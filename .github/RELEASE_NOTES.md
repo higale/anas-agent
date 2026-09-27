@@ -1,12 +1,16 @@
-## Anas v3.1.0
+## Anas v3.1.1
 
-- 子 Agent 支持独立选择模型和参数预设，未选择时跟随父 Agent；清除选择可恢复继承。自定义选择在创建子任务时绑定，已创建任务保留原绑定，失效的模型或预设会明确报错。
-- 模型及参数预设选择统一放在子 Agent 的“标识”和项目的“项目名称”标题右侧，便于发现和操作。
-- 子 Agent 配置新增可选的 `model_config_id` 和 `model_parameter_preset_id`，未设置这些字段的现有配置继续继承父 Agent；中英文用户指南同步更新。
+- 新增系统技能 `tool-creator`，指导模型创建、修改和排查 Anas 自定义工具，附工具格式参考和可运行的 Python 模板。
+- 新增百度 AI 搜索示例工具，支持通过环境变量配置密钥，提供参数校验、超时控制、错误诊断和中英使用说明。
+- 修复 Edge TTS 命令行备用路径无法正确传递负数语速、音量及音调的问题。
+- 修复照片搜索在父子目录或其他重叠范围中重复计数、重复结果占用扫描和返回数量上限的问题。
+- 文本读取、文件 SHA-256 和 JSON 格式化示例的工具描述、参数说明及 README 改为英文；百度搜索保留中文工具说明。
 
-- Subagents can select their own model and parameter preset, or follow the parent Agent when no model is selected. Clearing the selection restores inheritance. Custom selections bind when a child task is created; existing tasks retain their binding, and unavailable models or presets produce explicit errors.
-- Model and preset controls now sit beside the subagent **Identifier** and **Project name** headings for consistent, more visible placement.
-- Subagent configuration adds optional `model_config_id` and `model_parameter_preset_id` fields. Existing configurations without these fields continue to inherit from the parent Agent. Chinese and English user guides have been updated.
+- Added the bundled `tool-creator` Skill for creating, modifying, and troubleshooting Anas custom tools, with a format reference and a runnable Python template.
+- Added a Baidu AI Search example tool with credentials supplied through an environment variable, input validation, timeout handling, error diagnostics, and Chinese and English setup instructions.
+- Fixed negative speech rate, volume, and pitch values being passed incorrectly through the Edge TTS command-line fallback.
+- Fixed duplicate photo counts and duplicate matches consuming scan and result limits when searching parent/child folders or other overlapping roots.
+- Changed tool descriptions, parameter help, and READMEs for the text-reading, file SHA-256, and JSON-formatting examples to English. Baidu AI Search retains Chinese tool descriptions.
 
 ## Downloads / 下载
 

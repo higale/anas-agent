@@ -1,12 +1,12 @@
 {
   "id": "example-json-format",
   "name": "json_format",
-  "description": "将传入的 JSON 值格式化为两空格缩进文本，可按键名排序；不读写文件。格式化结果超过 100000 UTF-8 字节时返回错误。",
+  "description": "Format a JSON value as text with two-space indentation and optional key sorting, without reading or writing files. Return an error if the formatted output exceeds 100000 UTF-8 bytes.",
   "input_schema": {
     "type": "object",
     "properties": {
-      "value": { "description": "需要格式化的 JSON 值，可为对象、数组或基本值" },
-      "sort_keys": { "type": "boolean", "description": "是否按键名排序；默认不排序" }
+      "value": { "description": "The JSON value to format: an object, array, or primitive value." },
+      "sort_keys": { "type": "boolean", "description": "Whether to sort object keys by name; defaults to false." }
     },
     "required": ["value"],
     "additionalProperties": false

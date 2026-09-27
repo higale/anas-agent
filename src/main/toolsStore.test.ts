@@ -35,15 +35,27 @@ beforeEach(async () => {
 afterEach(async () => { vi.doUnmock('./config/dataDir'); vi.doUnmock('node:fs/promises'); await rm(root, { recursive: true, force: true }) })
 
 describe('tool directory imports', () => {
+  it('loads the tool-creator template as an independent user package', async () => {
+    const result = await store.importToolDirectories([resolve('data/skills_system/tool-creator/assets/python-tool')])
+    expect(result.ids).toEqual(['user:normalize-text-example'])
+    expect((await store.listToolSnapshot()).tools).toEqual([expect.objectContaining({
+      id: 'user:normalize-text-example', name: 'normalize_text',
+      definition: expect.objectContaining({ command: 'scripts/run.py {{args}}' })
+    })])
+    await expect(readFile(join(root, 'tools/python-tool/scripts/run.py'), 'utf8')).resolves.toBe(
+      await readFile(resolve('data/skills_system/tool-creator/assets/python-tool/scripts/run.py'), 'utf8'))
+  })
   it('initializes examples and the user directory before import, then imports independent copies', async () => {
     await store.initializeToolsStore()
     const examples = join(root, 'tools_examples')
     expect(await readdir(join(root, 'tools'))).toEqual([])
-    expect(await readdir(examples)).toEqual(expect.arrayContaining(['read_text_raw', 'file_sha256', 'json_format']))
+    expect(await readdir(examples)).toEqual(expect.arrayContaining(['read_text_raw', 'file_sha256', 'json_format', 'baidu-search']))
     expect((await store.listToolSnapshot()).tools).toEqual([])
-    const result = await store.importToolDirectories(['read_text_raw', 'json_format'].map(name => join(examples, name)))
-    expect(result.ids).toEqual(['user:example-read-text-raw', 'user:example-json-format'])
-    expect((await store.listToolSnapshot()).tools.map(tool => tool.name)).toEqual(['read_text_raw', 'json_format'])
+    const result = await store.importToolDirectories(['read_text_raw', 'json_format', 'baidu-search'].map(name => join(examples, name)))
+    expect(result.ids).toEqual(['user:example-read-text-raw', 'user:example-json-format', 'user:baidu-search'])
+    expect((await store.listToolSnapshot()).tools.map(tool => tool.name)).toEqual(['read_text_raw', 'json_format', 'baidu_search'])
+    expect(await readFile(join(root, 'tools/baidu-search/scripts/run.py'), 'utf8')).toBe(
+      await readFile(join(examples, 'baidu-search/scripts/run.py'), 'utf8'))
     const importedScript = join(root, 'tools/read_text_raw/scripts/run.py')
     expect(await readFile(importedScript, 'utf8')).toContain('sys.stdout.buffer.write(content)')
     await writeFile(importedScript, '# user edit')

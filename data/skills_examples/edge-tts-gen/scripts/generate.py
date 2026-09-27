@@ -376,11 +376,11 @@ async def generate(args):
             "--write-media", str(temporary_path),
         ]
         if args.rate:
-            command.extend(["--rate", args.rate])
+            command.append(f"--rate={args.rate}")
         if args.volume:
-            command.extend(["--volume", args.volume])
+            command.append(f"--volume={args.volume}")
         if args.pitch:
-            command.extend(["--pitch", args.pitch])
+            command.append(f"--pitch={args.pitch}")
         result = run_command(command, args.timeout)
         if result["ok"]:
             try:

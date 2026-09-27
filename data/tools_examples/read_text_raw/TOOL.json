@@ -1,10 +1,10 @@
 {
   "id": "example-read-text-raw",
   "name": "read_text_raw",
-  "description": "读取本地 UTF-8 文本文件的完整原始内容，不添加行号、不改写换行。传入文件绝对路径；最大 512 KiB（524288 字节），超限或不是 UTF-8 文本时返回错误，不截断文件。",
+  "description": "Read the complete raw contents of a local UTF-8 text file, preserving line endings and adding no line numbers. Supply an absolute path. The maximum file size is 512 KiB (524288 bytes). Oversized files or invalid UTF-8 produce an error without returning partial content.",
   "input_schema": {
     "type": "object",
-    "properties": { "path": { "type": "string", "minLength": 1, "description": "文本文件的绝对路径" } },
+    "properties": { "path": { "type": "string", "minLength": 1, "description": "Absolute path to the UTF-8 text file." } },
     "required": ["path"],
     "additionalProperties": false
   },

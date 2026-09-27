@@ -208,11 +208,13 @@ Edit the application `.env` in Settings > Environment to prepare variables for c
 
 ## Manage Custom Tools
 
+The bundled `tool-creator` Skill guides the model through creating, modifying, and troubleshooting custom tools, with a format reference and a Python example template. Enable the Skill and the required file capabilities, then ask the model to create a custom tool for the current project. Script testing also requires command execution and the appropriate runtime. Select the generated tool in capability settings before using it in a subsequent run.
+
 Select **Custom tools** in **Settings > Tools** to add, edit, delete, reorder, import, and refresh tools. Double-click a tool to edit it; Open locates its directory. Deleting moves the entire tool directory to the trash.
 
 Each directory contains `TOOL.json` and scripts or resources. User tools live in the application data directory's `tools/`; project tools live in `.agents/tools/` under source folders and are available only to that project. The editor configures names, descriptions, JSON parameter rules, and commands; it does not generate scripts or install dependencies.
 
-**Import tools** accepts multiple directories and opens the bundled examples by default. The examples provide text reading, file SHA-256, and JSON formatting, all requiring Python 3. Imports copy into user tools without overwriting existing tools.
+**Import tools** accepts multiple directories and opens the bundled examples by default. The examples provide text reading, file SHA-256, JSON formatting, and Baidu AI Search, all using the Python 3 standard library. Baidu AI Search also requires internet access and `BAIDU_SEARCH_API_KEY`; see its bundled README for setup. Imports copy into user tools without overwriting existing tools.
 
 After adding or importing a tool, select it under **Custom tools** in default, project, or subagent capabilities. Subagents use independent selections, may enable **Use current project tools**, and follow project limits. For duplicate names, the first valid, enabled entry wins: project source folders in order, then user tools.
 

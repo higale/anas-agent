@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { EOL, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -32,6 +32,36 @@ async function fixture(source: string, overrides: Partial<CustomToolDefinition> 
 }
 
 describe('custom command tools', () => {
+  it('runs the copied Baidu search example and reports missing credentials and invalid queries without a request', async ({ skip }) => {
+    if (!await runtimeDiscovery.discoverPython3()) return skip()
+    const { directory } = await fixture('')
+    const packageDirectory = join(directory, '百度 search tool')
+    await cp(resolve('data/tools_examples/baidu-search'), packageDirectory, { recursive: true })
+    const [definition] = parseCustomTools([JSON.parse(await readFile(join(packageDirectory, 'TOOL.json'), 'utf8'))])
+    const [tool] = createCustomTools([{ ...definition, directory: packageDirectory }], {
+      env: { ...process.env, BAIDU_SEARCH_API_KEY: '' }, backgroundTools: false
+    })
+    expect(JSON.parse(await tool.invoke({ query: '上海 "天气" & $()' }))).toMatchObject({
+      ok: false, exit_code: 2, stdout: '', stderr: expect.stringContaining('Missing environment variable: BAIDU_SEARCH_API_KEY')
+    })
+    expect(JSON.parse(await tool.invoke({ query: '中'.repeat(37) }))).toMatchObject({
+      ok: false, exit_code: 2, stdout: '', stderr: expect.stringContaining('72')
+    })
+    await expect(tool.invoke({ query: 'test', timeout: true })).rejects.toThrow()
+    await expect(tool.invoke({ query: 'test', timeout: 121 })).rejects.toThrow()
+  })
+  it('runs the tool-creator template from a copied package and reports invalid business input as failure', async ({ skip }) => {
+    if (!await runtimeDiscovery.discoverPython3()) return skip()
+    const { directory } = await fixture('')
+    const packageDirectory = join(directory, 'tool with spaces')
+    await cp(resolve('data/skills_system/tool-creator/assets/python-tool'), packageDirectory, { recursive: true })
+    const [definition] = parseCustomTools([JSON.parse(await readFile(join(packageDirectory, 'TOOL.json'), 'utf8'))])
+    const [tool] = createCustomTools([{ ...definition, directory: packageDirectory }], { env: process.env, backgroundTools: false })
+    const text = '中文🙂 "quote"\n$() & {{tool_dir}}'
+    expect(JSON.parse(await tool.invoke({ text: `  ${text}  ` }))).toEqual({ text, characters: Array.from(text).length })
+    expect(JSON.parse(await tool.invoke({ text: ' \n\t' }))).toMatchObject({ ok: false, exit_code: 1, stdout: '', stderr: expect.stringContaining('non-whitespace') })
+    await expect(tool.invoke({ text: 42 })).rejects.toThrow()
+  })
   it.each(['entry with spaces.py', '{{tool_dir}}/entry with spaces.py'])('resolves %s to the discovered interpreter and passes arguments and environment intact', async entry => {
     const { directory, definition } = await fixture('')
     const script = join(directory, 'entry with spaces.py')

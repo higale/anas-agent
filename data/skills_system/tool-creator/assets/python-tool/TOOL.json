@@ -1,0 +1,21 @@
+{
+  "id": "normalize-text-example",
+  "name": "normalize_text",
+  "description": "Remove leading and trailing whitespace from text and return the cleaned text and Unicode code point count. Does not modify files.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 8192,
+        "description": "Text to trim; must contain at least one non-whitespace character."
+      }
+    },
+    "required": ["text"],
+    "additionalProperties": false
+  },
+  "command": "scripts/run.py {{args}}",
+  "timeout_seconds": 0,
+  "interactive": false
+}

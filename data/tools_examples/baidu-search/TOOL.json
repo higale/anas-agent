@@ -1,0 +1,28 @@
+{
+  "id": "baidu-search",
+  "name": "baidu_search",
+  "description": "使用百度 AI 搜索检索实时网络信息，返回搜索结果及来源链接。用于近期新闻、价格、比分、时效性事实、事实核查，或用户明确要求联网搜索时。需要 BAIDU_SEARCH_API_KEY 环境变量。",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200,
+        "description": "完整的搜索查询。保留名称、日期、地点及其他必要约束。去除首尾空白后，按 GB18030 编码最多 72 字节，常用汉字通常占 2 字节；过长时先压缩措辞。"
+      },
+      "timeout": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 120,
+        "default": 30,
+        "description": "HTTP 超时秒数，默认 30。"
+      }
+    },
+    "required": ["query"],
+    "additionalProperties": false
+  },
+  "command": "scripts/run.py {{args}}",
+  "timeout_seconds": 150,
+  "interactive": false
+}

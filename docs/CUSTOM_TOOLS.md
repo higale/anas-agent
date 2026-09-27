@@ -94,7 +94,7 @@ PTY 合并 stdout/stderr，可能改变换行并包含终端控制符；需要�
 
 启动时将随应用打包的 `data/tools_examples/` 同步到数据目录的 `tools_examples/`。“导入工具”默认打开此目录，可多选包含 `TOOL.json` 的工具目录，复制到用户 `tools/`；导入后的副本不随示例更新。
 
-自带示例为 `read_text_raw`、`file_sha256`、`json_format`，只依赖 Python 3。各包 README 说明参数和版本要求；`read_text_raw` 仅接受最多 512 KiB 的 UTF-8 文件，超限报错，保证限制内正文完整返回。
+自带示例包括 `read_text_raw`、`file_sha256`、`json_format` 和 `baidu-search`，均使用 Python 3 标准库。百度搜索另需联网和 `BAIDU_SEARCH_API_KEY`；各包 README 说明参数与配置。`read_text_raw` 仅接受最多 512 KiB 的 UTF-8 文件，超限报错，保证限制内正文完整返回。
 
 导入保留包 ID、命令、脚本和资源，按选择顺序追加。同名工具、同名目录或重复 ID 拒绝整批导入；每批最多 128 个目录、10000 项、128 MiB、32 层。全部复制校验后才发布，失败清理本批文件并恢复排序，不覆盖现有工具。
 

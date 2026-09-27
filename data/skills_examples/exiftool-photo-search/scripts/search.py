@@ -120,18 +120,18 @@ def normalize_extension(value: str) -> str:
 
 
 def iter_image_files(roots: Iterable[Path], extensions: set[str]) -> List[Path]:
-    files: List[Path] = []
+    files: dict[str, Path] = {}
     for root in roots:
         if root.is_file() and root.suffix.lower() in extensions:
-            files.append(root)
+            files.setdefault(os.path.normcase(str(root.resolve())), root)
             continue
         if not root.is_dir():
             print("Skipping missing or non-directory root: {}".format(root), file=sys.stderr)
             continue
         for path in root.rglob("*"):
             if path.is_file() and path.suffix.lower() in extensions:
-                files.append(path)
-    return sorted(files, key=candidate_sort_key, reverse=True)
+                files.setdefault(os.path.normcase(str(path.resolve())), path)
+    return sorted(files.values(), key=candidate_sort_key, reverse=True)
 
 
 def candidate_sort_key(path: Path) -> tuple[str, float, str]:

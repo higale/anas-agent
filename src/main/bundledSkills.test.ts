@@ -12,6 +12,7 @@ describe('bundled Skills', () => {
     await expect(validateRestoredSkillsDirectory(exampleRoot)).resolves.toBeUndefined()
     await expect(readdir(systemRoot)).resolves.toEqual(expect.arrayContaining([
       'config',
+      'tool-creator',
       'skill-creator',
       'skill-installer'
     ]))
