@@ -469,6 +469,13 @@ export function useAgentSpeech(
     activeThreadIdRef.current = activeThreadId
   }, [activeThreadId, cancelAll])
 
+  useEffect(() => {
+    if (!config?.enabled || !activeThreadId) return
+    // A new thread can start before its submission response selects it. Join
+    // once the target is ready so the shared event hub replays the active run.
+    return window.gale.agent.onEvent(handleEvent)
+  }, [activeThreadId, config?.enabled, handleEvent])
+
   useEffect(() => () => cancelAll(false), [cancelAll])
 
   return { handleEvent, playText, state, stop }

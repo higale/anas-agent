@@ -166,11 +166,6 @@ export function App() {
   const visionEnabled = selectedModel?.capabilities.vision ?? false
   const agentCapabilitiesEnabled = Boolean(config && !simpleChatEnabled)
 
-  useEffect(
-    () => window.gale.agent.onEvent(speech.handleEvent),
-    [speech.handleEvent]
-  )
-
   useEffect(() => {
     if (agentActiveThreadId) {
       draftModelInitializedRef.current = false

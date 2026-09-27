@@ -1,10 +1,15 @@
-import { act, renderHook } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
+import { StrictMode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { SpeechGenerateRequest } from '@shared/types'
-import type { AgentRuntimeEvent } from '@shared/agentTypes'
+import type { SpeechGenerateRequest, SpeechReplyConfig } from '@shared/types'
+import type { AgentEventEnvelope, AgentRuntimeEvent } from '@shared/agentTypes'
+import { subscribeAgentRuntimeEvents } from '../../../../preload/agentEventSubscription'
 import { useAgentSpeech } from './useAgentSpeech'
 
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
+vi.mock('react-i18next', () => {
+  const t = (key: string): string => key
+  return { useTranslation: () => ({ t }) }
+})
 const config = { enabled: true, voice: 'zh-CN-XiaoxiaoNeural', speed: 1 }
 const pending: Array<{ request: SpeechGenerateRequest; resolve: (audio: Uint8Array) => void; reject: (error: Error) => void }> = []
 const audioPlayers: FakeAudio[] = []
@@ -27,7 +32,10 @@ beforeEach(() => {
   pending.length = 0
   audioPlayers.length = 0
   vi.stubGlobal('Audio', FakeAudio)
-  Object.defineProperty(window, 'gale', { configurable: true, value: { speech: { generate, cancel, logWarning: vi.fn(async () => {}) } } })
+  Object.defineProperty(window, 'gale', { configurable: true, value: {
+    agent: { onEvent: vi.fn(() => () => {}) },
+    speech: { generate, cancel, logWarning: vi.fn(async () => {}) }
+  } })
   let counter = 0
   vi.stubGlobal('URL', { createObjectURL: vi.fn(() => `blob:audio-${++counter}`), revokeObjectURL: revoke })
 })
@@ -57,6 +65,51 @@ async function drainPlayback(): Promise<void> {
 }
 
 describe('speech generation and playback', () => {
+  it.each(['thread', 'config', 'both'] as const)('reads the first reply when %s becomes ready after the run starts', async (late) => {
+    let receive!: (event: unknown, envelope: AgentEventEnvelope) => void
+    let revision = 0
+    const ipc = {
+      invoke: vi.fn(async () => ({ revision: 0, replay: [], replayComplete: true })),
+      on: (_channel: string, listener: typeof receive) => { receive = listener },
+      removeListener: vi.fn()
+    }
+    const onEvent = vi.fn((listener: (event: AgentRuntimeEvent) => void) => subscribeAgentRuntimeEvents(ipc, listener))
+    window.gale.agent.onEvent = onEvent
+    // The workspace subscribes before speech settings and new-thread selection
+    // are available; use the real shared preload hub for this ordering.
+    const workspace = vi.fn()
+    const unsubscribeWorkspace = onEvent(workspace)
+    const { result, rerender, unmount } = renderHook(
+      ({ settings, thread }: { settings?: SpeechReplyConfig; thread?: string }) => useAgentSpeech(settings, thread),
+      { initialProps: {
+        settings: late === 'thread' ? config : undefined,
+        thread: late === 'config' ? 'thread-1' : undefined
+      }, wrapper: StrictMode }
+    )
+    await waitFor(() => expect(ipc.invoke).toHaveBeenCalledOnce())
+    const emit = (event: AgentRuntimeEvent): void => receive({}, {
+      revision: ++revision, event, replayActive: event.type !== 'run_completed'
+    })
+    let candidate!: ReturnType<typeof startCandidate>
+    await act(async () => {
+      candidate = startCandidate(emit, Date.now())
+      candidate.delta('第一条回复。')
+    })
+    expect(generate).not.toHaveBeenCalled()
+    expect(workspace).toHaveBeenCalledTimes(3)
+    rerender({ settings: config, thread: 'thread-1' })
+    await act(async () => candidate.complete('第一条回复。'))
+    expect(pending).toHaveLength(1)
+    expect(pending[0].request).toMatchObject({ text: '第一条回复。', voice: config.voice, speed: config.speed })
+    await complete(0)
+    expect(result.current.state.status).toBe('playing')
+    expect(audioPlayers[0].play).toHaveBeenCalledOnce()
+    rerender({ settings: { ...config }, thread: 'thread-1' })
+    expect(pending).toHaveLength(1)
+    unmount()
+    unsubscribeWorkspace()
+  })
+
   it('serializes generation and bounds prefetched audio while preserving playback order', async () => {
     const { result, unmount } = renderHook(() => useAgentSpeech(config, 'thread-1'))
     await act(async () => result.current.playText('message', 'a'.repeat(1100)))

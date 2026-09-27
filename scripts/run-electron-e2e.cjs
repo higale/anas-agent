@@ -22,6 +22,7 @@ const { verifyGlobalSettings } = require('./electron-global-settings.cjs')
 const { verifySkillApproval } = require('./electron-skill-approval.cjs')
 const { verifyCustomTools } = require('./electron-custom-tools.cjs')
 const { verifyModelSelection } = require('./electron-model-selection.cjs')
+const { verifySpeechReply } = require('./electron-speech-reply.cjs')
 const { verifyAttachmentPreviews } = require('./electron-attachment-previews.cjs')
 const { restrict_subagents: defaultRestrictSubagents, ...defaultCapabilities } = require('../data/config/capabilities.json')
 
@@ -1059,6 +1060,10 @@ async function main() {
     await verifyModelSelection(launchApplication)
     return
   }
+  if (process.argv.includes('--speech-only')) {
+    await verifySpeechReply(launchApplication)
+    return
+  }
   if (process.argv.includes('--custom-tools-only')) {
     await verifyCustomTools(launchApplication)
     return
@@ -1106,6 +1111,7 @@ async function main() {
     return
   }
   if (!process.argv.includes('--changes-only')) {
+    await verifySpeechReply(launchApplication)
     await verifyDefaultCapabilities(launchApplication)
     await verifyGlobalSettings(launchApplication)
     await verifyCustomTools(launchApplication)
