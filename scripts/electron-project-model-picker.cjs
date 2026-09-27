@@ -61,6 +61,7 @@ async function verifyProjectModelPicker(launchApplication) {
     await expect(dialog.getByRole('button', { name: 'Select model', exact: true })).toBeFocused()
     await dialog.getByRole('button', { name: 'Select model', exact: true }).click()
     await page.getByRole('menuitemradio', { name: /^Model 0(?: |$)/ }).click()
+    if (process.env.ANAS_E2E_PROJECT_MODEL_POSITION_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_PROJECT_MODEL_POSITION_SCREENSHOT })
     await dialog.getByRole('button', { name: 'Reasoning options', exact: true }).click()
     const presets = page.locator('.composer-model-parameter-preset-menu')
     await expect(presets).toBeVisible()

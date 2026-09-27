@@ -42,6 +42,7 @@ export function subagentSavePayload(draft: SubagentDraft): SubagentConfigSave {
     enabled: draft.enabled,
     description: draft.description.trim(),
     systemPrompt: draft.systemPrompt.trim(),
+    ...(draft.modelConfigId ? { modelConfigId: draft.modelConfigId, modelParameterPresetId: draft.modelParameterPresetId } : {}),
     capabilities: structuredClone(draft.capabilities)
   }
 }

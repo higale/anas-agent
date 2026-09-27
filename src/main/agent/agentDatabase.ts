@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3'
+import { validateSubagentModelSelection } from '@shared/subagentConfig'
 import { FileChangeLedger, fileChangeLedgerSchema } from './fileChangeLedger'
 import { agentToolEffectArtifactId } from './toolEffectScope'
 import { randomUUID } from 'node:crypto'
@@ -257,6 +258,7 @@ function normalizeSubagentConfigSnapshot(value: unknown): SubagentConfig {
     builtIn: raw.builtIn,
     description,
     systemPrompt,
+    ...validateSubagentModelSelection(raw),
     capabilities: validateCapabilities(raw.capabilities)
   }
 }

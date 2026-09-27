@@ -486,6 +486,7 @@
     "subagent_selection_description": "Selection description",
     "subagent_selection_description_hint": "Tell the main agent when it should select this subagent. Specific descriptions improve delegation.",
     "subagent_system_prompt": "Specialized prompt",
+    "subagent_inherit_model": "Follow parent Agent",
     "subagent_context": "Inherit main-agent context",
     "subagent_context_hint": "Choose which parts of the main agent's system context are provided. The subagent role and specialized prompt are always added.",
     "subagent_workspace_context": "Project",

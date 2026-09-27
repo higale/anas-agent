@@ -166,6 +166,8 @@ Configure subagents in **Settings > Subagents**. Default, project, and subagent 
 
 Subagents keep their own capability settings rather than inheriting Settings > Capabilities. Subagents may delegate further, but their choices cannot exceed the original project's allowed set. **Limit subagent capabilities** separately constrains context, tools, and skills at every level: when selected, only capabilities allowed by both the project and the subagent remain available. Otherwise, the subagent uses its own configuration. It receives the delegated task, not the complete parent conversation automatically.
 
+Choose a model and parameter preset beside **Identifier**. **Follow parent Agent** uses the nearest ancestor's selected model and preset. An explicit selection applies to newly created subtasks; clear it to restore inheritance. Editing a subagent definition does not change existing subtasks' model bindings. Missing models or presets produce an error rather than switching to another model.
+
 ### Skills
 
 Supplies the names, purposes, and instruction paths of available skills, or lets you invoke them with `/name`. Skills are instructions, not separate callable tools, and do not grant file, command, or network capabilities.

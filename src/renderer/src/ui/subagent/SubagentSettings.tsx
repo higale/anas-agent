@@ -56,6 +56,7 @@ export function SubagentSettings({
         onMove={onMove}
       />
       <SubagentEditor
+        config={config}
         customTools={config?.customTools}
         draft={draft}
         subagents={config?.subagents}

@@ -13,6 +13,8 @@ import { providerProtocolLabel } from './providerProtocol'
 interface ModelPickerProps {
   providers: ModelProviderConfig[] | undefined
   selectedId?: string
+  emptyLabel?: string
+  clearLabel?: string
   defaultModelId?: string
   disabled: boolean
   focusRef?: RefObject<HTMLElement | null>
@@ -36,6 +38,8 @@ const modelContextMenuHeight = 44
 export function ModelPicker({
   providers: configuredProviders,
   selectedId,
+  emptyLabel,
+  clearLabel,
   defaultModelId,
   disabled,
   focusRef,
@@ -66,7 +70,7 @@ export function ModelPicker({
   const selectedModelIsDefault = Boolean(selectedModel && selectedModel.id === defaultModelId)
   const label = selectedId && (!selectedModel || !isSelectableModelConfig(selectedModel))
     ? t('chat.model_unavailable')
-    : selectedModel?.displayName.trim() || selectedModel?.model.trim() || t('chat.select_model')
+    : selectedModel?.displayName.trim() || selectedModel?.model.trim() || emptyLabel || t('chat.select_model')
 
   useEffect(() => {
     if (!disabled) return
@@ -177,7 +181,7 @@ export function ModelPicker({
                   window.requestAnimationFrame(onClear)
                 }}
               >
-                {t('chat.clear_model_selection')}
+                {clearLabel ?? t('chat.clear_model_selection')}
               </DropdownMenu.RadioItem>
             )}
             {providers.length === 0

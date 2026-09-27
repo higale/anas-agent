@@ -1,12 +1,12 @@
-## Anas v3.0.7
+## Anas v3.1.0
 
-- 子 Agent 和技能能力统一为“使用默认／自定义／关闭”，覆盖全局设置、项目和子 Agent；仅自定义模式展开条目，切换模式保留具体选择。
-- 启动恢复按当前能力配置格式逐项校验，保留合法的关闭状态，错误配置项恢复对应默认值，不因局部能力错误重置整个文件、项目或会话。
-- **配置变化**：子 Agent 选择移入 `capabilities.subagents`，技能移除 `enabled` 字段，统一使用三态 `mode`。本次不转换旧格式；升级后如进入启动恢复，请选择“修复”。无法识别的值将恢复默认，修复后请检查能力选择；原始数据会先备份。无效选择列表恢复该列表的默认值。
+- 子 Agent 支持独立选择模型和参数预设，未选择时跟随父 Agent；清除选择可恢复继承。自定义选择在创建子任务时绑定，已创建任务保留原绑定，失效的模型或预设会明确报错。
+- 模型及参数预设选择统一放在子 Agent 的“标识”和项目的“项目名称”标题右侧，便于发现和操作。
+- 子 Agent 配置新增可选的 `model_config_id` 和 `model_parameter_preset_id`，未设置这些字段的现有配置继续继承父 Agent；中英文用户指南同步更新。
 
-- Subagent and skill capabilities now use **Use defaults / Custom / Off** across global settings, projects, and subagents. Lists appear only in Custom mode, and switching modes retains selections.
-- Startup recovery validates capability settings field by field against the current format, preserves valid Off selections, and restores invalid settings to their defaults without resetting entire files, projects, or conversations for local capability errors.
-- **Configuration change**: subagent selections move into `capabilities.subagents`; skills drop `enabled` and use the same three-state `mode`. This release does not convert the old format. If startup recovery appears after upgrading, choose **Repair** and review capability selections afterward: unrecognized values use defaults, invalid selection lists use the list default, and original data is backed up before changes.
+- Subagents can select their own model and parameter preset, or follow the parent Agent when no model is selected. Clearing the selection restores inheritance. Custom selections bind when a child task is created; existing tasks retain their binding, and unavailable models or presets produce explicit errors.
+- Model and preset controls now sit beside the subagent **Identifier** and **Project name** headings for consistent, more visible placement.
+- Subagent configuration adds optional `model_config_id` and `model_parameter_preset_id` fields. Existing configurations without these fields continue to inherit from the parent Agent. Chinese and English user guides have been updated.
 
 ## Downloads / 下载
 

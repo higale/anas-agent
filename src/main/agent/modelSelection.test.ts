@@ -3,7 +3,7 @@ import { defaultCapabilities } from '@shared/agentCapabilities'
 import { defaultModelConfig, resolveProviderModelConfig } from '@shared/modelConfig'
 import type { ModelProviderConfigDetail, SubagentConfig } from '@shared/types'
 import { AgentDatabase } from './agentDatabase'
-import { createAgentModelResolver, ModelSelectionError, resolveModelSelection, resolveThreadModelSelection } from './modelSelection'
+import { createAgentModelResolver, ModelSelectionError, resolveModelSelection, resolveSubagentModelSelection, resolveThreadModelSelection } from './modelSelection'
 
 function configuration() {
   const provider: ModelProviderConfigDetail = {
@@ -34,6 +34,31 @@ function addChild(owner: string, parent: string, parentRun: string, id: string, 
 }
 
 describe('request-time model selection', () => {
+  it('binds subagent model defaults once while retaining explicit no-preset and inheritance choices', async () => {
+    database = AgentDatabase.open(':memory:')
+    const root = database.createThread({ modelConfigId: 'model-a' })
+    const run = database.createRun(root.id)
+    const definition: SubagentConfig = { index: 0, name: 'reviewer', enabled: true, builtIn: false,
+      description: 'Review.', systemPrompt: 'Review work.', capabilities: structuredClone(defaultCapabilities), modelConfigId: 'model-b' }
+    const config = configuration()
+    config.providers[0].models[1].defaultParameterPresetId = 'precise'
+    expect(resolveSubagentModelSelection({ ...definition, modelConfigId: undefined }, config)).toEqual({})
+    expect(resolveSubagentModelSelection({ ...definition, modelParameterPresetId: null }, config)).toEqual({ modelConfigId: 'model-b', modelParameterPresetId: undefined })
+    const child = database.createSubagentCall({ id: 'child', ownerThreadId: root.id, parentThreadId: root.id, parentRunId: run.id,
+      childThreadId: 'child-thread', childRunId: 'child-run', config: definition, description: 'Review work.',
+      childThread: resolveSubagentModelSelection(definition, config) })
+    expect(database.getSubagentCall(child.id, root.id)?.config.modelConfigId).toBe('model-b')
+    const grandchild = addChild(root.id, child.childThreadId, child.childRunId, 'nested', child.id)
+    definition.modelConfigId = 'model-c'
+    config.providers[0].models[1].defaultParameterPresetId = undefined
+    database.updateThread(root.id, { modelConfigId: 'model-c' })
+    const resolve = createAgentModelResolver(grandchild.childThreadId, database, { loadConfig: async () => config })
+    expect(await resolve()).toMatchObject({ id: 'model-b', parameters: { temperature: 0.1 } })
+    config.providers[0].models[1].parameterPresets = []
+    await expect(resolve()).rejects.toThrow('preset no longer exists')
+    config.providers[0].models.splice(1, 1)
+    expect(() => resolveSubagentModelSelection({ ...definition, modelConfigId: 'model-b' }, config)).toThrow('no longer exists')
+  })
   it('reads parent selection and model parameters again for every child request, including nested children', async () => {
     database = AgentDatabase.open(':memory:')
     const root = database.createThread({ modelConfigId: 'model-a', modelParameterPresetId: 'precise' })

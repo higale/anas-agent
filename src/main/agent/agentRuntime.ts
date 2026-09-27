@@ -113,7 +113,7 @@ import {
 } from './approvalPathPreview'
 import { manualContextCompressionInput } from './manualCompressionMiddleware'
 import { isProjectRulesError } from './projectRules'
-import { createAgentModelResolver, isModelSelectionError } from './modelSelection'
+import { createAgentModelResolver, isModelSelectionError, resolveSubagentModelSelection } from './modelSelection'
 import { modelContextKey } from '@shared/modelConfig'
 import { isModelRequestChangedError } from './modelRequestValidation'
 import { ManagedCallService } from './managedCallService'
@@ -3072,6 +3072,8 @@ export class AgentRuntime {
         if (!subagent || !isSubagentConfigured(subagent) || subagent.name !== request.agentName) {
           throw new ToolInputParsingException(`Configured subagent ${request.agentName} is unavailable. Choose an available agent listed in start_subagent.`)
         }
+        const modelSelection = subagent.modelConfigId
+          ? resolveSubagentModelSelection(subagent, await getAppConfigSnapshot()) : {}
         const activeCalls = this.database.listSubagentCalls(ownerThreadId)
           .filter((candidate) => candidate.status === 'running' || candidate.status === 'interrupted')
         if (activeCalls.length >= maximumConcurrentSubagents) {
@@ -3100,6 +3102,7 @@ export class AgentRuntime {
           config: subagent,
           description,
           childThread: {
+            ...modelSelection,
             title: description.slice(0, 120),
             projectId: thread.projectId,
             accessMode: thread.accessMode

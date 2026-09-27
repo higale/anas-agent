@@ -91,7 +91,8 @@ async function verifyDefaultCapabilities(launchApplication) {
         baseUrl: 'https://preview.invalid/v1', apiKey: '', parameters: {}, modelListAuth: 'bearer' })
       const provider = providerConfig.providers.find(item => item.name === 'Preview')
       const configured = await api.config.saveProviderModel({ providerId: provider.id, displayName: 'Preview', model: 'preview', parameters: {},
-        parameterPresetMode: 'none', capabilities: { vision: true, toolUse: true }, stream: true,
+        parameterPresetMode: 'custom', parameterPresets: [{ id: 'careful', name: 'Careful', parameters: { temperature: 0.1 } }],
+        defaultParameterPresetId: 'careful', capabilities: { vision: true, toolUse: true }, stream: true,
         maxContextTokens: 128000, maxOutputTokens: 16000, contextCompressionThreshold: 0.8, contextCompressionEnabled: true })
       await api.config.selectDefaultModel(configured.providers[0].models[0].id)
       return { project: (await api.projects.list()).find(item => item.id === 'default-workspace'),
@@ -131,6 +132,40 @@ async function verifyDefaultCapabilities(launchApplication) {
     assert.equal('enabled' in raw.skills, false)
     assert.equal('subagent_selection' in raw, false)
     await page.locator('[data-settings-tab="subagents"]').click()
+    const subagentEditor = page.locator('.settings-subagent-editor')
+    const modelPicker = subagentEditor.getByRole('button', { name: 'Select model', exact: true })
+    await expect(modelPicker).toHaveText('Follow parent Agent')
+    await expect(subagentEditor.getByRole('button', { name: 'Reasoning options', exact: true })).toHaveCount(0)
+    await modelPicker.click()
+    await page.getByRole('menuitemradio', { name: /Preview/ }).click()
+    await expect.poll(() => page.evaluate(async () => (await globalThis.gale.config.get()).subagents[0].modelParameterPresetId)).toBe('careful')
+    await expect(modelPicker).toHaveText('Preview')
+    const presetPicker = subagentEditor.getByRole('button', { name: 'Reasoning options', exact: true })
+    await expect(presetPicker).toHaveText('Careful')
+    await presetPicker.click()
+    await page.getByRole('menuitem', { name: 'Not selected', exact: true }).click()
+    await expect.poll(() => page.evaluate(async () => (await globalThis.gale.config.get()).subagents[0].modelParameterPresetId)).toBe(null)
+    await modelPicker.click()
+    await page.getByRole('menuitemradio', { name: 'Follow parent Agent', exact: true }).click()
+    await expect.poll(() => page.evaluate(async () => (await globalThis.gale.config.get()).subagents[0].modelConfigId)).toBe(undefined)
+    await modelPicker.click()
+    await page.getByRole('menuitemradio', { name: /Preview/ }).click()
+    await expect.poll(() => page.evaluate(async () => (await globalThis.gale.config.get()).subagents[0].modelParameterPresetId)).toBe('careful')
+    const savedSubagent = JSON.parse(await readFile(join(home, 'config/subagents.json'), 'utf8')).subagents[0]
+    assert.ok(savedSubagent.model_config_id)
+    assert.equal(savedSubagent.model_parameter_preset_id, 'careful')
+    for (const width of [900, 1180]) {
+      await application.evaluate(({ BrowserWindow }, width) => BrowserWindow.getAllWindows()[0].setSize(width, 780), width)
+      await expect.poll(() => page.evaluate(() => globalThis.innerWidth)).toBe(width)
+      await modelPicker.scrollIntoViewIfNeeded()
+      const controls = await Promise.all([subagentEditor.getByText('Identifier', { exact: true }).boundingBox(), modelPicker.boundingBox(), presetPicker.boundingBox()])
+      for (const [index, bounds] of controls.entries()) {
+        assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= width)
+        for (const other of controls.slice(index + 1)) assert.ok(other && (bounds.x + bounds.width <= other.x + 1 || other.x + other.width <= bounds.x + 1
+          || bounds.y + bounds.height <= other.y + 1 || other.y + other.height <= bounds.y + 1), 'Identifier label and model controls must not overlap.')
+      }
+      if (process.env.ANAS_E2E_SUBAGENT_MODEL_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_SUBAGENT_MODEL_SCREENSHOT.replace('.png', `-${width}.png`) })
+    }
     await verifySelectionModes(page, page.locator('.settings-subagent-editor'), true)
     await expect.poll(() => page.evaluate(async () => (await globalThis.gale.config.get()).subagents[0].capabilities.skills.mode)).toBe('off')
     await page.locator('[data-settings-tab="capabilities"]').click()
@@ -149,6 +184,8 @@ async function verifyDefaultCapabilities(launchApplication) {
       await expect(page.getByRole('combobox', { name, exact: true })).toHaveValue('Off')
     }
     const saved = await page.evaluate(() => globalThis.gale.config.get())
+    assert.equal(saved.subagents[0].modelConfigId, savedSubagent.model_config_id)
+    assert.equal(saved.subagents[0].modelParameterPresetId, 'careful')
     assert.equal(saved.subagents[0].capabilities.subagents.mode, 'off')
     assert.equal(saved.subagents[0].capabilities.skills.mode, 'off')
     await expect(page.getByRole('checkbox', { name: 'Profile', exact: true })).not.toBeChecked()
@@ -202,7 +239,7 @@ async function verifyDefaultCapabilities(launchApplication) {
         await page.screenshot({ path: process.env.ANAS_E2E_CAPABILITIES_NARROW_SCREENSHOT })
       }
     }
-    console.log('Default capabilities E2E passed: default/custom/off modes in settings, projects and subagents; retained choices, nested persistence and restart; project overrides, prompt previews, pending saves and toolbar layout.')
+    console.log('Default capabilities E2E passed: default/custom/off modes; subagent model and preset selection, clearing, persistence and restart; identifier toolbar layout; project overrides, prompt previews and pending saves.')
   } finally {
     await application?.close()
     await rm(home, { recursive: true, force: true })

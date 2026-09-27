@@ -268,31 +268,8 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
                   </header>
 
                   <div className="ui-field-stack">
-                    <label htmlFor={nameInputId}>{t('project.name')}</label>
-                    <input
-                      className="ui-input"
-                      id={nameInputId}
-                      ref={nameInputRef}
-                      value={name}
-                      maxLength={80}
-                      onChange={(event) => setName(event.target.value)}
-                      placeholder={t('project.name_placeholder')}
-                    />
-                  </div>
-
-                  {!simpleChat && advancedSettings && <label className="ui-field-stack ui-field-stack-fill">
-                    <span>{t('project.prompt')}</span>
-                    <textarea className="ui-textarea ui-textarea-fixed ui-code-textarea ui-textarea-wrap" value={prompt}
-                      maxLength={50_000} rows={2} disabled={busy} onChange={(event) => setPrompt(event.target.value)} />
-                  </label>}
-
-                  <section className="ui-field-stack">
-                    <div className="ui-row-between">
-                      {simpleChat ? (
-                        <label className="ui-field-label" htmlFor={promptInputId}>{t('project.simple_chat_prompt')}</label>
-                      ) : (
-                        <span className="ui-field-label">{t('project.source_folders')}</span>
-                      )}
+                    <div className="ui-toolbar ui-toolbar-between">
+                      <label className="ui-field-label" htmlFor={nameInputId}>{t('project.name')}</label>
                       <div className="composer-model-selection-group">
                         <ModelPicker
                           modal
@@ -317,6 +294,31 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
                           onSelect={setModelParameterPresetId}
                         />
                       </div>
+                    </div>
+                    <input
+                      className="ui-input"
+                      id={nameInputId}
+                      ref={nameInputRef}
+                      value={name}
+                      maxLength={80}
+                      onChange={(event) => setName(event.target.value)}
+                      placeholder={t('project.name_placeholder')}
+                    />
+                  </div>
+
+                  {!simpleChat && advancedSettings && <label className="ui-field-stack ui-field-stack-fill">
+                    <span>{t('project.prompt')}</span>
+                    <textarea className="ui-textarea ui-textarea-fixed ui-code-textarea ui-textarea-wrap" value={prompt}
+                      maxLength={50_000} rows={2} disabled={busy} onChange={(event) => setPrompt(event.target.value)} />
+                  </label>}
+
+                  <section className="ui-field-stack">
+                    <div className="ui-row-between">
+                      {simpleChat ? (
+                        <label className="ui-field-label" htmlFor={promptInputId}>{t('project.simple_chat_prompt')}</label>
+                      ) : (
+                        <span className="ui-field-label">{t('project.source_folders')}</span>
+                      )}
                     </div>
 
                     {simpleChat ? (

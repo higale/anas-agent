@@ -5,6 +5,7 @@ import type {
 } from '@shared/types'
 import type { RawSubagentConfig } from './rawAppConfig'
 import { parseCapabilities, serializeCapabilities } from '@shared/agentCapabilities'
+import { validateSubagentModelSelection } from '@shared/subagentConfig'
 
 const subagentNamePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const presets = new Set<SubagentPreset>([
@@ -54,6 +55,7 @@ export function normalizeSubagent(raw: RawSubagentConfig, index: number): Subage
     builtIn: normalizedPreset !== undefined,
     description: text(raw.description, `${path}.description`),
     systemPrompt: text(raw.system_prompt, `${path}.system_prompt`),
+    ...validateSubagentModelSelection({ modelConfigId: raw.model_config_id, modelParameterPresetId: raw.model_parameter_preset_id }),
     capabilities: parseCapabilities(raw.capabilities)
   }
 }
@@ -70,6 +72,7 @@ export function rawSubagentFromSave(
   const description = text(subagent.description, 'subagent.description')
   const systemPrompt = text(subagent.systemPrompt, 'subagent.systemPrompt')
   const enabled = boolean(subagent.enabled, 'subagent.enabled')
+  const selection = validateSubagentModelSelection(subagent)
   if (enabled) {
     requireEnabledText(description, 'description')
     requireEnabledText(systemPrompt, 'system prompt')
@@ -80,6 +83,8 @@ export function rawSubagentFromSave(
     enabled,
     description,
     system_prompt: systemPrompt,
+    ...(selection.modelConfigId ? { model_config_id: selection.modelConfigId } : {}),
+    ...(selection.modelParameterPresetId !== undefined ? { model_parameter_preset_id: selection.modelParameterPresetId } : {}),
     capabilities: serializeCapabilities(subagent.capabilities)
   }
 }

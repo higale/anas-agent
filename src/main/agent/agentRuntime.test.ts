@@ -32,6 +32,10 @@ import { toHumanMessage } from './messageMapper'
 import { ManagedCallService } from './managedCallService'
 import { ModelSelectionError, resolveThreadModelSelection } from './modelSelection'
 import * as modelSelection from './modelSelection'
+import * as appConfig from '../config/appConfig'
+import bundledSettings from '../../../data/config/settings.json'
+import bundledCapabilities from '../../../data/config/capabilities.json'
+import type { RawAppConfig } from '../config/rawAppConfig'
 import { defaultModelConfig, modelContextKey } from '@shared/modelConfig'
 import type { ResolvedModelConfig } from '@shared/types'
 import { ModelRequestChangedError } from './modelRequestValidation'
@@ -527,6 +531,41 @@ describe('AgentRuntime', () => {
     runtimeLogMock.mockReset()
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it.each([false, true])('binds the configured subagent model before launch (missing=%s)', async (missing) => {
+    database = AgentDatabase.open(':memory:')
+    const owner = database.createThread({ modelConfigId: 'parent-model' })
+    const provider = { id: 'provider', name: 'Provider', index: 0, protocol: 'openai_chat_completions' as const,
+      baseUrl: 'https://example.com/v1', modelListUrl: '', modelListAuth: 'bearer' as const, parameters: {},
+      models: [{ ...structuredClone(defaultModelConfig), id: 'child-model', index: 0, model: 'child-model', displayName: 'Child model',
+        parameterPresetMode: 'custom' as const, defaultParameterPresetId: 'careful',
+        parameterPresets: [{ id: 'careful', name: 'Careful', parameters: { temperature: 0.1 } }] }] }
+    const config = appConfig.normalizeAppConfigSnapshot({ capabilities: bundledCapabilities, settings: bundledSettings as RawAppConfig['settings'],
+      providers: [], subagents: [], mcp_servers: [] })
+    vi.spyOn(appConfig, 'getAppConfigSnapshot').mockResolvedValue({ ...config, providers: missing ? [] : [provider] })
+    const runtime = new AgentRuntime(database, async (_thread, _database, context) => ({
+      agent: {
+        streamEvents: async () => {
+          if (!context?.subagentCall) {
+            const start = () => context!.subagents!.start({ agentName: 'reviewer',
+              config: subagentConfig('reviewer', { modelConfigId: 'child-model' }) }, 'Review.',
+            { subagentId: 'custom-model-child', childThreadId: 'custom-model-thread', childRunId: 'custom-model-run' }, () => {})
+            if (missing) await expect(start()).rejects.toThrow('no longer exists')
+            else await start()
+          }
+          return completedStream('Done.') as never
+        },
+        getState: async () => ({ values: {}, tasks: [] }) as never
+      }, dispose: async () => {}
+    }))
+    await collect(runtime.startRun({ threadId: owner.id, runId: 'custom-model-parent', text: 'Delegate.' }))
+    if (missing) expect(database.getThread('custom-model-thread')).toBeNull()
+    else {
+      expect(database.getThread('custom-model-thread')).toMatchObject({ modelConfigId: 'child-model', modelParameterPresetId: 'careful' })
+      expect(database.getSubagentCall('custom-model-child', owner.id)?.config.modelConfigId).toBe('child-model')
+    }
+    await runtime.shutdown()
   })
 
   it.each([false, true])('streams only argument counts before model completion and clears progress (failure=%s)', async (fail) => {

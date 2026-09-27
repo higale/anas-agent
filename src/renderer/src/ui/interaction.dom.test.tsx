@@ -196,13 +196,12 @@ describe('renderer interaction accessibility', () => {
     modelConfigId: 'model-1', modelParameterPresetId: 'thinking-off'
   }
 
-  it.each(['workspace', 'simple_chat'] as const)('aligns model/reasoning with the %s content heading', (kind) => {
+  it.each(['workspace', 'simple_chat'] as const)('places model selection beside the %s project name without changing input labels', (kind) => {
     render(<ProjectDialog open kind={kind} config={modelPickerConfig(true)} onClose={vi.fn()} onSave={vi.fn()} />)
-    const label = screen.getByText(kind === 'simple_chat' ? 'project.simple_chat_prompt' : 'project.source_folders')
+    const label = screen.getByText('project.name')
     const header = label.parentElement!
-    expect(header).toHaveClass('ui-row-between')
     expect(within(header).getByRole('button', { name: 'chat.select_model' })).toBeInTheDocument()
-    expect(label.nextElementSibling).toHaveClass('composer-model-selection-group')
+    expect(screen.getByRole('textbox', { name: 'project.name' })).toBeVisible()
     expect(header.closest('label')).toBeNull()
     if (kind === 'simple_chat') {
       expect(screen.getByRole('textbox', { name: 'project.simple_chat_prompt' })).toBeVisible()

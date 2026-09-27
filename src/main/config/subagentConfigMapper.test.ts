@@ -3,6 +3,26 @@ import { describe, expect, it } from 'vitest'
 import { normalizeSubagent, rawSubagentFromSave } from './subagentConfigMapper'
 
 describe('subagent configuration mapping', () => {
+  it.each([undefined, null, 'precise'])('round trips independent model selection and preset %s', (modelParameterPresetId) => {
+    const config = { name: 'delegate', enabled: true, description: 'Delegate.', systemPrompt: 'Complete work.',
+      capabilities: structuredClone(defaultCapabilities), modelConfigId: 'model-b', modelParameterPresetId }
+    const raw = rawSubagentFromSave(config)
+    expect(raw.model_config_id).toBe('model-b')
+    expect(raw.model_parameter_preset_id).toBe(modelParameterPresetId)
+    expect(normalizeSubagent(raw, 0)).toMatchObject({ modelConfigId: 'model-b' })
+    expect(normalizeSubagent(raw, 0).modelParameterPresetId).toBe(modelParameterPresetId)
+    const cleared = rawSubagentFromSave({ ...config, modelConfigId: undefined, modelParameterPresetId: undefined }, raw)
+    expect(cleared).not.toHaveProperty('model_config_id')
+    expect(cleared).not.toHaveProperty('model_parameter_preset_id')
+  })
+
+  it('rejects malformed model references and presets without a model', () => {
+    const config = { name: 'delegate', enabled: true, description: 'Delegate.', systemPrompt: 'Complete work.', capabilities: structuredClone(defaultCapabilities) }
+    expect(() => rawSubagentFromSave({ ...config, modelConfigId: '' })).toThrow('model configuration ID')
+    expect(() => rawSubagentFromSave({ ...config, modelParameterPresetId: 'precise' })).toThrow('requires a model')
+    expect(() => rawSubagentFromSave({ ...config, modelConfigId: 'model-b', modelParameterPresetId: '' })).toThrow('parameter preset ID')
+    expect(normalizeSubagent(rawSubagentFromSave(config), 0)).not.toHaveProperty('modelConfigId')
+  })
   it('round trips delegation choices independently of the global default switch', () => {
     const config = { name: 'delegate', enabled: false, description: 'Delegate work.', systemPrompt: 'Complete work.',
       capabilities: { ...structuredClone(defaultCapabilities), subagents: { mode: 'custom' as const, names: ['reviewer', 'missing'] } } }

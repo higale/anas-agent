@@ -216,7 +216,7 @@ export interface SubagentDefaults {
   capabilities: AgentCapabilities
 }
 
-export interface SubagentConfig {
+export interface SubagentConfig extends ProjectModelSelection {
   index: number
   name: string
   /** Included by default; custom selections may grant access independently. */
@@ -228,7 +228,7 @@ export interface SubagentConfig {
   capabilities: AgentCapabilities
 }
 
-export interface SubagentConfigSave {
+export interface SubagentConfigSave extends ProjectModelSelection {
   index?: number
   name: string
   enabled: boolean

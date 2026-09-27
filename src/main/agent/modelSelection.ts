@@ -1,5 +1,6 @@
 import type { AgentThread } from '@shared/agentTypes'
-import type { AppConfigSnapshot, ResolvedModelConfig } from '@shared/types'
+import type { AppConfigSnapshot, ResolvedModelConfig, SubagentConfig } from '@shared/types'
+import { validateSubagentModelSelection } from '@shared/subagentConfig'
 import { applyModelParameterPreset } from '@shared/modelConfig'
 import { findResolvedModelConfig, getAppConfigSnapshot } from '../config/appConfig'
 import type { AgentDatabase } from './agentDatabase'
@@ -21,6 +22,18 @@ export function isModelSelectionError(error: unknown): boolean {
 type ModelSelection = Pick<AgentThread, 'modelConfigId' | 'modelParameterPresetId'>
 type ModelConfiguration = Pick<AppConfigSnapshot, 'providers' | 'defaultModel'>
 type ModelSelectionDatabase = Pick<AgentDatabase, 'getThread' | 'getSubagentCallByChildThreadId'>
+
+/** Bind explicit definition choices once, when creating the child conversation. */
+export function resolveSubagentModelSelection(subagent: SubagentConfig, config: ModelConfiguration): ModelSelection {
+  const selection = validateSubagentModelSelection(subagent)
+  if (!selection.modelConfigId) return {}
+  const model = resolveModelSelection({ modelConfigId: selection.modelConfigId }, config)
+  const resolved = { modelConfigId: selection.modelConfigId,
+    modelParameterPresetId: selection.modelParameterPresetId === undefined
+      ? model.defaultParameterPresetId ?? undefined : selection.modelParameterPresetId ?? undefined }
+  resolveModelSelection(resolved, config)
+  return resolved
+}
 
 /** A child without its own selection follows its nearest explicitly bound ancestor. */
 export function resolveThreadModelSelection(threadId: string, database: ModelSelectionDatabase): ModelSelection {

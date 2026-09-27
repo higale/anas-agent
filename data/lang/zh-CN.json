@@ -484,6 +484,7 @@
     "subagent_selection_description": "选择说明",
     "subagent_selection_description_hint": "告诉主 Agent 何时应选择此子 Agent。描述越具体，委派越准确。",
     "subagent_system_prompt": "专用提示词",
+    "subagent_inherit_model": "跟随父 Agent",
     "subagent_context": "继承主 Agent 上下文",
     "subagent_context_hint": "选择哪些主 Agent 系统上下文提供给此子 Agent。子 Agent 角色与专用提示词始终添加。",
     "subagent_workspace_context": "项目",

@@ -1874,25 +1874,28 @@ describe('AgentDatabase', () => {
     }
   })
 
-  it('persists and reopens a selected non-default subagent with its delegation policy', () => {
+  it.each([false, true])('persists and reopens a selected subagent with its delegation and model choices (custom=%s)', (custom) => {
     const root = mkdtempSync(join(tmpdir(), 'anas-selected-subagent-'))
     const path = join(root, 'agent.sqlite')
     let database = AgentDatabase.open(path)
     try {
       const owner = database.createThread({ title: 'Owner' })
       const parentRun = database.createRun(owner.id, 'selected-agent-parent')
-      const config = { ...subagentConfig('reviewer'), enabled: false,
+      const selection = custom ? { modelConfigId: 'review-model', modelParameterPresetId: 'careful' } : {}
+      const config = { ...subagentConfig('reviewer'), enabled: false, ...selection,
         capabilities: { ...subagentConfig('reviewer').capabilities, subagents: { mode: 'custom' as const, names: ['researcher'] } } }
       const input = {
         id: '11111111-1111-8111-8111-111111111111', ownerThreadId: owner.id, parentThreadId: owner.id, parentRunId: parentRun.id,
         childThreadId: '22222222-2222-8222-8222-222222222222', childRunId: '33333333-3333-8333-8333-333333333333',
-        config, description: 'Explicit project selection.', childThread: { title: 'Selected child' }
+        config, description: 'Explicit project selection.', childThread: { title: 'Selected child', ...selection }
       }
       expect(() => database.createSubagentCall({ ...input, config: { ...config, systemPrompt: '' } })).toThrow('must not be empty')
       database.createSubagentCall(input)
       database.close()
       database = AgentDatabase.open(path)
       expect(database.getSubagentCall(input.id, owner.id)?.config).toEqual(config)
+      expect(database.getThread(input.childThreadId)?.modelConfigId).toBe(selection.modelConfigId)
+      expect(database.getThread(input.childThreadId)?.modelParameterPresetId).toBe(selection.modelParameterPresetId)
     } finally { database.close(); rmSync(root, { recursive: true, force: true }) }
   })
 

@@ -51,6 +51,8 @@ export interface RawModelProviderConfig {
 }
 
 export interface RawSubagentConfig {
+  model_config_id?: string
+  model_parameter_preset_id?: string | null
   preset?: string
   name?: string
   enabled?: boolean

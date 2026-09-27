@@ -1,11 +1,17 @@
 import { defaultSubagentConfig } from '@shared/subagentConfig'
 import type { TFunction } from 'i18next'
 import { describe, expect, it } from 'vitest'
-import { createSubagentDraft } from './subagentDraft'
+import { createSubagentDraft, subagentSavePayload } from './subagentDraft'
 
 const t = ((key: string) => key) as TFunction
 
 describe('subagent draft configuration', () => {
+  it('saves a model and explicit empty preset, and clears both when following the parent', () => {
+    const draft = { ...createSubagentDraft(undefined, t), modelConfigId: 'model-b', modelParameterPresetId: null }
+    expect(subagentSavePayload(draft)).toMatchObject({ modelConfigId: 'model-b', modelParameterPresetId: null })
+    expect(subagentSavePayload({ ...draft, modelConfigId: undefined, modelParameterPresetId: undefined })).not.toHaveProperty('modelConfigId')
+    expect(subagentSavePayload({ ...draft, modelConfigId: undefined, modelParameterPresetId: undefined })).not.toHaveProperty('modelParameterPresetId')
+  })
   it('uses bundled data defaults for a custom subagent', () => {
     const draft = createSubagentDraft(undefined, t)
     expect(draft).toMatchObject({
