@@ -1,10 +1,10 @@
-# Anas
+# Anas — 本地桌面 AI Agent
 
 [简体中文](README.md) · [English](README.en.md)
 
-Anas 是基于 Electron、React 和 TypeScript 构建的本地桌面 Agent。每个项目可以选择自己的上下文、工具、技能和子 Agent。配置与会话保存在本地；请求模型时，会将任务所需的内容发送给所选模型供应商。
+Anas 是基于 Electron、React 和 TypeScript 构建的本地桌面 AI Agent，使用 LangGraph 和 Deep Agents 运行时。每个项目可以选择自己的上下文、工具、技能和子 Agent。配置与会话保存在本地；请求模型时，会将任务所需的内容发送给所选模型供应商。
 
-[GitHub](https://github.com/higale/Anas-public) · [MIT 协议](LICENSE) · [参与贡献](CONTRIBUTING.md)
+[GitHub](https://github.com/higale/anas-agent) · [MIT 协议](LICENSE) · [参与贡献](CONTRIBUTING.md)
 
 公开仓库定期接收源码快照，每次同步新增一个提交；发布标签与 `package.json` 中的版本号一致。日常开发历史单独保留。
 
@@ -130,7 +130,7 @@ npm run pack:mac:release  # 当前 Mac 架构的 ad-hoc 签名 DMG
 
 ### 打开下载的 macOS 应用
 
-从 [GitHub Releases](https://github.com/higale/Anas-public/releases) 下载适合你 Mac 架构的 DMG，打开后将 Anas 拖入“应用程序”，再启动安装后的副本。如果 macOS 因无法验证开发者而阻止启动，请按 [Apple 的说明](https://support.apple.com/102445)，在“系统设置 > 隐私与安全”中选择“仍要打开”，然后确认“打开”。
+从 [GitHub Releases](https://github.com/higale/anas-agent/releases) 下载适合你 Mac 架构的 DMG，打开后将 Anas 拖入“应用程序”，再启动安装后的副本。如果 macOS 因无法验证开发者而阻止启动，请按 [Apple 的说明](https://support.apple.com/102445)，在“系统设置 > 隐私与安全”中选择“仍要打开”，然后确认“打开”。
 
 如果上述方法仍未解决下载隔离问题，且你信任此版本，请先将 DMG 的 `shasum -a 256` 输出与该 Release 的 `SHA256SUMS.txt` 对应条目比较，再仅移除已安装 Anas 应用的隔离属性：
 

@@ -34,7 +34,7 @@ export function AboutDialog({ open, buildInfo, iconDataUri, onClose }: {
           </AlertDialog.Description>
           <div className="ui-row-between">
             <a className="ui-text-link" href={applicationRepositoryUrl} target="_blank" rel="noreferrer">
-              GitHub · higale/Anas-public
+              GitHub · higale/anas-agent
             </a>
             <a className="ui-text-link" href={applicationLicenseUrl} target="_blank" rel="noreferrer">
               MIT License

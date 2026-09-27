@@ -2,7 +2,7 @@
 
 语言：[English](./USER_GUIDE.en.md) | [中文](./USER_GUIDE.zh-CN.md)
 
-GitHub：[higale/Anas-public](https://github.com/higale/Anas-public) · 开源协议：[MIT](https://github.com/higale/Anas-public/blob/main/LICENSE)
+GitHub：[higale/anas-agent](https://github.com/higale/anas-agent) · 开源协议：[MIT](https://github.com/higale/anas-agent/blob/main/LICENSE)
 
 Anas 是一个本地桌面 Agent。你可以为不同项目配置上下文、工具、技能和子 Agent。配置、会话和记忆保存在本地；完成任务所需的内容会发送给你配置的模型服务。
 

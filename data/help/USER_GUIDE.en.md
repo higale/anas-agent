@@ -2,7 +2,7 @@
 
 Languages: [English](./USER_GUIDE.en.md) | [中文](./USER_GUIDE.zh-CN.md)
 
-GitHub: [higale/Anas-public](https://github.com/higale/Anas-public) · License: [MIT](https://github.com/higale/Anas-public/blob/main/LICENSE)
+GitHub: [higale/anas-agent](https://github.com/higale/anas-agent) · License: [MIT](https://github.com/higale/anas-agent/blob/main/LICENSE)
 
 Anas is a local desktop agent. Configure context, tools, skills, and subagents for each project. Settings, conversations, and memory stay on your computer; content needed for a task is sent to your configured model provider.
 

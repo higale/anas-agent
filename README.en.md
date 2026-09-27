@@ -1,10 +1,10 @@
-# Anas
+# Anas — Local Desktop AI Agent
 
 [简体中文](README.md) · [English](README.en.md)
 
-Anas is a local desktop agent built with Electron, React, and TypeScript. Each project can choose its context, tools, skills, and subagents. Configuration and conversations stay locally; requests send the required task content to the selected model provider.
+Anas is a local desktop AI agent built with Electron, React, and TypeScript, powered by LangGraph and Deep Agents. Each project can choose its context, tools, skills, and subagents. Configuration and conversations stay locally; requests send the required task content to the selected model provider.
 
-[GitHub](https://github.com/higale/Anas-public) · [MIT License](LICENSE) · [Contributing](CONTRIBUTING.md)
+[GitHub](https://github.com/higale/anas-agent) · [MIT License](LICENSE) · [Contributing](CONTRIBUTING.md)
 
 The public repository receives periodic source snapshots. Each synchronization adds one commit; release tags match `package.json`. Daily development history is kept separately.
 
@@ -130,7 +130,7 @@ The [GitHub Actions workflow](.github/workflows/release.yml) builds all three pa
 
 ### Opening the macOS download
 
-Download the DMG matching your Mac from [GitHub Releases](https://github.com/higale/Anas-public/releases), open it, and drag Anas into Applications. Launch the installed copy. If macOS blocks it because the developer cannot be verified, use **System Settings > Privacy & Security > Open Anyway**, then confirm **Open**, as described by [Apple](https://support.apple.com/102445).
+Download the DMG matching your Mac from [GitHub Releases](https://github.com/higale/anas-agent/releases), open it, and drag Anas into Applications. Launch the installed copy. If macOS blocks it because the developer cannot be verified, use **System Settings > Privacy & Security > Open Anyway**, then confirm **Open**, as described by [Apple](https://support.apple.com/102445).
 
 If that route does not resolve a download-quarantine block, and you trust this release, compare the DMG's `shasum -a 256` output with its entry in the release's `SHA256SUMS.txt`. Then remove only the installed Anas app's quarantine attribute:
 

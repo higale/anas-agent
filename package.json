@@ -1,6 +1,6 @@
 {
     "name": "anas",
-    "version": "3.0.3",
+    "version": "3.0.4",
     "productName": "Anas",
     "description": "Anas, short for Ananas: a local desktop agent with project-scoped context, tools, and skills customization.",
     "main": "out/main/index.js",
@@ -38,11 +38,11 @@
     },
     "repository": {
         "type": "git",
-        "url": "https://github.com/higale/Anas-public.git"
+        "url": "https://github.com/higale/anas-agent.git"
     },
-    "homepage": "https://github.com/higale/Anas-public#readme",
+    "homepage": "https://github.com/higale/anas-agent#readme",
     "bugs": {
-        "url": "https://github.com/higale/Anas-public/issues"
+        "url": "https://github.com/higale/anas-agent/issues"
     },
     "keywords": [],
     "author": "gale",
