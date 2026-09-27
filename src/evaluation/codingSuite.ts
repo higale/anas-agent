@@ -189,7 +189,7 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
       const capabilities = (tools: string[], subagents = false) => ({
         ...structuredClone(defaultCapabilities), profile: false, environment: false,
         applicationEnvironment: false, memory: false, backgroundTools: false,
-        subagents, planning: false, skills: { enabled: false, mode: 'custom' as const, project: false, entries: [] },
+        subagents: { mode: subagents ? 'default' as const : 'off' as const, names: [] }, planning: false, skills: { mode: 'off' as const, project: false, entries: [] },
         toolMode: 'selected' as const, tools
       })
       if (task.subagent) await saveSubagent({
@@ -433,7 +433,7 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
         return configuration?.codingMode === codingMode
           && configuration.capabilities.toolMode === 'selected'
           && fingerprint(configuration.capabilities.tools) === fingerprint(enabledTools)
-          && !configuration.capabilities.applicationEnvironment && !configuration.capabilities.skills.enabled
+          && !configuration.capabilities.applicationEnvironment && configuration.capabilities.skills.mode === 'off'
       }) })
       const childSnapshots = new Map<string, string>()
       if (task.subagent) {
@@ -448,7 +448,7 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
           result.checks.push({ name: 'subagent-run-configuration-matches', passed:
             configuration?.codingMode === codingMode && configuration.capabilities.toolMode === 'selected'
             && fingerprint([...configuration.capabilities.tools].sort()) === fingerprint([...task.subagent.expectedTools].sort())
-            && !configuration.capabilities.subagents && !configuration.capabilities.skills.enabled
+            && configuration.capabilities.subagents.mode === 'off' && configuration.capabilities.skills.mode === 'off'
             && !configuration.capabilities.applicationEnvironment
             && database.getThread(call.childThreadId)?.accessMode === accessMode
             && database.getRun(call.childRunId)?.status === 'completed' })

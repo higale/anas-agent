@@ -1,4 +1,3 @@
-import { validateSubagentSelection } from '@shared/subagentSelection'
 import type {
   SubagentConfig,
   SubagentConfigSave,
@@ -49,7 +48,6 @@ export function normalizeSubagent(raw: RawSubagentConfig, index: number): Subage
   const normalizedPreset = preset(raw.preset, `${path}.preset`)
   return {
     index,
-    ...(raw.subagent_selection === undefined ? {} : { subagentSelection: validateSubagentSelection(raw.subagent_selection) }),
     name: requireName(raw.name),
     enabled: boolean(raw.enabled, `${path}.enabled`),
     preset: normalizedPreset,
@@ -79,7 +77,6 @@ export function rawSubagentFromSave(
   return {
     ...(existingPreset ? { preset: existingPreset } : {}),
     name,
-    ...(subagent.subagentSelection === undefined ? {} : { subagent_selection: validateSubagentSelection(subagent.subagentSelection) }),
     enabled,
     description,
     system_prompt: systemPrompt,

@@ -23,13 +23,11 @@ export function CapabilitySettings({ config, pending, skills, mcpStatus, runtime
   return (
     <CapabilityEditor customTools={config.customTools} value={value.capabilities} skills={skills} mcpStatus={mcpStatus}
       mcpServers={config.mcpServers} runtimeToolStatus={runtimeToolStatus} disabled={saving}
-      subagentSelection={{ value: value.subagentSelection, definitions: config.subagents,
-        onChange: (subagentSelection) => void save({ subagentSelection }) }}
+      subagents={config.subagents}
       toolbarEnd={<CheckboxField className="ui-checkbox-field-inline" checked={value.restrictSubagents}
         disabled={saving} label={t('capabilities.restrict_subagents')} tooltip={t('capabilities.restrict_subagents_hint')}
         onChange={(restrictSubagents) => void save({ restrictSubagents })} />}
-      onEnableAll={(capabilities) => void save({ capabilities, restrictSubagents: false,
-        subagentSelection: { ...value.subagentSelection, mode: 'default' } })}
+      onEnableAll={(capabilities) => void save({ capabilities, restrictSubagents: false })}
       onChange={(capabilities) => void save({ capabilities })} />
   )
 }

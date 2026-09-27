@@ -11,9 +11,7 @@ export interface SubagentSelectionProps {
   onChange(value: SubagentSelection): void
 }
 
-export function SubagentSelectionEditor({ value, definitions, onChange, enabled, onEnable, disabled }: SubagentSelectionProps & {
-  enabled: boolean
-  onEnable(enabled: boolean): void
+export function SubagentSelectionEditor({ value, definitions, onChange, disabled }: SubagentSelectionProps & {
   disabled: boolean
 }) {
   const { t } = useTranslation()
@@ -30,18 +28,18 @@ export function SubagentSelectionEditor({ value, definitions, onChange, enabled,
   return <div className="ui-form-section ui-form-section-divided">
     <div className="ui-form-row ui-form-row-inline">
       <div className="ui-row">
-        <CheckboxField className="ui-checkbox-field-inline" checked={enabled} disabled={disabled}
-          label={t('settings.capability_subagents')} onChange={onEnable} />
+        <span>{t('settings.capability_subagents')}</span>
         <small>{count}</small>
       </div>
       <SearchableOptionPicker className="compact" ariaLabel={t('capabilities.subagent_selection')}
-        disabled={disabled || !enabled} searchable={false} emptyLabel={t('settings.no_options')}
+        disabled={disabled} searchable={false} emptyLabel={t('settings.no_options')}
         value={value.mode} options={[
           { value: 'default', label: t('capabilities.default') },
-          { value: 'custom', label: t('capabilities.custom') }
+          { value: 'custom', label: t('capabilities.custom') },
+          { value: 'off', label: t('capabilities.off') }
         ]} onChange={(mode) => onChange({ ...value, mode: mode as SubagentSelection['mode'] })} />
     </div>
-    {value.mode === 'custom' && <fieldset className="ui-capability-editor" disabled={disabled || !enabled}>
+    {value.mode === 'custom' && <fieldset className="ui-capability-editor" disabled={disabled}>
       <input className="ui-input" type="search" aria-label={t('capabilities.search_subagents')}
         placeholder={t('capabilities.search_subagents')} value={query} onChange={(event) => setQuery(event.target.value)} />
       <div className="ui-capability-list">

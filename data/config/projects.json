@@ -1,9 +1,5 @@
 {
   "advanced_settings": false,
   "coding_mode": false,
-  "prompt": "",
-  "subagent_selection": {
-    "mode": "default",
-    "names": []
-  }
+  "prompt": ""
 }

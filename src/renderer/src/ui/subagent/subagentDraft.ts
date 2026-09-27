@@ -28,7 +28,6 @@ export function createSubagentDraft(
   return {
     name: nextSubagentName(config?.subagents),
     enabled: defaultSubagentConfig.enabled,
-    subagentSelection: structuredClone(defaultSubagentConfig.subagentSelection),
     builtIn: false,
     description: t('settings.subagent_new_description'),
     systemPrompt: t('settings.subagent_new_prompt'),
@@ -41,7 +40,6 @@ export function subagentSavePayload(draft: SubagentDraft): SubagentConfigSave {
     index: draft.index,
     name: draft.name.trim(),
     enabled: draft.enabled,
-    ...(draft.subagentSelection === undefined ? {} : { subagentSelection: structuredClone(draft.subagentSelection) }),
     description: draft.description.trim(),
     systemPrompt: draft.systemPrompt.trim(),
     capabilities: structuredClone(draft.capabilities)

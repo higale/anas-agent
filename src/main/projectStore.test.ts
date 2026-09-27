@@ -68,19 +68,18 @@ describe('project store', () => {
     const folder = join(tempDir, 'selection')
     await mkdir(folder)
     const request = { kind: 'workspace' as const, name: 'Selected agents', sourceFolders: [folder],
-      codingMode: false, advancedSettings: true, prompt: '', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false,
-      subagentSelection: { mode: 'custom' as const, names: ['general-purpose', 'removed-agent'] } }
+      codingMode: false, advancedSettings: true, prompt: '', capabilities: { ...structuredClone(defaultCapabilities), subagents: { mode: 'custom' as const, names: ['general-purpose', 'removed-agent'] } }, restrictSubagents: false }
     const created = await store.createProject(request)
-    expect((await store.getProject(created.id))).toMatchObject({ subagentSelection: request.subagentSelection, restrictSubagents: false })
+    expect((await store.getProject(created.id))).toMatchObject({ capabilities: { subagents: request.capabilities.subagents }, restrictSubagents: false })
     const raw = JSON.parse(await readFile(storePaths.projectFile, 'utf8')).projects.find((item: Project) => item.id === created.id)
-    expect(raw.subagent_selection).toEqual(request.subagentSelection)
+    expect(raw.capabilities.subagents).toEqual(request.capabilities.subagents)
     expect(raw).not.toHaveProperty('subagentSelection')
-    await store.updateProject(created.id, { ...request, subagentSelection: { mode: 'custom', names: [] }, restrictSubagents: true })
-    expect(await store.getProject(created.id)).toMatchObject({ subagentSelection: { mode: 'custom', names: [] }, restrictSubagents: true })
-    await expect(store.updateProject(created.id, { ...request, subagentSelection: { mode: 'custom', names: ['bad name'] } })).rejects.toThrow()
-    expect(await store.getProject(created.id)).toMatchObject({ subagentSelection: { mode: 'custom', names: [] } })
-    await store.updateProject(created.id, { ...request, subagentSelection: undefined })
-    expect(await store.getProject(created.id)).not.toHaveProperty('subagentSelection')
+    await store.updateProject(created.id, { ...request, capabilities: { ...request.capabilities, subagents: { mode: 'custom', names: [] } }, restrictSubagents: true })
+    expect(await store.getProject(created.id)).toMatchObject({ capabilities: { subagents: { mode: 'custom', names: [] } }, restrictSubagents: true })
+    await expect(store.updateProject(created.id, { ...request, capabilities: { ...request.capabilities, subagents: { mode: 'custom', names: ['bad name'] } } })).rejects.toThrow()
+    expect(await store.getProject(created.id)).toMatchObject({ capabilities: { subagents: { mode: 'custom', names: [] } } })
+    await store.updateProject(created.id, { ...request, capabilities: { ...request.capabilities, subagents: { mode: 'off', names: request.capabilities.subagents.names } } })
+    expect(await store.getProject(created.id)).toMatchObject({ capabilities: { subagents: { mode: 'off', names: request.capabilities.subagents.names } } })
   })
 
   it('defaults coding mode off and round trips it independently of advanced settings', async () => {

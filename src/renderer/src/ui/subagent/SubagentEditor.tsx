@@ -1,4 +1,3 @@
-import { defaultSubagentSelection } from '@shared/subagentSelection'
 import type { FormEvent } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -97,9 +96,7 @@ export function SubagentEditor({
       </div>
 
       <CapabilityEditor customTools={customTools} value={draft.capabilities} subagent skills={skills} mcpStatus={mcpStatus} mcpServers={mcpServers} runtimeToolStatus={runtimeToolStatus}
-        subagentSelection={{ value: draft.subagentSelection ?? defaultSubagentSelection, definitions: subagents,
-          onChange: (subagentSelection) => onUpdate({ subagentSelection }) }}
-        onEnableAll={(capabilities) => onUpdate({ capabilities, subagentSelection: { ...(draft.subagentSelection ?? defaultSubagentSelection), mode: 'default' } })}
+        subagents={subagents}
         onChange={(capabilities) => onUpdate({ capabilities })} />
     </div>
   )

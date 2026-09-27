@@ -1,3 +1,13 @@
+## Anas v3.0.7
+
+- 子 Agent 和技能能力统一为“使用默认／自定义／关闭”，覆盖全局设置、项目和子 Agent；仅自定义模式展开条目，切换模式保留具体选择。
+- 启动恢复按当前能力配置格式逐项校验，保留合法的关闭状态，错误配置项恢复对应默认值，不因局部能力错误重置整个文件、项目或会话。
+- **配置变化**：子 Agent 选择移入 `capabilities.subagents`，技能移除 `enabled` 字段，统一使用三态 `mode`。本次不转换旧格式；升级后如进入启动恢复，请选择“修复”。无法识别的值将恢复默认，修复后请检查能力选择；原始数据会先备份。无效选择列表恢复该列表的默认值。
+
+- Subagent and skill capabilities now use **Use defaults / Custom / Off** across global settings, projects, and subagents. Lists appear only in Custom mode, and switching modes retains selections.
+- Startup recovery validates capability settings field by field against the current format, preserves valid Off selections, and restores invalid settings to their defaults without resetting entire files, projects, or conversations for local capability errors.
+- **Configuration change**: subagent selections move into `capabilities.subagents`; skills drop `enabled` and use the same three-state `mode`. This release does not convert the old format. If startup recovery appears after upgrading, choose **Repair** and review capability selections afterward: unrecognized values use defaults, invalid selection lists use the list default, and original data is backed up before changes.
+
 ## Downloads / 下载
 
 - **macOS Apple Silicon (ARM64)**: `Anas-<version>-macos-arm64.dmg`

@@ -7,7 +7,7 @@ import { serializeStructuredTool } from './toolSchemaSerialization'
 
 const subagents = [{
  capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: true,
-    memory: true, toolMode: 'all' as const, tools: [], skills: { enabled: true, mode: 'default' as const, project: false, entries: [] } },
+    memory: true, toolMode: 'all' as const, tools: [], skills: { mode: 'default' as const, project: false, entries: [] } },
   index: 0,
   name: 'general-purpose',
   enabled: true,

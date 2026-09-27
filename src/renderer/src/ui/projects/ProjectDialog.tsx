@@ -1,4 +1,3 @@
-import { defaultSubagentSelection } from '@shared/subagentSelection'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Folder, FolderPlus, Plus, Save, X } from 'lucide-react'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
@@ -58,7 +57,6 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
   const [advancedSettings, setAdvancedSettings] = useState(defaultProjectSettings.advancedSettings)
   const [codingMode, setCodingMode] = useState(defaultProjectSettings.codingMode)
   const [capabilities, setCapabilities] = useState(() => structuredClone(defaultCapabilities))
-  const [subagentSelection, setSubagentSelection] = useState(() => structuredClone(defaultSubagentSelection))
   const [restrictSubagents, setRestrictSubagents] = useState(defaultRestrictSubagents)
   const [skills, setSkills] = useState<SkillSnapshot>()
   const [mcpStatus, setMcpStatus] = useState<McpToolStatus>()
@@ -85,11 +83,10 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
     return simpleChat
       ? { ...preferences, kind: 'simple_chat', prompt }
       : { ...preferences, kind: 'workspace', sourceFolders,
-        ...(subagentSelection.mode === 'custom' || subagentSelection.names.length ? { subagentSelection } : {}),
         capabilities: config ? removeEmptyMissingMcpSelections(capabilities, new Set(config.mcpServers.map((server) => server.id))) : capabilities,
         restrictSubagents, prompt, advancedSettings, codingMode }
   }, [advancedSettings, capabilities, codingMode, config, icon, iconColor, modelConfigId,
-    modelParameterPresetId, name, prompt, restrictSubagents, simpleChat, sourceFolders, subagentSelection, t])
+    modelParameterPresetId, name, prompt, restrictSubagents, simpleChat, sourceFolders, t])
 
   useEffect(() => {
     if (!open) return
@@ -103,7 +100,6 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
     setCodingMode(initialCodingMode)
     const defaults = defaultsRef.current
     setCapabilities(structuredClone(project?.kind === 'workspace' ? project.capabilities : defaults.capabilities))
-    setSubagentSelection(structuredClone(project?.kind === 'workspace' ? project.subagentSelection ?? defaultSubagentSelection : defaults.subagentSelection))
     setRestrictSubagents(project?.kind === 'workspace' ? project.restrictSubagents : defaults.restrictSubagents)
     setModelConfigId(project?.modelConfigId)
     setModelParameterPresetId(project?.modelParameterPresetId)
@@ -392,8 +388,9 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
               {!simpleChat && advancedSettings && <section className="ui-dialog-pane ui-form-section" aria-label={t('settings.capabilities')}>
                 <h3 className="ui-dialog-title">{t('settings.capabilities')}</h3>
                 <CapabilityEditor customTools={projectTools} value={capabilities} skills={skills} mcpStatus={mcpStatus} mcpServers={config?.mcpServers} runtimeToolStatus={runtimeToolStatus} disabled={busy}
-                  subagentSelection={{ value: subagentSelection, definitions: config?.subagents ?? [], onChange: setSubagentSelection }}
-                  onChange={setCapabilities} onEnableAll={(enabled) => { setCapabilities(enabled); setRestrictSubagents(false); setSubagentSelection((current) => ({ ...current, mode: 'default' })) }}
+                  subagents={config?.subagents ?? []}
+                  onChange={setCapabilities}
+                  onEnableAll={(capabilities) => { setCapabilities(capabilities); setRestrictSubagents(false) }}
                   toolbarEnd={<CheckboxField className="ui-checkbox-field-inline" checked={restrictSubagents} disabled={busy} label={t('capabilities.restrict_subagents')}
                     tooltip={t('capabilities.restrict_subagents_hint')} onChange={setRestrictSubagents} />} />
               </section>}

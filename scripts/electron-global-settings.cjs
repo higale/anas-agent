@@ -17,8 +17,8 @@ async function verifyGlobalSettings(launchApplication) {
       await globalThis.gale.config.updateSettings({ language: 'en' })
       const project = (await globalThis.gale.projects.list()).find((item) => item.id === 'default-workspace')
       const capabilities = {
-        ...project.capabilities, profile: false, subagents: false, memory: false,
-        skills: { ...project.capabilities.skills, enabled: false }, mcp: { defaultMode: 'selected', servers: [] }
+        ...project.capabilities, profile: false, subagents: { mode: 'off', names: [] }, memory: false,
+        skills: { ...project.capabilities.skills, mode: 'off' }, mcp: { defaultMode: 'selected', servers: [] }
       }
       const first = await globalThis.gale.projects.update(project.id, { ...project, advancedSettings: true, capabilities })
       const second = await globalThis.gale.projects.create({ ...project, name: 'Other workspace', sourceFolders: [root] })

@@ -173,9 +173,9 @@ async function verifyCustomTools(launchApplication) {
       const project = await api.projects.create({ ...base, name: 'Custom terminal fixture', sourceFolders: [workspace],
         advancedSettings: true, codingMode: false, prompt: '', restrictSubagents: false,
         capabilities: { ...base.capabilities, profile: false, environment: false, workspace: false, memory: false,
-          applicationEnvironment: false, backgroundTools: true, subagents: false, planning: false,
+          applicationEnvironment: false, backgroundTools: true, subagents: { mode: 'off', names: [] }, planning: false,
           toolMode: 'selected', tools: [], customTools: { project: false, entries: toolIds },
-          mcp: { defaultMode: 'selected', servers: [] }, skills: { enabled: false, mode: 'custom', project: false, entries: [] } } })
+          mcp: { defaultMode: 'selected', servers: [] }, skills: { mode: 'off', project: false, entries: [] } } })
       if (project.status !== 'ok') throw new Error(JSON.stringify(project.error))
       return api.agent.runs.submit({ requestId: globalThis.crypto.randomUUID(),
         newThread: { title: 'Custom terminal fixture', projectId: project.value.id, modelConfigId, accessMode: 'full_access' },

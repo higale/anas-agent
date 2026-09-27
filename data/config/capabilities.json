@@ -1,13 +1,15 @@
 {
   "application_environment": true,
   "background_tools": true,
-  "subagents": true,
+  "subagents": {
+    "mode": "default",
+    "names": []
+  },
   "planning": true,
   "tool_mode": "all",
   "tools": [],
   "skills": {
     "project": false,
-    "enabled": true,
     "mode": "default",
     "entries": []
   },
@@ -19,10 +21,6 @@
   "mcp": {
     "default_mode": "all",
     "servers": []
-  },
-  "subagent_selection": {
-    "mode": "default",
-    "names": []
   },
   "custom_tools": {
     "project": false,

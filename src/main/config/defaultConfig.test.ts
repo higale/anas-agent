@@ -65,7 +65,7 @@ describe('bundled configuration contract', () => {
     expect(parseCapabilities(researcher?.capabilities)).toMatchObject({
       workspace: false,
       memory: false,
-      subagents: false,
+      subagents: { mode: 'off' as const, names: [] },
       planning: false,
       toolMode: 'selected',
       tools: ['run_shell', 'read_file', 'http_request']
@@ -83,7 +83,7 @@ describe('bundled configuration contract', () => {
         'get_file_info',
         'run_shell',
         'http_request'
-      ], mcp: { defaultMode: 'selected', servers: [] }, skills: { enabled: true, mode: 'custom', project: false, entries: [] } }),
+      ], mcp: { defaultMode: 'selected', servers: [] }, skills: { mode: 'custom', project: false, entries: [] } }),
     })
   })
 
@@ -92,7 +92,6 @@ describe('bundled configuration contract', () => {
     expect(defaultSubagentConfig).toEqual({
  capabilities: parseCapabilities(subagents.subagent_defaults.capabilities),
       enabled: subagents.subagent_defaults.enabled,
-      subagentSelection: subagents.subagent_defaults.subagent_selection,
     })
   })
 })

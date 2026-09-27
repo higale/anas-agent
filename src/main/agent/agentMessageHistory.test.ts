@@ -233,7 +233,7 @@ describe('current conversation message history', () => {
         childThreadId: '12000000-0000-8000-8000-000000000001',
         childRunId: '13000000-0000-8000-8000-000000000001',
         config: {
- capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: true, memory: true, toolMode: 'all', tools: [], skills: { enabled: true, mode: 'default', project: false, entries: [] } },
+ capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: true, memory: true, toolMode: 'all', tools: [], skills: { mode: 'default', project: false, entries: [] } },
           index: 0,
           name: 'reviewer',
           enabled: true,

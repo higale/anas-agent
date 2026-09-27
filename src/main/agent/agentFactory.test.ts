@@ -144,7 +144,7 @@ function config(settings: Partial<AppConfigSnapshot['settings']> = {}): AppConfi
     providers: [],
     subagents: [{
  capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: true,
-        memory: true, toolMode: 'all', tools: [], skills: { enabled: true, mode: 'default', project: false, entries: [] } },
+        memory: true, toolMode: 'all', tools: [], skills: { mode: 'default', project: false, entries: [] } },
       index: 0,
       name: 'general-purpose',
       enabled: true,
@@ -334,8 +334,8 @@ describe('live model selection in one running graph', () => {
       appConfigMocks.getAppConfigSnapshot.mockImplementation(async () => structuredClone(snapshot))
       projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), capabilities: {
         ...structuredClone(defaultCapabilities), profile: false, environment: false, workspace: false,
-        planning: false, toolMode: 'selected', tools: [], subagents: false, backgroundTools: false, memory: false,
-        skills: { enabled: false, mode: 'default', project: false, entries: [] }
+        planning: false, toolMode: 'selected', tools: [], subagents: { mode: 'off' as const, names: [] }, backgroundTools: false, memory: false,
+        skills: { mode: 'off', project: false, entries: [] }
       } })
       const bodies: Record<string, unknown>[] = []
       const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
@@ -436,8 +436,8 @@ describe('live model selection in one running graph', () => {
     appConfigMocks.getAppConfigSnapshot.mockImplementation(async () => structuredClone(snapshot))
     projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), capabilities: {
       ...structuredClone(defaultCapabilities), profile: false, environment: false, workspace: false,
-      planning: false, toolMode: 'selected', tools: [], subagents: false, backgroundTools: false, memory: false,
-      skills: { enabled: false, mode: 'default', project: false, entries: [] }
+      planning: false, toolMode: 'selected', tools: [], subagents: { mode: 'off' as const, names: [] }, backgroundTools: false, memory: false,
+      skills: { mode: 'off', project: false, entries: [] }
     } })
     const path = join(testPaths.root, `attachment-usage-${protocol}.txt`)
     await writeFile(path, 'Attachment evidence '.repeat(100))
@@ -485,8 +485,8 @@ describe('live model selection in one running graph', () => {
     appConfigMocks.getAppConfigSnapshot.mockImplementation(async () => structuredClone(snapshot))
     projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), capabilities: {
       ...structuredClone(defaultCapabilities), profile: false, environment: false, workspace: false,
-      planning: false, toolMode: 'selected', tools: [], subagents: false, backgroundTools: false, memory: false,
-      skills: { enabled: false, mode: 'default', project: false, entries: [] }
+      planning: false, toolMode: 'selected', tools: [], subagents: { mode: 'off' as const, names: [] }, backgroundTools: false, memory: false,
+      skills: { mode: 'off', project: false, entries: [] }
     } })
     const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
       expect(JSON.parse(String(init?.body)).tools).toEqual([{ type: 'image_generation', partial_images: 1 }])
@@ -542,8 +542,8 @@ describe('live model selection in one running graph', () => {
     appConfigMocks.getAppConfigSnapshot.mockResolvedValue(previewConfig())
     projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), capabilities: {
       ...structuredClone(defaultCapabilities), profile: false, environment: false, workspace: false,
-      planning: false, toolMode: 'selected', tools: [], subagents: false, backgroundTools, memory: false,
-      skills: { enabled: false, mode: 'default', project: false, entries: [] }
+      planning: false, toolMode: 'selected', tools: [], subagents: { mode: 'off' as const, names: [] }, backgroundTools, memory: false,
+      skills: { mode: 'off', project: false, entries: [] }
     } })
     const database = AgentDatabase.open(':memory:')
     const target = configuredThread(database)
@@ -577,8 +577,8 @@ describe('live model selection in one running graph', () => {
     appConfigMocks.getAppConfigSnapshot.mockImplementation(async () => structuredClone(snapshot))
     const project = { ...defaultWorkspaceProject(), capabilities: {
       ...structuredClone(defaultCapabilities), profile: false, environment: false, workspace: false,
-      planning: false, toolMode: 'selected' as const, tools: [], subagents: false, backgroundTools: false, memory: false,
-      skills: { enabled: false, mode: 'default' as const, project: false, entries: [] }
+      planning: false, toolMode: 'selected' as const, tools: [], subagents: { mode: 'off' as const, names: [] }, backgroundTools: false, memory: false,
+      skills: { mode: 'off' as const, project: false, entries: [] }
     } }
     projectStoreMocks.getProject.mockImplementation(async () => structuredClone(project))
     const database = AgentDatabase.open(':memory:')
@@ -620,8 +620,8 @@ describe('live model selection in one running graph', () => {
     appConfigMocks.getAppConfigSnapshot.mockImplementation(async () => structuredClone(snapshot))
     projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), capabilities: {
       ...structuredClone(defaultCapabilities), profile: false, environment: false, workspace: false,
-      planning: false, toolMode: 'selected', tools: [], subagents: false, backgroundTools: false, memory: true,
-      skills: { enabled: false, mode: 'default', project: false, entries: [] }
+      planning: false, toolMode: 'selected', tools: [], subagents: { mode: 'off' as const, names: [] }, backgroundTools: false, memory: true,
+      skills: { mode: 'off', project: false, entries: [] }
     } })
     const database = AgentDatabase.open(':memory:')
     const target = configuredThread(database)
@@ -670,8 +670,8 @@ describe('live model selection in one running graph', () => {
     appConfigMocks.getAppConfigSnapshot.mockResolvedValue(snapshot)
     projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(),
       capabilities: { ...structuredClone(defaultCapabilities), profile: false, environment: false, workspace: false,
-        planning: true, toolMode: 'selected', tools: [], subagents: false, backgroundTools: false, memory: false,
-        skills: { enabled: false, mode: 'default', project: false, entries: [] } } })
+        planning: true, toolMode: 'selected', tools: [], subagents: { mode: 'off' as const, names: [] }, backgroundTools: false, memory: false,
+        skills: { mode: 'off', project: false, entries: [] } } })
     const database = AgentDatabase.open(':memory:')
     const target = configuredThread(database)
     const onContextStatus = vi.fn()
@@ -705,8 +705,8 @@ describe('live model selection in one running graph', () => {
     appConfigMocks.getAppConfigSnapshot.mockImplementation(async () => structuredClone(snapshot))
     projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), sourceFolders: [directory], codingMode,
       capabilities: { ...structuredClone(defaultCapabilities), profile: false, environment: false, workspace: false,
-        planning: true, toolMode: 'selected', tools: [], subagents: false, backgroundTools: false, memory: false,
-        skills: { enabled: false, mode: 'default', project: false, entries: [] } } })
+        planning: true, toolMode: 'selected', tools: [], subagents: { mode: 'off' as const, names: [] }, backgroundTools: false, memory: false,
+        skills: { mode: 'off', project: false, entries: [] } } })
     const database = AgentDatabase.open(':memory:')
     const target = configuredThread(database)
     const factory = vi.spyOn(modelFactory, 'createChatModel').mockImplementation(() => new LiveSelectionTestModel(() => new AIMessage({
@@ -1080,8 +1080,8 @@ describe('managed call supervision availability', () => {
     vi.mocked(toolsStore.listToolSnapshot).mockResolvedValue({ roots: [], tools: snapshot.customTools })
     appConfigMocks.getAppConfigSnapshot.mockResolvedValue(snapshot)
     projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), sourceFolders: [root],
-      capabilities: { ...structuredClone(defaultCapabilities), customTools: selectedTools(['submit']), memory: false, subagents: false,
-        skills: { enabled: false, mode: 'default', project: false, entries: [] } } })
+      capabilities: { ...structuredClone(defaultCapabilities), customTools: selectedTools(['submit']), memory: false, subagents: { mode: 'off' as const, names: [] },
+        skills: { mode: 'off', project: false, entries: [] } } })
     const database = AgentDatabase.open(':memory:')
     const thread = configuredThread(database, { title: 'Custom tools' })
     const run = database.createRun(thread.id, 'custom-graph')
@@ -1126,8 +1126,8 @@ describe('managed call supervision availability', () => {
   it.each([false, true].flatMap(memory => [false, true].map(tools => ({ memory, tools }))))('runs automatic recall $memory independently from memory tools $tools', async ({ memory, tools }) => {
     const names = ['read_memory', 'save_to_memory', 'forget_memory']
     projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), sourceFolders: [process.cwd()],
-      capabilities: { ...structuredClone(defaultCapabilities), memory, subagents: false, backgroundTools: false, planning: false,
-        toolMode: 'selected', tools: tools ? names : [], skills: { enabled: false, mode: 'default', project: false, entries: [] } } })
+      capabilities: { ...structuredClone(defaultCapabilities), memory, subagents: { mode: 'off' as const, names: [] }, backgroundTools: false, planning: false,
+        toolMode: 'selected', tools: tools ? names : [], skills: { mode: 'off', project: false, entries: [] } } })
     appConfigMocks.getAppConfigSnapshot.mockResolvedValue({ ...previewConfig(), subagents: [] })
     const database = AgentDatabase.open(':memory:')
     const thread = configuredThread(database)
@@ -1147,7 +1147,7 @@ describe('managed call supervision availability', () => {
   it.each(['todos', 'approval'] as const)('completes a mixed %s batch through the production middleware and SQLite', async source => {
     projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), sourceFolders: [process.cwd()], codingMode: true,
       capabilities: { ...structuredClone(defaultCapabilities), planning: true, toolMode: 'selected', tools: ['read_file', 'update_config'], memory: false,
-        skills: { enabled: false, mode: 'default', project: false, entries: [] } } })
+        skills: { mode: 'off', project: false, entries: [] } } })
     appConfigMocks.getAppConfigSnapshot.mockResolvedValue({ ...previewConfig(), subagents: [] })
     const database = AgentDatabase.open(':memory:')
     const thread = configuredThread(database)
@@ -1191,7 +1191,7 @@ describe('managed call supervision availability', () => {
   it('returns invalid arguments before production preflight while preserving the valid batch and next correction', async () => {
     projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), sourceFolders: [process.cwd()], codingMode: true,
       capabilities: { ...structuredClone(defaultCapabilities), toolMode: 'selected', tools: ['read_file'], memory: false,
-        skills: { enabled: false, mode: 'default', project: false, entries: [] } } })
+        skills: { mode: 'off', project: false, entries: [] } } })
     appConfigMocks.getAppConfigSnapshot.mockResolvedValue({ ...previewConfig(), subagents: [] })
     const database = AgentDatabase.open(':memory:')
     const thread = configuredThread(database)
@@ -1250,7 +1250,7 @@ describe('managed call supervision availability', () => {
   it.each(['openai_chat_completions', 'openai_responses', 'anthropic_messages'] as const)(
     'retains %s structured review usage through the production factory and SQLite checkpointer', async protocol => {
     projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), sourceFolders: [process.cwd()], codingMode: true,
-      capabilities: { ...structuredClone(defaultCapabilities), toolMode: 'selected', tools: [], memory: false, skills: { enabled: false, mode: 'default', project: false, entries: [] } } })
+      capabilities: { ...structuredClone(defaultCapabilities), toolMode: 'selected', tools: [], memory: false, skills: { mode: 'off', project: false, entries: [] } } })
     const snapshot = { ...previewConfig(), subagents: [] }
     snapshot.providers[0].protocol = protocol
     appConfigMocks.getAppConfigSnapshot.mockResolvedValue(snapshot)
@@ -1585,8 +1585,7 @@ describe('subagent definition snapshots', () => {
     const tools = vi.spyOn(subagentTools, 'createSubagentTools')
     const resolved = vi.fn()
     const context = { requestId: call?.childRunId ?? parent.id, subagentCall: call, prepareWorkspace: false,
-      parentConfiguration: { customTools: [], codingMode: false, capabilities: structuredClone(defaultCapabilities),
-        subagentSelection: { mode: 'custom' as const, names: ['general-purpose', 'reviewer'] } } }
+      parentConfiguration: { customTools: [], codingMode: false, capabilities: { ...structuredClone(defaultCapabilities), subagents: { mode: 'custom' as const, names: ['general-purpose', 'reviewer'] } } } }
     try {
       const thread = call ? database.getThread(call.childThreadId)! : owner
       const first = await createAgentInstance(thread, database, { ...context, onConfigurationResolved: resolved })
@@ -1619,15 +1618,14 @@ describe('subagent definition snapshots', () => {
     const call = database.createSubagentCall({
       id: '12929292-9292-8292-8292-929292929292', ownerThreadId: owner.id, parentThreadId: owner.id, parentRunId: parent.id,
       childThreadId: '13939393-9393-8393-8393-939393939393', childRunId: '14949494-9494-8494-9494-949494949494',
-      config: { ...base, subagentSelection: { mode: mode === 'default' ? 'default' : 'custom', names: mode === 'empty' ? [] : ['reviewer', 'outside'] } },
+      config: { ...base, capabilities: { ...base.capabilities, subagents: { mode: mode === 'default' ? 'default' : 'custom', names: mode === 'empty' ? [] : ['reviewer', 'outside'] } } },
       description: 'Delegate within the project.', childThread: { title: 'Child', projectId: owner.projectId }
     })
     const tools = vi.spyOn(subagentTools, 'createSubagentTools')
     try {
       const instance = await createAgentInstance(database.getThread(call.childThreadId)!, database, {
         requestId: call.childRunId, subagentCall: call, prepareWorkspace: false,
-        parentConfiguration: { customTools: [], codingMode: false, capabilities: structuredClone(defaultCapabilities),
-          subagentSelection: { mode: 'custom', names: nested ? ['general-purpose'] : ['general-purpose', 'reviewer'] },
+        parentConfiguration: { customTools: [], codingMode: false, capabilities: { ...structuredClone(defaultCapabilities), subagents: { mode: 'custom', names: nested ? ['general-purpose'] : ['general-purpose', 'reviewer'] } },
           ...(nested ? { subagentSelectionLimit: { mode: 'custom' as const, names: ['general-purpose', 'reviewer'] } } : {}) }
       })
       await instance.dispose()
@@ -1708,7 +1706,7 @@ describe('subagent definition snapshots', () => {
       memory: false, workspace: false, toolMode: 'selected', tools: ['http_request'] }
     snapshot.defaultCapabilities.restrictSubagents = restricted
     snapshot.subagents.push({ ...snapshot.subagents[0], name: 'reviewer', enabled: false })
-    snapshot.defaultCapabilities.subagentSelection = { mode: 'custom', names: ['reviewer'] }
+    snapshot.defaultCapabilities.capabilities.subagents = { mode: 'custom', names: ['reviewer'] }
     const project = { ...defaultWorkspaceProject(), advancedSettings: customized, restrictSubagents: restricted,
       capabilities: { ...structuredClone(defaultCapabilities), toolMode: 'selected' as const, tools: ['read_file'] } }
     projectStoreMocks.getProject.mockResolvedValue(project)
@@ -1727,7 +1725,7 @@ describe('subagent definition snapshots', () => {
       expect(configuration.capabilities).toMatchObject({ profile: customized, workspace: customized,
         toolMode: 'selected', tools: customized ? ['read_file'] : ['http_request'] })
       expect(Boolean(configuration.subagentLimit)).toBe(restricted)
-      expect(configuration.subagentSelection.names).toEqual(customized ? ['general-purpose'] : ['reviewer'])
+      expect(configuration.capabilities.subagents.names).toEqual(customized ? ['general-purpose'] : ['reviewer'])
       const prompt = await prepareAgentSystemPrompt(owner, snapshot)
       expect(prompt.systemPrompt.sections.some(section => section.kind === 'workspace')).toBe(customized)
       const call = database.createSubagentCall({
@@ -1765,9 +1763,9 @@ describe('subagent definition snapshots', () => {
   })
 
   it.each((['main', 'independent', 'restricted'] as const).flatMap((scope) => [false, true].map((parentCodingMode) => ({ scope, parentCodingMode }))))('enforces memory tool selection in $scope with parent coding mode $parentCodingMode', async ({ scope, parentCodingMode }) => {
-    const project = { customTools: [], ...defaultWorkspaceProject(), codingMode: true, subagentSelection: { mode: 'custom' as const, names: ['general-purpose'] }, capabilities: {
+    const project = { customTools: [], ...defaultWorkspaceProject(), codingMode: true, capabilities: { ...{
       ...structuredClone(defaultCapabilities), toolMode: 'except' as const, tools: ['save_to_memory', 'forget_memory']
-    } }
+    }, subagents: { mode: 'custom' as const, names: ['general-purpose'] } } }
     projectStoreMocks.getProject.mockResolvedValue(project)
     memoryStoreMocks.buildMemoryRulesPrompt.mockResolvedValue('MEMORY RULES')
     appConfigMocks.getAppConfigSnapshot.mockResolvedValue(previewConfig())
@@ -1785,11 +1783,11 @@ describe('subagent definition snapshots', () => {
       const instance = await createAgentInstance(call ? database.getThread(call.childThreadId)! : owner, database, {
         onConfigurationResolved: resolved,
         requestId: call?.childRunId ?? parentRun.id, subagentCall: call, prepareWorkspace: false,
-        parentConfiguration: { customTools: [], codingMode: parentCodingMode, subagentSelection: { mode: 'custom', names: [] }, capabilities: project.capabilities, ...(scope === 'restricted' ? { subagentLimit: { ...project.capabilities, customTools: selectedTools(), skills: resolveSkillSelection(project.capabilities.skills, []) } } : {}) }
+        parentConfiguration: { customTools: [], codingMode: parentCodingMode, capabilities: { ...project.capabilities, subagents: { mode: 'custom', names: [] } }, ...(scope === 'restricted' ? { subagentLimit: { ...project.capabilities, customTools: selectedTools(), skills: resolveSkillSelection(project.capabilities.skills, []) } } : {}) }
       })
       await instance.dispose()
       expect(resolved.mock.lastCall![0].codingMode).toBe(scope === 'main' || parentCodingMode)
-      expect(resolved.mock.lastCall![0].subagentSelection).toEqual(scope === 'main' ? project.subagentSelection : { mode: 'custom', names: [] })
+      expect(resolved.mock.lastCall![0].capabilities.subagents).toEqual(scope === 'main' ? project.capabilities.subagents : { mode: 'custom', names: [] })
       const actual = runtimeToolMocks.createdToolNames.mock.lastCall![0] as string[]
       expect(actual.filter((name) => ['read_memory', 'save_to_memory', 'forget_memory'].includes(name))).toEqual(
         scope === 'independent' ? ['read_memory', 'save_to_memory', 'forget_memory'] : ['read_memory']
@@ -1863,11 +1861,11 @@ describe('subagent definition snapshots', () => {
       id: '15959595-9595-8595-8595-959595959595', ownerThreadId: owner.id, parentThreadId: owner.id, parentRunId: parentRun.id,
       childThreadId: '16969696-9696-8696-8696-969696969696', childRunId: '17979797-9797-8797-8797-979797979797',
       config: { ...config().subagents[0], capabilities: { ...structuredClone(defaultCapabilities),
-        skills: { enabled: true, mode: 'custom', project: true, entries: [] } } },
+        skills: { mode: 'custom', project: true, entries: [] } } },
       description: 'Use current project skills.', childThread: { title: 'Child', projectId: owner.projectId }
     })
     const resolved = vi.fn()
-    const limit = { ...structuredClone(defaultCapabilities), customTools: selectedTools(), skills: { enabled: true, mode: 'custom' as const, project: false,
+    const limit = { ...structuredClone(defaultCapabilities), customTools: selectedTools(), skills: { mode: 'custom' as const, project: false,
       entries: [{ id: 'current-project:search', model: false, shortcut: true }] } }
     try {
       const instance = await createAgentInstance(database.getThread(call.childThreadId)!, database, {
@@ -1919,7 +1917,7 @@ describe('subagent definition snapshots', () => {
     const parentRun = database.createRun(owner.id, 'subagent-definition-parent-run')
     const original = {
       ...config().subagents[0],
- capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: true, memory: false, toolMode: 'selected' as const, tools: ['read_file'], skills: { enabled: true, mode: 'custom' as const, project: false, entries: [] } },
+ capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: true, memory: false, toolMode: 'selected' as const, tools: ['read_file'], skills: { mode: 'custom' as const, project: false, entries: [] } },
       preset: undefined,
       builtIn: false,
       name: 'reviewer',
@@ -2389,7 +2387,7 @@ describe('prepareAgentSystemPrompt workspace context', () => {
     capabilities.memory = false
     capabilities.toolMode = 'except'
     capabilities.tools = ['read_memory', 'save_to_memory', 'forget_memory']
-    capabilities.skills.enabled = false
+    capabilities.skills.mode = 'off'
 
     const prepared = await prepareAgentSystemPrompt(thread(), snapshot, capabilities)
 
@@ -2630,7 +2628,7 @@ describe('captureAgentModelRequest', () => {
       description: 'Custom fixture.', command: 'node fixture.cjs {{args}}', inputSchema: { type: 'object', properties: {} } }))
     vi.mocked(toolsStore.listToolSnapshot).mockResolvedValue({ roots: [], tools: snapshot.customTools })
     projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), advancedSettings: true,
-      capabilities: { ...structuredClone(defaultCapabilities), backgroundTools, subagents: false, planning: false,
+      capabilities: { ...structuredClone(defaultCapabilities), backgroundTools, subagents: { mode: 'off' as const, names: [] }, planning: false,
         toolMode: 'selected', tools: [], customTools: selectedTools(['ordinary', ...(selected ? ['interactive'] : [])]),
         mcp: { defaultMode: 'selected', servers: [] } } })
     const database = AgentDatabase.open(':memory:')
@@ -2655,7 +2653,7 @@ describe('captureAgentModelRequest', () => {
         id, index, name: id, enabled: true, type: 'stdio', command: 'unused', args: [], env: {}, workingDir: '', timeoutMs: 1000, url: ''
       }))
       projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), advancedSettings: true,
-        capabilities: { ...structuredClone(defaultCapabilities), subagents: false, planning: true,
+        capabilities: { ...structuredClone(defaultCapabilities), subagents: { mode: 'off' as const, names: [] }, planning: true,
           toolMode: 'selected', tools: ['http_request', 'run_shell', 'read_file'], customTools: selectedTools(['first', 'second']),
           mcp: { defaultMode: 'all', servers: [{ id: 'alpha', mode: 'selected', tools: ['mcp_alpha_only'] }] } } })
       const names = ['mcp_alpha_only', 'mcp_alpha_hidden', 'mcp_beta_second', 'mcp_beta_first']
@@ -2745,6 +2743,7 @@ describe('captureAgentModelRequest', () => {
   it.each([
     { mode: 'custom' as const, names: ['researcher', 'disabled-agent'], advanced: true, expected: ['researcher', 'disabled-agent'] },
     { mode: 'custom' as const, names: [], advanced: true, expected: [] },
+    { mode: 'off' as const, names: ['general-purpose', 'researcher'], advanced: true, expected: [] as string[] },
     { mode: 'default' as const, names: [], advanced: true, expected: ['general-purpose', 'researcher'] },
     { mode: 'custom' as const, names: [], advanced: false, expected: ['general-purpose', 'researcher'] }
   ])('advertises only project-selected subagents ($mode, advanced $advanced, names $names)', async ({ mode, names, advanced, expected }) => {
@@ -2752,7 +2751,7 @@ describe('captureAgentModelRequest', () => {
     snapshot.subagents = [snapshot.subagents[0], { ...snapshot.subagents[0], name: 'researcher', description: 'Research only' },
       { ...snapshot.subagents[0], name: 'disabled-agent', enabled: false }]
     projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), advancedSettings: advanced,
-      restrictSubagents: false, subagentSelection: { mode, names } })
+      restrictSubagents: false, capabilities: { ...structuredClone(defaultCapabilities), subagents: { mode, names } } })
     const database = AgentDatabase.open(':memory:')
     try {
       const owner = configuredThread(database, { title: 'Selected agents' })
@@ -2763,7 +2762,9 @@ describe('captureAgentModelRequest', () => {
       else for (const name of ['general-purpose', 'researcher', 'disabled-agent']) {
         expect(start.description.includes(`- ${name}:`)).toBe(expected.includes(name))
       }
-      expect(tools.map((entry: { name: string }) => entry.name)).toEqual(expect.arrayContaining(['read_subagent', 'wait_subagent', 'cancel_subagent']))
+      const supervision = expect.arrayContaining(['read_subagent', 'wait_subagent', 'cancel_subagent'])
+      if (mode === 'off' && advanced) expect(tools.map((entry: { name: string }) => entry.name)).not.toEqual(supervision)
+      else expect(tools.map((entry: { name: string }) => entry.name)).toEqual(supervision)
     } finally { database.close() }
   })
 

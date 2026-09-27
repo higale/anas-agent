@@ -473,7 +473,7 @@ describe('Deep Agent checkpoint lifecycle boundaries', () => {
         childRunId: '87878787-8787-8787-8787-878787878787',
         agentName: 'reviewer',
         config: {
- capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: true, memory: true, toolMode: 'all', tools: [], skills: { enabled: true, mode: 'default', project: false, entries: [] } },
+ capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: true, memory: true, toolMode: 'all', tools: [], skills: { mode: 'default', project: false, entries: [] } },
           index: 0,
           name: 'reviewer',
           enabled: true,

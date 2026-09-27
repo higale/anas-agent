@@ -20,7 +20,7 @@ function fullSequences(activity: AgentRunActivity): number[] {
 function config(): SubagentConfig {
   return {
     index: 0, name: 'reviewer', enabled: true, builtIn: false, description: 'Review a file.', systemPrompt: 'Review the assigned file.',
-    capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: true, memory: true, toolMode: 'all', tools: [], skills: { enabled: true, mode: 'default', project: false, entries: [] } }
+    capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: true, memory: true, toolMode: 'all', tools: [], skills: { mode: 'default', project: false, entries: [] } }
   }
 }
 

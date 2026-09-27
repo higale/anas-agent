@@ -10,5 +10,6 @@ it('treats custom names as explicit grants while excluding missing and incomplet
   expect(selectedSubagents(definitions).map(item => item.name)).toEqual(['default-agent'])
   expect(selectedSubagents(definitions, { mode: 'custom', names: ['custom-agent', 'draft-agent', 'missing'] }).map(item => item.name)).toEqual(['custom-agent'])
   expect(selectedSubagents(definitions, { mode: 'custom', names: [] })).toEqual([])
+  expect(selectedSubagents(definitions, { mode: 'off', names: ['default-agent', 'custom-agent'] })).toEqual([])
   expect(definitions[1].enabled).toBe(false)
 })

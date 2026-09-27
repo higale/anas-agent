@@ -66,7 +66,7 @@ function subagentConfig(
   overrides: Partial<SubagentConfig> = {}
 ): SubagentConfig {
   return {
- capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: true, memory: true, toolMode: 'all', tools: [], skills: { enabled: true, mode: 'default', project: false, entries: [] } },
+ capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: true, memory: true, toolMode: 'all', tools: [], skills: { mode: 'default', project: false, entries: [] } },
     index: 0,
     name,
     enabled: true,
@@ -6434,7 +6434,7 @@ describe('AgentRuntime', () => {
             arm: () => {}
           }, () => context?.subagents?.start({
             agentName: 'reviewer',
-            config: subagentConfig('reviewer', { enabled, subagentSelection: { mode: 'custom', names: [] } })
+            config: subagentConfig('reviewer', { enabled, capabilities: { ...structuredClone(defaultCapabilities), subagents: { mode: 'custom', names: [] } } })
           }, 'Review independently.', {
             subagentId: '11111111-1111-8111-8111-111111111111',
             childThreadId: '22222222-2222-8222-8222-222222222222',
@@ -6677,7 +6677,7 @@ describe('AgentRuntime', () => {
     const owner = database.createThread({ title: 'Durable subagent start replay' })
     const rootRun = database.createRun(owner.id, 'durable-start-replay-root-run')
     const original = subagentConfig('reviewer', {
- capabilities: { ...structuredClone(defaultCapabilities), profile: false, toolMode: 'selected', tools: ['read_file'], skills: { enabled: true, mode: 'custom', project: false, entries: [] } },
+ capabilities: { ...structuredClone(defaultCapabilities), profile: false, toolMode: 'selected', tools: ['read_file'], skills: { mode: 'custom', project: false, entries: [] } },
       systemPrompt: 'Original durable reviewer prompt.',
     })
     const call = database.createSubagentCall({

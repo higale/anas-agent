@@ -12,8 +12,7 @@ it('edits global references, clears missing entries, and retains custom choices 
   const changed = vi.fn()
   function Harness() {
     const [value, setValue] = useState<SubagentSelection>({ mode: 'custom', names: ['missing', 'disabled'] })
-    const [enabled, setEnabled] = useState(true)
-    return <SubagentSelectionEditor value={value} enabled={enabled} onEnable={setEnabled} disabled={false}
+    return <SubagentSelectionEditor value={value} disabled={false}
       definitions={[{ name: 'researcher', description: 'Research documents', systemPrompt: 'Research.', enabled: true }, { name: 'disabled', description: 'Custom use.', systemPrompt: 'Complete task.', enabled: false }]}
       onChange={(next) => { setValue(next); changed(next) }} />
   }
@@ -35,10 +34,13 @@ it('edits global references, clears missing entries, and retains custom choices 
   await user.click(screen.getByRole('option', { name: 'capabilities.custom' }))
   const researcher = screen.getByRole('checkbox', { name: 'researcher' })
   expect(researcher).toBeChecked()
-  const enabled = screen.getByRole('checkbox', { name: 'settings.capability_subagents' })
-  await user.click(enabled)
-  expect(researcher).toBeDisabled()
-  await user.click(enabled)
-  expect(researcher).toBeChecked()
-  expect(researcher).toBeEnabled()
+  expect(screen.queryByRole('checkbox', { name: 'settings.capability_subagents' })).toBeNull()
+  await user.click(picker)
+  await user.click(screen.getByRole('option', { name: 'capabilities.off' }))
+  expect(screen.queryByRole('searchbox')).toBeNull()
+  expect(screen.queryByRole('checkbox', { name: 'researcher' })).toBeNull()
+  expect(changed).toHaveBeenLastCalledWith({ mode: 'off', names: ['disabled', 'researcher'] })
+  await user.click(picker)
+  await user.click(screen.getByRole('option', { name: 'capabilities.custom' }))
+  expect(screen.getByRole('checkbox', { name: 'researcher' })).toBeChecked()
 })

@@ -1,5 +1,6 @@
 {
   "capabilities": {
+    "off": "Off",
     "terminal_input_hint": "Requires Background tools and either Command execution or a selected interactive custom tool. A terminal must be allocated at launch; it cannot be attached afterward.",
     "use_all_tools": "All tools",
     "no_known_mcp_tools": "No known tools yet. The tool list loads after a successful connection.",

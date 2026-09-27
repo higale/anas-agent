@@ -1,5 +1,6 @@
 {
   "capabilities": {
+    "off": "关闭",
     "terminal_input_hint": "需要开启后台工具，并启用执行命令或选中交互式自定义工具。终端必须在启动时创建，运行中不能补接。",
     "use_all_tools": "全部工具",
     "no_known_mcp_tools": "尚无可显示的工具；连接成功后会加载工具列表。",

@@ -1,7 +1,7 @@
 import { listToolSnapshot } from '../toolsStore'
 import { resolveToolSelection } from '@shared/toolPackages'
 import { createCustomTools } from './customToolRuntime'
-import { defaultSubagentSelection, selectedSubagents, type SubagentSelection } from '@shared/subagentSelection'
+import { defaultSubagentSelection, selectedSubagents } from '@shared/subagentSelection'
 import { mkdir } from 'node:fs/promises'
 import { currentToolExecution } from './toolExecutionContext'
 import { withManagedToolExecution } from './managedToolExecution'
@@ -495,11 +495,12 @@ async function prepareAgentInstanceFromConfig(
     const projectPolicy = project.kind === 'workspace' ? effectiveProjectCapabilitySettings(project, config.defaultCapabilities) : undefined
     const ownCapabilities = activeSubagent?.capabilities ?? projectPolicy?.capabilities ?? defaultCapabilities
     const parentLimit = activeSubagent ? context.parentConfiguration?.subagentLimit : undefined
-    const catalog = project.kind === 'workspace' && ownCapabilities.skills.enabled && (!parentLimit || parentLimit.skills.enabled)
+    const catalog = project.kind === 'workspace' && ownCapabilities.skills.mode !== 'off' && (!parentLimit || parentLimit.skills.mode !== 'off')
       ? await listSkillSnapshot(thread.projectId, project.sourceFolders)
       : { skills: [] }
     const toolCatalog = project.kind === 'workspace' ? await listToolSnapshot(project.sourceFolders) : { tools: [] }
     const resolve = (value: AgentCapabilities): ResolvedAgentCapabilities => ({ ...value,
+      subagents: { mode: value.subagents.mode === 'off' ? 'off' : 'custom', names: selectedSubagents(config.subagents, value.subagents).map((subagent) => subagent.name) },
       customTools: resolveToolSelection(value.customTools, toolCatalog.tools.filter(tool => !tool.definition?.interactive || value.backgroundTools), Boolean(activeSubagent), false),
       skills: resolveSkillSelection(value.skills, catalog.skills, true, Boolean(activeSubagent)) })
     let capabilities = resolve(ownCapabilities)
@@ -511,17 +512,14 @@ async function prepareAgentInstanceFromConfig(
     // project override cannot hide an allowed tool from another source.
     capabilities = { ...capabilities, customTools: resolveToolSelection(capabilities.customTools,
       toolCatalog.tools.filter(tool => !tool.definition?.interactive || capabilities.backgroundTools)) }
-    const subagentLimit = activeSubagent ? parentLimit : projectPolicy?.restrictSubagents ? capabilities : undefined
     const rootSelection = activeSubagent
-      ? context.parentConfiguration?.subagentSelectionLimit ?? context.parentConfiguration?.subagentSelection ?? defaultSubagentSelection
-      : projectPolicy?.subagentSelection
+      ? context.parentConfiguration?.subagentSelectionLimit ?? context.parentConfiguration?.capabilities.subagents ?? defaultSubagentSelection
+      : capabilities.subagents
     const rootSubagents = selectedSubagents(config.subagents, rootSelection)
-    const subagentSelection: SubagentSelection = {
-      mode: 'custom',
-      names: (activeSubagent ? selectedSubagents(rootSubagents, activeSubagent.subagentSelection) : rootSubagents).map((subagent) => subagent.name)
-    }
+    capabilities = { ...capabilities, subagents: { ...capabilities.subagents,
+      names: selectedSubagents(rootSubagents, capabilities.subagents).map((subagent) => subagent.name) } }
+    const subagentLimit = activeSubagent ? parentLimit : projectPolicy?.restrictSubagents ? capabilities : undefined
     runConfiguration = {
-      subagentSelection,
       customTools: structuredClone(project.kind === 'workspace'
         ? toolCatalog.tools.filter(tool => capabilities.customTools.entries.includes(tool.id)).map(tool => tool.definition!) : []),
       ...(activeSubagent ? { subagentSelectionLimit: structuredClone(rootSelection) } : {}),
@@ -563,7 +561,7 @@ async function prepareAgentInstanceFromConfig(
     )
   }
   const availableSubagents = toolsEnabled && features.subagents
-    ? selectedSubagents(config.subagents, runConfiguration.subagentSelection)
+    ? selectedSubagents(config.subagents, capabilities.subagents)
     : []
   // Resolved selections apply only to new launches. A running child owns the
   // immutable definition captured when it was created, so config edits cannot

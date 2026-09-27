@@ -1,4 +1,3 @@
-import { validateSubagentSelection } from '@shared/subagentSelection'
 import Database from 'better-sqlite3'
 import { FileChangeLedger, fileChangeLedgerSchema } from './fileChangeLedger'
 import { agentToolEffectArtifactId } from './toolEffectScope'
@@ -254,7 +253,6 @@ function normalizeSubagentConfigSnapshot(value: unknown): SubagentConfig {
     index: raw.index as number,
     name,
     enabled: raw.enabled,
-    ...(raw.subagentSelection === undefined ? {} : { subagentSelection: validateSubagentSelection(raw.subagentSelection) }),
     ...(preset === undefined ? {} : { preset }),
     builtIn: raw.builtIn,
     description,

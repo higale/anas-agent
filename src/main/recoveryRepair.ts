@@ -31,10 +31,13 @@ const templates: Record<string, unknown> = {
 class Repair {
   fields: string[] = []
   constructor(readonly file: string) {}
+  record(path: string): void {
+    this.fields.push(`${this.file}: ${path}`)
+    if (this.fields.length > 10_000) throw new Error('Too many repairable fields; review this file manually.')
+  }
   replace(object: RecordValue, key: string, fallback: unknown, path: string): void {
     Object.defineProperty(object, key, { value: structuredClone(fallback), enumerable: true, configurable: true, writable: true })
-    this.fields.push(`${this.file}: ${path}`)
-    if (this.fields.length > 10_000) throw new Error('Too many repairable fields; review or reset this file.')
+    this.record(path)
   }
   // Walk only schema fields; never rewrite arbitrary provider parameters or
   // match user list entries by position. Valid false, zero and empty lists stay.
@@ -66,28 +69,47 @@ class Repair {
     })
   }
   capabilities(owner: RecordValue, defaults: RecordValue, path: string): void {
-    this.fill(owner, { capabilities: defaults }, path)
-    const value = owner.capabilities as RecordValue
-    this.choice(value, 'tool_mode', ['all', 'selected', 'except'], defaults.tool_mode as string, `${path}.capabilities`)
-    if ((value.tools as unknown[]).some((id) => typeof id !== 'string' || !id.trim())) {
-      // Invalid IDs have no replacement. Keep valid selections instead of
-      // widening a selected/except policy by replacing the entire list.
-      throw new Error(`${path}.capabilities.tools: invalid tool ID; review or reset this configuration.`)
-    }
-    const mcp = value.mcp as RecordValue
-    const defaultMcp = defaults.mcp as RecordValue
-    this.choice(mcp, 'default_mode', ['all', 'selected'], defaultMcp.default_mode as string, `${path}.capabilities.mcp`)
-    // Per-server choices have no reliable default; parseCapabilities validates them below.
-    const skills = value.skills as RecordValue
-    const defaultSkills = defaults.skills as RecordValue
-    this.choice(skills, 'mode', ['default', 'custom'], defaultSkills.mode as string, `${path}.capabilities.skills`)
-    for (const [index, entry] of this.list(skills.entries, `${path}.capabilities.skills.entries`).entries()) {
-      // No source-specific default exists for an individual selected skill.
-      if (typeof entry.shortcut !== 'boolean' || typeof entry.model !== 'boolean') {
-        throw new Error(`${path}.capabilities.skills.entries[${index}]: availability has no reliable default; review or reset.`)
+    const field = `${path}.capabilities`
+    if (!isObject(owner.capabilities)) this.replace(owner, 'capabilities', defaults, field)
+    this.validated(owner.capabilities as RecordValue, defaults, parseCapabilities, field)
+  }
+  // Test each setting in an otherwise valid default document using the actual
+  // parser. Recovery must not maintain a second set of accepted modes or IDs.
+  validated(object: RecordValue, defaults: RecordValue, validate: (value: RecordValue) => unknown, path = ''): void {
+    const checkListSizes = (value: RecordValue, template: RecordValue, path: string): void => {
+      for (const [key, fallback] of Object.entries(template)) {
+        const field = path ? `${path}.${key}` : key
+        const entry = value[key]
+        if (Array.isArray(entry) && entry.length > 10_000) throw new Error(`${field}: too many selection items; review this file manually.`)
+        if (isObject(entry) && isObject(fallback)) checkListSizes(entry, fallback, field)
       }
     }
-    try { parseCapabilities(value) } catch (error) { throw new Error(`${path}.capabilities: ${errorDetail(error)}`) }
+    checkListSizes(object, defaults, path)
+    validate(defaults)
+    const accepts = (value: RecordValue): boolean => {
+      try { validate(value); return true } catch { return false }
+    }
+    if (accepts(object)) return
+    for (const [key, fallback] of Object.entries(defaults)) {
+      const field = path ? `${path}.${key}` : key
+      const validateField = (value: unknown) => validate({ ...defaults, [key]: value })
+      if (accepts({ ...defaults, [key]: object[key] })) continue
+      if (isObject(object[key]) && isObject(fallback)) {
+        this.validated(object[key], fallback, validateField, field)
+      } else {
+        // Lists without item defaults are one setting. Never invent an ID or
+        // infer item defaults by matching positions in the bundled list.
+        this.replace(object, key, fallback, field)
+      }
+    }
+    for (const key of Object.keys(object)) {
+      if (Object.hasOwn(defaults, key) || accepts({ ...defaults, [key]: object[key] })) continue
+      // A rejected field absent from the current defaults has no replacement.
+      // Remove it without translating its meaning into another setting.
+      delete object[key]
+      this.record(path ? `${path}.${key}` : key)
+    }
+    validate(object)
   }
 }
 
@@ -131,7 +153,9 @@ export function repairDocument(file: string, input: unknown): { value: RecordVal
   } else {
     if (!templates[file]) throw new Error('Unsupported repair file.')
     repair.fill(value, templates[file] as RecordValue)
-    if (file === 'settings.json') {
+    if (file === 'capabilities.json') {
+      repair.validated(value, capabilityDefaults, parseDefaultCapabilitySettings)
+    } else if (file === 'settings.json') {
       for (const [key, choices] of Object.entries({ theme: ['system', 'light', 'dark'], chat_content_width: ['narrow', 'wide', 'adaptive'],
         diff_view_mode: ['inline', 'side_by_side'], new_thread_model_selection: ['default', 'prompt', 'current'], attachment_text_overflow: ['truncate', 'error'], log_level: ['trace', 'debug', 'info', 'warn', 'error', 'off'] })) {
         repair.choice(value, key, choices, (settingsDefaults as RecordValue)[key] as string, 'settings')

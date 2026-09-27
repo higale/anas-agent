@@ -35,7 +35,75 @@ describe('field-level recovery', () => {
     expect(agents[1].capabilities.mcp).toEqual(subagents.subagents[1].capabilities.mcp)
     expect(repaired.fields.join('\n')).toContain('subagents[1].capabilities.mcp')
     raw.subagents[0].capabilities.mcp.servers[0].mode = 'invalid'
-    expect(() => repairDocument('subagents.json', raw)).toThrow('Invalid MCP server tool mode')
+    const invalid: any = repairDocument('subagents.json', raw).value
+    expect(invalid.subagents[0].capabilities.mcp).toEqual({ default_mode: 'selected', servers: [] })
+    expect(invalid.subagents[0].name).toBe(raw.subagents[0].name)
+  })
+
+  it.each(['capabilities.json', 'subagents.json', 'projects.json'])('preserves valid off choices and repairs only invalid capability fields in %s', (file) => {
+    const selection = { ...structuredClone(capabilities),
+      skills: { mode: 'off', project: true, entries: [{ id: 'user:kept', shortcut: false, model: true }] },
+      subagents: { mode: 'off', names: ['web-researcher'] }, workspace: false }
+    const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep project', pinned: false, collapsed: true,
+      createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z', sourceFolders: ['/keep/path'],
+      prompt: 'Keep prompt', coding_mode: true, advanced_settings: true, restrict_subagents: true, capabilities: selection }
+    const raw: any = file === 'capabilities.json' ? selection
+      : file === 'subagents.json' ? { ...structuredClone(subagents), subagents: [{ ...subagents.subagents[0], capabilities: selection }] }
+        : { version: 4, projects: [project] }
+    expect(repairDocument(file, raw)).toEqual({ value: raw, fields: [] })
+    const broken = structuredClone(raw)
+    const target = file === 'capabilities.json' ? broken
+      : file === 'subagents.json' ? broken.subagents[0].capabilities : broken.projects[0].capabilities
+    target.mcp.default_mode = 'unknown'
+    target.tool_mode = 'unknown'
+    target.skills.project = 'invalid'
+    const repaired = repairDocument(file, broken)
+    const expected = structuredClone(raw)
+    const expectedSelection = file === 'capabilities.json' ? expected
+      : file === 'subagents.json' ? expected.subagents[0].capabilities : expected.projects[0].capabilities
+    expectedSelection.skills.project = false
+    expect(repaired.value).toEqual(expected)
+    expect(repaired.fields).toHaveLength(3)
+    expect(repaired.fields.some((field) => field.endsWith('skills.mode'))).toBe(false)
+    expect(repairDocument(file, repaired.value)).toEqual({ value: repaired.value, fields: [] })
+  })
+
+  it('repairs rejected values with current defaults without converting old choices or discarding sibling settings', () => {
+    const raw: any = structuredClone(capabilities)
+    raw.subagents = false
+    raw.skills.enabled = false
+    raw.skills.mode = 'off'
+    raw.skills.entries = [{ id: 'keep-skill', shortcut: true, model: false }]
+    raw.tools = ['read_file']
+    raw.tool_mode = 'selected'
+    raw.environment = false
+    const repaired = repairDocument('capabilities.json', raw)
+    expect(repaired.value).toEqual({ ...raw, subagents: capabilities.subagents,
+      skills: { mode: 'off', project: false, entries: raw.skills.entries } })
+    expect(repaired.fields).toEqual(expect.arrayContaining(['capabilities.json: subagents', 'capabilities.json: skills.enabled']))
+    expect(raw.subagents).toBe(false)
+    expect(raw.skills.enabled).toBe(false)
+  })
+
+  it('restores invalid selection lists to their defaults while preserving valid modes and other selections', () => {
+    const raw: any = structuredClone(capabilities)
+    raw.skills = { mode: 'off', project: true, entries: [{ id: 'broken', shortcut: false }] }
+    raw.subagents = { mode: 'custom', names: [42] }
+    raw.custom_tools = { project: true, entries: ['user:keep'] }
+    raw.tool_mode = 'selected'
+    raw.tools = [null]
+    const repaired = repairDocument('capabilities.json', raw)
+    expect(repaired.value).toEqual({ ...raw, tools: [],
+      skills: { ...raw.skills, entries: capabilities.skills.entries },
+      subagents: { ...raw.subagents, names: capabilities.subagents.names } })
+    expect(repaired.fields).toHaveLength(3)
+  })
+
+  it('keeps recovery list limits without resetting oversized selections', () => {
+    const raw = { ...structuredClone(capabilities), skills: { ...capabilities.skills,
+      entries: Array.from({ length: 10_001 }, (_, index) => ({ id: `skill-${index}`, shortcut: false, model: false })) } }
+    expect(() => repairDocument('capabilities.json', raw)).toThrow('too many selection items')
+    expect(raw.skills.entries).toHaveLength(10_001)
   })
 
   it.each([undefined, null, 'true', 1, false, true])('repairs invalid coding mode %s only through explicit recovery', (codingMode) => {
@@ -146,6 +214,33 @@ describe('field-level recovery', () => {
     expect(await readFile(join(data, 'projects.json'), 'utf8')).toBe('{broken')
     expect(await readFile(join(data, 'sqlite/agent.sqlite'), 'utf8')).toBe('leave database untouched')
     expect((await inspectRecoveryRepair(data)).candidates).toEqual([])
+  })
+
+  it('repairs project capability settings without resetting projects or conversation data', async () => {
+    const { root, data } = await fixture()
+    const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep project', pinned: false, collapsed: true,
+      createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z', sourceFolders: ['/keep/path'],
+      prompt: 'Keep prompt', coding_mode: true, advanced_settings: true, restrict_subagents: true,
+      capabilities: { ...structuredClone(capabilities), subagents: false } }
+    const raw = { version: 4, projects: [project, { ...structuredClone(project), id: 'second-project', name: 'Keep second project' }] }
+    const before = JSON.stringify(raw)
+    await writeFile(join(data, 'projects.json'), before)
+    await mkdir(join(data, 'sqlite/conversations'), { recursive: true })
+    const databases = ['sqlite/catalog.sqlite', 'sqlite/conversations/kept.sqlite']
+    for (const path of databases) await writeFile(join(data, path), `unchanged ${path}`)
+    const plan = await inspectRecoveryRepair(data)
+    expect(plan.files.find((file) => file.name === 'projects.json')?.error).toBeUndefined()
+    expect(plan.files.find((file) => file.name === 'projects.json')?.repairableFields).toHaveLength(2)
+    const result = await repairRecoveryData(data, 'projects.json', () => preserveRecoveryData(data, root))
+    expect(result.unresolved).toEqual([])
+    expect(result.repaired).toHaveLength(2)
+    expect(JSON.parse(await readFile(join(data, 'projects.json'), 'utf8'))).toEqual({ ...raw,
+      projects: raw.projects.map((entry) => ({ ...entry, capabilities: { ...entry.capabilities, subagents: capabilities.subagents } })) })
+    expect(await readFile(join(result.preservationPath!, 'data/projects.json'), 'utf8')).toBe(before)
+    for (const path of databases) expect(await readFile(join(data, path), 'utf8')).toBe(`unchanged ${path}`)
+    const preserve = vi.fn(async () => '/unused')
+    expect((await repairRecoveryData(data, 'projects.json', preserve)).repaired).toEqual([])
+    expect(preserve).not.toHaveBeenCalled()
   })
 
   it('never writes after preservation fails or overwrites a file changed during preservation', async () => {

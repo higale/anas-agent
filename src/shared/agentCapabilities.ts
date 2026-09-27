@@ -1,4 +1,4 @@
-import { defaultSubagentSelection, validateSubagentSelection, type SubagentSelection } from './subagentSelection'
+import { validateSubagentSelection, type SubagentSelection } from './subagentSelection'
 import defaults from '../../data/config/capabilities.json'
 import projectDefaults from '../../data/config/projects.json'
 import { builtinToolCatalog } from './toolRegistry'
@@ -7,8 +7,7 @@ import { validateToolSelection, type ToolSelection, type ResolvedToolSelection }
 import type { AgentFeatures, SkillSummary, SkillSnapshot, WorkspaceProject } from './types'
 
 export interface SkillSelection {
-  enabled: boolean
-  mode: 'default' | 'custom'
+  mode: 'default' | 'custom' | 'off'
   /** Include the current project's skills in custom subagent selections. */
   project: boolean
   entries: Array<{ id: string; shortcut: boolean; model: boolean }>
@@ -34,7 +33,7 @@ export interface AgentCapabilities {
   memory: boolean
   applicationEnvironment: boolean
   backgroundTools: boolean
-  subagents: boolean
+  subagents: SubagentSelection
   planning: boolean
   toolMode: 'all' | 'selected' | 'except'
   tools: string[]
@@ -44,7 +43,7 @@ export interface AgentCapabilities {
 }
 
 export interface ResolvedSkillSelection extends SkillSelection {
-  mode: 'custom'
+  mode: 'custom' | 'off'
   project: false
 }
 
@@ -55,7 +54,7 @@ export interface ResolvedAgentCapabilities extends AgentCapabilities {
 
 /** Intersection operates on catalog-resolved entries, never editable preferences. */
 export function assertResolvedCapabilities(value: AgentCapabilities): asserts value is ResolvedAgentCapabilities {
-  if (value.skills.mode !== 'custom' || value.skills.project !== false || value.customTools.project !== false) {
+  if ((value.skills.mode !== 'custom' && value.skills.mode !== 'off') || value.skills.project !== false || value.customTools.project !== false) {
     throw new Error('Resolve capability selections against the current catalogs before intersecting capabilities.')
   }
 }
@@ -68,8 +67,6 @@ export interface RunConfiguration {
   capabilities: AgentCapabilities
   /** Root project policy, retained through every descendant run. */
   subagentLimit?: AgentCapabilities
-  /** Effective launch selection captured for this run. */
-  subagentSelection?: SubagentSelection
   /** Root project launch range, retained independently of each child's choices. */
   subagentSelectionLimit?: SubagentSelection
 }
@@ -92,6 +89,7 @@ function strings(value: unknown): string[] {
 export function validateCapabilities(value: unknown): AgentCapabilities {
   const raw = object(value)
   const skills = object(raw.skills)
+  if ('enabled' in skills) throw new Error('Skill selection must use default, custom, or off mode without an enabled flag.')
   const mcp = object(raw.mcp)
   if (mcp.defaultMode !== 'all' && mcp.defaultMode !== 'selected') throw new Error('Invalid default MCP tool mode.')
   if (!Array.isArray(mcp.servers)) throw new Error('Invalid MCP server selections.')
@@ -105,7 +103,7 @@ export function validateCapabilities(value: unknown): AgentCapabilities {
   const tools = strings(raw.tools)
   if (tools.some((id) => id.startsWith('mcp:'))) throw new Error('MCP selections must use the per-server MCP policy.')
   if (raw.toolMode !== 'all' && raw.toolMode !== 'selected' && raw.toolMode !== 'except') throw new Error('Invalid capability tool mode.')
-  if (skills.mode !== 'default' && skills.mode !== 'custom') throw new Error('Invalid skill selection mode.')
+  if (skills.mode !== 'default' && skills.mode !== 'custom' && skills.mode !== 'off') throw new Error('Invalid skill selection mode.')
   if (!Array.isArray(skills.entries)) throw new Error('Invalid skill selection entries.')
   const entries = skills.entries.map((value) => {
     const entry = object(value)
@@ -117,13 +115,13 @@ export function validateCapabilities(value: unknown): AgentCapabilities {
     profile: boolean(raw.profile), environment: boolean(raw.environment), workspace: boolean(raw.workspace), memory: boolean(raw.memory),
     applicationEnvironment: boolean(raw.applicationEnvironment),
     backgroundTools: boolean(raw.backgroundTools),
-    subagents: boolean(raw.subagents),
+    subagents: validateSubagentSelection(raw.subagents),
     planning: boolean(raw.planning),
     toolMode: raw.toolMode,
     tools,
     customTools: validateToolSelection(raw.customTools),
     mcp: { defaultMode: mcp.defaultMode, servers },
-    skills: { enabled: boolean(skills.enabled), mode: skills.mode, project: boolean(skills.project), entries }
+    skills: { mode: skills.mode, project: boolean(skills.project), entries }
   }
 }
 
@@ -144,36 +142,32 @@ export const defaultProjectSettings = { advancedSettings: projectDefaults.advanc
 export interface DefaultCapabilitySettings {
   capabilities: AgentCapabilities
   restrictSubagents: boolean
-  subagentSelection: SubagentSelection
 }
 
 export function validateDefaultCapabilitySettings(value: unknown): DefaultCapabilitySettings {
   const raw = object(value)
   return {
     capabilities: validateCapabilities(raw.capabilities),
-    restrictSubagents: boolean(raw.restrictSubagents),
-    subagentSelection: validateSubagentSelection(raw.subagentSelection)
+    restrictSubagents: boolean(raw.restrictSubagents)
   }
 }
 
 export function parseDefaultCapabilitySettings(value: unknown): DefaultCapabilitySettings {
   const raw = object(value)
   return validateDefaultCapabilitySettings({ capabilities: parseCapabilities(raw),
-    restrictSubagents: raw.restrict_subagents, subagentSelection: raw.subagent_selection })
+    restrictSubagents: raw.restrict_subagents })
 }
 
 export function serializeDefaultCapabilitySettings(value: DefaultCapabilitySettings) {
   const validated = validateDefaultCapabilitySettings(value)
-  return { ...serializeCapabilities(validated.capabilities), restrict_subagents: validated.restrictSubagents,
-    subagent_selection: validated.subagentSelection }
+  return { ...serializeCapabilities(validated.capabilities), restrict_subagents: validated.restrictSubagents }
 }
 
 export const defaultCapabilitySettings = parseDefaultCapabilitySettings(defaults)
 
 export function effectiveProjectCapabilitySettings(project: WorkspaceProject, defaults: DefaultCapabilitySettings): DefaultCapabilitySettings {
   return project.advancedSettings
-    ? { capabilities: project.capabilities, restrictSubagents: project.restrictSubagents,
-      subagentSelection: project.subagentSelection ?? defaultSubagentSelection }
+    ? { capabilities: project.capabilities, restrictSubagents: project.restrictSubagents }
     : defaults
 }
 
@@ -186,8 +180,7 @@ export function validateRunConfiguration(value: unknown): RunConfiguration {
   const subagentLimit = raw.subagentLimit === undefined ? undefined : validateCapabilities(raw.subagentLimit)
   if (typeof raw.codingMode !== 'boolean') throw new Error('Invalid run coding mode.')
   return { codingMode: raw.codingMode, capabilities, customTools: validateCustomTools(raw.customTools), ...(subagentLimit ? { subagentLimit } : {}),
-    ...(raw.subagentSelectionLimit === undefined ? {} : { subagentSelectionLimit: validateSubagentSelection(raw.subagentSelectionLimit) }),
-    ...(raw.subagentSelection === undefined ? {} : { subagentSelection: validateSubagentSelection(raw.subagentSelection) }) }
+    ...(raw.subagentSelectionLimit === undefined ? {} : { subagentSelectionLimit: validateSubagentSelection(raw.subagentSelectionLimit) }) }
 }
 
 export function serializeRunConfiguration(value: RunConfiguration) {
@@ -196,7 +189,6 @@ export function serializeRunConfiguration(value: RunConfiguration) {
     coding_mode: config.codingMode,
     custom_tools: config.customTools.map(serializeCustomTool),
     capabilities: serializeCapabilities(config.capabilities),
-    ...(config.subagentSelection ? { subagent_selection: config.subagentSelection } : {}),
     ...(config.subagentSelectionLimit ? { subagent_selection_limit: config.subagentSelectionLimit } : {}),
     ...(config.subagentLimit ? { subagent_limit: serializeCapabilities(config.subagentLimit) } : {})
   }
@@ -208,7 +200,6 @@ export function parseRunConfiguration(value: unknown): RunConfiguration {
     codingMode: raw.coding_mode,
     customTools: parseCustomTools(raw.custom_tools),
     capabilities: parseCapabilities(raw.capabilities),
-    ...(raw.subagent_selection === undefined ? {} : { subagentSelection: raw.subagent_selection }),
     ...(raw.subagent_selection_limit === undefined ? {} : { subagentSelectionLimit: raw.subagent_selection_limit }),
     ...(raw.subagent_limit === undefined ? {} : { subagentLimit: parseCapabilities(raw.subagent_limit) })
   })
@@ -292,8 +283,8 @@ export function capabilityFeatures(value: AgentCapabilities): AgentFeatures {
     applicationEnvironment: value.applicationEnvironment,
     workspaceContext: value.workspace,
     memory: value.memory || groupEnabled('memory'),
-    skills: value.skills.enabled,
-    subagents: value.subagents,
+    skills: value.skills.mode !== 'off',
+    subagents: value.subagents.mode !== 'off',
     planning: value.planning,
     backgroundTools: value.backgroundTools,
     commandExecution: toolAllowed(value, 'run_shell'),
@@ -307,8 +298,7 @@ export function capabilityFeatures(value: AgentCapabilities): AgentFeatures {
 export function resolveSkillSelection(selection: SkillSelection, skills: readonly SkillSummary[], uniqueModels = false, subagent = false): ResolvedSkillSelection {
   const modelNames = new Set<string>()
   return {
-    enabled: selection.enabled,
-    mode: 'custom',
+    mode: selection.mode === 'off' ? 'off' : 'custom',
     project: false,
     entries: skills.filter((skill) => !skill.loadError).map((skill) => {
       const chosen = selection.mode === 'default'
@@ -317,9 +307,9 @@ export function resolveSkillSelection(selection: SkillSelection, skills: readonl
           ? { shortcut: false, model: selection.project }
           : selection.entries.find((entry) => entry.id === skill.id)
       const name = skill.name.toLowerCase()
-      const model = selection.enabled && Boolean(chosen?.model) && (!uniqueModels || !modelNames.has(name))
+      const model = selection.mode !== 'off' && Boolean(chosen?.model) && (!uniqueModels || !modelNames.has(name))
       if (model) modelNames.add(name)
-      return { id: skill.id, shortcut: selection.enabled && Boolean(chosen?.shortcut), model }
+      return { id: skill.id, shortcut: selection.mode !== 'off' && Boolean(chosen?.shortcut), model }
     })
   }
 }
@@ -366,20 +356,20 @@ export function intersectCapabilities(value: ResolvedAgentCapabilities, limit: R
     memory: value.memory && limit.memory,
     applicationEnvironment: value.applicationEnvironment && limit.applicationEnvironment,
     backgroundTools: value.backgroundTools && limit.backgroundTools,
-    subagents: value.subagents && limit.subagents,
+    subagents: { mode: value.subagents.mode === 'off' || limit.subagents.mode === 'off' ? 'off' : 'custom',
+      names: value.subagents.names.filter((name) => limit.subagents.names.includes(name)) },
     planning: value.planning && limit.planning,
     toolMode: selected ? 'selected' : tools.length ? 'except' : 'all',
     tools: [...tools],
     mcp: intersectMcpSelections(value.mcp, limit.mcp),
     customTools: { project: false, entries: value.customTools.entries.filter((id) => limit.customTools.entries.includes(id)) },
     skills: {
-      enabled: value.skills.enabled && limit.skills.enabled,
-      mode: 'custom',
+      mode: value.skills.mode === 'off' || limit.skills.mode === 'off' ? 'off' : 'custom',
       project: false,
       entries: value.skills.entries.map((entry) => ({
         ...entry,
         shortcut: false,
-        model: entry.model && limit.skills.enabled && limit.skills.entries.some((allowed) => allowed.id === entry.id && allowed.model)
+        model: entry.model && value.skills.mode !== 'off' && limit.skills.mode !== 'off' && limit.skills.entries.some((allowed) => allowed.id === entry.id && allowed.model)
       }))
     }
   }

@@ -5,18 +5,18 @@ import { normalizeSubagent, rawSubagentFromSave } from './subagentConfigMapper'
 describe('subagent configuration mapping', () => {
   it('round trips delegation choices independently of the global default switch', () => {
     const config = { name: 'delegate', enabled: false, description: 'Delegate work.', systemPrompt: 'Complete work.',
-      capabilities: structuredClone(defaultCapabilities), subagentSelection: { mode: 'custom' as const, names: ['reviewer', 'missing'] } }
+      capabilities: { ...structuredClone(defaultCapabilities), subagents: { mode: 'custom' as const, names: ['reviewer', 'missing'] } } }
     const raw = rawSubagentFromSave(config)
-    expect(raw.subagent_selection).toEqual(config.subagentSelection)
+    expect(raw.capabilities).toMatchObject({ subagents: config.capabilities.subagents })
     expect(raw).not.toHaveProperty('subagentSelection')
     expect(normalizeSubagent(raw, 0)).toMatchObject(config)
-    expect(() => rawSubagentFromSave({ ...config, subagentSelection: { mode: 'custom', names: ['bad name'] } })).toThrow()
+    expect(() => rawSubagentFromSave({ ...config, capabilities: { ...config.capabilities, subagents: { mode: 'custom', names: ['bad name'] } } })).toThrow()
   })
 
   it('derives built-in status from a known preset and normalizes scoped capabilities', () => {
     expect(normalizeSubagent({
  capabilities: serializeCapabilities({ ...structuredClone(defaultCapabilities), profile: false, workspace: false,
-        memory: false, toolMode: 'selected', tools: ['http_request', 'http_request'], skills: { enabled: true, mode: 'custom' as const, project: false, entries: (['baidu-search'] as string[]).map(id => ({ id, shortcut: false, model: true })) } }),
+        memory: false, toolMode: 'selected', tools: ['http_request', 'http_request'], skills: { mode: 'custom' as const, project: false, entries: (['baidu-search'] as string[]).map(id => ({ id, shortcut: false, model: true })) } }),
       preset: 'web-researcher',
       name: 'web-researcher',
       enabled: true,
@@ -24,7 +24,7 @@ describe('subagent configuration mapping', () => {
       system_prompt: 'Verify sources.',
     }, 2)).toEqual({
  capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: false,
-        memory: false, toolMode: 'selected', tools: ['http_request'], skills: { enabled: true, mode: 'custom' as const, project: false, entries: (['baidu-search'] as string[]).map(id => ({ id, shortcut: false, model: true })) } },
+        memory: false, toolMode: 'selected', tools: ['http_request'], skills: { mode: 'custom' as const, project: false, entries: (['baidu-search'] as string[]).map(id => ({ id, shortcut: false, model: true })) } },
       index: 2,
       preset: 'web-researcher',
       builtIn: true,
@@ -42,7 +42,7 @@ describe('subagent configuration mapping', () => {
     }
     expect(rawSubagentFromSave({
  capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: true,
-        memory: true, toolMode: 'all', tools: [], skills: { enabled: true, mode: 'default' as const, project: false, entries: [] } },
+        memory: true, toolMode: 'all', tools: [], skills: { mode: 'default' as const, project: false, entries: [] } },
       index: 0,
       name: 'general-purpose',
       enabled: true,
@@ -55,7 +55,7 @@ describe('subagent configuration mapping', () => {
 
     expect(() => rawSubagentFromSave({
  capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: false,
-        memory: false, toolMode: 'selected', tools: [], skills: { enabled: true, mode: 'custom' as const, project: false, entries: [] } },
+        memory: false, toolMode: 'selected', tools: [], skills: { mode: 'custom' as const, project: false, entries: [] } },
       name: 'Invalid Agent',
       enabled: false,
       description: '',
@@ -64,7 +64,7 @@ describe('subagent configuration mapping', () => {
 
     expect(() => rawSubagentFromSave({
  capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: true,
-        memory: true, toolMode: 'all', tools: [], skills: { enabled: true, mode: 'default' as const, project: false, entries: [] } },
+        memory: true, toolMode: 'all', tools: [], skills: { mode: 'default' as const, project: false, entries: [] } },
       index: 0,
       name: 'renamed-agent',
       enabled: true,
@@ -76,7 +76,7 @@ describe('subagent configuration mapping', () => {
   it('requires routing text and a prompt only when the subagent is enabled', () => {
     const disabled = {
  capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: false,
-        memory: false, toolMode: 'selected' as const, tools: [], skills: { enabled: true, mode: 'custom' as const, project: false, entries: [] } },
+        memory: false, toolMode: 'selected' as const, tools: [], skills: { mode: 'custom' as const, project: false, entries: [] } },
       name: 'draft-agent',
       enabled: false,
       description: '',

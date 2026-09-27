@@ -55,9 +55,9 @@ async function verifyModelSelection(launchApplication) {
     settings.environment_context.custom_information = 'Controlled local model selection test.'
     await writeFile(join(profile, 'config', 'settings.json'), `${JSON.stringify(settings)}\n`)
     const capabilities = { ...structuredClone(capabilityDefaults), application_environment: false,
-      background_tools: false, subagents: false, planning: true, tool_mode: 'selected', tools: ['read_file'],
+      background_tools: false, subagents: { mode: 'off', names: [] }, planning: true, tool_mode: 'selected', tools: ['read_file'],
       profile: true, environment: false, workspace: false, memory: false,
-      skills: { enabled: false, mode: 'custom', project: false, entries: [] },
+      skills: { mode: 'off', project: false, entries: [] },
       mcp: { default_mode: 'selected', servers: [] } }
     const timestamp = new Date().toISOString()
     await writeFile(join(profile, 'projects.json'), `${JSON.stringify({ version: 4, projects: [{

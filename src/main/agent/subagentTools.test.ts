@@ -18,7 +18,7 @@ vi.mock('@langchain/langgraph', async (importOriginal) => ({
 }))
 
 const reviewer: SubagentConfig = {
- capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: true, memory: true, toolMode: 'all', tools: [], skills: { enabled: true, mode: 'default', project: false, entries: [] } },
+ capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: true, memory: true, toolMode: 'all', tools: [], skills: { mode: 'default', project: false, entries: [] } },
   index: 0,
   name: 'reviewer',
   enabled: true,

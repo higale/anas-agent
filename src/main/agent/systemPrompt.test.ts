@@ -86,7 +86,7 @@ describe('effective agent system prompt', () => {
   })
 
   it.each([false, true])('does not advertise disabled tools in coding mode (model tools %s)', (toolsEnabled) => {
-    const features = capabilityFeatures({ ...defaultCapabilities, toolMode: 'selected', tools: [], planning: false, subagents: false })
+    const features = capabilityFeatures({ ...defaultCapabilities, toolMode: 'selected', tools: [], planning: false, subagents: { mode: 'off' as const, names: [] } })
     const prompt = buildAgentSystemPrompt(config(), { workspace: '', memory: '', skills: '', codingMode: true, toolsEnabled },
       toolsEnabled ? features : capabilityFeatures(defaultCapabilities))
     const coding = prompt.sections.find((section) => section.kind === 'coding_instruction')!.content

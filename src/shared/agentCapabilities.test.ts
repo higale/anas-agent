@@ -8,16 +8,29 @@ const skill = (id: string, modelAvailable = false, userAvailable = false): Skill
 })
 
 describe('scoped Agent capabilities', () => {
+  it.each(['default', 'custom', 'off'] as const)('round trips %s selections without losing custom choices', (mode) => {
+    const value: AgentCapabilities = { ...structuredClone(defaultCapabilities),
+      subagents: { mode, names: ['reviewer'] },
+      skills: { mode, project: true, entries: [{ id: 'user:review', model: true, shortcut: true }] } }
+    const raw = serializeCapabilities(value)
+    expect(parseCapabilities(raw)).toEqual(value)
+    expect(raw.skills).not.toHaveProperty('enabled')
+    expect(capabilityFeatures(value)).toMatchObject({ skills: mode !== 'off', subagents: mode !== 'off' })
+    if (mode === 'off') expect(resolveSkillSelection(value.skills, [skill('user:review')]).entries)
+      .toEqual([{ id: 'user:review', model: false, shortcut: false }])
+    expect(() => parseCapabilities({ ...raw, subagents: true })).toThrow()
+    expect(() => parseCapabilities({ ...raw, skills: { ...raw.skills, enabled: false } })).toThrow()
+  })
+
   it('round trips the project subagent launch policy without a capability ceiling', () => {
-    const value = { customTools: [], codingMode: false, capabilities: structuredClone(defaultCapabilities), subagentSelection: { mode: 'custom' as const, names: ['general-purpose'] },
-      subagentSelectionLimit: { mode: 'custom' as const, names: ['general-purpose', 'reviewer'] } }
+    const value = { customTools: [], codingMode: false, capabilities: { ...structuredClone(defaultCapabilities), subagents: { mode: 'custom' as const, names: ['general-purpose'] } }, subagentSelectionLimit: { mode: 'custom' as const, names: ['general-purpose', 'reviewer'] } }
     const raw = serializeRunConfiguration(value)
-    expect(raw.subagent_selection).toEqual(value.subagentSelection)
+    expect(raw.capabilities.subagents).toEqual(value.capabilities.subagents)
     expect(raw.subagent_selection_limit).toEqual(value.subagentSelectionLimit)
     expect(raw).not.toHaveProperty('subagentSelection')
     expect(parseRunConfiguration(raw)).toEqual(value)
     expect(parseRunConfiguration(raw)).not.toHaveProperty('subagentLimit')
-    expect(() => parseRunConfiguration({ ...raw, subagent_selection: { mode: 'unknown', names: [] } })).toThrow()
+    expect(() => parseRunConfiguration({ ...raw, capabilities: { ...raw.capabilities, subagents: { mode: 'unknown', names: [] } } })).toThrow()
     expect(() => parseRunConfiguration({ ...raw, subagent_selection_limit: { mode: 'custom', names: ['bad name'] } })).toThrow()
   })
 
@@ -124,14 +137,14 @@ describe('scoped Agent capabilities', () => {
     expect(() => intersectCapabilities(resolved, resolved)).not.toThrow()
   })
   it('resolves the subagent project rule against each current project without binding skill IDs', () => {
-    const selection = { enabled: true, mode: 'custom' as const, project: true, entries: [] }
+    const selection = { mode: 'custom' as const, project: true, entries: [] }
     for (const id of ['project-a:search', 'project-b:search']) {
       const catalog = [{ ...skill(id), source: 'project' as const }, skill('global')]
       const resolved = resolveSkillSelection(selection, catalog, true, true)
       expect(resolved).toMatchObject({ project: false, entries: [
         { id, model: true, shortcut: false }, { id: 'global', model: false, shortcut: false }
       ] })
-      expect(resolveSkillSelection({ ...selection, enabled: false }, catalog, true, true).entries.every((entry) => !entry.model)).toBe(true)
+      expect(resolveSkillSelection({ ...selection, mode: 'off' }, catalog, true, true).entries.every((entry) => !entry.model)).toBe(true)
       expect(resolveSkillSelection({ ...selection, project: false, entries: [{ id, model: true, shortcut: false }] }, catalog, true, true).entries[0].model).toBe(false)
       expect(resolveSkillSelection({ ...selection, project: false, entries: [{ id, model: true, shortcut: false }] }, catalog, true).entries[0].model).toBe(true)
     }
@@ -143,7 +156,7 @@ describe('scoped Agent capabilities', () => {
       { ...skill('user:search', true), name: 'search' },
       { ...skill('broken'), source: 'project' as const, loadError: { code: 'missing_skill_file' as const } }
     ]
-    const custom = { enabled: true, mode: 'custom' as const, project: true, entries: [{ id: 'user:search', model: true, shortcut: false }] }
+    const custom = { mode: 'custom' as const, project: true, entries: [{ id: 'user:search', model: true, shortcut: false }] }
     const resolved = resolveSkillSelection(custom, catalog, true, true)
     expect(resolved.entries.map((entry) => entry.model)).toEqual([true, false])
     expect(resolveSkillSelection({ ...custom, mode: 'default' }, catalog, true, true).entries.map((entry) => entry.model)).toEqual([false, true])
@@ -203,15 +216,15 @@ describe('scoped Agent capabilities', () => {
   })
   it('lets explicit skill selection override global model and shortcut defaults', () => {
     const skills = [skill('private'), skill('public', true, true)]
-    const resolved = resolveSkillSelection({ enabled: true, mode: 'custom', project: false, entries: [{ id: 'private', model: true, shortcut: false }] }, skills)
+    const resolved = resolveSkillSelection({ mode: 'custom', project: false, entries: [{ id: 'private', model: true, shortcut: false }] }, skills)
     expect(resolved.entries).toEqual([{ id: 'private', model: true, shortcut: false }, { id: 'public', model: false, shortcut: false }])
     expect(resolveSkillSelection(defaultCapabilities.skills, skills).entries[1]).toEqual({ id: 'public', model: true, shortcut: true })
   })
   it('keeps shortcut-only skills out of the model selection', () => {
-    const selection = { enabled: true, mode: 'custom' as const, project: false, entries: [{ id: 'private', shortcut: true, model: false }] }
+    const selection = { mode: 'custom' as const, project: false, entries: [{ id: 'private', shortcut: true, model: false }] }
     const snapshot = projectSkillSnapshot({ scriptAutoApprove: false, roots: [], skills: [skill('private')] }, selection)
     expect(snapshot?.skills[0]).toMatchObject({ userAvailable: true, modelAvailable: false, shortcut: '/private' })
-    expect(projectSkillSnapshot(snapshot, { ...selection, enabled: false })?.skills[0]).toMatchObject({ userAvailable: false, modelAvailable: false })
+    expect(projectSkillSnapshot(snapshot, { ...selection, mode: 'off' })?.skills[0]).toMatchObject({ userAvailable: false, modelAvailable: false })
   })
   it('resolves duplicate model skill names to the first selected source', () => {
     const skills = [
@@ -229,9 +242,9 @@ describe('scoped Agent capabilities', () => {
     Object.assign(parent, { profile: false, environment: false, workspace: false, memory: false })
     parent.applicationEnvironment = false
     parent.backgroundTools = false
-    parent.skills = { enabled: true, mode: 'custom', project: false, entries: [{ id: 'private', model: false, shortcut: true }, { id: 'public', model: true, shortcut: false }] }
+    parent.skills = { mode: 'custom', project: false, entries: [{ id: 'private', model: false, shortcut: true }, { id: 'public', model: true, shortcut: false }] }
     const child = structuredClone(defaultCapabilities)
-    child.skills = { enabled: true, mode: 'custom', project: false, entries: [{ id: 'private', model: true, shortcut: false }, { id: 'public', model: true, shortcut: false }] }
+    child.skills = { mode: 'custom', project: false, entries: [{ id: 'private', model: true, shortcut: false }, { id: 'public', model: true, shortcut: false }] }
     child.customTools = selectedTools()
     parent.customTools = selectedTools()
     assertResolvedCapabilities(child)
@@ -246,7 +259,7 @@ describe('scoped Agent capabilities', () => {
     expect(child.memory).toBe(true)
     expect(child.applicationEnvironment).toBe(true)
   })
-  it.each([undefined, {}, { ...defaultCapabilities, customTools: selectedTools(), toolMode: 'invalid' }, { ...defaultCapabilities, customTools: selectedTools(), applicationEnvironment: 'yes' }, { ...defaultCapabilities, customTools: selectedTools(), skills: { enabled: true, mode: 'inherit', entries: [] } }])('rejects incomplete or invalid settings', (value) => {
+  it.each([undefined, {}, { ...defaultCapabilities, customTools: selectedTools(), toolMode: 'invalid' }, { ...defaultCapabilities, customTools: selectedTools(), applicationEnvironment: 'yes' }, { ...defaultCapabilities, customTools: selectedTools(), skills: { mode: 'inherit', entries: [] } }])('rejects incomplete or invalid settings', (value) => {
     expect(() => validateCapabilities(value)).toThrow()
   })
 })

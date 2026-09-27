@@ -4,13 +4,15 @@
     "capabilities": {
       "application_environment": true,
       "background_tools": true,
-      "subagents": true,
+      "subagents": {
+        "mode": "default",
+        "names": []
+      },
       "planning": true,
       "tool_mode": "selected",
       "tools": [],
       "skills": {
         "project": false,
-        "enabled": true,
         "mode": "custom",
         "entries": []
       },
@@ -26,10 +28,6 @@
         "project": false,
         "entries": []
       }
-    },
-    "subagent_selection": {
-      "mode": "default",
-      "names": []
     }
   },
   "subagents": [
@@ -42,13 +40,15 @@
       "capabilities": {
         "application_environment": true,
         "background_tools": true,
-        "subagents": true,
+        "subagents": {
+          "mode": "default",
+          "names": []
+        },
         "planning": true,
         "tool_mode": "all",
         "tools": [],
         "skills": {
           "project": false,
-          "enabled": true,
           "mode": "default",
           "entries": []
         },
@@ -64,10 +64,6 @@
           "project": false,
           "entries": []
         }
-      },
-      "subagent_selection": {
-        "mode": "default",
-        "names": []
       }
     },
     {
@@ -79,7 +75,10 @@
       "capabilities": {
         "application_environment": true,
         "background_tools": true,
-        "subagents": false,
+        "subagents": {
+          "mode": "off",
+          "names": []
+        },
         "planning": false,
         "tool_mode": "selected",
         "tools": [
@@ -89,7 +88,6 @@
         ],
         "skills": {
           "project": false,
-          "enabled": true,
           "mode": "custom",
           "entries": []
         },
@@ -105,10 +103,6 @@
           "project": false,
           "entries": []
         }
-      },
-      "subagent_selection": {
-        "mode": "default",
-        "names": []
       }
     },
     {
@@ -120,7 +114,10 @@
       "capabilities": {
         "application_environment": true,
         "background_tools": true,
-        "subagents": true,
+        "subagents": {
+          "mode": "default",
+          "names": []
+        },
         "planning": true,
         "tool_mode": "selected",
         "tools": [
@@ -134,7 +131,6 @@
         ],
         "skills": {
           "project": false,
-          "enabled": true,
           "mode": "custom",
           "entries": []
         },
@@ -150,10 +146,6 @@
           "project": false,
           "entries": []
         }
-      },
-      "subagent_selection": {
-        "mode": "default",
-        "names": []
       }
     }
   ]

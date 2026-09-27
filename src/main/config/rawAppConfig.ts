@@ -51,7 +51,6 @@ export interface RawModelProviderConfig {
 }
 
 export interface RawSubagentConfig {
-  subagent_selection?: unknown
   preset?: string
   name?: string
   enabled?: boolean

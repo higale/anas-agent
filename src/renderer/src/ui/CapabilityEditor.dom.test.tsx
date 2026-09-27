@@ -9,8 +9,12 @@ import { CapabilityEditor } from './CapabilityEditor'
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 const skills: SkillSnapshot = { scriptAutoApprove: false, roots: [{ id: 'user', kind: 'user', name: 'User', path: '/skills', shortcutAlias: 'user', removable: false, available: true }], skills: [{ scriptAutoApprove: false, id: 'user:private', rootId: 'user', name: 'private', description: 'Private skill', modelAvailable: false, userAvailable: false, linked: false, dirPath: '/skills/private', relativePath: 'private', source: 'user', rootName: 'User', shortcutAlias: 'user' }] }
 function Harness({ subagent = false, onChange = vi.fn(), mcpStatus, initial }: { subagent?: boolean; onChange?: (value: AgentCapabilities) => void; mcpStatus?: McpToolStatus; initial?: AgentCapabilities }) {
-  const [value, setValue] = useState<AgentCapabilities>(() => initial ?? ({ ...structuredClone(defaultCapabilities), skills: { enabled: true, mode: 'custom', project: false, entries: [] } }))
+  const [value, setValue] = useState<AgentCapabilities>(() => initial ?? ({ ...structuredClone(defaultCapabilities), skills: { mode: 'custom', project: false, entries: [] } }))
   return <CapabilityEditor value={value} skills={skills} subagent={subagent} mcpStatus={mcpStatus} onChange={(next) => { setValue(next); onChange(next) }} />
+}
+async function selectSkills(mode: 'default' | 'custom' | 'off') {
+  await userEvent.click(screen.getByRole('combobox', { name: 'capabilities.skill_selection' }))
+  await userEvent.click(screen.getByRole('option', { name: `capabilities.${mode}` }))
 }
 describe('shared capability editor', () => {
   it.each([false, true])('removes stale skill selections regardless of checked state in subagent mode %s', async (subagent) => {
@@ -18,14 +22,14 @@ describe('shared capability editor', () => {
     const entries = [retained, { id: 'deleted:off', shortcut: false, model: false }, { id: 'deleted:on', shortcut: true, model: true }]
     const onChange = vi.fn()
     render(<Harness subagent={subagent} onChange={onChange} initial={{ ...structuredClone(defaultCapabilities),
-      skills: { enabled: true, mode: 'custom', project: true, entries } }} />)
+      skills: { mode: 'custom', project: true, entries } }} />)
 
     for (const id of ['deleted:off', 'deleted:on']) {
       await userEvent.click(screen.getByRole('button', { name: `capabilities.remove_missing_skill: ${id}` }))
       expect(screen.queryByText(id)).toBeNull()
     }
     expect(screen.queryByText('capabilities.other_skills')).toBeNull()
-    expect(onChange.mock.lastCall?.[0].skills).toEqual({ enabled: true, mode: 'custom', project: true, entries: [retained] })
+    expect(onChange.mock.lastCall?.[0].skills).toEqual({ mode: 'custom', project: true, entries: [retained] })
     expect(screen.queryByRole('button', { name: /capabilities.remove_missing_skill/ })).toBeNull()
   })
 
@@ -222,7 +226,7 @@ describe('shared capability editor', () => {
     const onChange = vi.fn()
     function MissingSkills({ snapshot }: { snapshot?: SkillSnapshot }) {
       const [value, setValue] = useState<AgentCapabilities>({ ...structuredClone(defaultCapabilities),
-        skills: { enabled: true, mode: 'custom', project: true, entries: [retained, { id: broken.id, ...selected }, { id: orphan.id, ...selected }, { id: 'deleted:skill', ...selected }] } })
+        skills: { mode: 'custom', project: true, entries: [retained, { id: broken.id, ...selected }, { id: orphan.id, ...selected }, { id: 'deleted:skill', ...selected }] } })
       return <CapabilityEditor value={value} skills={snapshot} subagent={subagent} onChange={(next) => { setValue(next); onChange(next) }} />
     }
     const { rerender } = render(<MissingSkills />)
@@ -241,7 +245,7 @@ describe('shared capability editor', () => {
       expect(checkbox).not.toBeChecked()
       if (!subagent) await userEvent.click(screen.getByRole('checkbox', { name: `${name} capabilities.shortcut` }))
     }
-    expect(onChange.mock.lastCall?.[0].skills).toEqual({ enabled: true, mode: 'custom', project: true, entries: [retained,
+    expect(onChange.mock.lastCall?.[0].skills).toEqual({ mode: 'custom', project: true, entries: [retained,
       ...[broken.id, orphan.id, 'deleted:skill'].map((id) => ({ id, shortcut: false, model: false }))] })
     const recovered: SkillSnapshot = { ...fixture, skills: fixture.skills.map((skill) => skill.id === broken.id ? { ...skill, loadError: undefined } : skill) }
     rerender(<MissingSkills snapshot={recovered} />)
@@ -258,7 +262,7 @@ describe('shared capability editor', () => {
     ] }
     function ProjectHarness() {
       const [value, setValue] = useState<AgentCapabilities>({ ...structuredClone(defaultCapabilities), toolMode: 'selected', tools: [],
-        skills: { enabled: true, mode: 'custom', project: false, entries: [] } })
+        skills: { mode: 'custom', project: false, entries: [] } })
       return <CapabilityEditor subagent value={value} skills={fixture} onChange={(next) => { setValue(next); onChange(next) }} />
     }
     const onChange = vi.fn()
@@ -278,8 +282,8 @@ describe('shared capability editor', () => {
     expect(summary).toHaveTextContent(/^1$/)
     await userEvent.click(project)
     expect(document.querySelector('.settings-status-indicator')).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('checkbox', { name: 'settings.capability_skills' }))
-    expect(project).toBeDisabled()
+    await selectSkills('off')
+    expect(screen.queryByRole('checkbox', { name: 'capabilities.project_skills' })).toBeNull()
   })
 
   it.each([1, 2])('groups skills by localized source with %s project directories', async (count) => {
@@ -292,7 +296,7 @@ describe('shared capability editor', () => {
     const fixture: SkillSnapshot = { scriptAutoApprove: false, roots, skills: roots.map((root) => ({ ...skills.skills[0],
       id: `${root.id}:skill`, rootId: root.id, source: root.kind, name: `${root.id}-skill` })) }
     const onChange = vi.fn()
-    render(<CapabilityEditor value={{ ...structuredClone(defaultCapabilities), skills: { enabled: true, mode: 'custom', project: false, entries: [] } }} skills={fixture} onChange={onChange} />)
+    render(<CapabilityEditor value={{ ...structuredClone(defaultCapabilities), skills: { mode: 'custom', project: false, entries: [] } }} skills={fixture} onChange={onChange} />)
     for (const kind of ['system', 'user', 'project']) expect(screen.getByText(`settings.skill_group_${kind}`)).toBeInTheDocument()
     expect(screen.getByText('Custom directory')).toBeInTheDocument()
     expect(screen.queryByText('System')).toBeNull()
@@ -319,15 +323,15 @@ describe('shared capability editor', () => {
     expect(group).toHaveClass('ui-surface-flat')
     expect(group).toContainElement(screen.getByText('settings.capabilities'))
     expect(group).toContainElement(screen.getByRole('button', { name: 'settings.capabilities_enable_all' }))
-    expect(group).toContainElement(screen.getByRole('checkbox', { name: 'settings.capability_skills' }))
+    expect(group).toContainElement(screen.getByRole('combobox', { name: 'capabilities.skill_selection' }))
   })
   it.each([false, true])('enables skills with global defaults when enabling all in subagent mode %s', async (subagent) => {
     const onChange = vi.fn()
     render(<Harness subagent={subagent} onChange={onChange} />)
     await userEvent.click(screen.getByRole('button', { name: 'settings.capabilities_disable_all' }))
     await userEvent.click(screen.getByRole('button', { name: 'settings.capabilities_enable_all' }))
-    expect(onChange.mock.lastCall?.[0]).toMatchObject({ toolMode: 'all', skills: { enabled: true, mode: 'default' } })
-    expect(screen.getByRole('checkbox', { name: 'settings.capability_skills' })).toBeChecked()
+    expect(onChange.mock.lastCall?.[0]).toMatchObject({ toolMode: 'all', skills: { mode: 'default' } })
+    expect(screen.queryByRole('checkbox', { name: 'settings.capability_skills' })).toBeNull()
     expect(screen.getByRole('combobox', { name: 'capabilities.skill_selection' })).toHaveValue('capabilities.default')
     expect(screen.queryByRole('searchbox')).toBeNull()
   })
@@ -374,15 +378,16 @@ describe('shared capability editor', () => {
     render(<Harness subagent={subagent} />)
     const picker = screen.getByRole('combobox', { name: 'capabilities.skill_selection' })
     expect(picker).toHaveClass('searchable-option-input')
-    expect(picker.closest('.ui-form-row')).toContainElement(screen.getByRole('checkbox', { name: 'settings.capability_skills' }))
+    expect(picker.closest('.ui-form-row')).toContainElement(screen.getByRole('combobox', { name: 'capabilities.skill_selection' }))
     expect(screen.queryByText('capabilities.skill_selection')).toBeNull()
     expect(screen.getByRole('searchbox', { name: 'capabilities.search_skills' })).toHaveClass('ui-input')
     await userEvent.click(picker)
     await userEvent.click(screen.getByRole('option', { name: 'capabilities.default' }))
     expect(picker).toHaveValue('capabilities.default')
     expect(screen.queryByRole('searchbox')).toBeNull()
-    await userEvent.click(screen.getByRole('checkbox', { name: 'settings.capability_skills' }))
-    expect(picker).toBeDisabled()
+    await selectSkills('off')
+    expect(picker).toHaveValue('capabilities.off')
+    expect(screen.queryByRole('searchbox')).toBeNull()
   })
   it.each([false, true])('selects recall and memory tools independently with one aggregate checkbox (subagent %s)', async (subagent) => {
     const onChange = vi.fn()
@@ -436,13 +441,13 @@ describe('shared capability editor', () => {
     expect(screen.getByRole('checkbox', { name: 'private capabilities.model' })).not.toBeChecked()
     expect(onChange.mock.lastCall?.[0].skills.entries).toEqual([{ id: 'user:private', shortcut: true, model: false }])
   })
-  it('shows only model availability in subagents and keeps selections when disabled', async () => {
-    render(<Harness subagent />)
-    expect(screen.queryByRole('checkbox', { name: 'private capabilities.shortcut' })).toBeNull()
+  it.each([false, true])('keeps custom choices across off and default modes (subagent %s)', async (subagent) => {
+    render(<Harness subagent={subagent} />)
+    if (subagent) expect(screen.queryByRole('checkbox', { name: 'private capabilities.shortcut' })).toBeNull()
     await userEvent.click(screen.getByRole('checkbox', { name: 'private capabilities.model' }))
-    await userEvent.click(screen.getByRole('checkbox', { name: 'settings.capability_skills' }))
-    expect(screen.getByRole('checkbox', { name: 'private capabilities.model' })).toBeDisabled()
-    await userEvent.click(screen.getByRole('checkbox', { name: 'settings.capability_skills' }))
+    await selectSkills('off')
+    expect(screen.queryByRole('checkbox', { name: 'private capabilities.model' })).toBeNull()
+    await selectSkills('custom')
     expect(screen.getByRole('checkbox', { name: 'private capabilities.model' })).toBeChecked()
   })
 })

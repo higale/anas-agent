@@ -1,5 +1,4 @@
 import type { HelpDocumentId } from './helpDocuments'
-import type { SubagentSelection } from './subagentSelection'
 import type { ProjectOperationResult } from './projectOperation'
 import type { AgentApi } from './agentTypes'
 import type { AgentCapabilities, DefaultCapabilitySettings } from './agentCapabilities'
@@ -33,8 +32,6 @@ export interface WorkspaceProject extends ProjectBase {
   sourceFolders: string[]
   capabilities: AgentCapabilities
   restrictSubagents: boolean
-  /** Optional project selection of global subagent definitions. */
-  subagentSelection?: SubagentSelection
 }
 
 export interface SimpleChatProject extends ProjectBase {
@@ -69,8 +66,6 @@ export interface WorkspaceProjectRequest extends ProjectModelSelection {
   sourceFolders: string[]
   capabilities: AgentCapabilities
   restrictSubagents: boolean
-  /** Optional project selection of global subagent definitions. */
-  subagentSelection?: SubagentSelection
 }
 
 export interface SimpleChatProjectRequest extends ProjectModelSelection {
@@ -217,14 +212,11 @@ export interface ModelListResponse {
 
 export type SubagentPreset = 'general-purpose' | 'web-researcher' | 'project-analyst'
 export interface SubagentDefaults {
-  subagentSelection: SubagentSelection
   enabled: boolean
   capabilities: AgentCapabilities
 }
 
 export interface SubagentConfig {
-  /** Omission follows global defaults for further delegation. */
-  subagentSelection?: SubagentSelection
   index: number
   name: string
   /** Included by default; custom selections may grant access independently. */
@@ -237,7 +229,6 @@ export interface SubagentConfig {
 }
 
 export interface SubagentConfigSave {
-  subagentSelection?: SubagentSelection
   index?: number
   name: string
   enabled: boolean

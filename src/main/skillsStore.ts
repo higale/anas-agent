@@ -511,8 +511,8 @@ async function loadCatalog(projectId?: string, selection?: SkillSelection, sourc
   if (selection) {
     for (const scan of scans) for (const skill of scan.skills) {
       const entry = selection.entries.find((entry) => entry.id === skill.summary.id)
-      skill.summary.modelAvailable = selection.enabled && (selection.mode === 'default' ? skill.summary.modelAvailable : Boolean(entry?.model))
-      skill.summary.userAvailable = selection.enabled && (selection.mode === 'default' ? skill.summary.userAvailable : Boolean(entry?.shortcut))
+      skill.summary.modelAvailable = selection.mode !== 'off' && (selection.mode === 'default' ? skill.summary.modelAvailable : Boolean(entry?.model))
+      skill.summary.userAvailable = selection.mode !== 'off' && (selection.mode === 'default' ? skill.summary.userAvailable : Boolean(entry?.shortcut))
     }
   }
   return { roots: scans.map((scan) => scan.root), skills: resolveConflicts(scans), scriptAutoApprove: config.script_auto_approve }
@@ -551,7 +551,7 @@ export interface SkillScriptInvocation { name: string; sourceAlias?: string }
 
 /** A current exemption, not execution permission or a persisted capability. */
 export async function findSkillScriptExemption(scriptPath: string, scope: SkillScriptScope, invocation?: SkillScriptInvocation) {
-  if (!scope.selection.enabled || !isAbsolute(scriptPath)) return undefined
+  if (scope.selection.mode === 'off' || !isAbsolute(scriptPath)) return undefined
   const catalog = await loadCatalog(scope.projectId, scope.selection, scope.sourceFolders)
   const skills = catalog.skills.map(item => item.summary).filter(skill => !skill.loadError)
   const explicit = scope.allowUserInvocation && invocation ? skills.find(skill => skill.userAvailable
@@ -939,7 +939,7 @@ export async function buildSkillsPrompt(projectId?: string, selection: SkillSele
         && skill.summary.modelAvailable
         && !skill.summary.modelShadowedBy
       ))
-  if (!selection.enabled || !catalog.skills.some((skill) => !skill.summary.loadError && (skill.summary.modelAvailable || skill.summary.userAvailable))) return ''
+  if (selection.mode === 'off' || !catalog.skills.some((skill) => !skill.summary.loadError && (skill.summary.modelAvailable || skill.summary.userAvailable))) return ''
   return [
     '<skills_instructions>',
     '',

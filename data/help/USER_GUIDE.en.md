@@ -162,7 +162,7 @@ Delegates independent tasks to other Agents for parallel investigation and divis
 | `wait_subagent` | Wait for progress, completion, or a request for approval. |
 | `cancel_subagent` | Cancel a specified subtask. |
 
-Configure subagents in **Settings > Subagents**. The capability list selects which subagents may be called. **Use default** selects globally default-enabled entries; Custom may include entries that are off by default. An empty list prevents launches. Turning this capability off preserves the list. It does not require **Background tools**.
+Configure subagents in **Settings > Subagents**. Default, project, and subagent capability editors share **Use default / Custom / Off**. Use default selects globally default-enabled entries. Custom shows the list and may include entries that are off by default; an empty list prevents launches. Off hides the list and disables the capability while retaining custom choices. It does not require **Background tools**.
 
 Subagents keep their own capability settings rather than inheriting Settings > Capabilities. Subagents may delegate further, but their choices cannot exceed the original project's allowed set. **Limit subagent capabilities** separately constrains context, tools, and skills at every level: when selected, only capabilities allowed by both the project and the subagent remain available. Otherwise, the subagent uses its own configuration. It receives the delegated task, not the complete parent conversation automatically.
 
@@ -170,7 +170,7 @@ Subagents keep their own capability settings rather than inheriting Settings > C
 
 Supplies the names, purposes, and instruction paths of available skills, or lets you invoke them with `/name`. Skills are instructions, not separate callable tools, and do not grant file, command, or network capabilities.
 
-The Skills switch enables or disables the capability without selecting every skill. Turning it off preserves the default/custom mode and individual choices.
+Skills use **Use default / Custom / Off**. Only Custom shows the entry list. Off disables skills while retaining individual choices, which are restored when you return to Custom.
 
 **Use default** follows global availability. Custom mode independently selects user shortcuts and model availability, including skills off by default. Subagents configure model availability only.
 
@@ -271,7 +271,7 @@ Settings > Dev provides developer tools, logs, and Start in console. Console sta
 
 If startup data cannot load, the recovery page lists affected files. View error details, open logs, and choose:
 
-- **Repair**: corrects identifiable invalid fields with defaults while keeping valid settings. Data that cannot be reliably repaired is left unchanged.
+- **Repair**: restores invalid settings to their defaults while keeping valid settings. Capability selections are checked field by field against the current configuration format. Unrecognized values use the corresponding defaults without translating old formats or resetting the whole file, projects, or conversations. Invalid selection lists without item defaults use the list default. Unparseable files or projects whose identity cannot be determined still require manual repair. Changed fields are listed in the error details.
 - **Reset**: restores the selected configuration to defaults. **Resetting `projects.json` also deletes every project's conversations, messages, execution records, task recovery information, and memory**. Other settings, skills, project source files, and attachment files are kept.
 
 Before changes, original data is saved beside the data directory under `Anas-Recovery/timestamp-random-suffix/`. If that fails, no changes are made. Restart after recovery.

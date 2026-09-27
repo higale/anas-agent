@@ -14,7 +14,7 @@ import { requiresToolApproval } from './toolAuthorization'
 
 function subagentConfig(name: string): SubagentConfig {
   return {
- capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: true, memory: true, toolMode: 'all', tools: [], skills: { enabled: true, mode: 'default', project: false, entries: [] } },
+ capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: true, memory: true, toolMode: 'all', tools: [], skills: { mode: 'default', project: false, entries: [] } },
     index: 0,
     name,
     enabled: true,
@@ -1882,7 +1882,7 @@ describe('AgentDatabase', () => {
       const owner = database.createThread({ title: 'Owner' })
       const parentRun = database.createRun(owner.id, 'selected-agent-parent')
       const config = { ...subagentConfig('reviewer'), enabled: false,
-        subagentSelection: { mode: 'custom' as const, names: ['researcher'] } }
+        capabilities: { ...subagentConfig('reviewer').capabilities, subagents: { mode: 'custom' as const, names: ['researcher'] } } }
       const input = {
         id: '11111111-1111-8111-8111-111111111111', ownerThreadId: owner.id, parentThreadId: owner.id, parentRunId: parentRun.id,
         childThreadId: '22222222-2222-8222-8222-222222222222', childRunId: '33333333-3333-8333-8333-333333333333',

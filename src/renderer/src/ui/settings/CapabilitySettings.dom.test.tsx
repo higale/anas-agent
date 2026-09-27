@@ -14,13 +14,12 @@ describe('default capability settings', () => {
     const value = config()
     value.defaultCapabilities.capabilities.profile = false
     value.defaultCapabilities.restrictSubagents = true
-    value.defaultCapabilities.subagentSelection = { mode: 'custom', names: ['reviewer'] }
+    value.defaultCapabilities.capabilities.subagents = { mode: 'custom', names: ['reviewer'] }
     const onSave = vi.fn(async (_value: DefaultCapabilitySettings) => undefined)
     render(<CapabilitySettings config={value} onSave={onSave} />)
     fireEvent.click(screen.getByRole('button', { name: 'settings.capabilities_enable_all' }))
     await waitFor(() => expect(onSave).toHaveBeenCalledOnce())
-    expect(onSave.mock.calls[0][0]).toMatchObject({ capabilities: { profile: true }, restrictSubagents: false,
-      subagentSelection: { mode: 'default', names: ['reviewer'] } })
+    expect(onSave.mock.calls[0][0]).toMatchObject({ capabilities: { ...{ profile: true }, subagents: { mode: 'default', names: ['reviewer'] } }, restrictSubagents: false })
     expect(value.defaultCapabilities.capabilities.profile).toBe(false)
   })
 })

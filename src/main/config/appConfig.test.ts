@@ -1002,7 +1002,7 @@ describe('profile configuration', () => {
 describe('subagent configuration', () => {
   const builtIn = {
  capabilities: serializeCapabilities({ ...structuredClone(defaultCapabilities), profile: false, workspace: true,
-      memory: true, toolMode: 'all', tools: [], skills: { enabled: true, mode: 'default', project: false, entries: [] } }),
+      memory: true, toolMode: 'all', tools: [], skills: { mode: 'default', project: false, entries: [] } }),
     preset: 'general-purpose',
     name: 'general-purpose',
     enabled: true,
@@ -1011,7 +1011,7 @@ describe('subagent configuration', () => {
   }
   const custom = {
  capabilities: serializeCapabilities({ ...structuredClone(defaultCapabilities), profile: false, workspace: true,
-      memory: false, toolMode: 'selected', tools: ['read_file'], skills: { enabled: true, mode: 'custom', project: false, entries: [] } }),
+      memory: false, toolMode: 'selected', tools: ['read_file'], skills: { mode: 'custom', project: false, entries: [] } }),
     name: 'custom-agent',
     enabled: false,
     description: 'Custom work.',
@@ -1062,7 +1062,7 @@ describe('subagent configuration', () => {
 
     await expect(appConfig.saveSubagent({
  capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: false,
-        memory: false, toolMode: 'selected', tools: [], skills: { enabled: true, mode: 'custom', project: false, entries: [] } },
+        memory: false, toolMode: 'selected', tools: [], skills: { mode: 'custom', project: false, entries: [] } },
       name: 'custom-agent',
       enabled: false,
       description: '',
@@ -1082,7 +1082,7 @@ describe('default project capabilities', () => {
     value.capabilities.toolMode = 'selected'
     value.capabilities.tools = ['read_file']
     value.restrictSubagents = true
-    value.subagentSelection = { mode: 'custom', names: ['reviewer'] }
+    value.capabilities.subagents = { mode: 'custom', names: ['reviewer'] }
     const saved = await appConfig.saveDefaultCapabilities(value)
     expect(saved.defaultCapabilities).toEqual(value)
     expect(raw.capabilities).toEqual(serializeDefaultCapabilitySettings(value))

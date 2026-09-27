@@ -4,11 +4,38 @@ const { tmpdir } = require('node:os')
 const { join } = require('node:path')
 const { expect } = require('playwright/test')
 
+async function verifySelectionModes(page, scope, finishOff = false) {
+  for (const [name, search, label] of [['Subagent selection', 'Search subagents', 'Subagents'], ['Skill selection', 'Search skills', 'Skills']]) {
+    const picker = scope.getByRole('combobox', { name, exact: true })
+    const section = scope.locator('.ui-form-section-divided').filter({ has: page.getByRole('combobox', { name, exact: true }) })
+    await expect(scope.getByRole('checkbox', { name: label, exact: true })).toHaveCount(0)
+    const choose = async mode => {
+      await picker.click()
+      await page.getByRole('option', { name: mode, exact: true }).click()
+      await expect(picker).toHaveValue(mode)
+    }
+    await choose('Custom')
+    await expect(section.getByRole('searchbox', { name: search })).toBeVisible()
+    const selected = section.locator('input[type="checkbox"]:checked')
+    const index = await selected.count() ? await section.getByRole('checkbox').evaluateAll(inputs => inputs.findIndex(input => input.checked)) : 0
+    const first = section.getByRole('checkbox').nth(index)
+    await first.check()
+    for (const mode of ['Off', 'Use defaults']) {
+      await choose(mode)
+      await expect(section.getByRole('searchbox')).toHaveCount(0)
+      await expect(section.getByRole('checkbox')).toHaveCount(0)
+      await choose('Custom')
+      await expect(first).toBeChecked()
+    }
+    if (finishOff) await choose('Off')
+  }
+}
+
 async function verifyMissingProjectSkills(page) {
   const result = await page.evaluate(async () => {
     const project = (await globalThis.gale.projects.list()).find(item => item.id === 'default-workspace')
     return globalThis.gale.projects.update(project.id, { ...project, advancedSettings: true,
-      capabilities: { ...project.capabilities, skills: { enabled: true, mode: 'custom', project: false, entries: [
+      capabilities: { ...project.capabilities, skills: { mode: 'custom', project: false, entries: [
         { id: 'project-deleted:unchecked-skill', shortcut: false, model: false },
         { id: 'project-deleted:selected-skill', shortcut: true, model: true }
       ] } } })
@@ -25,6 +52,7 @@ async function verifyMissingProjectSkills(page) {
   const savedEntries = () => page.evaluate(async () =>
     (await globalThis.gale.projects.list()).find(item => item.id === 'default-workspace').capabilities.skills.entries)
   await openProject()
+  await verifySelectionModes(page, dialog)
   const removeUnchecked = dialog.getByRole('button', { name: 'Remove missing skill: project-deleted:unchecked-skill', exact: true })
   await removeUnchecked.scrollIntoViewIfNeeded()
   if (process.env.ANAS_E2E_MISSING_SKILLS_SCREENSHOT) await dialog.screenshot({ path: process.env.ANAS_E2E_MISSING_SKILLS_SCREENSHOT })
@@ -93,6 +121,19 @@ async function verifyDefaultCapabilities(launchApplication) {
     assert.equal(previews.custom, true)
     assert.deepEqual(previews.project, original.project)
     assert.deepEqual(previews.subagents, original.subagents)
+    await verifySelectionModes(page, section, true)
+    const off = await page.evaluate(async () => (await globalThis.gale.config.get()).defaultCapabilities.capabilities)
+    assert.equal(off.subagents.mode, 'off')
+    assert.equal(off.skills.mode, 'off')
+    const raw = JSON.parse(await readFile(join(home, 'config', 'capabilities.json'), 'utf8'))
+    assert.deepEqual(raw.subagents, off.subagents)
+    assert.deepEqual(raw.skills, off.skills)
+    assert.equal('enabled' in raw.skills, false)
+    assert.equal('subagent_selection' in raw, false)
+    await page.locator('[data-settings-tab="subagents"]').click()
+    await verifySelectionModes(page, page.locator('.settings-subagent-editor'), true)
+    await expect.poll(() => page.evaluate(async () => (await globalThis.gale.config.get()).subagents[0].capabilities.skills.mode)).toBe('off')
+    await page.locator('[data-settings-tab="capabilities"]').click()
     if (process.env.ANAS_E2E_CAPABILITIES_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_CAPABILITIES_SCREENSHOT })
     await verifyMissingProjectSkills(page)
     await application.close()
@@ -104,6 +145,12 @@ async function verifyDefaultCapabilities(launchApplication) {
     await page.locator('.sidebar-settings').click()
     await page.locator('.app-menu-item').first().click()
     await page.locator('[data-settings-tab="capabilities"]').click()
+    for (const name of ['Subagent selection', 'Skill selection']) {
+      await expect(page.getByRole('combobox', { name, exact: true })).toHaveValue('Off')
+    }
+    const saved = await page.evaluate(() => globalThis.gale.config.get())
+    assert.equal(saved.subagents[0].capabilities.subagents.mode, 'off')
+    assert.equal(saved.subagents[0].capabilities.skills.mode, 'off')
     await expect(page.getByRole('checkbox', { name: 'Profile', exact: true })).not.toBeChecked()
     await expect(page.getByRole('checkbox', { name: 'Limit subagent capabilities', exact: true })).toBeChecked()
     await page.getByRole('button', { name: 'Enable all', exact: true }).click()
@@ -155,7 +202,7 @@ async function verifyDefaultCapabilities(launchApplication) {
         await page.screenshot({ path: process.env.ANAS_E2E_CAPABILITIES_NARROW_SCREENSHOT })
       }
     }
-    console.log('Default capabilities E2E passed: UI save, restart persistence, project overrides, prompt previews, unchanged subagents, atomic Enable all, pending saves across navigation and non-overlapping toolbar controls with large text.')
+    console.log('Default capabilities E2E passed: default/custom/off modes in settings, projects and subagents; retained choices, nested persistence and restart; project overrides, prompt previews, pending saves and toolbar layout.')
   } finally {
     await application?.close()
     await rm(home, { recursive: true, force: true })

@@ -25,7 +25,7 @@ function projectionKey({ config, project, continuationRunId, continuationStatus 
       ...(project.kind === 'workspace' ? {
         advancedSettings: project.advancedSettings, codingMode: project.codingMode,
         sourceFolders: project.sourceFolders, capabilities: project.capabilities,
-        restrictSubagents: project.restrictSubagents, subagentSelection: project.subagentSelection
+        restrictSubagents: project.restrictSubagents
       } : {})
     },
     defaultCapabilities: config?.defaultCapabilities,

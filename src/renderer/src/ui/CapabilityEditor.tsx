@@ -25,7 +25,7 @@ interface Props {
   mcpStatus?: McpToolStatus
   mcpServers?: readonly Pick<McpServerConfigDetail, 'id' | 'name' | 'enabled'>[]
   runtimeToolStatus?: RuntimeToolStatus
-  subagentSelection?: SubagentSelectionProps
+  subagents?: SubagentSelectionProps['definitions']
   subagent?: boolean
   disabled?: boolean
   toolbarEnd?: ReactNode
@@ -33,7 +33,7 @@ interface Props {
   onEnableAll?(capabilities: AgentCapabilities): void
 }
 
-export function CapabilityEditor({ customTools = [], value: storedValue, skills, mcpStatus, mcpServers = [], runtimeToolStatus, subagentSelection, subagent = false, disabled = false, toolbarEnd, onChange: onValueChange, onEnableAll }: Props) {
+export function CapabilityEditor({ customTools = [], value: storedValue, skills, mcpStatus, mcpServers = [], runtimeToolStatus, subagents = [], subagent = false, disabled = false, toolbarEnd, onChange: onValueChange, onEnableAll }: Props) {
   const { t } = useTranslation()
   const [query, setQuery] = useState('')
   const mcpListId = useId()
@@ -68,9 +68,9 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
   const missingTools = value.tools.filter((id) => !catalogToolIds.has(id))
   const customToolItems = withToolShadows(customTools.filter(tool => !subagent || tool.source !== 'project'),
     value.customTools.entries.filter(id => value.backgroundTools || !customTools.find(tool => tool.id === id)?.definition?.interactive))
-  type CapabilityFlag = 'profile' | 'environment' | 'workspace' | 'memory' | 'applicationEnvironment' | 'backgroundTools' | 'subagents' | 'planning'
+  type CapabilityFlag = 'profile' | 'environment' | 'workspace' | 'memory' | 'applicationEnvironment' | 'backgroundTools' | 'planning'
   const groups: Array<{ id: string; name: string; flag?: CapabilityFlag; tools: Array<{ id: string; name: string; unavailable?: boolean; requiresBackground?: boolean; shadowedBy?: string; ariaLabel?: string }> }> = [
-    ...(['profile', 'environment', 'workspace', 'applicationEnvironment', 'backgroundTools', 'subagents', 'planning'] as const).filter((flag) => flag !== 'subagents' || !subagentSelection).map((flag) => ({
+    ...(['profile', 'environment', 'workspace', 'applicationEnvironment', 'backgroundTools', 'planning'] as const).map((flag) => ({
       id: flag, name: t(`settings.capability_${flag === 'workspace' ? 'workspaceContext' : flag}`), flag, tools: []
     })),
     ...(['commandExecution', 'networkAccess', 'fileRead', 'fileWrite', 'configuration', 'memory'] as const).map((feature) => ({
@@ -112,7 +112,7 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
     ...value.skills.entries.filter((entry) => !skills?.skills.some((skill) => skill.id === entry.id)).map((entry) => ({ id: entry.id, name: entry.id, description: entry.id, unavailable: true, missing: Boolean(skills) }))
   ]
   const matchesSkillQuery = (skill: { name: string }) => skill.name.toLowerCase().includes(query.toLowerCase())
-  const projectSkillsSelected = subagent && value.skills.enabled && value.skills.mode === 'custom' && value.skills.project
+  const projectSkillsSelected = subagent && value.skills.mode === 'custom' && value.skills.project
   const selectedSkillCount = effectiveSkills.entries.filter((entry) => entry.model || (!subagent && entry.shortcut)).length
   const skillWarning = (effectiveSkills.entries.some((entry) => entry.model || (!subagent && entry.shortcut))
     || projectSkillsSelected)
@@ -145,11 +145,11 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
           {subagent && <strong className="ui-section-title">{t('settings.capabilities')}</strong>}
           <div className="ui-toolbar">
             <button type="button" className="ui-button ui-button-compact" onClick={() => {
-              const enabled: AgentCapabilities = { ...value, profile: true, environment: true, workspace: true, memory: true, applicationEnvironment: true, backgroundTools: true, subagents: true, planning: true, toolMode: 'all', tools: [], customTools: setAllCustomTools(value.customTools, customTools, subagent, true), mcp: { defaultMode: 'all', servers: value.mcp.servers.map((server) => ({ ...server, mode: 'all' })) }, skills: { ...value.skills, enabled: true, mode: 'default' } }
+              const enabled: AgentCapabilities = { ...value, profile: true, environment: true, workspace: true, memory: true, applicationEnvironment: true, backgroundTools: true, subagents: { ...value.subagents, mode: 'default' }, planning: true, toolMode: 'all', tools: [], customTools: setAllCustomTools(value.customTools, customTools, subagent, true), mcp: { defaultMode: 'all', servers: value.mcp.servers.map((server) => ({ ...server, mode: 'all' })) }, skills: { ...value.skills, mode: 'default' } }
               if (onEnableAll) onEnableAll(enabled)
               else onChange(enabled)
             }}>{t('settings.capabilities_enable_all')}</button>
-            <button type="button" className="ui-button ui-button-compact" onClick={() => onChange({ ...value, profile: false, environment: false, workspace: false, memory: false, applicationEnvironment: false, backgroundTools: false, subagents: false, planning: false, toolMode: 'selected', tools: [], customTools: setAllCustomTools(value.customTools, customTools, subagent, false), mcp: { defaultMode: 'selected', servers: [] }, skills: { ...value.skills, enabled: false } })}>{t('settings.capabilities_disable_all')}</button>
+            <button type="button" className="ui-button ui-button-compact" onClick={() => onChange({ ...value, profile: false, environment: false, workspace: false, memory: false, applicationEnvironment: false, backgroundTools: false, subagents: { ...value.subagents, mode: 'off' }, planning: false, toolMode: 'selected', tools: [], customTools: setAllCustomTools(value.customTools, customTools, subagent, false), mcp: { defaultMode: 'selected', servers: [] }, skills: { ...value.skills, mode: 'off' } })}>{t('settings.capabilities_disable_all')}</button>
           </div>
           {toolbarEnd}
         </div>
@@ -220,31 +220,31 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
             </div>
           })}
         </div>}
-        {subagentSelection && <SubagentSelectionEditor {...subagentSelection} enabled={value.subagents} disabled={disabled}
-          onEnable={(subagents) => onChange({ ...value, subagents })} />}
+        <SubagentSelectionEditor value={value.subagents} definitions={subagents} disabled={disabled}
+          onChange={(subagents) => onChange({ ...value, subagents })} />
         <div className="ui-form-section ui-form-section-divided">
           <div className="ui-form-row ui-form-row-inline">
             <div className="ui-row">
-              <CheckboxField className="ui-checkbox-field-inline" checked={value.skills.enabled} label={t('settings.capability_skills')}
-                onChange={(enabled) => onChange({ ...value, skills: { ...value.skills, enabled } })} />
+              <span>{t('settings.capability_skills')}</span>
               <small>{selectedSkillCount}{projectSkillsSelected && <> + {t('settings.skill_group_project')}</>}</small>
               {skillWarning && <SettingsStatusIndicator label={t('settings.subagent_skills_require_file_read')} hint={t('settings.subagent_skills_require_file_read')} />}
             </div>
             <SearchableOptionPicker
               className="compact"
               ariaLabel={t('capabilities.skill_selection')}
-              disabled={disabled || !value.skills.enabled}
+              disabled={disabled}
               emptyLabel={t('settings.no_options')}
               searchable={false}
               value={value.skills.mode}
               options={[
                 { value: 'default', label: t('capabilities.default') },
-                { value: 'custom', label: t('capabilities.custom') }
+                { value: 'custom', label: t('capabilities.custom') },
+                { value: 'off', label: t('capabilities.off') }
               ]}
-              onChange={(mode) => onChange({ ...value, skills: { ...value.skills, mode: mode as 'default' | 'custom' } })}
+              onChange={(mode) => onChange({ ...value, skills: { ...value.skills, mode: mode as AgentCapabilities['skills']['mode'] } })}
             />
           </div>
-          <fieldset disabled={!value.skills.enabled} className="ui-capability-editor">
+          <div className="ui-capability-editor">
             {value.skills.mode === 'custom' && <>
               <input className="ui-input" type="search" aria-label={t('capabilities.search_skills')} placeholder={t('capabilities.search_skills')} value={query} onChange={(event) => setQuery(event.target.value)} />
               <div className="ui-capability-list">
@@ -282,7 +282,7 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
                 {!skills && <small>{t('capabilities.loading')}</small>}
               </div>
             </>}
-          </fieldset>
+          </div>
         </div>
       </div>
     </fieldset>

@@ -187,10 +187,10 @@ async function verifyLifecycleAction(launchApplication, action) {
       const projectResult = await api.projects.create({ kind: 'workspace', name: 'PTY lifecycle', sourceFolders: [workspace],
         advancedSettings: true, codingMode: true, prompt: '', restrictSubagents: false,
         capabilities: { profile: false, environment: false, workspace: true, memory: false, applicationEnvironment: false,
-          backgroundTools: true, subagents: false, planning: false, toolMode: 'selected',
+          backgroundTools: true, subagents: { mode: 'off', names: [] }, planning: false, toolMode: 'selected',
           tools: ['run_shell', 'read_call', 'read_call_output', 'write_call', 'wait_call', 'cancel_call'],
           mcp: { defaultMode: 'selected', servers: [] },
-          skills: { enabled: false, project: false, mode: 'custom', entries: [] } } })
+          skills: { project: false, mode: 'off', entries: [] } } })
       if (projectResult.status === 'error') throw new Error(JSON.stringify(projectResult.error))
       const project = projectResult.value
       return api.agent.runs.submit({ requestId: globalThis.crypto.randomUUID(),
