@@ -47,7 +47,9 @@ async function verifyAttachmentPreviews(launchApplication) {
       response.writeHead(200, { 'content-type': 'application/json' })
       response.end(JSON.stringify({ id: 'photo-response', object: 'chat.completion', created: 1, model: input.model,
         choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant',
-          content: `Photo received.\n\n![Generated cat](${encodeURIComponent(generatedName)})` } }],
+          content: `Photo received.\n\n![Generated cat](${encodeURIComponent(generatedName)})`
+            + `\n\n![Absolute cat](<${generated}>)`
+            + `\n\n![Absolute photo](<${photo.replaceAll('%', '%25').replaceAll('#', '%23')}>)` } }],
         usage: { prompt_tokens: 2000, completion_tokens: 5, total_tokens: 2005 } }))
     })().catch(error => { errors.push(String(error)); response.writeHead(400); response.end(String(error)) })
   })
@@ -110,6 +112,19 @@ async function verifyAttachmentPreviews(launchApplication) {
     await expect(page.getByText('Failed to open attachment.', { exact: true })).toHaveCount(0)
     await page.keyboard.press('Escape')
 
+    for (const [name, path, width] of [['Absolute cat', generated, 800], ['Absolute photo', photo, 2048]]) {
+      const thumbnail = page.getByRole('button', { name, exact: true })
+      await expect(thumbnail).toBeVisible()
+      await expect.poll(() => thumbnail.locator('img').evaluate(image => image.naturalWidth)).toBeGreaterThan(0)
+      await thumbnail.click()
+      await expect(slide).toHaveAttribute('src', /^anas-image:/)
+      await expect.poll(() => slide.evaluate(image => image.naturalWidth)).toBe(width)
+      await page.locator('.attachment-lightbox-folder-button').click()
+      await expect.poll(() => application.evaluate(() => globalThis.__anasRevealedImages.at(-1))).toBe(path)
+      await page.keyboard.press('Escape')
+    }
+    await page.screenshot({ path: join(tmpdir(), 'anas-markdown-local-images.png') })
+
     const largeResult = await page.evaluate(async path => {
       const preview = await globalThis.gale.files.readAttachmentPreview(path, { mode: 'original' })
       const image = new globalThis.Image()
@@ -123,7 +138,7 @@ async function verifyAttachmentPreviews(launchApplication) {
     assert.match(largeResult.rejected, /exceeds 25 MB/)
     assert.equal(requests, 1)
     assert.deepEqual(errors, [])
-    console.log('Attachment previews Electron E2E passed: original resolution; large image limits; reveal buttons for attachments and project-relative Markdown images.')
+    console.log('Attachment previews Electron E2E passed: original resolution; large image limits; reveal buttons for attachments, project-relative and absolute Markdown images with Unicode, spaces, # and %.')
   } finally {
     await closeElectronTestApplication(application)
     server.closeAllConnections()

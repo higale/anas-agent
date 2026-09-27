@@ -18,6 +18,14 @@ describe('normalizeLocalImagePath', () => {
     expect(normalizeLocalImagePath('C:\\Users\\user\\Pictures\\photo.webp')).toBe('C:\\Users\\user\\Pictures\\photo.webp')
   })
 
+  it('decodes Markdown destinations exactly once before identifying local paths', () => {
+    expect(normalizeLocalImagePath('C:%5CUsers%5Cuser%5CPictures%5C002.png')).toBe('C:\\Users\\user\\Pictures\\002.png')
+    expect(normalizeLocalImagePath('/Pictures/%E9%B1%BC%20%23%20100%25.png')).toBe('/Pictures/鱼 # 100%.png')
+    expect(normalizeLocalImagePath('images/literal%2520.png')).toBe('images/literal%20.png')
+    expect(normalizeLocalImagePath('file:///C:/Pictures/photo%20%23%20100%25.png')).toBe('C:\\Pictures\\photo # 100%.png')
+    expect(normalizeLocalImagePath('file://server/share/photo%20%23.png')).toBe('\\\\server\\share\\photo #.png')
+  })
+
   it('strips query and hash fragments before reading the local image', () => {
     expect(normalizeLocalImagePath('/Users/user/Pictures/photo.png?raw=1#preview')).toBe('/Users/user/Pictures/photo.png')
   })
@@ -32,5 +40,7 @@ describe('normalizeLocalImagePath', () => {
     expect(normalizeLocalImagePath('data:image/png;base64,AA==')).toBeNull()
     expect(normalizeLocalImagePath('/Users/user/Pictures/readme.txt')).toBeNull()
     expect(normalizeLocalImagePath('notes/readme.txt')).toBeNull()
+    expect(normalizeLocalImagePath('//example.com/photo.png')).toBeNull()
+    expect(normalizeLocalImagePath('C:%5CPictures%5Cbad%ZZ.png')).toBeNull()
   })
 })

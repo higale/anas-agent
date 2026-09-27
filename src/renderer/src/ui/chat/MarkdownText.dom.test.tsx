@@ -23,6 +23,29 @@ beforeEach(() => {
 })
 
 describe('Markdown workspace images', () => {
+  it.each([
+    ['C:\\Users\\user\\Pictures\\002.png', 'C:\\Users\\user\\Pictures\\002.png'],
+    ['<C:\\Pictures\\鱼缸 %23 100%25.png>', 'C:\\Pictures\\鱼缸 # 100%.png'],
+    ['<C:/Pictures/鱼缸 %23 100%25.png>', 'C:/Pictures/鱼缸 # 100%.png'],
+    ['</Pictures/鱼缸 %23 100%25.png>', '/Pictures/鱼缸 # 100%.png'],
+    ['file:///C:/Pictures/%E9%B1%BC%E7%BC%B8%20%23%20100%25.png', 'C:\\Pictures\\鱼缸 # 100%.png']
+  ])('loads a local Markdown image from %s', async (destination, expectedPath) => {
+    const view = render(<MarkdownText text={`![Fish tank](${destination})`} />)
+
+    await waitFor(() => expect(previewMocks.loadAttachmentPreview).toHaveBeenCalledWith(
+      expectedPath, { mode: 'thumbnail', projectId: undefined }
+    ))
+    expect(await view.findByRole('img', { name: 'Fish tank' })).toHaveAttribute('src', 'data:image/png;base64,AQ==')
+  })
+
+  it.each(['', 'javascript:invalid'])('shows a failure instead of loading forever for an invalid image source: %s', async (source) => {
+    const view = render(<MarkdownText text={`![Invalid image](${source})`} />)
+
+    expect(await view.findByText('Invalid image: chat.image_preview_failed')).toBeVisible()
+    expect(previewMocks.loadAttachmentPreview).not.toHaveBeenCalled()
+    expect(view.queryByText('common.loading')).not.toBeInTheDocument()
+  })
+
   it.each([false, true])('reveals the resolved image file while original loading is pending: %s', async (pending) => {
     const resolvedPath = 'D:\\workspace\\images\\avatar.png'
     previewMocks.loadAttachmentPreview.mockImplementation(async (_path, options) => {

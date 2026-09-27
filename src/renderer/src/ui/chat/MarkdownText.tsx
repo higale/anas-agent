@@ -159,7 +159,7 @@ function MarkdownImage({ src, alt, node: _node, onError, ...props }: MarkdownIma
     let canceled = false
     setThumbnail(null)
     setOriginal(null)
-    setFailure(null)
+    setFailure(src ? null : t('chat.image_preview_failed'))
     setLightboxOpen(false)
     if (!localPath || !visible) return () => {
       canceled = true

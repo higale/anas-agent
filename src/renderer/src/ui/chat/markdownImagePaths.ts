@@ -20,20 +20,24 @@ export function normalizeLocalImagePath(src: string | undefined): string | null 
   const value = src.trim()
   if (!value) return null
 
-  const filePath = /^file:/i.test(value) ? fileUrlToPath(value) : value
-  if (
-    !filePath
-    || (!localPathPattern.test(filePath) && (urlSchemePattern.test(filePath) || filePath.startsWith('//')))
-  ) return null
-
-  const pathWithoutQuery = filePath.split(/[?#]/, 1)[0] ?? filePath
-  const extensionMatch = /\.[a-zA-Z0-9]+$/.exec(pathWithoutQuery)
-  const extension = extensionMatch?.[0]?.toLowerCase()
-  if (!extension || !localImageExtensions.has(extension)) return null
-  if (localPathPattern.test(pathWithoutQuery)) return pathWithoutQuery
+  // Markdown encodes backslashes, spaces and Unicode in image destinations.
+  // Remove URL suffixes before decoding so encoded # and ? stay in filenames.
+  let filePath: string | null
   try {
-    return decodeURIComponent(pathWithoutQuery)
+    filePath = /^file:/i.test(value)
+      ? fileUrlToPath(value)
+      : decodeURIComponent(value.split(/[?#]/, 1)[0])
   } catch {
     return null
   }
+  if (
+    !filePath
+    || filePath.startsWith('//')
+    || (!localPathPattern.test(filePath) && urlSchemePattern.test(filePath))
+  ) return null
+
+  const extensionMatch = /\.[a-zA-Z0-9]+$/.exec(filePath)
+  const extension = extensionMatch?.[0]?.toLowerCase()
+  if (!extension || !localImageExtensions.has(extension)) return null
+  return filePath
 }
