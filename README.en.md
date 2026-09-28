@@ -59,6 +59,8 @@ npm test -- <test-file>
 npm run build
 ```
 
+Daily development keeps the release version unchanged; increment PATCH once when preparing a GitHub sync. The development repository records sync baselines with `github/v<version>` tags. Both unpackaged and packaged development builds show a startup/build-time marker such as `3.1.3-dev.5+g9e8317f8.dirty` in the app menu and About dialog. Releases built from independent GitHub source snapshots show only the release version. Without Git or a baseline, no development marker is generated. See the [publishing workflow](docs/SOURCE_PUBLISHING.md).
+
 After startup, add your model provider in **Settings > Model**, then select a model in the message toolbar. No model service credentials are bundled. `data/config/` and `data/.env` are distribution defaults; store personal settings and keys in the application's data directory.
 
 `build` checks types, builds main/preload/renderer resources, and verifies main-process dependency boundaries. Run relevant tests for changed behavior. Electron checks use isolated data directories:

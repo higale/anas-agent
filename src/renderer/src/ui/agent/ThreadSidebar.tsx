@@ -3,7 +3,7 @@ import { CircleHelp, Info, Plus, Power, Settings } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { AgentThread } from '@shared/agentTypes'
 import type { AppBuildInfo, Project, SidebarCollapsedSections, SidebarSectionId } from '@shared/types'
-import { formatBuildTime } from '../buildInfo'
+import { formatBuildTime, formatBuildVersion } from '../buildInfo'
 import { DropdownMenuContent, DropdownMenuRoot, DropdownMenuTrigger } from '../DropdownMenuShell'
 import { NoFocusButton } from '../NoFocusButton'
 import { ThreadList } from './ThreadList'
@@ -105,7 +105,7 @@ export function ThreadSidebarFooter(props: ThreadSidebarFooterProps) {
           collisionPadding={10}
         >
           <DropdownMenu.Label className="app-menu-build-info">
-            <span>Version {props.buildInfo?.version ?? '-'}</span>
+            <span>Version {formatBuildVersion(props.buildInfo)}</span>
             {props.buildInfo?.environment === 'development'
               ? <span>Development</span>
               : buildTime && <time dateTime={props.buildInfo?.builtAt}>Built {buildTime}</time>}

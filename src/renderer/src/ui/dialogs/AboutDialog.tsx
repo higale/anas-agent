@@ -3,7 +3,7 @@ import { Bot } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { AppBuildInfo } from '@shared/types'
 import { applicationLicenseUrl, applicationRepositoryUrl } from '@shared/appMetadata'
-import { formatBuildTime } from '../buildInfo'
+import { formatBuildTime, formatBuildVersion } from '../buildInfo'
 
 export function AboutDialog({ open, buildInfo, iconDataUri, onClose }: {
   open: boolean
@@ -42,7 +42,7 @@ export function AboutDialog({ open, buildInfo, iconDataUri, onClose }: {
           </div>
           <div className="ui-row-between ui-divider-top ui-meta-row">
             <span className="ui-copy-stack">
-              <span>Version {buildInfo?.version ?? '-'}</span>
+              <span>Version {formatBuildVersion(buildInfo)}</span>
               {buildInfo?.environment === 'development'
                 ? <span>Development</span>
                 : buildTime && <time dateTime={buildInfo?.builtAt}>Built {buildTime}</time>}

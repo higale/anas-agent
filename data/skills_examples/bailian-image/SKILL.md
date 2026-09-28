@@ -1,19 +1,19 @@
 ---
 name: bailian-image
 description: "调用阿里云 DashScope 千问或万相模型生成和编辑图片。用户要求画图、创作插图或海报，或基于本地图片、图片 URL 修改背景、文字、风格及多图融合时使用。"
-compatibility: "Requires Python 3.10+, internet access, BAILIAN_IMAGE_API_KEY, and a model set by BAILIAN_IMAGE_MODEL or --model."
+compatibility: "Requires Python 3.10+, internet access, and the BAILIAN_IMAGE_API_KEY environment variable. Model selection uses BAILIAN_IMAGE_MODEL or --model."
 ---
 
 # 百炼图片生成与编辑
 
-使用 Python 3.10+ 运行 `scripts/generate.py`，不要自行构造 API 请求。配置方式见 [SETUP.md](SETUP.md)。脚本使用同步接口，网络操作超时默认 `300` 秒；宿主执行超时至少预留 `330` 秒，或使用宿主的后台执行机制等待结果。
+直接使用 Python 3.10+ 运行 `scripts/generate.py`，由脚本读取配置并报告错误，不要自行构造 API 请求。不要在调用前读取 `.env`、探测 Key 是否存在或发起鉴权测试；仅在脚本报告缺少配置、鉴权失败，或用户要求排查配置时阅读 [SETUP.md](SETUP.md)。脚本使用同步接口，网络操作超时默认 `300` 秒；宿主执行超时至少预留 `330` 秒，或使用宿主的后台执行机制等待结果。
 
 ## 调用
 
 - 将用户需求整理为一段完整、明确的图片描述，通过 `--prompt` 传入。忠实保留主体、文字、构图、风格、颜色和比例等明确约束，不要添加冲突细节。
 - **文生图**：不传 `--image`。
 - **图片编辑**：通过 `--image` 传入用户指定的本地路径或 HTTP(S) 图片 URL；多图时重复此参数，提示词按顺序称“图一、图二”。本地图片由脚本编码为 Base64，无需先上传；相对图片路径以执行时的工作目录为基准，有空格的路径需加引号。用户指的是附件时，先取得附件实际路径，不猜测文件名。
-- 默认使用 `BAILIAN_IMAGE_MODEL`。用户指定模型时用 `--model` 覆盖；编辑必须使用支持图片输入的模型，例如 `qwen-image-3.0-pro` 或 `wan2.7-image`。普通 API Key 和 Token Plan 的模型可用范围不同，以套餐当前支持列表为准，不因失败自动换模型。
+- 默认由脚本使用 `BAILIAN_IMAGE_MODEL`。用户指定模型时用 `--model` 覆盖；编辑必须使用支持图片输入的模型，例如 `qwen-image-3.0-pro` 或 `wan2.7-image`。不因失败自动换模型。
 - 描述足够生成时直接调用，不要为用户未指定的可选参数追问。
 - 脚本默认生成一张：千问文生图传入 `1536*1536`，千问编辑不指定尺寸，由模型选择；万相 2.7 传入 `1K`，编辑时按最后一张输入图的比例输出，约一百万总像素。这些是脚本默认值，不代表服务端默认值。
 - 用户要求时设置 `--size WIDTH*HEIGHT`、`--n N` 或 `--watermark true|false`；万相 2.7 也可用 `--size 1K|2K`。`--negative-prompt TEXT` 和 `--prompt-extend true|false` 仅用于千问。需要调整网络等待时间时使用 `--timeout SECONDS`。
@@ -41,6 +41,6 @@ python3 scripts/generate.py --image "/path/to/subject.png" --image "https://exam
 
 ## 错误处理
 
-- 缺少环境变量时，明确提示用户配置 `BAILIAN_IMAGE_API_KEY`，以及 `BAILIAN_IMAGE_MODEL` 或 `--model`。
-- HTTP 请求或参数校验失败时，简要说明服务返回的错误，并指出需要检查的参数、模型或凭据；不要输出 API Key。
+- 脚本报告缺少环境变量时，仅提示补齐报错中指出的配置；模型也可通过 `--model` 指定。
+- HTTP 请求或参数校验失败时，按实际错误处理参数、模型、额度或鉴权问题，不把任意失败都归因于 Key；不要输出 API Key。
 - 超时或中止本地进程不能确认服务端任务已取消。先报告结果不确定，不把同一请求再次提交来探测状态。

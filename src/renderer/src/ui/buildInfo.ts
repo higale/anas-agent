@@ -1,3 +1,9 @@
+import type { AppBuildInfo } from '@shared/types'
+
+export function formatBuildVersion(info?: AppBuildInfo): string {
+  return (info?.environment === 'development' ? info.developmentVersion ?? info.version : info?.version) ?? '-'
+}
+
 export function formatBuildTime(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ''

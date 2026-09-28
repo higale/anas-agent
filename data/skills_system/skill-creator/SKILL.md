@@ -59,6 +59,7 @@ compatibility: "Only the runtimes, commands, network access, credentials, or hos
 - Use relative paths for Skill resources. Make every referenced file discoverable from `SKILL.md`.
 - Put deterministic repeated operations in scripts, and test changed scripts. Declare every required runtime, external command, network endpoint class, environment variable, or filesystem capability in `compatibility`.
 - Keep credentials out of Skill files, arguments, examples, and logs. Name required environment variables without including their values.
+- When a script reads credentials and reports configuration or authentication errors, direct normal use to that script. Dependency declarations are not a credential preflight checklist; reserve credential checks and setup instructions for relevant execution errors or explicit configuration requests.
 - Remove obsolete instructions and resources in the same change.
 
 ## Validate and Finish

@@ -1,6 +1,6 @@
 # 配置说明
 
-使用此 Skill 前，宿主环境必须提供：
+仅在脚本报告缺少配置、鉴权失败，或用户要求配置时参考。正常调用由脚本读取环境变量，无需提前检查。配置项：
 
 - `BAILIAN_IMAGE_API_KEY`：阿里云 DashScope API Key；以 `sk-sp-` 开头的套餐 Key 自动使用北京 Token Plan 专属接口，其他 Key 使用普通北京 DashScope 接口。
 - `BAILIAN_IMAGE_MODEL`：要调用的图片生成或编辑模型名称，也可通过 `--model` 为单次调用指定。

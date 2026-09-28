@@ -1,10 +1,10 @@
-## Anas v3.1.3
+## Anas v3.1.4
 
-- 修复全局、项目和子 Agent 能力设置中自定义工具分组挤占空间的问题：来源组纵向排列，组内工具自适应分列。
-- 来源组支持折叠并显示已选数量，空组隐藏。
+- 开发版显示 Git 版本标记，本地打包后仍保留，便于识别构建来源。
+- 统一搜索和生图技能的 API Key 环境要求，避免调用前重复检查凭据。
 
-- Fixed crowded custom-tool groups in global, project, and subagent capabilities: sources stack vertically, with responsive tool columns within each group.
-- Source groups can collapse, show selection counts, and hide when empty.
+- Development builds display a Git version marker that is preserved in local packages.
+- Search and image skills consistently declare API key requirements and avoid redundant credential checks before execution.
 
 ## 下载与安装 / Downloads & installation
 

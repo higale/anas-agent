@@ -6,7 +6,7 @@ compatibility: "Requires Python 3, internet access, and the BAIDU_SEARCH_API_KEY
 
 # 百度 AI 搜索
 
-通过宿主支持的环境变量配置方式提供 `BAIDU_SEARCH_API_KEY`。不要把密钥写入 Skill 文件、脚本参数或日志。
+直接执行搜索脚本，由脚本读取配置并报告错误。不要在调用前读取 `.env`、探测 Key 是否存在或发起鉴权测试；仅在脚本报告缺少配置、鉴权失败，或用户要求排查配置时处理凭据问题。不要输出密钥。
 
 使用 Python 3 运行 `scripts/search.py`：
 
@@ -23,4 +23,4 @@ compatibility: "Requires Python 3, internet access, and the BAIDU_SEARCH_API_KEY
 
 执行成功时，从标准输出 JSON 的 `data` 中整理答案并附上相关来源链接。不要编造引用；除非用户明确要求，否则不要返回原始 JSON。
 
-执行失败时，从标准错误 JSON 读取 `error`，并在包含 `next_step` 时给出该建议。缺少 API Key 时，明确提示用户为此技能配置 `BAIDU_SEARCH_API_KEY`；不要输出 API Key。
+执行失败时，从标准错误 JSON 读取 `error`，并在包含 `next_step` 时给出该建议。脚本报告缺少 `BAIDU_SEARCH_API_KEY` 时，提示用户通过宿主的环境变量配置方式补齐；其他错误按实际原因处理。

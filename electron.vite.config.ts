@@ -1,6 +1,8 @@
 import { resolve } from 'node:path'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
+import { getDevelopmentVersion } from './src/build/developmentVersion'
+import { version } from './package.json'
 
 export default defineConfig(({ command }) => {
   const productionBuild = command === 'build'
@@ -8,6 +10,7 @@ export default defineConfig(({ command }) => {
     main: {
       define: {
         __ANAS_BUILD_ENVIRONMENT__: JSON.stringify(productionBuild ? 'production' : 'development'),
+        __ANAS_DEVELOPMENT_VERSION__: JSON.stringify(getDevelopmentVersion(resolve('.'), version) ?? ''),
         __ANAS_BUILD_TIME__: JSON.stringify(productionBuild ? new Date().toISOString() : '')
       },
       plugins: [externalizeDepsPlugin()],

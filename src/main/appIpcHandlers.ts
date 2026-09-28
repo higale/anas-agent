@@ -28,9 +28,11 @@ import {
 import { detectSystemEnvironment } from './systemEnvironmentDetection'
 import { getDataStorageUsage, getDeveloperHttpTraceUsage } from './dataStorageUsage'
 import { restartInConsole } from './consoleRestart'
+import { createAppBuildInfo } from './buildInfo'
 
 declare const __ANAS_BUILD_ENVIRONMENT__: AppBuildInfo['environment']
 declare const __ANAS_BUILD_TIME__: string
+declare const __ANAS_DEVELOPMENT_VERSION__: string
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -99,10 +101,10 @@ async function clearElectronCache(): Promise<void> {
 
 export function registerAppIpcHandlers(): void {
   handleMainIpc('app:getBuildInfo', (): AppBuildInfo => {
-    const version = app.getVersion()
-    return __ANAS_BUILD_ENVIRONMENT__ === 'production'
-      ? { version, environment: 'production', builtAt: __ANAS_BUILD_TIME__ }
-      : { version, environment: 'development' }
+    return createAppBuildInfo(app.getVersion(), app.isPackaged, {
+      environment: __ANAS_BUILD_ENVIRONMENT__, builtAt: __ANAS_BUILD_TIME__,
+      developmentVersion: __ANAS_DEVELOPMENT_VERSION__
+    })
   })
   handleMainIpc('app:toggleDevTools', (event): void => {
     event.sender.toggleDevTools()
