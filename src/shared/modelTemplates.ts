@@ -1,3 +1,4 @@
+import { requireDataVersion } from './dataVersion'
 import rawModelTemplates from '../../data/config/model-templates.json'
 import {
   defaultModelProviderConfig,
@@ -6,6 +7,8 @@ import {
   requireModelProtocol
 } from './modelConfig'
 import type { ModelProtocol, ModelProviderConfigSave } from './types'
+
+requireDataVersion(rawModelTemplates, 0, 'model templates')
 
 export interface ModelProviderTemplate extends ModelProviderConfigSave {
   label: string

@@ -1,4 +1,5 @@
 {
+  "version": 0,
   "capabilities": {
     "off": "关闭",
     "terminal_input_hint": "需要开启后台工具，并启用执行命令或选中交互式自定义工具。终端必须在启动时创建，运行中不能补接。",
@@ -72,7 +73,7 @@
   "recovery": {
     "title": "启动恢复",
     "repair": "修复",
-    "repair_confirm": "仅修复 {{path}} 中的 {{count}} 个错误字段，使用对应默认值并保留有效设置。修复能力字段可能改变工具和技能可用性。执行前自动保留原始数据，不修改其他文件或数据库。",
+    "repair_confirm": "先保全原始数据，再尝试修复 {{path}}。已识别 {{count}} 个可修复项；有效设置会保留，无法修复的问题会逐项报告。项目修复也会抢救关联数据库，无法恢复的数据库保留原样。修复能力字段可能改变工具和技能可用性。",
     "repaired_fields": "已修复：",
     "unresolved_fields": "未解决：",
     "description": "修复或重置出错文件，然后重新启动。",
@@ -100,8 +101,10 @@
     "repair_file": "修复 {{file}}",
     "reset_file": "重置 {{file}}",
     "file_repairable": "{{count}} 个字段可修复",
-    "file_unrepairable": "无法自动修复，可重置或手动修改",
+    "file_unrepairable": "发现数据错误，可尝试修复并保全原始数据",
     "file_repaired": "已修复",
+    "file_partially_repaired": "已部分修复，未恢复内容保留在原始数据副本中",
+    "avatar_files": "头像文件",
     "file_reset": "已重置",
     "restart_hint": "处理完成后，请重新启动。",
     "no_file_errors": "未定位到可修复的配置文件错误，请查看错误详情。",
@@ -1145,6 +1148,14 @@
     "update_failed": "自定义工具配置未能保存，请检查以下详情。",
     "project_tools": "使用当前项目工具",
     "shadowed": "已覆盖",
-    "shadowed_by": "由「{{source}}」的同名工具优先生效"
+    "shadowed_by": "由「{{source}}」的同名工具优先生效",
+    "builtin": "内置工具",
+    "all": "全部自定义工具",
+    "add_directory": "添加目录",
+    "remove_directory": "移除目录",
+    "remove_directory_hint": "只移除目录引用，不会删除目录中的工具和文件。已保存的能力选择会保留为不可用引用。",
+    "select_item": "选择目录、工具或文件查看详情。",
+    "expand": "展开工具“{{name}}”",
+    "collapse": "收起工具“{{name}}”"
   }
 }

@@ -10,9 +10,14 @@ const definition = { ...customToolDefaults, id: 'stable-id', name: 'submit_resul
 describe('custom tool definitions', () => {
   it('round trips without persisting camelCase keys', () => {
     const raw = serializeCustomTool(validateCustomTool(definition))
+    expect(raw.version).toBe(0)
     expect(raw).not.toHaveProperty('inputSchema')
     expect(raw).not.toHaveProperty('timeoutSeconds')
     expect(parseCustomTools([raw])).toEqual([definition])
+  })
+  it.each([undefined, 1, 99])('rejects missing or unsupported manifest version %s', version => {
+    const raw = { ...serializeCustomTool(validateCustomTool(definition)), version }
+    expect(() => parseCustomTools([raw])).toThrow('version')
   })
   it('defaults to pipe execution and preserves an explicit interactive choice', () => {
     expect(validateCustomTool({ ...definition, interactive: undefined }).interactive).toBe(false)

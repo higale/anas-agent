@@ -25,7 +25,7 @@ beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'anas-tool-sources-'))
   trashItem.mockReset().mockImplementation(async path => { await rename(path, join(root, 'trashed')) })
   vi.doMock('./config/dataDir', () => ({
-    customToolsConfigFileName: 'tools.json', getDataDir: () => root,
+    configDirName: 'config', customToolsConfigFileName: 'tools.json', getDataDir: () => root,
     getBundledDataDir: () => resolve('data'), getToolExamplesDir: () => join(root, 'tools_examples'),
     getConfigFile: (name: string) => join(root, 'config', name),
     getBundledConfigFile: (name: string) => resolve('data/config', name)
@@ -49,11 +49,14 @@ describe('tool directory imports', () => {
     await store.initializeToolsStore()
     const examples = join(root, 'tools_examples')
     expect(await readdir(join(root, 'tools'))).toEqual([])
-    expect(await readdir(examples)).toEqual(expect.arrayContaining(['read_text_raw', 'file_sha256', 'json_format', 'baidu-search']))
-    expect((await store.listToolSnapshot()).tools).toEqual([])
-    const result = await store.importToolDirectories(['read_text_raw', 'json_format', 'baidu-search'].map(name => join(examples, name)))
-    expect(result.ids).toEqual(['user:example-read-text-raw', 'user:example-json-format', 'user:baidu-search'])
-    expect((await store.listToolSnapshot()).tools.map(tool => tool.name)).toEqual(['read_text_raw', 'json_format', 'baidu_search'])
+    const exampleNames = await readdir(examples)
+    expect(exampleNames).toEqual(expect.arrayContaining(['read_text_raw', 'baidu-search']))
+    expect(exampleNames).not.toContain('file_sha256')
+    expect(exampleNames).not.toContain('json_format')
+    expect((await store.listToolSnapshot()).tools.filter(tool => tool.source === 'user')).toEqual([])
+    const result = await store.importToolDirectories(['read_text_raw', 'baidu-search'].map(name => join(examples, name)))
+    expect(result.ids).toEqual(['user:example-read-text-raw', 'user:baidu-search'])
+    expect((await store.listToolSnapshot()).tools.filter(tool => tool.source === 'user').map(tool => tool.name)).toEqual(['read_text_raw', 'baidu_search'])
     expect(await readFile(join(root, 'tools/baidu-search/scripts/run.py'), 'utf8')).toBe(
       await readFile(join(examples, 'baidu-search/scripts/run.py'), 'utf8'))
     const importedScript = join(root, 'tools/read_text_raw/scripts/run.py')
@@ -61,12 +64,32 @@ describe('tool directory imports', () => {
     await writeFile(importedScript, '# user edit')
     expect(await readFile(join(examples, 'read_text_raw/scripts/run.py'), 'utf8')).not.toBe('# user edit')
   })
+  it('installs the bundled hash and formatter as read-only system tools without enabling them', async () => {
+    await store.initializeToolsStore()
+    const snapshot = await store.listToolSnapshot()
+    expect(snapshot.tools).toEqual([
+      expect.objectContaining({ id: 'system:example-file-sha256', name: 'file_sha256', source: 'system', rootId: 'system' }),
+      expect.objectContaining({ id: 'system:example-json-format', name: 'json_format', source: 'system', rootId: 'system' })
+    ])
+    expect(resolveToolSelection(defaultCapabilities.customTools, snapshot.tools).entries).toEqual([])
+    expect(resolveToolSelection(selectedTools(snapshot.tools.map(tool => tool.id)), snapshot.tools).entries).toEqual(snapshot.tools.map(tool => tool.id))
+    for (const tool of snapshot.tools) {
+      const manifest = join(tool.directory, 'TOOL.json')
+      const before = await readFile(manifest, 'utf8')
+      await expect(store.saveToolPackage({ ...tool.definition!, description: 'Changed' })).rejects.toThrow('Only valid user')
+      await expect(store.deleteToolPackage(tool.id)).rejects.toThrow('Only user')
+      expect(await readFile(manifest, 'utf8')).toBe(before)
+      expect(await readFile(join(tool.directory, 'scripts/run.py'), 'utf8')).toBe(
+        await readFile(resolve('data/tools_system', tool.name, 'scripts/run.py'), 'utf8'))
+    }
+    expect(trashItem).not.toHaveBeenCalled()
+  })
   it('refreshes bundled examples at initialization while preserving user tools', async () => {
     await packageAt(join(root, 'tools/user_tool'), 'user-id', 'user_tool')
     await mkdir(join(root, 'tools_examples/stale'), { recursive: true })
     await writeFile(join(root, 'tools_examples/stale/old.txt'), 'old bundled example')
     await Promise.all([store.initializeToolsStore(), store.initializeToolsStore()])
-    expect((await store.listToolSnapshot()).tools.map(tool => tool.name)).toEqual(['user_tool'])
+    expect((await store.listToolSnapshot()).tools.filter(tool => tool.source === 'user').map(tool => tool.name)).toEqual(['user_tool'])
     await expect(readFile(join(root, 'tools_examples/stale/old.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
     expect(JSON.parse(await readFile(join(root, 'tools_examples/read_text_raw/TOOL.json'), 'utf8')).name).toBe('read_text_raw')
   })
@@ -333,13 +356,13 @@ describe('directory tool packages', () => {
     await store.deleteToolPackage('user:invalid:link')
     expect(trashItem).toHaveBeenCalledWith(join(root, 'tools/link'))
   })
-  it('uses only fixed roots and refuses project edits through global settings', async () => {
+  it('uses managed roots and refuses project edits through global settings', async () => {
     const project = join(root, 'project')
     const directory = join(project, '.agents/tools/read')
     await packageAt(directory)
     await packageAt(join(root, 'unconfigured/read'))
     const snapshot = await store.listToolSnapshot([project])
-    expect(snapshot.roots.map(source => source.path)).toEqual([join(project, '.agents/tools'), join(root, 'tools')])
+    expect(snapshot.roots.map(source => source.path)).toEqual([join(project, '.agents/tools'), join(root, 'tools'), join(root, 'tools_system')])
     expect(snapshot.tools).toHaveLength(1)
     await expect(store.deleteToolPackage(snapshot.tools[0].id)).rejects.toThrow('Only user')
     await expect(store.saveToolPackage(snapshot.tools[0].definition!)).rejects.toThrow('Only valid user')
@@ -370,5 +393,88 @@ describe('directory tool packages', () => {
     const capabilities = { ...defaultCapabilities, skills: resolveSkillSelection(defaultCapabilities.skills, []), customTools: own }
     expect(intersectCapabilities(capabilities, { ...capabilities, customTools: policy }).customTools.entries).toEqual([])
     expect(intersectCapabilities(capabilities, capabilities).customTools.entries).toEqual(own.entries)
+  })
+})
+
+describe('tool source settings', () => {
+  it('still rejects invalid current settings after the migration version check skips them', async () => {
+    await mkdir(join(root, 'config'), { recursive: true })
+    const path = join(root, 'config/tools.json')
+    const raw = '{"version":0,"order":"invalid","external_directories":[]}'
+    await writeFile(path, raw)
+    const { migrateDataDirectory } = await import('./migrations')
+    await migrateDataDirectory(root)
+    await expect(store.listToolSnapshot()).rejects.toThrow('Invalid tool settings')
+    expect(await readFile(path, 'utf8')).toBe(raw)
+    await expect(readFile(`${path}.v0.bak`)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('rejects unversioned settings without migrating or modifying them', async () => {
+    await mkdir(join(root, 'config'), { recursive: true })
+    const path = join(root, 'config/tools.json'), raw = '{"order":[]}'
+    await writeFile(path, raw)
+    await expect(store.listToolSnapshot()).rejects.toThrow('Unsupported')
+    expect(await readFile(path, 'utf8')).toBe(raw)
+    await expect(readFile(`${path}.v0.bak`)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('rejects a future format without modifying the settings', async () => {
+    await mkdir(join(root, 'config'), { recursive: true })
+    const path = join(root, 'config/tools.json'), raw = '{"version":2,"order":[]}'
+    await writeFile(path, raw)
+    await expect(store.listToolSnapshot()).rejects.toThrow('Unsupported')
+    expect(await readFile(path, 'utf8')).toBe(raw)
+    await expect(readFile(`${path}.v0.bak`)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('discovers all sources with project, user, external and system precedence, and never enables new tools', async () => {
+    const project = join(root, 'project'), external = join(root, 'external')
+    for (const path of [join(project, '.agents/tools/read'), join(root, 'tools/read'), join(external, 'read'), join(root, 'tools_system/read')]) await packageAt(path)
+    await store.addExternalToolDirectory(external)
+    const snapshot = await store.listToolSnapshot([project])
+    expect(snapshot.tools.map(tool => tool.source)).toEqual(['project', 'user', 'external', 'system'])
+    expect(resolveToolSelection(selectedTools(), snapshot.tools).entries).toEqual([])
+    expect(resolveToolSelection(selectedTools(snapshot.tools.map(t => t.id)), snapshot.tools).entries).toEqual([snapshot.tools[0].id])
+    expect((await store.listToolSnapshot()).tools.some(tool => tool.source === 'project')).toBe(false)
+  })
+
+  it('renames and reorders external roots without changing tool IDs, and unlinks without deleting files', async () => {
+    const first = join(root, 'first'), second = join(root, 'second')
+    await packageAt(join(first, 'read')); await packageAt(join(second, 'read'))
+    await store.addExternalToolDirectory(first); await store.addExternalToolDirectory(second)
+    const tools = (await store.listToolSnapshot()).tools
+    await store.updateExternalToolDirectory(tools[0].rootId, 'Renamed')
+    await store.moveExternalToolDirectory(tools[1].rootId, -1)
+    const reordered = (await store.listToolSnapshot()).tools
+    expect(reordered.map(t => t.id)).toEqual([tools[1].id, tools[0].id])
+    expect(reordered[1].rootName).toBe('Renamed')
+    await store.removeExternalToolDirectory(tools[0].rootId)
+    expect((await store.listToolSnapshot()).tools.map(t => t.id)).toEqual([tools[1].id])
+    expect(await readFile(join(first, 'read/TOOL.json'), 'utf8')).toContain('read_complete')
+    await expect(store.withToolPackageDirectory(tools[0].definition!, async () => {})).rejects.toThrow('unavailable')
+  })
+
+  it('rejects duplicate source aliases and allows importing a copy from an external source', async () => {
+    const external = join(root, 'external'), alias = join(root, 'alias')
+    await packageAt(join(external, 'read'))
+    await store.addExternalToolDirectory(external)
+    await symlink(external, alias, 'dir')
+    await expect(store.addExternalToolDirectory(alias)).rejects.toThrow('already managed')
+    await store.importToolDirectories([join(external, 'read')])
+    expect((await store.listToolSnapshot()).tools.map(t => t.source)).toEqual(['user', 'external'])
+  })
+
+  it('browses package files, follows resource links and rejects traversal or oversized previews', async () => {
+    const directory = join(root, 'tools/read')
+    await packageAt(directory)
+    await writeFile(join(directory, 'README.md'), 'Tool documentation')
+    const nodes = await store.listToolFiles('user:read-id')
+    expect(nodes.map(n => n.name)).toContain('TOOL.json')
+    expect(await store.readToolFile('user:read-id', 'README.md')).toMatchObject({ content: 'Tool documentation', kind: 'text' })
+    await expect(store.readToolFile('user:read-id', '../secret')).rejects.toThrow('invalid')
+    await writeFile(join(directory, 'large.txt'), 'x'.repeat(1024 * 1024 + 1))
+    await expect(store.readToolFile('user:read-id', 'large.txt')).rejects.toThrow('exceeds')
+    await symlink(join(directory, 'README.md'), join(directory, 'linked.md'))
+    expect(await store.readToolFile('user:read-id', 'linked.md')).toMatchObject({ content: 'Tool documentation', linkTarget: join(directory, 'README.md') })
   })
 })

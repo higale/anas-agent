@@ -69,7 +69,7 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
   const customToolItems = withToolShadows(customTools.filter(tool => !subagent || tool.source !== 'project'),
     value.customTools.entries.filter(id => value.backgroundTools || !customTools.find(tool => tool.id === id)?.definition?.interactive))
   type CapabilityFlag = 'profile' | 'environment' | 'workspace' | 'memory' | 'applicationEnvironment' | 'backgroundTools' | 'planning'
-  const groups: Array<{ id: string; name: string; flag?: CapabilityFlag; tools: Array<{ id: string; name: string; unavailable?: boolean; requiresBackground?: boolean; shadowedBy?: string; ariaLabel?: string }> }> = [
+  const groups: Array<{ id: string; name: string; flag?: CapabilityFlag; tools: Array<{ id: string; name: string; unavailable?: boolean; requiresBackground?: boolean; shadowedBy?: string; ariaLabel?: string; sourceId?: string; sourceName?: string }> }> = [
     ...(['profile', 'environment', 'workspace', 'applicationEnvironment', 'backgroundTools', 'planning'] as const).map((flag) => ({
       id: flag, name: t(`settings.capability_${flag === 'workspace' ? 'workspaceContext' : flag}`), flag, tools: []
     })),
@@ -87,11 +87,16 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
     })),
     { id: 'customTools', name: t('custom_tools.title'), tools: [
       ...customToolItems.map((tool) => ({ id: tool.id, name: tool.name, unavailable: Boolean(tool.error),
+        sourceId: tool.rootId, sourceName: tool.source === 'system' || tool.source === 'user' ? t(`settings.skill_group_${tool.source}`) : tool.rootName,
         ariaLabel: `${tool.rootName} ${tool.name}`, shadowedBy: tool.shadowedBy, requiresBackground: tool.definition?.interactive && !value.backgroundTools })),
       ...value.customTools.entries.filter((id) => !customTools.some((tool) => tool.id === id)).map((id) => ({ id, name: id, unavailable: true }))
     ] },
     ...(missingTools.length ? [{ id: 'missing-tools', name: t('capabilities.other_tools'), tools: missingTools.map((id) => ({ id, name: id, unavailable: true })) }] : [])
   ]
+  function renderCapabilityTool(group: typeof groups[number], tool: typeof groups[number]['tools'][number]) {
+    return <CheckboxField className="ui-checkbox-field-inline" key={tool.id} checked={group.id === 'customTools' ? value.customTools.entries.includes(tool.id) : toolSelected(value, tool.id)} aria-label={tool.ariaLabel ?? tool.name} label={<span className="ui-row"><code className="ui-tool-name">{tool.name}</code>{tool.unavailable && <span className="ui-badge">{t('capabilities.inactive')}</span>}{tool.shadowedBy && <span className="ui-badge" data-tooltip={t('custom_tools.shadowed_by', { source: tool.shadowedBy })}>{t('custom_tools.shadowed')}</span>}{tool.requiresBackground && <span className="ui-badge">{t('custom_tools.requires_background')}</span>}</span>}
+                    onChange={(checked) => onChange(selectGroupTools(group, [tool.id], checked))} />
+  }
   const isDirectToggle = (group: typeof groups[number]) => (group.tools.length === 1 && group.id !== 'missing-tools' && group.id !== 'customTools') || (!group.tools.length && Boolean(group.flag))
   const groupOrder = new Map<string, number>(capabilityGroupOrder.map((id, index) => [id, index]))
   const orderedGroups = [...groups].sort((a, b) => (groupOrder.get(a.id) ?? groupOrder.size) - (groupOrder.get(b.id) ?? groupOrder.size))
@@ -177,8 +182,18 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
                     onChange={project => onChange({ ...value, customTools: { ...value.customTools, project } })} />}
                   {group.flag && <CheckboxField className="ui-checkbox-field-inline" checked={value[group.flag]}
                     label={t('settings.capability_memory_recall')} onChange={(checked) => onChange({ ...value, [group.flag!]: checked })} />}
-                  {group.tools.map((tool) => <CheckboxField className="ui-checkbox-field-inline" key={tool.id} checked={group.id === 'customTools' ? value.customTools.entries.includes(tool.id) : toolSelected(value, tool.id)} aria-label={tool.ariaLabel ?? tool.name} label={<span className="ui-row"><code className="ui-tool-name">{tool.name}</code>{tool.unavailable && <span className="ui-badge">{t('capabilities.inactive')}</span>}{tool.shadowedBy && <span className="ui-badge" data-tooltip={t('custom_tools.shadowed_by', { source: tool.shadowedBy })}>{t('custom_tools.shadowed')}</span>}{tool.requiresBackground && <span className="ui-badge">{t('custom_tools.requires_background')}</span>}</span>}
-                    onChange={(checked) => onChange(selectGroupTools(group, [tool.id], checked))} />)}
+                  {group.id === 'customTools'
+                    ? [...new Set(group.tools.map(tool => tool.sourceId ?? 'missing'))].sort((a, b) => {
+                      const rank = (id: string) => {
+                        const source = customToolItems.find(tool => tool.rootId === id)?.source
+                        return source ? { system: 0, user: 1, project: 2, external: 3 }[source] : 4
+                      }
+                      return rank(a) - rank(b)
+                    }).map(id => <div className="ui-form-section" key={id}>
+                      <strong>{group.tools.find(tool => tool.sourceId === id)?.sourceName ?? t('capabilities.other_tools')}</strong>
+                      {group.tools.filter(tool => (tool.sourceId ?? 'missing') === id).map(tool => renderCapabilityTool(group, tool))}
+                    </div>)
+                    : group.tools.map(tool => renderCapabilityTool(group, tool))}
                   {group.id === 'customTools' && !group.tools.length && <small className="ui-field-hint">{t('custom_tools.empty')}</small>}
                 </fieldset>
               </details>

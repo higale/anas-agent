@@ -1,4 +1,5 @@
 {
+  "version": 0,
   "id": "normalize-text-example",
   "name": "normalize_text",
   "description": "Remove leading and trailing whitespace from text and return the cleaned text and Unicode code point count. Does not modify files.",

@@ -60,6 +60,7 @@ async function loadBackupService(
   }
   vi.doMock('./config/dataDir', () => ({
     configDirName: 'config',
+    customToolsConfigFileName: 'tools.json',
     configFileNames,
     getDataDir: () => dataRoot,
     getFileEditRecordsDir: () => join(dataRoot, 'file_edits'),
@@ -92,13 +93,41 @@ afterEach(async () => {
 })
 
 describe('data backup restore', () => {
+  it.each([false, true])('rolls back a partial project repair, including a retry after rollback failure: %s', async failRollback => {
+    const root = await temporaryDirectory(), data = join(root, 'data')
+    await writeText(join(data, 'projects.json'), 'old projects')
+    await writeText(join(data, 'sqlite/catalog.sqlite'), 'old catalog')
+    await writeText(join(data, 'config/settings.json'), 'untouched config')
+    let failing = true
+    const service = await loadBackupService(data, undefined, (source, target) => failing && (
+      (source.includes('/staged/') && target === join(data, 'sqlite'))
+      || (failRollback && source.includes('/previous/') && target === join(data, 'projects.json'))
+    ))
+    let preserved = false
+    await expect(service.replaceProjectData(data, async staged => {
+      await writeText(join(staged, 'projects.json'), 'repaired projects')
+      await writeText(join(staged, 'sqlite/catalog.sqlite'), 'repaired catalog')
+      return async () => { expect(preserved).toBe(true) }
+    }, async () => {
+      expect(await readFile(join(data, 'projects.json'), 'utf8')).toBe('old projects')
+      preserved = true
+      return '/preserved'
+    })).rejects.toThrow(failRollback ? 'could not be rolled back' : 'injected rename failure')
+    failing = false
+    expect(await service.recoverInterruptedDataRestore()).toBe(failRollback)
+    expect(await readFile(join(data, 'projects.json'), 'utf8')).toBe('old projects')
+    expect(await readFile(join(data, 'sqlite/catalog.sqlite'), 'utf8')).toBe('old catalog')
+    expect(await readFile(join(data, 'config/settings.json'), 'utf8')).toBe('untouched config')
+    expect((await readdir(root)).filter(name => name.startsWith('.anas-restore-'))).toEqual([])
+  })
+
   it.for([false, true])('round trips tool packages, resources and selections (links: %s)', async (withLinks, { skip }) => {
     const root = await temporaryDirectory()
     const dataRoot = join(root, 'data')
     const files = new Map<string, Buffer>()
     for (const name of configFileNames) files.set(`config/${name}`, await readFile(join(process.cwd(), 'data/config', name)))
     const toolId = 'user:example-read-text-raw'
-    files.set('config/tools.json', Buffer.from(JSON.stringify({ order: [toolId] })))
+    files.set('config/tools.json', Buffer.from(JSON.stringify({ version: 0, order: [toolId], external_directories: [] })))
     const capabilities = JSON.parse(files.get('config/capabilities.json')!.toString())
     capabilities.custom_tools = { project: false, entries: [toolId] }
     files.set('config/capabilities.json', Buffer.from(JSON.stringify(capabilities)))
@@ -315,7 +344,7 @@ describe('data backup restore', () => {
     await writeText(join(transaction, 'previous/sqlite/catalog.sqlite'), 'old database')
     await mkdir(join(dataRoot, 'sqlite'), { recursive: true })
     await writeText(join(transaction, 'transaction.json'), JSON.stringify({
-      version: 1, dataDir: dataRoot, phase: 'swapping',
+      version: 0, dataDir: dataRoot, phase: 'swapping',
       previousEntries: ['projects.json', 'sqlite/catalog.sqlite'], installedEntries: []
     }))
     const service = await loadBackupService(dataRoot)
@@ -348,7 +377,7 @@ describe('data backup restore', () => {
     const service = await loadBackupService(dataRoot)
     for (const previousEntries of [['../outside.txt'], ['sqlite/other.sqlite'], ['sqlite', 'sqlite/catalog.sqlite']]) {
       await writeText(join(transaction, 'transaction.json'), JSON.stringify({
-        version: 1, dataDir: dataRoot, phase: 'swapping', previousEntries, installedEntries: []
+        version: 0, dataDir: dataRoot, phase: 'swapping', previousEntries, installedEntries: []
       }))
       await expect(service.recoverInterruptedDataRestore()).rejects.toThrow('Invalid restore transaction journal')
       expect(await readFile(join(dataRoot, 'projects.json'), 'utf8')).toBe('keep')
@@ -371,7 +400,7 @@ describe('data backup restore', () => {
     await writeZip(archive, [
       ...configFileNames.map((fileName) => ({
         name: `config/${fileName}`,
-        data: `new ${fileName}`
+        data: fileName === 'tools.json' ? '{"version":0,"order":[],"external_directories":[]}' : `new ${fileName}`
       })),
       { name: 'notes/state.txt', data: 'new state' },
       { name: 'log/archived.log', data: 'must not restore' }
@@ -438,7 +467,7 @@ describe('data backup restore', () => {
     await writeText(join(dataRoot, 'current.txt'), 'current data')
     await writeZip(archive, configFileNames.map((fileName) => ({
       name: `config/${fileName}`,
-      data: '{}'
+      data: fileName === 'tools.json' ? '{"version":0,"order":[],"external_directories":[]}' : '{}'
     })))
     const backupService = await loadBackupService(dataRoot, async () => {
       throw new Error('formal validation failed')
@@ -459,7 +488,7 @@ describe('data backup restore', () => {
       ...configFileNames.map((fileName) => writeText(join(dataRoot, 'config', fileName), `old ${fileName}`))
     ])
     await writeZip(archive, [
-      ...configFileNames.map((fileName) => ({ name: `config/${fileName}`, data: `new ${fileName}` })),
+      ...configFileNames.map((fileName) => ({ name: `config/${fileName}`, data: fileName === 'tools.json' ? '{"version":0,"order":[],"external_directories":[]}' : `new ${fileName}` })),
       { name: 'notes/state.txt', data: 'new state' }
     ])
     const backupService = await loadBackupService(dataRoot)
@@ -499,7 +528,7 @@ describe('data backup restore', () => {
       ...configFileNames.map((fileName) => writeText(join(dataRoot, 'config', fileName), `old ${fileName}`))
     ])
     await writeZip(archive, [
-      ...configFileNames.map((fileName) => ({ name: `config/${fileName}`, data: `new ${fileName}` })),
+      ...configFileNames.map((fileName) => ({ name: `config/${fileName}`, data: fileName === 'tools.json' ? '{"version":0,"order":[],"external_directories":[]}' : `new ${fileName}` })),
       { name: 'marker.txt', data: 'new' }
     ])
     const backupService = await loadBackupService(dataRoot)
@@ -532,11 +561,11 @@ describe('data backup restore', () => {
       ...configFileNames.map((fileName) => writeText(join(dataRoot, 'config', fileName), `old ${fileName}`)),
       writeZip(firstArchive, configFileNames.map((fileName) => ({
         name: `config/${fileName}`,
-        data: `first ${fileName}`
+        data: fileName === 'tools.json' ? '{"version":0,"order":[],"external_directories":[]}' : `first ${fileName}`
       }))),
       writeZip(secondArchive, configFileNames.map((fileName) => ({
         name: `config/${fileName}`,
-        data: `second ${fileName}`
+        data: fileName === 'tools.json' ? '{"version":0,"order":[],"external_directories":[]}' : `second ${fileName}`
       })))
     ])
     const backupService = await loadBackupService(dataRoot)
@@ -576,7 +605,7 @@ describe('data backup restore', () => {
     ])
     await writeZip(archive, configFileNames.map((fileName) => ({
       name: `config/${fileName}`,
-      data: `new ${fileName}`
+      data: fileName === 'tools.json' ? '{"version":0,"order":[],"external_directories":[]}' : `new ${fileName}`
     })))
     const backupService = await loadBackupService(dataRoot)
     const order: string[] = []
@@ -604,7 +633,7 @@ describe('data backup restore', () => {
       ...configFileNames.map((fileName) => writeText(join(dataRoot, 'config', fileName), `old ${fileName}`))
     ])
     await writeZip(archive, [
-      ...configFileNames.map((fileName) => ({ name: `config/${fileName}`, data: `new ${fileName}` })),
+      ...configFileNames.map((fileName) => ({ name: `config/${fileName}`, data: fileName === 'tools.json' ? '{"version":0,"order":[],"external_directories":[]}' : `new ${fileName}` })),
       { name: 'marker.txt', data: 'new' }
     ])
     let failNextCommittedJournal = false
@@ -662,7 +691,7 @@ describe('data backup restore', () => {
       writeText(join(transactionRoot, 'previous', 'old.txt'), 'old file'),
       writeText(join(transactionRoot, 'staged', 'notes', 'state.txt'), 'uninstalled staged data'),
       writeText(join(transactionRoot, 'transaction.json'), JSON.stringify({
-        version: 1,
+        version: 0,
         dataDir: dataRoot,
         phase: 'activated',
         previousEntries: ['config', 'old.txt'],
@@ -688,7 +717,7 @@ describe('data backup restore', () => {
       ...configFileNames.map((fileName) => writeText(join(dataRoot, 'config', fileName), `old ${fileName}`))
     ])
     await writeZip(archive, [
-      ...configFileNames.map((fileName) => ({ name: `config/${fileName}`, data: `new ${fileName}` })),
+      ...configFileNames.map((fileName) => ({ name: `config/${fileName}`, data: fileName === 'tools.json' ? '{"version":0,"order":[],"external_directories":[]}' : `new ${fileName}` })),
       { name: 'notes/state.txt', data: 'new state' }
     ])
     const backupService = await loadBackupService(
@@ -716,7 +745,7 @@ describe('data backup restore', () => {
       writeText(join(transactionRoot, 'previous', 'config', 'settings.json'), 'old config'),
       writeText(join(transactionRoot, 'previous', 'tools', 'sample', 'run.sh'), 'old script'),
       writeText(join(transactionRoot, 'transaction.json'), JSON.stringify({
-        version: 1,
+        version: 0,
         dataDir: dataRoot,
         phase: 'activated',
         previousEntries: ['config', 'tools'],

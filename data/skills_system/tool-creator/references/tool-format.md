@@ -2,11 +2,11 @@
 
 ## Discovery and Identity
 
-Each package is a directory with `TOOL.json` at its root and any scripts/resources beside it. User packages live under the application data directory's `tools/`; project packages live under a configured project source folder's `.agents/tools/`. Project packages do not appear in the global tool-management list.
+Each package is a directory with `TOOL.json` at its root and any scripts/resources beside it. User packages live under the application data directory's `tools/`; project packages live under a configured project source folder's `.agents/tools/`. System packages are mirrored to `tools_system/`; added external directories are referenced in place. Project packages do not appear in the global tool-management list.
 
-`config/tools.json` stores ordering, not tool definitions. Creating a package does not require adding its manifest there. Inspect names and IDs before choosing a destination; do not overwrite a conflicting package. Preserve the ID when updating or renaming. Use Anas's management UI to rename or delete installed user packages so selection, ordering, and active-directory checks remain consistent.
+`config/tools.json` stores versioned source references and ordering, not tool definitions. Creating a package does not require adding its manifest there. Inspect names and IDs before choosing a destination; do not overwrite a conflicting package. Preserve the ID when updating or renaming. Use Anas's management UI to rename or delete installed user packages so selection, ordering, and active-directory checks remain consistent.
 
-Among valid enabled tools with the same callable name, project source-folder order takes precedence over user tools. A file existing on disk does not establish which definition is selected.
+Among valid enabled tools with the same callable name, precedence is project source-folder order, user tools, added external-directory order, then system tools. A file existing on disk does not establish which definition is selected.
 
 ## TOOL.json
 
@@ -14,6 +14,7 @@ Use these persisted field names:
 
 | Field | Contract |
 | --- | --- |
+| `version` | Required integer `0`, the current application tool format. |
 | `id` | Stable package identity: 1–100 letters, digits, underscores, or hyphens; unique within its source. Do not include catalog prefixes such as `user:`. |
 | `name` | Callable name: at most 64 characters; begins with a letter or underscore, then letters, digits, underscores, or hyphens. Avoid built-in/Shell tool names and reserved `mcp_`, `__`, `anas_`, and `code_review` prefixes. |
 | `description` | Nonempty operation and usage guidance, at most 8192 characters. |

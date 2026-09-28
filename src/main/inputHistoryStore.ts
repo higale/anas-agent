@@ -5,7 +5,7 @@ import { getInputHistoryFile } from './config/dataDir'
 import type { InputHistoryItem, InputHistorySnapshot } from '@shared/types'
 
 interface StoredInputHistory {
-  version: 1
+  version: 0
   maxHistory: number
   items: InputHistoryItem[]
 }
@@ -53,18 +53,23 @@ export function normalizeInputHistoryStore(raw: Partial<StoredInputHistory> | un
     }]
   }) : []
   return {
-    version: 1,
+    version: 0,
     maxHistory,
     items: prune(items, maxHistory)
   }
 }
 
-export async function readInputHistoryStoreFile(path: string): Promise<StoredInputHistory> {
-  const parsed = JSON.parse(await readFile(path, 'utf8')) as Partial<StoredInputHistory>
-  if (parsed.version !== 1 || !Array.isArray(parsed.items)) {
+export function parseInputHistoryStore(value: unknown): StoredInputHistory {
+  const parsed = value as Partial<StoredInputHistory> | null
+  if (!parsed || parsed.version !== 0 || !Array.isArray(parsed.items)
+    || parsed.items.some(item => !item || typeof item.text !== 'string')) {
     throw new Error('Input history has an invalid format.')
   }
   return normalizeInputHistoryStore(parsed)
+}
+
+export async function readInputHistoryStoreFile(path: string): Promise<StoredInputHistory> {
+  return parseInputHistoryStore(JSON.parse(await readFile(path, 'utf8')))
 }
 
 async function readStore(): Promise<StoredInputHistory> {
@@ -72,7 +77,7 @@ async function readStore(): Promise<StoredInputHistory> {
     return await readInputHistoryStoreFile(getInputHistoryFile())
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { version: 1, maxHistory: defaultMaxHistory, items: [] }
+      return { version: 0, maxHistory: defaultMaxHistory, items: [] }
     }
     throw error
   }

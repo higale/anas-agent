@@ -21,6 +21,7 @@ const { verifyDefaultCapabilities } = require('./electron-default-capabilities.c
 const { verifyGlobalSettings } = require('./electron-global-settings.cjs')
 const { verifySkillApproval } = require('./electron-skill-approval.cjs')
 const { verifyCustomTools } = require('./electron-custom-tools.cjs')
+const { verifyCurrentData } = require('./electron-data-migrations.cjs')
 const { verifyModelSelection } = require('./electron-model-selection.cjs')
 const { verifySpeechReply } = require('./electron-speech-reply.cjs')
 const { verifyAttachmentPreviews } = require('./electron-attachment-previews.cjs')
@@ -1048,6 +1049,11 @@ async function verifyCodeReview(electronApplication) {
 }
 
 async function main() {
+  if (process.argv.includes('--current-data-only')) {
+    await verifyCurrentData(launchApplication)
+    return
+  }
+
   if (process.argv.includes('--skill-approval-only')) {
     await verifySkillApproval(launchApplication)
     return
@@ -1111,6 +1117,7 @@ async function main() {
     return
   }
   if (!process.argv.includes('--changes-only')) {
+    await verifyCurrentData(launchApplication)
     await verifySpeechReply(launchApplication)
     await verifyDefaultCapabilities(launchApplication)
     await verifyGlobalSettings(launchApplication)
@@ -1135,7 +1142,7 @@ async function main() {
     await git('commit', '-m', 'Initial fixture')
     await writeFile(join(workspace, 'greeting.txt'), 'Working tree edit\n')
     await writeFile(join(testHome, 'projects.json'), `${JSON.stringify({
-      version: 4,
+      version: 0,
       projects: [{
         id: 'default-workspace',
         kind: 'workspace',

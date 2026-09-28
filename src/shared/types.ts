@@ -1,3 +1,4 @@
+import type { PackageFilePreview } from './packageFiles'
 import type { HelpDocumentId } from './helpDocuments'
 import type { ProjectOperationResult } from './projectOperation'
 import type { AgentApi } from './agentTypes'
@@ -731,28 +732,8 @@ export interface SkillSnapshot {
   skills: SkillSummary[]
 }
 
-export interface SkillFileNode {
-  name: string
-  path: string
-  relativePath: string
-  kind: 'directory' | 'text' | 'binary' | 'symlink'
-  size?: number
-  linkTarget?: string
-  resolvedPath?: string
-  linkDirectory?: boolean
-}
-
-export interface SkillFilePreview {
-  skillId: string
-  name: string
-  path: string
-  relativePath: string
-  size: number
-  kind: 'text' | 'binary'
-  content?: string
-  linkTarget?: string
-  resolvedPath: string
-}
+export type SkillFileNode = import('./packageFiles').PackageFileNode
+export interface SkillFilePreview extends PackageFilePreview { skillId: string }
 
 export interface SkillAvailabilityUpdate {
   modelAvailable?: boolean
@@ -848,6 +829,12 @@ export interface GaleApi {
     get(projectId?: string, sourceFolders?: string[]): Promise<import('./toolPackages').ToolSnapshot>
     refresh(): Promise<AppConfigSnapshot>
     importDirectories(): Promise<ToolImportResult>
+    addDirectory(): Promise<{ status: 'added' | 'cancelled' }>
+    updateDirectory(id: string, name: string): Promise<void>
+    removeDirectory(id: string): Promise<void>
+    moveDirectory(id: string, direction: -1 | 1): Promise<void>
+    listFiles(id: string, relativePath?: string, sourceFolders?: string[]): Promise<import('./packageFiles').PackageFileNode[]>
+    readFile(id: string, relativePath: string, sourceFolders?: string[]): Promise<import('./packageFiles').PackageFilePreview>
   }
   skills: {
     updateScriptApproval(projectId: string | undefined, skillId: string | undefined, enabled: boolean): Promise<SkillSnapshot>

@@ -1,4 +1,5 @@
 {
+  "version": 0,
   "id": "example-file-sha256",
   "name": "file_sha256",
   "description": "Calculate the SHA-256 digest of a local file and return its absolute path, bytes read, and digest as JSON. Read the file in chunks without loading it entirely into memory.",

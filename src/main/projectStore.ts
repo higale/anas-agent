@@ -20,12 +20,12 @@ import {
 } from '@shared/types'
 
 interface StoredProjects {
-  version: 4
+  version: 0
   projects: Project[]
 }
 
 interface ProjectDeletionJournal {
-  version: 4
+  version: 0
   projectId: string
   threadIds: string[]
   previous: ReturnType<typeof serializeProjectStore>
@@ -96,7 +96,7 @@ function requireProject(value: unknown, index: number): Project {
 
 export function parseProjectStore(value: unknown): StoredProjects {
   const parsed = value as { version?: unknown; projects?: unknown } | null
-  if (!parsed || parsed.version !== 4 || !Array.isArray(parsed.projects)) {
+  if (!parsed || parsed.version !== 0 || !Array.isArray(parsed.projects)) {
     throw new Error('Project store has an invalid format.')
   }
   const projects = parsed.projects.map(requireProject)
@@ -107,7 +107,7 @@ export function parseProjectStore(value: unknown): StoredProjects {
   if (!defaultWorkspace || defaultWorkspace.kind !== 'workspace' || defaultWorkspace.pinned) {
     throw new Error('Project store must contain one unpinned default workspace project.')
   }
-  return { version: 4, projects }
+  return { version: 0, projects }
 }
 
 export async function readProjectStoreFile(path: string): Promise<StoredProjects> {
@@ -169,7 +169,7 @@ async function initializeMissingStore(path: string): Promise<void> {
       const defaultWorkspaceDir = getDefaultWorkspaceDir()
       await mkdir(defaultWorkspaceDir, { recursive: true })
       const store: StoredProjects = {
-        version: 4,
+        version: 0,
         projects: [{
           id: DEFAULT_WORKSPACE_PROJECT_ID,
           kind: 'workspace',
@@ -466,7 +466,7 @@ export async function recoverProjectDeletion(
       throw reason
     }
     if (
-      journal.version !== 4
+      journal.version !== 0
       || typeof journal.projectId !== 'string'
       || !Array.isArray(journal.threadIds)
       || journal.threadIds.some((id) => typeof id !== 'string')
@@ -501,11 +501,11 @@ export async function deleteProjectWithThreads<T>(
     }
 
     const next: StoredProjects = {
-      version: 4,
+      version: 0,
       projects: store.projects.filter((project) => project.id !== projectId)
     }
     const journal: ProjectDeletionJournal = {
-      version: 4,
+      version: 0,
       projectId,
       threadIds: [...threadIds],
       previous: serializeProjectStore(store),

@@ -18,7 +18,7 @@ import { runtimeLog } from '../runtimeLogger'
 import { AgentDatabase } from './agentDatabase'
 import { SqliteMemoryStore } from './memoryStore'
 
-const catalogVersion = 1
+const catalogVersion = 0
 const sqliteSuffixes = ['', '-wal', '-shm', '-journal']
 const nativeDependency = createRequire(import.meta.url)
 const requiredCatalogColumns: Record<string, string[]> = {

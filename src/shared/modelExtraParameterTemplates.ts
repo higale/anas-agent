@@ -1,6 +1,9 @@
+import { requireDataVersion } from './dataVersion'
 import rawTemplates from '../../data/config/model-extra-parameter-templates.json'
 import { mergeModelParameters } from './modelConfig'
 import type { ModelProtocol } from './types'
+
+requireDataVersion(rawTemplates, 0, 'model extra parameter templates')
 
 export interface ModelExtraParameterTemplate {
   path: string[]
@@ -16,7 +19,11 @@ interface ModelExtraParameterGroup {
   parameters: ModelExtraParameterTemplate[]
 }
 
-export const modelExtraParameterGroups: Record<ModelProtocol, ModelExtraParameterGroup[]> = rawTemplates
+export const modelExtraParameterGroups: Record<ModelProtocol, ModelExtraParameterGroup[]> = {
+  openai_chat_completions: rawTemplates.openai_chat_completions,
+  openai_responses: rawTemplates.openai_responses,
+  anthropic_messages: rawTemplates.anthropic_messages
+}
 
 export function modelExtraParameterStatus(
   parameters: Record<string, unknown>,

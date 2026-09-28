@@ -1,6 +1,9 @@
+import { requireDataVersion } from './dataVersion'
 import rawParameterPresetTemplates from '../../data/config/model-parameter-preset-templates.json'
 import type { ModelParameterPreset, ModelProtocol } from './types'
 import { modelReservedParameterKeys } from './modelParameterValidation'
+
+requireDataVersion(rawParameterPresetTemplates, 0, 'model parameter preset templates')
 
 export interface ModelParameterPresetTemplate {
   id: string

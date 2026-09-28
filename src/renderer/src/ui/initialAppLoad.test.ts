@@ -57,6 +57,18 @@ function createLoader(overrides: Partial<{
 }
 
 describe('InitialAppLoader', () => {
+  it('keeps the application gated until input history settles and reports data errors as critical', async () => {
+    const history = deferred<InitialAppResources['inputHistory']>()
+    const { loader } = createLoader({ inputHistory: () => history.promise })
+    loader.start()
+    await vi.waitFor(() => expect(loader.snapshot().config.phase).toBe('ready'))
+    expect(initialAppCriticalPhase(loader.snapshot())).toBe('loading')
+    history.resolve(values().inputHistory)
+    await vi.waitFor(() => expect(initialAppCriticalPhase(loader.snapshot())).toBe('ready'))
+    const failed = createLoader({ inputHistory: async () => { throw new Error('Invalid input history') } }).loader
+    failed.start()
+    await vi.waitFor(() => expect(initialAppCriticalPhase(failed.snapshot())).toBe('error'))
+  })
   it('makes critical resources ready without waiting for optional resources', async () => {
     const buildInfo = deferred<InitialAppResources['buildInfo']>()
     const icon = deferred<InitialAppResources['icon']>()

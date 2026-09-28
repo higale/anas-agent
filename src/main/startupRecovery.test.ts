@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   transition: vi.fn(), closeAgent: vi.fn(), closeMcp: vi.fn(), recoverRestore: vi.fn(),
   createWindow: vi.fn(), preserve: vi.fn(), reset: vi.fn(), resetProjects: vi.fn(),
   relaunch: vi.fn(), quit: vi.fn(), configureLogger: vi.fn(),
-  inspectRepair: vi.fn(), repair: vi.fn(), readProjects: vi.fn(), validateDatabase: vi.fn()
+  inspectRepair: vi.fn(), repair: vi.fn()
 }))
 vi.mock('electron', () => ({ app: { relaunch: mocks.relaunch, quit: mocks.quit }, shell: { openPath: vi.fn() } }))
 vi.mock('./ipcSecurity', () => ({ handleMainIpc: (channel: string, handler: (...args: any[]) => any) => mocks.handlers.set(channel, handler) }))
@@ -22,8 +22,6 @@ vi.mock('./recoveryData', async (importOriginal) => ({
   preserveRecoveryData: mocks.preserve, resetRecoveryConfig: mocks.reset
 }))
 vi.mock('./backupService', () => ({ recoverInterruptedDataRestore: mocks.recoverRestore, resetProjectData: mocks.resetProjects }))
-vi.mock('./projectStore', async (importOriginal) => ({ ...await importOriginal<typeof import('./projectStore')>(), readProjectStoreFile: mocks.readProjects }))
-vi.mock('./agent/agentStorage', () => ({ AgentStorage: { validateCatalogBackup: mocks.validateDatabase } }))
 vi.mock('./runtimeLogger', () => ({ runtimeLog: vi.fn(), configureRuntimeLogger: mocks.configureLogger }))
 vi.mock('./recoveryRepair', async (importOriginal) => ({
   ...await importOriginal<typeof import('./recoveryRepair')>(), inspectRecoveryRepair: mocks.inspectRepair, repairRecoveryData: mocks.repair
@@ -46,16 +44,13 @@ beforeEach(() => {
 })
 
 describe('startup recovery lifecycle', () => {
-  it('offers the global reset boundary for catalog damage', async () => {
+  it('presents the combined project and database inspection result', async () => {
     const recovery = await setup()
-    mocks.inspectRepair.mockResolvedValue({ candidates: [], issues: [], files: [{ name: 'projects.json', path: '/test/data/projects.json', repairableFields: [] }] })
-    mocks.readProjects.mockResolvedValue({ projects: [{ id: 'project' }] })
-    mocks.validateDatabase.mockImplementation(() => { throw new Error('no such column: invalid_field') })
+    mocks.inspectRepair.mockResolvedValue({ candidates: [], issues: [], files: [{ name: 'projects.json', path: '/test/data/projects.json', repairableFields: ['sqlite/catalog.sqlite: user_version (1 → 0)'] }] })
     await recovery.showStartupRecovery(new Error('database failed'))
     const snapshot = await invoke('inspect')
     expect(snapshot).toMatchObject({ catalogPath: '/test/data/sqlite/catalog.sqlite', conversationsPath: '/test/data/sqlite/conversations' })
-    expect(snapshot.files[0]).toMatchObject({ name: 'projects.json', error: 'no such column: invalid_field' })
-    expect(mocks.validateDatabase).toHaveBeenCalledWith('/test/data/sqlite/catalog.sqlite', new Set(['project']))
+    expect(snapshot.files[0]).toMatchObject({ name: 'projects.json', repairableFields: ['sqlite/catalog.sqlite: user_version (1 → 0)'] })
   })
   it('requires stopped writers for field repair and delegates preservation to the repair service', async () => {
     const recovery = await setup()
@@ -165,5 +160,15 @@ describe('startup recovery lifecycle', () => {
     await expect(invoke('resetProjects')).rejects.toThrow('reset failed')
     expect(await invoke('inspect')).toMatchObject({ canModify: false, stopError: 'rollback failed' })
     await expect(invoke('reset', 'settings.json')).rejects.toThrow('rollback failed')
+  })
+
+  it('blocks further repair writes when the project repair rollback cannot finish', async () => {
+    const recovery = await setup()
+    await recovery.showStartupRecovery(new Error('wrong versions'))
+    mocks.repair.mockRejectedValue(new Error('repair failed'))
+    mocks.recoverRestore.mockRejectedValue(new Error('rollback failed'))
+    await expect(invoke('repair', 'projects.json')).rejects.toThrow('repair failed')
+    expect(await invoke('inspect')).toMatchObject({ canModify: false, stopError: 'rollback failed' })
+    await expect(invoke('repair', 'projects.json')).rejects.toThrow('rollback failed')
   })
 })

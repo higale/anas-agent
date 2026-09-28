@@ -28,7 +28,7 @@ afterAll(() => { nativeFs.rename = nativeRename })
 
 async function writeJson(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
+  await writeFile(path, `${JSON.stringify({ version: 0, ...value as object }, null, 2)}\n`, 'utf8')
 }
 
 async function loadRawConfig() {
@@ -86,7 +86,7 @@ describe('domain config storage', () => {
     await rawConfig.writeRawSettingsConfig({ settings: { default_model_id: 'updated' } })
 
     expect(renameFailure.attempts).toBeGreaterThanOrEqual(3)
-    expect(await readFile(path, 'utf8')).toBe('{\n  "default_model_id": "updated"\n}\n')
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({ default_model_id: 'updated', version: 0 })
     expect(await readdir(configDir)).toEqual([fileNames.settings])
   })
 
@@ -109,7 +109,7 @@ describe('domain config storage', () => {
     // background retry against the new destination after the rejection.
     renameFailure.remaining = 1
     await rawConfig.writeRawSettingsConfig({ settings: { default_model_id: 'next' } })
-    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({ default_model_id: 'next' })
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({ default_model_id: 'next', version: 0 })
   })
 
   it('does not retry non-transient rename errors and preserves the original config', async () => {
@@ -266,6 +266,7 @@ describe('domain config storage', () => {
     await expect(readFile(join(configDir, fileNames.settings), 'utf8')).resolves.toBe(originalSettings)
     const models = JSON.parse(await readFile(join(configDir, fileNames.models), 'utf8'))
     expect(models).toEqual({
+      version: 0,
       providers: [{ id: 'first', name: 'First' }, { id: 'second', name: 'Second' }]
     })
 
@@ -289,6 +290,7 @@ describe('domain config storage', () => {
     })
     const settings = JSON.parse(await readFile(join(configDir, fileNames.settings), 'utf8'))
     expect(settings).toEqual({
+      version: 0,
       profile: {
         assistant: {
           name: 'Local assistant',

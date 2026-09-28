@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { errorDetail, type RecoveryFile, type RecoveryFileStatus, type RecoverySnapshot } from '@shared/recovery'
+import { errorDetail, recoverableAuxiliaryFiles, resettableConfigFiles, type ResettableConfigFile, type RecoveryFile, type RecoveryFileStatus, type RecoverySnapshot } from '@shared/recovery'
 import { ConfirmDialog } from './dialogs/ConfirmDialog'
 import type { ConfirmDialogRequest } from './dialogs/dialogTypes'
 
@@ -39,6 +39,7 @@ export function RecoveryApp() {
 
   function confirmReset(file: RecoveryFileStatus): void {
     if (!snapshot) return
+    if (file.name !== 'projects.json' && !resettableConfigFiles.includes(file.name as ResettableConfigFile)) return
     const project = file.name === 'projects.json'
     setConfirmation({
       title: t('recovery.reset_file', { file: file.name }), variant: 'danger',
@@ -51,7 +52,7 @@ export function RecoveryApp() {
       }),
       onConfirm: () => perform(async () => {
         if (file.name === 'projects.json') await window.gale.recovery.resetProjects()
-        else await window.gale.recovery.reset(file.name)
+        else await window.gale.recovery.reset(file.name as ResettableConfigFile)
         setCompleted((current) => ({ ...current, [file.name]: t('recovery.file_reset') }))
         setReports((current) => ({ ...current, [file.name]: t('recovery.file_reset') }))
         setNotice(t('recovery.restart_hint'))
@@ -61,16 +62,19 @@ export function RecoveryApp() {
 
   function confirmRepair(file: RecoveryFileStatus): void {
     setConfirmation({
-      title: t('recovery.repair_file', { file: file.name }), confirmText: t('recovery.repair'),
+      title: t('recovery.repair_file', { file: file.name === 'assets/avatar-transform.json' ? t('recovery.avatar_files') : file.name }), confirmText: t('recovery.repair'),
       description: t('recovery.repair_confirm', { path: file.path, count: file.repairableFields.length }),
       onConfirm: () => perform(async () => {
         const result = await window.gale.recovery.repair(file.name)
         setReports((current) => ({ ...current, [file.name]: [
+          ...(result.preservationPath ? [t('recovery.saved_at', { path: result.preservationPath })] : []),
           t('recovery.repaired_fields'), ...result.repaired,
           t('recovery.unresolved_fields'), ...result.unresolved
         ].join('\n') }))
-        if (result.unresolved.length) setError(result.unresolved.join('\n'))
-        else {
+        if (result.unresolved.length) {
+          setError(result.unresolved.join('\n'))
+          if (result.repaired.length) setCompleted((current) => ({ ...current, [file.name]: t('recovery.file_partially_repaired') }))
+        } else {
           setCompleted((current) => ({ ...current, [file.name]: t('recovery.file_repaired') }))
           setNotice(t('recovery.restart_hint'))
         }
@@ -103,7 +107,8 @@ export function RecoveryApp() {
                 ? completed[file.name] : !file.error && !file.repairableFields.length ? completed[file.name] : undefined
               return <div className="initial-app-failure" key={file.name} role="group" aria-label={file.name}>
                 <span>
-                  <b>{file.name}</b>
+                  <b>{file.name === 'assets/avatar-transform.json' ? t('recovery.avatar_files') : file.name}</b>
+                  {file.name === 'assets/avatar-transform.json' && <small>{file.path}</small>}
                   {file.name === 'projects.json' && <>
                     <small>{snapshot.catalogPath}</small>
                     <small>{snapshot.conversationsPath}</small>
@@ -112,8 +117,8 @@ export function RecoveryApp() {
                     ? t('recovery.file_repairable', { count: file.repairableFields.length }) : t('recovery.file_unrepairable'))}</small>
                 </span>
                 {!done && <div className="ui-row">
-                  {file.repairableFields.length > 0 && <button className="ui-button ui-button-primary" disabled={busy || !snapshot.canModify} onClick={() => confirmRepair(file)}>{t('recovery.repair')}</button>}
-                  <button className="ui-button ui-button-danger" disabled={busy || !snapshot.canModify} onClick={() => confirmReset(file)}>{t('recovery.reset')}</button>
+                  <button className="ui-button ui-button-primary" disabled={busy || !snapshot.canModify} onClick={() => confirmRepair(file)}>{t('recovery.repair')}</button>
+                  {!recoverableAuxiliaryFiles.includes(file.name as typeof recoverableAuxiliaryFiles[number]) && <button className="ui-button ui-button-danger" disabled={busy || !snapshot.canModify} onClick={() => confirmReset(file)}>{t('recovery.reset')}</button>}
                 </div>}
               </div>
             })}

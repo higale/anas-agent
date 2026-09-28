@@ -38,6 +38,7 @@ function parseCachedModels(value: unknown): string[] {
 function parseModelListCache(value: unknown, endpoint: string): ModelListCache | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const record = value as Record<string, unknown>
+  if (record.version !== 0) return undefined
   const cachedAt = typeof record.cachedAt === 'string' ? record.cachedAt : ''
   const cacheEndpoint = typeof record.endpoint === 'string' ? record.endpoint : ''
   const models = parseCachedModels(record.models)
@@ -71,5 +72,5 @@ export async function writeModelListCache(endpoint: string, apiKey: string | und
     models
   }
   await mkdir(join(getCacheDir(), 'model_lists'), { recursive: true })
-  await writeFile(modelListCachePath(endpoint, apiKey), JSON.stringify(cache, null, 2), 'utf8')
+  await writeFile(modelListCachePath(endpoint, apiKey), JSON.stringify({ version: 0, ...cache }, null, 2), 'utf8')
 }

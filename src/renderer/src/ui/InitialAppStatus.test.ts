@@ -23,6 +23,7 @@ describe('InitialAppStatus', () => {
     const snapshot = createInitialAppLoadSnapshot()
     snapshot.projects = { phase: 'ready' }
     snapshot.config = { phase: 'error', error: 'Config unavailable' }
+    snapshot.inputHistory = { phase: 'ready' }
     const html = renderToStaticMarkup(createElement(InitialAppGate, {
       snapshot
     }))

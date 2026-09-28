@@ -192,7 +192,7 @@ async function verifyRoundChanges(launchApplication) {
   try {
     const workspace = join(home, 'workspace'), now = new Date().toISOString()
     await mkdir(workspace)
-    await writeFile(join(home, 'projects.json'), JSON.stringify({ version: 4, projects: [{
+    await writeFile(join(home, 'projects.json'), JSON.stringify({ version: 0, projects: [{
       id: 'default-workspace', kind: 'workspace', name: 'Round changes fixture', sourceFolders: [workspace],
       capabilities, restrict_subagents, advanced_settings: false, coding_mode: false,
       pinned: false, collapsed: false, prompt: '', createdAt: now, updatedAt: now

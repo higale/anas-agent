@@ -81,7 +81,7 @@ function requireTraceLimits(limits: ProviderHttpTraceLimits): ProviderHttpTraceL
 }
 
 async function writeJson(path: string, value: unknown): Promise<void> {
-  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
+  await writeFile(path, `${JSON.stringify({ ...value as Record<string, unknown>, version: 0 }, null, 2)}\n`, 'utf8')
 }
 
 async function writeAll(file: FileHandle, value: Uint8Array): Promise<void> {
@@ -140,7 +140,6 @@ function requestMetadata(
   requestBodyFileName: string
 ): Record<string, unknown> {
   return {
-    formatVersion: 1,
     startedAt: startedAt.toISOString(),
     requestId: options.requestId,
     role: options.requestRole ?? 'model',

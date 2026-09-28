@@ -1,3 +1,4 @@
+import { requireDataVersion } from './dataVersion'
 import { validateSubagentSelection, type SubagentSelection } from './subagentSelection'
 import defaults from '../../data/config/capabilities.json'
 import projectDefaults from '../../data/config/projects.json'
@@ -137,6 +138,7 @@ export function serializeCapabilities(value: AgentCapabilities) {
 }
 
 export const defaultCapabilities = parseCapabilities(defaults)
+requireDataVersion(projectDefaults, 0, 'project defaults')
 export const defaultProjectSettings = { advancedSettings: projectDefaults.advanced_settings, codingMode: projectDefaults.coding_mode, prompt: projectDefaults.prompt }
 
 export interface DefaultCapabilitySettings {

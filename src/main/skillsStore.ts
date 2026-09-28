@@ -1,10 +1,12 @@
+import { requireDataVersion } from '@shared/dataVersion'
+import { listPackageFiles, readPackageFile } from './packageFiles'
 import { writeJsonFileAtomic } from './atomicJson'
 import { mirrorBundledDirectories } from './bundledDirectories'
 import { getAppConfigSnapshot } from './config/appConfig'
 import { createHash, randomUUID } from 'node:crypto'
 import { copyFile, cp, lstat, mkdir, open, readFile, readdir, readlink, realpath, rename, rm, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import { SKILL_ROOT_DISPLAY_NAME_MAX_LENGTH, SKILL_SHORTCUT_ALIAS_MAX_LENGTH, SKILL_SHORTCUT_ALIAS_PATTERN } from '@shared/types'
 import type {
@@ -53,6 +55,7 @@ interface StoredAvailability {
 }
 
 interface SkillsConfigFile {
+  version: 0
   script_auto_approve: boolean
   script_auto_approve_skills: string[]
   external_directories: ExternalSkillDirectory[]
@@ -76,12 +79,8 @@ interface SkillDirectory {
   resolvedPath?: string
 }
 
-const ignoredDirectories = new Set(['.git', '.svn', '__pycache__', 'node_modules', '.backup', '__history', '__recovery'])
-const binaryExtensions = new Set(['.7z', '.avi', '.bin', '.bmp', '.db', '.dmg', '.doc', '.docx', '.gif', '.gz', '.ico', '.jpeg', '.jpg', '.mov', '.mp3', '.mp4', '.pdf', '.png', '.ppt', '.pptx', '.sqlite', '.tar', '.tgz', '.wav', '.webp', '.xls', '.xlsx', '.zip'])
 const maxPreviewBytes = 1024 * 1024
-const maxTreeDepth = 24
 const maxSkillDirectoriesPerRoot = 2048
-const maxTreeEntriesPerDirectory = 4096
 const skillNamePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const reservedAliases = new Set(['system', 'user', 'project'])
 let initialization: Promise<void> | undefined
@@ -166,6 +165,7 @@ function normalizeExternalDirectory(value: unknown): ExternalSkillDirectory {
 }
 
 export function normalizeSkillsConfig(value: unknown): SkillsConfigFile {
+  requireDataVersion(value, 0, 'Skills configuration')
   if (!isRecord(value) || !Array.isArray(value.external_directories) || !isRecord(value.availability)) {
     throw new Error('Skills configuration is invalid.')
   }
@@ -188,7 +188,7 @@ export function normalizeSkillsConfig(value: unknown): SkillsConfigFile {
   if (value.script_auto_approve !== undefined && typeof value.script_auto_approve !== 'boolean') throw new Error('Skill script approval setting must be a boolean.')
   const scriptSkills = value.script_auto_approve_skills ?? []
   if (!Array.isArray(scriptSkills) || scriptSkills.some(id => typeof id !== 'string' || !id.trim())) throw new Error('Skill script approval entries must be Skill IDs.')
-  return { external_directories: directories, availability, script_auto_approve: value.script_auto_approve === true,
+  return { version: 0, external_directories: directories, availability, script_auto_approve: value.script_auto_approve === true,
     script_auto_approve_skills: [...new Set(scriptSkills)] }
 }
 
@@ -574,28 +574,6 @@ async function findSkill(projectId: string | undefined, skillId: string): Promis
   return skill
 }
 
-function safeRelativePath(value: string): string {
-  const normalized = value.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
-  if (!normalized || isAbsolute(value) || normalized.split('/').some((part) => part === '..' || part === '')) {
-    throw new Error('Skill file path is invalid.')
-  }
-  if (normalized.split('/').length > maxTreeDepth) throw new Error('Skill tree path is too deep.')
-  return normalized
-}
-
-function lexicalSkillPath(skill: LoadedSkill, value: string): string {
-  const safe = safeRelativePath(value)
-  const path = resolve(skill.summary.dirPath, safe)
-  const rel = relative(resolve(skill.summary.dirPath), path)
-  if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new Error('Skill file path is outside the Skill directory.')
-  return path
-}
-
-function fileKind(name: string): 'text' | 'binary' {
-  const dot = name.lastIndexOf('.')
-  return dot >= 0 && binaryExtensions.has(name.slice(dot).toLowerCase()) ? 'binary' : 'text'
-}
-
 async function readBoundedTextFile(path: string): Promise<string> {
   const handle = await open(path, 'r')
   try {
@@ -612,75 +590,11 @@ async function readBoundedTextFile(path: string): Promise<string> {
 }
 
 export async function listSkillFiles(projectId: string | undefined, skillId: string, relativePath?: string): Promise<SkillFileNode[]> {
-  const skill = await findSkill(projectId, skillId)
-  const directory = relativePath ? lexicalSkillPath(skill, relativePath) : skill.summary.dirPath
-  const directoryInfo = await stat(directory)
-  if (!directoryInfo.isDirectory()) throw new Error('Skill tree node is not a directory.')
-  const entries = await readdir(directory, { withFileTypes: true })
-  if (entries.length > maxTreeEntriesPerDirectory) {
-    throw new Error(`Skill directory contains more than ${maxTreeEntriesPerDirectory} entries.`)
-  }
-  const nodes = await Promise.all(entries
-    .filter((entry) => !ignoredDirectories.has(entry.name.toLowerCase()))
-    .map(async (entry): Promise<SkillFileNode> => {
-      const childPath = join(directory, entry.name)
-      const childRelative = relativePath ? `${safeRelativePath(relativePath)}/${entry.name}` : entry.name
-      const linkInfo = await lstat(childPath)
-      const targetInfo = linkInfo.isSymbolicLink() ? await stat(childPath).catch(() => undefined) : linkInfo
-      const kind = linkInfo.isSymbolicLink()
-        ? 'symlink'
-        : targetInfo?.isDirectory()
-          ? 'directory'
-          : fileKind(entry.name)
-      return {
-        name: entry.name,
-        path: childPath,
-        relativePath: childRelative,
-        kind,
-        ...(!targetInfo?.isDirectory() && targetInfo ? { size: targetInfo.size } : {}),
-        ...(linkInfo.isSymbolicLink() ? {
-          linkTarget: await readlink(childPath),
-          resolvedPath: await realpath(childPath).catch(() => undefined),
-          linkDirectory: targetInfo?.isDirectory() ?? false
-        } : {})
-      }
-    }))
-  return nodes.sort((left, right) => (
-    Number(right.kind === 'directory' || right.linkDirectory) - Number(left.kind === 'directory' || left.linkDirectory)
-    || left.name.localeCompare(right.name)
-  ))
+  return listPackageFiles((await findSkill(projectId, skillId)).summary.dirPath, relativePath)
 }
 
 export async function readSkillFile(projectId: string | undefined, skillId: string, relativePath: string): Promise<SkillFilePreview> {
-  const skill = await findSkill(projectId, skillId)
-  const lexicalPath = lexicalSkillPath(skill, relativePath)
-  const [linkInfo, resolvedPath] = await Promise.all([lstat(lexicalPath), realpath(lexicalPath)])
-  const handle = await open(resolvedPath, 'r')
-  let info
-  let data: Buffer
-  try {
-    info = await handle.stat()
-    if (!info.isFile()) throw new Error('Skill tree node is not a file.')
-    if (info.size > maxPreviewBytes) throw new Error(`Skill file exceeds ${maxPreviewBytes} bytes.`)
-    const buffer = Buffer.allocUnsafe(maxPreviewBytes + 1)
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
-    if (bytesRead > maxPreviewBytes) throw new Error(`Skill file exceeds ${maxPreviewBytes} bytes.`)
-    data = buffer.subarray(0, bytesRead)
-  } finally {
-    await handle.close()
-  }
-  const binary = fileKind(resolvedPath) === 'binary' || data.includes(0)
-  return {
-    skillId,
-    name: basename(lexicalPath),
-    path: lexicalPath,
-    relativePath: safeRelativePath(relativePath),
-    resolvedPath,
-    ...(linkInfo.isSymbolicLink() ? { linkTarget: await readlink(lexicalPath) } : {}),
-    size: info.size,
-    kind: binary ? 'binary' : 'text',
-    ...(!binary ? { content: data.toString('utf8') } : {})
-  }
+  return { ...await readPackageFile((await findSkill(projectId, skillId)).summary.dirPath, relativePath), skillId }
 }
 
 export async function updateSkillAvailability(projectId: string | undefined, skillId: string, update: SkillAvailabilityUpdate): Promise<SkillSnapshot> {

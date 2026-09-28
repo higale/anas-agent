@@ -70,6 +70,19 @@ describe('Windows avatar icon assets', () => {
     }
   })
 
+  it.each([undefined, 1])('preserves an unsupported avatar transform version %s during startup', async (version) => {
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'linux' })
+    const dataDir = await mkdtemp(join(tmpdir(), 'anas-avatar-version-'))
+    try {
+      const assets = await setAvatarSourceCrop('source.png', originalSource, Buffer.from('crop'), transform, dataDir)
+      const unsupported = JSON.stringify({ version, ...transform })
+      await writeFile(assets.transformPath, unsupported)
+      await expect(initializeAvatarAssets(dataDir)).rejects.toThrow('Unsupported avatar transform version')
+      expect(await readFile(assets.transformPath, 'utf8')).toBe(unsupported)
+      expect(await readFile(assets.sourcePath)).toEqual(originalSource)
+    } finally { await rm(dataDir, { recursive: true, force: true }) }
+  })
+
   it('commits validated source bytes without rereading a mutable external file', async () => {
     Object.defineProperty(process, 'platform', { configurable: true, value: 'linux' })
     const dataDir = await mkdtemp(join(tmpdir(), 'anas-agent-avatar-'))
@@ -156,7 +169,7 @@ describe('avatar asset transaction recovery', () => {
       await mkdir(previousDir, { recursive: true })
       await writeFile(join(previousDir, 'avatar-source.png'), 'previous source')
       await writeFile(join(previousDir, 'avatar-crop.png'), 'previous crop')
-      await writeFile(join(previousDir, 'avatar-transform.json'), `${JSON.stringify(transform)}\n`)
+      await writeFile(join(previousDir, 'avatar-transform.json'), `${JSON.stringify({ version: 0, ...transform })}\n`)
       await writeFile(join(previousDir, 'avatar.png'), 'previous display')
       await writeFile(join(previousDir, 'avatar-dock.png'), 'previous dock')
 

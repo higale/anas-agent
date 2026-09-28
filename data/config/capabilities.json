@@ -1,4 +1,5 @@
 {
+  "version": 0,
   "application_environment": true,
   "background_tools": true,
   "subagents": {

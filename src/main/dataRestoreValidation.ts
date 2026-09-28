@@ -3,6 +3,7 @@ import { access, lstat, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AgentDatabase } from './agent/agentDatabase'
 import { AgentStorage } from './agent/agentStorage'
+import { avatarTransformPath, readAvatarTransform } from './avatarAssets'
 import { normalizeAppConfigSnapshot } from './config/appConfig'
 import {
   configDirName, getAgentCatalogFile, getAgentConversationDatabaseFile,
@@ -36,6 +37,7 @@ export async function validateRestoredDataDirectory(root: string): Promise<void>
   }
   const inputHistory = join(root, 'input_history.json')
   if (await exists(inputHistory)) await readInputHistoryStoreFile(inputHistory)
+  if (await exists(avatarTransformPath(root))) await readAvatarTransform(root)
   await validateRestoredSkillsDirectory(join(root, 'skills'))
   await validateRestoredTools(root)
   const catalog = getAgentCatalogFile(root)

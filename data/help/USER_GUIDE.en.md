@@ -28,7 +28,7 @@ The bulk actions at the top differ from individual switches:
 - **Enable all** enables built-in capabilities and current custom tools, sets MCP to All tools, and switches Skills and Subagents to Use default. In project or default capability settings, it also clears Limit subagent capabilities. It does not start globally disabled MCP servers.
 - **Disable all** turns capabilities off and clears built-in, custom, and MCP tool selections. Custom skill and subagent lists are retained.
 
-In **Settings > Tools**, select a capability group, Custom tools, or MCP on the left to view its tools. Select a built-in or MCP tool name to inspect its parameters and full description.
+In **Settings > Tools**, select Built-in tools or MCP to view tools grouped by capability or server. Below the divider, browse custom tool sources and package files. Select a built-in or MCP tool name to inspect its parameters and full description.
 
 ### Profile
 
@@ -210,13 +210,15 @@ Edit the application `.env` in Settings > Environment to prepare variables for c
 
 The bundled `tool-creator` Skill guides the model through creating, modifying, and troubleshooting custom tools, with a format reference and a Python example template. Enable the Skill and the required file capabilities, then ask the model to create a custom tool for the current project. Script testing also requires command execution and the appropriate runtime. Select the generated tool in capability settings before using it in a subsequent run.
 
-Select **Custom tools** in **Settings > Tools** to add, edit, delete, reorder, import, and refresh tools. Double-click a tool to edit it; Open locates its directory. Deleting moves the entire tool directory to the trash.
+In **Settings > Tools**, Built-in tools and MCP appear above a divider. Below it, the custom-tool tree lists all packages, system and user sources, and added directories. Expand packages to browse files, preview text, or open their locations. User tools support creation, editing by double-click, deletion, and ordering; deletion moves the entire user package to the trash.
 
-Each directory contains `TOOL.json` and scripts or resources. User tools live in the application data directory's `tools/`; project tools live in `.agents/tools/` under source folders and are available only to that project. The editor configures names, descriptions, JSON parameter rules, and commands; it does not generate scripts or install dependencies.
+**Add directory** references an external source in place. Rename its display label, reorder it, or remove the reference without deleting files. **Import** copies packages into the user directory. System packages follow application updates and include `file_sha256` (file SHA-256) and `json_format` (JSON formatting). Select them in capability settings to use them; no import is required.
 
-**Import tools** accepts multiple directories and opens the bundled examples by default. The examples provide text reading, file SHA-256, JSON formatting, and Baidu AI Search, all using the Python 3 standard library. Baidu AI Search also requires internet access and `BAIDU_SEARCH_API_KEY`; see its bundled README for setup. Imports copy into user tools without overwriting existing tools.
+Each directory contains a `TOOL.json` manifest with explicit `"version": 0`, plus scripts or resources. User tools live in the application data directory's `tools/`; project tools live in `.agents/tools/` under source folders and are available only to that project. The editor configures names, descriptions, JSON parameter rules, and commands; it does not generate scripts or install dependencies.
 
-After adding or importing a tool, select it under **Custom tools** in default, project, or subagent capabilities. Subagents use independent selections, may enable **Use current project tools**, and follow project limits. For duplicate names, the first valid, enabled entry wins: project source folders in order, then user tools.
+**Import tools** appears only while the User group, a user tool, or one of its files is selected. It accepts multiple directories and opens the bundled examples by default. The examples provide text reading and Baidu AI Search, both using the Python 3 standard library. Baidu AI Search also requires internet access and `BAIDU_SEARCH_API_KEY`; see its bundled README for setup. Imports copy into user tools without overwriting existing tools.
+
+After adding or importing a tool, select it under **Custom tools** in default, project, or subagent capabilities. Subagents use independent selections, may enable **Use current project tools**, and follow project limits. For duplicate names, the first valid, enabled entry wins: project source folders in order, then user tools, external directories in order, and system tools.
 
 Commands run in the tool directory, where relative paths resolve, for example `scripts/run.py {{args}}`. A `.py` entry automatically selects an available Python 3; an explicit interpreter is also supported. A standalone `{{args}}` receives complete JSON; `{{tool_dir}}` supplies the absolute tool directory. A command starts one program with fixed arguments, without pipelines or redirection. Standard output is returned to the model; pass large inputs through files.
 
@@ -279,3 +281,9 @@ If startup data cannot load, the recovery page lists affected files. View error 
 - **Reset**: restores the selected configuration to defaults. **Resetting `projects.json` also deletes every project's conversations, messages, execution records, task recovery information, and memory**. Other settings, skills, project source files, and attachment files are kept.
 
 Before changes, original data is saved beside the data directory under `Anas-Recovery/timestamp-random-suffix/`. If that fails, no changes are made. Restart after recovery.
+
+Application-owned persisted data uses explicit format version `0` as its current baseline. Automatic upgrades and manual recovery are separate: missing or mismatched versions and failed upgrades do not prevent trying **Repair**. Input history and avatar asset errors also open recovery before the main interface loads. Originals are preserved before configuration, input history, avatars, project metadata, and associated databases are salvaged, retaining valid settings, project identities, conversations, and memories where possible. Unrecoverable databases remain unchanged while independent repairs continue, and unresolved issues are listed. Repair does not automatically clear projects or conversations.
+
+Input history can recover readable entries individually while retaining their order and pinned state. Invalid entries remain in the preserved original, and the result reports partial recovery. A nonempty history with no readable entries is not replaced with an empty list. A staged project-deletion file without its corresponding journal is also preserved and does not block project repair.
+
+Avatar repair rebuilds required assets from a readable source, crop, or display image after preserving the originals. If no image can be recovered, it reports the problem without automatically replacing the avatar with the default. Backup imports also validate avatar parameters before replacing data, rejecting unsupported versions or invalid parameters. Missing optional avatar parameters can still be initialized normally.

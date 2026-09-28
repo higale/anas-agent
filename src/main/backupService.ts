@@ -14,6 +14,7 @@ import {
   shouldSkipBackupRelativePath
 } from './backupArchive'
 import { validateRestoredDataDirectory } from './dataRestoreValidation'
+import { migrateDataDirectory } from './migrations'
 import { runtimeLog } from './runtimeLogger'
 import { withApplicationDataSnapshot } from './applicationDataSnapshot'
 
@@ -177,7 +178,7 @@ async function createDataBackupSnapshot(targetPath: string): Promise<DataBackupR
 type RestorePhase = 'staged' | 'swapping' | 'activated' | 'committed' | 'restoring_previous' | 'rolled_back'
 
 interface RestoreJournal {
-  version: 1
+  version: 0
   dataDir: string
   phase: RestorePhase
   previousEntries: string[]
@@ -203,7 +204,7 @@ async function pathExists(path: string): Promise<boolean> {
 }
 
 async function writeRestoreJournal(path: string, journal: RestoreJournal): Promise<void> {
-  validateRestoreJournal(journal, resolve(getDataDir()), path)
+  validateRestoreJournal(journal, resolve(journal.dataDir), path)
   const temporary = `${path}.${process.pid}.tmp`
   await writeFile(temporary, `${JSON.stringify(journal, null, 2)}\n`, 'utf8')
   await rename(temporary, path)
@@ -224,7 +225,7 @@ function validateRestoreJournal(value: unknown, dataDir: string, path: string): 
     return new Set(entries).size === entries.length
       && !entries.some((name) => name.includes('/') && roots.has(name.split('/')[0]))
   }
-  if (!journal || journal.version !== 1 || typeof journal.dataDir !== 'string' || resolve(journal.dataDir) !== dataDir
+  if (!journal || journal.version !== 0 || typeof journal.dataDir !== 'string' || resolve(journal.dataDir) !== dataDir
     || !['staged', 'swapping', 'activated', 'committed', 'restoring_previous', 'rolled_back'].includes(journal.phase ?? '')
     || !validEntries(journal.previousEntries, true) || !validEntries(journal.installedEntries, false)) {
     throw new Error(`Invalid restore transaction journal: ${path}`)
@@ -287,8 +288,8 @@ async function swapRestoredData(transactionRoot: string, journal: RestoreJournal
   await writeRestoreJournal(join(transactionRoot, 'transaction.json'), journal)
 }
 
-async function recoverInterruptedDataRestoreExcept(ignoredRoot?: string): Promise<boolean> {
-  const dataDir = resolve(getDataDir())
+async function recoverInterruptedDataRestoreExcept(ignoredRoot?: string, dataRoot = getDataDir()): Promise<boolean> {
+  const dataDir = resolve(dataRoot)
   const parent = dirname(dataDir)
   const prefix = `.anas-restore-${basename(dataDir)}-`
   if (!(await pathExists(parent))) return false
@@ -329,7 +330,7 @@ async function restoreDataBackupZipExclusive(
   const tempRoot = await mkdtemp(join(dirname(dataDir), `.anas-restore-${basename(dataDir)}-`))
   const restoreDir = join(tempRoot, 'staged')
   const journal: RestoreJournal = {
-    version: 1,
+    version: 0,
     dataDir,
     phase: 'staged',
     previousEntries: [],
@@ -347,6 +348,7 @@ async function restoreDataBackupZipExclusive(
         throw new Error(`Backup archive is missing ${fileName}.`)
       }
     }
+    await migrateDataDirectory(restoreDir)
     await validateRestoredDataDirectory(restoreDir)
     await writeRestoreJournal(join(tempRoot, 'transaction.json'), journal)
 
@@ -483,7 +485,7 @@ export function resetProjectData(preserveCurrentData: () => Promise<string>): Pr
     const preservationPath = await preserveCurrentData()
     const transactionRoot = await mkdtemp(join(dirname(dataDir), `.anas-restore-${basename(dataDir)}-`))
     const journalPath = join(transactionRoot, 'transaction.json')
-    const journal: RestoreJournal = { version: 1, dataDir, phase: 'staged', previousEntries, installedEntries: [] }
+    const journal: RestoreJournal = { version: 0, dataDir, phase: 'staged', previousEntries, installedEntries: [] }
     let cleanup = true
     try {
       await mkdir(join(transactionRoot, 'previous', 'sqlite'), { recursive: true })
@@ -514,6 +516,56 @@ export function resetProjectData(preserveCurrentData: () => Promise<string>): Pr
       if (cleanup) await rm(transactionRoot, { recursive: true, force: true }).catch((error) => {
         runtimeLog('warn', 'recovery', 'Could not remove a finished project reset transaction.', { path: transactionRoot, error })
       })
+    }
+  })
+}
+
+// Explicit recovery only, with writers stopped. Reuse the restore journal to
+// commit metadata and all conversation databases together, including on crash.
+export function replaceProjectData(
+  root: string,
+  prepare: (stagedRoot: string) => Promise<() => Promise<void>>,
+  preserve: () => Promise<string>
+): Promise<string> {
+  return enqueueDataReplacement(async () => {
+    const dataDir = resolve(root)
+    await recoverInterruptedDataRestoreExcept(undefined, dataDir)
+    const transactionRoot = await mkdtemp(join(dirname(dataDir), `.anas-restore-${basename(dataDir)}-`))
+    const staged = join(transactionRoot, 'staged'), previous = join(transactionRoot, 'previous')
+    const journalPath = join(transactionRoot, 'transaction.json')
+    const journal: RestoreJournal = { version: 0, dataDir, phase: 'staged', previousEntries: [], installedEntries: [] }
+    let cleanup = true
+    try {
+      await mkdir(staged)
+      await mkdir(previous)
+      await writeRestoreJournal(journalPath, journal)
+      const verifyUnchanged = await prepare(staged)
+      const preservationPath = await preserve()
+      await verifyUnchanged()
+      const entries = ['projects.json', 'sqlite']
+      for (const name of entries) if (await pathExists(join(dataDir, name))) journal.previousEntries.push(name)
+      journal.phase = 'swapping'
+      await writeRestoreJournal(journalPath, journal)
+      cleanup = false
+      for (const name of journal.previousEntries) await rename(join(dataDir, name), join(previous, name))
+      for (const name of entries) {
+        if (!(await pathExists(join(staged, name)))) continue
+        journal.installedEntries.push(name)
+        await writeRestoreJournal(journalPath, journal)
+        await rename(join(staged, name), join(dataDir, name))
+      }
+      journal.phase = 'committed'
+      await writeRestoreJournal(journalPath, journal)
+      cleanup = true
+      return preservationPath
+    } catch (error) {
+      if (!cleanup) {
+        try { await rollbackRestore(transactionRoot, journal); cleanup = true }
+        catch (rollbackError) { throw new AggregateError([error, rollbackError], 'Project data repair failed and could not be rolled back safely.') }
+      }
+      throw error
+    } finally {
+      if (cleanup) await rm(transactionRoot, { recursive: true, force: true })
     }
   })
 }

@@ -93,7 +93,7 @@ export function toolDefinitionText(tool: RuntimeToolDefinition): string {
 
 export function ToolsSettings({ customTools, onConfigChange, mcpServers, mcpStatus, runtimeToolStatus }: ToolsSettingsProps) {
   const { t } = useTranslation()
-  const [selectedGroup, setSelectedGroup] = useState<string>(toolGroupOrder.find(group => orderedToolCatalog.some(tool => (tool.feature ?? tool.id) === group)) ?? 'customTools')
+  const [selectedGroup, setSelectedGroup] = useState<'builtin' | 'mcp' | 'customTools'>('builtin')
   const [selectedToolKey, setSelectedToolKey] = useState<string>()
   const renderGroupTitle = (label: string) => (
     <strong className="settings-tool-group-title">{label}</strong>
@@ -145,38 +145,36 @@ export function ToolsSettings({ customTools, onConfigChange, mcpServers, mcpStat
 
   return (
     <>
-      <nav className="ui-scroll-list" aria-label={t('settings.tools_page')}>
-        {toolGroupOrder.filter(group => group === 'mcp' || group === 'customTools' || orderedToolCatalog.some(tool => (tool.feature ?? tool.id) === group)).map(group => {
-          const count = group === 'customTools' ? customTools.length
-            : group === 'mcp' ? mcpGroups.reduce((total, server) => total + server.tools.length, 0)
-              : orderedToolCatalog.filter(tool => (tool.feature ?? tool.id) === group).length
-          return <button key={group} type="button" className={`ui-list-item ui-list-item-split${selectedGroup === group ? " active" : ""}`} aria-pressed={selectedGroup === group} onClick={() => { setSelectedGroup(group); setSelectedToolKey(undefined) }}>
-            <strong>{group === 'customTools' ? t('custom_tools.title') : group === 'mcp' ? t('settings.mcp') : t(`settings.capability_${group}`)}</strong>
-            <em>{count}</em>
-          </button>
-        })}
-      </nav>
-      <div className="ui-editor">
-        {selectedGroup === 'customTools' ? <CustomToolsGroup tools={customTools} onConfigChange={onConfigChange} />
-          : selectedGroup === 'mcp' ? <div className="ui-form-section settings-tool-group">
-            {renderGroupTitle(t('settings.mcp'))}
-            <div className="settings-mcp-tool-groups">
-              {mcpGroups.map(group => <section className="settings-mcp-tool-group" key={group.id}>
-                <div className="settings-mcp-tool-group-header ui-row"><strong>{group.id === 'other' ? t('settings.tools_mcp_other') : group.name}</strong>
-                  <small>{t('settings.tools_count', { count: group.tools.length })}</small></div>
-                <div className="settings-tool-catalog">
-                  {group.tools.map((tool, index) => renderToolRow(`mcp:${group.id}:${tool.name}:${index}`))}
-                  {!group.tools.length && <div className="ui-field-hint">{t('settings.tools_mcp_server_empty')}</div>}
-                </div>
-              </section>)}
-              {!mcpGroups.length && <div className="ui-field-hint">{t('settings.tools_mcp_empty')}</div>}
-            </div>
-          </div> : <div className="ui-form-section">
-            {renderGroupTitle(t(`settings.capability_${selectedGroup}`))}
-            <small className="ui-field-hint">{t('settings.tools_page_hint')}</small>
-            <div className="settings-tool-catalog">{orderedToolCatalog.filter(tool => (tool.feature ?? tool.id) === selectedGroup).map(tool => renderToolRow(`runtime:${tool.id}`))}</div>
-          </div>}
-      </div>
+      <CustomToolsGroup tools={customTools} onConfigChange={onConfigChange} onSelectCustom={() => setSelectedGroup('customTools')}
+        catalogNavigation={<>{(['builtin', 'mcp'] as const).map(group => <button key={group} type="button"
+          className={`ui-list-item ui-list-item-split${selectedGroup === group ? ' active' : ''}`} aria-pressed={selectedGroup === group}
+          onClick={() => { setSelectedGroup(group); setSelectedToolKey(undefined) }}>
+          <strong>{t(group === 'builtin' ? 'custom_tools.builtin' : 'settings.mcp')}</strong>
+          <em>{group === 'builtin' ? orderedToolCatalog.length : mcpGroups.reduce((total, server) => total + server.tools.length, 0)}</em>
+        </button>)}</>}
+        catalogView={selectedGroup === 'customTools' ? undefined : selectedGroup === 'mcp' ? <div className="ui-form-section settings-tool-group">
+          {renderGroupTitle(t('settings.mcp'))}
+          <div className="settings-mcp-tool-groups">
+            {mcpGroups.map(group => <section className="settings-mcp-tool-group" key={group.id}>
+              <div className="settings-mcp-tool-group-header ui-row"><strong>{group.id === 'other' ? t('settings.tools_mcp_other') : group.name}</strong>
+                <small>{t('settings.tools_count', { count: group.tools.length })}</small></div>
+              <div className="settings-tool-catalog">
+                {group.tools.map((tool, index) => renderToolRow(`mcp:${group.id}:${tool.name}:${index}`))}
+                {!group.tools.length && <div className="ui-field-hint">{t('settings.tools_mcp_server_empty')}</div>}
+              </div>
+            </section>)}
+            {!mcpGroups.length && <div className="ui-field-hint">{t('settings.tools_mcp_empty')}</div>}
+          </div>
+        </div> : <div className="ui-form-section">
+          {renderGroupTitle(t('custom_tools.builtin'))}
+          <small className="ui-field-hint">{t('settings.tools_page_hint')}</small>
+          {toolGroupOrder.filter(group => orderedToolCatalog.some(tool => (tool.feature ?? tool.id) === group)).map(group =>
+            <section className="settings-tool-catalog-group" key={group} aria-label={t(`settings.capability_${group}`)}>
+              {renderGroupTitle(`${t(`settings.capability_${group}`)}：`)}
+              <div className="settings-tool-catalog">{orderedToolCatalog.filter(tool => (tool.feature ?? tool.id) === group).map(tool => renderToolRow(`runtime:${tool.id}`))}</div>
+            </section>)}
+        </div>}
+      />
 
       <Dialog.Root open={selectedTool !== undefined} onOpenChange={(open) => { if (!open) setSelectedToolKey(undefined) }}>
         <Dialog.Portal>

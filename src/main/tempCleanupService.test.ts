@@ -60,7 +60,7 @@ describe('temporary artifact cleanup', () => {
     await writeFile(sentinel, 'keep')
     await import('node:fs/promises').then(({ mkdir }) => mkdir(registry, { recursive: true }))
     await writeFile(join(registry, `${id}.json`), JSON.stringify({
-      version: 1,
+      version: 0,
       kind: 'http-download',
       id,
       path: sentinel

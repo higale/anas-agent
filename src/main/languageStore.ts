@@ -1,3 +1,4 @@
+import { requireDataVersion } from '@shared/dataVersion'
 import { app } from 'electron'
 import { copyFile, mkdir, readFile, readdir } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
@@ -28,7 +29,8 @@ function mergeDeep(base: JsonObject, override: JsonObject): JsonObject {
 async function readJsonFile(filePath: string): Promise<JsonObject | undefined> {
   try {
     const parsed = JSON.parse(await readFile(filePath, 'utf8')) as unknown
-    return isJsonObject(parsed) ? parsed : undefined
+    requireDataVersion(parsed, 0, 'language pack')
+    return parsed
   } catch (reason) {
     runtimeLog('warn', 'i18n', 'Failed to read language pack.', {
       path: filePath,

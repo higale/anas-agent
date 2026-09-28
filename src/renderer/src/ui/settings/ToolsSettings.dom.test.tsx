@@ -1,6 +1,6 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { McpToolStatus, RuntimeToolStatus } from '@shared/types'
 import { ToolsSettings } from './ToolsSettings'
 
@@ -15,6 +15,8 @@ const runtimeToolStatus: RuntimeToolStatus = {
 }
 
 const props = { customTools: [], onConfigChange: vi.fn(), mcpServers: [], mcpStatus: undefined, runtimeToolStatus }
+
+beforeEach(() => { vi.stubGlobal('gale', { tools: { get: vi.fn(async () => ({ roots: [], tools: [] })) } }) })
 
 describe('tool catalog', () => {
   it('groups every built-in and framework tool under its matching capability', () => {
@@ -32,8 +34,7 @@ describe('tool catalog', () => {
       configuration: ['update_config']
     }
     for (const [group, names] of Object.entries(expected)) {
-      fireEvent.click(screen.getByRole('button', { name: new RegExp(`^settings\\.capability_${group}\\s*${names.length}$`) }))
-      expect(screen.getAllByRole('button', { name: /settings.tools_view_details$/ }).map(button => button.textContent)).toEqual(names)
+      expect(within(screen.getByRole('region', { name: `settings.capability_${group}` })).getAllByRole('button').map(button => button.textContent)).toEqual(names)
     }
     for (const group of ['profile', 'environment', 'workspaceContext', 'applicationEnvironment', 'skills', 'memory_recall']) {
       expect(screen.queryByText(`settings.capability_${group}`)).not.toBeInTheDocument()
@@ -44,15 +45,24 @@ describe('tool catalog', () => {
     render(<ToolsSettings {...props} runtimeToolStatus={{ checkedAt: '', toolNames: ['zsh'], tools: [
       { name: 'zsh', capabilityId: 'run_shell', description: 'Run Z shell.', parameters: [] }
     ] }} />)
-    fireEvent.click(screen.getByRole('button', { name: /^settings\.capability_commandExecution\s*1$/ }))
     expect(screen.getByRole('button', { name: /^zsh:/ })).toBeEnabled()
     expect(screen.queryByRole('button', { name: /^run_shell:/ })).not.toBeInTheDocument()
   })
 
-  it('retains empty MCP server groups and the unloaded MCP hint', () => {
+  it('retains empty MCP server groups and hides import when returning from user tools to the catalogs', async () => {
+    vi.stubGlobal('gale', { tools: { get: vi.fn(async () => ({ roots: [{ id: 'user', name: 'User', source: 'user', path: '/tools' }], tools: [] })) } })
     const view = render(<ToolsSettings {...props} />)
+    expect(screen.queryByRole('button', { name: 'custom_tools.import' })).not.toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: /^settings.skill_group_user/ }))
+    expect(screen.getByRole('button', { name: 'custom_tools.import' })).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: /^settings\.mcp\s*0$/ }))
-    expect(screen.getByRole('button', { name: /^custom_tools\.title\s*0$/ })).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'custom_tools.import' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /^settings.skill_group_user/ }))
+    expect(screen.getByRole('button', { name: 'custom_tools.import' })).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: /^custom_tools.builtin/ }))
+    expect(screen.queryByRole('button', { name: 'custom_tools.import' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /^settings\.mcp\s*0$/ }))
+    expect(screen.getByRole('button', { name: /^custom_tools\.all\s*0$/ })).toBeVisible()
     expect(screen.getByText('settings.tools_mcp_empty')).toBeVisible()
     view.rerender(<ToolsSettings {...props} mcpStatus={{ checkedAt: '',
       servers: [{ id: 'empty', index: 0, name: 'Empty MCP', type: 'http', state: 'stopped', toolCount: 0, toolNames: [] }],
@@ -65,15 +75,13 @@ describe('tool catalog', () => {
   it('allows inspecting every catalog entry even before runtime definitions are available', async () => {
     const user = userEvent.setup()
     const view = render(<ToolsSettings {...props} runtimeToolStatus={undefined} />)
-    for (const [name, group] of [['start_subagent', 'subagents'], ['write_call', 'backgroundTools'], ['read_call', 'backgroundTools'], ['read_memory', 'memory']]) {
-      await user.click(screen.getByRole('button', { name: new RegExp(`^settings\\.capability_${group}\\s*\\d+$`) }))
+    for (const name of ['start_subagent', 'write_call', 'read_call', 'read_memory']) {
       const button = screen.getByRole('button', { name: `${name}: settings.tools_view_details` })
       expect(button).toBeEnabled()
       await user.click(button)
       expect(screen.getByRole('dialog')).toHaveTextContent(`"name": "${name}"`)
       await user.keyboard('{Escape}')
     }
-    await user.click(screen.getByRole('button', { name: /^settings\.capability_backgroundTools\s*5$/ }))
     await user.click(screen.getByRole('button', { name: 'read_call: settings.tools_view_details' }))
     view.rerender(<ToolsSettings {...props} />)
     expect(screen.getByRole('dialog')).toHaveTextContent('Read background call status.')

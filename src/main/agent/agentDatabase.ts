@@ -58,7 +58,7 @@ import { validateCapabilities, parseRunConfiguration, serializeRunConfiguration,
 import type { CodeReviewSnapshot } from '@shared/codeReview'
 import { validateCodeReviewSnapshot } from './codeReview'
 
-const schemaVersion = 1
+const schemaVersion = 0
 
 const modelRoundSql = `(SELECT COUNT(*) FROM agent_model_activities previous
   WHERE previous.run_id = model.run_id AND previous.subagent_id IS model.subagent_id
@@ -1302,9 +1302,9 @@ export class AgentDatabase {
       onChanged?: (database: AgentDatabase) => void
     } = {}
   ) {
-    this.database.pragma('journal_mode = WAL')
     this.database.pragma('foreign_keys = ON')
     this.initializeSchema()
+    this.database.pragma('journal_mode = WAL')
     this.database.exec(fileChangeLedgerSchema)
     this.fileChanges = new FileChangeLedger(database, onFileChanges)
     if (options.memoryStore) {
@@ -1470,10 +1470,12 @@ export class AgentDatabase {
 
   private initializeSchema(): void {
     const currentVersion = this.database.pragma('user_version', { simple: true }) as number
-    if (currentVersion !== 0 && currentVersion !== schemaVersion) {
+    if (currentVersion !== schemaVersion) {
       throw new Error(`Unsupported agent database schema ${currentVersion}; expected ${schemaVersion}.`)
     }
-    if (currentVersion === schemaVersion) {
+    const hasTables = this.database.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' LIMIT 1").get()
+    if (hasTables) {
+      AgentDatabase.validateRequiredTableColumns(this.database)
       this.initializeActivitySchema()
       return
     }

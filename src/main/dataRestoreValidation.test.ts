@@ -1,5 +1,5 @@
 import { defaultCapabilities, serializeCapabilities } from '@shared/agentCapabilities'
-import { cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -26,10 +26,60 @@ afterEach(async () => {
 })
 
 describe('restored data validation', () => {
+  it.each([
+    ['unsupported version', '{"version":99,"crop":{"x":0,"y":0,"width":100,"height":100},"rotation":0}'],
+    ['missing version', '{"crop":{"x":0,"y":0,"width":100,"height":100},"rotation":0}'],
+    ['malformed JSON', '{not json'],
+    ['invalid crop', '{"version":0,"crop":{"x":50,"y":0,"width":100,"height":100},"rotation":0}'],
+    ['invalid rotation', '{"version":0,"crop":{"x":0,"y":0,"width":100,"height":100},"rotation":45}']
+  ])('rejects avatar metadata with %s without modifying staged assets', async (_description, raw) => {
+    const root = await fixture()
+    const path = join(root, 'assets/avatar-transform.json')
+    await writeText(path, raw)
+
+    await expect(validateRestoredDataDirectory(root)).rejects.toThrow()
+
+    expect(await readFile(path, 'utf8')).toBe(raw)
+    expect(await readdir(join(root, 'assets'))).toEqual(['avatar-transform.json'])
+  })
+
+  it('accepts current avatar metadata without generating derived images', async () => {
+    const root = await fixture()
+    const path = join(root, 'assets/avatar-transform.json')
+    const raw = '{"version":0,"crop":{"x":20,"y":10,"width":60,"height":80},"rotation":90}\n'
+    await writeText(path, raw)
+
+    await expect(validateRestoredDataDirectory(root)).resolves.toBeUndefined()
+
+    expect(await readFile(path, 'utf8')).toBe(raw)
+    expect(await readdir(join(root, 'assets'))).toEqual(['avatar-transform.json'])
+  })
+
+  it('leaves absent optional avatar assets for initialization after restore', async () => {
+    const root = await fixture()
+
+    await expect(validateRestoredDataDirectory(root)).resolves.toBeUndefined()
+
+    await expect(lstat(join(root, 'assets'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it.each(['settings', 'models', 'capabilities', 'subagents', 'mcp_servers', 'skills', 'tools'])('requires an explicit v0 in %s and never rewrites rejected data', async name => {
+    const root = await fixture()
+    const path = join(root, 'config', `${name}.json`)
+    const document = JSON.parse(await readFile(path, 'utf8'))
+    for (const version of [undefined, 1, 99]) {
+      const candidate = { ...document, version }
+      const raw = JSON.stringify(candidate)
+      await writeFile(path, raw)
+      await expect(validateRestoredDataDirectory(root)).rejects.toThrow(/version/)
+      expect(await readFile(path, 'utf8')).toBe(raw)
+    }
+  })
+
   it('accepts formal config, project, input history, Skill, custom tool, SQLite, and attachment state', async () => {
     const root = await fixture()
     await writeText(join(root, 'projects.json'), JSON.stringify({
-      version: 4,
+      version: 0,
       projects: [{
  capabilities: serializeCapabilities(defaultCapabilities), restrict_subagents: false, coding_mode: false, advanced_settings: true, prompt: '',
         id: 'project-1',
@@ -53,13 +103,13 @@ describe('restored data validation', () => {
       }]
     }))
     await writeText(join(root, 'input_history.json'), JSON.stringify({
-      version: 1,
+      version: 0,
       maxHistory: 10,
       items: []
     }))
     await writeText(join(root, 'skills', 'sample', 'SKILL.md'), '---\nname: sample\ndescription: Sample skill\n---\nBody\n')
     await cp(join(process.cwd(), 'data/tools_examples/read_text_raw'), join(root, 'tools/read_text_raw'), { recursive: true })
-    await writeText(join(root, 'config/tools.json'), JSON.stringify({ order: ['user:example-read-text-raw'] }))
+    await writeText(join(root, 'config/tools.json'), JSON.stringify({ version: 0, order: ['user:example-read-text-raw'], external_directories: [] }))
     const storage = AgentStorage.open(root)
     storage.createThread({ projectId: 'project-1', title: 'Project conversation' })
     storage.createThread({ title: 'Default conversation' })
@@ -70,9 +120,9 @@ describe('restored data validation', () => {
 
   it('rejects invalid tool settings or a non-directory tools root before restore', async () => {
     const root = await fixture()
-    await writeText(join(root, 'config/tools.json'), JSON.stringify({ order: 'invalid' }))
+    await writeText(join(root, 'config/tools.json'), JSON.stringify({ version: 0, order: 'invalid', external_directories: [] }))
     await expect(validateRestoredDataDirectory(root)).rejects.toThrow('Invalid tool settings')
-    await writeText(join(root, 'config/tools.json'), JSON.stringify({ order: [] }))
+    await writeText(join(root, 'config/tools.json'), JSON.stringify({ version: 0, order: [], external_directories: [] }))
     await writeText(join(root, 'tools'), 'not a directory')
     await expect(validateRestoredDataDirectory(root)).rejects.toThrow('Restored tools must be a directory')
   })
@@ -89,7 +139,7 @@ describe('restored data validation', () => {
     await expect(validateRestoredDataDirectory(root)).rejects.toThrow('Default model configuration ID')
 
     const skillsRoot = await fixture()
-    await writeText(join(skillsRoot, 'config', 'skills.json'), JSON.stringify({ external_directories: 'invalid', availability: {} }))
+    await writeText(join(skillsRoot, 'config', 'skills.json'), JSON.stringify({ version: 0, external_directories: 'invalid', availability: {} }))
     await expect(validateRestoredDataDirectory(skillsRoot)).rejects.toThrow('Skills configuration is invalid')
   })
 
@@ -157,7 +207,7 @@ describe('restored data validation', () => {
 
   it('rejects invalid project and Skill data', async () => {
     const projectRoot = await fixture()
-    await writeText(join(projectRoot, 'projects.json'), JSON.stringify({ version: 4, projects: [{ id: 1 }] }))
+    await writeText(join(projectRoot, 'projects.json'), JSON.stringify({ version: 0, projects: [{ id: 1 }] }))
     await expect(validateRestoredDataDirectory(projectRoot)).rejects.toThrow('Project 1')
 
     const skillRoot = await fixture()

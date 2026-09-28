@@ -1,4 +1,4 @@
-import { importToolDirectories, initializeToolsStore, listToolSnapshot, toToolImportError } from './toolsStore'
+import { addExternalToolDirectory, updateExternalToolDirectory, removeExternalToolDirectory, moveExternalToolDirectory, listToolFiles, readToolFile, importToolDirectories, initializeToolsStore, listToolSnapshot, toToolImportError } from './toolsStore'
 import { updateSkillScriptApproval } from './config/appConfig'
 import type { ToolImportResult } from '@shared/types'
 import type { DefaultCapabilitySettings } from '@shared/agentCapabilities'
@@ -137,6 +137,17 @@ export function registerWorkspaceIpcHandlers(): void {
     return listToolSnapshot(sourceFolders ?? (project?.kind === 'workspace' ? project.sourceFolders : []))
   })
   handleMainIpc('tools:refresh', async () => getAppConfigSnapshot())
+  handleMainIpc('tools:addDirectory', async event => {
+    const result = await showModalOpenDialog(dialogParentFromEvent(event), { properties: ['openDirectory'] })
+    if (result.canceled || !result.filePaths.length) return { status: 'cancelled' }
+    await addExternalToolDirectory(result.filePaths[0])
+    return { status: 'added' }
+  })
+  handleMainIpc('tools:updateDirectory', async (_event, id: string, name: string) => updateExternalToolDirectory(id, name))
+  handleMainIpc('tools:removeDirectory', async (_event, id: string) => removeExternalToolDirectory(id))
+  handleMainIpc('tools:moveDirectory', async (_event, id: string, direction: -1 | 1) => moveExternalToolDirectory(id, direction))
+  handleMainIpc('tools:listFiles', async (_event, id: string, path?: string, folders?: string[]) => listToolFiles(id, path, folders))
+  handleMainIpc('tools:readFile', async (_event, id: string, path: string, folders?: string[]) => readToolFile(id, path, folders))
   handleMainIpc('tools:importDirectories', async (event): Promise<ToolImportResult> => {
     try {
       await initializeToolsStore()

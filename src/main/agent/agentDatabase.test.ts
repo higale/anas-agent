@@ -1439,7 +1439,7 @@ describe('AgentDatabase', () => {
     }
   })
 
-  it('rejects a prototype managed call table without the owner-run foreign key', () => {
+  it('rejects an incomplete prototype managed call schema without changing its running calls', () => {
     const root = mkdtempSync(join(tmpdir(), 'anas-managed-call-schema-'))
     const databasePath = join(root, 'agent.sqlite')
     try {
@@ -1463,7 +1463,7 @@ describe('AgentDatabase', () => {
       }
 
       expect(() => AgentDatabase.open(databasePath)).toThrow(
-        'Unsupported agent database schema: agent_managed_calls must reference agent_runs with (run_id, thread_id) ON DELETE CASCADE.'
+        'Unsupported agent database schema:'
       )
 
       const unchanged = new Database(databasePath, { readonly: true })

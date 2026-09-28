@@ -132,7 +132,29 @@ describe('current AgentDatabase schema', () => {
     }
   })
 
-  it.each([2, 99])('rejects unsupported schema %i without modifying its data', async (version) => {
+  it('distinguishes an empty v0 database from an unrelated populated v0 database', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'anas-agent-v0-'))
+    const file = join(root, 'agent.sqlite')
+    try {
+      new Database(file).close()
+      const current = AgentDatabase.open(file)
+      const thread = current.createThread({ title: 'v0 data' })
+      current.close()
+      const raw = new Database(file, { readonly: true })
+      try { expect(raw.pragma('user_version', { simple: true })).toBe(0) } finally { raw.close() }
+      const reopened = AgentDatabase.open(file)
+      try { expect(reopened.getThread(thread.id)?.title).toBe('v0 data') } finally { reopened.close() }
+      const unrelated = join(root, 'unrelated.sqlite')
+      const other = new Database(unrelated)
+      other.exec('CREATE TABLE unrelated(value TEXT); INSERT INTO unrelated VALUES (\'keep\')')
+      other.close()
+      const before = await readFile(unrelated)
+      expect(() => AgentDatabase.open(unrelated)).toThrow('missing table')
+      expect(await readFile(unrelated)).toEqual(before)
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it.each([1, 2, 99])('rejects unsupported schema %i without modifying its data', async (version) => {
     const root = await mkdtemp(join(tmpdir(), 'anas-agent-schema-'))
     const file = join(root, 'agent.sqlite')
     try {
@@ -142,7 +164,7 @@ describe('current AgentDatabase schema', () => {
       const fixture = new Database(file)
       fixture.pragma(`user_version = ${version}`)
       fixture.close()
-      expect(() => AgentDatabase.open(file)).toThrow(`Unsupported agent database schema ${version}; expected 1.`)
+      expect(() => AgentDatabase.open(file)).toThrow(`Unsupported agent database schema ${version}; expected 0.`)
       const verified = new Database(file, { readonly: true })
       try {
         expect(verified.pragma('user_version', { simple: true })).toBe(version)

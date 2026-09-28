@@ -41,7 +41,7 @@ describe('input history store', () => {
     expect(snapshot.items).toHaveLength(1)
     expect(snapshot.items[0]).toMatchObject({ text: 'first prompt', pinned: false })
     expect(stored).toEqual({
-      version: 1,
+      version: 0,
       maxHistory: 100,
       items: snapshot.items
     })

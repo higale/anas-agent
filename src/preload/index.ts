@@ -176,6 +176,12 @@ const api: GaleApi = {
   tools: {
     get: (projectId, sourceFolders) => ipcRenderer.invoke('tools:get', projectId, sourceFolders),
     refresh: () => ipcRenderer.invoke('tools:refresh'),
+    addDirectory: () => ipcRenderer.invoke('tools:addDirectory'),
+    updateDirectory: (id, name) => ipcRenderer.invoke('tools:updateDirectory', id, name),
+    removeDirectory: id => ipcRenderer.invoke('tools:removeDirectory', id),
+    moveDirectory: (id, direction) => ipcRenderer.invoke('tools:moveDirectory', id, direction),
+    listFiles: (id, path, folders) => ipcRenderer.invoke('tools:listFiles', id, path, folders),
+    readFile: (id, path, folders) => ipcRenderer.invoke('tools:readFile', id, path, folders),
     importDirectories: () => ipcRenderer.invoke('tools:importDirectories')
   },
   skills: {

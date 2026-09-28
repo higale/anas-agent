@@ -5,9 +5,10 @@ import { copyFile, cp, lstat, mkdir, open, readFile, readdir, realpath, rename, 
 import { constants } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { shell } from 'electron'
+import { listPackageFiles, readPackageFile } from './packageFiles'
 import { customToolsConfigFileName, getBundledConfigFile, getBundledDataDir, getConfigFile, getDataDir, getToolExamplesDir } from './config/dataDir'
 import { parseCustomTools, serializeCustomTool, validateCustomTool, type CustomToolDefinition, type CustomToolSave } from '@shared/customTools'
-import { normalizeToolSettings, type ToolImportError, type ToolPackage, type ToolRoot, type ToolSnapshot, type ToolSettings } from '@shared/toolPackages'
+import { normalizeToolSettings, serializeToolSettings, type ToolImportError, type ToolPackage, type ToolRoot, type ToolSnapshot, type ToolSettings } from '@shared/toolPackages'
 
 let mutationTail: Promise<unknown> = Promise.resolve()
 const activeDirectories = new Map<string, number>()
@@ -16,12 +17,14 @@ const maxManifestBytes = 128 * 1024
 const maxSourceEntries = 2048
 let initialization: Promise<void> | undefined
 export const getToolsDir = () => join(getDataDir(), 'tools')
+export const getSystemToolsDir = () => join(getDataDir(), 'tools_system')
 const message = (reason: unknown) => reason instanceof Error ? reason.message : String(reason)
 async function exists(path: string) {
   try { await lstat(path); return true } catch (reason) { if ((reason as NodeJS.ErrnoException).code === 'ENOENT') return false; throw reason }
 }
 async function ensureDirectoriesAndConfig(): Promise<string> {
   await mkdir(getToolsDir(), { recursive: true })
+  await mkdir(getSystemToolsDir(), { recursive: true })
   const path = getConfigFile(customToolsConfigFileName)
   await mkdir(dirname(path), { recursive: true })
   try { await copyFile(getBundledConfigFile(customToolsConfigFileName), path, constants.COPYFILE_EXCL) }
@@ -40,7 +43,14 @@ function serialize<T>(operation: () => Promise<T>): Promise<T> {
 function mutate<T>(operation: (config: ToolSettings) => Promise<T>): Promise<T> {
   return serialize(async () => operation(await settings()))
 }
-const saveSettings = (value: ToolSettings) => writeAtomic(getConfigFile(customToolsConfigFileName), normalizeToolSettings(value))
+async function saveSettings(value: ToolSettings): Promise<void> {
+  const path = getConfigFile(customToolsConfigFileName)
+  const raw = JSON.parse(await readFile(path, 'utf8'))
+  normalizeToolSettings(raw)
+  const document = serializeToolSettings(value)
+  normalizeToolSettings(document)
+  await writeAtomic(path, { ...raw, ...document })
+}
 
 async function readDefinition(directory: string) {
   const handle = await open(join(directory, manifestName), constants.O_RDONLY | (constants.O_NONBLOCK ?? 0))
@@ -66,6 +76,7 @@ export async function initializeToolsStore(): Promise<void> {
   if (!initialization) {
     initialization = (async () => {
       await ensureDirectoriesAndConfig()
+      await mirrorBundledDirectories(join(getBundledDataDir(), 'tools_system'), getSystemToolsDir(), readDefinition)
       await mirrorBundledDirectories(join(getBundledDataDir(), 'tools_examples'), getToolExamplesDir(), readDefinition)
     })()
     initialization.catch(() => { initialization = undefined })
@@ -87,7 +98,8 @@ export function importToolDirectories(sourcePaths: readonly string[]): Promise<{
       || sourcePaths.some(path => typeof path !== 'string' || !isAbsolute(path))) {
       throw new ToolImportFailure({ code: 'invalid_directory' })
     }
-    const catalog = await readToolSnapshot()
+    const snapshot = await readToolSnapshot()
+    const catalog = { roots: snapshot.roots.filter(root => root.source === 'user'), tools: snapshot.tools.filter(tool => tool.source === 'user') }
     const catalogError = catalog.roots.find(root => root.error)?.error
     if (catalogError) throw new Error(catalogError)
     const names = new Set(catalog.tools.map(tool => tool.name.toLowerCase()))
@@ -157,6 +169,7 @@ export function importToolDirectories(sourcePaths: readonly string[]): Promise<{
 
 async function scan(root: ToolRoot, config: ToolSettings): Promise<ToolPackage[]> {
   try {
+    if (!isAbsolute(root.path)) throw new Error('Tool source path is not absolute on this system.')
     const entries = await readdir(root.path, { withFileTypes: true })
     if (entries.length > maxSourceEntries) throw new Error(`Tool source exceeds ${maxSourceEntries} entries.`)
     const tools: ToolPackage[] = []
@@ -197,7 +210,9 @@ async function readToolSnapshot(sourceFolders: readonly string[] = []): Promise<
       id: `project-${createHash('sha256').update(folder).digest('hex').slice(0, 16)}`,
       name: basename(folder), path: join(folder, '.agents', 'tools'), source: 'project' as const
     })),
-    { id: 'user', name: 'User', path: getToolsDir(), source: 'user' }
+    { id: 'user', name: 'User', path: getToolsDir(), source: 'user' },
+    ...config.externalDirectories.map(directory => ({ ...directory, source: 'external' as const })),
+    { id: 'system', name: 'System', path: getSystemToolsDir(), source: 'system' }
   ]
   const tools = (await Promise.all(roots.map(root => scan(root, config)))).flat()
   return { roots, tools }
@@ -207,7 +222,8 @@ async function readToolSnapshot(sourceFolders: readonly string[] = []): Promise<
 export async function withToolPackageDirectory<T>(definition: CustomToolDefinition, operation: (directory: string) => Promise<T>): Promise<T> {
   const directory = await serialize(async () => {
     let current = definition.directory
-    if (definition.id.startsWith('user:')) {
+    // Catalog IDs resolve current global sources; project and standalone definitions use their supplied directory.
+    if (definition.id.includes(':') && !definition.id.startsWith('project-')) {
       current = (await readToolSnapshot()).tools.find(tool => tool.id === definition.id)?.definition?.directory
     }
     if (!current) throw new Error(`Tool package is unavailable: ${definition.id}`)
@@ -319,4 +335,62 @@ export async function validateRestoredTools(root: string): Promise<void> {
   if (!await exists(directory)) return
   if (!(await lstat(directory)).isDirectory()) throw new Error('Restored tools must be a directory.')
   // Broken individual packages remain visible as unavailable; they must not prevent data recovery.
+}
+
+export function addExternalToolDirectory(path: string): Promise<void> {
+  return mutate(async config => {
+    if (typeof path !== 'string' || !isAbsolute(path)) throw new Error('Tool directory must be an absolute path.')
+    const canonical = await realpath(path)
+    if (!(await lstat(canonical)).isDirectory()) throw new Error('Tool source is not a directory.')
+    const reserved = [getToolsDir(), getSystemToolsDir(), getToolExamplesDir(), ...config.externalDirectories.map(d => d.path)]
+    for (const candidate of reserved) {
+      if (resolve(candidate) === resolve(path) || await realpath(candidate).catch(() => undefined) === canonical) throw new Error('Tool directory is already managed.')
+    }
+    config.externalDirectories.push({ id: `external-${randomUUID()}`, name: basename(path), path: resolve(path) })
+    await saveSettings(config)
+  })
+}
+
+export function updateExternalToolDirectory(id: string, name: string): Promise<void> {
+  return mutate(async config => {
+    const directory = config.externalDirectories.find(d => d.id === id)
+    if (!directory || typeof name !== 'string' || !name.trim() || name.trim().length > 100) throw new Error('Invalid tool directory name.')
+    directory.name = name.trim()
+    await saveSettings(config)
+  })
+}
+
+export function removeExternalToolDirectory(id: string): Promise<void> {
+  return mutate(async config => {
+    if (!config.externalDirectories.some(d => d.id === id)) throw new Error('Tool directory was not found.')
+    // Keep saved capability references and ordering: unlinking never deletes packages.
+    config.externalDirectories = config.externalDirectories.filter(d => d.id !== id)
+    await saveSettings(config)
+  })
+}
+
+export function moveExternalToolDirectory(id: string, direction: -1 | 1): Promise<void> {
+  return mutate(async config => {
+    if (direction !== -1 && direction !== 1) throw new Error('Invalid move direction.')
+    const index = config.externalDirectories.findIndex(d => d.id === id)
+    if (index < 0) throw new Error('Tool directory was not found.')
+    const target = index + direction
+    if (target < 0 || target >= config.externalDirectories.length) return
+    ;[config.externalDirectories[index], config.externalDirectories[target]] = [config.externalDirectories[target], config.externalDirectories[index]]
+    await saveSettings(config)
+  })
+}
+
+async function findToolPackage(id: string, sourceFolders: readonly string[]) {
+  const tool = (await readToolSnapshot(sourceFolders)).tools.find(t => t.id === id)
+  if (!tool) throw new Error('Tool package was not found.')
+  return tool
+}
+
+export function listToolFiles(id: string, relativePath?: string, sourceFolders: readonly string[] = []) {
+  return serialize(async () => listPackageFiles((await findToolPackage(id, sourceFolders)).directory, relativePath))
+}
+
+export function readToolFile(id: string, relativePath: string, sourceFolders: readonly string[] = []) {
+  return serialize(async () => readPackageFile((await findToolPackage(id, sourceFolders)).directory, relativePath))
 }

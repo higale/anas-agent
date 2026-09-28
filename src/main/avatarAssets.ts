@@ -1,3 +1,4 @@
+import { requireDataVersion } from '@shared/dataVersion'
 import { createHash } from 'node:crypto'
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, extname, join, resolve } from 'node:path'
@@ -147,7 +148,7 @@ export async function pruneAvatarWindowsIcons(currentPath: string, dataDir = get
   await rm(join(avatarAssetDir(dataDir), obsoleteAvatarWindowsIconFileName), { force: true })
 }
 
-async function avatarWindowsIconPathForCrop(cropPath: string, dataDir = getDataDir()): Promise<string> {
+export async function avatarWindowsIconPathForCrop(cropPath: string, dataDir = getDataDir()): Promise<string> {
   const digest = createHash('sha256')
     .update(avatarWindowsIconRevision)
     .update('\0')
@@ -157,7 +158,7 @@ async function avatarWindowsIconPathForCrop(cropPath: string, dataDir = getDataD
   return join(avatarAssetDir(dataDir), `${avatarWindowsIconPrefix}${digest}.ico`)
 }
 
-async function writeDerivedAvatarAssets(
+export async function writeDerivedAvatarAssets(
   sourcePath: string,
   cropPath: string,
   transformPath: string,
@@ -268,29 +269,19 @@ async function replaceAvatarAssets(
   dataDir: string
 ): Promise<AvatarAssets> {
   const normalizedTransform = requireAvatarTransform(transform)
-  await mkdir(dataDir, { recursive: true })
-  const stagingDataDir = await mkdtemp(join(dataDir, avatarStagingDirPrefix))
-  const stagingAssetDir = avatarAssetDir(stagingDataDir)
-  const stagingSourcePath = join(stagingAssetDir, `${avatarSourceBaseName}${extension}`)
-  const stagingCropPath = avatarCropImagePath(stagingDataDir)
-  const stagingTransformPath = avatarTransformPath(stagingDataDir)
-
-  try {
-    await mkdir(stagingAssetDir, { recursive: true })
+  await withAvatarAssetTransaction(dataDir, async (stagingDataDir) => {
+    const stagingAssetDir = avatarAssetDir(stagingDataDir)
+    const stagingSourcePath = join(stagingAssetDir, `${avatarSourceBaseName}${extension}`)
+    const stagingCropPath = avatarCropImagePath(stagingDataDir)
+    const stagingTransformPath = avatarTransformPath(stagingDataDir)
     await writeSource(stagingSourcePath)
     await writeCrop(stagingCropPath)
-    await writeFile(stagingTransformPath, `${JSON.stringify(normalizedTransform, null, 2)}\n`)
+    await writeFile(stagingTransformPath, `${JSON.stringify({ version: 0, ...normalizedTransform }, null, 2)}\n`)
     assertAvatarImageReadable(stagingSourcePath)
     assertAvatarImageReadable(stagingCropPath)
     await writeDerivedAvatarAssets(stagingSourcePath, stagingCropPath, stagingTransformPath, stagingDataDir)
     await copyExistingWindowsIconsToStage(stagingDataDir, dataDir)
-    await commitStagedAvatarAssets(stagingDataDir, dataDir)
-  } catch (reason) {
-    if (!(reason instanceof AvatarAssetRollbackError)) {
-      await rm(stagingDataDir, { recursive: true, force: true }).catch(() => undefined)
-    }
-    throw reason
-  }
+  })
 
   const sourcePath = join(avatarAssetDir(dataDir), `${avatarSourceBaseName}${extension}`)
   return {
@@ -304,6 +295,21 @@ async function replaceAvatarAssets(
   }
 }
 
+// All callers prepare a complete asset directory before the existing atomic
+// swap. Failed generation never replaces the live assets.
+export async function withAvatarAssetTransaction(dataDir: string, prepare: (stagedDataDir: string) => Promise<void>): Promise<void> {
+  await mkdir(dataDir, { recursive: true })
+  const stagingDataDir = await mkdtemp(join(dataDir, avatarStagingDirPrefix))
+  try {
+    await mkdir(avatarAssetDir(stagingDataDir), { recursive: true })
+    await prepare(stagingDataDir)
+    await commitStagedAvatarAssets(stagingDataDir, dataDir)
+  } catch (reason) {
+    if (!(reason instanceof AvatarAssetRollbackError)) await rm(stagingDataDir, { recursive: true, force: true }).catch(() => undefined)
+    throw reason
+  }
+}
+
 async function avatarAssetsAreComplete(dataDir = getDataDir()): Promise<boolean> {
   const requiredPaths = [
     avatarCropImagePath(dataDir),
@@ -312,12 +318,8 @@ async function avatarAssetsAreComplete(dataDir = getDataDir()): Promise<boolean>
     avatarDockIconPath(dataDir)
   ]
   const existing = await Promise.all(requiredPaths.map(pathExists))
+  if (existing[1]) await readAvatarTransform(dataDir)
   if (!existing.every(Boolean)) return false
-  try {
-    await readAvatarTransform(dataDir)
-  } catch {
-    return false
-  }
   if (process.platform === 'win32') {
     const windowsIconPath = await avatarWindowsIconPathForCrop(avatarCropImagePath(dataDir), dataDir)
     if (!(await pathExists(windowsIconPath))) return false
@@ -329,7 +331,8 @@ async function avatarAssetsAreComplete(dataDir = getDataDir()): Promise<boolean>
 export async function initializeAvatarAssets(dataDir = getDataDir()): Promise<AvatarAssets | undefined> {
   await recoverInterruptedAvatarAssetSwap(dataDir)
   const currentSourcePath = await findAvatarSourceImage(dataDir)
-  if (currentSourcePath && await avatarAssetsAreComplete(dataDir)) {
+  const assetsComplete = await avatarAssetsAreComplete(dataDir)
+  if (currentSourcePath && assetsComplete) {
     return {
       sourcePath: currentSourcePath,
       cropPath: avatarCropImagePath(dataDir),
@@ -413,6 +416,7 @@ export async function resetAvatarAssetsToDefault(dataDir = getDataDir()): Promis
 
 export async function readAvatarTransform(dataDir = getDataDir()): Promise<AvatarTransform> {
   const value = JSON.parse(await readFile(avatarTransformPath(dataDir), 'utf8')) as unknown
+  requireDataVersion(value, 0, 'avatar transform')
   return requireAvatarTransform(value)
 }
 

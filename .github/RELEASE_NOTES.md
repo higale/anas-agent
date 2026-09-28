@@ -1,16 +1,24 @@
-## Anas v3.1.1
+## Anas v3.1.2
 
-- 新增系统技能 `tool-creator`，指导模型创建、修改和排查 Anas 自定义工具，附工具格式参考和可运行的 Python 模板。
-- 新增百度 AI 搜索示例工具，支持通过环境变量配置密钥，提供参数校验、超时控制、错误诊断和中英使用说明。
-- 修复 Edge TTS 命令行备用路径无法正确传递负数语速、音量及音调的问题。
-- 修复照片搜索在父子目录或其他重叠范围中重复计数、重复结果占用扫描和返回数量上限的问题。
-- 文本读取、文件 SHA-256 和 JSON 格式化示例的工具描述、参数说明及 README 改为英文；百度搜索保留中文工具说明。
+**数据兼容性提示：** 本版以显式 `v0` 为应用数据格式原点，此前无版本和旧编号的数据、备份不自动升级。首次启动可能进入恢复页，可点击“修复”抢救配置、项目及关联数据库、输入历史和头像；修复前保全原始数据，未恢复内容会明确报告。自定义工具 `TOOL.json` 和语言包也须符合当前 `v0` 格式，不属于恢复页的修复范围。
 
-- Added the bundled `tool-creator` Skill for creating, modifying, and troubleshooting Anas custom tools, with a format reference and a runnable Python template.
-- Added a Baidu AI Search example tool with credentials supplied through an environment variable, input validation, timeout handling, error diagnostics, and Chinese and English setup instructions.
-- Fixed negative speech rate, volume, and pitch values being passed incorrectly through the Edge TTS command-line fallback.
-- Fixed duplicate photo counts and duplicate matches consuming scan and result limits when searching parent/child folders or other overlapping roots.
-- Changed tool descriptions, parameter help, and READMEs for the text-reading, file SHA-256, and JSON-formatting examples to English. Baidu AI Search retains Chinese tool descriptions.
+**Data compatibility:** This release establishes explicit `v0` as the application data baseline. Earlier unversioned or differently numbered data and backups are not upgraded automatically. Startup may open recovery, where **Repair** can salvage configuration, projects and associated databases, input history, and avatars. Originals are preserved first, and unrecovered content is reported. Custom-tool `TOOL.json` manifests and language packs must also use their current `v0` format; recovery does not repair those files.
+
+- 工具页合并内置工具入口，右侧按能力分组；MCP 保持独立并按服务器分组。
+- 自定义工具新增系统与外加目录来源，复用技能页的目录树和文件预览；项目工具仅在项目设置中展示，能力选择按来源分组。
+- 外加目录支持引用、重命名、排序与移除；导入入口仅在选中用户来源时显示，复制到用户目录。
+- `file_sha256` 和 `json_format` 从导入示例移入系统工具，在能力设置中选中即可使用。
+- 应用自有数据格式统一以显式 v0 为新基线，补齐配置、工具包及辅助数据版本；新增独立迁移框架，供从 v0 开始的后续格式升级使用。
+- 恢复页将版本不匹配视为可修复的数据错误，始终为出错文件提供修复入口；先保全原文，再抢救配置、项目及关联数据库。单库损坏不阻断其他数据抢救，剩余问题逐项报告，项目替换支持失败回滚。输入历史和头像配置在进入主界面前检查并纳入同一修复流程。
+- 修复可逐条抢救混有坏条目的输入历史，保留原文并报告部分结果；无对应删除日志的暂存文件不再阻断项目修复。头像检查扩展到图片及衍生资产，修复使用仍可读取的图像并通过资产事务重建，不静默换成默认头像；备份导入在替换数据前校验头像参数。
+
+- Combined built-in tools into one entry with capability groups; MCP remains separate with server groups.
+- Added system and external custom-tool sources with shared Skill directory-tree and file-preview interactions. Project tools remain in project settings; capability choices are grouped by source.
+- External directories support references, display names, ordering, and removal; import appears only for a selected user source and creates user copies.
+- Moved `file_sha256` and `json_format` from importable examples into system tools, available by selecting them in capability settings.
+- Established explicit v0 as the new baseline for application-owned data, including configurations, tool packages, and supporting records. Added an independent migration framework for future format upgrades starting from v0.
+- Recovery treats version mismatches as repairable data errors and keeps repair available for every affected file. Originals are preserved before salvaging configuration, projects, and associated databases. A damaged database does not block independent repairs; unresolved issues are reported and project replacement supports rollback. Input history and avatar configuration are checked before the main interface opens and use the same recovery flow.
+- Repair salvages readable input-history entries alongside invalid ones, preserving originals and reporting partial results. A staged deletion file without its journal no longer blocks project repair. Avatar checks include images and derived assets; repair uses surviving images through the asset transaction without silently switching to the default avatar. Backup imports validate avatar parameters before replacing data.
 
 ## Downloads / 下载
 

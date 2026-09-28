@@ -16,8 +16,9 @@ vi.mock('../notice', () => ({ notice: { success: vi.fn(), error: vi.fn() } }))
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 const definition: CustomToolDefinition = { ...customToolDefaults, id: 'stable', name: 'submit_result', description: 'Submit data.', inputSchema: { type: 'object', properties: {} } }
 
-const toolApi = { get: vi.fn(async () => ({ roots: [{ id: 'user', name: 'User', source: 'user', path: '/tools' }], tools: [] })) }
-beforeEach(() => { vi.clearAllMocks(); vi.stubGlobal('gale', { tools: toolApi }) })
+let serverTools: ToolPackage[] = []
+const toolApi = { get: vi.fn(async () => ({ roots: [{ id: 'user', name: 'User', source: 'user', path: '/tools' }], tools: serverTools })), refresh: vi.fn(async () => ({ customTools: serverTools })) }
+beforeEach(() => { serverTools = []; vi.clearAllMocks(); vi.stubGlobal('gale', { tools: toolApi }) })
 function Harness() {
   const [tools, setTools] = useState<ToolPackage[]>([])
   return <CustomToolsGroup tools={tools} onConfigChange={(config) => setTools(config.customTools)} />
@@ -26,24 +27,31 @@ function Harness() {
 describe('custom tool settings', () => {
   it('imports tool packages and selects the first imported tool', async () => {
     const imported = toolPackageFixture(definition)
-    const importDirectories = vi.fn(async () => ({ status: 'imported', ids: [imported.id], names: [imported.name], config: { customTools: [imported] } }))
+    const importDirectories = vi.fn(async () => { serverTools = [imported]; return { status: 'imported', ids: [imported.id], names: [imported.name], config: { customTools: [imported] } } })
     vi.stubGlobal('gale', { tools: { ...toolApi, importDirectories } })
     render(<Harness />)
+    expect(screen.queryByRole('button', { name: 'custom_tools.import' })).not.toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: /^settings.skill_group_user/ }))
     fireEvent.click(screen.getByRole('button', { name: 'custom_tools.import' }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'submit_result', pressed: true })).toBeVisible())
     expect(notice.success).toHaveBeenCalledWith('custom_tools.imported')
     expect(screen.getByRole('button', { name: 'custom_tools.edit' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'custom_tools.import' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: /^custom_tools.all/ }))
+    expect(screen.queryByRole('button', { name: 'custom_tools.import' })).not.toBeInTheDocument()
   })
   it.each(['cancelled', 'error'])('preserves the current list when import is %s', async status => {
     const change = vi.fn()
     const importDirectories = vi.fn(async () => ({ status, error: { code: 'already_exists', name: 'submit_result' } }))
     vi.stubGlobal('gale', { tools: { ...toolApi, importDirectories } })
-    render(<CustomToolsGroup tools={[toolPackageFixture(definition)]} onConfigChange={change} />)
+    serverTools = [toolPackageFixture(definition)]
+    render(<CustomToolsGroup tools={serverTools} onConfigChange={change} />)
+    fireEvent.click(await screen.findByRole('button', { name: /^settings.skill_group_user/ }))
     fireEvent.click(screen.getByRole('button', { name: 'custom_tools.import' }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'custom_tools.import' })).toBeEnabled())
     expect(change).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'submit_result' })).toBeVisible()
-    if (status === 'error') expect(notice.error).toHaveBeenCalledWith('custom_tools.import_error_already_exists', { description: undefined })
+    if (status === 'error') expect(screen.getByRole('alert')).toHaveTextContent('custom_tools.import_error_already_exists')
     else expect(notice.error).not.toHaveBeenCalled()
   })
   it.each([false, true])('selects individual tools and toggles the whole group (subagent %s)', subagent => {
@@ -109,14 +117,15 @@ describe('custom tool settings', () => {
   it('selects on click and edits only through the edit button or a double click', async () => {
     const user = userEvent.setup()
     const other = toolPackageFixture({ ...definition, id: 'other', name: 'other_tool' })
-    const view = render(<CustomToolsGroup tools={[toolPackageFixture(definition), other]} onConfigChange={vi.fn()} />)
-    const edit = screen.getByRole('button', { name: 'custom_tools.edit' })
-    expect(edit).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'custom_tools.delete' })).toBeDisabled()
+    serverTools = [toolPackageFixture(definition), other]
+    const view = render(<CustomToolsGroup tools={serverTools} onConfigChange={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: 'custom_tools.edit' })).toBeNull()
+    await user.click(await screen.findByRole('button', { name: /^settings.skill_group_user/ }))
 
     await user.click(screen.getByRole('button', { name: 'submit_result' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(screen.getByRole('button', { name: 'submit_result', pressed: true })).toBeVisible()
+    const edit = screen.getByRole('button', { name: 'custom_tools.edit' })
     expect(edit).toBeEnabled()
     expect(screen.getByRole('button', { name: 'custom_tools.delete' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'common.move_down' })).toBeEnabled()
@@ -131,8 +140,9 @@ describe('custom tool settings', () => {
     expect(screen.getByRole('button', { name: 'submit_result', pressed: false })).toBeVisible()
     expect(screen.getByRole('button', { name: 'other_tool', pressed: true })).toBeVisible()
 
-    view.rerender(<CustomToolsGroup tools={[toolPackageFixture(definition)]} onConfigChange={vi.fn()} />)
-    expect(edit).toBeDisabled()
+    serverTools = [toolPackageFixture(definition)]
+    view.rerender(<CustomToolsGroup tools={serverTools} onConfigChange={vi.fn()} />)
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'custom_tools.edit' })).toBeNull())
   })
   it('keeps unsaved input when the backdrop is clicked and still allows explicit cancellation', async () => {
     const user = userEvent.setup()
@@ -152,7 +162,7 @@ describe('custom tool settings', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
   it('adds a tool with the current textarea draft and keeps backend validation failures editable', async () => {
-    const save = vi.fn().mockRejectedValueOnce(new Error('Schema required must be an array.')).mockImplementation(async (tool) => ({ customTools: [toolPackageFixture({ ...tool, id: 'new-id' })] }))
+    const save = vi.fn().mockRejectedValueOnce(new Error('Schema required must be an array.')).mockImplementation(async (tool) => { serverTools = [toolPackageFixture({ ...tool, id: 'new-id' })]; return { customTools: serverTools } })
     vi.stubGlobal('gale', { tools: toolApi, config: { saveCustomTool: save } })
     render(<Harness />)
     fireEvent.click(screen.getByRole('button', { name: 'custom_tools.add' }))
@@ -185,4 +195,30 @@ describe('custom tool settings', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: /stable/ }))
     expect(onChange.mock.lastCall?.[0].customTools).toEqual(selectedTools())
   })
+})
+
+it('browses external packages and removes only their source reference', async () => {
+  const user = userEvent.setup()
+  const externalTool = { ...toolPackageFixture(definition), rootId: 'external-test', rootName: 'Shared', source: 'external' as const }
+  const root = { id: 'external-test', name: 'Shared', source: 'external', path: '/shared' }
+  const listFiles = vi.fn(async () => [{ name: 'TOOL.json', path: '/shared/tool/TOOL.json', relativePath: 'TOOL.json', kind: 'text' }])
+  const readFile = vi.fn(async () => ({ name: 'TOOL.json', path: '/shared/tool/TOOL.json', relativePath: 'TOOL.json', resolvedPath: '/shared/tool/TOOL.json', size: 4, kind: 'text', content: 'manifest preview' }))
+  const removeDirectory = vi.fn(async () => {})
+  const api = { ...toolApi, get: vi.fn(async () => ({ roots: [root], tools: [externalTool] })), listFiles, readFile, removeDirectory }
+  vi.stubGlobal('gale', { tools: api })
+  render(<CustomToolsGroup tools={[externalTool]} onConfigChange={vi.fn()} />)
+  await user.click(await screen.findByRole('button', { name: /^Shared/ }))
+  await user.click(screen.getByRole('button', { name: 'submit_result' }))
+  expect(screen.queryByRole('button', { name: 'custom_tools.import' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'custom_tools.edit' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'custom_tools.delete' })).toBeNull()
+  await user.click(screen.getByRole('button', { name: 'custom_tools.expand' }))
+  await user.click(await screen.findByRole('button', { name: 'TOOL.json' }))
+  expect(await screen.findByText('manifest preview')).toBeVisible()
+  expect(screen.queryByRole('button', { name: 'custom_tools.import' })).not.toBeInTheDocument()
+  expect(readFile).toHaveBeenCalledWith('stable', 'TOOL.json')
+  await user.click(screen.getByRole('button', { name: /^Shared/ }))
+  await user.click(screen.getByRole('button', { name: 'custom_tools.remove_directory' }))
+  expect(screen.getByRole('alertdialog')).toHaveTextContent('custom_tools.remove_directory_hint')
+  expect(removeDirectory).not.toHaveBeenCalled()
 })

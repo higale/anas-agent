@@ -1,3 +1,4 @@
+import { requireDataVersion } from '@shared/dataVersion'
 import { lstat, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -9,16 +10,20 @@ import mcpDefaults from '../../data/config/mcp_servers.json'
 import capabilityDefaults from '../../data/config/capabilities.json'
 import { normalizeToolSettings } from '@shared/toolPackages'
 import toolsDefaults from '../../data/config/tools.json'
-import projectDefaults from '../../data/config/projects.json'
+import projectDefaultsDocument from '../../data/config/projects.json'
 import { parseCapabilities, parseDefaultCapabilitySettings, serializeCapabilities } from '@shared/agentCapabilities'
-import { errorDetail, resettableConfigFiles, type RecoveryFile, type RecoveryFileStatus, type RecoveryRepairResult } from '@shared/recovery'
+import { errorDetail, recoverableAuxiliaryFiles, resettableConfigFiles, type RecoveryFile, type RecoveryFileStatus, type RecoveryRepairResult } from '@shared/recovery'
+import { parseInputHistoryStore } from './inputHistoryStore'
+import { inspectAvatarRepair, repairAvatarData } from './recoveryAvatar'
 import { samePath } from './pathContainment'
 import { normalizeAppConfigSnapshot } from './config/appConfig'
 import type { RawAppConfig } from './config/rawAppConfig'
 import { parseProjectStore } from './projectStore'
 import { normalizeSkillsConfig } from './skillsStore'
 import { DEFAULT_WORKSPACE_PROJECT_ID } from '@shared/types'
+import { inspectProjectStorageRepair, repairProjectStorage } from './recoveryProjectStorage'
 
+const { version: _projectDefaultsVersion, ...projectDefaults } = projectDefaultsDocument
 type RecordValue = Record<string, unknown>
 const isObject = (value: unknown): value is RecordValue => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 const projectCapabilityDefaults = serializeCapabilities(parseCapabilities(capabilityDefaults))
@@ -114,6 +119,7 @@ class Repair {
 }
 
 function validateConfig(file: string, value: RecordValue): void {
+  requireDataVersion(value, 0, file)
   if (file === 'capabilities.json') { parseDefaultCapabilitySettings(value); return }
   if (file === 'skills.json') { normalizeSkillsConfig(value); return }
   if (file === 'tools.json') { normalizeToolSettings(value); return }
@@ -131,12 +137,33 @@ function validateConfig(file: string, value: RecordValue): void {
   normalizeAppConfigSnapshot(raw)
 }
 
-export function repairDocument(file: string, input: unknown): { value: RecordValue; fields: string[] } {
+export function repairDocument(file: string, input: unknown): { value: RecordValue; fields: string[]; unresolved?: string[] } {
   if (!isObject(input)) throw new Error('Document is not a JSON object; use reset.')
   const value = structuredClone(input)
   const repair = new Repair(file)
-  if (file === 'projects.json') {
-    if (value.version === undefined || typeof value.version !== 'number') repair.replace(value, 'version', 4, 'version')
+  const unresolved: string[] = []
+  if (value.version !== 0) {
+    repair.replace(value, 'version', 0, 'version')
+  }
+  if (file === 'input_history.json') {
+    repair.number(value, 'maxHistory', 1, Number.MAX_SAFE_INTEGER, 100, 'inputHistory')
+    if (Array.isArray(value.items)) {
+      const readable = value.items.filter((item, index) => {
+        if (isObject(item) && typeof item.text === 'string') return true
+        unresolved.push(`${file}: items[${index}] could not be recovered; the original entry is retained in the preservation copy.`)
+        return false
+      })
+      if (unresolved.length) {
+        // An entirely unreadable history must not be replaced by an empty one.
+        // Mixed files can expose the usable entries after preserving all bytes.
+        if (!readable.length) throw new Error(unresolved.join('\n'))
+        repair.replace(value, 'items', readable, 'items (recovered readable entries)')
+      }
+    }
+    // Validate with the normal reader, but do not write its pruning/deduplication
+    // result during rescue: retain every original entry and its metadata.
+    parseInputHistoryStore(value)
+  } else if (file === 'projects.json') {
     // Project IDs, kinds, names and timestamps have no recoverable defaults.
     // Never replace a project list or generate IDs behind existing DB records.
     for (const [index, project] of repair.list(value.projects, 'projects').entries()) {
@@ -148,7 +175,6 @@ export function repairDocument(file: string, input: unknown): { value: RecordVal
         repair.capabilities(project, projectCapabilityDefaults, path)
       }
     }
-    // A different numeric version is not migrated to the current schema.
     parseProjectStore(value)
   } else {
     if (!templates[file]) throw new Error('Unsupported repair file.')
@@ -207,14 +233,15 @@ export function repairDocument(file: string, input: unknown): { value: RecordVal
     }
     validateConfig(file, value)
   }
-  return { value, fields: [...new Set(repair.fields)] }
+  return { value, fields: [...new Set(repair.fields)], ...(unresolved.length ? { unresolved } : {}) }
 }
 
-interface RepairCandidate { file: RecoveryFile; path: string; before: string | undefined; after: string; fields: string[] }
+interface RepairCandidate { file: RecoveryFile; path: string; before: string | undefined; after: string; fields: string[]; unresolved?: string[] }
 export interface RecoveryRepairPlan { candidates: RepairCandidate[]; issues: string[]; files: RecoveryFileStatus[] }
 
 export function requireRecoveryFile(file: unknown): RecoveryFile {
-  if (file !== 'projects.json' && !resettableConfigFiles.includes(file as typeof resettableConfigFiles[number])) {
+  if (file !== 'projects.json' && !resettableConfigFiles.includes(file as typeof resettableConfigFiles[number])
+    && !recoverableAuxiliaryFiles.includes(file as typeof recoverableAuxiliaryFiles[number])) {
     throw new Error('Select exactly one supported file to repair.')
   }
   return file as RecoveryFile
@@ -235,11 +262,19 @@ export async function inspectRecoveryRepair(dataDir: string): Promise<RecoveryRe
   const root = await realpath(dataDir)
   const plan: RecoveryRepairPlan = { candidates: [], issues: [], files: [] }
   const documents = new Map<string, RecordValue>()
-  for (const file of [...resettableConfigFiles, 'projects.json'] as const) {
-    const path = file === 'projects.json' ? join(root, file) : join(root, 'config', file)
+  for (const file of [...resettableConfigFiles, 'projects.json', ...recoverableAuxiliaryFiles] as const) {
+    const auxiliary = recoverableAuxiliaryFiles.includes(file as typeof recoverableAuxiliaryFiles[number])
+    const path = file === 'assets/avatar-transform.json' ? join(root, 'assets')
+      : file === 'projects.json' || auxiliary ? join(root, file) : join(root, 'config', file)
     const status: RecoveryFileStatus = { name: file, path, repairableFields: [] }
     plan.files.push(status)
     try {
+      if (file === 'assets/avatar-transform.json') {
+        const avatar = await inspectAvatarRepair(root)
+        status.repairableFields = avatar.fields
+        if (avatar.issues.length) status.error = avatar.issues.join('\n')
+        continue
+      }
       // Do not repair through source directory links.
       const parent = await realpath(dirname(path)).catch((error: NodeJS.ErrnoException) => {
         if (error.code === 'ENOENT') return dirname(path)
@@ -247,11 +282,19 @@ export async function inspectRecoveryRepair(dataDir: string): Promise<RecoveryRe
       })
       if (!samePath(parent, dirname(path))) throw new Error('Linked configuration directories must be handled manually.')
       const before = await readRepairFile(path)
+      // These optional stores are created by their owners when first needed.
+      if (before === undefined && auxiliary) continue
       if (before === undefined && file === 'projects.json') throw new Error('Project metadata is missing; use project reset to also clear associated database records.')
       const repaired = repairDocument(file, before === undefined ? {} : JSON.parse(before))
+      if (repaired.unresolved?.length) status.error = repaired.unresolved.join('\n')
+      if (file === 'projects.json') {
+        const storage = await inspectProjectStorageRepair(root, before!, JSON.stringify(repaired.value))
+        repaired.fields.push(...storage.fields)
+        if (storage.issues.length) status.error = storage.issues.join('\n')
+      }
       documents.set(file, repaired.value)
       status.repairableFields = repaired.fields
-      if (repaired.fields.length || before === undefined) plan.candidates.push({ file, path, before, after: `${JSON.stringify(repaired.value, null, 2)}\n`, fields: repaired.fields })
+      if (repaired.fields.length || before === undefined) plan.candidates.push({ file, path, before, after: `${JSON.stringify(repaired.value, null, 2)}\n`, fields: repaired.fields, unresolved: repaired.unresolved })
     } catch (error) { status.error = errorDetail(error) }
   }
   if (['settings.json', 'models.json', 'subagents.json', 'mcp_servers.json', 'tools.json'].every((file) => documents.has(file))) {
@@ -275,11 +318,19 @@ export async function inspectRecoveryRepair(dataDir: string): Promise<RecoveryRe
 
 export async function repairRecoveryData(dataDir: string, file: RecoveryFile, preserve: () => Promise<string>): Promise<RecoveryRepairResult> {
   requireRecoveryFile(file)
+  if (file === 'assets/avatar-transform.json') return repairAvatarData(await realpath(dataDir), preserve)
   const plan = await inspectRecoveryRepair(dataDir)
   const candidates = plan.candidates.filter((candidate) => candidate.file === file)
   const result: RecoveryRepairResult = { repaired: [], unresolved: [] }
   if (!candidates.length) {
     result.unresolved = plan.files.filter((status) => status.name === file && status.error).map((status) => `${file}: ${status.error}`)
+    if (result.unresolved.length) result.preservationPath = await preserve()
+    return result
+  }
+  if (file === 'projects.json') {
+    const candidate = candidates[0]
+    Object.assign(result, await repairProjectStorage(dataDir, candidate.before!, candidate.after, preserve))
+    result.repaired = candidate.fields
     return result
   }
   result.preservationPath = await preserve()
@@ -292,6 +343,7 @@ export async function repairRecoveryData(dataDir: string, file: RecoveryFile, pr
       await writeFile(temporary, candidate.after, { flag: 'wx', mode: 0o600 })
       await rename(temporary, candidate.path)
       result.repaired.push(...candidate.fields)
+      result.unresolved.push(...(candidate.unresolved ?? []))
     } catch (error) { result.unresolved.push(`${candidate.path}: ${errorDetail(error)}`) }
     finally { await rm(temporary, { force: true }) }
   }

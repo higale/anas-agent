@@ -45,7 +45,7 @@ export function InitialAppGate({ snapshot }: InitialAppGateProps) {
   }, [details])
 
   useEffect(() => {
-    // Collect both critical results before stopping services. The ref also
+    // Collect all critical results before stopping services. The ref also
     // prevents duplicate navigation during StrictMode effect replay.
     if (phase === 'error' && settled) void enterRecovery()
   }, [phase, settled, enterRecovery])

@@ -41,7 +41,7 @@ async function loadSkillsStore(externalDirectories: unknown[] = []) {
     mkdir(join(bundledDataDir, 'skills_examples'), { recursive: true }),
     mkdir(skillsDir, { recursive: true }),
     mkdir(workspace, { recursive: true }),
-    writeText(join(bundledConfigDir, 'skills.json'), `${JSON.stringify({ external_directories: externalDirectories, availability: {} }, null, 2)}\n`)
+    writeText(join(bundledConfigDir, 'skills.json'), `${JSON.stringify({ version: 0, external_directories: externalDirectories, availability: {} }, null, 2)}\n`)
   ])
   vi.doMock('./config/dataDir', () => ({
     skillsConfigFileName: 'skills.json',
@@ -284,7 +284,7 @@ describe('skillsStore', () => {
       expect(copyConfig).toHaveBeenCalledOnce()
       expect(probe.mock.calls.filter(([path]) => path === fixture.configFile)).toHaveLength(1)
       expect(results[4]).toMatchObject({ status: 'fulfilled', value: expect.stringContaining('system-skill') })
-      expect(JSON.parse(await readFile(fixture.configFile, 'utf8'))).toEqual({ external_directories: [], availability: {} })
+      expect(JSON.parse(await readFile(fixture.configFile, 'utf8'))).toEqual({ version: 0, external_directories: [], availability: {} })
     } finally {
       releaseCopy()
       await settled

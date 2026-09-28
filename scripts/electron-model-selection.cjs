@@ -60,7 +60,7 @@ async function verifyModelSelection(launchApplication) {
       skills: { mode: 'off', project: false, entries: [] },
       mcp: { default_mode: 'selected', servers: [] } }
     const timestamp = new Date().toISOString()
-    await writeFile(join(profile, 'projects.json'), `${JSON.stringify({ version: 4, projects: [{
+    await writeFile(join(profile, 'projects.json'), `${JSON.stringify({ version: 0, projects: [{
       id: 'default-workspace', kind: 'workspace', name: 'Model selection test', pinned: false, collapsed: false,
       sourceFolders: [workspace], capabilities, restrict_subagents, advanced_settings: true,
       coding_mode: false, prompt: '', createdAt: timestamp, updatedAt: timestamp

@@ -12,7 +12,7 @@ interface ExternalTemporaryFileRecord {
   id: string
   kind: 'http-download'
   path: string
-  version: 1
+  version: 0
 }
 
 function tempDirPath(): string {
@@ -30,7 +30,7 @@ function externalRecordPath(id: string): string {
 function isValidExternalRecord(value: unknown, expectedId?: string): value is ExternalTemporaryFileRecord {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const record = value as Partial<ExternalTemporaryFileRecord>
-  return record.version === 1
+  return record.version === 0
     && record.kind === 'http-download'
     && typeof record.id === 'string'
     && externalTemporaryFileIdPattern.test(record.id)
@@ -52,7 +52,7 @@ export async function registerExternalTemporaryFile(
   path: string,
   id: string
 ): Promise<string> {
-  const record: ExternalTemporaryFileRecord = { id, kind: 'http-download', path, version: 1 }
+  const record: ExternalTemporaryFileRecord = { id, kind: 'http-download', path, version: 0 }
   if (!isValidExternalRecord(record, id)) throw new Error('Invalid external temporary file identity.')
   const registry = externalRegistryPath()
   const recordPath = externalRecordPath(id)
@@ -168,7 +168,7 @@ try {
     const recordPath = path.join(registry, name)
     try {
       const record = JSON.parse(fs.readFileSync(recordPath, 'utf8'))
-      const valid = record && record.version === 1 && record.kind === 'http-download'
+      const valid = record && record.version === 0 && record.kind === 'http-download'
         && typeof record.id === 'string' && name === record.id + '.json'
         && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(record.id)
         && typeof record.path === 'string' && path.isAbsolute(record.path)

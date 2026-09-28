@@ -37,11 +37,11 @@ Capability selection and execution approval are separate. See the user guide for
 
 LangChain, LangGraph, and Deep Agents own the model/tool loop, messages, checkpoints, interrupts, retries, and subagent orchestration. LangGraph's current checkpoint state is the conversation source of truth. Anas owns Electron lifecycle, configuration, projects, presentation, backups, and other product services.
 
-Each main conversation and its subagents share a SQLite database; the catalog stores conversation locations and shared memory. Completed messages are stored individually, without a second application-owned model history. The current implementation rejects unsupported storage formats and has no legacy-format migration path. The first public `3.0.0` release will establish the compatibility baseline; subsequent format changes must provide upgrade paths for supported releases under the [compatibility policy](AGENTS.md#发布兼容性). Pre-release development formats and reading newer data with an older app are outside that guarantee. See [Current state storage](docs/CURRENT_STATE_STORAGE.md).
+Each main conversation and its subagents share a SQLite database; the catalog stores conversation locations and shared memory. Completed messages are stored individually, without a second application-owned model history. The current implementation rejects unsupported storage formats and has no legacy-format migration path. Application-owned data now uses explicit `v0` as its compatibility baseline. Earlier unversioned and previously numbered formats are no longer supported; future upgrades follow the [migration policy](docs/DATA_MIGRATIONS.md). See [Current state storage](docs/CURRENT_STATE_STORAGE.md).
 
 Ordinary tools share a managed executor with **8 execution slots** and a **64-call active/queued limit**. Busy slots and conflicting mutations queue automatically. With Background tools enabled, a call waiting or running for over 10 seconds returns a handle for supervision. Cancellation retains execution ownership until the real executor settles; uncertain external outcomes are explicit. Planning, subagent orchestration, user questions, and supervision remain outside this execution pool.
 
-Custom tools run in their package directory. User packages live in `tools/` under the data directory; project packages live in `.agents/tools/` under each source folder. They require explicit capability selection. See [Custom tool packages](docs/CUSTOM_TOOLS.md) for execution and import rules.
+Custom tools run in their package directory. Sources include system packages, user packages in the data directory's `tools/`, added external directories, and project packages in each source folder's `.agents/tools/`. Tools and Skills share directory-tree and file-preview interactions; project tools appear only in project settings. They require explicit capability selection. See [Custom tool packages](docs/CUSTOM_TOOLS.md) for execution and import rules.
 
 Shell commands preserve the model's command text, arguments, and search behavior. Supported read-only commands may be approved automatically after target and environment checks; analysis does not rewrite commands to obtain approval. Other commands follow the selected access mode. The security model defines platform support and recovery rules.
 
@@ -95,14 +95,14 @@ npm run dev -- -- --data-dir "./runtime-data/research"
 
 | Path under the data directory | Contents |
 | --- | --- |
-| `config/` | Settings, default capabilities, providers/models, subagents, MCP, Skill sources/availability, and custom-tool ordering |
+| `config/` | Settings, default capabilities, providers/models, subagents, MCP, Skill sources/availability, and custom-tool sources/ordering |
 | `sqlite/catalog.sqlite` | Main conversation directory and shared memory |
 | `sqlite/conversations/<threadId>.sqlite` | One main conversation and its subagents |
 | `projects.json` | Project definitions and source folders |
 | `.env` | Application environment variables |
 | `attachments/`, `file_edits/` | Saved attachments and file-edit recovery material |
 | `skills/`, `tools/` | User-managed packages |
-| `skills_system/`, `skills_examples/`, `tools_examples/` | Bundled packages refreshed at startup; examples must be imported before use |
+| `skills_system/`, `skills_examples/`, `tools_system/`, `tools_examples/` | Bundled packages refreshed at startup; examples must be imported before use |
 | `help/`, `lang/` | Help and language packs |
 | `assets/`, `log/`, `cache/`, `tmp/`, `electron/` | Assets, logs, cache, temporary files, and Electron profile |
 

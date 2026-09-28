@@ -45,6 +45,7 @@ export async function preserveRecoveryData(dataDir: string, destinationParent: s
       if (!excludedRoots.has(name)) await copy(join(root, name), join(payload, name), 0)
     }
     await writeFile(join(output, 'recovery.json'), JSON.stringify({
+      version: 0,
       source: root, createdAt: new Date().toISOString(), entries, bytes,
       excludedRoots: [...excludedRoots], symbolicLinks: 'Preserved without copying their targets',
       format: 'Raw data preservation; not a validated application backup'

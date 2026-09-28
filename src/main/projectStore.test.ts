@@ -173,7 +173,7 @@ describe('project store', () => {
     const previous = JSON.parse(await readFile(storePaths.projectFile, 'utf8'))
     const next = { ...previous, projects: previous.projects.filter((item: Project) => item.id !== preferred.id) }
     await writeFile(`${storePaths.projectFile}.delete-journal`, JSON.stringify({
-      version: 4, projectId: preferred.id, threadIds: ['thread'], previous, next
+      version: 0, projectId: preferred.id, threadIds: ['thread'], previous, next
     }), 'utf8')
     await writeFile(storePaths.projectFile, JSON.stringify(next), 'utf8')
     await store.recoverProjectDeletion(() => true, vi.fn())
@@ -432,13 +432,13 @@ describe('project store', () => {
     const store = await import('./projectStore')
     const project = await store.createProject({
  capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, advancedSettings: true, prompt: '', kind: 'workspace', name: 'Crash', sourceFolders: [sourceFolder] })
-    const previous = { version: 4, projects: await store.listProjects() }
+    const previous = { version: 0, projects: await store.listProjects() }
     const next = {
-      version: 4,
+      version: 0,
       projects: previous.projects.filter((item) => item.id !== project.id)
     }
     const journal = {
-      version: 4,
+      version: 0,
       projectId: project.id,
       threadIds: ['thread-1'],
       previous,
@@ -472,13 +472,13 @@ describe('project store', () => {
     const store = await import('./projectStore')
     const project = await store.createProject({
  capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, advancedSettings: true, prompt: '', kind: 'workspace', name: 'Empty', sourceFolders: [sourceFolder] })
-    const previous = { version: 4, projects: await store.listProjects() }
+    const previous = { version: 0, projects: await store.listProjects() }
     const next = {
-      version: 4,
+      version: 0,
       projects: previous.projects.filter((item) => item.id !== project.id)
     }
     const journal = {
-      version: 4,
+      version: 0,
       projectId: project.id,
       threadIds: [],
       previous,

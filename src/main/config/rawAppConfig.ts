@@ -1,3 +1,4 @@
+import { requireDataVersion } from '@shared/dataVersion'
 import { writeJsonFileAtomic } from '../atomicJson'
 import { access, copyFile, mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -137,17 +138,20 @@ export interface RawMcpServer {
   env?: Record<string, unknown>
 }
 
-type RawSettingsConfigFile = RawAppSettings
+type RawSettingsConfigFile = RawAppSettings & { version: 0 }
 
 interface RawModelsConfigFile {
+  version: 0
   providers?: RawAppConfig['providers']
 }
 
 interface RawSubagentsConfigFile {
+  version: 0
   subagents?: RawAppConfig['subagents']
 }
 
 interface RawMcpServersConfigFile {
+  version: 0
   mcp_servers?: RawAppConfig['mcp_servers']
 }
 
@@ -195,7 +199,9 @@ async function ensureConfigFiles(): Promise<void> {
 async function readJsonFile<T>(path: string): Promise<T> {
   const content = await readFile(path, 'utf8')
   try {
-    return JSON.parse(content) as T
+    const value: unknown = JSON.parse(content)
+    requireDataVersion(value, 0, path)
+    return value as T
   } catch (cause) {
     throw new Error(`Could not read configuration file: ${path}\n${cause instanceof Error ? cause.message : String(cause)}`, { cause })
   }
@@ -282,28 +288,31 @@ export async function readBundledRawConfig(): Promise<RawAppConfig> {
 export async function writeRawSettingsConfig(config: RawAppConfig): Promise<void> {
   await writeJsonFileAtomic(
     getConfigFile(settingsConfigFileName),
-    (config.settings ?? {}) satisfies RawSettingsConfigFile
+    { ...config.settings, version: 0 } satisfies RawSettingsConfigFile
   )
 }
 
 export async function writeRawModelsConfig(config: RawAppConfig): Promise<void> {
   await writeJsonFileAtomic(getConfigFile(modelsConfigFileName), {
+    version: 0,
     providers: config.providers ?? []
   } satisfies RawModelsConfigFile)
 }
 
 export async function writeRawSubagentsConfig(config: RawAppConfig): Promise<void> {
   await writeJsonFileAtomic(getConfigFile(subagentsConfigFileName), {
+    version: 0,
     subagents: config.subagents ?? []
   } satisfies RawSubagentsConfigFile)
 }
 
 export async function writeRawMcpServersConfig(config: RawAppConfig): Promise<void> {
   await writeJsonFileAtomic(getConfigFile(mcpServersConfigFileName), {
+    version: 0,
     mcp_servers: config.mcp_servers ?? []
   } satisfies RawMcpServersConfigFile)
 }
 
 export async function writeRawCapabilitiesConfig(config: RawAppConfig): Promise<void> {
-  await writeJsonFileAtomic(getConfigFile(capabilitiesConfigFileName), config.capabilities)
+  await writeJsonFileAtomic(getConfigFile(capabilitiesConfigFileName), { ...asRecord(config.capabilities), version: 0 })
 }

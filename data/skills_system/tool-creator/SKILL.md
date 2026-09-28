@@ -11,7 +11,7 @@ Deliver a working tool package for the requested operation. This Skill targets A
 
 - Inspect existing tools and the user's requested scope before creating another. For an update, preserve the package ID and unrelated behavior; inspect its manifest, script, resources, and dependencies first.
 - For project-specific work, use `.agents/tools/<directory>/` under an actual source folder of the current project. For reusable user tools, use `tools/<directory>/` under the application data directory reported by the host. Honor an explicit destination; ask if the required root is unavailable or ambiguous. Do not guess a home-directory path or derive it from this Skill's installation directory.
-- Do not author in managed `tools_examples/` or `skills_system/` copies. Editing bundled source is appropriate only when the user is developing Anas itself.
+- Do not author in managed `tools_examples/`, `tools_system/`, or `skills_system/` copies. Editing bundled source is appropriate only when the user is developing Anas itself.
 
 ## Build the Tool
 

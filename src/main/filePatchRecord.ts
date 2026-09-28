@@ -33,6 +33,7 @@ const maxTargets = maxFilePatchOperations * 2
 // Only this metadata changes during execution. Text blobs and the operation
 // definition are immutable and live in the same managed operation directory.
 export const filePatchRecordMetadataSchema = z.object({
+  version: z.literal(0),
   tool: z.literal('apply_patch'), operationId: id, requestId: id, createdAt: z.string().datetime(),
   revision: integer, definitionHash: hash,
   transaction: z.object({
@@ -47,6 +48,7 @@ export const filePatchRecordMetadataSchema = z.object({
 }).strict()
 
 export const filePatchDefinitionSchema = z.object({
+  version: z.literal(0),
   restores: z.object({ requestId: id, operationId: id, revision: integer, definitionHash: hash }).strict().optional(),
   entries: z.array(z.object({
   before: image, afterHash: hash.nullable(), afterSize: integer.max(maxPatchInputBytes).nullable(),
@@ -73,7 +75,7 @@ function withoutText<T extends { text: string | null }>(value: T): Omit<T, 'text
 }
 
 export function encodePatchDefinition(record: FilePatchTransaction): string {
-  return JSON.stringify(filePatchDefinitionSchema.parse({ restores: record.restores, entries: record.entries.map((entry) => ({
+  return JSON.stringify(filePatchDefinitionSchema.parse({ version: 0, restores: record.restores, entries: record.entries.map((entry) => ({
     before: withoutText(entry.before), afterHash: entry.afterText === null ? null : patchTextHash(entry.afterText),
     afterSize: entry.afterText === null ? null : Buffer.byteLength(entry.afterText), afterMode: entry.afterMode ?? null
   })) }))
@@ -81,7 +83,7 @@ export function encodePatchDefinition(record: FilePatchTransaction): string {
 
 export function encodePatchMetadata(record: FilePatchEditRecord): string {
   const { restores: _restores, ...transaction } = record.transaction
-  return JSON.stringify(filePatchRecordMetadataSchema.parse({ ...record, transaction: {
+  return JSON.stringify(filePatchRecordMetadataSchema.parse({ ...record, version: 0, transaction: {
     ...transaction, entries: record.transaction.entries.map((entry) => ({
       state: entry.state, after: entry.after ? withoutText(entry.after) : null,
       ...(entry.compensated ? { compensated: withoutText(entry.compensated) } : {})
@@ -93,7 +95,7 @@ export async function decodePatchRecord(
   metadata: unknown, definitionText: string,
   readText: (index: number, side: 'before' | 'after', size: number) => Promise<string>
 ): Promise<FilePatchEditRecord> {
-  const parsed = filePatchRecordMetadataSchema.parse(metadata)
+  const { version: _version, ...parsed } = filePatchRecordMetadataSchema.parse(metadata)
   if (patchTextHash(definitionText) !== parsed.definitionHash) throw new Error('Patch definition hash mismatch.')
   const definition = filePatchDefinitionSchema.parse(JSON.parse(definitionText))
   if (parsed.operationId !== parsed.transaction.id || definition.entries.length !== parsed.transaction.entries.length) {

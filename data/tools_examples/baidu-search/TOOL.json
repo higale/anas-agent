@@ -1,4 +1,5 @@
 {
+  "version": 0,
   "id": "baidu-search",
   "name": "baidu_search",
   "description": "使用百度 AI 搜索检索实时网络信息，返回搜索结果及来源链接。用于近期新闻、价格、比分、时效性事实、事实核查，或用户明确要求联网搜索时。需要 BAIDU_SEARCH_API_KEY 环境变量。",

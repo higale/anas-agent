@@ -43,7 +43,7 @@ async function verifyGitPanelStates(launchApplication) {
   try {
     const workspace = join(home, 'workspace'), timestamp = new Date().toISOString()
     await mkdir(workspace)
-    await writeFile(join(home, 'projects.json'), JSON.stringify({ version: 4, projects: [{
+    await writeFile(join(home, 'projects.json'), JSON.stringify({ version: 0, projects: [{
       id: 'default-workspace', kind: 'workspace', name: 'Git panel fixture', sourceFolders: [workspace],
       capabilities, restrict_subagents, advanced_settings: false, coding_mode: false,
       pinned: false, collapsed: false, prompt: '', createdAt: timestamp, updatedAt: timestamp

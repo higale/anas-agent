@@ -12,8 +12,6 @@ import { recoverInterruptedDataRestore, resetProjectData } from './backupService
 import { errorDetail, type RecoveryResult, type RecoverySnapshot } from '@shared/recovery'
 import { configureRuntimeLogger, runtimeLog } from './runtimeLogger'
 import { inspectRecoveryRepair, repairRecoveryData, requireRecoveryFile } from './recoveryRepair'
-import { readProjectStoreFile } from './projectStore'
-import { AgentStorage } from './agent/agentStorage'
 
 let active = false
 let canModify = false
@@ -92,17 +90,6 @@ export function registerRecoveryIpcHandlers(): void {
   handleMainIpc('recovery:inspect', async (): Promise<RecoverySnapshot> => {
     requireRecovery()
     const repair = await inspectRecoveryRepair(getDataDir())
-    const projects = repair.files.find((file) => file.name === 'projects.json')
-    if (canModify && projects && !projects.error && !projects.repairableFields.length) {
-      try {
-        const store = await readProjectStoreFile(projects.path)
-        AgentStorage.validateCatalogBackup(getAgentCatalogFile(), new Set(store.projects.map((project) => project.id)))
-      } catch (error) {
-        // Only the shared catalog belongs to global startup recovery. An
-        // unreadable conversation is reported when that conversation is opened.
-        projects.error = errorDetail(error)
-      }
-    }
     return {
       dataDir: getDataDir(), logDir: getLogDir(), preservationParent: dirname(getDataDir()),
       catalogPath: getAgentCatalogFile(), conversationsPath: getAgentConversationsDir(),
@@ -112,9 +99,17 @@ export function registerRecoveryIpcHandlers(): void {
   })
   handleMainIpc('recovery:repair', (_event, file: unknown) => exclusive(async () => {
     requireStopped()
-    const result = await repairRecoveryData(getDataDir(), requireRecoveryFile(file), () => preserve())
-    runtimeLog('info', 'recovery', 'Repaired application data fields.', { repaired: result.repaired, unresolved: result.unresolved })
-    return result
+    try {
+      const result = await repairRecoveryData(getDataDir(), requireRecoveryFile(file), () => preserve())
+      runtimeLog('info', 'recovery', 'Repaired application data fields.', { repaired: result.repaired, unresolved: result.unresolved })
+      return result
+    } catch (error) {
+      try { await recoverInterruptedDataRestore() } catch (rollbackError) {
+        canModify = false
+        stopError = errorDetail(rollbackError)
+      }
+      throw error
+    }
   }))
   handleMainIpc('recovery:openDirectory', async (_event, kind: unknown): Promise<void> => {
     const path = kind === 'data' ? getDataDir() : kind === 'log' ? getLogDir()

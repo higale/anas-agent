@@ -30,6 +30,41 @@ beforeEach(() => {
 })
 
 describe('RecoveryApp', () => {
+  it('keeps a partial recovery report visible after the repaired live file passes validation', async () => {
+    const user = userEvent.setup()
+    const history = { name: 'input_history.json', path: '/test/data/input_history.json', repairableFields: ['items'], error: 'One unreadable entry' }
+    api.inspect.mockResolvedValue({ ...snapshot, files: [history] })
+    api.repair.mockImplementation(async () => {
+      api.inspect.mockResolvedValue({ ...snapshot, files: [{ ...history, repairableFields: [], error: undefined }], lastPreservationPath: '/test/originals' })
+      return { preservationPath: '/test/history-originals', repaired: ['items'], unresolved: ['Original entry 1 remains in the preservation copy'] }
+    })
+    render(<RecoveryApp />)
+    await user.click(within(await screen.findByRole('group', { name: 'input_history.json' })).getByRole('button', { name: 'recovery.repair' }))
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'recovery.repair' }))
+    expect(await screen.findByText('recovery.file_partially_repaired')).toBeVisible()
+    expect(screen.getByText('Original entry 1 remains in the preservation copy')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'recovery.restart' })).toBeEnabled()
+    await user.click(screen.getByText('recovery.details'))
+    expect(screen.getByText('recovery.saved_at /test/originals')).toBeVisible()
+    expect((screen.getByRole('textbox', { name: 'recovery.details' }) as HTMLTextAreaElement).value).toContain('/test/history-originals')
+  })
+
+  it('repairs auxiliary data in the unified recovery page without offering a config reset', async () => {
+    const user = userEvent.setup()
+    api.inspect.mockResolvedValue({ ...snapshot, files: [
+      { name: 'input_history.json', path: '/test/data/input_history.json', repairableFields: ['input_history.json: version'] },
+      { name: 'assets/avatar-transform.json', path: '/test/data/assets/avatar-transform.json', repairableFields: ['assets/avatar-transform.json: version'] }
+    ] })
+    api.repair.mockResolvedValue({ repaired: ['input_history.json: version'], unresolved: [] })
+    render(<RecoveryApp />)
+    const row = within(await screen.findByRole('group', { name: 'input_history.json' }))
+    expect(row.queryByRole('button', { name: 'recovery.reset' })).not.toBeInTheDocument()
+    expect(within(screen.getByRole('group', { name: 'assets/avatar-transform.json' })).getByRole('button', { name: 'recovery.repair' })).toBeEnabled()
+    await user.click(row.getByRole('button', { name: 'recovery.repair' }))
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'recovery.repair' }))
+    await waitFor(() => expect(api.repair).toHaveBeenCalledExactlyOnceWith('input_history.json'))
+  })
+
   it('shows only affected files, with inline actions and collapsed diagnostics, without generic choices', async () => {
     render(<RecoveryApp />)
     expect(await screen.findByRole('group', { name: 'settings.json' })).toBeVisible()
@@ -38,7 +73,7 @@ describe('RecoveryApp', () => {
     expect(screen.queryByRole('button', { name: 'recovery.restore' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'recovery.preserve' })).not.toBeInTheDocument()
     expect(screen.getByText('recovery.details').closest('details')).not.toHaveAttribute('open')
-    expect(within(screen.getByRole('group', { name: 'settings.json' })).queryByRole('button', { name: 'recovery.repair' })).not.toBeInTheDocument()
+    expect(within(screen.getByRole('group', { name: 'settings.json' })).getByRole('button', { name: 'recovery.repair' })).toBeEnabled()
   })
 
   it('confirms repair for only the clicked file and leaves other failures actionable', async () => {
@@ -99,10 +134,11 @@ describe('RecoveryApp', () => {
     api.repair.mockResolvedValue({ repaired: [], unresolved: ['File changed since inspection'] })
     api.inspect.mockResolvedValue({ ...snapshot, lastPreservationPath: '/test/preserved' })
     render(<RecoveryApp />)
-    await user.click(await screen.findByRole('button', { name: 'recovery.repair' }))
+    const row = within(await screen.findByRole('group', { name: 'settings.json' }))
+    await user.click(row.getByRole('button', { name: 'recovery.repair' }))
     await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'recovery.repair' }))
     expect(await screen.findByText('File changed since inspection')).toBeVisible()
-    expect(screen.getByRole('button', { name: 'recovery.repair' })).toBeEnabled()
+    expect(row.getByRole('button', { name: 'recovery.repair' })).toBeEnabled()
     await user.click(screen.getByText('recovery.details'))
     expect(screen.getByText('recovery.saved_at /test/preserved')).toBeVisible()
   })
@@ -115,8 +151,9 @@ describe('RecoveryApp', () => {
     expect(screen.getByRole('button', { name: 'recovery.restart' })).toBeEnabled()
   })
 
-  it('automatically enters file recovery once after both critical resources settle, including StrictMode', async () => {
+  it('automatically enters file recovery once after all critical resources settle, including StrictMode', async () => {
     const state = createInitialAppLoadSnapshot()
+    state.inputHistory = { phase: 'ready' }
     state.projects = { phase: 'error', error: 'bad projects.json' }
     state.config = { phase: 'loading' }
     const view = render(<StrictMode><InitialAppGate snapshot={state} /></StrictMode>)
@@ -132,6 +169,7 @@ describe('RecoveryApp', () => {
   it('allows retry when automatic recovery navigation fails without retrying endlessly', async () => {
     const user = userEvent.setup()
     const state = createInitialAppLoadSnapshot()
+    state.inputHistory = { phase: 'ready' }
     state.projects = { phase: 'ready' }
     state.config = { phase: 'error', error: 'bad settings.json' }
     api.enter.mockRejectedValueOnce(new Error('navigation failed')).mockResolvedValue(undefined)
@@ -144,11 +182,22 @@ describe('RecoveryApp', () => {
 
   it('does not enter recovery for optional resource failures', () => {
     const state = createInitialAppLoadSnapshot()
+    state.inputHistory = { phase: 'ready' }
     state.projects = { phase: 'ready' }
     state.config = { phase: 'ready' }
     state.icon = { phase: 'error', error: 'optional icon unavailable' }
     const view = render(<InitialAppGate snapshot={state} />)
     expect(api.enter).not.toHaveBeenCalled()
     expect(view.container).toBeEmptyDOMElement()
+  })
+
+  it('automatically routes an input history failure to recovery instead of the main application', async () => {
+    const state = createInitialAppLoadSnapshot()
+    state.projects = { phase: 'ready' }
+    state.config = { phase: 'ready' }
+    state.inputHistory = { phase: 'error', error: 'Input history has an invalid format.' }
+    render(<StrictMode><InitialAppGate snapshot={state} /></StrictMode>)
+    await waitFor(() => expect(api.enter).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('Input history has an invalid format.')))
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
 })

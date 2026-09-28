@@ -96,6 +96,7 @@ function parseSpeechVoiceList(output: unknown): SpeechVoiceInfo[] {
 function parseSpeechVoiceCache(output: unknown): SpeechVoiceCache | undefined {
   if (!output || typeof output !== 'object' || Array.isArray(output)) return undefined
   const record = output as Record<string, unknown>
+  if (record.version !== 0) return undefined
   const cachedAt = typeof record.cachedAt === 'string' ? record.cachedAt : ''
   const voices = parseCachedSpeechVoices(record.voices)
   if (!cachedAt || voices.length === 0) return undefined
@@ -135,6 +136,7 @@ async function writeSpeechVoiceCache(voices: SpeechVoiceInfo[]): Promise<void> {
   try {
     await mkdir(speechCacheDir(), { recursive: true })
     await writeFile(speechVoiceCachePath(), JSON.stringify({
+      version: 0,
       cachedAt: new Date().toISOString(),
       voices
     }, null, 2), 'utf8')

@@ -1,4 +1,5 @@
 {
+  "version": 0,
   "id": "example-json-format",
   "name": "json_format",
   "description": "Format a JSON value as text with two-space indentation and optional key sorting, without reading or writing files. Return an error if the formatted output exceeds 100000 UTF-8 bytes.",

@@ -19,6 +19,8 @@ import { initializeCustomEnvironmentInformation } from './environmentContextServ
 import { installRuntimeNetworkPolicy } from './runtimeNetworkPolicy'
 import { initializeSkillsStore } from './skillsStore'
 import { initializeToolsStore } from './toolsStore'
+import { getInputHistory } from './inputHistoryStore'
+import { migrateDataDirectory } from './migrations'
 import { recoverInterruptedDataRestore } from './backupService'
 import { reportStartupFailure } from './startupFailure'
 import { registerSpeechReplyIpc } from './speech/speechReplyIpc'
@@ -74,6 +76,7 @@ function startApplication(): void {
   app.whenReady().then(async () => {
     registerAttachmentPreviewProtocol()
     const recoveredInterruptedRestore = await recoverInterruptedDataRestore()
+    await migrateDataDirectory(getDataDir())
     await recoverPendingProjectDeletion()
     await initializeAgentRuntime()
     await initializeAppProfile()
@@ -99,13 +102,10 @@ function startApplication(): void {
     }
     await initializeSkillsStore()
     await initializeToolsStore()
+    await getInputHistory()
     await initializeUserShellEnvironment()
     await configureApplicationMenu()
-    try {
-      await initializeAvatarAssets()
-    } catch (reason) {
-      runtimeLog('warn', 'profile', 'Failed to initialize avatar assets on startup.', { error: reason })
-    }
+    await initializeAvatarAssets()
     try {
       await consumePendingAvatarUpdate()
     } catch (reason) {

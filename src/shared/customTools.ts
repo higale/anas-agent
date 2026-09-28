@@ -1,3 +1,4 @@
+import { requireDataVersion } from './dataVersion'
 import Ajv, { type AnySchema } from 'ajv/dist/2019'
 import { isCommandShellToolName, maxCommandTimeoutSeconds } from './commandShell'
 import defaults from '../../data/config/tools.json'
@@ -109,13 +110,15 @@ export function validateCustomTools(value: unknown): CustomToolDefinition[] {
 
 export function serializeCustomTool(tool: CustomToolDefinition) {
   const { inputSchema, timeoutSeconds, ...rest } = tool
-  return { ...rest, input_schema: inputSchema, timeout_seconds: timeoutSeconds }
+  return { ...rest, version: 0, input_schema: inputSchema, timeout_seconds: timeoutSeconds }
 }
 
 export function parseCustomTools(value: unknown): CustomToolDefinition[] {
   if (!Array.isArray(value)) throw new Error('Invalid custom tool configuration.')
-  return validateCustomTools(value.map((raw) => ({ ...raw, inputSchema: raw.input_schema,
-    timeoutSeconds: raw.timeout_seconds })))
+  return validateCustomTools(value.map((raw) => {
+    requireDataVersion(raw, 0, 'tool manifest')
+    return { ...raw, inputSchema: raw.input_schema, timeoutSeconds: raw.timeout_seconds }
+  }))
 }
 
 export function isCustomToolMetadata(value: unknown): boolean {

@@ -1,5 +1,6 @@
+import { PackageSourceActions, PackageTreeRoot, PackageTreeItem, PackageFileTree, PackageFileViewer, packageNodeKey as nodeKey } from './PackageTree'
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { ChevronDown, ChevronRight, File, FileCode2, Folder, FolderDown, FolderInput, FolderOpen, Link2, ListTree, RefreshCw, SquareChevronDown, SquareChevronRight, Trash2 } from 'lucide-react'
+import { FolderOpen, ListTree, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { SKILL_ROOT_DISPLAY_NAME_MAX_LENGTH, SKILL_SHORTCUT_ALIAS_MAX_LENGTH, SKILL_SHORTCUT_ALIAS_PATTERN } from '@shared/types'
 import type { SkillAvailabilityUpdate, SkillFileNode, SkillFilePreview, SkillRootSummary, SkillRootUpdate, SkillSnapshot, SkillSummary } from '@shared/types'
@@ -25,10 +26,6 @@ type Selection =
   | { kind: 'root'; rootId: string }
   | { kind: 'skill'; skillId: string }
   | { kind: 'file'; skillId: string; relativePath: string }
-
-function nodeKey(skillId: string, path = ''): string {
-  return `${skillId}\0${path}`
-}
 
 export function SkillsSettings({
   sectionClass,
@@ -178,78 +175,19 @@ export function SkillsSettings({
     }
   }
 
-  function renderFileNodes(skillId: string, parentPath?: string, depth = 0): ReactNode {
-    const key = nodeKey(skillId, parentPath)
-    return (children[key] ?? []).map((file) => {
-      const expandable = file.kind === 'directory' || file.linkDirectory
-      const expandedKey = `files:${nodeKey(skillId, file.relativePath)}`
-      const isExpanded = expanded.has(expandedKey)
-      const selected = selection?.kind === 'file' && selection.skillId === skillId && selection.relativePath === file.relativePath
-      const Icon = file.kind === 'symlink' ? Link2 : expandable ? Folder : file.kind === 'text' ? FileCode2 : File
-      return (
-        <div key={file.relativePath}>
-          <button
-            className={selected ? 'settings-skill-tree-row active' : 'settings-skill-tree-row'}
-            style={{ paddingLeft: 10 + depth * 16 }}
-            type="button"
-            onClick={() => void selectFile(skillId, file)}
-          >
-            {expandable ? (isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />) : <span className="settings-skill-tree-spacer" />}
-            <Icon size={14} />
-            <span className="settings-skill-tree-label">{file.name}</span>
-          </button>
-          {expandable && isExpanded && renderFileNodes(skillId, file.relativePath, depth + 1)}
-        </div>
-      )
-    })
-  }
-
   function renderSkill(skill: SkillSummary, depth: number, showSource = false): ReactNode {
     const isExpanded = expanded.has(`files:${nodeKey(skill.id)}`)
-    const selected = selection?.kind === 'skill' && selection.skillId === skill.id
-    const fullyUnavailable = !skill.modelAvailable && !skill.userAvailable
-    const className = [
-      'settings-skill-tree-row',
-      selected && 'active',
-      fullyUnavailable && 'settings-skill-tree-row-fully-unavailable'
-    ].filter(Boolean).join(' ')
-    const badge = [
-      showSource ? `@${skill.shortcutAlias}` : '',
-      skill.loadError ? t('settings.skill_load_error_badge') : ''
-    ].filter(Boolean).join(' · ')
-    return (
-      <div key={skill.id}>
-        <div
-          className={`${className} settings-skill-tree-split`}
-          style={{ paddingLeft: 10 + depth * 16 }}
-        >
-          <button
-            aria-expanded={isExpanded}
-            aria-label={t(isExpanded ? 'settings.skill_collapse' : 'settings.skill_expand', { name: skill.name })}
-            className="settings-skill-tree-toggle"
-            type="button"
-            onClick={() => void expandFiles(skill.id)}
-          >
-            {isExpanded ? <SquareChevronDown size={14} /> : <SquareChevronRight size={14} />}
-          </button>
-          <button
-            className="settings-skill-tree-select"
-            aria-label={skill.scriptAutoApprove ? [skill.name, badge, t('settings.skill_scripts_auto_approve')].filter(Boolean).join(' · ') : undefined}
-            data-tooltip={skill.scriptAutoApprove ? t('settings.skill_scripts_auto_approve') : undefined}
-            type="button"
-            onClick={() => {
-              setSelection({ kind: 'skill', skillId: skill.id })
-              clearPreview()
-            }}
-          >
-            {skill.linked ? <Link2 size={14} /> : <Folder size={14} />}
-            <span className={`settings-skill-tree-label${skill.scriptAutoApprove ? ' ui-text-success' : ''}`}>{skill.name}</span>
-            {badge && <em>{badge}</em>}
-          </button>
-        </div>
-        {isExpanded && renderFileNodes(skill.id, undefined, depth + 1)}
-      </div>
-    )
+    return <PackageTreeItem key={skill.id} name={skill.name} depth={depth}
+      expanded={isExpanded} selected={selection?.kind === 'skill' && selection.skillId === skill.id}
+      unavailable={!skill.modelAvailable && !skill.userAvailable} linked={skill.linked} highlighted={skill.scriptAutoApprove}
+      badge={[showSource ? `@${skill.shortcutAlias}` : '', skill.loadError ? t('settings.skill_load_error_badge') : ''].filter(Boolean).join(' · ')}
+      tooltip={skill.scriptAutoApprove ? t('settings.skill_scripts_auto_approve') : undefined}
+      expandLabel={t(isExpanded ? 'settings.skill_collapse' : 'settings.skill_expand', { name: skill.name })}
+      onExpand={() => void expandFiles(skill.id)} onSelect={() => { setSelection({ kind: 'skill', skillId: skill.id }); clearPreview() }}>
+      <PackageFileTree packageId={skill.id} depth={depth + 1} childrenByKey={children} expanded={expanded}
+        selectedPath={selection?.kind === 'file' && selection.skillId === skill.id ? selection.relativePath : undefined}
+        onSelect={file => void selectFile(skill.id, file)} />
+    </PackageTreeItem>
   }
 
   function rootLabel(root: SkillRootSummary): string {
@@ -258,34 +196,14 @@ export function SkillsSettings({
       : root.name
   }
 
-  function renderRoot(root: SkillRootSummary, depth = 0): ReactNode {
+  function renderRoot(root: SkillRootSummary): ReactNode {
     const key = `root:${root.id}`
-    const isExpanded = expanded.has(key)
-    const selected = selection?.kind === 'root' && selection.rootId === root.id
-    const rootSkills = allSkills.filter((skill) => skill.rootId === root.id)
-    const label = rootLabel(root)
-    return (
-      <div key={root.id}>
-        <button
-          className={selected ? 'settings-skill-tree-row settings-skill-tree-root active' : 'settings-skill-tree-row settings-skill-tree-root'}
-          style={{ paddingLeft: 8 + depth * 16 }}
-          type="button"
-          onClick={() => {
-            setSelection({ kind: 'root', rootId: root.id })
-            clearPreview()
-            toggle(key)
-          }}
-        >
-          <span>
-            {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          </span>
-          <Folder size={15} />
-          <span className="settings-skill-tree-label">{label}</span>
-          <em>{rootSkills.length}</em>
-        </button>
-        {isExpanded && rootSkills.map((skill) => renderSkill(skill, depth + 1))}
-      </div>
-    )
+    const rootSkills = allSkills.filter(skill => skill.rootId === root.id)
+    return <PackageTreeRoot key={root.id} name={rootLabel(root)} count={rootSkills.length} expanded={expanded.has(key)}
+      selected={selection?.kind === 'root' && selection.rootId === root.id}
+      onClick={() => { setSelection({ kind: 'root', rootId: root.id }); clearPreview(); toggle(key) }}>
+      {rootSkills.map(skill => renderSkill(skill, 1))}
+    </PackageTreeRoot>
   }
 
   const selectedExternalIndex = selectedRoot ? externalRoots.findIndex((root) => root.id === selectedRoot.id) : -1
@@ -298,40 +216,14 @@ export function SkillsSettings({
   return (
     <section className={sectionClass}>
       <div className="ui-list-pane">
-        <div className="ui-list-pane-header">
-          <div className="ui-toolbar ui-toolbar-between">
-            <div className="ui-toolbar">
-              <button className="ui-button ui-button-compact" type="button" onClick={() => void onAddDirectory()}>
-                <FolderInput size={UI_ICON_SIZE_SMALL} /><span>{t('settings.add_skill_directory')}</span>
-              </button>
-              {showImport && (
-                <button className="ui-button ui-button-compact" type="button" onClick={() => void onImportDirectories()}>
-                  <FolderDown size={UI_ICON_SIZE_SMALL} /><span>{t('settings.import_skill')}</span>
-                </button>
-              )}
-            </div>
-            <button className="ui-tool-button ui-tool-button-small" type="button" aria-label={t('common.refresh')} data-tooltip={t('common.refresh')} onClick={() => void onRefresh()}>
-              <RefreshCw size={UI_ICON_SIZE_SMALL} />
-            </button>
-          </div>
-        </div>
+        <PackageSourceActions addLabel={t('settings.add_skill_directory')} importLabel={t('settings.import_skill')} refreshLabel={t('common.refresh')}
+          onAdd={() => void onAddDirectory()} onImport={showImport ? () => void onImportDirectories() : undefined} onRefresh={() => void onRefresh()} />
         <div className="ui-scroll-list settings-skill-tree">
-          <div>
-            <button
-              className={selection?.kind === 'all' ? 'settings-skill-tree-row settings-skill-tree-root active' : 'settings-skill-tree-row settings-skill-tree-root'}
-              type="button"
-              onClick={() => {
-                setSelection({ kind: 'all' })
-                clearPreview()
-                toggle('group:all')
-              }}
-            >
-              {expanded.has('group:all') ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-              <ListTree size={15} /><span className="settings-skill-tree-label">{t('settings.skill_group_all')}</span>
-              <em>{allSkills.length}</em>
-            </button>
-            {expanded.has('group:all') && sortedSkills.map((skill) => renderSkill(skill, 1, true))}
-          </div>
+          <PackageTreeRoot name={t('settings.skill_group_all')} count={allSkills.length} expanded={expanded.has('group:all')}
+            selected={selection?.kind === 'all'} icon={<ListTree size={15} />}
+            onClick={() => { setSelection({ kind: 'all' }); clearPreview(); toggle('group:all') }}>
+            {sortedSkills.map(skill => renderSkill(skill, 1, true))}
+          </PackageTreeRoot>
           {roots.map((root) => renderRoot(root))}
         </div>
       </div>
@@ -426,19 +318,7 @@ export function SkillsSettings({
           </dl>
         </>}
 
-        {preview && <>
-          <div className="settings-skill-viewer-heading ui-toolbar ui-toolbar-between"><div><strong>{preview.name}</strong><small>{preview.relativePath}</small></div><div className="ui-row"><small>{preview.size} B</small>{openButton(preview.path)}</div></div>
-          {preview.linkTarget && <div className="ui-note"><Link2 size={14} /> {preview.linkTarget} → {preview.resolvedPath}</div>}
-          {preview.kind === 'text' ? <pre className="settings-skill-file-content">{preview.content}</pre> : <div className="ui-empty-state">{t('settings.skill_binary_preview_unavailable')}</div>}
-        </>}
-
-        {selection?.kind === 'file' && !preview && selectedFile && <>
-          <div className="settings-skill-viewer-heading ui-toolbar ui-toolbar-between"><div><strong>{selectedFile.name}</strong><small>{selectedFile.relativePath}</small></div>{openButton(selectedFile.path, selectedFile.kind === 'symlink' && !selectedFile.resolvedPath)}</div>
-          {selectedFile.linkTarget && <div className="ui-note"><Link2 size={14} /> {selectedFile.linkTarget} → {selectedFile.resolvedPath ?? t('settings.skill_link_unavailable')}</div>}
-          <div className="ui-empty-state">{selectedFile.kind === 'directory' || selectedFile.linkDirectory
-            ? t('settings.skill_directory_preview')
-            : t('settings.skill_file_preview_unavailable')}</div>
-        </>}
+        <PackageFileViewer preview={preview} file={selection?.kind === 'file' ? selectedFile : undefined} openButton={openButton} t={t} />
 
         {!selection && <div className="ui-empty-state">{t('settings.select_skill_tree_item')}</div>}
       </div>

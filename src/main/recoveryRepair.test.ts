@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -7,8 +7,12 @@ import subagents from '../../data/config/subagents.json'
 import models from '../../data/config/models.json'
 import capabilities from '../../data/config/capabilities.json'
 import { DEFAULT_WORKSPACE_PROJECT_ID } from '@shared/types'
+import { resettableConfigFiles } from '@shared/recovery'
 import { inspectRecoveryRepair, repairDocument, repairRecoveryData } from './recoveryRepair'
 import { preserveRecoveryData } from './recoveryData'
+import { AgentStorage } from './agent/agentStorage'
+import { readInputHistoryStoreFile } from './inputHistoryStore'
+import * as avatarRepair from './recoveryAvatar'
 
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))) })
@@ -24,6 +28,151 @@ async function fixture() {
 }
 
 describe('field-level recovery', () => {
+  it.each([undefined, 1, 99])('rescues input history version %s without pruning, reordering, or changing pinned entries', async version => {
+    const { root, data } = await fixture()
+    const items = Array.from({ length: 59 }, (_, index) => ({ text: `Prompt ${index}`, pinned: index % 3 === 0,
+      createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-28T00:00:00.000Z' }))
+    const before = JSON.stringify({ version, maxHistory: 10, items })
+    const path = join(data, 'input_history.json')
+    await writeFile(path, before)
+    await expect(readInputHistoryStoreFile(path)).rejects.toThrow('invalid format')
+    const plan = await inspectRecoveryRepair(data)
+    expect(plan.files.find(file => file.name === 'input_history.json')?.repairableFields).toEqual(['input_history.json: version'])
+    expect(await readFile(path, 'utf8')).toBe(before)
+    const result = await repairRecoveryData(data, 'input_history.json', () => preserveRecoveryData(data, root))
+    expect(result.unresolved).toEqual([])
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({ version: 0, maxHistory: 10, items })
+    expect(await readFile(join(result.preservationPath!, 'data/input_history.json'), 'utf8')).toBe(before)
+    await expect(readInputHistoryStoreFile(path)).resolves.toMatchObject({ version: 0, maxHistory: 10 })
+    expect((await inspectRecoveryRepair(data)).files.find(file => file.name === 'input_history.json')?.repairableFields).toEqual([])
+  })
+
+  it('exposes asset failures even with valid metadata and delegates repair to the asset transaction', async () => {
+    const { data } = await fixture()
+    await mkdir(join(data, 'assets'))
+    await writeFile(join(data, 'assets/avatar-transform.json'), JSON.stringify({ version: 0, crop: { x: 0, y: 0, width: 100, height: 100 }, rotation: 0 }))
+    vi.spyOn(avatarRepair, 'inspectAvatarRepair').mockResolvedValue({ fields: ['Recover source from crop'], issues: ['Source image cannot be decoded'] })
+    const expected = { preservationPath: '/saved', repaired: ['Recover source from crop'], unresolved: [] }
+    const repair = vi.spyOn(avatarRepair, 'repairAvatarData').mockResolvedValue(expected)
+    const plan = await inspectRecoveryRepair(data)
+    const canonical = await realpath(data)
+    expect(plan.files.find(file => file.name === 'assets/avatar-transform.json')).toMatchObject({
+      path: join(canonical, 'assets'), repairableFields: ['Recover source from crop'], error: 'Source image cannot be decoded'
+    })
+    const preserve = vi.fn(async () => '/saved')
+    expect(await repairRecoveryData(data, 'assets/avatar-transform.json', preserve)).toEqual(expected)
+    expect(repair).toHaveBeenCalledExactlyOnceWith(canonical, preserve)
+  })
+
+  it('does not create optional stores during inspection or discard history with unreadable items', async () => {
+    const { root, data } = await fixture()
+    expect((await inspectRecoveryRepair(data)).candidates).toEqual([])
+    await expect(readFile(join(data, 'input_history.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+    const before = '{"version":1,"items":[{"text":7}]}'
+    await writeFile(join(data, 'input_history.json'), before)
+    const result = await repairRecoveryData(data, 'input_history.json', () => preserveRecoveryData(data, root))
+    expect(result.unresolved.join('\n')).toContain('items[0] could not be recovered')
+    expect(await readFile(join(data, 'input_history.json'), 'utf8')).toBe(before)
+    expect(await readFile(join(result.preservationPath!, 'data/input_history.json'), 'utf8')).toBe(before)
+  })
+
+  it.each([0, 1])('recovers readable history independently of bad entries at version %s', async version => {
+    const { root, data } = await fixture()
+    const first = { text: 'Keep pinned', pinned: true, createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-28T00:00:00Z' }
+    const second = { text: 'Keep ordinary', pinned: false, createdAt: '2026-09-02T00:00:00Z', updatedAt: '2026-09-27T00:00:00Z' }
+    const before = JSON.stringify({ version, maxHistory: 100, items: [first, { text: 7, pinned: true }, second, null] })
+    const path = join(data, 'input_history.json')
+    await writeFile(path, before)
+    const plan = await inspectRecoveryRepair(data)
+    expect(plan.files.find(file => file.name === 'input_history.json')?.error).toContain('items[1]')
+    expect(plan.files.find(file => file.name === 'input_history.json')?.repairableFields.length).toBeGreaterThan(0)
+    expect(await readFile(path, 'utf8')).toBe(before)
+    const result = await repairRecoveryData(data, 'input_history.json', async () => {
+      expect(await readFile(path, 'utf8')).toBe(before)
+      return preserveRecoveryData(data, root)
+    })
+    expect(result.repaired.length).toBeGreaterThan(0)
+    expect(result.unresolved).toHaveLength(2)
+    expect(result.unresolved.join('\n')).toContain('items[3]')
+    expect(await readFile(join(result.preservationPath!, 'data/input_history.json'), 'utf8')).toBe(before)
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({ version: 0, maxHistory: 100, items: [first, second] })
+    expect((await readInputHistoryStoreFile(path)).items).toEqual([first, second])
+    const preserve = vi.fn(async () => '/unused')
+    expect(await repairRecoveryData(data, 'input_history.json', preserve)).toEqual({ repaired: [], unresolved: [] })
+    expect(preserve).not.toHaveBeenCalled()
+  })
+
+  it('does not replace partially readable history if the original cannot be preserved', async () => {
+    const { data } = await fixture()
+    const path = join(data, 'input_history.json')
+    const before = '{"version":0,"maxHistory":100,"items":[{"text":"keep"},{"text":7}]}'
+    await writeFile(path, before)
+    await expect(repairRecoveryData(data, 'input_history.json', async () => { throw new Error('preservation failed') })).rejects.toThrow('preservation failed')
+    expect(await readFile(path, 'utf8')).toBe(before)
+  })
+
+  it('preserves unparseable input and reports the problem when no safe field repair is available', async () => {
+    const { root, data } = await fixture()
+    const path = join(data, 'config/tools.json'), before = '{broken tool data'
+    await writeFile(path, before)
+    const result = await repairRecoveryData(data, 'tools.json', () => preserveRecoveryData(data, root))
+    expect(result.repaired).toEqual([])
+    expect(result.unresolved).not.toEqual([])
+    expect(await readFile(path, 'utf8')).toBe(before)
+    expect(await readFile(join(result.preservationPath!, 'data/config/tools.json'), 'utf8')).toBe(before)
+  })
+
+  it.each(resettableConfigFiles)('repairs missing version metadata in %s only after preserving its original bytes', async (file) => {
+    const { root, data } = await fixture()
+    const path = join(data, 'config', file)
+    const current = JSON.parse(await readFile(path, 'utf8'))
+    const unversioned = structuredClone(current)
+    delete unversioned.version
+    const before = JSON.stringify(unversioned)
+    await writeFile(path, before)
+    const plan = await inspectRecoveryRepair(data)
+    expect(plan.files.find((status) => status.name === file)?.repairableFields).toEqual([`${file}: version`])
+    expect(await readFile(path, 'utf8')).toBe(before)
+    const result = await repairRecoveryData(data, file, async () => {
+      expect(await readFile(path, 'utf8')).toBe(before)
+      return preserveRecoveryData(data, root)
+    })
+    expect(result.unresolved).toEqual([])
+    expect(result.repaired).toEqual([`${file}: version`])
+    expect(await readFile(join(result.preservationPath!, 'data/config', file), 'utf8')).toBe(before)
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(current)
+    const preserve = vi.fn(async () => '/unused')
+    expect((await repairRecoveryData(data, file, preserve)).repaired).toEqual([])
+    expect(preserve).not.toHaveBeenCalled()
+  })
+
+  it('recreates a missing config through explicit repair without changing other config files', async () => {
+    const { root, data } = await fixture()
+    const path = join(data, 'config/settings.json')
+    const other = await readFile(join(data, 'config/models.json'), 'utf8')
+    await rm(path)
+    expect((await inspectRecoveryRepair(data)).files.find((file) => file.name === 'settings.json')?.repairableFields).toContain('settings.json: version')
+    const result = await repairRecoveryData(data, 'settings.json', () => preserveRecoveryData(data, root))
+    expect(result.unresolved).toEqual([])
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(settings)
+    expect(await readFile(join(data, 'config/models.json'), 'utf8')).toBe(other)
+    await expect(readFile(join(result.preservationPath!, 'data/config/settings.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it.each([1, 4, 99, null, '0'])('repairs incorrect version metadata %s with current validation and preservation', async (version) => {
+    const { root, data } = await fixture()
+    const path = join(data, 'config/settings.json')
+    const before = JSON.stringify({ ...settings, version })
+    await writeFile(path, before)
+    const preserve = vi.fn(() => preserveRecoveryData(data, root))
+    const result = await repairRecoveryData(data, 'settings.json', preserve)
+    expect(result.repaired).toEqual(['settings.json: version'])
+    expect(result.unresolved).toEqual([])
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(settings)
+    expect(await readFile(join(result.preservationPath!, 'data/config/settings.json'), 'utf8')).toBe(before)
+    expect(preserve).toHaveBeenCalledOnce()
+  })
+
   it('retains per-server MCP policies and only repairs missing domain defaults on explicit recovery', () => {
     const raw: any = structuredClone(subagents)
     const custom = { default_mode: 'selected', servers: [{ id: 'offline', mode: 'all', tools: ['remembered'] }] }
@@ -49,7 +198,7 @@ describe('field-level recovery', () => {
       prompt: 'Keep prompt', coding_mode: true, advanced_settings: true, restrict_subagents: true, capabilities: selection }
     const raw: any = file === 'capabilities.json' ? selection
       : file === 'subagents.json' ? { ...structuredClone(subagents), subagents: [{ ...subagents.subagents[0], capabilities: selection }] }
-        : { version: 4, projects: [project] }
+        : { version: 0, projects: [project] }
     expect(repairDocument(file, raw)).toEqual({ value: raw, fields: [] })
     const broken = structuredClone(raw)
     const target = file === 'capabilities.json' ? broken
@@ -110,7 +259,7 @@ describe('field-level recovery', () => {
     const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep',
       createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z',
       coding_mode: codingMode, advanced_settings: false, capabilities }
-    const result = repairDocument('projects.json', { version: 4, projects: [project] })
+    const result = repairDocument('projects.json', { version: 0, projects: [project] })
     expect((result.value.projects as Record<string, unknown>[])[0].coding_mode).toBe(codingMode === true)
     expect(result.fields.some((field) => field.includes('coding_mode'))).toBe(typeof codingMode !== 'boolean')
     expect(project.coding_mode).toBe(codingMode)
@@ -168,7 +317,7 @@ describe('field-level recovery', () => {
   })
 
   it('repairs skill availability defaults without enabling an explicitly disabled switch', () => {
-    const repaired: any = repairDocument('skills.json', { external_directories: [], availability: {
+    const repaired: any = repairDocument('skills.json', { version: 0, external_directories: [], availability: {
       example: { model_available: false, user_available: 'broken' }
     } }).value
     expect(repaired.availability.example).toEqual({ model_available: false, user_available: true })
@@ -190,11 +339,11 @@ describe('field-level recovery', () => {
       createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z', sourceFolders: ['/keep/path'],
       capabilities: { ...capabilities, workspace: false }, pinned: false
     }
-    const repaired: any = repairDocument('projects.json', { version: 4, projects: [project] }).value
+    const repaired: any = repairDocument('projects.json', { version: 0, projects: [project] }).value
     expect(repaired.projects[0]).toMatchObject({ id: project.id, name: project.name, sourceFolders: ['/keep/path'], advanced_settings: false, collapsed: false })
     expect(repaired.projects[0].capabilities.workspace).toBe(false)
     delete project.id
-    expect(() => repairDocument('projects.json', { version: 4, projects: [project] })).toThrow('invalid format')
+    expect(() => repairDocument('projects.json', { version: 0, projects: [project] })).toThrow('invalid format')
   })
 
   it('preserves raw files before writing and leaves unparseable files and database untouched', async () => {
@@ -222,22 +371,23 @@ describe('field-level recovery', () => {
       createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z', sourceFolders: ['/keep/path'],
       prompt: 'Keep prompt', coding_mode: true, advanced_settings: true, restrict_subagents: true,
       capabilities: { ...structuredClone(capabilities), subagents: false } }
-    const raw = { version: 4, projects: [project, { ...structuredClone(project), id: 'second-project', name: 'Keep second project' }] }
+    const raw = { projects: [project, { ...structuredClone(project), id: 'second-project', name: 'Keep second project' }] }
     const before = JSON.stringify(raw)
     await writeFile(join(data, 'projects.json'), before)
-    await mkdir(join(data, 'sqlite/conversations'), { recursive: true })
-    const databases = ['sqlite/catalog.sqlite', 'sqlite/conversations/kept.sqlite']
-    for (const path of databases) await writeFile(join(data, path), `unchanged ${path}`)
+    const storage = AgentStorage.open(data)
+    const thread = storage.createThread({ title: 'Keep conversation' })
+    storage.close()
     const plan = await inspectRecoveryRepair(data)
     expect(plan.files.find((file) => file.name === 'projects.json')?.error).toBeUndefined()
-    expect(plan.files.find((file) => file.name === 'projects.json')?.repairableFields).toHaveLength(2)
+    expect(plan.files.find((file) => file.name === 'projects.json')?.repairableFields).toHaveLength(3)
     const result = await repairRecoveryData(data, 'projects.json', () => preserveRecoveryData(data, root))
     expect(result.unresolved).toEqual([])
-    expect(result.repaired).toHaveLength(2)
-    expect(JSON.parse(await readFile(join(data, 'projects.json'), 'utf8'))).toEqual({ ...raw,
+    expect(result.repaired).toHaveLength(3)
+    expect(JSON.parse(await readFile(join(data, 'projects.json'), 'utf8'))).toEqual({ ...raw, version: 0,
       projects: raw.projects.map((entry) => ({ ...entry, capabilities: { ...entry.capabilities, subagents: capabilities.subagents } })) })
     expect(await readFile(join(result.preservationPath!, 'data/projects.json'), 'utf8')).toBe(before)
-    for (const path of databases) expect(await readFile(join(data, path), 'utf8')).toBe(`unchanged ${path}`)
+    const reopened = AgentStorage.open(data)
+    try { expect(reopened.getThread(thread.id)?.title).toBe('Keep conversation') } finally { reopened.close() }
     const preserve = vi.fn(async () => '/unused')
     expect((await repairRecoveryData(data, 'projects.json', preserve)).repaired).toEqual([])
     expect(preserve).not.toHaveBeenCalled()
@@ -266,15 +416,15 @@ describe('field-level recovery', () => {
 
   it('attributes errors to files and repairs only the clicked file even when several need repairs', async () => {
     const { data } = await fixture()
-    await writeFile(join(data, 'config/settings.json'), '{}')
-    await writeFile(join(data, 'config/subagents.json'), '{}')
+    await writeFile(join(data, 'config/settings.json'), '{"version":0}')
+    await writeFile(join(data, 'config/subagents.json'), '{"version":0}')
     await writeFile(join(data, 'config/models.json'), '{broken')
     const plan = await inspectRecoveryRepair(data)
     expect(plan.files.find((file) => file.name === 'settings.json')?.repairableFields.length).toBeGreaterThan(0)
     expect(plan.files.find((file) => file.name === 'models.json')?.error).toBeTruthy()
     expect(plan.files.find((file) => file.name === 'projects.json')?.error).toContain('missing')
     await repairRecoveryData(data, 'settings.json', async () => '/preserved')
-    expect(await readFile(join(data, 'config/subagents.json'), 'utf8')).toBe('{}')
+    expect(await readFile(join(data, 'config/subagents.json'), 'utf8')).toBe('{"version":0}')
     expect(await readFile(join(data, 'config/models.json'), 'utf8')).toBe('{broken')
     expect(JSON.parse(await readFile(join(data, 'config/settings.json'), 'utf8'))).toEqual(settings)
   })

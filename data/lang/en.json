@@ -1,4 +1,5 @@
 {
+  "version": 0,
   "capabilities": {
     "off": "Off",
     "terminal_input_hint": "Requires Background tools and either Command execution or a selected interactive custom tool. A terminal must be allocated at launch; it cannot be attached afterward.",
@@ -72,7 +73,7 @@
   "recovery": {
     "title": "Startup recovery",
     "repair": "Repair",
-    "repair_confirm": "Repair only the {{count}} invalid fields in {{path}} using their defaults, retaining valid settings. Capability repairs may change tool and skill availability. Original data is preserved first. Other files and the database are unchanged.",
+    "repair_confirm": "Preserve the original data, then attempt to repair {{path}}. {{count}} repairable items have been identified; valid settings are retained and unresolved issues are reported individually. Project repair also salvages associated databases, keeping unrecoverable databases unchanged. Capability repairs may change tool and skill availability.",
     "repaired_fields": "Repaired:",
     "unresolved_fields": "Unresolved:",
     "retry_stop": "Retry stopping background activity",
@@ -100,8 +101,10 @@
     "repair_file": "Repair {{file}",
     "reset_file": "Reset {{file}",
     "file_repairable": "{{count}} fields can be repaired",
-    "file_unrepairable": "Cannot repair automatically. Reset or edit manually.",
+    "file_unrepairable": "Data errors found; attempt repair while preserving originals",
     "file_repaired": "Repaired",
+    "file_partially_repaired": "Partially repaired; unrecovered content remains in the original data copy",
+    "avatar_files": "Avatar files",
     "file_reset": "Reset",
     "restart_hint": "Restart when finished.",
     "no_file_errors": "No repairable configuration file error was identified. See error details.",
@@ -1151,6 +1154,14 @@
     "update_failed": "Could not update custom tool settings. Check the details below.",
     "project_tools": "Use current project tools",
     "shadowed": "Shadowed",
-    "shadowed_by": "The tool from {{source}} takes precedence"
+    "shadowed_by": "The tool from {{source}} takes precedence",
+    "builtin": "Built-in tools",
+    "all": "All custom tools",
+    "add_directory": "Add directory",
+    "remove_directory": "Remove directory",
+    "remove_directory_hint": "Remove only the directory reference. Tools and files are kept, and saved capability selections remain as unavailable references.",
+    "select_item": "Select a directory, tool or file to view details.",
+    "expand": "Expand tool “{{name}}”",
+    "collapse": "Collapse tool “{{name}}”"
   }
 }

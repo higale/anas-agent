@@ -11,7 +11,7 @@
 
 1. 将英文模板复制为新的语言文件，例如 `ja.json`、`ko.json`、`fr.json` 或 `pt-BR.json`。
 2. 将 `_meta.name` 改为该语言的显示名称。
-3. 翻译文本值，保留 JSON 键和 `{{name}}` 等占位符。
+3. 翻译文本值，保留 `version: 0`、JSON 键和 `{{name}}` 等占位符。
 4. 将文件保存为 UTF-8 JSON。
 5. 重启或重新打开 Anas，加载语言列表后在设置中选择新语言。
 
@@ -28,7 +28,7 @@ To add your own language:
 
 1. Copy the English template file to a new language file. Example file names: ja.json, ko.json, fr.json, pt-BR.json.
 2. Change `_meta.name` to the display name of your language.
-3. Translate the text values. Keep JSON keys and placeholders such as `{{name}}` unchanged.
+3. Translate the text values. Keep `version: 0`, JSON keys and placeholders such as `{{name}}` unchanged.
 4. Save the file as UTF-8 JSON.
 5. Restart or reopen Anas so the language list is loaded, then select your language in settings.
 
@@ -38,6 +38,7 @@ You do not need to translate every key. Missing keys fall back to English.
 
 ```json
 {
+  "version": 0,
   "_meta": {
     "name": "Example Language",
     "author": "Your name"

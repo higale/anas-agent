@@ -33,8 +33,8 @@ export const initialAppResources: InitialAppResource[] = [
   'icon'
 ]
 
-export const criticalInitialAppResources: InitialAppResource[] = ['projects', 'config']
-export const optionalInitialAppResources: InitialAppResource[] = ['inputHistory', 'buildInfo', 'icon']
+export const criticalInitialAppResources: InitialAppResource[] = ['projects', 'config', 'inputHistory']
+export const optionalInitialAppResources: InitialAppResource[] = ['buildInfo', 'icon']
 
 export function createInitialAppLoadSnapshot(): InitialAppLoadSnapshot {
   return {

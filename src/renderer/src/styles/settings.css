@@ -596,6 +596,22 @@
   gap: 6px 16px;
 }
 
+.settings-tool-catalog-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.settings-tool-catalog-group > .settings-tool-group-title {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.settings-tool-catalog-group > .settings-tool-catalog {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .settings-tool-group {
   --ui-form-section-gap: 10px;
 }
@@ -688,4 +704,11 @@
   background: var(--danger-bg);
   color: var(--danger);
   font-size: var(--font-size-ui);
+}
+
+.settings-tool-navigation {
+  flex: 0 0 auto;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border-muted);
 }

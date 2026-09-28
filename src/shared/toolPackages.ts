@@ -11,7 +11,7 @@ export interface ToolRoot {
   id: string
   name: string
   path: string
-  source: 'user' | 'project'
+  source: 'system' | 'user' | 'external' | 'project'
   error?: string
 }
 
@@ -34,8 +34,11 @@ export interface ToolImportError {
   name?: string
   detail?: string
 }
+export interface ToolDirectory { id: string; name: string; path: string }
 export interface ToolSettings {
+  version: 0
   order: string[]
+  externalDirectories: ToolDirectory[]
 }
 
 export function validateToolSelection(value: unknown): ToolSelection {
@@ -46,9 +49,24 @@ export function validateToolSelection(value: unknown): ToolSelection {
 }
 
 export function normalizeToolSettings(value: unknown): ToolSettings {
-  const v = value as ToolSettings | undefined
-  if (!v || !Array.isArray(v.order) || v.order.length > 10000 || v.order.some(x => typeof x !== 'string' || !x)) throw new Error('Invalid tool settings.')
-  return { order: [...new Set(v.order)] }
+  const v = value as { version?: unknown; order?: unknown; external_directories?: unknown } | undefined
+  if (!v || v.version !== 0) throw new Error('Unsupported tool settings version.')
+  if (!Array.isArray(v.order) || v.order.length > 10000 || v.order.some(x => typeof x !== 'string' || !x)) throw new Error('Invalid tool settings.')
+  const directories = v.external_directories
+  if (!Array.isArray(directories) || directories.length > 128) throw new Error('Invalid tool directories.')
+  const ids = new Set<string>()
+  for (const directory of directories) {
+    if (!directory || typeof directory.id !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(directory.id)
+      || ['system', 'user', 'project'].includes(directory.id) || directory.id.startsWith('project-') || ids.has(directory.id)
+      || typeof directory.name !== 'string' || !directory.name.trim() || directory.name.length > 100
+      || typeof directory.path !== 'string' || !directory.path.trim()) throw new Error('Invalid tool directory.')
+    ids.add(directory.id)
+  }
+  return { version: 0, order: [...new Set(v.order)] as string[], externalDirectories: directories.map(d => ({ id: d.id, name: d.name, path: d.path })) }
+}
+
+export function serializeToolSettings(value: ToolSettings) {
+  return { version: value.version, order: value.order, external_directories: value.externalDirectories }
 }
 
 export function setAllCustomTools(selection: ToolSelection, tools: readonly ToolPackage[], subagent: boolean, checked: boolean): ToolSelection {
