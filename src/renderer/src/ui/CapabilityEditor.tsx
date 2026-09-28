@@ -177,7 +177,7 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
                 aria-label={group.name} label="" disabled={total === 0} onChange={toggle} />
               <details>
                 <summary>{group.name} <small>{count}/{total}</small></summary>
-                <fieldset className="ui-capability-list ui-capability-tools ui-grid-auto">
+                <fieldset className={`ui-capability-list ui-capability-tools${group.id === 'customTools' ? '' : ' ui-grid-auto'}`}>
                   {projectTools && <CheckboxField className="ui-checkbox-field-inline" checked={value.customTools.project} label={t('custom_tools.project_tools')}
                     onChange={project => onChange({ ...value, customTools: { ...value.customTools, project } })} />}
                   {group.flag && <CheckboxField className="ui-checkbox-field-inline" checked={value[group.flag]}
@@ -189,10 +189,16 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
                         return source ? { system: 0, user: 1, project: 2, external: 3 }[source] : 4
                       }
                       return rank(a) - rank(b)
-                    }).map(id => <div className="ui-form-section" key={id}>
-                      <strong>{group.tools.find(tool => tool.sourceId === id)?.sourceName ?? t('capabilities.other_tools')}</strong>
-                      {group.tools.filter(tool => (tool.sourceId ?? 'missing') === id).map(tool => renderCapabilityTool(group, tool))}
-                    </div>)
+                    }).map(id => {
+                      const tools = group.tools.filter(tool => (tool.sourceId ?? 'missing') === id)
+                      const selected = tools.filter(tool => value.customTools.entries.includes(tool.id)).length
+                      return <details className="ui-capability-source" key={id} open>
+                        <summary>{tools[0].sourceName ?? t('capabilities.other_tools')} <small>{selected}/{tools.length}</small></summary>
+                        <div className="ui-grid-auto">
+                          {tools.map(tool => renderCapabilityTool(group, tool))}
+                        </div>
+                      </details>
+                    })
                     : group.tools.map(tool => renderCapabilityTool(group, tool))}
                   {group.id === 'customTools' && !group.tools.length && <small className="ui-field-hint">{t('custom_tools.empty')}</small>}
                 </fieldset>

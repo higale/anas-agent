@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { customToolDefaults, type CustomToolDefinition } from '@shared/customTools'
-import { defaultCapabilities } from '@shared/agentCapabilities'
+import { defaultCapabilities, type AgentCapabilities } from '@shared/agentCapabilities'
 import { CustomToolsGroup } from './CustomToolsGroup'
 import { CustomToolEditor } from './CustomToolEditor'
 import { CapabilityEditor } from '../CapabilityEditor'
@@ -78,6 +78,49 @@ describe('custom tool settings', () => {
     expect(first).not.toBeChecked()
     expect(second).not.toBeChecked()
     if (subagent) expect(screen.getByRole('checkbox', { name: 'custom_tools.project_tools' })).not.toBeChecked()
+  })
+  it.each([false, true])('collapses sources independently and keeps selection counts current (subagent %s)', async subagent => {
+    const user = userEvent.setup()
+    const tools: ToolPackage[] = [
+      { ...toolPackageFixture({ ...definition, id: 'external' }), source: 'external', rootId: 'external', rootName: 'Shared' },
+      { ...toolPackageFixture({ ...definition, id: 'project' }), source: 'project', rootId: 'project', rootName: 'Project' },
+      toolPackageFixture(definition),
+      { ...toolPackageFixture({ ...definition, id: 'system' }), source: 'system', rootId: 'system', rootName: 'System' }
+    ]
+    function Capabilities() {
+      const [value, setValue] = useState<AgentCapabilities>({ ...structuredClone(defaultCapabilities), customTools: selectedTools(['missing']) })
+      return <CapabilityEditor subagent={subagent} value={value} onChange={setValue} customTools={tools} />
+    }
+    render(<Capabilities />)
+    await user.click(screen.getByText('custom_tools.title', { selector: 'summary' }))
+    const system = screen.getByText('settings.skill_group_system', { selector: 'summary' })
+    const userSource = screen.getByText('settings.skill_group_user', { selector: 'summary' })
+    const shared = screen.getByText('Shared', { selector: 'summary' })
+    const missing = screen.getByText('capabilities.other_tools', { selector: 'summary' })
+    expect(system).toHaveTextContent('0/1')
+    expect(missing).toHaveTextContent('1/1')
+    expect(Boolean(system.compareDocumentPosition(userSource) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    expect(Boolean(userSource.compareDocumentPosition(shared) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    if (subagent) {
+      expect(screen.queryByText('Project', { selector: 'summary' })).not.toBeInTheDocument()
+      expect(screen.getByRole('checkbox', { name: 'custom_tools.project_tools' })).not.toBeChecked()
+    } else {
+      expect(screen.getByText('Project', { selector: 'summary' })).toHaveTextContent('0/1')
+    }
+    await user.click(userSource)
+    expect(screen.getByLabelText('User submit_result')).not.toBeVisible()
+    await user.click(screen.getByRole('checkbox', { name: 'System submit_result' }))
+    expect(system).toHaveTextContent('1/1')
+    expect(userSource).toHaveTextContent('0/1')
+    expect(screen.getByLabelText('User submit_result')).not.toBeVisible()
+    await user.click(screen.getByRole('checkbox', { name: 'custom_tools.title' }))
+    expect(userSource).toHaveTextContent('1/1')
+    expect(shared).toHaveTextContent('1/1')
+    expect(screen.getByLabelText('User submit_result')).not.toBeVisible()
+    await user.click(userSource)
+    expect(screen.getByRole('checkbox', { name: 'User submit_result' })).toBeChecked()
+    await user.click(screen.getByRole('checkbox', { name: 'missing' }))
+    expect(screen.queryByText('capabilities.other_tools', { selector: 'summary' })).not.toBeInTheDocument()
   })
   it.each([['', 0], ['0', 0], ['7200', 7200]] as const)('saves the timeout draft %s as %s seconds', async (value, timeoutSeconds) => {
     const onSave = vi.fn(async () => {})

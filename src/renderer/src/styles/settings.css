@@ -557,8 +557,11 @@
   margin-block-start: 12px;
 }
 
-.ui-capability-group summary {
+.ui-capability-group > details > summary {
   margin-inline-start: calc(var(--control-checkbox-size) + var(--ui-capability-heading-gap));
+}
+
+.ui-capability-group summary {
   cursor: pointer;
   color: var(--text-subtle);
   font-size: var(--font-size-ui);
@@ -571,6 +574,11 @@
   font-size: var(--font-size-small);
   font-weight: 400;
   line-height: 1;
+}
+
+.ui-capability-source > .ui-grid-auto {
+  margin-block-start: 12px;
+  align-items: start;
 }
 
 .ui-capability-skill {
