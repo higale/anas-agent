@@ -6,8 +6,9 @@ import { parseProjectStore } from './projectStore'
 import { AgentStorage } from './agent/agentStorage'
 import { AgentDatabase } from './agent/agentDatabase'
 import { replaceProjectData } from './backupService'
+import { repairArchivedFileChangeVersions } from './recoveryFileChanges'
 
-async function sqliteFiles(root: string): Promise<Map<string, string>> {
+async function storageFiles(root: string, directory: 'sqlite' | 'file_edits'): Promise<Map<string, string>> {
   const files = new Map<string, string>()
   async function visit(path: string, relative: string): Promise<void> {
     const info = await lstat(path).catch((error: NodeJS.ErrnoException) => {
@@ -15,7 +16,7 @@ async function sqliteFiles(root: string): Promise<Map<string, string>> {
       throw error
     })
     if (!info) return
-    if (files.size >= 100_000 || relative.split('/').length > 64) throw new Error('SQLite preservation exceeds the file count or depth limit.')
+    if (files.size >= 100_000 || relative.split('/').length > 64) throw new Error(`${directory} preservation exceeds the file count or depth limit.`)
     if (info.isDirectory()) {
       files.set(relative, `directory:${info.dev}:${info.ino}`)
       for (const name of (await readdir(path)).sort()) await visit(join(path, name), relative ? `${relative}/${name}` : name)
@@ -25,7 +26,7 @@ async function sqliteFiles(root: string): Promise<Map<string, string>> {
       files.set(relative, `link:${info.dev}:${info.ino}:${await readlink(path)}`)
     } else throw new Error(`Cannot preserve special file: ${path}`)
   }
-  await visit(join(root, 'sqlite'), '')
+  await visit(join(root, directory), '')
   return files
 }
 
@@ -42,7 +43,8 @@ async function stageProjectRepair(root: string, staged: string, before: string, 
   const projectPath = join(root, 'projects.json')
   const projectInfo = await lstat(projectPath)
   if (!projectInfo.isFile() || await readFile(projectPath, 'utf8') !== before) throw new Error('Project file changed since inspection.')
-  const files = await sqliteFiles(root)
+  const files = await storageFiles(root, 'sqlite')
+  const fileEdits = await storageFiles(root, 'file_edits')
   const issues: string[] = []
   for (const relative of files.keys()) {
     if (/^(catalog\.sqlite|conversations\/[^/]+\.sqlite)-(wal|shm|journal)$/.test(relative) && !files.has(relative.replace(/-(wal|shm|journal)$/, ''))) {
@@ -53,7 +55,8 @@ async function stageProjectRepair(root: string, staged: string, before: string, 
     const currentProject = await lstat(projectPath)
     if (!currentProject.isFile() || currentProject.ino !== projectInfo.ino || currentProject.dev !== projectInfo.dev
       || await readFile(projectPath, 'utf8') !== before
-      || JSON.stringify([...await sqliteFiles(root)]) !== JSON.stringify([...files])) {
+      || JSON.stringify([...await storageFiles(root, 'sqlite')]) !== JSON.stringify([...files])
+      || JSON.stringify([...await storageFiles(root, 'file_edits')]) !== JSON.stringify([...fileEdits])) {
       throw new Error('Project data changed since inspection; inspect again before repairing.')
     }
   }
@@ -84,20 +87,23 @@ async function stageProjectRepair(root: string, staged: string, before: string, 
         if (files.has(`${relative}${suffix}`)) await copyFile(`${original}${suffix}`, `${probe}${suffix}`)
       }
       let version: number
+      let repairedFields: string[] = []
       const database = new Database(probe, { fileMustExist: true })
       try {
         version = database.pragma('user_version', { simple: true }) as number
         database.pragma('user_version = 0')
+        if (relative !== 'catalog.sqlite') repairedFields = await repairArchivedFileChangeVersions(database, root)
         const checkpoint = database.pragma('wal_checkpoint(TRUNCATE)') as Array<{ busy: number }>
         if (checkpoint.some((result) => result.busy)) throw new Error('SQLite snapshot is busy.')
         database.pragma('journal_mode = DELETE')
       } finally { database.close() }
       if (relative === 'catalog.sqlite') conversationIds = AgentStorage.validateCatalogBackup(probe, projectIds)
       else AgentDatabase.validateBackup(probe, join(root, 'attachments'), projectIds, basename(relative, '.sqlite'))
-      if (version !== 0) {
+      if (version !== 0 || repairedFields.length) {
         await copyFile(probe, original)
         for (const suffix of ['-wal', '-shm', '-journal']) await rm(`${original}${suffix}`, { force: true })
-        fields.push(`sqlite/${relative}: user_version (${version} → 0)`)
+        if (version !== 0) fields.push(`sqlite/${relative}: user_version (${version} → 0)`)
+        fields.push(...repairedFields.map(field => `sqlite/${relative}: ${field}`))
       }
     } catch (error) {
       issues.push(`sqlite/${relative}: ${error instanceof Error ? error.message : String(error)}`)

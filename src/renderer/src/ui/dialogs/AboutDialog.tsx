@@ -12,7 +12,7 @@ export function AboutDialog({ open, buildInfo, iconDataUri, onClose }: {
   onClose: () => void
 }) {
   const { t } = useTranslation()
-  const buildTime = buildInfo?.environment === 'production' ? formatBuildTime(buildInfo.builtAt) : ''
+  const buildTime = buildInfo?.builtAt ? formatBuildTime(buildInfo.builtAt) : ''
   return (
     <AlertDialog.Root open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose() }}>
       <AlertDialog.Portal>
@@ -43,9 +43,8 @@ export function AboutDialog({ open, buildInfo, iconDataUri, onClose }: {
           <div className="ui-row-between ui-divider-top ui-meta-row">
             <span className="ui-copy-stack">
               <span>Version {formatBuildVersion(buildInfo)}</span>
-              {buildInfo?.environment === 'development'
-                ? <span>Development</span>
-                : buildTime && <time dateTime={buildInfo?.builtAt}>Built {buildTime}</time>}
+              {!buildTime && buildInfo?.environment === 'development' && <span>Development</span>}
+              {buildTime && <time dateTime={buildInfo?.builtAt}>Built {buildTime}</time>}
             </span>
             <span>© gale</span>
           </div>

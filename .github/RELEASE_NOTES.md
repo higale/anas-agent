@@ -1,10 +1,12 @@
-## Anas v3.1.4
+## Anas v3.1.5
 
-- 开发版显示 Git 版本标记，本地打包后仍保留，便于识别构建来源。
-- 统一搜索和生图技能的 API Key 环境要求，避免调用前重复检查凭据。
+- 改进会话数据修复，保留文件修改历史和撤销关联，解决部分会话修复后仍无法打开或删除的问题。
+- 修复元数据时保留已删除轮次的历史引用，避免无关引用阻断会话恢复。
+- 开发构建和本地打包正确显示构建时间，有时间信息时不再重复显示 Development 标识。
 
-- Development builds display a Git version marker that is preserved in local packages.
-- Search and image skills consistently declare API key requirements and avoid redundant credential checks before execution.
+- Improve conversation data repair while preserving file change history and undo references, fixing cases where repaired conversations could not be opened or deleted.
+- Preserve historical references to deleted rounds during metadata repair so they no longer block conversation recovery.
+- Show build timestamps in development builds and local packages, without a redundant Development label when a timestamp is available.
 
 ## 下载与安装 / Downloads & installation
 

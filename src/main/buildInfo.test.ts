@@ -7,8 +7,12 @@ const build = { environment: 'production' as const, builtAt: '2026-09-28T00:00:0
 describe('displayed build versions', () => {
   describe.each([false, true])('development source, packaged=%s', packaged => {
     it.each(['development', 'production'] as const)('retains the marker in a %s build', environment => {
-      const info = createAppBuildInfo('3.1.3', packaged, { ...build, environment })
-      expect(info).toEqual({ version: '3.1.3', environment: 'development', developmentVersion: build.developmentVersion })
+      const builtAt = environment === 'production' ? build.builtAt : ''
+      const info = createAppBuildInfo('3.1.3', packaged, { ...build, environment, builtAt })
+      expect(info).toEqual({
+        version: '3.1.3', environment: 'development', developmentVersion: build.developmentVersion,
+        ...(builtAt ? { builtAt } : {})
+      })
       expect(formatBuildVersion(info)).toBe(build.developmentVersion)
     })
   })

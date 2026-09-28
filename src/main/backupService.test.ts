@@ -2,7 +2,7 @@ import { createWriteStream } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ZipFile } from 'yazl'
@@ -100,8 +100,8 @@ describe('data backup restore', () => {
     await writeText(join(data, 'config/settings.json'), 'untouched config')
     let failing = true
     const service = await loadBackupService(data, undefined, (source, target) => failing && (
-      (source.includes('/staged/') && target === join(data, 'sqlite'))
-      || (failRollback && source.includes('/previous/') && target === join(data, 'projects.json'))
+      (source.includes(`${sep}staged${sep}`) && target === join(data, 'sqlite'))
+      || (failRollback && source.includes(`${sep}previous${sep}`) && target === join(data, 'projects.json'))
     ))
     let preserved = false
     await expect(service.replaceProjectData(data, async staged => {

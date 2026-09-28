@@ -77,7 +77,7 @@ export function ThreadSidebarContent(props: ThreadSidebarContentProps) {
 
 export function ThreadSidebarFooter(props: ThreadSidebarFooterProps) {
   const { t } = useTranslation()
-  const buildTime = props.buildInfo?.environment === 'production'
+  const buildTime = props.buildInfo?.builtAt
     ? formatBuildTime(props.buildInfo.builtAt)
     : ''
 
@@ -106,9 +106,8 @@ export function ThreadSidebarFooter(props: ThreadSidebarFooterProps) {
         >
           <DropdownMenu.Label className="app-menu-build-info">
             <span>Version {formatBuildVersion(props.buildInfo)}</span>
-            {props.buildInfo?.environment === 'development'
-              ? <span>Development</span>
-              : buildTime && <time dateTime={props.buildInfo?.builtAt}>Built {buildTime}</time>}
+            {!buildTime && props.buildInfo?.environment === 'development' && <span>Development</span>}
+            {buildTime && <time dateTime={props.buildInfo?.builtAt}>Built {buildTime}</time>}
           </DropdownMenu.Label>
           <DropdownMenu.Separator className="ui-menu-separator" />
           <DropdownMenu.Item className="app-menu-item ui-menu-item ui-menu-item-row" onSelect={props.onOpenSettings}>

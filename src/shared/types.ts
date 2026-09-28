@@ -519,6 +519,7 @@ export type AppBuildInfo = {
   version: string
   environment: 'development'
   developmentVersion?: string
+  builtAt?: string
 }
 
 export type ChatContentWidth = 'narrow' | 'wide' | 'adaptive'
