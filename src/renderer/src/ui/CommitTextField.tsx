@@ -3,11 +3,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { resizeAutosizeTextarea } from './autosizeTextarea'
 
 interface CommitTextInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'onBlur' | 'onChange' | 'onKeyDown' | 'type' | 'value'> {
-  normalizeDraft?: (value: string) => string
   onBlur?: (event: FocusEvent<HTMLInputElement>) => void
   onCommit: (value: string) => void | Promise<void>
   onDraftChange?: (value: string) => void
   onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void
+  preserveDirtyDraft?: boolean
   type?: InputHTMLAttributes<HTMLInputElement>['type']
   value: string
 }
@@ -21,44 +21,56 @@ interface CommitTextareaProps extends Omit<TextareaHTMLAttributes<HTMLTextAreaEl
 }
 
 export function CommitTextInput({
-  normalizeDraft,
   onBlur,
   onCommit,
   onDraftChange,
   onKeyDown,
+  preserveDirtyDraft = false,
   value,
   ...props
 }: CommitTextInputProps) {
   const [draft, setDraft] = useState(value)
   const draftRef = useRef(value)
   const skipBlurCommitRef = useRef(false)
+  const dirtyRef = useRef(false)
+  const pendingCommitsRef = useRef(new Set<{ value: string }>())
 
   useEffect(() => {
+    if (preserveDirtyDraft && dirtyRef.current && draftRef.current !== value) return
     draftRef.current = value
     setDraft(value)
-  }, [value])
+    dirtyRef.current = false
+  }, [preserveDirtyDraft, value])
 
-  function commit(): void {
-    if (draftRef.current !== value) void onCommit(draftRef.current)
+  async function commit(): Promise<void> {
+    const next = draftRef.current
+    const revertingPending = preserveDirtyDraft && [...pendingCommitsRef.current].some(commit => commit.value !== next)
+    if (next === value && !revertingPending) return
+    const request = { value: next }
+    pendingCommitsRef.current.add(request)
+    try { await onCommit(next) }
+    finally { pendingCommitsRef.current.delete(request) }
   }
 
   function handleBlur(event: FocusEvent<HTMLInputElement>): void {
     if (skipBlurCommitRef.current) {
       skipBlurCommitRef.current = false
     } else {
-      commit()
+      void commit()
     }
     onBlur?.(event)
   }
 
   function handleChange(event: ChangeEvent<HTMLInputElement>): void {
-    const nextDraft = normalizeDraft?.(event.target.value) ?? event.target.value
+    const nextDraft = event.target.value
     draftRef.current = nextDraft
+    dirtyRef.current = true
     setDraft(nextDraft)
     onDraftChange?.(nextDraft)
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return
     if (event.key === 'Enter') {
       event.preventDefault()
       event.currentTarget.blur()
@@ -68,6 +80,7 @@ export function CommitTextInput({
       event.preventDefault()
       skipBlurCommitRef.current = true
       draftRef.current = value
+      dirtyRef.current = false
       setDraft(value)
       onDraftChange?.(value)
       event.currentTarget.blur()
@@ -113,6 +126,22 @@ export function CommitTextarea({
     if (!textarea?.classList.contains('ui-autosize-textarea')) return
     resizeAutosizeTextarea(textarea)
   }, [draft])
+
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea?.classList.contains('ui-autosize-textarea')) return
+    let width = -1
+    let frame = 0
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry.contentRect.width === width) return
+      width = entry.contentRect.width
+      cancelAnimationFrame(frame)
+      // Measure after layout; height changes must not trigger a resize loop.
+      if (width > 0) frame = requestAnimationFrame(() => resizeAutosizeTextarea(textarea))
+    })
+    observer.observe(textarea)
+    return () => { observer.disconnect(); cancelAnimationFrame(frame) }
+  }, [props.className])
 
   function handleBlur(event: FocusEvent<HTMLTextAreaElement>): void {
     if (draftRef.current !== value) void onCommit(draftRef.current)

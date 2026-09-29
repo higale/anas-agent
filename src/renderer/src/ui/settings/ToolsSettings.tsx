@@ -169,9 +169,9 @@ export function ToolsSettings({ customTools, onConfigChange, mcpServers, mcpStat
           {renderGroupTitle(t('custom_tools.builtin'))}
           <small className="ui-field-hint">{t('settings.tools_page_hint')}</small>
           {toolGroupOrder.filter(group => orderedToolCatalog.some(tool => (tool.feature ?? tool.id) === group)).map(group =>
-            <section className="settings-tool-catalog-group" key={group} aria-label={t(`settings.capability_${group}`)}>
+            <section className="settings-tool-catalog" key={group} aria-label={t(`settings.capability_${group}`)}>
               {renderGroupTitle(`${t(`settings.capability_${group}`)}：`)}
-              <div className="settings-tool-catalog">{orderedToolCatalog.filter(tool => (tool.feature ?? tool.id) === group).map(tool => renderToolRow(`runtime:${tool.id}`))}</div>
+              {orderedToolCatalog.filter(tool => (tool.feature ?? tool.id) === group).map(tool => renderToolRow(`runtime:${tool.id}`))}
             </section>)}
         </div>}
       />
@@ -200,18 +200,18 @@ export function ToolsSettings({ customTools, onConfigChange, mcpServers, mcpStat
 
             <footer className="ui-dialog-footer">
               <button
-                className="ui-button ui-button-compact"
+                className="ui-icon-button"
                 type="button"
+                aria-label={t('common.copy')}
+                data-tooltip={t('common.copy')}
                 disabled={!selectedToolText}
                 onClick={() => void copyToolDefinition()}
               >
                 <ClipboardCopy size={UI_ICON_SIZE_SMALL} />
-                <span>{t('common.copy')}</span>
               </button>
               <Dialog.Close asChild>
-                <button className="ui-button ui-button-compact" type="button">
+                <button className="ui-icon-button" type="button" aria-label={t('common.close')} data-tooltip={t('common.close')}>
                   <X size={UI_ICON_SIZE_SMALL} />
-                  <span>{t('common.close')}</span>
                 </button>
               </Dialog.Close>
             </footer>

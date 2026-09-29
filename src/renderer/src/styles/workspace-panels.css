@@ -85,7 +85,7 @@
 :root[data-platform="win32"] .workspace-panels-titlebar::before {
   content: '';
   order: -2;
-  flex: 0 0 calc(var(--titlebar-actions-inset) + 2 * var(--text-button-height));
+  flex: 0 0 calc(var(--titlebar-actions-inset) + 2 * var(--control-height));
   height: max(var(--topbar-height), calc(env(titlebar-area-y, 0px) + env(titlebar-area-height, 36px)));
 }
 :root[data-platform="win32"] .workspace-panels-titlebar > .ui-tab-workspace-actions {

@@ -17,7 +17,7 @@ export interface CustomToolDefinition {
   directory?: string
 }
 
-export type CustomToolSave = Omit<CustomToolDefinition, 'id' | 'directory'> & { id?: string }
+export type CustomToolSave = Omit<CustomToolDefinition, 'id' | 'directory'> & { id?: string; rootId?: string }
 export const maxCustomToolInputBytes = 1024 * 1024
 export const maxCustomToolOutputChars = 512 * 1024
 export const customToolDefaults = {
@@ -30,7 +30,7 @@ const reservedNames = new Set<string>([...orderedToolCatalog.map((tool) => tool.
   'pwsh', 'powershell', 'bash', 'zsh', 'sh', 'cmd', 'task', 'ls', 'edit_file', 'execute'])
 const ajv = new Ajv({ strict: false, validateFormats: false, allErrors: true })
 
-export function parseCustomToolCommand(command: string): { executable: string; args: string[] } {
+function customToolCommandTokens(command: string): { value: string; start: number; end: number }[] {
   if (!command.trim() || command.length > 16384 || Array.from(command).some((character) => character < ' ' && !'\t\r\n'.includes(character))) {
     throw new Error('Command must contain an executable and arguments, at most 16384 characters.')
   }
@@ -38,8 +38,10 @@ export function parseCustomToolCommand(command: string): { executable: string; a
   // splits it: quotes group text, backslashes never escape, and adjacent quoted
   // and unquoted fragments form one argument. Shell parsers use different rules.
   const lexeme = /(\s+)|'([^']*)'|"([^"]*)"|([^\s'"]+)/y
-  const words: string[] = []
+  const tokens: { value: string; start: number; end: number }[] = []
   let word: string | undefined
+  let start = 0
+  let end = 0
   let offset = 0
   while (offset < command.length) {
     lexeme.lastIndex = offset
@@ -47,22 +49,45 @@ export function parseCustomToolCommand(command: string): { executable: string; a
     if (!match) throw new Error('Command contains an unclosed quote.')
     offset = lexeme.lastIndex
     if (match[1] !== undefined) {
-      if (word !== undefined) words.push(word)
+      if (word !== undefined) tokens.push({ value: word, start, end })
       word = undefined
     } else {
       if (match[4] !== undefined && /[|&;()<>#$`]/.test(match[4])) {
         throw new Error('Shell operators, variables and comments are not supported. Quote special characters to pass them literally.')
       }
+      if (word === undefined) start = match.index
+      end = offset
       word = (word ?? '') + (match[2] ?? match[3] ?? match[4])
     }
   }
-  if (word !== undefined) words.push(word)
+  if (word !== undefined) tokens.push({ value: word, start, end })
+  const words = tokens.map(token => token.value)
   const [executable, ...args] = words
   if (!executable || executable.includes('{{args}}') || words.length > 129) throw new Error('Command must contain an executable and at most 128 arguments.')
   if (args.filter((arg) => arg === '{{args}}').length !== 1 || args.some((arg) => arg.includes('{{args}}') && arg !== '{{args}}')) {
     throw new Error('Command must contain exactly one standalone {{args}} argument for the model JSON.')
   }
+  return tokens
+}
+
+export function parseCustomToolCommand(command: string): { executable: string; args: string[] } {
+  const [executable, ...args] = customToolCommandTokens(command).map(token => token.value)
   return { executable, args }
+}
+
+/** A literal package-local entry file; options and inline programs are not file references. */
+export function getCustomToolCommandFile(command: string): { start: number; end: number; relativePath: string } | undefined {
+  const tokens = customToolCommandTokens(command)
+  const executable = tokens[0].value.replace(/\\/g, '/').split('/').at(-1)!
+  const interpreter = /^(?:python(?:\d+(?:\.\d+)*)?|node|ruby|perl|php|lua|bash|zsh|sh)(?:\.exe)?$/i.test(executable)
+  const token = tokens[interpreter ? 1 : 0]
+  if (!token || token.value.startsWith('-')) return
+  let path = token.value.replace(/\\/g, '/').replace(/^\{\{tool_dir\}\}\//, '')
+  if (!path.includes('/') && !/\.(?:py|pyw|js|cjs|mjs|ts|rb|pl|php|lua|sh|bash|zsh|ps1|bat|cmd)$/i.test(path)) return
+  if (/^(?:\/|~|[A-Za-z]:)/.test(path) || path.includes('{{') || path.includes('\n') || path.includes('\r')) return
+  path = path.split('/').filter(part => part !== '.').join('/')
+  if (path.split('/').some(part => !part || part === '..')) return
+  return { start: token.start, end: token.end, relativePath: path }
 }
 
 export function validateCustomToolSchema(value: unknown): Record<string, unknown> {

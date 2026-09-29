@@ -28,9 +28,7 @@ describe('DeveloperHttpTraceSettings', () => {
     const usage = screen.getByText('1.50 KB')
     expect(usage).toBeVisible()
     expect(usage.parentElement).toHaveClass('ui-row')
-    expect(usage.parentElement).toContainElement(
-      screen.getByRole('button', { name: 'settings.open_developer_http_trace_folder' })
-    )
+    expect(screen.queryByRole('button', { name: 'settings.developer_http_trace_files' })).not.toBeInTheDocument()
     await user.click(checkbox)
     expect(onChange).toHaveBeenCalledWith(true)
 

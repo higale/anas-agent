@@ -66,8 +66,8 @@
 
 .thread-topbar-project,
 .thread-topbar-more {
-  width: 26px;
-  height: 26px;
+  width: var(--control-height);
+  height: var(--control-height);
   color: var(--text-secondary);
 }
 
@@ -99,7 +99,7 @@
 .thread-topbar-title-input {
   grid-column: 2;
   min-width: 0;
-  height: var(--text-button-height);
+  height: var(--control-height);
   padding: 2px 7px;
   font-size: var(--font-size-ui);
 }

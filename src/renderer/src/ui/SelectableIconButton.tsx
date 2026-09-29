@@ -32,7 +32,7 @@ export function SelectableIconButton({
       aria-label={label}
       aria-pressed={pressed}
       className={[
-        variant === 'toolbar' ? 'ui-tool-button ui-tool-button-small' : 'ui-icon-button',
+        variant === 'toolbar' ? 'ui-tool-button ui-tool-button-square' : 'ui-icon-button',
         'ui-selectable-icon-button',
         pressed ? 'ui-selectable-icon-button-active' : '',
         className ?? ''

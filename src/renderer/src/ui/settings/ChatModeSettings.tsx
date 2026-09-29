@@ -1,6 +1,7 @@
+import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AppSettings, NewThreadModelSelection, SpeechReplyConfig } from '@shared/types'
-import { CommitTextInput } from '../CommitTextField'
+import { CommitNumberInput } from '../CommitNumberInput'
 import { clampIntegerInput } from '../numberInput'
 import { SearchableOptionPicker } from '../SearchableOptionPicker'
 import { SpeechReplySettings } from '../speech/SpeechReplySettings'
@@ -21,6 +22,7 @@ interface ChatModeSettingsProps {
 
 export function ChatModeSettings({ settings, speechReply, onChange, onSpeechReplyChange }: ChatModeSettingsProps) {
   const { t } = useTranslation()
+  const maxCallsId = useId()
   const newThreadModelOptions = [
     { value: 'prompt', label: t('settings.new_thread_model_prompt') },
     { value: 'default', label: t('settings.new_thread_model_default') },
@@ -47,16 +49,16 @@ export function ChatModeSettings({ settings, speechReply, onChange, onSpeechRepl
             })}
           />
         </div>
-        <label className="ui-form-row ui-form-row-narrow">
-          <span>
+        <div className="ui-form-row ui-form-row-narrow">
+          <label htmlFor={maxCallsId}>
             <strong>{t('settings.max_model_calls_per_run')}</strong>
             <small>{t('settings.max_model_calls_per_run_hint')}</small>
-          </span>
-          <CommitTextInput
+          </label>
+          <CommitNumberInput
+            id={maxCallsId}
             min={SETTINGS_COUNT_MIN}
             max={SETTINGS_MAX_MODEL_CALLS}
             placeholder={t('settings.max_model_calls_unlimited')}
-            type="number"
             value={maxModelCallsPerRun === 0 ? '' : String(maxModelCallsPerRun)}
             normalizeDraft={(value) => value === '0' ? '' : value}
             onDraftChange={(value) => {
@@ -70,7 +72,7 @@ export function ChatModeSettings({ settings, speechReply, onChange, onSpeechRepl
               )
             })}
           />
-        </label>
+        </div>
       </SettingsGroup>
       <SpeechReplySettings value={speechReply} onChange={onSpeechReplyChange} />
       <AttachmentSettings settings={settings} onChange={onChange} />

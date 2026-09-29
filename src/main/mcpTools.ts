@@ -1,6 +1,7 @@
 import { MultiServerMCPClient, type ClientConfig, type Connection } from '@langchain/mcp-adapters'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import { createHash } from 'node:crypto'
+import { homedir } from 'node:os'
 import { processEnvironment } from './config/apiKeys'
 import type { McpServerConfig } from './config/appConfig'
 import type { McpServerType } from '@shared/types'
@@ -108,7 +109,7 @@ export function mcpConnectionSnapshotForServer(server: McpServerConfig): McpConn
       transport: 'stdio',
       command: server.command,
       args: [...server.args],
-      cwd: server.workingDir,
+      cwd: server.workingDir || homedir(),
       env: {
         ...processEnv(),
         ...server.env
@@ -120,7 +121,7 @@ export function mcpConnectionSnapshotForServer(server: McpServerConfig): McpConn
     const endpoint = Object.freeze({
       command: connection.command,
       argumentCount: connection.args.length,
-      ...(connection.cwd ? { workingDirectory: connection.cwd } : {})
+      workingDirectory: connection.cwd
     })
     return Object.freeze({
       connection,

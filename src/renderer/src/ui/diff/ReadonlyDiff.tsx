@@ -17,7 +17,7 @@ export function ReadonlyDiff({ data, viewKey }: { data: DiffContents; viewKey: s
     if (data.status !== 'ready' || !host.current) return
     let disposed = false, release = () => {}
     setError(''); setLoading(true)
-    void import('./monacoRuntime').then(({ monaco, languageForPath }) => {
+    void import('./monacoRuntime').then(({ monaco, languageForPath, applyEditorAppearance }) => {
       if (disposed || !host.current) return
       const language = languageForPath(data.path)
       const original = monaco.editor.createModel(data.before, language)
@@ -43,24 +43,7 @@ export function ReadonlyDiff({ data, viewKey }: { data: DiffContents; viewKey: s
       instance.current = diff
       diff.setModel({ original, modified })
       const appearance = () => {
-        const root = document.documentElement, styles = getComputedStyle(root)
-        const dark = root.dataset.theme === 'dark'
-        monaco.editor.defineTheme('anas-diff', { base: dark ? 'vs-dark' : 'vs', inherit: true, rules: [],
-          colors: {
-            'editor.background': styles.getPropertyValue('--bg-app').trim(),
-            'editor.foreground': styles.getPropertyValue('--text').trim(),
-            'editorLineNumber.foreground': styles.getPropertyValue('--text-muted').trim(),
-            'editorLineNumber.activeForeground': styles.getPropertyValue('--text').trim(),
-            'editorWidget.background': styles.getPropertyValue('--bg-surface').trim(),
-            'editorWidget.border': styles.getPropertyValue('--border').trim(),
-            'diffEditor.insertedLineBackground': styles.getPropertyValue('--diff-added-line-bg').trim(),
-            'diffEditor.insertedTextBackground': styles.getPropertyValue('--diff-added-text-bg').trim(),
-            'diffEditor.removedLineBackground': styles.getPropertyValue('--diff-removed-line-bg').trim(),
-            'diffEditor.removedTextBackground': styles.getPropertyValue('--diff-removed-text-bg').trim()
-          } })
-        monaco.editor.setTheme('anas-diff')
-        diff.updateOptions({ fontSize: parseFloat(styles.getPropertyValue('--font-size-base')) || 14,
-          fontFamily: styles.getPropertyValue('--font-mono').trim() || 'monospace' })
+        diff.updateOptions(applyEditorAppearance())
       }
       appearance()
       const observer = new MutationObserver(appearance)

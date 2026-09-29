@@ -1,5 +1,5 @@
 import { requireDataVersion } from '@shared/dataVersion'
-import { listPackageFiles, readPackageFile } from './packageFiles'
+import { listPackageFiles, readPackageFile, savePackageFile } from './packageFiles'
 import { writeJsonFileAtomic } from './atomicJson'
 import { mirrorBundledDirectories } from './bundledDirectories'
 import { getAppConfigSnapshot } from './config/appConfig'
@@ -594,7 +594,8 @@ export async function listSkillFiles(projectId: string | undefined, skillId: str
 }
 
 export async function readSkillFile(projectId: string | undefined, skillId: string, relativePath: string): Promise<SkillFilePreview> {
-  return { ...await readPackageFile((await findSkill(projectId, skillId)).summary.dirPath, relativePath), skillId }
+  const { summary } = await findSkill(projectId, skillId)
+  return { ...await readPackageFile(summary.dirPath, relativePath), skillId, editable: summary.source !== 'system' }
 }
 
 export async function updateSkillAvailability(projectId: string | undefined, skillId: string, update: SkillAvailabilityUpdate): Promise<SkillSnapshot> {
@@ -866,4 +867,19 @@ export async function buildSkillsPrompt(projectId?: string, selection: SkillSele
     '',
     '</skills_instructions>'
   ].join('\n')
+}
+
+export async function saveSkillFile(projectId: string | undefined, skillId: string, relativePath: string, update: import('@shared/packageFiles').PackageFileUpdate): Promise<SkillFilePreview> {
+  const { summary } = await findSkill(projectId, skillId)
+  if (summary.source === 'system') throw new Error('System skill files are read-only.')
+  const definitionPath = await realpath(join(summary.dirPath, 'SKILL.md')).catch(reason => {
+    if ((reason as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw reason
+  })
+  if (definitionPath && update?.resolvedPath === definitionPath) {
+    if (typeof update.content !== 'string' || Buffer.byteLength(update.content) > maxPreviewBytes) throw new Error('Invalid Skill content.')
+    const parsed = inspectSkillText(update.content, summary.name)
+    if ('code' in parsed) throw new Error(`Invalid Skill definition: ${parsed.code}`)
+  }
+  return { ...await savePackageFile(summary.dirPath, relativePath, update), skillId, editable: true }
 }

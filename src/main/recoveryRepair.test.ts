@@ -294,7 +294,7 @@ describe('field-level recovery', () => {
   })
 
   it('keeps valid false, zero, empty strings, custom parameters and empty lists', () => {
-    const raw = { ...settings, sidebar_visible: false, log_retention_days: 0, backup_dir: '' }
+    const raw = { ...settings, font_size: 10, sidebar_visible: false, log_retention_days: 0, backup_dir: '' }
     expect(repairDocument('settings.json', raw)).toEqual({ value: raw, fields: [] })
     const rawModels = { ...models, providers: [{
       id: 'provider', name: 'Custom', protocol: 'openai_chat_completions', base_url: 'https://example.com',

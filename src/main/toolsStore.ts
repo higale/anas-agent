@@ -5,10 +5,10 @@ import { copyFile, cp, lstat, mkdir, open, readFile, readdir, realpath, rename, 
 import { constants } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { shell } from 'electron'
-import { listPackageFiles, readPackageFile } from './packageFiles'
+import { listPackageFiles, readPackageFile, savePackageFile, createPackageFile, packageFileExists } from './packageFiles'
 import { customToolsConfigFileName, getBundledConfigFile, getBundledDataDir, getConfigFile, getDataDir, getToolExamplesDir } from './config/dataDir'
 import { parseCustomTools, serializeCustomTool, validateCustomTool, type CustomToolDefinition, type CustomToolSave } from '@shared/customTools'
-import { normalizeToolSettings, serializeToolSettings, type ToolImportError, type ToolPackage, type ToolRoot, type ToolSnapshot, type ToolSettings } from '@shared/toolPackages'
+import { normalizeToolSettings, serializeToolSettings, type ToolImportError, type ToolLoadError, type ToolPackage, type ToolRoot, type ToolSnapshot, type ToolSettings } from '@shared/toolPackages'
 
 let mutationTail: Promise<unknown> = Promise.resolve()
 const activeDirectories = new Map<string, number>()
@@ -52,11 +52,28 @@ async function saveSettings(value: ToolSettings): Promise<void> {
   await writeAtomic(path, { ...raw, ...document })
 }
 
+class ToolLoadFailure extends Error {
+  constructor(readonly issue: ToolLoadError) { super(issue.detail ?? `${issue.code}: ${issue.path}`) }
+}
+
+function toToolLoadError(reason: unknown, path: string, fallback: ToolLoadError['code']): ToolLoadError {
+  if (reason instanceof ToolLoadFailure) return reason.issue
+  const errno = (reason as NodeJS.ErrnoException | undefined)?.code
+  const code = errno === 'ENOENT' ? (fallback === 'invalid_definition' ? 'manifest_not_found' : 'path_not_found')
+    : errno === 'EACCES' || errno === 'EPERM' ? 'permission_denied'
+      : errno === 'ENOTDIR' ? 'not_directory' : errno === 'EISDIR' ? 'not_file'
+        : reason instanceof SyntaxError ? 'invalid_json' : errno ? 'read_failed' : fallback
+  return { code, path, detail: message(reason) }
+}
+
 async function readDefinition(directory: string) {
-  const handle = await open(join(directory, manifestName), constants.O_RDONLY | (constants.O_NONBLOCK ?? 0))
+  const path = join(directory, manifestName)
+  const handle = await open(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0))
+    .catch(reason => { throw new ToolLoadFailure(toToolLoadError(reason, path, 'invalid_definition')) })
   try {
     const stat = await handle.stat()
-    if (!stat.isFile() || stat.size > maxManifestBytes) throw new Error('TOOL.json must be a file no larger than 128 KiB.')
+    if (!stat.isFile()) throw new ToolLoadFailure({ code: 'not_file', path })
+    if (stat.size > maxManifestBytes) throw new ToolLoadFailure({ code: 'manifest_too_large', path })
     const buffer = Buffer.alloc(maxManifestBytes + 1)
     let length = 0
     while (length < buffer.length) {
@@ -64,11 +81,13 @@ async function readDefinition(directory: string) {
       if (!bytesRead) break
       length += bytesRead
     }
-    if (length > maxManifestBytes) throw new Error('TOOL.json exceeds 128 KiB.')
+    if (length > maxManifestBytes) throw new ToolLoadFailure({ code: 'manifest_too_large', path })
     const raw = JSON.parse(buffer.subarray(0, length).toString('utf8'))
     if (typeof raw.id !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(raw.id)) throw new Error('Tool package ID must use letters, numbers, underscores or hyphens (1–100 characters).')
     const [tool] = parseCustomTools([{ ...raw, directory: undefined }])
     return tool
+  } catch (reason) {
+    throw new ToolLoadFailure(toToolLoadError(reason, path, 'invalid_definition'))
   } finally { await handle.close() }
 }
 
@@ -89,23 +108,23 @@ class ToolImportFailure extends Error {
 }
 
 export function toToolImportError(reason: unknown): ToolImportError {
-  return reason instanceof ToolImportFailure ? reason.error : { code: 'failed', detail: message(reason) }
+  return reason instanceof ToolImportFailure ? reason.error
+    : reason instanceof ToolLoadFailure ? { code: 'failed', issue: reason.issue } : { code: 'failed', detail: message(reason) }
 }
 
-export function importToolDirectories(sourcePaths: readonly string[]): Promise<{ ids: string[]; names: string[] }> {
+export function importToolDirectories(sourcePaths: readonly string[], rootId = 'user'): Promise<{ ids: string[]; names: string[] }> {
   return mutate(async config => {
     if (!Array.isArray(sourcePaths) || !sourcePaths.length || sourcePaths.length > 128
       || sourcePaths.some(path => typeof path !== 'string' || !isAbsolute(path))) {
       throw new ToolImportFailure({ code: 'invalid_directory' })
     }
     const snapshot = await readToolSnapshot()
-    const catalog = { roots: snapshot.roots.filter(root => root.source === 'user'), tools: snapshot.tools.filter(tool => tool.source === 'user') }
-    const catalogError = catalog.roots.find(root => root.error)?.error
-    if (catalogError) throw new Error(catalogError)
+    const targetRoot = editableToolRoot(snapshot, rootId)
+    const catalog = { tools: snapshot.tools.filter(tool => tool.rootId === targetRoot.id) }
     const names = new Set(catalog.tools.map(tool => tool.name.toLowerCase()))
     const ids = new Set(catalog.tools.map(tool => tool.id))
     const targets = new Set<string>()
-    const root = await realpath(getToolsDir())
+    const root = await realpath(targetRoot.path)
     if ((await readdir(root)).length + sourcePaths.length > maxSourceEntries) throw new ToolImportFailure({ code: 'too_many_tools' })
     const sources = []
     for (const path of sourcePaths) {
@@ -116,8 +135,8 @@ export function importToolDirectories(sourcePaths: readonly string[]): Promise<{
       if (!rootRelative || (rootRelative !== '..' && !rootRelative.startsWith(`..${sep}`) && !isAbsolute(rootRelative))) {
         throw new ToolImportFailure({ code: 'invalid_directory' })
       }
-      const definition = await readDefinition(canonical).catch(reason => { throw new ToolImportFailure({ code: 'invalid_tool', name, detail: message(reason) }) })
-      const id = `user:${definition.id}`
+      const definition = await readDefinition(canonical).catch(reason => { throw new ToolImportFailure({ code: 'invalid_tool', name, issue: toToolLoadError(reason, join(canonical, manifestName), 'invalid_definition') }) })
+      const id = `${targetRoot.id}:${definition.id}`
       if (targets.has(name.toLowerCase()) || names.has(definition.name.toLowerCase()) || await exists(join(root, name))) {
         throw new ToolImportFailure({ code: 'already_exists', name: definition.name })
       }
@@ -142,10 +161,10 @@ export function importToolDirectories(sourcePaths: readonly string[]): Promise<{
             return true
           }
         })
-        const staged = await readDefinition(target).catch(reason => { throw new ToolImportFailure({ code: 'invalid_tool', name: source.name, detail: message(reason) }) })
+        const staged = await readDefinition(target).catch(reason => { throw new ToolImportFailure({ code: 'invalid_tool', name: source.name, issue: toToolLoadError(reason, join(target, manifestName), 'invalid_definition') }) })
         if (staged.id !== source.definition.id || staged.name !== source.definition.name) throw new ToolImportFailure({ code: 'invalid_tool', name: source.name })
       }
-      config.order = [...config.order.filter(id => !id.startsWith('user:')), ...catalog.tools.map(tool => tool.id), ...sources.map(source => source.id)]
+      config.order = [...config.order.filter(id => !id.startsWith(`${targetRoot.id}:`)), ...catalog.tools.map(tool => tool.id), ...sources.map(source => source.id)]
       await saveSettings(config)
       settingsSaved = true
       for (const source of sources) {
@@ -169,9 +188,9 @@ export function importToolDirectories(sourcePaths: readonly string[]): Promise<{
 
 async function scan(root: ToolRoot, config: ToolSettings): Promise<ToolPackage[]> {
   try {
-    if (!isAbsolute(root.path)) throw new Error('Tool source path is not absolute on this system.')
+    if (!isAbsolute(root.path)) throw new ToolLoadFailure({ code: 'invalid_source_path', path: root.path })
     const entries = await readdir(root.path, { withFileTypes: true })
-    if (entries.length > maxSourceEntries) throw new Error(`Tool source exceeds ${maxSourceEntries} entries.`)
+    if (entries.length > maxSourceEntries) throw new ToolLoadFailure({ code: 'too_many_entries', path: root.path })
     const tools: ToolPackage[] = []
     for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
       if (entry.name.startsWith('.') || (!entry.isDirectory() && !entry.isSymbolicLink())) continue
@@ -183,19 +202,19 @@ async function scan(root: ToolRoot, config: ToolSettings): Promise<ToolPackage[]
         tools.push({ ...base, id, name: definition.name, description: definition.description,
           definition: { ...definition, id, directory: await realpath(directory) } })
       } catch (reason) {
-        tools.push({ ...base, id: `${root.id}:invalid:${entry.name}`, name: entry.name, description: '', error: message(reason) })
+        tools.push({ ...base, id: `${root.id}:invalid:${entry.name}`, name: entry.name, description: '', error: toToolLoadError(reason, directory, 'read_failed') })
       }
     }
     const counts = new Map<string, number>()
     for (const tool of tools) counts.set(tool.id, (counts.get(tool.id) ?? 0) + 1)
     for (const tool of tools) if (counts.get(tool.id)! > 1) {
       tool.id = `${root.id}:duplicate:${basename(tool.directory)}`
-      tool.error = 'Duplicate tool package ID in this source.'
+      tool.error = { code: 'duplicate_id', path: join(tool.directory, manifestName) }
       delete tool.definition
     }
     const rank = new Map(config.order.map((id, index) => [id, index]))
     return tools.sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity) || a.name.localeCompare(b.name))
-  } catch (reason) { root.error = message(reason); return [] }
+  } catch (reason) { root.error = toToolLoadError(reason, root.path, 'read_failed'); return [] }
 }
 
 export function listToolSnapshot(sourceFolders: readonly string[] = []): Promise<ToolSnapshot> {
@@ -261,31 +280,43 @@ async function renameToolDirectory(source: string, target: string, document: Ret
   }
 }
 
+function editableToolRoot(snapshot: ToolSnapshot, rootId: string): ToolRoot {
+  const root = snapshot.roots.find(root => root.id === rootId)
+  if (!root || (root.source !== 'user' && root.source !== 'external')) throw new Error('Only user and added tool directories can be modified.')
+  if (root.error) throw new ToolLoadFailure(root.error)
+  return root
+}
+
 export async function saveToolPackage(input: CustomToolSave): Promise<void> {
   return mutate(async config => {
     const catalog = await readToolSnapshot()
     const existing = input.id === undefined ? undefined : catalog.tools.find(tool => tool.id === input.id)
-    if (input.id !== undefined && (!existing || existing.source !== 'user' || !existing.definition)) throw new Error('Only valid user tools can be edited here.')
-    const id = existing?.definition?.id.slice('user:'.length) ?? randomUUID()
+    if (input.id !== undefined && (!existing || !existing.definition)) throw new Error('Only valid tools can be edited here.')
+    if (existing && input.rootId !== undefined && input.rootId !== existing.rootId) throw new Error('Editing cannot move a tool to another source.')
+    const targetRoot = editableToolRoot(catalog, existing?.rootId ?? (input.rootId === undefined ? 'user' : input.rootId))
+    const id = existing?.definition?.id.slice(targetRoot.id.length + 1) ?? randomUUID()
     const definition = validateCustomTool({ ...input, id, directory: undefined })
+    if ((!existing || existing.name !== definition.name) && catalog.tools.some(tool => tool.rootId === targetRoot.id && tool.id !== existing?.id && tool.name.toLowerCase() === definition.name.toLowerCase())) {
+      throw new Error(`Tool name already exists in this source: ${definition.name}`)
+    }
     const document = serializeCustomTool(definition)
     if (Buffer.byteLength(`${JSON.stringify(document, null, 2)}\n`, 'utf8') > maxManifestBytes) throw new Error('TOOL.json exceeds 128 KiB.')
-    const directory = existing && existing.name === definition.name ? existing.directory : join(getToolsDir(), definition.name)
+    const directory = existing && existing.name === definition.name ? existing.directory : join(targetRoot.path, definition.name)
     if (!existing && await exists(directory)) throw new Error(`Tool directory already exists: ${definition.name}`)
     if (existing && directory !== existing.directory) {
       assertDirectoryIdle(existing.definition!.directory!)
       await renameToolDirectory(existing.directory, directory, document)
     } else if (existing) await writeAtomic(join(directory, manifestName), document)
     else {
-      if ((await readdir(getToolsDir())).length >= maxSourceEntries) throw new Error(`Tool source cannot exceed ${maxSourceEntries} entries.`)
-      const stage = join(getToolsDir(), `.new-${randomUUID()}`)
+      if ((await readdir(targetRoot.path)).length >= maxSourceEntries) throw new Error(`Tool source cannot exceed ${maxSourceEntries} entries.`)
+      const stage = join(targetRoot.path, `.new-${randomUUID()}`)
       const previous = structuredClone(config)
       let settingsSaved = false
       try {
         await mkdir(stage)
         await writeAtomic(join(stage, manifestName), document)
-        const currentIds = catalog.tools.filter(tool => tool.source === 'user').map(tool => tool.id)
-        config.order = [...config.order.filter(id => !id.startsWith('user:')), ...currentIds, `user:${id}`]
+        const currentIds = catalog.tools.filter(tool => tool.rootId === targetRoot.id).map(tool => tool.id)
+        config.order = [...config.order.filter(id => !id.startsWith(`${targetRoot.id}:`)), ...currentIds, `${targetRoot.id}:${id}`]
         // Commit the index before exposing the package. An orphan index entry
         // cannot make a half-created tool available to a concurrent reader.
         await saveSettings(config)
@@ -302,7 +333,7 @@ export async function saveToolPackage(input: CustomToolSave): Promise<void> {
 export async function deleteToolPackage(id: string): Promise<void> {
   return mutate(async config => {
     const tool = (await readToolSnapshot()).tools.find(tool => tool.id === id)
-    if (!tool || tool.source !== 'user') throw new Error('Only user tools can be deleted here.')
+    if (!tool || (tool.source !== 'user' && tool.source !== 'external')) throw new Error('Only user and added-directory tools can be deleted here.')
     const directory = await realpath(tool.directory).catch(reason => {
       if ((reason as NodeJS.ErrnoException).code === 'ENOENT') return undefined
       throw reason
@@ -392,5 +423,39 @@ export function listToolFiles(id: string, relativePath?: string, sourceFolders: 
 }
 
 export function readToolFile(id: string, relativePath: string, sourceFolders: readonly string[] = []) {
-  return serialize(async () => readPackageFile((await findToolPackage(id, sourceFolders)).directory, relativePath))
+  return serialize(async () => {
+    const tool = await findToolPackage(id, sourceFolders)
+    return { ...await readPackageFile(tool.directory, relativePath), editable: tool.source !== 'system' }
+  })
+}
+
+export function createToolFile(id: string, relativePath: string, sourceFolders: readonly string[] = []) {
+  return serialize(async () => {
+    const tool = await findToolPackage(id, sourceFolders)
+    if (tool.source === 'system') throw new Error('System tool files are read-only.')
+    return { ...await createPackageFile(tool.directory, relativePath), editable: true }
+  })
+}
+
+export function toolFileExists(id: string, relativePath: string, sourceFolders: readonly string[] = []) {
+  return serialize(async () => packageFileExists((await findToolPackage(id, sourceFolders)).directory, relativePath))
+}
+
+export function saveToolFile(id: string, relativePath: string, update: import('@shared/packageFiles').PackageFileUpdate, sourceFolders: readonly string[] = []) {
+  return serialize(async () => {
+    const tool = await findToolPackage(id, sourceFolders)
+    if (tool.source === 'system') throw new Error('System tool files are read-only.')
+    const definitionPath = await realpath(join(tool.directory, manifestName)).catch(reason => {
+      if ((reason as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+      throw reason
+    })
+    if (definitionPath && update?.resolvedPath === definitionPath) {
+      if (typeof update.content !== 'string' || Buffer.byteLength(update.content) > maxManifestBytes) throw new Error('TOOL.json exceeds 128 KiB.')
+      const raw = JSON.parse(update.content)
+      if (typeof raw.id !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(raw.id)) throw new Error('Invalid tool package ID.')
+      parseCustomTools([{ ...raw, directory: undefined }])
+      if (tool.definition && `${tool.rootId}:${raw.id}` !== tool.id) throw new Error('Changing the tool package ID would break existing selections.')
+    }
+    return { ...await savePackageFile(tool.directory, relativePath, update), editable: true }
+  })
 }

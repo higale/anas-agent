@@ -13,6 +13,9 @@ interface SpeechReplySettingsProps {
   onChange: (settings: Partial<SpeechReplyConfig>) => void | Promise<void>
 }
 
+const SPEECH_SPEED_MARKS = [MIN_SPEECH_REPLY_SPEED, 1, 2, 3, MAX_SPEECH_REPLY_SPEED]
+  .map(value => ({ value, label: String(value) }))
+
 export function SpeechReplySettings({ value, onChange }: SpeechReplySettingsProps) {
   const { t } = useTranslation()
   const [voices, setVoices] = useState<SpeechVoiceInfo[]>([])
@@ -50,8 +53,6 @@ export function SpeechReplySettings({ value, onChange }: SpeechReplySettingsProp
     }
   }, [loadVoices])
 
-  const speedLabel = `${Number(speed.toFixed(2))}x`
-
   return (
     <SettingsGroup title={t('speech.title')} description={voiceStatus ?? t('speech.hint')}>
       <div className="ui-form-row">
@@ -69,11 +70,13 @@ export function SpeechReplySettings({ value, onChange }: SpeechReplySettingsProp
       </div>
       <RangeField
         className="ui-form-row-standard"
-        label={`${t('speech.speed')} ${speedLabel}`}
+        label={t('speech.speed')}
         min={MIN_SPEECH_REPLY_SPEED}
         max={MAX_SPEECH_REPLY_SPEED}
+        marks={SPEECH_SPEED_MARKS}
         step={SETTINGS_RANGE_STEP_FINE}
         value={speed}
+        formatValue={(value) => `${Number(value.toFixed(2))}x`}
         onChange={(value) => void onChange({ speed: clampSpeechReplySpeed(value) })}
       />
     </SettingsGroup>

@@ -7,12 +7,20 @@ export interface ToolSelection {
 
 export interface ResolvedToolSelection extends ToolSelection { project: false }
 
+export interface ToolLoadError {
+  code: 'manifest_not_found' | 'path_not_found' | 'permission_denied' | 'not_directory' | 'not_file'
+    | 'manifest_too_large' | 'invalid_json' | 'invalid_definition' | 'duplicate_id'
+    | 'invalid_source_path' | 'too_many_entries' | 'read_failed'
+  path: string
+  detail?: string
+}
+
 export interface ToolRoot {
   id: string
   name: string
   path: string
   source: 'system' | 'user' | 'external' | 'project'
-  error?: string
+  error?: ToolLoadError
 }
 
 export interface ToolPackage {
@@ -24,7 +32,7 @@ export interface ToolPackage {
   source: ToolRoot['source']
   directory: string
   definition?: CustomToolDefinition
-  error?: string
+  error?: ToolLoadError
   shadowedBy?: string
 }
 
@@ -33,6 +41,7 @@ export interface ToolImportError {
   code: 'invalid_directory' | 'invalid_tool' | 'already_exists' | 'duplicate_id' | 'too_large' | 'too_many_tools' | 'failed'
   name?: string
   detail?: string
+  issue?: ToolLoadError
 }
 export interface ToolDirectory { id: string; name: string; path: string }
 export interface ToolSettings {

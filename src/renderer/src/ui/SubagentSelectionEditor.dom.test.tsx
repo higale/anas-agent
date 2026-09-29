@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { expect, it, vi } from 'vitest'
@@ -26,21 +26,17 @@ it('edits global references, clears missing entries, and retains custom choices 
   await user.type(screen.getByRole('searchbox'), 'documents')
   await user.click(screen.getByRole('checkbox', { name: 'researcher' }))
   expect(changed).toHaveBeenLastCalledWith({ mode: 'custom', names: ['disabled', 'researcher'] })
-  const picker = screen.getByRole('combobox', { name: 'capabilities.subagent_selection' })
-  await user.click(picker)
-  await user.click(screen.getByRole('option', { name: 'capabilities.default' }))
+  const picker = within(screen.getByRole('radiogroup', { name: 'capabilities.subagent_selection' }))
+  await user.click(picker.getByRole('radio', { name: 'capabilities.default' }))
   expect(screen.queryByRole('checkbox', { name: 'researcher' })).not.toBeInTheDocument()
-  await user.click(picker)
-  await user.click(screen.getByRole('option', { name: 'capabilities.custom' }))
+  await user.click(picker.getByRole('radio', { name: 'capabilities.custom' }))
   const researcher = screen.getByRole('checkbox', { name: 'researcher' })
   expect(researcher).toBeChecked()
   expect(screen.queryByRole('checkbox', { name: 'settings.capability_subagents' })).toBeNull()
-  await user.click(picker)
-  await user.click(screen.getByRole('option', { name: 'capabilities.off' }))
+  await user.click(picker.getByRole('radio', { name: 'capabilities.off' }))
   expect(screen.queryByRole('searchbox')).toBeNull()
   expect(screen.queryByRole('checkbox', { name: 'researcher' })).toBeNull()
   expect(changed).toHaveBeenLastCalledWith({ mode: 'off', names: ['disabled', 'researcher'] })
-  await user.click(picker)
-  await user.click(screen.getByRole('option', { name: 'capabilities.custom' }))
+  await user.click(picker.getByRole('radio', { name: 'capabilities.custom' }))
   expect(screen.getByRole('checkbox', { name: 'researcher' })).toBeChecked()
 })

@@ -508,8 +508,10 @@ describe('configuration domain writes', () => {
     expect(snapshot.settings.fontSize).toBe(18)
     expect(writeRawSettingsConfig).toHaveBeenCalledOnce()
 
+    expect((await appConfig.updateSettings({ fontSize: 10 })).settings.fontSize).toBe(10)
+    expect(raw.settings?.font_size).toBe(10)
     raw.settings!.font_size = 1
-    expect((await appConfig.getAppConfigSnapshot()).settings.fontSize).toBe(11)
+    expect((await appConfig.getAppConfigSnapshot()).settings.fontSize).toBe(10)
   })
 
   it('serializes read-modify-write mutations', async () => {

@@ -23,6 +23,18 @@ beforeEach(() => {
 })
 
 describe('Markdown workspace images', () => {
+  it('resolves document-relative images against the Markdown file, including encoded filename characters', async () => {
+    render(<MarkdownText text="![Local](./images/photo%20%231.png)" documentPath="/skills/demo/SKILL.md" />)
+    await waitFor(() => expect(previewMocks.loadAttachmentPreview).toHaveBeenCalledWith(
+      '/skills/demo/images/photo #1.png', { mode: 'thumbnail', projectId: undefined }
+    ))
+  })
+
+  it('resolves document-relative links through the existing local file action', async () => {
+    const view = render(<MarkdownText text="[Guide](../guide.md)" documentPath="/skills/demo/SKILL.md" />)
+    fireEvent.click(view.getByRole('link', { name: 'Guide' }))
+    await waitFor(() => expect(previewMocks.showItemInFolder).toHaveBeenCalledWith('/skills/guide.md'))
+  })
   it.each([
     ['C:\\Users\\user\\Pictures\\002.png', 'C:\\Users\\user\\Pictures\\002.png'],
     ['<C:\\Pictures\\鱼缸 %23 100%25.png>', 'C:\\Pictures\\鱼缸 # 100%.png'],

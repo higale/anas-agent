@@ -119,6 +119,31 @@
   gap: 24px;
 }
 
+.settings-action-grid > .settings-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
+  column-gap: 12px;
+}
+
+.settings-action-grid .settings-action-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  column-gap: 12px;
+}
+
+.settings-action-grid .settings-action-row > :first-child {
+  grid-column: 1;
+}
+
+.settings-action-grid .settings-action-row > .ui-row {
+  display: contents;
+}
+
+.settings-action-grid .ui-action-column {
+  grid-column: 3;
+}
+
 @media (max-width: 720px) {
   .settings-content {
     --workspace-content-padding: 18px var(--workspace-content-gutter) var(--workspace-content-gutter);
@@ -293,12 +318,12 @@
 
 .settings-skill-tree-row {
   display: flex;
-  flex: 0 0 30px;
+  flex: 0 0 var(--control-height);
   align-items: center;
   gap: 6px;
   width: 100%;
   min-width: 0;
-  height: 30px;
+  height: var(--control-height);
   padding: 0 8px;
   border: 0;
   border-radius: var(--control-radius);
@@ -319,6 +344,14 @@
 .settings-skill-tree-row.active {
   background: var(--list-item-active-bg);
   color: var(--text);
+}
+
+.settings-package-source-icon[data-source="system"] {
+  color: color-mix(in srgb, var(--purple) 75%, var(--text-muted));
+}
+
+.settings-package-source-icon[data-source="user"] {
+  color: color-mix(in srgb, var(--accent) 75%, var(--text-muted));
 }
 
 .settings-skill-tree-split {
@@ -412,18 +445,85 @@
   --ui-editor-gap: 14px;
 }
 
+.settings-skill-viewer:has(> :is(.ui-code-file-editor, .settings-package-markdown)) {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-skill-viewer:has(> :is(.ui-code-file-editor, .settings-package-markdown)) > * {
+  flex-shrink: 0;
+}
+
+.settings-skill-viewer > :is(.ui-code-file-editor, .settings-package-markdown) {
+  flex: 1 1 0;
+  height: auto;
+  min-height: 120px;
+}
+
+.settings-package-markdown {
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--border-section);
+  border-radius: var(--control-radius);
+  background: var(--bg-app);
+}
+
+.settings-package-metadata {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-muted);
+  color: var(--text-muted);
+}
+
+.settings-package-metadata pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: var(--font-size-small)/1.55 var(--font-mono);
+}
+
 .settings-skill-viewer-heading {
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border-muted);
 }
 
+.settings-file-edit-dialog {
+  display: flex;
+  flex-direction: column;
+  height: min(720px, calc(100vh - 80px));
+}
+
+.settings-file-edit-dialog > :not(.settings-file-edit-body) {
+  flex-shrink: 0;
+}
+
+.settings-file-edit-dialog .ui-dialog-title,
+.settings-file-edit-dialog .ui-dialog-description {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-file-edit-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.settings-file-edit-body > .ui-code-file-editor {
+  flex: 1 1 0;
+  height: auto;
+  min-height: 0;
+}
+
 .settings-skill-viewer-heading > div:first-child {
   display: grid;
+  flex: 1 1 0;
   gap: 4px;
   min-width: 0;
 }
 
 .settings-skill-viewer-heading strong,
+.settings-skill-viewer-heading .ui-link-button,
 .settings-skill-viewer-heading small,
 .settings-skill-metadata dd {
   overflow-wrap: anywhere;
@@ -439,11 +539,6 @@
   gap: 10px;
   padding-bottom: 14px;
   border-bottom: 1px solid var(--border-muted);
-}
-
-.settings-skill-root-editor-actions {
-  display: flex;
-  justify-content: flex-end;
 }
 
 .settings-skill-metadata {
@@ -604,22 +699,6 @@
   gap: 6px 16px;
 }
 
-.settings-tool-catalog-group {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.settings-tool-catalog-group > .settings-tool-group-title {
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
-
-.settings-tool-catalog-group > .settings-tool-catalog {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
 .settings-tool-group {
   --ui-form-section-gap: 10px;
 }
@@ -720,3 +799,34 @@
   margin-bottom: 8px;
   border-bottom: 1px solid var(--border-muted);
 }
+
+.tool-parameters { display: grid; gap: 10px; min-width: 0; }
+.tool-parameter-list { display: grid; gap: 8px; min-width: 0; }
+.tool-parameter-node { border: 1px solid var(--border-muted); border-radius: 8px; padding: 10px 12px; min-width: 0; }
+.tool-parameter-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tool-parameter-name { overflow-wrap: anywhere; min-width: 0; font-weight: 600; }
+.tool-parameter-type, .tool-parameter-required { color: var(--text-muted); font-size: var(--font-size-small); }
+.tool-parameter-required { color: var(--accent); }
+.tool-parameter-actions { margin-left: auto; }
+.tool-parameter-description { margin: 6px 0 0; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool-parameter-node > .tool-parameter-list { margin-top: 10px; }
+.tool-parameter-advanced { min-width: 0; color: var(--text-secondary); font-size: var(--font-size-small); }
+.tool-parameter-advanced > summary { padding: 6px 0; cursor: pointer; }
+.tool-parameter-advanced pre { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool-parameter-constraints { display: grid; gap: 6px; margin: 0; }
+.tool-parameter-constraints > div { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(0, 3fr); gap: 12px; }
+.tool-parameter-constraints dd { margin: 0; overflow-wrap: anywhere; }
+.tool-parameter-source { width: 100%; min-height: 160px; max-height: 420px; overflow: auto; resize: none; }
+.custom-tool-editor {
+  --ui-dialog-width: min(820px, calc(100vw - 32px));
+  height: min(680px, calc(100vh - var(--ui-dialog-safe-top) - 18px));
+  resize: none;
+}
+.custom-tool-editor-header .ui-segmented-control { justify-self: start; }
+.custom-tool-editor-pending { margin-right: auto; }
+.custom-tool-editor-error { margin-top: 14px; }
+.settings-tool-command-link,
+.settings-tool-command-link:hover { font: inherit; color: var(--accent); text-decoration: none; }
+.tool-parameter-editor-actions { justify-content: flex-end; }
+.tool-parameter-editor > .ui-section-title,
+.tool-parameter-editor > .ui-field-hint { margin: 0; }

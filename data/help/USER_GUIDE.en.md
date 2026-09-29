@@ -25,7 +25,7 @@ Enable **Customize capabilities** in the project editor to choose the project pr
 
 The bulk actions at the top differ from individual switches:
 
-- **Enable all** enables built-in capabilities and current custom tools, sets MCP to All tools, and switches Skills and Subagents to Use default. In project or default capability settings, it also clears Limit subagent capabilities. It does not start globally disabled MCP servers.
+- **Enable all** enables built-in capabilities and current custom tools, sets MCP to All tools, and switches Skills and Subagents to Default. In project or default capability settings, it also clears Limit subagent capabilities. It does not start globally disabled MCP servers.
 - **Disable all** turns capabilities off and clears built-in, custom, and MCP tool selections. Custom skill and subagent lists are retained.
 
 In **Settings > Tools**, select Built-in tools or MCP to view tools grouped by capability or server. Below the divider, browse custom tool sources and package files. Select a built-in or MCP tool name to inspect its parameters and full description.
@@ -162,7 +162,7 @@ Delegates independent tasks to other Agents for parallel investigation and divis
 | `wait_subagent` | Wait for progress, completion, or a request for approval. |
 | `cancel_subagent` | Cancel a specified subtask. |
 
-Configure subagents in **Settings > Subagents**. Default, project, and subagent capability editors share **Use default / Custom / Off**. Use default selects globally default-enabled entries. Custom shows the list and may include entries that are off by default; an empty list prevents launches. Off hides the list and disables the capability while retaining custom choices. It does not require **Background tools**.
+Configure subagents in **Settings > Subagents**. Default, project, and subagent capability editors share **Default / Custom / Off**. Default selects globally default-enabled entries. Custom shows the list and may include entries that are off by default; an empty list prevents launches. Off hides the list and disables the capability while retaining custom choices. It does not require **Background tools**.
 
 Subagents keep their own capability settings rather than inheriting Settings > Capabilities. Subagents may delegate further, but their choices cannot exceed the original project's allowed set. **Limit subagent capabilities** separately constrains context, tools, and skills at every level: when selected, only capabilities allowed by both the project and the subagent remain available. Otherwise, the subagent uses its own configuration. It receives the delegated task, not the complete parent conversation automatically.
 
@@ -172,9 +172,9 @@ Choose a model and parameter preset beside **Identifier**. **Follow parent Agent
 
 Supplies the names, purposes, and instruction paths of available skills, or lets you invoke them with `/name`. Skills are instructions, not separate callable tools, and do not grant file, command, or network capabilities.
 
-Skills use **Use default / Custom / Off**. Only Custom shows the entry list. Off disables skills while retaining individual choices, which are restored when you return to Custom.
+Skills use **Default / Custom / Off**. Only Custom shows the entry list. Off disables skills while retaining individual choices, which are restored when you return to Custom.
 
-**Use default** follows global availability. Custom mode independently selects user shortcuts and model availability, including skills off by default. Subagents configure model availability only.
+**Default** follows global availability. Custom mode independently selects user shortcuts and model availability, including skills off by default. Subagents configure model availability only.
 
 Explicit invocation sends the unchanged skill file and its source path, keeping the user request separate; expand the skill entry to inspect the submitted text. Autonomous loading and reading supporting files require `read_file`, `read_multiple_files`, or **Command execution** capable of reading files. Scripts also need their command interpreter, runtime, tools, and accounts. Selecting a skill does not satisfy those dependencies automatically. Manage global sources and availability in **Settings > Skills**; put project skills in `.agents/skills/` under source folders. See the [Skills Guide](./AGENT_SKILLS.en.md) for importing, name conflicts, and authoring, and each skill's `SETUP.md`, if supplied, for installation requirements.
 
@@ -210,13 +210,17 @@ Edit the application `.env` in Settings > Environment to prepare variables for c
 
 The bundled `tool-creator` Skill guides the model through creating, modifying, and troubleshooting custom tools, with a format reference and a Python example template. Enable the Skill and the required file capabilities, then ask the model to create a custom tool for the current project. Script testing also requires command execution and the appropriate runtime. Select the generated tool in capability settings before using it in a subsequent run.
 
-In **Settings > Tools**, Built-in tools and MCP appear above a divider. Below it, the custom-tool tree lists all packages, system and user sources, and added directories. Expand packages to browse files, preview text, or open their locations. User tools support creation, editing by double-click, deletion, and ordering; deletion moves the entire user package to the trash.
+In **Settings > Tools**, Built-in tools and MCP appear above a divider. Below it, the custom-tool tree lists all packages, system and user sources, and added directories. Select a group name to list its tools on the right; use the boxed arrow to expand or collapse it. Select a tool from the list to view its details. Click a detail title to locate its directory, or expand packages to browse and preview files. User and added-directory tools support creation, editing by double-click, deletion, and ordering; deletion moves the entire tool package to the trash.
 
-**Add directory** references an external source in place. Rename its display label, reorder it, or remove the reference without deleting files. **Import** copies packages into the user directory. System packages follow application updates and include `file_sha256` (file SHA-256) and `json_format` (JSON formatting). Select them in capability settings to use them; no import is required.
+**Add directory** references an external source in place. Rename its display label, reorder it, or remove the reference without deleting files. Name changes save on Enter or focus loss. **Create** and **Import** appear in the selected user or added-directory group header and write packages into that source. System packages follow application updates and include `file_sha256` (file SHA-256) and `json_format` (JSON formatting). Select them in capability settings to use them; no import is required.
 
 Each directory contains a `TOOL.json` manifest with explicit `"version": 0`, plus scripts or resources. User tools live in the application data directory's `tools/`; project tools live in `.agents/tools/` under source folders and are available only to that project. The editor configures names, descriptions, JSON parameter rules, and commands; it does not generate scripts or install dependencies.
 
-**Import tools** appears only while the User group, a user tool, or one of its files is selected. It accepts multiple directories and opens the bundled examples by default. The examples provide text reading and Baidu AI Search, both using the Python 3 standard library. Baidu AI Search also requires internet access and `BAIDU_SEARCH_API_KEY`; see its bundled README for setup. Imports copy into user tools without overwriting existing tools.
+The **+** create and **Import tools** buttons appear in the right pane header while the User group or an added directory is selected. Import accepts multiple directories and opens the bundled examples by default. The examples provide text reading and Baidu AI Search, both using the Python 3 standard library. Baidu AI Search also requires internet access and `BAIDU_SEARCH_API_KEY`; see its bundled README for setup. Imports copy into the selected source without overwriting existing tools.
+
+**Edit information** and **Edit parameters** open the same editor on the corresponding section. Switching sections preserves the draft. The parameter section supports **Parameters / Source**, with controls for names, types, required status, descriptions, enums, limits, and nested object or array parameters. Edit each parameter within the same window and apply it to return to the list. Save the tool to apply all changes together; discarding unsaved changes requires confirmation. Update scripts separately. Use Source for advanced references and composed schemas; other untouched attributes are preserved. Defaults are annotations and are not automatically supplied during calls.
+
+Click a package-local script path in the command to locate it in the file list. If missing, confirm to create an empty file and its parent directories. System tools are read-only; existing files are never overwritten.
 
 After adding or importing a tool, select it under **Custom tools** in default, project, or subagent capabilities. Subagents use independent selections, may enable **Use current project tools**, and follow project limits. For duplicate names, the first valid, enabled entry wins: project source folders in order, then user tools, external directories in order, and system tools.
 
@@ -227,6 +231,8 @@ Commands run in the tool directory, where relative paths resolve, for example `s
 ## MCP Setup
 
 Add and edit servers in Settings > MCP using stdio, HTTP, or SSE. The server must be enabled and connected, the model must have Tool use enabled, and the project must allow the relevant tools.
+
+For stdio servers, leaving Working directory blank uses the current user's home directory. Enter an absolute path to run the server in another directory.
 
 Disabled servers remain editable; editing a running server stops it first. The tool catalog in Settings > Tools groups tools by server. Projects can further select available tools.
 

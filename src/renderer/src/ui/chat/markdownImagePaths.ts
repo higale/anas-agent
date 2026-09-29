@@ -2,7 +2,7 @@ const localImageExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', 
 const localPathPattern = /^(?:[a-zA-Z]:[\\/]|\\\\|\/)/
 const urlSchemePattern = /^[a-zA-Z][a-zA-Z\d+.-]*:/
 
-function fileUrlToPath(value: string): string | null {
+export function fileUrlToPath(value: string): string | null {
   try {
     const url = new URL(value)
     if (url.protocol !== 'file:') return null
@@ -13,6 +13,25 @@ function fileUrlToPath(value: string): string | null {
   } catch {
     return null
   }
+}
+
+/** Resolve document assets without using the renderer page's URL or working directory. */
+export function resolveMarkdownDocumentUrl(value: string, documentPath: string): string {
+  if (!value || value.startsWith('#')) return value
+  const asFileUrl = (path: string) => {
+    const normalized = path.replaceAll('\\', '/')
+    const encoded = normalized.split('/').map(encodeURIComponent).join('/').replace(/^([a-zA-Z])%3A\//, '$1:/')
+    return new URL(normalized.startsWith('//') ? `file:${encoded}` : `file://${normalized.startsWith('/') ? '' : '/'}${encoded}`)
+  }
+  try {
+    if (/^[a-zA-Z]:[\\/]/.test(value) || value.startsWith('\\\\')) {
+      const path = value.split(/[?#]/, 1)[0]
+      return new URL(value.slice(path.length), asFileUrl(decodeURIComponent(path))).href
+    }
+    if (urlSchemePattern.test(value)) return value
+    if (value.startsWith('//')) return `https:${value}`
+    return new URL(value, asFileUrl(documentPath)).href
+  } catch { return value }
 }
 
 export function normalizeLocalImagePath(src: string | undefined): string | null {

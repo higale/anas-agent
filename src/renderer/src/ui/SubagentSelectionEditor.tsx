@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import type { SubagentConfig } from '@shared/types'
 import { isSubagentConfigured, selectedSubagents, type SubagentSelection } from '@shared/subagentSelection'
 import { CheckboxField } from './CheckboxField'
-import { SearchableOptionPicker } from './SearchableOptionPicker'
+import { SegmentedControl } from './SegmentedControl'
 
 export interface SubagentSelectionProps {
   value: SubagentSelection
@@ -31,13 +31,13 @@ export function SubagentSelectionEditor({ value, definitions, onChange, disabled
         <span>{t('settings.capability_subagents')}</span>
         <small>{count}</small>
       </div>
-      <SearchableOptionPicker className="compact" ariaLabel={t('capabilities.subagent_selection')}
-        disabled={disabled} searchable={false} emptyLabel={t('settings.no_options')}
+      <SegmentedControl<SubagentSelection['mode']> ariaLabel={t('capabilities.subagent_selection')}
+        disabled={disabled}
         value={value.mode} options={[
           { value: 'default', label: t('capabilities.default') },
           { value: 'custom', label: t('capabilities.custom') },
           { value: 'off', label: t('capabilities.off') }
-        ]} onChange={(mode) => onChange({ ...value, mode: mode as SubagentSelection['mode'] })} />
+        ]} onChange={(mode) => onChange({ ...value, mode })} />
     </div>
     {value.mode === 'custom' && <fieldset className="ui-capability-editor" disabled={disabled}>
       <input className="ui-input" type="search" aria-label={t('capabilities.search_subagents')}

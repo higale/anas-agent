@@ -1,4 +1,5 @@
 import { requireDataVersion } from '@shared/dataVersion'
+import { UI_FONT_SIZE_MAX, UI_FONT_SIZE_MIN } from '@shared/uiPreferences'
 import { lstat, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -186,7 +187,7 @@ export function repairDocument(file: string, input: unknown): { value: RecordVal
         diff_view_mode: ['inline', 'side_by_side'], new_thread_model_selection: ['default', 'prompt', 'current'], attachment_text_overflow: ['truncate', 'error'], log_level: ['trace', 'debug', 'info', 'warn', 'error', 'off'] })) {
         repair.choice(value, key, choices, (settingsDefaults as RecordValue)[key] as string, 'settings')
       }
-      for (const [key, min, max] of [['font_size', 11, 18], ['sidebar_width', 220, 420], ['workspace_panel_width', 320, Number.MAX_SAFE_INTEGER], ['log_retention_days', 0, 3650],
+      for (const [key, min, max] of [['font_size', UI_FONT_SIZE_MIN, UI_FONT_SIZE_MAX], ['sidebar_width', 220, 420], ['workspace_panel_width', 320, Number.MAX_SAFE_INTEGER], ['log_retention_days', 0, 3650],
         ['max_model_calls_per_run', 0, 9999], ['attachment_text_max_chars', 1000, 2_000_000]] as const) {
         repair.number(value, key, min, max, settingsDefaults[key], 'settings')
       }

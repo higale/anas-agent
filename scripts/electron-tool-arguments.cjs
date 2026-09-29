@@ -112,9 +112,17 @@ async function verifyToolArguments(launchApplication) {
     await expect.poll(async () => (await position()).gap).toBeLessThan(3)
     // Drag Chromium's actual scrollbar, then ensure new output does not take
     // the reader away from the chosen position after releasing the pointer.
-    await page.mouse.move(bounds.x + bounds.width - 3, bounds.y + bounds.height - 12)
+    const scrollbar = await panel.evaluate((element) => {
+      const bounds = element.getBoundingClientRect()
+      const width = Math.max(element.offsetWidth - element.clientWidth, 6)
+      const trackHeight = element.clientHeight - 2 * width
+      const thumbHeight = trackHeight * element.clientHeight / element.scrollHeight
+      // Start inside the thumb, clear of native arrow buttons and rounded edges.
+      return { x: bounds.right - width / 2, y: bounds.bottom - width - thumbHeight / 2 }
+    })
+    await page.mouse.move(scrollbar.x, scrollbar.y)
     await page.mouse.down()
-    await page.mouse.move(bounds.x + bounds.width - 3, bounds.y + bounds.height - 100, { steps: 8 })
+    await page.mouse.move(scrollbar.x, scrollbar.y - 80, { steps: 8 })
     await page.mouse.up()
     await expect.poll(async () => (await position()).gap).toBeGreaterThan(50)
     const draggedTop = (await position()).top
@@ -124,7 +132,7 @@ async function verifyToolArguments(launchApplication) {
     assert.ok((await position()).top <= draggedTop + 2, 'Scrollbar dragging must pause output following.')
     await page.getByRole('button', { name: /^(滚动到底部|Scroll to bottom)$/ }).click()
     await expect.poll(async () => (await position()).gap).toBeLessThan(3)
-    await page.mouse.click(bounds.x + bounds.width - 3, bounds.y + bounds.height / 2)
+    await page.mouse.click(scrollbar.x, bounds.y + bounds.height / 2)
     await expect.poll(async () => (await position()).gap).toBeGreaterThan(50)
     const trackTop = (await position()).top
     await send({ ...common, type: 'model_delta', modelId: nextModel.id,

@@ -1,4 +1,4 @@
-export const UI_FONT_SIZE_MIN = 11
+export const UI_FONT_SIZE_MIN = 10
 export const UI_FONT_SIZE_MAX = 18
 export const UI_FONT_SIZE_DEFAULT = 14
 export const SIDEBAR_WIDTH_MIN = 220

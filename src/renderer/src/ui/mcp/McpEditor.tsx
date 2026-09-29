@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from 'react'
+import { useId, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AppConfigSnapshot, McpServerType, McpToolStatus } from '@shared/types'
 import { CheckboxField } from '../CheckboxField'
+import { CommitNumberInput } from '../CommitNumberInput'
 import { CommitTextInput, CommitTextarea } from '../CommitTextField'
 import { SearchableOptionPicker } from '../SearchableOptionPicker'
 import { SETTINGS_MCP_TIMEOUT_MIN_MS, SETTINGS_MILLISECONDS_STEP, UI_TEXTAREA_ROWS_COMPACT } from '../uiConstants'
@@ -30,6 +31,7 @@ export function McpEditor({
   onUpdateDraft
 }: McpEditorProps) {
   const { t } = useTranslation()
+  const timeoutId = useId()
   const [apiKeyFocused, setApiKeyFocused] = useState(false)
   const transportOptions = [
     { value: 'stdio', label: 'stdio' },
@@ -74,10 +76,10 @@ export function McpEditor({
             disabled={disabled}
           />
         </label>
-        <label className="ui-field-stack">
-          <span>{t('settings.timeout_ms')}</span>
-          <CommitTextInput min={SETTINGS_MCP_TIMEOUT_MIN_MS} step={SETTINGS_MILLISECONDS_STEP} type="number" value={String(mcpDraft.timeoutMs)} onCommit={(timeoutMs) => onUpdateDraft({ timeoutMs: Number(timeoutMs) })} disabled={disabled} />
-        </label>
+        <div className="ui-field-stack">
+          <label className="ui-field-label" htmlFor={timeoutId}>{t('settings.timeout_ms')}</label>
+          <CommitNumberInput id={timeoutId} min={SETTINGS_MCP_TIMEOUT_MIN_MS} step={SETTINGS_MILLISECONDS_STEP} value={String(mcpDraft.timeoutMs)} onCommit={(timeoutMs) => onUpdateDraft({ timeoutMs: Number(timeoutMs) })} disabled={disabled} />
+        </div>
       </div>
 
       {mcpDraft.type === 'stdio' ? (
@@ -101,7 +103,12 @@ export function McpEditor({
           </label>
           <label className="ui-field-stack">
             <span>{t('settings.working_directory')}</span>
-            <CommitTextInput value={mcpDraft.workingDir} onCommit={(workingDir) => onUpdateDraft({ workingDir })} disabled={disabled} />
+            <CommitTextInput
+              value={mcpDraft.workingDir}
+              onCommit={(workingDir) => onUpdateDraft({ workingDir })}
+              placeholder={t('settings.mcp_working_directory_placeholder')}
+              disabled={disabled}
+            />
           </label>
           <label className="ui-field-stack">
             <span>{t('settings.environment')}</span>

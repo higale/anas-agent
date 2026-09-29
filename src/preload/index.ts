@@ -174,6 +174,7 @@ const api: GaleApi = {
     clear: (): Promise<number> => ipcRenderer.invoke('memory:clear')
   },
   tools: {
+    validateSchema: schema => ipcRenderer.invoke('tools:validateSchema', schema),
     get: (projectId, sourceFolders) => ipcRenderer.invoke('tools:get', projectId, sourceFolders),
     refresh: () => ipcRenderer.invoke('tools:refresh'),
     addDirectory: () => ipcRenderer.invoke('tools:addDirectory'),
@@ -181,13 +182,17 @@ const api: GaleApi = {
     removeDirectory: id => ipcRenderer.invoke('tools:removeDirectory', id),
     moveDirectory: (id, direction) => ipcRenderer.invoke('tools:moveDirectory', id, direction),
     listFiles: (id, path, folders) => ipcRenderer.invoke('tools:listFiles', id, path, folders),
+    createFile: (id, path, folders) => ipcRenderer.invoke('tools:createFile', id, path, folders),
+    fileExists: (id, path, folders) => ipcRenderer.invoke('tools:fileExists', id, path, folders),
     readFile: (id, path, folders) => ipcRenderer.invoke('tools:readFile', id, path, folders),
-    importDirectories: () => ipcRenderer.invoke('tools:importDirectories')
+    saveFile: (id, path, update, folders) => ipcRenderer.invoke('tools:saveFile', id, path, update, folders),
+    importDirectories: (rootId?: string) => ipcRenderer.invoke('tools:importDirectories', rootId)
   },
   skills: {
     updateScriptApproval: (projectId: string | undefined, skillId: string | undefined, enabled: boolean): Promise<SkillSnapshot> => ipcRenderer.invoke('skills:updateScriptApproval', projectId, skillId, enabled),
     get: (projectId?: string, sourceFolders?: string[]): Promise<SkillSnapshot> => ipcRenderer.invoke('skills:get', projectId, sourceFolders),
     listFiles: (projectId: string | undefined, skillId: string, relativePath?: string): Promise<SkillFileNode[]> => ipcRenderer.invoke('skills:listFiles', projectId, skillId, relativePath),
+    saveFile: (projectId, skillId, path, update) => ipcRenderer.invoke('skills:saveFile', projectId, skillId, path, update),
     readFile: (projectId: string | undefined, skillId: string, relativePath: string): Promise<SkillFilePreview> => ipcRenderer.invoke('skills:readFile', projectId, skillId, relativePath),
     invoke: (projectId: string | undefined, name: string, sourceAlias: string | undefined, args: string): Promise<SkillInvocationResult> => ipcRenderer.invoke('skills:invoke', projectId, name, sourceAlias, args),
     updateAvailability: (projectId: string | undefined, skillId: string, settings: SkillAvailabilityUpdate): Promise<SkillSnapshot> => ipcRenderer.invoke('skills:updateAvailability', projectId, skillId, settings),

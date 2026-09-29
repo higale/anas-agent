@@ -645,3 +645,21 @@ Body
     expect(snapshot.skills.find((skill) => skill.name === 'broken')).toMatchObject({ linked: true, loadError: { code: 'missing_skill_file' } })
   })
 })
+
+it('edits user skill files while keeping system files read-only', async () => {
+  const fixture = await loadSkillsStore()
+  await writeSkill(fixture.bundledSystemDir, 'system-one')
+  await writeSkill(fixture.skillsDir, 'user-one')
+  const store = await import('./skillsStore')
+  await store.initializeSkillsStore()
+  const snapshot = await store.listSkillSnapshot()
+  const user = snapshot.skills.find(skill => skill.source === 'user')!
+  const system = snapshot.skills.find(skill => skill.source === 'system')!
+  const before = await store.readSkillFile(undefined, user.id, 'SKILL.md')
+  expect(before.editable).toBe(true)
+  await store.saveSkillFile(undefined, user.id, 'SKILL.md', { content:skillText('user-one','Updated description'),revision:before.revision!,resolvedPath:before.resolvedPath })
+  expect((await store.listSkillSnapshot()).skills.find(skill => skill.id === user.id)?.description).toBe('Updated description')
+  const systemFile = await store.readSkillFile(undefined, system.id, 'SKILL.md')
+  expect(systemFile.editable).toBe(false)
+  await expect(store.saveSkillFile(undefined, system.id, 'SKILL.md', {content:systemFile.content!,revision:systemFile.revision!,resolvedPath:systemFile.resolvedPath})).rejects.toThrow('read-only')
+})

@@ -6,9 +6,11 @@ A skill provides instructions an Agent reads when needed, optionally with script
 
 ## Add And Manage Skills
 
-Use **Settings > Skills** to manage global sources and browse skill instructions and files. Files are read-only; click a Skill's location or a file's **Open** button to locate it in your file manager for editing.
+Use **Settings > Skills** to manage global sources and browse skill instructions and files. Select a group name to list its Skills on the right; use the boxed arrow to expand or collapse it. Group headings show `@alias`; external-directory names and aliases save on Enter or focus loss. Text and scripts support syntax highlighting and **Edit** with explicit saving; system Skill files remain read-only. Saving checks for external changes, and closing with unsaved edits asks before discarding. Click a source directory, Skill, or file title to locate it in your file manager. Skill locations are also clickable.
 
-- **Import skills**: Select the **User** group or one of its skills, then choose **Import**. Select one or more skill directories containing `SKILL.md` to copy into `skills/` under application data. Name conflicts prevent import without overwriting existing skills. The picker opens in the examples directory by default.
+Markdown files open in rendered **Preview**, with a **Source** switch and collapsible metadata. Relative images load from the file's directory; same-page links jump to headings, and other local file links reveal their targets in your file manager.
+
+- **Import skills**: Select the **User** group, then click the import icon in the right pane header. Select one or more skill directories containing `SKILL.md` to copy into `skills/` under application data. Name conflicts prevent import without overwriting existing skills. The picker opens in the examples directory by default.
 - **Add directory**: Select an external directory containing skill subdirectories. Anas references its files without copying them. External sources can be renamed, assigned shortcut aliases, reordered, or removed. Removing a source only removes its reference, not its files.
 - **Project skills**: Place them in `.agents/skills/` under each project source folder. They appear in that project's capability choices and conversations, not on the global Skills page.
 
@@ -21,7 +23,7 @@ Use **Settings > Skills** to manage global sources and browse skill instructions
 - **Available to model** supplies the Agent with the name, description, and absolute `SKILL.md` path so it can read the instructions when relevant.
 - **Available to user** allows explicit invocation with `/skill-name request` in the message input. Type `/` to see suggestions. Anas sends the complete, unchanged `SKILL.md` and its source path, with the text after the command as a separate user request; expand the skill entry in the conversation to inspect the actual submitted text.
 
-Global switches provide defaults. In a project's **Customize capabilities > Skills**, **Use default** follows global settings; **Custom** selects each use independently, including enabling globally disabled skills. Turning the main Skills switch off preserves selections but stops providing the skill catalog and shortcuts. Skills with loading errors remain unavailable.
+Global switches provide defaults. In a project's **Customize capabilities > Skills**, **Default** follows global settings; **Custom** selects each use independently, including enabling globally disabled skills. Selecting **Off** for Skills preserves selections but stops providing the skill catalog and shortcuts. Skills with loading errors remain unavailable.
 
 Subagents configure model use only, may enable **Project skills**, and follow the project's **Limit subagent capabilities** setting. See [Subagents](./USER_GUIDE.en.md#subagents).
 

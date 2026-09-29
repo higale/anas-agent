@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { DataManagementSettings } from './DataManagementSettings'
 
@@ -7,22 +8,24 @@ vi.mock('react-i18next', () => ({
 }))
 
 describe('DataManagementSettings', () => {
-  it('places data directory usage beside its trailing action', () => {
+  it('opens the data directory with an explicit action and keeps storage usage visible', async () => {
+    const onOpenDataDirectory = vi.fn()
     render(
       <DataManagementSettings
         dataDirectoryUsage={{ totalBytes: 1536, approximate: false }}
         storageUsageLoading={false}
         onBackupDataDirectory={vi.fn()}
         onOpenDataCleanup={vi.fn()}
-        onOpenDataDirectory={vi.fn()}
+        onOpenDataDirectory={onOpenDataDirectory}
         onRestoreDataDirectory={vi.fn()}
       />
     )
 
     const usage = screen.getByText('1.50 KB')
-    const actionRow = usage.parentElement
-    expect(actionRow).toHaveClass('ui-row')
-    expect(actionRow).toContainElement(screen.getByRole('button', { name: 'common.open' }))
+    expect(usage).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'settings.data_directory' })).not.toBeInTheDocument()
     expect(screen.getByText('settings.data_directory').parentElement).not.toContainElement(usage)
+    await userEvent.click(screen.getByRole('button', { name: 'common.open' }))
+    expect(onOpenDataDirectory).toHaveBeenCalledOnce()
   })
 })

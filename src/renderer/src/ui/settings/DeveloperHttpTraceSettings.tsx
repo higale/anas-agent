@@ -1,7 +1,9 @@
+import { FolderOpen } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { StorageUsageValue } from '@shared/types'
 import { CheckboxField } from '../CheckboxField'
 import { StorageUsageText } from '../StorageUsageText'
+import { UI_ICON_SIZE_MEDIUM } from '../uiConstants'
 import { SettingsGroup } from './SettingsGroup'
 
 interface DeveloperHttpTraceSettingsProps {
@@ -42,12 +44,9 @@ export function DeveloperHttpTraceSettings({
         </div>
         <div className="ui-row">
           <StorageUsageText loading={storageUsageLoading} usage={usage} />
-          <button
-            className="ui-button ui-button-compact"
-            type="button"
-            onClick={() => void onOpenDirectory()}
-          >
-            {t('settings.open_developer_http_trace_folder')}
+          <button className="ui-button ui-button-compact" type="button" onClick={() => void onOpenDirectory()}>
+            <FolderOpen size={UI_ICON_SIZE_MEDIUM} />
+            <span>{t('settings.open_developer_http_trace_folder')}</span>
           </button>
         </div>
       </div>

@@ -1,5 +1,25 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeLocalImagePath } from './markdownImagePaths'
+import { fileUrlToPath, normalizeLocalImagePath, resolveMarkdownDocumentUrl } from './markdownImagePaths'
+
+describe('Markdown document-relative destinations', () => {
+  it.each([
+    ['/skills/鱼 # 100%/SKILL.md', './images/a%20%231.png', '/skills/鱼 # 100%/images/a #1.png'],
+    ['C:\\skills\\demo\\SKILL.md', '../images/a.png', 'C:\\skills\\images\\a.png'],
+    ['/skills/SKILL.md', 'C:/docs/guide.md#section', 'C:\\docs\\guide.md'],
+    ['/skills/SKILL.md', 'C:/images/photo%20%231.png?raw=1#preview', 'C:\\images\\photo #1.png'],
+    ['/skills/SKILL.md', '\\\\server\\share\\guide.md#section', '\\\\server\\share\\guide.md'],
+    ['\\\\server\\share\\demo\\SKILL.md', './a.png', '\\\\server\\share\\demo\\a.png'],
+    ['/skills/demo/SKILL.md', '/other/readme.md', '/other/readme.md']
+  ])('resolves %s and %s to a filesystem target', (path, href, expected) => {
+    expect(fileUrlToPath(resolveMarkdownDocumentUrl(href, path))).toBe(expected)
+  })
+  it('keeps anchors and explicit URL schemes for the existing URL policy', () => {
+    for (const href of ['#section', 'https://example.com', 'mailto:a@example.com', 'javascript:alert(1)']) {
+      expect(resolveMarkdownDocumentUrl(href, '/skills/SKILL.md')).toBe(href)
+    }
+    expect(resolveMarkdownDocumentUrl('//example.com/a.png', '/skills/SKILL.md')).toBe('https://example.com/a.png')
+  })
+})
 
 describe('normalizeLocalImagePath', () => {
   it('keeps absolute macOS file URLs as POSIX paths', () => {

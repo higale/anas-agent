@@ -176,18 +176,18 @@ describe('avatar crop dialog', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'common.save' })).toBeEnabled())
     await waitFor(() => expect(editorBehavior.crop).toEqual({ x: 42, y: -18 }))
     expect(editorBehavior.mediaSize).toEqual({ height: 426.6666666666667, naturalHeight: 1200, naturalWidth: 900, width: 320 })
-    expect((screen.getByRole('slider', { name: 'settings.avatar_crop_zoom' }) as HTMLInputElement).value).toBe('2.5')
+    expect(screen.getByRole('slider', { name: 'settings.avatar_crop_zoom' })).toHaveAttribute('aria-valuenow', '2.5')
     expect(editorBehavior.rotation).toBe(90)
   })
 
   it('uses the cropper wheel interaction and keeps the slider synchronized', async () => {
     renderDialog()
-    const slider = screen.getByRole('slider', { name: 'settings.avatar_crop_zoom' }) as HTMLInputElement
-    await waitFor(() => expect(slider).toBeEnabled())
+    const slider = screen.getByRole('slider', { name: 'settings.avatar_crop_zoom' })
+    await waitFor(() => expect(slider).toHaveAttribute('aria-disabled', 'false'))
 
     fireEvent.wheel(screen.getByTestId('avatar-editor'), { deltaY: -100 })
 
-    expect(Number(slider.value)).toBeGreaterThan(1)
+    expect(Number(slider.getAttribute('aria-valuenow'))).toBeGreaterThan(1)
   })
 
   it('stores the original source path, crop metadata, rotation, and bounded PNG cache', async () => {

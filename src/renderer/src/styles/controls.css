@@ -1,6 +1,7 @@
 /* Shared field chrome for picker search input. */
 :where(.searchable-option-search) {
   width: 100%;
+  height: var(--control-height);
   min-width: 0;
   padding: 0 var(--control-padding-x);
   border: 1px solid var(--border-muted);
@@ -27,18 +28,12 @@
   background: var(--control-field-bg);
 }
 
-.searchable-option-picker.compact {
-  grid-template-columns: minmax(0, 1fr) var(--control-height-compact);
-  height: var(--control-height-compact);
-}
-
 .searchable-option-input {
   appearance: none;
   min-width: 0;
   width: 100%;
   height: 100%;
-  /* The UI font's visible glyphs sit slightly below its line-box center. */
-  padding: 5px var(--control-padding-x) 7px;
+  padding: 0 var(--control-padding-x);
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -71,23 +66,6 @@
   color: var(--text);
 }
 
-.searchable-option-picker.compact .searchable-option-input,
-.searchable-option-picker.compact .searchable-option-tail {
-  height: 100%;
-}
-
-.searchable-option-picker.compact .searchable-option-input {
-  padding-block: 2px 4px;
-}
-
-.searchable-option-picker.compact .searchable-option-tail {
-  width: var(--control-height-compact);
-}
-
-.searchable-option-picker.compact {
-  background: var(--control-field-bg);
-}
-
 .searchable-option-popover {
   gap: 6px;
   width: var(--searchable-option-picker-width, var(--radix-popover-trigger-width));
@@ -103,7 +81,8 @@
 }
 
 .searchable-option-search-row.with-commit {
-  grid-template-columns: minmax(0, 1fr) var(--control-height-compact);
+  grid-template-columns: minmax(0, 1fr) var(--control-height);
+  height: var(--control-height);
   overflow: hidden;
   border: 1px solid var(--border-muted);
   border-radius: var(--control-radius);
@@ -111,6 +90,7 @@
 }
 
 .searchable-option-search-row.with-commit .searchable-option-search {
+  height: 100%;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -126,8 +106,8 @@
 }
 
 .searchable-option-search-commit {
-  width: var(--control-height-compact);
-  height: var(--control-height-compact);
+  width: var(--control-height);
+  height: 100%;
   border: 0;
   border-left: 1px solid var(--border-muted);
   border-radius: 0;
@@ -159,10 +139,6 @@
   color: var(--text);
 }
 
-.searchable-option-popover.compact .ui-option-item {
-  min-height: var(--control-height-compact);
-}
-
 .searchable-option-list .ui-option-item:hover,
 .searchable-option-list .ui-option-item:focus-visible {
   background: var(--list-item-hover-bg);
@@ -172,15 +148,6 @@
 .searchable-option-list .ui-option-item[aria-selected="true"] {
   background: var(--list-item-active-bg);
   color: var(--text);
-}
-
-:where(.searchable-option-search) {
-  height: var(--control-height);
-}
-
-:where(.searchable-option-search) {
-  height: var(--control-height-compact);
-  background: var(--control-field-bg);
 }
 
 :where(.searchable-option-search):focus {

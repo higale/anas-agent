@@ -828,21 +828,26 @@ export interface GaleApi {
     clear(): Promise<number>
   }
   tools: {
+    validateSchema(schema: unknown): Promise<void>
     get(projectId?: string, sourceFolders?: string[]): Promise<import('./toolPackages').ToolSnapshot>
     refresh(): Promise<AppConfigSnapshot>
-    importDirectories(): Promise<ToolImportResult>
+    importDirectories(rootId?: string): Promise<ToolImportResult>
     addDirectory(): Promise<{ status: 'added' | 'cancelled' }>
     updateDirectory(id: string, name: string): Promise<void>
     removeDirectory(id: string): Promise<void>
     moveDirectory(id: string, direction: -1 | 1): Promise<void>
     listFiles(id: string, relativePath?: string, sourceFolders?: string[]): Promise<import('./packageFiles').PackageFileNode[]>
+    createFile(id: string, relativePath: string, sourceFolders?: string[]): Promise<import('./packageFiles').PackageFilePreview>
+    fileExists(id: string, relativePath: string, sourceFolders?: string[]): Promise<boolean>
     readFile(id: string, relativePath: string, sourceFolders?: string[]): Promise<import('./packageFiles').PackageFilePreview>
+    saveFile(id: string, relativePath: string, update: import('./packageFiles').PackageFileUpdate, sourceFolders?: string[]): Promise<import('./packageFiles').PackageFilePreview>
   }
   skills: {
     updateScriptApproval(projectId: string | undefined, skillId: string | undefined, enabled: boolean): Promise<SkillSnapshot>
     get(projectId?: string, sourceFolders?: string[]): Promise<SkillSnapshot>
     listFiles(projectId: string | undefined, skillId: string, relativePath?: string): Promise<SkillFileNode[]>
     readFile(projectId: string | undefined, skillId: string, relativePath: string): Promise<SkillFilePreview>
+    saveFile(projectId: string | undefined, skillId: string, relativePath: string, update: import('./packageFiles').PackageFileUpdate): Promise<SkillFilePreview>
     invoke(projectId: string | undefined, name: string, sourceAlias: string | undefined, args: string): Promise<SkillInvocationResult>
     updateAvailability(projectId: string | undefined, skillId: string, settings: SkillAvailabilityUpdate): Promise<SkillSnapshot>
     addDirectory(projectId?: string): Promise<SkillDirectoryAddResult>

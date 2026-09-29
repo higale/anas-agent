@@ -7,7 +7,7 @@ import { builtinToolCatalog, runtimeToolSelectionId } from '@shared/toolRegistry
 import { mcpServerSelection, removeEmptyMissingMcpSelections, setMcpServerMode, setMcpToolSelection, resolveSkillSelection, setToolSelection, toolAllowed, toolSelected, type AgentCapabilities } from '@shared/agentCapabilities'
 import type { McpServerConfigDetail, McpToolStatus, RuntimeToolStatus, SkillSnapshot } from '@shared/types'
 import { CheckboxField } from './CheckboxField'
-import { SearchableOptionPicker } from './SearchableOptionPicker'
+import { SegmentedControl } from './SegmentedControl'
 import { SettingsStatusIndicator } from './settings/SettingsStatusIndicator'
 import { skillSourceGroups } from './skillSourceGroups'
 import { UI_ICON_SIZE_MEDIUM, UI_ICON_SIZE_SMALL } from './uiConstants'
@@ -250,19 +250,16 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
               <small>{selectedSkillCount}{projectSkillsSelected && <> + {t('settings.skill_group_project')}</>}</small>
               {skillWarning && <SettingsStatusIndicator label={t('settings.subagent_skills_require_file_read')} hint={t('settings.subagent_skills_require_file_read')} />}
             </div>
-            <SearchableOptionPicker
-              className="compact"
+            <SegmentedControl<AgentCapabilities['skills']['mode']>
               ariaLabel={t('capabilities.skill_selection')}
               disabled={disabled}
-              emptyLabel={t('settings.no_options')}
-              searchable={false}
               value={value.skills.mode}
               options={[
                 { value: 'default', label: t('capabilities.default') },
                 { value: 'custom', label: t('capabilities.custom') },
                 { value: 'off', label: t('capabilities.off') }
               ]}
-              onChange={(mode) => onChange({ ...value, skills: { ...value.skills, mode: mode as AgentCapabilities['skills']['mode'] } })}
+              onChange={(mode) => onChange({ ...value, skills: { ...value.skills, mode } })}
             />
           </div>
           <div className="ui-capability-editor">

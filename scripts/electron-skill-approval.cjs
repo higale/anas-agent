@@ -19,7 +19,7 @@ async function verifySkillApproval(launchApplication) {
     await page.locator('[data-settings-tab="skills"]').click()
     const global = page.getByRole('checkbox', { name: 'Auto-approve all Skill scripts', exact: true })
     await expect(global).not.toBeChecked()
-    await page.locator('.settings-skill-tree-root').filter({ hasText: 'System' }).click()
+    await page.locator('.settings-skill-tree-root').filter({ hasText: 'System' }).locator('.settings-skill-tree-toggle').click()
     await page.locator('.settings-skill-tree-select').filter({ hasText: /^config$/ }).click()
     const individual = page.getByRole('checkbox', { name: 'Auto-approve scripts', exact: true })
     await expect(individual).not.toBeChecked()

@@ -29,7 +29,7 @@ For an avatar request, report success only when the tool returns `ok: true` and 
 | --- | --- |
 | `language` | `"system"` or an installed language-pack code; bundled codes are `"en"` and `"zh-CN"` |
 | `theme` | `"system"`, `"light"`, or `"dark"` |
-| `font_size` | integer from `11` through `18` |
+| `font_size` | integer from `10` through `18` |
 | `chat_content_width` | `"narrow"`, `"wide"`, or `"adaptive"` |
 | `sidebar_visible` | boolean |
 | `sidebar_width` | integer from `220` through `420` |

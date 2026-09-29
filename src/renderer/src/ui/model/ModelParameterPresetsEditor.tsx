@@ -8,14 +8,13 @@ import { CheckboxField } from '../CheckboxField'
 import { CommitTextInput, CommitTextarea } from '../CommitTextField'
 import { ConfirmDialog } from '../dialogs/AppDialogs'
 import type { ConfirmDialogRequest } from '../dialogs/AppDialogs'
-import { SearchableOptionPicker } from '../SearchableOptionPicker'
+import { SegmentedControl } from '../SegmentedControl'
 import { SettingsListActions } from '../settings/SettingsListActions'
 import { UI_ICON_SIZE_LARGE, UI_TEXTAREA_ROWS_COMPACT } from '../uiConstants'
 import type { ModelDraft, ModelParameterPresetDraft } from './modelDraft'
 
 interface ModelParameterPresetsEditorProps {
   draft: ModelDraft
-  portalContainer?: HTMLElement | null
   onUpdate(update: Partial<ModelDraft>): void
 }
 
@@ -29,7 +28,6 @@ function nextPresetName(existing: ModelParameterPresetDraft[], base: string): st
 
 export function ModelParameterPresetsEditor({
   draft,
-  portalContainer,
   onUpdate
 }: ModelParameterPresetsEditorProps) {
   const { t } = useTranslation()
@@ -194,72 +192,63 @@ export function ModelParameterPresetsEditor({
 
   return (
     <div className="model-parameter-presets">
-      <div className="model-parameter-presets-heading ui-field-heading">
+      <div className="ui-list-pane-header ui-field-heading ui-form-row ui-form-row-inline">
         <span>{t('settings.model_parameter_presets')}</span>
-        <SearchableOptionPicker
+        <SegmentedControl<ModelParameterPresetMode>
           ariaLabel={t('settings.parameter_preset_mode')}
-          className="model-parameter-preset-mode-picker"
-          emptyLabel={t('settings.no_options')}
           options={modeOptions}
-          popoverClassName="model-parameter-preset-mode-popover"
-          portalContainer={portalContainer}
-          searchable={false}
           value={draft.parameterPresetMode}
-          onChange={(parameterPresetMode) => updateMode(parameterPresetMode as ModelParameterPresetMode)}
+          onChange={updateMode}
         />
       </div>
 
-      {draft.parameterPresetMode === 'protocol_default' && (
-        <p className="model-parameter-preset-mode-description ui-muted">
-          {t('settings.protocol_default_reasoning_options_description', {
-            protocol: parameterTemplateGroup?.label ?? draft.protocol
-          })}
-        </p>
-      )}
-
       {draft.parameterPresetMode === 'none' && (
-        <div className="model-parameter-presets-empty ui-muted">
+        <div className="model-parameter-presets-empty ui-empty-state">
           {t('settings.reasoning_options_disabled_description')}
         </div>
       )}
 
-      {isCustom && (
-        <SettingsListActions
-          addLabel={t('settings.add_model_parameter_preset')}
-          additionalActions={(
-            <button
-              aria-label={t('settings.import_protocol_defaults')}
-              className="ui-icon-button"
-              data-tooltip={t('settings.import_protocol_defaults')}
-              disabled={!parameterTemplateGroup}
-              type="button"
-              onClick={requestImportProtocolPresets}
-            >
-              <RotateCcw size={UI_ICON_SIZE_LARGE} />
-            </button>
-          )}
-          canDelete={Boolean(selected)}
-          canMoveDown={selectedIndex >= 0 && selectedIndex < draft.parameterPresets.length - 1}
-          canMoveUp={selectedIndex > 0}
-          deleteLabel={t('settings.delete_model_parameter_preset')}
-          onAdd={() => addPresets()}
-          onDelete={deleteSelected}
-          onMove={moveSelected}
-        />
-      )}
-
       {draft.parameterPresetMode !== 'none' && (
-        visiblePresets.length === 0 ? (
-          <div className="model-parameter-presets-empty ui-muted">
-            {t('settings.no_model_parameter_presets')}
-          </div>
-        ) : (
-          <div className="model-parameter-presets-layout">
+        <div className="model-parameter-presets-layout ui-workbench ui-grid-sidebar">
+          <div className="ui-list-pane">
+            <div className="ui-list-pane-header">
+              {isCustom ? (
+                <SettingsListActions
+                  addLabel={t('settings.add_model_parameter_preset')}
+                  additionalActions={(
+                    <button
+                      aria-label={t('settings.import_protocol_defaults')}
+                      className="ui-icon-button"
+                      data-tooltip={t('settings.import_protocol_defaults')}
+                      disabled={!parameterTemplateGroup}
+                      type="button"
+                      onClick={requestImportProtocolPresets}
+                    >
+                      <RotateCcw size={UI_ICON_SIZE_LARGE} />
+                    </button>
+                  )}
+                  canDelete={Boolean(selected)}
+                  canMoveDown={selectedIndex >= 0 && selectedIndex < draft.parameterPresets.length - 1}
+                  canMoveUp={selectedIndex > 0}
+                  deleteLabel={t('settings.delete_model_parameter_preset')}
+                  onAdd={() => addPresets()}
+                  onDelete={deleteSelected}
+                  onMove={moveSelected}
+                />
+              ) : (
+                <span className="ui-field-label">{parameterTemplateGroup?.label ?? draft.protocol}</span>
+              )}
+            </div>
             <div
               aria-label={t('settings.model_parameter_presets')}
-              className="model-parameter-preset-list ui-list ui-list-compact ui-list-framed"
+              className="model-parameter-preset-list ui-scroll-list ui-list ui-list-compact"
               role="listbox"
             >
+              {visiblePresets.length === 0 && (
+                <div className="ui-empty-state ui-empty-state-compact">
+                  {t('settings.no_model_parameter_presets')}
+                </div>
+              )}
               {visiblePresets.map((preset) => isCustom && preset.id === editingNameId
                 ? (
                     <div
@@ -298,35 +287,35 @@ export function ModelParameterPresetsEditor({
                     </button>
                 ))}
             </div>
+          </div>
+          <div className="ui-editor">
             {selected && (
-              <div className="model-parameter-preset-editor">
-                <div className="ui-field-stack">
-                  <div className="model-parameter-preset-heading ui-field-heading">
-                    <span>{t('settings.model_parameter_preset_parameters')}</span>
-                    <CheckboxField
-                      checked={draft.defaultParameterPresetId === selected.id}
-                      className="ui-checkbox-field-inline"
-                      label={t('common.default')}
-                      onChange={(checked) => onUpdate({
-                        defaultParameterPresetId: checked ? selected.id : undefined
-                      })}
-                    />
-                  </div>
-                  <CommitTextarea
-                    aria-label={t('settings.model_parameter_preset_parameters')}
-                    className="ui-autosize-textarea ui-code-textarea"
-                    data-max-height="none"
-                    readOnly={!isCustom}
-                    value={selected.parametersJson}
-                    onCommit={(parametersJson) => updateSelected({ parametersJson })}
-                    placeholder='{"enable_thinking":true}'
-                    rows={UI_TEXTAREA_ROWS_COMPACT}
+              <div className="ui-field-stack">
+                <div className="model-parameter-preset-heading ui-field-heading">
+                  <span>{t('settings.model_parameter_preset_parameters')}</span>
+                  <CheckboxField
+                    checked={draft.defaultParameterPresetId === selected.id}
+                    className="ui-checkbox-field-inline"
+                    label={t('common.default')}
+                    onChange={(checked) => onUpdate({
+                      defaultParameterPresetId: checked ? selected.id : undefined
+                    })}
                   />
                 </div>
+                <CommitTextarea
+                  aria-label={t('settings.model_parameter_preset_parameters')}
+                  className="ui-autosize-textarea ui-code-textarea"
+                  data-max-height="none"
+                  readOnly={!isCustom}
+                  value={selected.parametersJson}
+                  onCommit={(parametersJson) => updateSelected({ parametersJson })}
+                  placeholder='{"enable_thinking":true}'
+                  rows={UI_TEXTAREA_ROWS_COMPACT}
+                />
               </div>
             )}
           </div>
-        )
+        </div>
       )}
       <ConfirmDialog request={confirmDialog} onClose={() => setConfirmDialog(undefined)} />
     </div>

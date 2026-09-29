@@ -1,6 +1,8 @@
 import { createServer } from 'node:http'
+import { homedir } from 'node:os'
 import { describe, expect, it } from 'vitest'
 import type { McpServerConfig } from './config/appConfig'
+import { mcpServerConfigDetail, normalizeMcpServer, rawMcpServerFromSave } from './config/mcpServerConfigMapper'
 import { createMcpClientForServer, mcpConnectionSnapshotForServer, mcpErrorMessage } from './mcpTools'
 
 const stdioServer: McpServerConfig = {
@@ -17,6 +19,20 @@ const stdioServer: McpServerConfig = {
 }
 
 describe('MCP connection snapshots', () => {
+  it.each([undefined, '', ' \t '])('uses the home directory for a blank stdio working directory (%j) without persisting it', (workingDir) => {
+    const raw = rawMcpServerFromSave({ ...stdioServer, workingDir })
+    const server = normalizeMcpServer(raw, 0)
+    const snapshot = mcpConnectionSnapshotForServer(server)
+    const explicitHome = mcpConnectionSnapshotForServer({ ...server, workingDir: homedir() })
+
+    expect(raw.working_dir?.trim()).toBe('')
+    expect(mcpServerConfigDetail(raw, 0).workingDir).toBe('')
+    expect(snapshot?.connection).toMatchObject({ transport: 'stdio', cwd: homedir() })
+    expect(snapshot?.identity.endpoint).toMatchObject({ workingDirectory: homedir() })
+    expect(snapshot?.identity.fingerprint).toBe(explicitHome?.identity.fingerprint)
+    expect(snapshot?.identity.fingerprint).not.toBe(mcpConnectionSnapshotForServer(stdioServer)?.identity.fingerprint)
+  })
+
   it.each(['http', 'sse'] as const)('preserves explicit %s transport and disables automatic SSE fallback', (type) => {
     const snapshot = mcpConnectionSnapshotForServer({
       ...stdioServer,

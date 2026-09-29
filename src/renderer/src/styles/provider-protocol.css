@@ -129,7 +129,6 @@
 }
 
 .provider-model-add-toolbar {
-  --control-height: var(--text-button-height-compact);
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
@@ -213,8 +212,6 @@
 }
 
 .model-details-dialog {
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  height: min(88vh, 820px);
   max-height: min(88vh, 820px);
 }
 
@@ -222,53 +219,20 @@
   display: grid;
   align-content: start;
   gap: 16px;
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-
-.model-details-group {
-  display: grid;
-  gap: 14px;
-  padding: 16px;
 }
 
 .model-parameter-presets {
   display: grid;
-  gap: var(--ui-field-gap, 8px);
-}
-
-.model-parameter-presets-heading {
-  gap: 16px;
-}
-
-.model-parameter-preset-mode-picker {
-  width: min(220px, 48%);
-}
-
-.model-parameter-preset-mode-description {
-  margin: 0;
-  font-size: var(--font-size-small);
+  border-radius: inherit;
+  overflow: hidden;
 }
 
 .model-parameter-presets-layout {
-  display: grid;
-  grid-template-columns: minmax(160px, 0.42fr) minmax(0, 1fr);
-  align-items: start;
-  gap: 12px;
-}
-
-.model-parameter-preset-editor {
-  display: grid;
-  gap: 12px;
-  min-width: 0;
+  max-height: min(240px, 40vh);
 }
 
 .model-parameter-presets-empty {
   display: grid;
   place-items: center;
   min-height: 58px;
-  border: 1px dashed var(--border-muted);
-  border-radius: var(--control-radius);
-  font-size: var(--font-size-small);
 }

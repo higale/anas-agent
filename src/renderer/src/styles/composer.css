@@ -17,7 +17,7 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
-  height: var(--small-text-tight-height);
+  height: var(--control-height);
 }
 
 .composer-activity-row .agent-task-plan-trigger {
@@ -35,7 +35,7 @@
   align-items: center;
   gap: 5px;
   max-width: 100%;
-  height: calc(var(--font-line-height-small) + 3px);
+  height: var(--control-height);
   padding: 0;
   border: 0;
   background: transparent;
@@ -79,7 +79,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  min-height: calc(var(--font-line-height-small) + 15px);
+  min-height: var(--control-height);
   padding: 0 10px;
   border-bottom: 1px solid var(--border-soft);
   color: var(--text-muted);
@@ -124,7 +124,7 @@
   grid-template-columns: 18px 18px minmax(0, 1fr);
   align-items: start;
   gap: 5px;
-  min-height: var(--small-text-tight-height);
+  min-height: var(--control-height);
   padding: 4px 5px;
   border-radius: 6px;
   color: var(--text-secondary);
@@ -181,7 +181,8 @@
 
 .agent-subagent-activity-overflow-trigger {
   width: auto;
-  min-width: 24px;
+  min-width: var(--control-height);
+  height: var(--control-height);
   padding: 0 5px;
   color: var(--text-subtle);
   font-size: var(--font-size-small);
@@ -197,8 +198,8 @@
 .agent-subagent-activity-trigger.icon {
   display: inline-grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: var(--control-height);
+  height: var(--control-height);
   padding: 0;
   border: 1px solid transparent;
   border-radius: 50%;
@@ -507,7 +508,7 @@
 .composer-queue-steer,
 .composer-queue-retry {
   gap: 5px;
-  height: 28px;
+  height: var(--control-height);
   padding: 0 6px;
   border: 0;
   background: transparent;
@@ -533,8 +534,8 @@
 }
 
 .composer-queue-remove {
-  width: 28px;
-  height: 28px;
+  width: var(--control-height);
+  height: var(--control-height);
   color: var(--text-subtle);
 }
 
@@ -563,7 +564,7 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
-  min-height: calc(var(--font-line-height-ui) + 10px);
+  min-height: var(--control-height);
   padding: 1px 8px;
 }
 
@@ -877,7 +878,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 38px;
+  height: calc(var(--control-height) + 10px);
   padding: 4px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 10px;
@@ -895,8 +896,8 @@
 .attachment-lightbox-toolbar .yarl__button {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
+  width: var(--control-height);
+  height: var(--control-height);
   border: 1px solid transparent;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.08);
@@ -1017,14 +1018,14 @@
 }
 
 .composer-attachment-button {
-  width: 28px;
-  height: 28px;
+  width: var(--control-height);
+  height: var(--control-height);
   color: var(--text-muted);
 }
 
 .composer-speech-reply-toggle {
-  width: 28px;
-  height: 28px;
+  width: var(--control-height);
+  height: var(--control-height);
   border: 0;
   border-radius: 50%;
   background: transparent;
@@ -1037,8 +1038,8 @@
 }
 
 .composer-send-button {
-  width: 30px;
-  height: 30px;
+  width: var(--control-height);
+  height: var(--control-height);
 }
 
 .composer-model-selection-group {
@@ -1046,7 +1047,7 @@
   flex: 0 1 auto;
   align-items: center;
   min-width: 0;
-  height: var(--small-text-control-height);
+  height: var(--control-height);
   border: 1px solid var(--border-soft);
   border-radius: 999px;
   overflow: hidden;
@@ -1119,7 +1120,6 @@
 .composer-model-menu {
   position: relative;
   --ui-menu-gap: 1px;
-  --ui-menu-item-height: calc(var(--font-line-height-ui) + 8px);
   --ui-menu-padding: 6px;
   display: flex;
   flex-direction: column;
@@ -1236,7 +1236,7 @@
   align-items: center;
   gap: 5px;
   min-width: 0;
-  height: var(--small-text-control-height);
+  height: var(--control-height);
   padding: 0 8px;
   border: 0;
   border-radius: 999px;
@@ -1252,7 +1252,7 @@
   align-items: center;
   gap: 5px;
   min-width: 0;
-  height: var(--small-text-control-height);
+  height: var(--control-height);
   padding: 0 8px;
   color: var(--text-muted);
   font-size: var(--font-size-small);

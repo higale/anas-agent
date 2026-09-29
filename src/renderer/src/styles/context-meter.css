@@ -2,8 +2,8 @@
   display: inline-grid;
   place-items: center;
   flex: none;
-  width: 28px;
-  height: 28px;
+  width: var(--control-height);
+  height: var(--control-height);
   padding: 0;
   border: 0;
   border-radius: 50%;

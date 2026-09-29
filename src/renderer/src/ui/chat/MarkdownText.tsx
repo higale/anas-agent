@@ -8,8 +8,8 @@ import type { AttachmentPreview } from '@shared/types'
 import { NoFocusButton } from '../NoFocusButton'
 import { notice } from '../notice'
 import { loadAttachmentPreview } from './attachmentPreviewLoader'
-import { normalizeLocalImagePath } from './markdownImagePaths'
-import { localFilePathFromHref, remarkLocalFileLinks } from './localFileLinks'
+import { fileUrlToPath, normalizeLocalImagePath, resolveMarkdownDocumentUrl } from './markdownImagePaths'
+import { localFileHref, localFilePathFromHref, remarkLocalFileLinks } from './localFileLinks'
 import { ImageLightbox } from './ImageLightbox'
 
 type MarkdownPreProps = ComponentProps<'pre'> & { node?: unknown }
@@ -236,10 +236,11 @@ function MarkdownImage({ src, alt, node: _node, onError, ...props }: MarkdownIma
   )
 }
 
-export function MarkdownText({ text, compact = false, onNavigate }: {
+export function MarkdownText({ text, compact = false, onNavigate, documentPath }: {
   text: string
   compact?: boolean
   onNavigate?: (href: string) => void | Promise<void>
+  documentPath?: string
 }) {
   return (
     <MarkdownNavigationContext.Provider value={onNavigate}>
@@ -251,6 +252,11 @@ export function MarkdownText({ text, compact = false, onNavigate }: {
         remarkPlugins={onNavigate ? [remarkGfm] : [remarkGfm, remarkLocalFileLinks]}
         rehypePlugins={onNavigate ? [[rehypeSlug, { prefix: 'document-' }]] : []}
         urlTransform={(url, key) => {
+          if (documentPath) {
+            url = resolveMarkdownDocumentUrl(url, documentPath)
+            const path = key === 'href' ? fileUrlToPath(url) : null
+            if (path) return localFileHref(path)
+          }
           if (key === 'href' && localFilePathFromHref(url)) return url
           return key === 'src' && normalizeLocalImagePath(url) ? url : defaultUrlTransform(url)
         }}

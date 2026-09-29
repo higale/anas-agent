@@ -56,8 +56,8 @@
   top: 8px;
   right: 8px;
   z-index: 1;
-  width: 28px;
-  height: 28px;
+  width: var(--control-height);
+  height: var(--control-height);
   color: var(--text-muted);
 }
 
@@ -96,7 +96,7 @@
   grid-column: 2;
   min-width: 0;
   width: 100%;
-  height: var(--text-button-height-compact);
+  height: var(--control-height);
   padding: 2px 6px;
   font-size: var(--font-size-ui);
 }

@@ -10,6 +10,8 @@ export interface PackageFileNode {
 }
 
 export interface PackageFilePreview {
+  revision?: string
+  editable?: boolean
   name: string
   path: string
   relativePath: string
@@ -17,5 +19,11 @@ export interface PackageFilePreview {
   kind: 'text' | 'binary'
   content?: string
   linkTarget?: string
+  resolvedPath: string
+}
+
+export interface PackageFileUpdate {
+  content: string
+  revision: string
   resolvedPath: string
 }

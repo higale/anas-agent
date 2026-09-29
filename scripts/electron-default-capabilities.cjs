@@ -6,13 +6,12 @@ const { expect } = require('playwright/test')
 
 async function verifySelectionModes(page, scope, finishOff = false) {
   for (const [name, search, label] of [['Subagent selection', 'Search subagents', 'Subagents'], ['Skill selection', 'Search skills', 'Skills']]) {
-    const picker = scope.getByRole('combobox', { name, exact: true })
-    const section = scope.locator('.ui-form-section-divided').filter({ has: page.getByRole('combobox', { name, exact: true }) })
+    const picker = scope.getByRole('radiogroup', { name, exact: true })
+    const section = scope.locator('.ui-form-section-divided').filter({ has: page.getByRole('radiogroup', { name, exact: true }) })
     await expect(scope.getByRole('checkbox', { name: label, exact: true })).toHaveCount(0)
     const choose = async mode => {
-      await picker.click()
-      await page.getByRole('option', { name: mode, exact: true }).click()
-      await expect(picker).toHaveValue(mode)
+      await picker.getByText(mode, { exact: true }).click()
+      await expect(picker.getByRole('radio', { name: mode, exact: true })).toBeChecked()
     }
     await choose('Custom')
     await expect(section.getByRole('searchbox', { name: search })).toBeVisible()
@@ -20,7 +19,7 @@ async function verifySelectionModes(page, scope, finishOff = false) {
     const index = await selected.count() ? await section.getByRole('checkbox').evaluateAll(inputs => inputs.findIndex(input => input.checked)) : 0
     const first = section.getByRole('checkbox').nth(index)
     await first.check()
-    for (const mode of ['Off', 'Use defaults']) {
+    for (const mode of ['Off', 'Default']) {
       await choose(mode)
       await expect(section.getByRole('searchbox')).toHaveCount(0)
       await expect(section.getByRole('checkbox')).toHaveCount(0)
@@ -181,7 +180,7 @@ async function verifyDefaultCapabilities(launchApplication) {
     await page.locator('.app-menu-item').first().click()
     await page.locator('[data-settings-tab="capabilities"]').click()
     for (const name of ['Subagent selection', 'Skill selection']) {
-      await expect(page.getByRole('combobox', { name, exact: true })).toHaveValue('Off')
+      await expect(page.getByRole('radiogroup', { name, exact: true }).getByRole('radio', { name: 'Off', exact: true })).toBeChecked()
     }
     const saved = await page.evaluate(() => globalThis.gale.config.get())
     assert.equal(saved.subagents[0].modelConfigId, savedSubagent.model_config_id)
@@ -219,7 +218,7 @@ async function verifyDefaultCapabilities(launchApplication) {
     await page.locator('.sidebar-settings').click()
     await page.locator('.app-menu-item').first().click()
     await page.locator('[data-settings-tab="capabilities"]').click()
-    for (const width of [900, 1180]) {
+    for (const width of [900, 1000, 1180]) {
       await application.evaluate(({ BrowserWindow }, width) => BrowserWindow.getAllWindows()[0].setSize(width, 780), width)
       await expect.poll(() => page.evaluate(() => globalThis.innerWidth)).toBe(width)
       const controls = await Promise.all([
@@ -234,6 +233,23 @@ async function verifyDefaultCapabilities(launchApplication) {
             || bounds.y + bounds.height <= other.y || other.y + other.height <= bounds.y),
           `Capability toolbar controls must not overlap at width ${width}: ${JSON.stringify(controls)}`)
         }
+      }
+      for (const name of ['Subagent selection', 'Skill selection']) {
+        const layout = await page.getByRole('radiogroup', { name, exact: true }).evaluate(element => {
+          const row = element.parentElement
+          const label = row.firstElementChild.getBoundingClientRect()
+          const control = element.getBoundingClientRect()
+          const bounds = row.getBoundingClientRect()
+          const gap = parseFloat(globalThis.getComputedStyle(row).columnGap)
+          return {
+            room: label.width + control.width + gap <= bounds.width + 0.5,
+            sameLine: Math.abs(label.y + label.height / 2 - control.y - control.height / 2) < 1,
+            wrapped: control.top >= label.bottom,
+            inside: control.left >= bounds.left - 1 && control.right <= bounds.right + 1
+          }
+        })
+        assert.ok(layout.inside, `${name} must fit the available width.`)
+        assert.ok(layout.room ? layout.sameLine : layout.wrapped, `${name} should wrap only when needed: ${JSON.stringify(layout)}`)
       }
       if (width === 900 && process.env.ANAS_E2E_CAPABILITIES_NARROW_SCREENSHOT) {
         await page.screenshot({ path: process.env.ANAS_E2E_CAPABILITIES_NARROW_SCREENSHOT })

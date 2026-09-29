@@ -194,6 +194,7 @@ describe('model token controls', () => {
   })
 
   it('steps maximum output tokens in thousand-token increments', async () => {
+    const user = userEvent.setup()
     const draft = emptyModelDraft()
     render(
       <ModelEditor
@@ -211,19 +212,21 @@ describe('model token controls', () => {
     const input = screen.getByLabelText('settings.max_output_tokens') as HTMLInputElement
     const contextControls = input.closest('.model-context-controls')
 
-    expect(input).toHaveAttribute('min', '1000')
+    expect(input).toHaveAttribute('aria-valuemin', '0')
     expect(input).toHaveAttribute('step', '1000')
-    expect(input.value).toBe('16000')
+    expect(input.value).toBe('16,000')
     expect(contextControls).toHaveClass('ui-grid-3')
     expect(contextControls?.children).toHaveLength(3)
 
-    input.stepUp()
-    expect(input.value).toBe('17000')
-    input.stepDown(2)
-    expect(input.value).toBe('15000')
+    await user.click(input)
+    await user.keyboard('{ArrowUp}')
+    expect(input.value).toBe('17,000')
+    await user.keyboard('{ArrowDown}{ArrowDown}')
+    expect(input.value).toBe('15,000')
   })
 
   it('steps from provider-default mode to one thousand tokens', async () => {
+    const user = userEvent.setup()
     const draft = { ...emptyModelDraft(), maxOutputTokens: '0' }
     render(
       <ModelEditor
@@ -242,8 +245,9 @@ describe('model token controls', () => {
 
     expect(input.value).toBe('')
     expect(input).toHaveAttribute('placeholder', 'settings.max_output_tokens_ignored')
-    input.stepUp()
-    expect(input.value).toBe('1000')
+    await user.click(input)
+    await user.keyboard('{ArrowUp}')
+    expect(input.value).toBe('1,000')
   })
 
   it('maps an empty maximum output field to the ignored value', async () => {
@@ -290,13 +294,13 @@ describe('model token controls', () => {
     await openModelDetails(user)
     const checkbox = screen.getByRole('checkbox', { name: 'settings.context_compression_threshold' })
     expect(checkbox).not.toBeChecked()
-    expect(screen.getByRole('slider', { name: 'settings.context_compression_threshold' })).toBeDisabled()
+    expect(screen.getByRole('slider', { name: 'settings.context_compression_threshold' })).toHaveAttribute('aria-disabled', 'true')
     expect(screen.queryByText('settings.context_compression_enabled')).not.toBeInTheDocument()
     await user.click(checkbox)
     expect(onUpdateDraft).toHaveBeenCalledWith({ contextCompressionEnabled: true })
   })
 
-  it('shows extra parameters and reasoning options in independent cards', async () => {
+  it('shows extra parameters and switches reasoning option sources without enabling toggles', async () => {
     const user = userEvent.setup()
     const onUpdateDraft = vi.fn()
     const draft = emptyModelDraft()
@@ -317,10 +321,11 @@ describe('model token controls', () => {
     const dialog = screen.getByRole('dialog')
     expect(within(dialog).queryByRole('checkbox', { name: 'settings.extra_parameters' })).not.toBeInTheDocument()
     expect(within(dialog).getByRole('textbox', { name: 'settings.extra_parameters' })).toBeInTheDocument()
-    expect(within(dialog).getByRole('combobox', { name: 'settings.parameter_preset_mode' }))
-      .toHaveValue('settings.parameter_preset_mode_protocol_default')
+    const modePicker = within(dialog).getByRole('radiogroup', { name: 'settings.parameter_preset_mode' })
+    expect(within(modePicker).getByRole('radio', { name: 'settings.parameter_preset_mode_protocol_default' }))
+      .toBeChecked()
+    expect(within(dialog).getByText('OpenAI Chat Completions')).toBeVisible()
     expect(screen.queryByRole('button', { name: 'settings.add_model_parameter_preset' })).not.toBeInTheDocument()
-    expect(dialog.querySelectorAll('.model-details-group.ui-surface-flat')).toHaveLength(5)
     expect(within(dialog).queryByRole('heading', { level: 3 })).not.toBeInTheDocument()
     const protocolDefaultToggle = within(dialog).getByRole('checkbox', { name: 'common.default' })
     expect(protocolDefaultToggle).not.toBeChecked()
@@ -328,11 +333,7 @@ describe('model token controls', () => {
     expect(onUpdateDraft).toHaveBeenCalledWith({
       defaultParameterPresetId: 'openai_chat_completions/reasoning-none'
     })
-    const modePicker = within(dialog).getByRole('combobox', { name: 'settings.parameter_preset_mode' })
-    await user.click(modePicker)
-    expect(document.querySelector('.model-parameter-preset-mode-popover'))
-      .not.toHaveClass('model-parameter-preset-mode-picker')
-    await user.click(screen.getByRole('option', { name: 'settings.parameter_preset_mode_custom' }))
+    await user.click(within(modePicker).getByRole('radio', { name: 'settings.parameter_preset_mode_custom' }))
     expect(onUpdateDraft).toHaveBeenCalledWith({
       parameterPresetMode: 'custom',
       defaultParameterPresetId: undefined
@@ -357,6 +358,12 @@ describe('model token controls', () => {
     expect(within(screen.getByRole('dialog')).getByRole('textbox', { name: 'settings.extra_parameters' }))
       .toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'settings.add_model_parameter_preset' })).toBeInTheDocument()
+    expect(within(modePicker).getByRole('radio', { name: 'settings.parameter_preset_mode_custom' })).toBeChecked()
+    await user.click(within(modePicker).getByRole('radio', { name: 'settings.parameter_preset_mode_none' }))
+    expect(onUpdateDraft).toHaveBeenLastCalledWith({
+      parameterPresetMode: 'none',
+      defaultParameterPresetId: undefined
+    })
   })
 
   it('selects model rows without opening details and opens details from the edit button', async () => {

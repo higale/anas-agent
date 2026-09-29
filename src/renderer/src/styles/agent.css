@@ -26,8 +26,8 @@
 .scroll-boundary-button {
   position: absolute;
   right: var(--scroll-boundary-inline-offset, 12px);
-  width: var(--scroll-boundary-button-size, 30px);
-  height: var(--scroll-boundary-button-size, 30px);
+  width: var(--control-height);
+  height: var(--control-height);
   padding: 0;
   border: 1px solid var(--border-muted);
   border-radius: 50%;
@@ -493,7 +493,6 @@
 
 .agent-subagent-scroll-frame {
   --scroll-boundary-block-offset: 9px;
-  --scroll-boundary-button-size: 28px;
   --scroll-boundary-inline-offset: 10px;
 
   min-height: 0;
@@ -530,7 +529,7 @@
   align-items: center;
   justify-self: center;
   gap: 5px;
-  min-height: var(--small-text-tight-height);
+  min-height: var(--control-height);
   padding: 2px 9px;
   border: 0;
   background: transparent;

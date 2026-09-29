@@ -1,9 +1,11 @@
+import { FolderOpen } from 'lucide-react'
+import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AppSettings, RuntimeLogLevel } from '@shared/types'
-import { CommitTextInput } from '../CommitTextField'
+import { CommitNumberInput } from '../CommitNumberInput'
 import { clampIntegerInput } from '../numberInput'
 import { SearchableOptionPicker } from '../SearchableOptionPicker'
-import { SETTINGS_COUNT_MIN, SETTINGS_LOG_RETENTION_DEFAULT_DAYS, SETTINGS_LOG_RETENTION_MAX_DAYS } from '../uiConstants'
+import { SETTINGS_COUNT_MIN, SETTINGS_LOG_RETENTION_DEFAULT_DAYS, SETTINGS_LOG_RETENTION_MAX_DAYS, UI_ICON_SIZE_MEDIUM } from '../uiConstants'
 import { SettingsGroup } from './SettingsGroup'
 
 const logLevelOptions: Array<{ value: RuntimeLogLevel; labelKey: string }> = [
@@ -24,6 +26,7 @@ interface LogSettingsProps {
 
 export function LogSettings({ settings, onChange, onOpenLogDirectory, onOpenRuntimeLogViewer }: LogSettingsProps) {
   const { t } = useTranslation()
+  const retentionId = useId()
   const logLevelPickerOptions = logLevelOptions.map((option) => ({
     value: option.value,
     label: t(option.labelKey)
@@ -45,19 +48,19 @@ export function LogSettings({ settings, onChange, onOpenLogDirectory, onOpenRunt
             onChange={(logLevel) => void onChange({ logLevel: logLevel as RuntimeLogLevel })}
           />
         </div>
-        <label className="ui-form-row">
-          <span>
+        <div className="ui-form-row">
+          <label htmlFor={retentionId}>
             <strong>{t('settings.log_retention_days')}</strong>
             <small>{t('settings.log_retention_hint')}</small>
-          </span>
-          <CommitTextInput
+          </label>
+          <CommitNumberInput
+            id={retentionId}
             min={SETTINGS_COUNT_MIN}
             max={SETTINGS_LOG_RETENTION_MAX_DAYS}
-            type="number"
             value={String(settings?.logRetentionDays ?? SETTINGS_LOG_RETENTION_DEFAULT_DAYS)}
             onCommit={(value) => void onChange({ logRetentionDays: clampIntegerInput(value, SETTINGS_COUNT_MIN, SETTINGS_LOG_RETENTION_MAX_DAYS) })}
           />
-        </label>
+        </div>
         <div className="ui-section-header settings-action-row">
           <div>
             <div className="ui-field-label">{t('settings.log_files')}</div>
@@ -65,7 +68,8 @@ export function LogSettings({ settings, onChange, onOpenLogDirectory, onOpenRunt
           </div>
           <div className="ui-toolbar">
             <button className="ui-button ui-button-compact" type="button" onClick={() => void onOpenLogDirectory()}>
-              {t('settings.open_log_folder')}
+              <FolderOpen size={UI_ICON_SIZE_MEDIUM} />
+              <span>{t('settings.open_log_folder')}</span>
             </button>
             <button className="ui-button ui-button-compact" type="button" onClick={() => void onOpenRuntimeLogViewer()}>
               {t('settings.open_log_viewer')}

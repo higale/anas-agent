@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -13,8 +13,8 @@ function Harness({ subagent = false, onChange = vi.fn(), mcpStatus, initial }: {
   return <CapabilityEditor value={value} skills={skills} subagent={subagent} mcpStatus={mcpStatus} onChange={(next) => { setValue(next); onChange(next) }} />
 }
 async function selectSkills(mode: 'default' | 'custom' | 'off') {
-  await userEvent.click(screen.getByRole('combobox', { name: 'capabilities.skill_selection' }))
-  await userEvent.click(screen.getByRole('option', { name: `capabilities.${mode}` }))
+  await userEvent.click(within(screen.getByRole('radiogroup', { name: 'capabilities.skill_selection' }))
+    .getByRole('radio', { name: `capabilities.${mode}` }))
 }
 describe('shared capability editor', () => {
   it.each([false, true])('removes stale skill selections regardless of checked state in subagent mode %s', async (subagent) => {
@@ -323,7 +323,7 @@ describe('shared capability editor', () => {
     expect(group).toHaveClass('ui-surface-flat')
     expect(group).toContainElement(screen.getByText('settings.capabilities'))
     expect(group).toContainElement(screen.getByRole('button', { name: 'settings.capabilities_enable_all' }))
-    expect(group).toContainElement(screen.getByRole('combobox', { name: 'capabilities.skill_selection' }))
+    expect(group).toContainElement(screen.getByRole('radiogroup', { name: 'capabilities.skill_selection' }))
   })
   it.each([false, true])('enables skills with global defaults when enabling all in subagent mode %s', async (subagent) => {
     const onChange = vi.fn()
@@ -332,7 +332,8 @@ describe('shared capability editor', () => {
     await userEvent.click(screen.getByRole('button', { name: 'settings.capabilities_enable_all' }))
     expect(onChange.mock.lastCall?.[0]).toMatchObject({ toolMode: 'all', skills: { mode: 'default' } })
     expect(screen.queryByRole('checkbox', { name: 'settings.capability_skills' })).toBeNull()
-    expect(screen.getByRole('combobox', { name: 'capabilities.skill_selection' })).toHaveValue('capabilities.default')
+    expect(within(screen.getByRole('radiogroup', { name: 'capabilities.skill_selection' }))
+      .getByRole('radio', { name: 'capabilities.default' })).toBeChecked()
     expect(screen.queryByRole('searchbox')).toBeNull()
   })
   it.each([
@@ -374,19 +375,18 @@ describe('shared capability editor', () => {
     await userEvent.click(screen.getByRole('checkbox', { name: 'settings.capability_backgroundTools' }))
     for (const id of ids) expect(toolAllowed(onChange.mock.lastCall![0], id)).toBe(true)
   })
-  it.each([false, true])('uses the shared picker and search field in subagent mode %s', async (subagent) => {
+  it.each([false, true])('uses the shared segmented control and search field in subagent mode %s', async (subagent) => {
     render(<Harness subagent={subagent} />)
-    const picker = screen.getByRole('combobox', { name: 'capabilities.skill_selection' })
-    expect(picker).toHaveClass('searchable-option-input')
-    expect(picker.closest('.ui-form-row')).toContainElement(screen.getByRole('combobox', { name: 'capabilities.skill_selection' }))
+    const picker = screen.getByRole('radiogroup', { name: 'capabilities.skill_selection' })
+    expect(picker).toHaveClass('ui-segmented-control')
+    expect(picker.closest('.ui-form-row')).toContainElement(picker)
     expect(screen.queryByText('capabilities.skill_selection')).toBeNull()
     expect(screen.getByRole('searchbox', { name: 'capabilities.search_skills' })).toHaveClass('ui-input')
-    await userEvent.click(picker)
-    await userEvent.click(screen.getByRole('option', { name: 'capabilities.default' }))
-    expect(picker).toHaveValue('capabilities.default')
+    await userEvent.click(within(picker).getByRole('radio', { name: 'capabilities.default' }))
+    expect(within(picker).getByRole('radio', { name: 'capabilities.default' })).toBeChecked()
     expect(screen.queryByRole('searchbox')).toBeNull()
     await selectSkills('off')
-    expect(picker).toHaveValue('capabilities.off')
+    expect(within(picker).getByRole('radio', { name: 'capabilities.off' })).toBeChecked()
     expect(screen.queryByRole('searchbox')).toBeNull()
   })
   it.each([false, true])('selects recall and memory tools independently with one aggregate checkbox (subagent %s)', async (subagent) => {

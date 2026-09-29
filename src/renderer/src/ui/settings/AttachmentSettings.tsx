@@ -1,6 +1,7 @@
+import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AppSettings, AttachmentTextOverflowMode } from '@shared/types'
-import { CommitTextInput } from '../CommitTextField'
+import { CommitNumberInput } from '../CommitNumberInput'
 import { clampIntegerInput } from '../numberInput'
 import { SearchableOptionPicker } from '../SearchableOptionPicker'
 import { SETTINGS_ATTACHMENT_TEXT_DEFAULT_CHARS, SETTINGS_ATTACHMENT_TEXT_MAX_CHARS, SETTINGS_ATTACHMENT_TEXT_MIN_CHARS, SETTINGS_ATTACHMENT_TEXT_STEP_CHARS } from '../uiConstants'
@@ -18,6 +19,7 @@ interface AttachmentSettingsProps {
 
 export function AttachmentSettings({ settings, onChange }: AttachmentSettingsProps) {
   const { t } = useTranslation()
+  const limitId = useId()
   const attachmentTextOverflowPickerOptions = attachmentTextOverflowOptions.map((option) => ({
     value: option.value,
     label: t(option.labelKey)
@@ -25,20 +27,20 @@ export function AttachmentSettings({ settings, onChange }: AttachmentSettingsPro
 
   return (
     <SettingsGroup title={t('settings.attachments')}>
-      <label className="ui-form-row ui-form-row-narrow">
-        <span>
+      <div className="ui-form-row ui-form-row-narrow">
+        <label htmlFor={limitId}>
           <strong>{t('settings.attachment_text_max_chars')}</strong>
           <small>{t('settings.attachment_text_max_chars_hint')}</small>
-        </span>
-        <CommitTextInput
+        </label>
+        <CommitNumberInput
+          id={limitId}
           min={SETTINGS_ATTACHMENT_TEXT_MIN_CHARS}
           max={SETTINGS_ATTACHMENT_TEXT_MAX_CHARS}
           step={SETTINGS_ATTACHMENT_TEXT_STEP_CHARS}
-          type="number"
           value={String(settings?.attachmentTextMaxChars ?? SETTINGS_ATTACHMENT_TEXT_DEFAULT_CHARS)}
           onCommit={(value) => void onChange({ attachmentTextMaxChars: clampIntegerInput(value, SETTINGS_ATTACHMENT_TEXT_MIN_CHARS, SETTINGS_ATTACHMENT_TEXT_MAX_CHARS) })}
         />
-      </label>
+      </div>
       <div className="ui-form-row ui-form-row-narrow">
         <span>
           <strong>{t('settings.attachment_text_overflow')}</strong>

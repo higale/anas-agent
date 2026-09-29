@@ -1,11 +1,19 @@
+import { Globe } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { ChatContentWidth, LanguagePackSummary } from '@shared/types'
-import { UI_FONT_SIZE_DEFAULT, UI_FONT_SIZE_MAX, UI_FONT_SIZE_MIN, normalizeUiFontSize } from '@shared/uiPreferences'
-import { CommitTextInput } from '../CommitTextField'
+import { UI_FONT_SIZE_MAX, UI_FONT_SIZE_MIN, normalizeUiFontSize } from '@shared/uiPreferences'
+import { RangeField } from '../RangeField'
 import { SearchableOptionPicker } from '../SearchableOptionPicker'
+import { SegmentedControl } from '../SegmentedControl'
+import { UI_ICON_SIZE_NAV } from '../uiConstants'
 import { SettingsGroup } from './SettingsGroup'
 
 export type ThemeMode = 'system' | 'light' | 'dark'
+
+const FONT_SIZE_MARKS = Array.from({ length: UI_FONT_SIZE_MAX - UI_FONT_SIZE_MIN + 1 }, (_, index) => {
+  const value = UI_FONT_SIZE_MIN + index
+  return { value, label: index % 2 === 0 ? String(value) : undefined }
+})
 
 export function normalizeTheme(value?: string): ThemeMode {
   return value === 'light' || value === 'dark' ? value : 'system'
@@ -41,6 +49,7 @@ export function AppearanceSettings({
   onSaveChatContentWidth
 }: AppearanceSettingsProps) {
   const { t } = useTranslation()
+  const fontSize = normalizeUiFontSize(fontSizeValue)
   const languagePickerOptions = [
     { value: systemLanguage, label: t('settings.language_system') },
     ...languageOptions.map((language) => ({
@@ -64,7 +73,10 @@ export function AppearanceSettings({
     <SettingsGroup title={t('settings.appearance')}>
       <div className="ui-form-row ui-form-row-narrow">
         <span>
-          <strong>{t('settings.language')}</strong>
+          <strong className="ui-row">
+            <Globe size={UI_ICON_SIZE_NAV} aria-hidden="true" />
+            <span>{t('settings.language')}</span>
+          </strong>
           <small>{t('settings.language_hint')}</small>
         </span>
         <SearchableOptionPicker
@@ -76,45 +88,41 @@ export function AppearanceSettings({
           onChange={(language) => void onSaveLanguage(language)}
         />
       </div>
-      <div className="ui-form-row ui-form-row-narrow">
+      <div className="ui-form-row ui-form-row-narrow ui-form-row-fit-control">
         <span>
           <strong>{t('settings.theme')}</strong>
           <small>{t('settings.theme_hint')}</small>
         </span>
-        <SearchableOptionPicker
+        <SegmentedControl
           ariaLabel={t('settings.theme')}
-          emptyLabel={t('settings.no_options')}
           options={themePickerOptions}
-          searchable={false}
           value={normalizeTheme(themeValue)}
           onChange={(theme) => void onSaveTheme(normalizeTheme(theme))}
         />
       </div>
-      <label className="ui-form-row ui-form-row-narrow">
-        <span>
+      <RangeField
+        ariaLabel={t('settings.font_size')}
+        className="ui-form-row ui-form-row-narrow"
+        label={<>
           <strong>{t('settings.font_size')}</strong>
           <small>{t('settings.font_size_hint')}</small>
-        </span>
-        <CommitTextInput
-          aria-label={t('settings.font_size')}
-          min={UI_FONT_SIZE_MIN}
-          max={UI_FONT_SIZE_MAX}
-          step={1}
-          type="number"
-          value={String(fontSizeValue ?? UI_FONT_SIZE_DEFAULT)}
-          onCommit={(value) => void onSaveFontSize(normalizeUiFontSize(Number(value)))}
-        />
-      </label>
-      <div className="ui-form-row ui-form-row-narrow">
+        </>}
+        min={UI_FONT_SIZE_MIN}
+        max={UI_FONT_SIZE_MAX}
+        marks={FONT_SIZE_MARKS}
+        step={1}
+        value={fontSize}
+        formatValue={(value) => `${value} px`}
+        onChange={(value) => void onSaveFontSize(normalizeUiFontSize(value))}
+      />
+      <div className="ui-form-row ui-form-row-narrow ui-form-row-fit-control">
         <span>
           <strong>{t('settings.chat_content_width')}</strong>
           <small>{t('settings.chat_content_width_hint')}</small>
         </span>
-        <SearchableOptionPicker
+        <SegmentedControl
           ariaLabel={t('settings.chat_content_width')}
-          emptyLabel={t('settings.no_options')}
           options={chatContentWidthOptions}
-          searchable={false}
           value={normalizeChatContentWidth(chatContentWidthValue)}
           onChange={(width) => void onSaveChatContentWidth(normalizeChatContentWidth(width))}
         />

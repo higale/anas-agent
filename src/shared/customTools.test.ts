@@ -1,6 +1,6 @@
 import { selectedTools } from '../test/toolPackageFixture'
 import { describe, expect, it } from 'vitest'
-import { customToolDefaults, parseCustomToolCommand, parseCustomTools, serializeCustomTool, validateCustomTool, validateCustomTools } from './customTools'
+import { customToolDefaults, getCustomToolCommandFile, parseCustomToolCommand, parseCustomTools, serializeCustomTool, validateCustomTool, validateCustomTools } from './customTools'
 import { defaultCapabilities, intersectCapabilities, resolveSkillSelection } from './agentCapabilities'
 import { maxCommandTimeoutSeconds } from './commandShell'
 
@@ -54,6 +54,22 @@ describe('custom tool definitions', () => {
 })
 
 describe('custom command parsing', () => {
+  it.each([
+    ['scripts/run.py {{args}}', 'scripts/run.py', 'scripts/run.py'],
+    ['  "scripts/run file.py"  {{args}}', '"scripts/run file.py"', 'scripts/run file.py'],
+    ['python3 "{{tool_dir}}/scripts/run file.py" {{args}}', '"{{tool_dir}}/scripts/run file.py"', 'scripts/run file.py'],
+    ['node scripts/"run file".js {{args}}', 'scripts/"run file".js', 'scripts/run file.js'],
+    [String.raw`"C:\Program Files\node.exe" ".\scripts\run.cjs" {{args}}`, String.raw`".\scripts\run.cjs"`, 'scripts/run.cjs']
+  ])('identifies the package file in %s without changing command text', (command, text, relativePath) => {
+    const reference = getCustomToolCommandFile(command)!
+    expect(command.slice(reference.start, reference.end)).toBe(text)
+    expect(reference.relativePath).toBe(relativePath)
+  })
+  it.each(['node -e "inline.py" {{args}}', 'python -m module {{args}}', 'node {{args}}',
+    '/usr/local/run.py {{args}}', '../run.py {{args}}', 'node scripts/../../run.js {{args}}',
+    'python "C:\\scripts\\run.py" {{args}}', 'program {{args}}'])('does not link ambiguous or external targets in %s', command => {
+    expect(getCustomToolCommandFile(command)).toBeUndefined()
+  })
   it.each([
     ['C:\\data\\', 'daily report'],
     ['C:\\data\\\\', 'another directory\\'],

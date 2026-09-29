@@ -19,6 +19,7 @@ const { verifyProjectModelPicker } = require('./electron-project-model-picker.cj
 const { verifyHelpDocuments } = require('./electron-help-documents.cjs')
 const { verifyDefaultCapabilities } = require('./electron-default-capabilities.cjs')
 const { verifyGlobalSettings } = require('./electron-global-settings.cjs')
+const { verifyControlLayout } = require('./electron-control-layout.cjs')
 const { verifySkillApproval } = require('./electron-skill-approval.cjs')
 const { verifyCustomTools } = require('./electron-custom-tools.cjs')
 const { verifyCurrentData } = require('./electron-data-migrations.cjs')
@@ -151,7 +152,7 @@ async function verifyApplication(electronApplication, verifyRestart = false) {
   const subagentCapabilities = page.locator('.settings-subagent-editor').getByRole('group', { name: /^(能力|Capabilities)$/ })
   await expect(subagentCapabilities.locator('.ui-section-title')).toHaveText(/^(能力|Capabilities)$/)
   await expect(subagentCapabilities.getByRole('button', { name: /^(全开|Enable all)$/ })).toBeVisible()
-  await expect(subagentCapabilities.getByRole('combobox', { name: /^(技能选择|Skill selection)$/ })).toHaveCount(1)
+  await expect(subagentCapabilities.getByRole('radiogroup', { name: /^(技能选择|Skill selection)$/ })).toHaveCount(1)
   await subagentCapabilities.scrollIntoViewIfNeeded()
   assert.equal(await subagentCapabilities.evaluate((element) => globalThis.getComputedStyle(element).borderTopStyle), 'solid', 'The full capability editor must have a visible shared boundary.')
   if (process.env.ANAS_E2E_SUBAGENT_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_SUBAGENT_SCREENSHOT })
@@ -160,7 +161,7 @@ async function verifyApplication(electronApplication, verifyRestart = false) {
   const skillRows = page.locator('.settings-skill-tree-row')
   assert.ok(await skillRows.count() >= 4, 'Skills tree must show its built-in roots.')
   const skillRowHeights = await skillRows.evaluateAll((rows) => rows.slice(0, 12).map((row) => Math.round(row.getBoundingClientRect().height)))
-  assert.deepEqual([...new Set(skillRowHeights)], [30], 'Skill tree item heights must remain fixed.')
+  assert.deepEqual([...new Set(skillRowHeights)], [32], 'Skill tree items must use the 32px control height at the default font size.')
   await page.locator('.sidebar-footer button').click()
   await page.locator('[data-agent-composer-input]').waitFor({ state: 'visible' })
 
@@ -198,10 +199,14 @@ async function verifyApplication(electronApplication, verifyRestart = false) {
   const promptBounds = await projectPrompt.boundingBox()
   const promptStyle = await projectPrompt.evaluate((element) => {
     const style = globalThis.getComputedStyle(element)
-    return { minHeight: parseFloat(style.minHeight), lineHeight: parseFloat(style.lineHeight), radius: parseFloat(style.borderRadius), rows: element.rows }
+    return {
+      lineHeight: parseFloat(style.lineHeight), radius: parseFloat(style.borderRadius), rows: element.rows,
+      verticalChrome: [style.paddingTop, style.paddingBottom, style.borderTopWidth, style.borderBottomWidth]
+        .reduce((sum, value) => sum + parseFloat(value), 0)
+    }
   })
   assert.equal(promptStyle.rows, 2)
-  assert.ok(Math.abs(promptStyle.minHeight - promptStyle.lineHeight * 2 - 20) < 1, 'Prompt minimum height must be two lines plus shared padding and borders.')
+  assert.ok(promptBounds.height >= promptStyle.lineHeight * 2 + promptStyle.verticalChrome - 1, 'The prompt must visibly fit at least two lines plus padding and borders.')
   assert.ok(promptStyle.radius > 0, 'Prompt must use shared rounded text field styling.')
   if (process.env.ANAS_E2E_PROJECT_PROMPT_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_PROJECT_PROMPT_SCREENSHOT })
   const folderBounds = await capabilityDialog.locator('.project-folder-add').boundingBox()
@@ -224,7 +229,7 @@ async function verifyApplication(electronApplication, verifyRestart = false) {
   const profileBounds = await profileToggle.boundingBox()
   const environmentBounds = await environmentToggle.boundingBox()
   assert.ok(Math.abs(profileBounds.y - environmentBounds.y) < 2, 'Direct capability toggles must share a row when space allows.')
-  const togglePositions = await capabilityDialog.locator('.ui-grid-auto > .ui-checkbox-field input').evaluateAll((inputs) => inputs.map((input) => {
+  const togglePositions = await capabilityDialog.locator('.ui-capability-editor > .ui-grid-auto > .ui-checkbox-field input').evaluateAll((inputs) => inputs.map((input) => {
     const { x, y } = input.getBoundingClientRect()
     return { x, y }
   }))
@@ -253,16 +258,15 @@ async function verifyApplication(electronApplication, verifyRestart = false) {
   await capabilityDialog.locator('summary').filter({ hasText: /File read|文件读/ }).click()
   await capabilityDialog.getByRole('checkbox', { name: 'read_multiple_files', exact: true }).uncheck()
   await expect(capabilityDialog.getByRole('checkbox', { name: 'read_file', exact: true })).toBeChecked()
-  const skillPicker = capabilityDialog.getByRole('combobox', { name: /^(技能选择|Skill selection)$/ })
-  await skillPicker.click()
-  await page.getByRole('option', { name: /^(自定义|Custom)$/ }).click()
+  const skillPicker = capabilityDialog.getByRole('radiogroup', { name: /^(技能选择|Skill selection)$/ })
+  await skillPicker.getByText(/^(自定义|Custom)$/, { exact: true }).click()
   const skillToggleBounds = await capabilityDialog.getByText(/^(技能|Skills)$/, { exact: true }).boundingBox()
   const skillPickerBounds = await skillPicker.boundingBox()
   assert.ok(Math.abs(skillToggleBounds.y + skillToggleBounds.height / 2 - skillPickerBounds.y - skillPickerBounds.height / 2) < 3, `Skill mode must align with its label: ${JSON.stringify({ skillToggleBounds, skillPickerBounds })}`)
   assert.ok(skillPickerBounds.x > skillToggleBounds.x + skillToggleBounds.width, 'Skill mode must be on the right of its label.')
   const skillSearch = capabilityDialog.getByRole('searchbox', { name: /^(搜索技能|Search skills)$/ })
   await skillSearch.fill('search')
-  await expect(skillPicker).toHaveClass('searchable-option-input')
+  await expect(skillPicker).toHaveClass('ui-segmented-control')
   await expect(skillSearch).toHaveClass('ui-input')
   const searchStyle = await skillSearch.evaluate((element) => {
     const style = globalThis.getComputedStyle(element)
@@ -270,8 +274,7 @@ async function verifyApplication(electronApplication, verifyRestart = false) {
   })
   assert.ok(searchStyle.radius > 0 && searchStyle.height >= 30, 'Skill search must use the shared rounded input styling.')
   if (process.env.ANAS_E2E_CAPABILITY_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_CAPABILITY_SCREENSHOT })
-  await skillPicker.click()
-  await page.getByRole('option', { name: /^(使用默认|Use defaults)$/ }).click()
+  await skillPicker.getByText(/^(默认|Default)$/, { exact: true }).click()
   await capabilityDialog.locator('button[type="submit"]').click()
   await expect(capabilityDialog).not.toBeVisible()
   const scopedProject = await page.evaluate(async () => (await globalThis.gale.projects.list()).find((project) => project.id === 'default-workspace'))
@@ -376,15 +379,15 @@ async function verifySkillSourceLayout(electronApplication) {
   await page.locator('.app-menu-item').first().click()
   await page.locator('[data-settings-tab="skills"]').click()
   const systemRoot = page.locator('.settings-skill-tree-root').filter({ hasText: /System|系统/ })
-  await systemRoot.click()
+  await systemRoot.locator('.settings-skill-tree-select').click()
+  await systemRoot.locator('.settings-skill-tree-toggle').click()
   await expect(page.locator('.settings-skill-tree-select').filter({ hasText: 'system-search' })).toBeVisible()
   await expect(page.locator('.settings-skill-tree-root').filter({ hasText: /Project|项目/ })).toHaveCount(0)
   await expect(systemRoot).toHaveClass(/active/)
   if (process.env.ANAS_E2E_SKILL_SOURCES_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_SKILL_SOURCES_SCREENSHOT })
   await page.locator('[data-settings-tab="subagents"]').click()
   const editor = page.locator('.settings-subagent-editor')
-  await editor.getByRole('combobox', { name: /^(技能选择|Skill selection)$/ }).click()
-  await page.getByRole('option', { name: /^(自定义|Custom)$/ }).click()
+  await editor.getByRole('radiogroup', { name: /^(技能选择|Skill selection)$/ }).getByText(/^(自定义|Custom)$/, { exact: true }).click()
   for (const label of [/^(系统|System)\s/, /^(用户|User)\s/]) {
     await expect(editor.locator('strong').filter({ hasText: label })).toBeVisible()
   }
@@ -437,7 +440,7 @@ async function verifyCapabilityToolListLayout(electronApplication) {
           const bounds = row.getBoundingClientRect()
           const checkbox = row.querySelector('input').getBoundingClientRect()
           const text = row.querySelector('code').getBoundingClientRect()
-          return { top: bounds.top, bottom: bounds.bottom, height: bounds.height,
+          return { top: bounds.top, bottom: bounds.bottom, left: bounds.left, right: bounds.right, height: bounds.height,
             contentHeight: Math.max(checkbox.height, text.height) }
         })
       }))
@@ -447,8 +450,11 @@ async function verifyCapabilityToolListLayout(electronApplication) {
       assert.ok(layout.scrollWidth <= layout.width + 1, `${context}: long tool names must wrap inside the list.`)
       layout.rows.forEach((row, index) => {
         assert.ok(row.height >= row.contentHeight - 1, `${context}: tool row ${index} must not compress its contents.`)
-        if (index) assert.ok(row.top >= layout.rows[index - 1].bottom + layout.gap - 1,
-          `${context}: tool rows must preserve their gap without overlapping.`)
+        for (const previous of layout.rows.slice(0, index)) {
+          if (row.left >= previous.right || row.right <= previous.left) continue
+          assert.ok(row.top >= previous.bottom + layout.gap - 1,
+            `${context}: tool rows in the same column must preserve their gap without overlapping.`)
+        }
       })
       const last = list.getByRole('checkbox').last()
       await last.check()
@@ -552,13 +558,13 @@ async function verifyProjectModelSelection(electronApplication) {
   const composerReasoning = page.locator('form .composer-model-parameter-preset-trigger')
   const dialog = page.locator('.project-dialog')
   async function verifyModelHeading() {
-    const row = dialog.locator('.ui-row-between').filter({ has: page.locator('.composer-model-selection-group') })
+    const row = dialog.locator('.ui-toolbar-between').filter({ has: page.locator('.composer-model-selection-group') })
     const labelBox = await row.locator('.ui-field-label').boundingBox()
     const groupBox = await row.locator('.composer-model-selection-group').boundingBox()
     const rowBox = await row.boundingBox()
     assert.ok(Math.abs(groupBox.x + groupBox.width - rowBox.x - rowBox.width) < 1, 'Project model controls must align to the right edge.')
-    assert.ok(Math.abs(labelBox.y + labelBox.height / 2 - groupBox.y - groupBox.height / 2) < 1, 'The content heading and model controls must share one vertically centered row.')
-    assert.ok(groupBox.x >= labelBox.x + labelBox.width, 'Project model controls must not overlap the content heading.')
+    assert.ok(Math.abs(labelBox.y + labelBox.height / 2 - groupBox.y - groupBox.height / 2) < 1, 'The project name label and model controls must share one vertically centered row.')
+    assert.ok(groupBox.x >= labelBox.x + labelBox.width, 'Project model controls must not overlap the project name label.')
   }
   async function verifySegmentFocus(segment) {
     await expect(segment).toBeFocused()
@@ -634,9 +640,11 @@ async function verifyProjectModelSelection(electronApplication) {
   await page.locator('.ui-backdrop').click({ position: { x: 30, y: 300 } })
   await expect(page.locator('.composer-model-menu')).not.toBeVisible()
   await expect(dialog).toBeVisible()
-  // Dismissing either menu by clicking an input must not steal that input's focus.
+  // Modal menus restore focus before the user continues editing the project name.
   for (const segment of [modelSegment, reasoningSegment]) {
     await segment.click()
+    await page.keyboard.press('Escape')
+    await verifySegmentFocus(segment)
     const nameInput = dialog.locator('input').first()
     await nameInput.click({ position: { x: 15, y: 15 } })
     await expect(page.getByRole('menu')).not.toBeVisible()
@@ -1090,6 +1098,10 @@ async function main() {
     await verifyGlobalSettings(launchApplication)
     return
   }
+  if (process.argv.includes('--control-layout-only')) {
+    await verifyControlLayout(launchApplication)
+    return
+  }
   if (process.argv.includes('--storage-only')) {
     if (packagedExecutable) throw new Error('The controlled storage probe requires the local built main process.')
     await verifyCurrentStorage(repositoryRoot, electronExecutable)
@@ -1121,6 +1133,7 @@ async function main() {
     await verifySpeechReply(launchApplication)
     await verifyDefaultCapabilities(launchApplication)
     await verifyGlobalSettings(launchApplication)
+    await verifyControlLayout(launchApplication)
     await verifyCustomTools(launchApplication)
     await verifySkillApproval(launchApplication)
     await verifyHelpDocuments(launchApplication)

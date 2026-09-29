@@ -4,7 +4,7 @@
   justify-self: start;
   gap: 6px;
   min-width: 0;
-  height: var(--text-pill-height);
+  height: var(--control-height);
   padding: 0 10px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
@@ -364,11 +364,11 @@
 .project-thread-heading {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 26px 26px;
+  grid-template-columns: minmax(0, 1fr) var(--control-height) var(--control-height);
   align-items: center;
   gap: 2px;
   min-width: 0;
-  min-height: calc(var(--font-line-height-ui) + 10px);
+  min-height: var(--control-height);
   padding: 2px var(--thread-list-row-inline-padding);
   border-radius: 6px;
   color: var(--text-secondary);
@@ -407,7 +407,7 @@
   align-items: center;
   gap: var(--thread-list-leading-gap);
   min-width: 0;
-  height: var(--text-button-height);
+  height: var(--control-height);
   padding: 0 var(--thread-list-content-inline-padding);
   border: 0;
   background: transparent;
@@ -419,8 +419,8 @@
 
 .project-thread-more,
 .project-thread-new-chat {
-  width: 26px;
-  height: 26px;
+  width: var(--control-height);
+  height: var(--control-height);
   opacity: 0;
   color: var(--text-muted);
   transition: opacity 120ms ease;

@@ -1,6 +1,6 @@
 {
     "name": "anas",
-    "version": "3.1.5",
+    "version": "3.2.0",
     "productName": "Anas",
     "description": "Anas, short for Ananas: a local desktop agent with project-scoped context, tools, and skills customization.",
     "main": "out/main/index.js",
@@ -64,6 +64,8 @@
         "@radix-ui/react-dropdown-menu": "^2.1.18",
         "@radix-ui/react-popover": "^1.1.17",
         "@radix-ui/react-tabs": "^1.1.21",
+        "@rc-component/input-number": "1.7.0",
+        "@rc-component/slider": "1.2.1",
         "@vscode/ripgrep": "1.18.0",
         "ajv": "8.20.0",
         "better-sqlite3": "^12.11.1",

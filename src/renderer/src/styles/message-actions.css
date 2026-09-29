@@ -21,14 +21,15 @@
   display: inline-flex;
   align-items: center;
   flex: 1 1 auto;
+  flex-wrap: wrap;
   gap: 12px;
   min-width: 0;
 }
 
 .message-actions button {
   position: relative;
-  width: 26px;
-  height: 26px;
+  width: var(--control-height);
+  height: var(--control-height);
   padding: 0;
   cursor: pointer;
 }

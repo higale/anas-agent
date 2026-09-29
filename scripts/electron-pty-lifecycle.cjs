@@ -189,6 +189,7 @@ async function verifyLifecycleAction(launchApplication, action) {
         capabilities: { profile: false, environment: false, workspace: true, memory: false, applicationEnvironment: false,
           backgroundTools: true, subagents: { mode: 'off', names: [] }, planning: false, toolMode: 'selected',
           tools: ['run_shell', 'read_call', 'read_call_output', 'write_call', 'wait_call', 'cancel_call'],
+          customTools: { project: false, entries: [] },
           mcp: { defaultMode: 'selected', servers: [] },
           skills: { project: false, mode: 'off', entries: [] } } })
       if (projectResult.status === 'error') throw new Error(JSON.stringify(projectResult.error))

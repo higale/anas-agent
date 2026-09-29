@@ -27,7 +27,7 @@ export function DataManagementSettings({
   const { t } = useTranslation()
 
   return (
-    <SettingsGroup title={t('settings.data')}>
+    <SettingsGroup className="settings-action-grid" title={t('settings.data')}>
       <div className="ui-section-header settings-action-row">
         <div>
           <div className="ui-field-label">{t('settings.data_directory')}</div>

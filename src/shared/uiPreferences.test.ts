@@ -7,9 +7,10 @@ import {
 } from './uiPreferences'
 
 describe('UI preferences', () => {
-  it('normalizes font size to an integer from 11 through 18', () => {
+  it('normalizes font size to an integer from 10 through 18', () => {
     expect(normalizeUiFontSize(undefined)).toBe(UI_FONT_SIZE_DEFAULT)
-    expect(normalizeUiFontSize(10)).toBe(11)
+    expect(normalizeUiFontSize(9)).toBe(10)
+    expect(normalizeUiFontSize(10)).toBe(10)
     expect(normalizeUiFontSize(13.9)).toBe(13)
     expect(normalizeUiFontSize(19)).toBe(18)
   })

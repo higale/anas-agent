@@ -1,9 +1,10 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import { SlidersHorizontal, X } from 'lucide-react'
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { resolveModelListEndpoint } from '@shared/modelListEndpoint'
 import { CheckboxField } from '../CheckboxField'
+import { CommitNumberInput } from '../CommitNumberInput'
 import { CommitTextInput } from '../CommitTextField'
 import { RangeField } from '../RangeField'
 import { RefreshButton } from '../RefreshButton'
@@ -19,7 +20,8 @@ import {
 import {
   maxModelMaxContextTokens,
   maxModelMaxOutputTokens,
-  minModelMaxContextTokens
+  minModelMaxContextTokens,
+  minModelMaxOutputTokens
 } from './modelDraft'
 import type { ModelDraft } from './modelDraft'
 import { ModelListUrlPopover } from './ModelListUrlPopover'
@@ -48,6 +50,7 @@ export function ModelDetailsDialog({
   onUpdateParameters
 }: ModelDetailsDialogProps) {
   const { t } = useTranslation()
+  const tokenFieldId = useId()
   const [portalContainer, setPortalContainer] = useState<HTMLDivElement | null>(null)
   let modelListRequestReady = false
   try {
@@ -71,7 +74,7 @@ export function ModelDetailsDialog({
       <Dialog.Portal>
         <Dialog.Overlay className="ui-backdrop" />
         <Dialog.Content
-          className="model-details-dialog ui-dialog ui-dialog-wide ui-dialog-centered ui-popover"
+          className="model-details-dialog ui-dialog ui-dialog-wide ui-dialog-fixed-footer ui-dialog-centered ui-popover"
           onPointerDownOutside={(event) => event.preventDefault()}
           ref={setPortalContainer}
         >
@@ -93,55 +96,51 @@ export function ModelDetailsDialog({
             </div>
           </header>
 
-          <div className="model-details-dialog-content">
-            <section className="model-details-group ui-surface-flat">
-              <div className="ui-form-section">
-                <div className="ui-grid-2">
-                  <label className="ui-field-stack">
-                    <span>{t('settings.model_display_name')}</span>
-                    <CommitTextInput
-                      placeholder={t('common.optional')}
-                      value={modelDraft.displayName}
-                      onCommit={(displayName) => onUpdateDraft({ displayName })}
-                    />
-                  </label>
-                  <div className="ui-field-stack">
-                    <span>{t('settings.model_id')}</span>
-                    <SearchableOptionPicker
-                      allowInput
-                      ariaLabel={t('settings.model_id')}
-                      emptyLabel={t('settings.no_model_id')}
-                      footer={(
-                        <div className="provider-model-picker-footer">
-                          {modelListUrlAction}
-                          <RefreshButton
-                            iconSize={UI_ICON_SIZE_MEDIUM}
-                            label={t('settings.fetch_available_models')}
-                            loading={listLoading}
-                            onClick={() => void onRefreshCandidates()}
-                            disabled={!modelDraft.baseUrl.trim() || !modelListRequestReady}
-                            showLabel
-                            variant="small"
-                          />
-                        </div>
-                      )}
-                      inputCommitMode="blur"
-                      inputPlaceholder={t('settings.model_id_placeholder')}
-                      options={Array.from(new Set(candidates.filter(Boolean))).map((candidate) => ({
-                        value: candidate,
-                        label: candidate
-                      }))}
-                      portalContainer={portalContainer}
-                      searchPlaceholder={t('settings.model_id')}
-                      value={modelDraft.model}
-                      onChange={(model) => onUpdateDraft({ model })}
-                      onInputChange={(model) => onUpdateDraft({ model })}
-                    />
-                  </div>
+          <div className="model-details-dialog-content ui-dialog-body">
+            <section className="ui-form-section">
+              <div className="ui-grid-2">
+                <label className="ui-field-stack">
+                  <span>{t('settings.model_display_name')}</span>
+                  <CommitTextInput
+                    placeholder={t('common.optional')}
+                    value={modelDraft.displayName}
+                    onCommit={(displayName) => onUpdateDraft({ displayName })}
+                  />
+                </label>
+                <div className="ui-field-stack">
+                  <span>{t('settings.model_id')}</span>
+                  <SearchableOptionPicker
+                    allowInput
+                    ariaLabel={t('settings.model_id')}
+                    emptyLabel={t('settings.no_model_id')}
+                    footer={(
+                      <div className="provider-model-picker-footer">
+                        {modelListUrlAction}
+                        <RefreshButton
+                          iconSize={UI_ICON_SIZE_MEDIUM}
+                          label={t('settings.fetch_available_models')}
+                          loading={listLoading}
+                          onClick={() => void onRefreshCandidates()}
+                          disabled={!modelDraft.baseUrl.trim() || !modelListRequestReady}
+                          showLabel
+                          variant="small"
+                        />
+                      </div>
+                    )}
+                    inputCommitMode="blur"
+                    inputPlaceholder={t('settings.model_id_placeholder')}
+                    options={Array.from(new Set(candidates.filter(Boolean))).map((candidate) => ({
+                      value: candidate,
+                      label: candidate
+                    }))}
+                    portalContainer={portalContainer}
+                    searchPlaceholder={t('settings.model_id')}
+                    value={modelDraft.model}
+                    onChange={(model) => onUpdateDraft({ model })}
+                    onInputChange={(model) => onUpdateDraft({ model })}
+                  />
                 </div>
               </div>
-            </section>
-            <section className="model-details-group ui-surface-flat">
               <div className="model-capability-controls">
                 <CheckboxField
                   checked={modelDraft.stream}
@@ -163,72 +162,63 @@ export function ModelDetailsDialog({
                   })}
                 />
               </div>
-            </section>
-            <section className="model-details-group ui-surface-flat">
-              <div className="ui-form-section">
-                <div className="model-context-controls ui-grid-3">
-                  <label className="ui-field-stack">
-                    <span>{t('settings.max_context_tokens')}</span>
-                    <CommitTextInput
-                      min={minModelMaxContextTokens}
-                      max={maxModelMaxContextTokens}
-                      step={SETTINGS_TOKEN_STEP}
-                      type="number"
-                      value={modelDraft.maxContextTokens}
-                      onCommit={(maxContextTokens) => onUpdateDraft({ maxContextTokens })}
-                    />
-                  </label>
-                  <label className="ui-field-stack">
-                    <span>{t('settings.max_output_tokens')}</span>
-                    <CommitTextInput
-                      min={SETTINGS_TOKEN_STEP}
-                      max={maxModelMaxOutputTokens}
-                      normalizeDraft={(value) => value === '0' ? '' : value}
-                      placeholder={t('settings.max_output_tokens_ignored')}
-                      step={SETTINGS_TOKEN_STEP}
-                      type="number"
-                      value={modelDraft.maxOutputTokens === '0' ? '' : modelDraft.maxOutputTokens}
-                      onDraftChange={(value) => {
-                        if (value === '' && modelDraft.maxOutputTokens !== '0') {
-                          onUpdateDraft({ maxOutputTokens: '0' })
-                        }
-                      }}
-                      onCommit={(value) => onUpdateDraft({ maxOutputTokens: value === '' ? '0' : value })}
-                    />
-                  </label>
-                  <div className="ui-field-stack">
-                    <RangeField
-                      checked={modelDraft.contextCompressionEnabled}
-                      label={t('settings.context_compression_threshold', {
-                        percent: Math.round(modelDraft.contextCompressionThreshold * 100)
-                      })}
-                      min={SETTINGS_CONTEXT_COMPRESSION_MIN}
-                      max={SETTINGS_CONTEXT_COMPRESSION_MAX}
-                      step={SETTINGS_RANGE_STEP_FINE}
-                      value={modelDraft.contextCompressionThreshold}
-                      onChange={(contextCompressionThreshold) => onUpdateDraft({ contextCompressionThreshold })}
-                      onCheckedChange={(contextCompressionEnabled) => onUpdateDraft({ contextCompressionEnabled })}
-                    />
-                  </div>
+              <div className="model-context-controls ui-grid-3">
+                <div className="ui-field-stack">
+                  <label className="ui-field-label" htmlFor={`${tokenFieldId}-context`}>{t('settings.max_context_tokens')}</label>
+                  <CommitNumberInput
+                    id={`${tokenFieldId}-context`}
+                    min={minModelMaxContextTokens}
+                    max={maxModelMaxContextTokens}
+                    step={SETTINGS_TOKEN_STEP}
+                    value={modelDraft.maxContextTokens}
+                    onCommit={(maxContextTokens) => onUpdateDraft({ maxContextTokens })}
+                  />
+                </div>
+                <div className="ui-field-stack">
+                  <label className="ui-field-label" htmlFor={`${tokenFieldId}-output`}>{t('settings.max_output_tokens')}</label>
+                  <CommitNumberInput
+                    id={`${tokenFieldId}-output`}
+                    min={minModelMaxOutputTokens}
+                    max={maxModelMaxOutputTokens}
+                    normalizeDraft={(value) => value === '0' ? '' : value}
+                    placeholder={t('settings.max_output_tokens_ignored')}
+                    step={SETTINGS_TOKEN_STEP}
+                    value={modelDraft.maxOutputTokens === '0' ? '' : modelDraft.maxOutputTokens}
+                    onDraftChange={(value) => {
+                      if (value === '' && modelDraft.maxOutputTokens !== '0') {
+                        onUpdateDraft({ maxOutputTokens: '0' })
+                      }
+                    }}
+                    onCommit={(value) => onUpdateDraft({ maxOutputTokens: value === '' ? '0' : value })}
+                  />
+                </div>
+                <div className="ui-field-stack">
+                  <RangeField
+                    checked={modelDraft.contextCompressionEnabled}
+                    label={t('settings.context_compression_threshold', {
+                      percent: Math.round(modelDraft.contextCompressionThreshold * 100)
+                    })}
+                    min={SETTINGS_CONTEXT_COMPRESSION_MIN}
+                    max={SETTINGS_CONTEXT_COMPRESSION_MAX}
+                    step={SETTINGS_RANGE_STEP_FINE}
+                    value={modelDraft.contextCompressionThreshold}
+                    onChange={(contextCompressionThreshold) => onUpdateDraft({ contextCompressionThreshold })}
+                    onCheckedChange={(contextCompressionEnabled) => onUpdateDraft({ contextCompressionEnabled })}
+                  />
                 </div>
               </div>
+              <ModelExtraParametersField
+                key={modelDraft.modelConfigId}
+                value={modelDraft.parametersJson}
+                protocol={modelDraft.protocol}
+                portalContainer={portalContainer}
+                onCommit={onUpdateParameters}
+                placeholder='{"temperature":0.7}'
+              />
             </section>
-            <section className="model-details-group ui-surface-flat">
-              <div className="ui-form-section">
-                <ModelExtraParametersField
-                  key={modelDraft.modelConfigId}
-                  value={modelDraft.parametersJson}
-                  protocol={modelDraft.protocol}
-                  portalContainer={portalContainer}
-                  onCommit={onUpdateParameters}
-                  placeholder='{"temperature":0.7}'
-                />
-              </div>
-            </section>
-            <section className="model-details-group ui-surface-flat">
+            <section className="ui-surface-flat">
               <ModelParameterPresetsEditor
                 draft={modelDraft}
-                portalContainer={portalContainer}
                 onUpdate={onUpdateDraft}
               />
             </section>

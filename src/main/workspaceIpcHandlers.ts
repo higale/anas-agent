@@ -1,4 +1,4 @@
-import { addExternalToolDirectory, updateExternalToolDirectory, removeExternalToolDirectory, moveExternalToolDirectory, listToolFiles, readToolFile, importToolDirectories, initializeToolsStore, listToolSnapshot, toToolImportError } from './toolsStore'
+import { addExternalToolDirectory, updateExternalToolDirectory, removeExternalToolDirectory, moveExternalToolDirectory, listToolFiles, readToolFile, saveToolFile, createToolFile, toolFileExists, importToolDirectories, initializeToolsStore, listToolSnapshot, toToolImportError } from './toolsStore'
 import { updateSkillScriptApproval } from './config/appConfig'
 import type { ToolImportResult } from '@shared/types'
 import type { DefaultCapabilitySettings } from '@shared/agentCapabilities'
@@ -9,7 +9,8 @@ import { stat } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import type { AppAvatarImage, AppConfigSnapshot, AppProfileUpdate, AppSettingsUpdate, AttachmentPreview, AttachmentPreviewOptions, AvatarCropSource, AvatarCropSourceReadResult, FileIconImage, FileIconSize, InputHistorySnapshot, McpMaintenanceResult, McpServerConfigSave, McpServerUpdate, McpToolStatus, ModelListRequest, ModelListResponse, ModelProviderConfigSave, Project, ProjectCreateRequest, ProjectStateUpdate, ProjectUpdateRequest, ProviderModelConfigSave, SelectedAttachment, SkillAvailabilityUpdate, SkillDirectoryAddResult, SkillFileNode, SkillFilePreview, SkillImportResult, SkillInvocationResult, SkillRootUpdate, SkillSnapshot, SpeechReplyConfig, SubagentConfigSave } from '@shared/types'
 import { saveCustomTool, deleteCustomTool, moveCustomTool, saveDefaultCapabilities, addProviderModels, deleteMcpServer, deleteModelProvider, deleteProviderModel, deleteSubagent, getAppConfigSnapshot, moveMcpServer, moveModelProvider, moveProviderModel, moveSubagent, onAppConfigChanged, restoreSubagent, saveMcpServer, saveModelProvider, saveProviderModel, saveSubagent, selectDefaultModel, updateMcpServer, updateProfile, updateSettings, updateSpeechReply } from './config/appConfig'
-import { addExternalSkillDirectory, buildUserSkillInvocation, importSkillDirectories, listSkillFiles, listSkillSnapshot, moveExternalSkillDirectory, readSkillFile, removeExternalSkillDirectory, toSkillImportError, updateExternalSkillDirectory, updateSkillAvailability } from './skillsStore'
+import { validateCustomToolSchema } from '@shared/customTools'
+import { addExternalSkillDirectory, buildUserSkillInvocation, importSkillDirectories, listSkillFiles, listSkillSnapshot, moveExternalSkillDirectory, readSkillFile, saveSkillFile, removeExternalSkillDirectory, toSkillImportError, updateExternalSkillDirectory, updateSkillAvailability } from './skillsStore'
 import { getSkillExamplesDir, getToolExamplesDir } from './config/dataDir'
 import { addInputHistory, getInputHistory, removeInputHistory, setInputHistoryPinned } from './inputHistoryStore'
 import { closeCachedMcpServerIndex, getCachedMcpStatus, loadMcpRuntimeForCurrentConfig, pingAndReloadFailedMcpServers, reloadMcpRuntimeForServer } from './mcpRuntimeService'
@@ -132,6 +133,7 @@ export function registerWorkspaceIpcHandlers(): void {
   handleMainIpc('config:addProviderModels', async (_event, models: ProviderModelConfigSave[]): Promise<AppConfigSnapshot> => addProviderModels(models))
   handleMainIpc('config:deleteProviderModel', async (_event, providerId: string, modelConfigId: string): Promise<AppConfigSnapshot> => deleteProviderModel(providerId, modelConfigId))
   handleMainIpc('config:moveProviderModel', async (_event, providerId: string, modelConfigId: string, direction: -1 | 1): Promise<AppConfigSnapshot> => moveProviderModel(providerId, modelConfigId, direction))
+  handleMainIpc('tools:validateSchema', (_event, schema: unknown) => { validateCustomToolSchema(schema) })
   handleMainIpc('tools:get', async (_event, projectId?: string, sourceFolders?: string[]) => {
     const project = sourceFolders === undefined && projectId ? await getProject(projectId) : undefined
     return listToolSnapshot(sourceFolders ?? (project?.kind === 'workspace' ? project.sourceFolders : []))
@@ -147,15 +149,18 @@ export function registerWorkspaceIpcHandlers(): void {
   handleMainIpc('tools:removeDirectory', async (_event, id: string) => removeExternalToolDirectory(id))
   handleMainIpc('tools:moveDirectory', async (_event, id: string, direction: -1 | 1) => moveExternalToolDirectory(id, direction))
   handleMainIpc('tools:listFiles', async (_event, id: string, path?: string, folders?: string[]) => listToolFiles(id, path, folders))
+  handleMainIpc('tools:createFile', async (_event, id: string, path: string, folders?: string[]) => createToolFile(id, path, folders))
+  handleMainIpc('tools:fileExists', async (_event, id: string, path: string, folders?: string[]) => toolFileExists(id, path, folders))
+  handleMainIpc('tools:saveFile', async (_event, id: string, path: string, update: import('@shared/packageFiles').PackageFileUpdate, folders?: string[]) => saveToolFile(id, path, update, folders))
   handleMainIpc('tools:readFile', async (_event, id: string, path: string, folders?: string[]) => readToolFile(id, path, folders))
-  handleMainIpc('tools:importDirectories', async (event): Promise<ToolImportResult> => {
+  handleMainIpc('tools:importDirectories', async (event, rootId?: string): Promise<ToolImportResult> => {
     try {
       await initializeToolsStore()
       const result = await showModalOpenDialog(dialogParentFromEvent(event), {
         defaultPath: getToolExamplesDir(), properties: ['openDirectory', 'multiSelections']
       })
       if (result.canceled || !result.filePaths.length) return { status: 'cancelled' }
-      return { status: 'imported', ...await importToolDirectories(result.filePaths), config: await getAppConfigSnapshot() }
+      return { status: 'imported', ...await importToolDirectories(result.filePaths, rootId), config: await getAppConfigSnapshot() }
     } catch (reason) {
       const error = toToolImportError(reason)
       if (error.code === 'failed') runtimeLog('error', 'tools', 'Failed to import tool directories.', { error: reason })
@@ -218,6 +223,7 @@ export function registerWorkspaceIpcHandlers(): void {
   handleMainIpc('skills:updateScriptApproval', async (_event, projectId: string | undefined, skillId: string | undefined, enabled: boolean): Promise<SkillSnapshot> => updateSkillScriptApproval(projectId, skillId, enabled))
   handleMainIpc('skills:get', async (_event, projectId?: string, sourceFolders?: string[]): Promise<SkillSnapshot> => listSkillSnapshot(projectId, sourceFolders))
   handleMainIpc('skills:listFiles', async (_event, projectId: string | undefined, skillId: string, relativePath?: string): Promise<SkillFileNode[]> => listSkillFiles(projectId, skillId, relativePath))
+  handleMainIpc('skills:saveFile', async (_event, projectId: string | undefined, skillId: string, path: string, update: import('@shared/packageFiles').PackageFileUpdate) => saveSkillFile(projectId, skillId, path, update))
   handleMainIpc('skills:readFile', async (_event, projectId: string | undefined, skillId: string, relativePath: string): Promise<SkillFilePreview> => readSkillFile(projectId, skillId, relativePath))
   handleMainIpc('skills:invoke', async (_event, projectId: string | undefined, name: string, sourceAlias: string | undefined, args: string): Promise<SkillInvocationResult> => buildUserSkillInvocation(projectId, name, sourceAlias, args))
   handleMainIpc('skills:updateAvailability', async (_event, projectId: string | undefined, skillId: string, settings: SkillAvailabilityUpdate): Promise<SkillSnapshot> => updateSkillAvailability(projectId, skillId, settings))
