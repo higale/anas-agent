@@ -1,18 +1,10 @@
-## Anas v3.2.0
+## Anas v3.2.1
 
-- 技能和工具文件支持语法高亮、Markdown 预览及非系统文件编辑；保存时检查外部修改冲突，并保留脚本权限。
-- 自定义工具支持在用户及外加目录中新增、导入、编辑和删除；支持可视化编辑参数、定位入口脚本，以及创建缺失的脚本文件。
-- 字体大小和朗读语速使用带刻度、滑块内显示当前值的紧凑控件；字号范围调整为 10–18，默认 14。
-- 统一分段选择和控件高度，精简模型编辑布局，推理选项采用左侧列表、右侧参数的布局，固定弹窗区域使用分隔线区分。
-- 数值设置支持千位分隔、直接输入和增减操作，保留原有单位、范围及不限量选项。
-- stdio MCP 工作目录留空时使用用户主目录，并在输入框显示明确提示；修正 Windows 下脚本父路径不是目录时的判断。
+- 分段选择控件支持最小宽度；主题和聊天内容宽度选项可独立增宽，保持语言选择框原有宽度。
+- 字体大小滑轨与语言选择框等宽对齐。
 
-- Add syntax highlighting, Markdown previews, and editing for non-system skill and tool files, with external-change conflict checks and preserved script permissions.
-- Create, import, edit, and delete custom tools in user and added directories. Edit parameters visually, locate entry scripts, and create missing script files.
-- Use compact sliders with tick marks and values inside the handles for font size and speech speed. Font sizes now range from 10 to 18, with 14 as the default.
-- Unify segmented controls and control heights, simplify the model editor, arrange reasoning options as a list beside the parameter editor, and separate fixed dialog areas with dividers.
-- Add thousands separators, direct entry, and step controls to numeric settings while preserving their units, ranges, and unlimited options.
-- Default blank stdio MCP working directories to the user's home directory with a clear placeholder. Correct script-path checks on Windows when a parent is a file rather than a directory.
+- Add minimum widths to segmented controls. Theme and chat-width options can grow independently while the language picker keeps its original width.
+- Align the font-size slider rail with the language picker at the same width.
 
 ## 下载与安装 / Downloads & installation
 

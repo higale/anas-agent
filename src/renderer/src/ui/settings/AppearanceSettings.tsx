@@ -95,6 +95,7 @@ export function AppearanceSettings({
         </span>
         <SegmentedControl
           ariaLabel={t('settings.theme')}
+          minWidth="var(--settings-control-width-narrow-preferred)"
           options={themePickerOptions}
           value={normalizeTheme(themeValue)}
           onChange={(theme) => void onSaveTheme(normalizeTheme(theme))}
@@ -122,6 +123,7 @@ export function AppearanceSettings({
         </span>
         <SegmentedControl
           ariaLabel={t('settings.chat_content_width')}
+          minWidth="var(--settings-control-width-narrow-preferred)"
           options={chatContentWidthOptions}
           value={normalizeChatContentWidth(chatContentWidthValue)}
           onChange={(width) => void onSaveChatContentWidth(normalizeChatContentWidth(width))}

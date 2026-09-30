@@ -85,7 +85,8 @@
   --sidebar-nav-item-height: calc(var(--font-line-height-ui) + var(--font-line-height-small) + 19px);
   --settings-row-min-height: calc(var(--font-line-height-ui) + 48px);
   --settings-control-width: minmax(220px, 388px);
-  --settings-control-width-narrow: minmax(180px, 240px);
+  --settings-control-width-narrow-preferred: 240px;
+  --settings-control-width-narrow: minmax(180px, var(--settings-control-width-narrow-preferred));
   --sidebar-width: 260px;
   --topbar-height: calc(var(--control-height) + 17px);
   --sidebar-titlebar-padding: 0px;

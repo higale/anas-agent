@@ -1402,7 +1402,7 @@ fieldset.ui-form-section {
 .ui-slider-rail {
   position: absolute;
   top: calc((var(--control-height) - 4px) / 2);
-  width: 100%;
+  inset-inline: calc(var(--range-thumb-width) / -2);
   height: 4px;
   border-radius: 999px;
   background: var(--border-muted);
@@ -1990,6 +1990,7 @@ button.ui-avatar:has(> img):focus-visible,
 .ui-segmented-option {
   position: relative;
   display: flex;
+  flex: 1 0 auto;
   min-width: 0;
 }
 

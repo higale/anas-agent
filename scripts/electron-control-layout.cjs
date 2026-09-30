@@ -28,6 +28,66 @@ async function expectChildrenInside(locator) {
   assert.deepEqual(overflow, [], 'Controls must fit inside their container.')
 }
 
+async function expectAppearanceWidths(appearance) {
+  const bounds = await appearance.locator('.searchable-option-picker, .ui-segmented-control').evaluateAll(elements => elements.map(element => {
+    const { right, width } = element.getBoundingClientRect()
+    return { right, width }
+  }))
+  assert.equal(bounds.length, 3)
+  assert.ok(Math.abs(bounds[0].width - 240) < 0.5, 'The language picker must retain its original width regardless of segment labels or font size.')
+  for (const boundsOfControl of bounds.slice(1)) {
+    assert.ok(boundsOfControl.width >= bounds[0].width - 0.5, 'Segments must use the language picker width as their minimum and may grow independently.')
+    assert.ok(Math.abs(boundsOfControl.right - bounds[0].right) < 0.5, 'Appearance controls must share the same trailing edge.')
+  }
+  const fontRail = await appearance.locator('.ui-slider-rail').boundingBox()
+  assert.ok(fontRail)
+  assert.ok(Math.abs(fontRail.width - bounds[0].width) < 0.5, 'The visible font slider rail must match the language picker width.')
+  assert.ok(Math.abs(fontRail.x + fontRail.width - bounds[0].right) < 0.5, 'The visible font slider rail must align with the language picker.')
+}
+
+async function verifySegmentMinimumWidth(locator) {
+  const measurements = await locator.evaluate(element => {
+    // Measure the shared component independently of the settings form.
+    const control = element.cloneNode(true)
+    Object.assign(control.style, { position: 'fixed', visibility: 'hidden', minWidth: '' })
+    element.ownerDocument.body.append(control)
+    const measure = () => ({
+      width: control.getBoundingClientRect().width,
+      items: [...control.querySelectorAll('label')].map(item => item.getBoundingClientRect().width)
+    })
+    try {
+      return ['equal', 'content'].map(mode => {
+        control.dataset.itemWidth = mode
+        control.style.minWidth = ''
+        const natural = measure()
+        control.style.minWidth = '1px'
+        const smaller = measure()
+        control.style.minWidth = '500px'
+        const larger = measure()
+        control.style.minWidth = '40em'
+        const relative = measure()
+        return { mode, natural, smaller, larger, relative, relativeMinimum: 40 * parseFloat(globalThis.getComputedStyle(control).fontSize) }
+      })
+    } finally {
+      control.remove()
+    }
+  })
+  for (const { mode, natural, smaller, larger, relative, relativeMinimum } of measurements) {
+    assert.equal(smaller.width, natural.width, `${mode}: a smaller minimum must not shrink content.`)
+    assert.ok(Math.abs(larger.width - 500) < 0.5, `${mode}: minimum width applies to the whole control.`)
+    assert.ok(Math.abs(relative.width - relativeMinimum) < 0.5, `${mode}: relative units must follow the font size.`)
+    const growth = larger.items.map((width, index) => width - natural.items[index])
+    assert.ok(Math.max(...growth) - Math.min(...growth) < 0.5, `${mode}: extra space must be distributed evenly.`)
+    assert.ok(Math.abs(larger.items.reduce((sum, width) => sum + width, 0) - (larger.width - 2)) < 0.5,
+      `${mode}: items must fill the control inside its border.`)
+  }
+  const [equal, content] = measurements
+  assert.ok(Math.abs(equal.natural.items[0] - Math.max(...content.natural.items)) < 0.5,
+    'Without a minimum, equal width must follow the longest label.')
+  assert.ok(Math.max(...content.larger.items) - Math.min(...content.larger.items) > 1,
+    'Content mode must preserve individual label width differences when widened.')
+}
+
 async function verifyControlLayout(launchApplication) {
   const root = await mkdtemp(join(tmpdir(), 'anas-control-layout-'))
   let application
@@ -66,6 +126,13 @@ async function verifyControlLayout(launchApplication) {
     assert.equal(await fontHandle.evaluate(element => globalThis.getComputedStyle(element).boxShadow), 'none', 'Mouse dragging must not add a focus ring.')
     await appearance.locator('.ui-slider-mark-text').filter({ hasText: /^14$/ }).click()
     await expect(fontHandle).toHaveAttribute('aria-valuenow', '14')
+    const rail = appearance.locator('.ui-slider-rail')
+    await rail.click({ position: { x: 1, y: 2 } })
+    await expect(fontHandle).toHaveAttribute('aria-valuenow', '10')
+    const railBounds = await rail.boundingBox()
+    assert.ok(railBounds)
+    await rail.click({ position: { x: railBounds.width - 1, y: 2 } })
+    await expect(fontHandle).toHaveAttribute('aria-valuenow', '18')
 
     // Change the actual saved setting so live CSS updates, minimum size, and all supported sizes are exercised.
     for (const fontSize of [10, 11, 12, 13, 14, 15, 16, 17, 18]) {
@@ -84,18 +151,11 @@ async function verifyControlLayout(launchApplication) {
       assert.ok(marks.every((mark, index) => index === 0 || marks[index - 1].right < mark.left), 'Scale labels must not overlap.')
       await theme.getByText(fontSize % 2 ? 'Light' : 'Dark', { exact: true }).click()
       await expectHeight(theme, height)
-      const widths = await theme.evaluate(element => {
-        const items = [...element.querySelectorAll('label')]
-        const equal = items.map(item => item.getBoundingClientRect().width)
-        // Exercise the optional content sizing with the same labels and live font metrics.
-        element.dataset.itemWidth = 'content'
-        const content = items.map(item => item.getBoundingClientRect().width)
-        element.dataset.itemWidth = 'equal'
-        return { equal, content }
-      })
-      assert.ok(Math.max(...widths.equal) - Math.min(...widths.equal) < 0.5, 'Default segment widths must match.')
-      assert.ok(Math.max(...widths.content) - Math.min(...widths.content) > 1, 'Content mode must fit individual labels.')
-      assert.ok(Math.abs(widths.equal[0] - Math.max(...widths.content)) < 0.5, 'Equal width must use the longest label, not stretch to fill the row.')
+      const widths = await theme.locator('label').evaluateAll(items => items.map(item => item.getBoundingClientRect().width))
+      assert.ok(Math.max(...widths) - Math.min(...widths) < 0.5, 'Default segment widths must match.')
+      if (fontSize === 14) await verifySegmentMinimumWidth(theme)
+      await expectAppearanceWidths(appearance)
+      await expectChildrenInside(appearance.locator('.ui-form-row'))
       await expectHeight(appearance.locator('.searchable-option-picker'), height)
       await expectChildrenInside(appearance.locator('.searchable-option-picker, .ui-segmented-control'))
       await expectHeight(page.getByRole('button', { name: 'Clean up...', exact: true }), height)
@@ -161,6 +221,7 @@ async function verifyControlLayout(launchApplication) {
     // A narrow window and maximum font must retain usable fields, tree controls, and toolbars.
     await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(900, 700))
     await expect.poll(() => page.evaluate(() => globalThis.innerWidth)).toBe(900)
+    await expectAppearanceWidths(appearance)
     await expectChildrenInside(appearance.locator('.ui-form-row'))
     await expectChildrenInside(appearance.locator('.ui-range-control'))
     if (process.env.ANAS_E2E_CONTROL_LAYOUT_SCREENSHOT) {
@@ -185,8 +246,27 @@ async function verifyControlLayout(launchApplication) {
     }
     await page.locator('.app-sidebar .ui-sidebar-action').click()
     await expectChildrenInside(page.locator('.composer-toolbar, .topbar, .project-thread-heading'))
+    await openGeneral()
+    await appearance.getByRole('combobox', { name: 'Language', exact: true }).click()
+    await page.getByRole('option', { name: '简体中文 (zh-CN)', exact: true }).click()
+    const chineseAppearance = page.locator('.settings-group').filter({ has: page.getByRole('heading', { name: '外观', exact: true }) })
+    const chineseFont = chineseAppearance.getByRole('slider', { name: '字体大小', exact: true })
+    for (const windowWidth of [1180, 900]) {
+      await application.evaluate(({ BrowserWindow }, width) => BrowserWindow.getAllWindows()[0].setContentSize(width, 820), windowWidth)
+      await expect.poll(() => page.evaluate(() => globalThis.innerWidth)).toBe(windowWidth)
+      for (const fontSize of [10, 14, 18]) {
+        if (fontSize === 14) await chineseAppearance.locator('.ui-slider-mark-text').filter({ hasText: /^14$/ }).click()
+        else await chineseFont.press(fontSize === 10 ? 'Home' : 'End')
+        await expect(chineseFont).toHaveAttribute('aria-valuenow', String(fontSize))
+        await expectAppearanceWidths(chineseAppearance)
+        await expectChildrenInside(chineseAppearance.locator('.ui-form-row, .ui-segmented-control'))
+        if (fontSize === 14 && process.env.ANAS_E2E_CONTROL_LAYOUT_SCREENSHOT) {
+          await chineseAppearance.screenshot({ path: `${process.env.ANAS_E2E_CONTROL_LAYOUT_SCREENSHOT}.zh.${windowWidth}.png` })
+        }
+      }
+    }
     assert.deepEqual(errors, [])
-    console.log('Control layout passed: live font sizes 10–18, slider marks/drag/keyboard, fractional speech speed persistence, light/dark themes, fields, segments, menu/options, trees and narrow-window containment.')
+    console.log('Control layout passed: live font sizes 10–18, slider marks/drag/keyboard, fractional speech speed persistence, light/dark themes, fields, segment minimum widths, independent appearance control sizing, menu/options, trees and narrow-window containment.')
   } finally {
     if (application) await application.close()
     await rm(root, { recursive: true, force: true })
