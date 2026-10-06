@@ -20,7 +20,7 @@ async function verifyGlobalSettings(launchApplication) {
         ...project.capabilities, profile: false, subagents: { mode: 'off', names: [] }, memory: false,
         skills: { ...project.capabilities.skills, mode: 'off' }, mcp: { defaultMode: 'selected', servers: [] }
       }
-      const first = await globalThis.gale.projects.update(project.id, { ...project, advancedSettings: true, capabilities })
+      const first = await globalThis.gale.projects.create({ ...project, name: 'Custom workspace', advancedSettings: true, capabilities })
       const second = await globalThis.gale.projects.create({ ...project, name: 'Other workspace', sourceFolders: [root] })
       if (first.status !== 'ok' || second.status !== 'ok') throw new Error('Project fixture setup failed.')
       return [first.value.name, second.value.name]

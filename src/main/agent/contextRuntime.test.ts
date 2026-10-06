@@ -483,6 +483,18 @@ describe('AgentContextRuntime', () => {
       _summarizationEvent: { cutoffIndex: 1, summaryMessage: summary } }))
     expect(compressed.currentContextTokens).toBeLessThan(9000)
   })
+  it('uses the project custom template and includes complete history during manual compression', async () => {
+    const runtime = createAgentContextRuntime({ model: { ...model, maxContextTokens: 20_000 }, codingMode: true,
+      compressionPrompt: 'Keep research citations: {conversation}', systemPrompt: '', tools: [] })
+    invokeMock.mockResolvedValueOnce(new AIMessage('Retained citations'))
+    await runtime.compress({ messages: [new HumanMessage('SOURCE-42'), new AIMessage('Notes '.repeat(400)), new HumanMessage('Continue')] }, new AbortController().signal)
+    const prompt = (invokeMock.mock.calls[0][0] as HumanMessage[])[0].text
+    expect(prompt).toContain('Keep research citations:')
+    expect(prompt).toContain('SOURCE-42')
+    expect(prompt).not.toContain('Coding continuation handoff')
+    expect(prompt).not.toContain('{conversation}')
+  })
+
   it('uses the selected coding template for manual compression and retains supplied continuation evidence', async () => {
     const runtime = createAgentContextRuntime({ model: { ...model, maxContextTokens: 20_000 }, codingMode: true, systemPrompt: 'Rules remain separate', tools: [] })
     const evidence = 'Goal: fix src/parser.ts. Preserve user changes in README.md. npm test failed: missing token. Build NOT RUN. Next: add regression test. Background call call-7 UNKNOWN.'

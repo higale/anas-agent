@@ -29,6 +29,7 @@ export interface WorkspaceProject extends ProjectBase {
   kind: 'workspace'
   advancedSettings: boolean
   codingMode: boolean
+  compressionPrompt?: string
   prompt: string
   sourceFolders: string[]
   capabilities: AgentCapabilities
@@ -60,6 +61,7 @@ export interface WorkspaceProjectRequest extends ProjectModelSelection {
   kind: 'workspace'
   advancedSettings: boolean
   codingMode: boolean
+  compressionPrompt?: string
   prompt: string
   name: string
   icon?: ProjectIconName

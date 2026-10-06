@@ -161,7 +161,7 @@
 }
 
 .ui-code-file-editor[data-readonly="true"] {
-  padding-inline: 12px;
+  padding-inline-start: 12px;
 }
 
 .ui-code-file-editor-surface {
@@ -171,13 +171,7 @@
 }
 
 .ui-code-file-editor .monaco-scrollable-element > .scrollbar > .slider {
-  border-radius: 6px;
-  background: var(--scroll-thumb);
-}
-
-.ui-code-file-editor .monaco-scrollable-element > .scrollbar > .slider:hover,
-.ui-code-file-editor .monaco-scrollable-element > .scrollbar > .slider.active {
-  background: var(--scroll-thumb-hover);
+  border-radius: 999px;
 }
 
 .ui-row-lg {
@@ -465,19 +459,6 @@
   flex-shrink: 0;
 }
 
-.ui-scroll-list::-webkit-scrollbar {
-  width: 8px;
-}
-
-.ui-scroll-list::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: var(--scroll-thumb);
-}
-
-.ui-scroll-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
 .ui-list-item-row {
   display: flex;
   align-items: center;
@@ -746,14 +727,13 @@
   border: 0;
 }
 
-.ui-dialog-pane-with-footer {
+.ui-dialog-pane-fill {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
   align-content: stretch;
-  gap: var(--ui-form-section-gap, 14px);
 }
 
-.ui-dialog-pane-with-footer > .ui-form-section {
+.ui-dialog-pane-fill > .ui-form-section {
   min-height: 0;
   align-content: start;
   overflow: auto;
@@ -2023,9 +2003,31 @@ button.ui-avatar:has(> img):focus-visible,
   pointer-events: none;
 }
 
-.ui-segmented-option:has(> input:checked)::before,
-.ui-segmented-option:has(> input:checked) + .ui-segmented-option::before {
+.ui-segmented-control:not([data-selection="multiple"]) > .ui-segmented-option:has(> input:checked)::before,
+.ui-segmented-control:not([data-selection="multiple"]) > .ui-segmented-option:has(> input:checked) + .ui-segmented-option::before,
+.ui-segmented-control[data-selection="multiple"] > .ui-segmented-option:has(> input:checked) + .ui-segmented-option:has(> input:not(:checked))::before,
+.ui-segmented-control[data-selection="multiple"] > .ui-segmented-option:has(> input:not(:checked)) + .ui-segmented-option:has(> input:checked)::before {
   content: none;
+}
+
+.ui-segmented-control[data-selection="multiple"] > .ui-segmented-option > span {
+  gap: 6px;
+  font-weight: 400;
+}
+
+.ui-segmented-control[data-selection="multiple"] > .ui-segmented-option::before {
+  background: var(--text-secondary);
+  opacity: 0.3;
+}
+
+.ui-segmented-check {
+  flex: 0 0 auto;
+  width: 1em;
+  height: 1em;
+}
+
+.ui-segmented-option > input:checked + span > .ui-segmented-check {
+  color: var(--control-mark);
 }
 
 .ui-segmented-option > span {
@@ -2049,6 +2051,10 @@ button.ui-avatar:has(> img):focus-visible,
 .ui-segmented-option > input:checked + span {
   background: var(--control-segment-selected-bg);
   color: var(--text-strong);
+}
+
+.ui-segmented-control[data-selection="multiple"] > .ui-segmented-option > input:checked + span {
+  background: color-mix(in srgb, var(--control-segment-selected-bg) 80%, var(--accent-bg));
 }
 
 .ui-segmented-option > input:focus-visible + span {
@@ -2275,7 +2281,6 @@ html.ui-resizing * {
   flex: 1 1 0;
   min-width: 0;
   overflow-x: auto;
-  scrollbar-width: thin;
 }
 
 .ui-tab-item {

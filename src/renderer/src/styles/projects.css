@@ -88,7 +88,7 @@
 .project-appearance-trigger:focus-visible {
   background: var(--bg-hover);
   outline: none;
-  box-shadow: 0 0 0 2px var(--control-field-focus-ring);
+  box-shadow: inset 0 0 0 2px var(--control-field-focus-ring);
 }
 
 .project-appearance-popover {
@@ -191,31 +191,57 @@
   min-width: 62px;
 }
 
-.project-folder-add,
 .project-prompt-input {
   min-height: 92px;
 }
 
-.project-folder-add {
-  display: grid;
-  place-items: center;
-  gap: 7px;
-  padding: 16px;
-  border: 1px dashed var(--border);
-  border-radius: 8px;
+.project-folders {
+  min-width: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--control-radius);
+  overflow: hidden;
   background: var(--bg-surface);
+}
+
+.project-folders[data-empty] {
+  border-style: dashed;
+  border-color: var(--border);
+}
+
+.project-folder-add {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  height: var(--control-height);
+  padding: 0 9px;
+  border: 0;
+  border-top: 1px solid var(--border-soft);
+  background: transparent;
   color: var(--text-secondary);
+}
+
+.project-folders[data-empty] .project-folder-add {
+  height: calc(var(--control-height) * 2);
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  border-top: 0;
+}
+
+.project-folders:has(.project-folder-add:hover:not(:disabled)),
+.project-folders:has(.project-folder-add:focus-visible) {
+  border-color: var(--control-field-focus-border);
 }
 
 .project-folder-add:hover:not(:disabled),
 .project-folder-add:focus-visible {
-  border-color: var(--control-field-focus-border);
   background: var(--bg-hover);
   color: var(--text);
   outline: none;
 }
 
-.project-folder-add.drag-active {
+.project-folders.drag-active {
   border-color: var(--control-field-focus-border);
   background: var(--bg-surface-alt);
   color: var(--text);
@@ -224,11 +250,9 @@
 
 .project-folder-list {
   display: grid;
+  grid-auto-rows: var(--control-height);
   gap: 0;
-  max-height: 160px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: var(--bg-surface);
+  max-height: calc(var(--control-height) * 5);
   overflow-x: hidden;
   overflow-y: auto;
 }
@@ -239,8 +263,8 @@
   align-items: center;
   gap: 7px;
   min-width: 0;
-  min-height: calc(var(--font-line-height-small) + 21px);
-  padding: 5px 9px;
+  height: var(--control-height);
+  padding: 0 9px;
   border: 0;
   background: transparent;
   color: var(--text-secondary);
@@ -505,7 +529,15 @@
   color: var(--text-muted);
   font-size: var(--font-size-small);
 }
-.project-prompt-preview-actions {
-  flex-wrap: wrap;
-  justify-content: center;
+.project-dialog-header {
+  grid-template-columns: var(--ui-dialog-icon-size) minmax(0, 1fr) auto;
+}
+
+.project-prompt-tabs {
+  flex-basis: auto;
+}
+
+.project-prompt-tabs .ui-tab-trigger:disabled {
+  color: var(--text-muted);
+  opacity: 0.5;
 }

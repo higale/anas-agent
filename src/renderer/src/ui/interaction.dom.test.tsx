@@ -176,7 +176,8 @@ describe('renderer interaction accessibility', () => {
     render(<ProjectDialog open kind="simple_chat" project={preferredProject} config={modelPickerConfig(true)} onClose={onClose} onSave={onSave} />)
     const input = screen.getByLabelText('project.simple_chat_prompt')
     await user.type(input, 'Unsaved instructions')
-    await user.click(screen.getByRole('button', { name: 'settings.view_effective_system_context' }))
+    await user.click(screen.getByRole('button', { name: 'common.more' }))
+    await user.click(screen.getByRole('menuitem', { name: 'settings.view_effective_system_context' }))
     expect(await screen.findByText('Preview from draft')).toBeInTheDocument()
     expect(preview).toHaveBeenCalledWith(expect.objectContaining({
       projectId: preferredProject.id,
@@ -186,6 +187,11 @@ describe('renderer interaction accessibility', () => {
     expect(screen.queryByText('Preview from draft')).not.toBeInTheDocument()
     expect(onClose).not.toHaveBeenCalled()
     expect(input).toHaveValue('Unsaved instructions')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'common.more' })).toHaveFocus())
+    await user.keyboard('{Enter}')
+    expect(await screen.findByRole('menuitem', { name: 'settings.view_model_request' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    expect(onClose).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: 'common.save' }))
     expect(onSave).toHaveBeenCalledWith(preview.mock.calls[0][0].project)
   })
@@ -307,6 +313,7 @@ describe('renderer interaction accessibility', () => {
     await user.click(screen.getByRole('button', { name: 'chat.select_model' }))
     await user.click(screen.getByRole('menuitemradio', { name: 'chat.clear_model_selection' }))
     await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'chat.select_model' })).toHaveTextContent('chat.select_model'))
     await user.click(screen.getByRole('button', { name: 'common.save' }))
     expect(onSave).toHaveBeenCalledWith({ kind: 'simple_chat', name: preferredProject.name, prompt: '' })
   })
@@ -1252,7 +1259,9 @@ describe('renderer interaction accessibility', () => {
     expect(onClose).toHaveBeenCalledOnce()
   })
 
-  it('shows the default tag when editing the default workspace', () => {
+  it('limits the default workspace editor to appearance and model preferences', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn().mockResolvedValue(undefined)
     const defaultWorkspace: Project = {
  capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, advancedSettings: true, prompt: '',
       id: DEFAULT_WORKSPACE_PROJECT_ID,
@@ -1269,11 +1278,34 @@ describe('renderer interaction accessibility', () => {
         open
         kind="workspace"
         project={defaultWorkspace}
+        config={modelPickerConfig(true)}
         onClose={vi.fn()}
-        onSave={vi.fn()}
+        onSave={onSave}
       />
     )
 
+    const name = screen.getByLabelText('project.name')
+    expect(name).toHaveAttribute('readonly')
+    await user.type(name, 'Changed')
+    expect(name).toHaveValue('Default Workspace')
+    expect(screen.queryByRole('button', { name: 'project.add_folders' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /project.remove_folder/ })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('project.project_prompt')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('project.advanced_settings')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('project.coding_mode')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('settings.capabilities')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'project.choose_icon' }))
+    await user.click(screen.getAllByRole('button', { name: 'project.icon_option' })[PROJECT_ICON_NAMES.indexOf('braces')])
+    await user.click(screen.getByRole('button', { name: 'common.done' }))
+    await user.click(screen.getByRole('button', { name: 'chat.select_model' }))
+    await user.click(screen.getByRole('menuitemradio', { name: /Friendly model/ }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'chat.select_model' })).toHaveTextContent('Friendly model'))
+    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'Default Workspace', sourceFolders: ['/default-workspace'],
+      icon: 'braces', modelConfigId: 'model-1', modelParameterPresetId: null,
+      advancedSettings: false, codingMode: false, prompt: '', capabilities: defaultCapabilities
+    }))
     expect(screen.getByText('common.default')).toHaveClass('project-default-badge')
     expect(screen.queryByText('project.primary_folder')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'project.set_primary_folder' })).not.toBeInTheDocument()
@@ -1433,6 +1465,51 @@ describe('renderer interaction accessibility', () => {
     expect(screen.queryByRole('checkbox', { name: 'project.coding_mode' })).not.toBeInTheDocument()
   })
 
+  it('edits both prompt tabs as one project draft and restores default compression by clearing it', async () => {
+    const user = userEvent.setup(), onSave = vi.fn(), onClose = vi.fn()
+    const project: Project = { id: 'summary-project', kind: 'workspace', name: 'Summary', sourceFolders: ['D:/project'],
+      codingMode: false, advancedSettings: false, prompt: 'Retained project rules', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false,
+      pinned: false, collapsed: false, createdAt: '2026-09-06T00:00:00Z', updatedAt: '2026-09-06T00:00:00Z' }
+    const view = render(<ProjectDialog open kind="workspace" project={project} onClose={onClose} onSave={onSave} />)
+    const compression = () => screen.getByRole('textbox', { name: 'settings.view_context_compression_prompt' })
+    expect(screen.queryByRole('tab', { name: 'settings.view_context_compression_prompt' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'project.load_default_prompt' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('checkbox', { name: 'project.advanced_settings' }))
+    await user.click(screen.getByRole('tab', { name: 'settings.view_context_compression_prompt' }))
+    expect(compression()).toHaveValue('')
+    await user.click(screen.getByRole('button', { name: 'project.load_default_prompt' }))
+    expect((compression() as HTMLTextAreaElement).value).toContain('{conversation}')
+    const defaultText = (compression() as HTMLTextAreaElement).value
+    await user.click(screen.getByRole('checkbox', { name: 'project.coding_mode' }))
+    expect(compression()).toHaveValue(defaultText)
+    await user.click(screen.getByRole('button', { name: 'project.load_default_prompt' }))
+    expect((compression() as HTMLTextAreaElement).value).toContain('Coding continuation handoff')
+    fireEvent.change(compression(), { target: { value: 'Keep citations: {conversation}' } })
+    await user.click(screen.getByRole('checkbox', { name: 'project.advanced_settings' }))
+    expect(screen.queryByRole('textbox', { name: 'settings.view_context_compression_prompt' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('checkbox', { name: 'project.advanced_settings' }))
+    expect(screen.getByRole('textbox', { name: 'project.project_prompt' })).toHaveValue('Retained project rules')
+    await user.click(screen.getByRole('tab', { name: 'settings.view_context_compression_prompt' }))
+    expect(compression()).toHaveValue('Keep citations: {conversation}')
+    fireEvent.change(compression(), { target: { value: 'Invalid template' } })
+    expect(screen.getByRole('button', { name: 'common.save' })).toBeDisabled()
+    fireEvent.change(compression(), { target: { value: 'Keep citations: {conversation}' } })
+    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ compressionPrompt: 'Keep citations: {conversation}', prompt: project.prompt }))
+    const saved = { ...project, advancedSettings: true, compressionPrompt: 'Keep citations: {conversation}' }
+    view.rerender(<ProjectDialog open kind="workspace" project={saved} onClose={onClose} onSave={onSave} />)
+    await user.click(screen.getByRole('tab', { name: 'settings.view_context_compression_prompt' }))
+    await user.clear(compression())
+    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    expect(onSave.mock.lastCall![0]).not.toHaveProperty('compressionPrompt')
+    view.rerender(<ProjectDialog open kind="workspace" project={{ ...saved }} onClose={onClose} onSave={onSave} />)
+    await user.click(screen.getByRole('tab', { name: 'settings.view_context_compression_prompt' }))
+    fireEvent.change(compression(), { target: { value: 'Unsaved: {conversation}' } })
+    await user.click(screen.getByRole('button', { name: 'common.cancel' }))
+    expect(onSave).toHaveBeenCalledTimes(2)
+    expect(saved.compressionPrompt).toBe('Keep citations: {conversation}')
+  })
+
   it('hides advanced fields without discarding their draft values', async () => {
     const user = userEvent.setup()
     const onSave = vi.fn()
@@ -1447,10 +1524,10 @@ describe('renderer interaction accessibility', () => {
     expect(coding).not.toBeChecked()
     await user.click(coding)
     expect(advanced.closest('footer')).not.toBeNull()
-    expect(screen.queryByRole('textbox', { name: 'project.prompt' })).toBeNull()
+    expect(screen.queryByRole('textbox', { name: 'project.project_prompt' })).toBeNull()
     expect(screen.queryByText('settings.capabilities')).toBeNull()
     await user.click(advanced)
-    const prompt = screen.getByRole('textbox', { name: 'project.prompt' })
+    const prompt = screen.getByRole('textbox', { name: 'project.project_prompt' })
     expect(prompt).toHaveClass('ui-textarea')
     expect(prompt).not.toHaveClass('project-prompt-input')
     expect(prompt).toHaveAttribute('rows', '2')
@@ -1460,11 +1537,11 @@ describe('renderer interaction accessibility', () => {
     await user.click(screen.getByText('settings.capabilities'))
     await user.click(screen.getByRole('checkbox', { name: 'settings.capability_workspaceContext' }))
     await user.click(advanced)
-    expect(screen.queryByRole('textbox', { name: 'project.prompt' })).toBeNull()
+    expect(screen.queryByRole('textbox', { name: 'project.project_prompt' })).toBeNull()
     expect(coding).toBeVisible()
     expect(coding).toBeChecked()
     await user.click(advanced)
-    expect(screen.getByRole('textbox', { name: 'project.prompt' })).toHaveValue('New rules')
+    expect(screen.getByRole('textbox', { name: 'project.project_prompt' })).toHaveValue('New rules')
     await user.click(advanced)
     await user.click(screen.getByRole('button', { name: 'common.save' }))
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({

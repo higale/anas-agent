@@ -189,6 +189,20 @@ describe('field-level recovery', () => {
     expect(invalid.subagents[0].name).toBe(raw.subagents[0].name)
   })
 
+  it.each([undefined, '', 'Keep sources: {conversation}', 42, 'Missing placeholder'])('preserves valid optional compression prompts and repairs only invalid values: %s', compressionPrompt => {
+    const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep', pinned: false, collapsed: true,
+      createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z', sourceFolders: ['/keep/path'],
+      prompt: 'Keep project rules', coding_mode: false, advanced_settings: false, restrict_subagents: false,
+      capabilities: structuredClone(capabilities), ...(compressionPrompt === undefined ? {} : { compression_prompt: compressionPrompt }) }
+    const raw = { version: 0, projects: [project] }
+    const result = repairDocument('projects.json', raw)
+    const invalid = compressionPrompt === 42 || compressionPrompt === 'Missing placeholder'
+    expect(result.value).toEqual(invalid ? { ...raw, projects: [{ ...project, compression_prompt: '' }] } : raw)
+    expect(result.fields).toHaveLength(invalid ? 1 : 0)
+    expect(project.prompt).toBe('Keep project rules')
+    expect(project.compression_prompt).toBe(compressionPrompt)
+  })
+
   it.each(['capabilities.json', 'subagents.json', 'projects.json'])('preserves valid off choices and repairs only invalid capability fields in %s', (file) => {
     const selection = { ...structuredClone(capabilities),
       skills: { mode: 'off', project: true, entries: [{ id: 'user:kept', shortcut: false, model: true }] },

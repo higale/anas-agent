@@ -183,32 +183,6 @@ export function useModelSettingsState({
     }
   }
 
-  async function addProviderModel(): Promise<boolean> {
-    if (!(await ensureModelDraftCanLeave())) return false
-    const providerId = modelDraftRef.current.providerId
-    if (!providerId) return false
-    const defaults = { ...emptyModelDraft(), providerId }
-    const payload = buildProviderModelPayload(defaults)
-    if (!payload) return false
-    try {
-      const nextConfig = await window.gale.config.saveProviderModel(payload)
-      const provider = nextConfig.providers.find((candidate) => candidate.id === providerId)
-      const model = provider?.models.at(-1)
-      if (!provider || !model) return false
-      const draft = modelConfigToDraft(provider, model)
-      setConfig(nextConfig)
-      setEditingModelIndex(provider.index)
-      setEditingProviderModelIndex(model.index)
-      modelDraftRef.current = draft
-      setModelDraft(draft)
-      setModelDirtyState(false)
-      return true
-    } catch {
-      notice.error(t('settings.failed_create_model'), { id: modelNoticeId })
-      return false
-    }
-  }
-
   async function addProviderModels(modelIds: string[]): Promise<boolean> {
     if (!(await ensureModelDraftCanLeave())) return false
     const providerId = modelDraftRef.current.providerId
@@ -248,55 +222,57 @@ export function useModelSettingsState({
       || update.modelListUrl !== undefined
       || update.modelListAuth !== undefined
       || update.apiKey !== undefined
-    const providerUpdate = modelCandidateSourceUpdate
-      || update.providerParametersJson !== undefined
     if (modelCandidateSourceUpdate) setModelCandidates([])
     modelDraftRef.current = nextDraft
     setModelDraft(nextDraft)
-    void saveModelDraftImmediately(nextDraft, providerUpdate ? 'provider' : 'model')
+    void saveProviderDraftImmediately(nextDraft)
   }
 
-  function updateModelParameters(parametersJson: string): void {
-    updateModelDraft({ parametersJson })
+  async function saveModelDetails(draft: ModelDraft): Promise<void> {
+    const validationError = validateProviderModelDraft(draft, t)
+    if (validationError) throw new Error(validationError)
+    const payload = buildProviderModelPayload(draft)
+    if (!payload) throw new Error(t('settings.failed_save_model'))
+    await modelAutosave.waitForIdle()
+    const nextConfig = await window.gale.config.saveProviderModel(payload)
+    const provider = nextConfig.providers.find((candidate) => candidate.id === draft.providerId)
+    const model = draft.modelConfigId
+      ? provider?.models.find((candidate) => candidate.id === draft.modelConfigId)
+      : provider?.models.at(-1)
+    if (!provider || !model) throw new Error(t('settings.failed_save_model'))
+    const savedDraft = modelConfigToDraft(provider, model)
+    setConfig(nextConfig)
+    setEditingModelIndex(provider.index)
+    setEditingProviderModelIndex(model.index)
+    modelDraftRef.current = savedDraft
+    setModelDraft(savedDraft)
+    setModelDirtyState(false)
   }
 
-  async function saveModelDraftImmediately(draft: ModelDraft, target: 'provider' | 'model'): Promise<boolean> {
-    const identity = target === 'provider' ? draft.providerId : draft.modelConfigId
-    if (!identity) return false
-    const revision = modelAutosave.revise(`${target}:${identity}`)
+  async function saveProviderDraftImmediately(draft: ModelDraft): Promise<void> {
+    if (!draft.providerId) return
+    const revision = modelAutosave.revise(`provider:${draft.providerId}`)
     setModelDirtyState(true)
-    const validationError = target === 'provider'
-      ? validateModelProviderDraft(draft, t)
-      : validateProviderModelDraft(draft, t)
+    const validationError = validateModelProviderDraft(draft, t)
     if (validationError) {
       notice.error(validationError, { id: modelNoticeId })
       await modelAutosave.waitForIdle()
       if (modelAutosave.isCurrent(revision)) setModelDirtyState(false)
-      return false
+      return
     }
-    const providerPayload = target === 'provider' ? buildProviderPayload(draft) : undefined
-    const modelPayload = target === 'model' ? buildProviderModelPayload(draft) : undefined
-    if ((target === 'provider' && !providerPayload) || (target === 'model' && !modelPayload)) return false
-    const latest = await modelAutosave.enqueue(revision, async (request) => {
+    const payload = buildProviderPayload(draft)
+    if (!payload) return
+    await modelAutosave.enqueue(revision, async (request) => {
       try {
-        const nextConfig = target === 'provider'
-          ? await window.gale.config.saveModelProvider(providerPayload!)
-          : await window.gale.config.saveProviderModel(modelPayload!)
+        const nextConfig = await window.gale.config.saveModelProvider(payload)
         setConfig(nextConfig)
         if (!request.isCurrent()) return
         const provider = nextConfig.providers.find((candidate) => candidate.id === draft.providerId)
         if (!provider) throw new Error('Saved provider is missing from the returned config.')
-        const requestedModel = draft.modelConfigId
-          ? provider.models.find((candidate) => candidate.id === draft.modelConfigId) ?? provider.models[0]
-          : undefined
-        if (target === 'model' && !requestedModel) {
-          throw new Error('Saved model configuration is missing from the returned config.')
-        }
+        const requestedModel = provider.models.find((candidate) => candidate.id === draft.modelConfigId)
         const savedDraft = providerConfigToDraft(provider, requestedModel)
         setEditingModelIndex(provider.index)
-        setEditingProviderModelIndex((current) => (
-          target === 'provider' && current === undefined ? undefined : requestedModel?.index
-        ))
+        setEditingProviderModelIndex((current) => current === undefined ? undefined : requestedModel?.index)
         modelDraftRef.current = savedDraft
         setModelDraft(savedDraft)
         setModelDirtyState(false)
@@ -307,7 +283,6 @@ export function useModelSettingsState({
         }
       }
     })
-    return !latest || !modelDirtyRef.current
   }
 
   async function deleteEditingModel(): Promise<void> {
@@ -413,7 +388,6 @@ export function useModelSettingsState({
     : config?.providers[editingModelIndex]
 
   return {
-    addProviderModel,
     addProviderModels,
     createModelDraft,
     deleteEditingModel,
@@ -433,6 +407,6 @@ export function useModelSettingsState({
     selectDefaultModel,
     selectProviderModel,
     updateModelDraft,
-    updateModelParameters
+    saveModelDetails
   }
 }

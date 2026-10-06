@@ -12,6 +12,7 @@ The public repository receives periodic source snapshots. Each synchronization a
 
 - User guide: [English](data/help/USER_GUIDE.en.md) · [中文](data/help/USER_GUIDE.zh-CN.md)
 - Agent Skills: [English](data/help/AGENT_SKILLS.en.md) · [中文](data/help/AGENT_SKILLS.zh-CN.md)
+- [Coding mode and project rules (Chinese)](docs/CODING_MODE.md)
 - [Custom tool packages](docs/CUSTOM_TOOLS.md)
 - [Current state storage](docs/CURRENT_STATE_STORAGE.md)
 - [Security and approval model](docs/SECURITY_MODEL.md)
@@ -25,6 +26,7 @@ The application's Help menu opens bundled guides in the right workspace pane, wi
 
 - OpenAI-compatible and Anthropic-compatible providers, streamed replies, context compression, and resumable approvals.
 - Default capabilities in Settings, optional project customization, and independently configured subagents.
+- The default project allows only icon (including color) and model (including reasoning options) changes. Its name, working folder, and other settings use defaults; capabilities follow global settings.
 - Built-in file, image, network, memory, and command tools; bundled ripgrep; MCP integration and custom tool packages.
 - User and project Skills, prompt shortcuts, input history, and speech input/output.
 - Text, image, PDF, and DOCX attachments. Images use native multimodal content blocks; documents are extracted locally.
@@ -69,6 +71,7 @@ After startup, add your model provider in **Settings > Model**, then select a mo
 npm run test:e2e -- --help-only
 npm run test:e2e -- --startup-only
 npm run test:e2e -- --storage-only
+npm run test:e2e -- --workspace-only
 ```
 
 Run builds and packaging serially with backend tests because they share generated output and native dependencies.

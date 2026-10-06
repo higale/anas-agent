@@ -442,7 +442,6 @@
   max-height: min(144px, 22vh);
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-width: thin;
 }
 
 .composer-queue-item {

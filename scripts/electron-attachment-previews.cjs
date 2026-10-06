@@ -66,11 +66,12 @@ async function verifyAttachmentPreviews(launchApplication) {
     await expect(page.locator('[data-agent-composer-input]')).toBeVisible()
     const projectUpdate = await page.evaluate(async sourceFolder => {
       const project = (await globalThis.gale.projects.list()).find(item => item.id === 'default-workspace')
-      return globalThis.gale.projects.update(project.id, { ...project, sourceFolders: [sourceFolder] })
+      return globalThis.gale.projects.create({ ...project, name: 'Attachment previews', sourceFolders: [sourceFolder] })
     }, root)
     assert.equal(projectUpdate.status, 'ok')
     await page.reload()
     await expect(page.locator('[data-agent-composer-input]')).toBeVisible()
+    await page.locator('.project-thread-group').filter({ hasText: projectUpdate.value.name }).locator('.project-thread-new-chat').click()
     await application.evaluate(({ shell }) => {
       globalThis.__anasRevealedImages = []
       // Keep the real preload/IPC validation; intercept only the OS file manager.

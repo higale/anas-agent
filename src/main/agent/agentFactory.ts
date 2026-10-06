@@ -523,6 +523,8 @@ async function prepareAgentInstanceFromConfig(
       customTools: structuredClone(project.kind === 'workspace'
         ? toolCatalog.tools.filter(tool => capabilities.customTools.entries.includes(tool.id)).map(tool => tool.definition!) : []),
       ...(activeSubagent ? { subagentSelectionLimit: structuredClone(rootSelection) } : {}),
+      ...(project.kind === 'workspace' && project.advancedSettings && !activeSubagent && project.compressionPrompt
+        ? { compressionPrompt: project.compressionPrompt } : {}),
       codingMode: activeSubagent
         ? context.parentConfiguration?.codingMode === true
         : project.kind === 'workspace' && project.codingMode,
@@ -758,6 +760,7 @@ async function prepareAgentInstanceFromConfig(
   const projectRecalledMemory = createMemoryRecallProjector(memoryRecallOptions)
   const contextRuntime = createAgentContextRuntime({
     codingMode: runConfiguration.codingMode,
+    compressionPrompt: activeSubagent ? undefined : runConfiguration.compressionPrompt,
     includeProjectRules: !simpleChat && runConfiguration.codingMode,
     developerHttpTrace,
     resolveModel,
@@ -814,6 +817,7 @@ async function prepareAgentInstanceFromConfig(
       : undefined
     const summaryMiddleware = createAnasSummarizationMiddleware({
           codingMode: runConfiguration.codingMode,
+          compressionPrompt: activeSubagent ? undefined : runConfiguration.compressionPrompt,
           responseTools,
           backend: (runtime: BackendRuntime) => new SummaryOnlyBackend(runtime),
           outputLanguage,

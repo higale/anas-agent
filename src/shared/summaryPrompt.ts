@@ -43,11 +43,28 @@ export interface SummaryOutputLanguage {
   name: string
 }
 
+export const COMPRESSION_PROMPT_MAX_LENGTH = 50_000
+
+export function compressionPromptError(value: unknown): 'type' | 'length' | 'conversation' | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string') return 'type'
+  if (value.length > COMPRESSION_PROMPT_MAX_LENGTH) return 'length'
+  if (value.trim() && value.split('{conversation}').length !== 2) return 'conversation'
+  return undefined
+}
+
+export function normalizeCompressionPrompt(value: unknown): string | undefined {
+  const error = compressionPromptError(value)
+  if (error) throw new Error(`Invalid compression prompt: ${error}. A custom prompt must contain exactly one {conversation} placeholder and at most ${COMPRESSION_PROMPT_MAX_LENGTH} characters.`)
+  return typeof value === 'string' && value.trim() ? value : undefined
+}
+
 export function summaryPromptForLanguage(
   language: SummaryOutputLanguage,
-  codingMode = false
+  codingMode = false,
+  customPrompt?: string
 ): string {
-  return (codingMode ? codingSummaryPrompt : summaryPrompt).replace(
+  return (normalizeCompressionPrompt(customPrompt) ?? (codingMode ? codingSummaryPrompt : summaryPrompt)).replaceAll(
     '{output_language}',
     `${language.name.trim()} (${language.code.trim()})`
   )

@@ -130,9 +130,10 @@ function hasRawSummarySource(messages: BaseMessage[]): boolean {
 function summaryInputPrompt(
   messages: BaseMessage[],
   outputLanguage: SummaryOutputLanguage,
-  codingMode: boolean
+  codingMode: boolean,
+  compressionPrompt?: string
 ): string {
-  return summaryPromptForLanguage(outputLanguage, codingMode)
+  return summaryPromptForLanguage(outputLanguage, codingMode, compressionPrompt)
     .replace('{conversation}', getBufferString(messages))
 }
 
@@ -141,10 +142,11 @@ async function messagesForSummary(
   inputTokenLimit: number,
   outputLanguage: SummaryOutputLanguage,
   codingMode: boolean,
-  tokenCountingOptions: LocalTokenCountingOptions
+  tokenCountingOptions: LocalTokenCountingOptions,
+  compressionPrompt?: string
 ): Promise<BaseMessage[]> {
   const promptTokens = (items: BaseMessage[]): number => countMessagesApproximately([
-    new HumanMessage(summaryInputPrompt(items, outputLanguage, codingMode))
+    new HumanMessage(summaryInputPrompt(items, outputLanguage, codingMode, compressionPrompt))
   ], null, tokenCountingOptions)
   if (promptTokens(messages) <= inputTokenLimit) return messages
   throw new ModelSelectionError('The complete history cannot be summarized within this model’s input capacity without dropping source context. Choose a larger-context model; the current history has not been replaced.')
@@ -172,6 +174,7 @@ function summaryText(response: unknown): string {
 
 export function createAgentContextRuntime(options: {
   codingMode?: boolean
+  compressionPrompt?: string
   developerHttpTrace?: boolean
   resolveModel: () => Promise<ResolvedModelConfig>
   outputLanguage: SummaryOutputLanguage
@@ -343,13 +346,14 @@ export function createAgentContextRuntime(options: {
       summaryInputTokenLimit,
       outputLanguage,
       options.codingMode === true,
-      { protocol: model.protocol, parameters: model.parameters }
+      { protocol: model.protocol, parameters: model.parameters },
+      options.compressionPrompt
     )
     if (sourceMessages.length === 0) {
       throw new Error('There is no conversation history eligible for compression.')
     }
 
-    const prompt = summaryInputPrompt(sourceMessages, outputLanguage, options.codingMode === true)
+    const prompt = summaryInputPrompt(sourceMessages, outputLanguage, options.codingMode === true, options.compressionPrompt)
     const response = await createCompressionChatModel(model, {
       beforeRequest: validateRequestModel,
       developerHttpTrace: options.developerHttpTrace,

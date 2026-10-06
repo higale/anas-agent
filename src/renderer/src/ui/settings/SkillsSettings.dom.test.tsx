@@ -16,11 +16,14 @@ vi.mock('react-i18next', () => ({
 const listFiles = vi.fn()
 const readFile = vi.fn()
 const updateScriptApproval = vi.fn()
+const updateAvailability = vi.fn()
 const showItemInFolder = vi.fn()
 
 beforeEach(() => {
   listFiles.mockReset()
   readFile.mockReset()
+  updateScriptApproval.mockReset()
+  updateAvailability.mockReset()
   listFiles.mockResolvedValue([{
     name: 'SKILL.md',
     path: '/skills/system/config/SKILL.md',
@@ -70,7 +73,7 @@ function renderSkills(onImportDirectories = vi.fn(), skills = snapshot, onMoveDi
       onRemoveDirectory={vi.fn()}
       onUpdateDirectory={vi.fn()}
       onUpdateScriptApproval={updateScriptApproval}
-      onUpdateAvailability={vi.fn()}
+      onUpdateAvailability={updateAvailability}
     />
   )
 }
@@ -83,6 +86,20 @@ async function openGroup(button: HTMLElement): Promise<void> {
 }
 
 describe('Skills settings tree', () => {
+  it('updates each segmented availability option through its existing save callback', async () => {
+    renderSkills()
+    await openGroup(screen.getByRole('button', { name: /^settings.skill_group_system/ }))
+    await userEvent.click(within(document.querySelector('.settings-skill-tree') as HTMLElement).getByRole('button', { name: 'config' }))
+    const group = within(screen.getByRole('group', { name: 'config' }))
+    await userEvent.click(group.getByRole('checkbox', { name: 'settings.skill_model_available' }))
+    expect(updateAvailability).toHaveBeenLastCalledWith('system:config', { modelAvailable: false })
+    await userEvent.click(group.getByRole('checkbox', { name: 'settings.skill_user_available' }))
+    expect(updateAvailability).toHaveBeenLastCalledWith('system:config', { userAvailable: false })
+    await userEvent.click(group.getByRole('checkbox', { name: 'settings.skill_scripts_auto_approve' }))
+    expect(updateScriptApproval).toHaveBeenCalledExactlyOnceWith('system:config', true)
+    expect(updateAvailability).toHaveBeenCalledTimes(2)
+  })
+
   it('saves directory fields on Enter or blur, preserves pending edits, and rejects invalid or unchanged input', async () => {
     const root = { ...snapshot.roots[1], id: 'shared', kind: 'external' as const, name: 'Shared', shortcutAlias: 'shared', removable: true }
     let finish!: () => void
@@ -252,7 +269,6 @@ describe('Skills settings tree', () => {
     await user.click(screen.getByText('config', { selector: '.settings-skill-tree-select > span' }))
     const checkbox = screen.getByRole('checkbox', { name: 'settings.skill_scripts_auto_approve' })
     expect(checkbox).not.toBeChecked()
-    expect(screen.getByText('settings.skill_scripts_auto_approve_global_active')).toBeVisible()
     await user.click(checkbox)
     expect(updateScriptApproval).toHaveBeenCalledWith('system:config', true)
     expect(screen.queryByRole('button', { name: 'common.open' })).not.toBeInTheDocument()

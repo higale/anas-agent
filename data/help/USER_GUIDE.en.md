@@ -18,6 +18,8 @@ Choose Help from the lower-left menu to read this guide in the right workspace. 
 
 Enable **Customize capabilities** in the project editor to choose the project prompt, context, tools, skills, and subagents. Turning it off uses **Settings > Capabilities** and preserves your custom choices. These defaults are not master switches: customized projects can independently enable or disable capabilities. **Coding mode** separately changes the development workflow; it does not enable tools or increase access permissions.
 
+The default project only allows changes to its icon, color, model, and reasoning option. Its name, working directory, and other project settings use defaults, and capabilities follow global settings. Create a regular project to customize folders, prompts, or capabilities.
+
 - File read, File write, Memory, and Custom tools expand into individual choices. Use each group switch to select or clear all items. Saved selections that are deleted or unavailable can still be deselected.
 - Every tool listed below requires a model that supports tool use with **Tool use** enabled. Context-only capabilities do not require tool use. Using a skill also requires tools for reading its instructions and performing its task.
 - Capabilities select available tools; the conversation's access mode determines when an operation needs approval. Disabling File read, File write, or Network access removes those specific tools. Commands and MCP tools may still provide similar operations.
@@ -29,6 +31,20 @@ The bulk actions at the top differ from individual switches:
 - **Disable all** turns capabilities off and clears built-in, custom, and MCP tool selections. Custom skill and subagent lists are retained.
 
 In **Settings > Tools**, select Built-in tools or MCP to view tools grouped by capability or server. Below the divider, browse custom tool sources and package files. Select a built-in or MCP tool name to inspect its parameters and full description.
+
+### Coding mode
+
+**Coding mode** is independent of **Customize capabilities**. It adds development guidance such as inspecting code before editing, preserving existing changes, and verifying results. Its compression summary preserves file changes, test evidence, and unfinished work. Models, tools, and access permissions continue to follow their separate settings.
+
+The application automatically reads applicable AGENTS rules in full and adds them directly to the system context; the model does not need to call a read tool first. Within a directory, `AGENTS.override.md` takes precedence; `AGENTS.md` is used only when the override is absent. Deeper rules apply only to their directory trees. Rules consume input tokens, and each run retains snapshots of directories already checked.
+
+The initial context includes rules applicable to the primary working directory. Other directories are discovered from structured file operation targets. A write requiring rules the model has not yet seen first returns “NOT EXECUTED”, allowing the model to reconsider with the new rules. Arbitrary shell commands, MCP tools, and custom tools without declared file targets do not automatically check every affected path.
+
+Regular workspace projects provide **Project prompt** and **Compression prompt** tabs. Leave the compression prompt empty to use the current mode's built-in default, or choose **Load default** to start editing its full text. Nonempty text replaces the default entirely; clearing it restores the default. Changes are saved or canceled with the project. Both prompts can be edited and take effect only when **Customize capabilities** is enabled. Turning it off uses defaults and retains custom text for later use. Custom compression applies only to the main conversation; subagents use built-in templates. Changing coding mode does not overwrite custom text.
+
+Custom compression prompts allow up to 50,000 characters and must contain exactly one `{conversation}` placeholder; `{output_language}` is optional. Automatic and manual compression use the same template. Existing tasks and their resumptions retain the custom content selected at launch.
+
+The menu beside the left-hand title area opens full prompt, compression prompt, and request previews. The read-only compression preview shows the effective template for the current draft: the built-in default when customization is disabled or the custom text is empty, otherwise the full custom template. Previews do not include subdirectory rules that would only be discovered by future operations.
 
 ### Profile
 
@@ -182,6 +198,8 @@ Explicit invocation sends the unchanged skill file and its source path, keeping 
 
 OpenAI-compatible and Anthropic-compatible services are supported. Manage models in Settings > Model and switch between them below the message input.
 
+Changes to the model name, capabilities, context limits, extra parameters, and reasoning options remain drafts until you choose **Save**. Choosing **Cancel** or closing the editor discards those changes.
+
 Set Vision and Tool use to match the model's actual capabilities. Turning Tool use off prevents calls to built-in tools, MCP tools, and subagents. Profile, runtime information, project information, skill listings, and automatic memory recall still follow capability settings; saved choices are unchanged.
 
 ## Tools And Approval
@@ -208,7 +226,7 @@ Edit the application `.env` in Settings > Environment to prepare variables for c
 
 ## Manage Custom Tools
 
-The bundled `tool-creator` Skill guides the model through creating, modifying, and troubleshooting custom tools, with a format reference and a Python example template. Enable the Skill and the required file capabilities, then ask the model to create a custom tool for the current project. Script testing also requires command execution and the appropriate runtime. Select the generated tool in capability settings before using it in a subsequent run.
+The bundled `tool-manager` Skill guides the model through creating, modifying, and troubleshooting custom tools, with a format reference and a Python example template. Enable the Skill and the required file capabilities, then ask the model to create a custom tool for the current project. Script testing also requires command execution and the appropriate runtime. Select the generated tool in capability settings before using it in a subsequent run.
 
 In **Settings > Tools**, Built-in tools and MCP appear above a divider. Below it, the custom-tool tree lists all packages, system and user sources, and added directories. Select a group name to list its tools on the right; use the boxed arrow to expand or collapse it. Select a tool from the list to view its details. Click a detail title to locate its directory, or expand packages to browse and preview files. User and added-directory tools support creation, editing by double-click, deletion, and ordering; deletion moves the entire tool package to the trash.
 

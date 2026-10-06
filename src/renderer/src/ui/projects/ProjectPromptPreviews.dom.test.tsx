@@ -77,7 +77,8 @@ describe('model request preview', () => {
       />
     )
 
-    await userEvent.click(screen.getByRole('button', { name: 'settings.view_model_request' }))
+    await userEvent.click(screen.getByRole('button', { name: 'common.more' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: 'settings.view_model_request' }))
 
     expect(await screen.findByText(/Bearer complete-api-key/)).toBeInTheDocument()
     expect(contextMocks.previewModelRequest).toHaveBeenCalledWith({
@@ -90,16 +91,54 @@ describe('model request preview', () => {
     expect(contextMocks.saveModelRequest).toHaveBeenCalledWith(content)
   })
 
+  it('keeps unavailable request previews disabled while compression remains accessible by keyboard', async () => {
+    const user = userEvent.setup()
+    render(<ProjectPromptPreviews project={{ ...project, sourceFolders: [] }} settings={settings} />)
+    const trigger = screen.getByRole('button', { name: 'common.more' })
+    trigger.focus()
+    await user.keyboard('{Enter}')
+    expect(screen.getByRole('menuitem', { name: 'settings.view_effective_system_context' })).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.getByRole('menuitem', { name: 'settings.view_model_request' })).toHaveAttribute('aria-disabled', 'true')
+    await user.keyboard('{Enter}')
+    expect(await screen.findByText(/You are a conversation summarizer/)).toBeInTheDocument()
+    expect(contextMocks.preview).not.toHaveBeenCalled()
+    expect(contextMocks.previewModelRequest).not.toHaveBeenCalled()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
   it('uses the current coding mode in the open compression preview', async () => {
     const props = { settings, projectId: 'project', project }
     const view = render(<ProjectPromptPreviews {...props} />)
-    await userEvent.click(screen.getByRole('button', { name: 'settings.view_context_compression_prompt' }))
+    await userEvent.click(screen.getByRole('button', { name: 'common.more' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: 'settings.view_context_compression_prompt' }))
     const preview = screen.getByText(/You are a conversation summarizer/)
     expect(preview).not.toHaveTextContent('Coding continuation handoff:')
     view.rerender(<ProjectPromptPreviews {...props} project={{ ...project, codingMode: true }} />)
     expect(preview).toHaveTextContent('Coding continuation handoff:')
     view.rerender(<ProjectPromptPreviews {...props} />)
     expect(preview).not.toHaveTextContent('Coding continuation handoff:')
+  })
+
+  it('previews effective custom or default compression prompts and reports invalid drafts without crashing', async () => {
+    const user = userEvent.setup()
+    const custom = { ...project, compressionPrompt: 'Keep citations in {output_language}: {conversation}' }
+    const props = { settings, project: custom }
+    const view = render(<ProjectPromptPreviews {...props} />)
+    await user.click(screen.getByRole('button', { name: 'common.more' }))
+    await user.click(screen.getByRole('menuitem', { name: 'settings.view_context_compression_prompt' }))
+    expect(screen.getByText(/^Keep citations in/)).toHaveTextContent('(en): {conversation}')
+    expect(screen.getByText(/^Keep citations in/)).not.toHaveTextContent('{output_language}')
+    view.rerender(<ProjectPromptPreviews {...props} project={{ ...custom, advancedSettings: false, codingMode: true }} />)
+    expect(screen.getByText(/You are a conversation summarizer/)).toHaveTextContent('Coding continuation handoff')
+    expect(screen.queryByText(/Keep citations/)).not.toBeInTheDocument()
+    view.rerender(<ProjectPromptPreviews {...props} project={{ ...custom, compressionPrompt: 'Missing placeholder' }} />)
+    expect(screen.getByText('project.compression_prompt_invalid')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'common.copy' })).toBeDisabled()
+    view.rerender(<ProjectPromptPreviews {...props} project={{ ...custom, compressionPrompt: '' }} />)
+    expect(screen.getByText(/You are a conversation summarizer/)).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'common.more' })).toHaveFocus())
   })
 
   it.each([
@@ -111,7 +150,8 @@ describe('model request preview', () => {
       .mockResolvedValueOnce({ content: '<coding_instruction>Current coding preview</coding_instruction>' })
     const props = { settings, projectId: 'project', project }
     const view = render(<ProjectPromptPreviews {...props} />)
-    await userEvent.click(screen.getByRole('button', { name: label }))
+    await userEvent.click(screen.getByRole('button', { name: 'common.more' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: label }))
     await waitFor(() => expect(contextMocks[method]).toHaveBeenCalledOnce())
     view.rerender(<ProjectPromptPreviews {...props} project={{ ...project, codingMode: true }} />)
     expect(await screen.findByText(/Current coding preview/)).toBeInTheDocument()

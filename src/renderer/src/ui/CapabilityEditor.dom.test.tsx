@@ -434,12 +434,16 @@ describe('shared capability editor', () => {
     expect(screen.getByRole('checkbox', { name: 'settings.capability_fileRead' })).toBePartiallyChecked()
     expect(onChange.mock.lastCall?.[0].toolMode).toBe('except')
   })
-  it('supports shortcut-only project skills even when globally disabled', async () => {
+  it('keeps shortcut and model selections independent even when globally disabled', async () => {
     const onChange = vi.fn()
     render(<Harness onChange={onChange} />)
     await userEvent.click(screen.getByRole('checkbox', { name: 'private capabilities.shortcut' }))
     expect(screen.getByRole('checkbox', { name: 'private capabilities.model' })).not.toBeChecked()
     expect(onChange.mock.lastCall?.[0].skills.entries).toEqual([{ id: 'user:private', shortcut: true, model: false }])
+    await userEvent.click(screen.getByRole('checkbox', { name: 'private capabilities.model' }))
+    expect(onChange.mock.lastCall?.[0].skills.entries).toEqual([{ id: 'user:private', shortcut: true, model: true }])
+    await userEvent.click(screen.getByRole('checkbox', { name: 'private capabilities.shortcut' }))
+    expect(onChange.mock.lastCall?.[0].skills.entries).toEqual([{ id: 'user:private', shortcut: false, model: true }])
   })
   it.each([false, true])('keeps custom choices across off and default modes (subagent %s)', async (subagent) => {
     render(<Harness subagent={subagent} />)

@@ -16,7 +16,6 @@ interface ModelSettingsProps {
   modelDraft: ModelDraft
   sectionClass: string
   onCreateModel: (templateId?: string) => void | Promise<void>
-  onAddProviderModel: () => boolean | void | Promise<boolean | void>
   onAddProviderModels: (models: string[]) => boolean | void | Promise<boolean | void>
   onDeleteProviderModel: () => boolean | void | Promise<boolean | void>
   onDeleteModel: () => void | Promise<void>
@@ -26,7 +25,7 @@ interface ModelSettingsProps {
   onSelectProviderModel: (index: number) => boolean | void | Promise<boolean | void>
   onRefreshCandidates: () => void | Promise<void>
   onUpdateDraft: (update: Partial<ModelDraft>) => void
-  onUpdateParameters: (parametersJson: string) => void
+  onSaveDetails: (draft: ModelDraft) => Promise<void>
 }
 
 export function ModelSettings({
@@ -40,7 +39,6 @@ export function ModelSettings({
   modelDraft,
   sectionClass,
   onCreateModel,
-  onAddProviderModel,
   onAddProviderModels,
   onDeleteProviderModel,
   onDeleteModel,
@@ -50,7 +48,7 @@ export function ModelSettings({
   onSelectProviderModel,
   onRefreshCandidates,
   onUpdateDraft,
-  onUpdateParameters
+  onSaveDetails
 }: ModelSettingsProps) {
   const { t } = useTranslation()
 
@@ -74,14 +72,13 @@ export function ModelSettings({
               selectedModelIndex={editingProviderModelIndex}
               listLoading={listLoading}
               modelDraft={modelDraft}
-              onAddProviderModel={onAddProviderModel}
               onAddProviderModels={onAddProviderModels}
               onDeleteProviderModel={onDeleteProviderModel}
               onMoveProviderModel={onMoveProviderModel}
               onSelectProviderModel={onSelectProviderModel}
               onRefreshCandidates={onRefreshCandidates}
               onUpdateDraft={onUpdateDraft}
-              onUpdateParameters={onUpdateParameters}
+              onSaveDetails={onSaveDetails}
             />
           )
         : (

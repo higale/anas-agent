@@ -31,7 +31,7 @@ import { DeveloperActions } from './DeveloperActions'
 import { GeneralSettingsSections } from './GeneralSettingsSections'
 import { LogSettings } from './LogSettings'
 import { MemorySettings } from './MemorySettings'
-import { CheckboxField } from '../CheckboxField'
+import { SegmentedMultiSelect } from '../SegmentedMultiSelect'
 import { formatDateTime } from '../formatDateTime'
 import { SkillsSettings } from './SkillsSettings'
 import type { SubagentDraft } from '../subagent/subagentDraft'
@@ -91,7 +91,6 @@ interface SettingsScreenProps {
   onEditAvatar: () => void | Promise<void>
   onClearAvatar: () => void | Promise<void>
   onCreateModel: (templateId?: string) => void | Promise<void>
-  onAddProviderModel: () => boolean | void | Promise<boolean | void>
   onAddProviderModels: (models: string[]) => boolean | void | Promise<boolean | void>
   onDeleteMcpServer: () => void | Promise<void>
   onDeleteSubagent: () => void | Promise<void>
@@ -132,7 +131,7 @@ interface SettingsScreenProps {
   onUpdateMcpDraft: (update: Partial<McpDraft>) => void
   onUpdateSubagentDraft: (update: Partial<SubagentDraft>) => void
   onUpdateModelDraft: (update: Partial<ModelDraft>) => void
-  onUpdateModelParameters: (parametersJson: string) => void
+  onSaveModelDetails: (draft: ModelDraft) => Promise<void>
   onUpdateSkillScriptApproval: (skillId: string | undefined, enabled: boolean) => void | Promise<void>
   onUpdateSkillAvailability: (skillId: string, update: SkillAvailabilityUpdate) => void | Promise<void>
 }
@@ -192,7 +191,6 @@ export function SettingsScreen({
   onEditAvatar,
   onClearAvatar,
   onCreateModel,
-  onAddProviderModel,
   onAddProviderModels,
   onDeleteMcpServer,
   onDeleteSubagent,
@@ -233,7 +231,7 @@ export function SettingsScreen({
   onUpdateMcpDraft,
   onUpdateSubagentDraft,
   onUpdateModelDraft,
-  onUpdateModelParameters,
+  onSaveModelDetails,
   onUpdateSkillScriptApproval,
   onUpdateSkillAvailability
 }: SettingsScreenProps) {
@@ -268,9 +266,10 @@ export function SettingsScreen({
               <h1 className="settings-page-title">{activeTabDefinition ? t(activeTabDefinition.labelKey) : ''}</h1>
               {pageDescription && <div className="ui-field-hint">{pageDescription}</div>}
             </div>
-            {activeTab === 'skills' && <CheckboxField checked={skills?.scriptAutoApprove ?? false}
-              disabled={!skills} label={t('settings.skill_scripts_auto_approve_all')}
-              onChange={enabled => void onUpdateSkillScriptApproval(undefined, enabled)} />}
+            {activeTab === 'skills' && <SegmentedMultiSelect ariaLabel={t('settings.skill_scripts_auto_approve_all')}
+              disabled={!skills}
+              options={[{ value: 'scriptAutoApprove', label: t('settings.skill_scripts_auto_approve_all'), checked: skills?.scriptAutoApprove ?? false }]}
+              onChange={(_value, enabled) => void onUpdateSkillScriptApproval(undefined, enabled)} />}
           </header>
           {error && <div className="settings-error" role="alert">{error}</div>}
           {activeTab === 'general' && (
@@ -411,7 +410,6 @@ export function SettingsScreen({
               modelDraft={modelDraft}
               sectionClass={sectionClass('model', 'settings-workbench ui-workbench ui-grid-sidebar')}
               onCreateModel={onCreateModel}
-              onAddProviderModel={onAddProviderModel}
               onAddProviderModels={onAddProviderModels}
               onDeleteModel={onDeleteModel}
               onDeleteProviderModel={onDeleteProviderModel}
@@ -421,7 +419,7 @@ export function SettingsScreen({
               onSelectProviderModel={onSelectProviderModel}
               onRefreshCandidates={onRefreshModelCandidates}
               onUpdateDraft={onUpdateModelDraft}
-              onUpdateParameters={onUpdateModelParameters}
+              onSaveDetails={onSaveModelDetails}
             />
           )}
 

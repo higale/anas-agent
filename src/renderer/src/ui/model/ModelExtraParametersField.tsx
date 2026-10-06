@@ -15,10 +15,11 @@ interface ModelExtraParametersFieldProps {
   protocol: ModelProtocol
   placeholder: string
   portalContainer?: HTMLElement | null
+  onDraftChange?(value: string): void
   onCommit(value: string): void
 }
 
-export function ModelExtraParametersField({ value, protocol, placeholder, portalContainer, onCommit }: ModelExtraParametersFieldProps) {
+export function ModelExtraParametersField({ value, protocol, placeholder, portalContainer, onCommit, onDraftChange }: ModelExtraParametersFieldProps) {
   const { t } = useTranslation()
   const inputId = useId()
   const [draft, setDraft] = useState(value)
@@ -91,7 +92,7 @@ export function ModelExtraParametersField({ value, protocol, placeholder, portal
         className="ui-autosize-textarea ui-code-textarea"
         data-max-height="none"
         value={value}
-        onDraftChange={setDraft}
+        onDraftChange={(value) => { setDraft(value); onDraftChange?.(value) }}
         onCommit={onCommit}
         placeholder={placeholder}
         rows={UI_TEXTAREA_ROWS_COMPACT}

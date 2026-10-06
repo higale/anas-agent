@@ -1,3 +1,4 @@
+import { compressionPromptError } from '@shared/summaryPrompt'
 import { requireDataVersion } from '@shared/dataVersion'
 import { UI_FONT_SIZE_MAX, UI_FONT_SIZE_MIN } from '@shared/uiPreferences'
 import { lstat, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
@@ -173,6 +174,7 @@ export function repairDocument(file: string, input: unknown): { value: RecordVal
       if (project.id === DEFAULT_WORKSPACE_PROJECT_ID && project.pinned !== false) repair.replace(project, 'pinned', false, `${path}.pinned`)
       if (project.kind === 'workspace') {
         repair.fill(project, { ...projectDefaults, sourceFolders: [], restrict_subagents: capabilityDefaults.restrict_subagents }, path)
+        if (compressionPromptError(project.compression_prompt)) repair.replace(project, 'compression_prompt', '', `${path}.compression_prompt`)
         repair.capabilities(project, projectCapabilityDefaults, path)
       }
     }

@@ -1,3 +1,4 @@
+import { normalizeCompressionPrompt } from './summaryPrompt'
 import { requireDataVersion } from './dataVersion'
 import { validateSubagentSelection, type SubagentSelection } from './subagentSelection'
 import defaults from '../../data/config/capabilities.json'
@@ -65,6 +66,7 @@ export interface RunConfiguration {
   customTools: CustomToolDefinition[]
   /** Workflow only; never participates in capability selection or intersection. */
   codingMode: boolean
+  compressionPrompt?: string
   capabilities: AgentCapabilities
   /** Root project policy, retained through every descendant run. */
   subagentLimit?: AgentCapabilities
@@ -181,7 +183,8 @@ export function validateRunConfiguration(value: unknown): RunConfiguration {
   const capabilities = validateCapabilities(raw.capabilities)
   const subagentLimit = raw.subagentLimit === undefined ? undefined : validateCapabilities(raw.subagentLimit)
   if (typeof raw.codingMode !== 'boolean') throw new Error('Invalid run coding mode.')
-  return { codingMode: raw.codingMode, capabilities, customTools: validateCustomTools(raw.customTools), ...(subagentLimit ? { subagentLimit } : {}),
+  const compressionPrompt = normalizeCompressionPrompt(raw.compressionPrompt)
+  return { ...(compressionPrompt ? { compressionPrompt } : {}), codingMode: raw.codingMode, capabilities, customTools: validateCustomTools(raw.customTools), ...(subagentLimit ? { subagentLimit } : {}),
     ...(raw.subagentSelectionLimit === undefined ? {} : { subagentSelectionLimit: validateSubagentSelection(raw.subagentSelectionLimit) }) }
 }
 
@@ -189,6 +192,7 @@ export function serializeRunConfiguration(value: RunConfiguration) {
   const config = validateRunConfiguration(value)
   return {
     coding_mode: config.codingMode,
+    ...(config.compressionPrompt ? { compression_prompt: config.compressionPrompt } : {}),
     custom_tools: config.customTools.map(serializeCustomTool),
     capabilities: serializeCapabilities(config.capabilities),
     ...(config.subagentSelectionLimit ? { subagent_selection_limit: config.subagentSelectionLimit } : {}),
@@ -200,6 +204,7 @@ export function parseRunConfiguration(value: unknown): RunConfiguration {
   const raw = object(value)
   return validateRunConfiguration({
     codingMode: raw.coding_mode,
+    compressionPrompt: raw.compression_prompt,
     customTools: parseCustomTools(raw.custom_tools),
     capabilities: parseCapabilities(raw.capabilities),
     ...(raw.subagent_selection_limit === undefined ? {} : { subagentSelectionLimit: raw.subagent_selection_limit }),

@@ -53,7 +53,6 @@ describe('empty model settings', () => {
         modelDraft={emptyModelDraft()}
         sectionClass="settings-workbench ui-workbench ui-grid-sidebar"
         onCreateModel={vi.fn()}
-        onAddProviderModel={vi.fn()}
         onAddProviderModels={vi.fn()}
         onDeleteProviderModel={vi.fn()}
         onDeleteModel={vi.fn()}
@@ -63,7 +62,7 @@ describe('empty model settings', () => {
         onSelectProviderModel={vi.fn()}
         onRefreshCandidates={vi.fn()}
         onUpdateDraft={vi.fn()}
-        onUpdateParameters={vi.fn()}
+        onSaveDetails={vi.fn()}
       />
     )
 

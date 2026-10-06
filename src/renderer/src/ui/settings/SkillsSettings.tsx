@@ -4,7 +4,7 @@ import { FolderDown, ListTree, Trash2, Wand2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { SKILL_ROOT_DISPLAY_NAME_MAX_LENGTH, SKILL_SHORTCUT_ALIAS_MAX_LENGTH, SKILL_SHORTCUT_ALIAS_PATTERN } from '@shared/types'
 import type { SkillAvailabilityUpdate, SkillFileNode, SkillFilePreview, SkillRootSummary, SkillRootUpdate, SkillSnapshot, SkillSummary } from '@shared/types'
-import { CheckboxField } from '../CheckboxField'
+import { SegmentedMultiSelect } from '../SegmentedMultiSelect'
 import { CommitTextInput } from '../CommitTextField'
 import { notice } from '../notice'
 import { UI_ICON_SIZE_SMALL } from '../uiConstants'
@@ -296,14 +296,17 @@ export function SkillsSettings({
           <div className="settings-skill-viewer-heading ui-toolbar ui-toolbar-between">
             <div><button className="ui-link-button" type="button" disabled={selectedSkill.linked && !selectedSkill.resolvedDirPath}
               data-tooltip={t('chat.show_in_folder')} onClick={() => void showItemInFolder(selectedSkill.dirPath)}>{selectedSkill.name}</button></div>
-            <div className="ui-toolbar">
-              <CheckboxField checked={selectedSkill.modelAvailable} label={t('settings.skill_model_available')} onChange={(modelAvailable) => void onUpdateAvailability(selectedSkill.id, { modelAvailable })} />
-              <CheckboxField checked={selectedSkill.userAvailable} label={t('settings.skill_user_available')} onChange={(userAvailable) => void onUpdateAvailability(selectedSkill.id, { userAvailable })} />
-              <CheckboxField checked={selectedSkill.scriptAutoApprove} label={t('settings.skill_scripts_auto_approve')}
-                onChange={enabled => void onUpdateScriptApproval(selectedSkill.id, enabled)} />
-            </div>
+            <SegmentedMultiSelect<'modelAvailable' | 'userAvailable' | 'scriptAutoApprove'> ariaLabel={selectedSkill.name}
+              options={[
+                { value: 'modelAvailable', label: t('settings.skill_model_available'), checked: selectedSkill.modelAvailable },
+                { value: 'userAvailable', label: t('settings.skill_user_available'), checked: selectedSkill.userAvailable },
+                { value: 'scriptAutoApprove', label: t('settings.skill_scripts_auto_approve'), checked: selectedSkill.scriptAutoApprove }
+              ]}
+              onChange={(value, checked) => {
+                if (value === 'scriptAutoApprove') void onUpdateScriptApproval(selectedSkill.id, checked)
+                else void onUpdateAvailability(selectedSkill.id, { [value]: checked })
+              }} />
           </div>
-          {skills?.scriptAutoApprove && <small className="ui-field-hint">{t('settings.skill_scripts_auto_approve_global_active')}</small>}
           {selectedSkillIssue && <div className="ui-note ui-note-danger">{selectedSkillIssueText}{selectedSkillIssue.detail ? ` ${selectedSkillIssue.detail}` : ''}</div>}
           <p>{selectedSkill.description}</p>
           {selectedSkill.compatibility && <p><strong>{t('settings.skill_compatibility')}：</strong>{selectedSkill.compatibility}</p>}

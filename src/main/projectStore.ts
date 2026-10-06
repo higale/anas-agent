@@ -1,9 +1,11 @@
+import { normalizeCompressionPrompt } from '@shared/summaryPrompt'
 import { ProjectOperationFailure } from '@shared/projectOperation'
 import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
 import { renameSync } from 'node:fs'
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import { getDefaultWorkspaceDir, getProjectStoreFile } from './config/dataDir'
 import { PROJECT_ICON_COLORS, PROJECT_ICON_NAMES } from '@shared/projectAppearance'
 import { defaultCapabilities, defaultProjectSettings, defaultRestrictSubagents, parseCapabilities, serializeCapabilities, validateCapabilities } from '@shared/agentCapabilities'
@@ -52,6 +54,26 @@ function initialDefaultWorkspaceName(): string {
   return locale.toLowerCase().startsWith('zh') ? '默认项目' : 'Default Project'
 }
 
+function defaultWorkspaceSettings() {
+  return {
+    compressionPrompt: undefined,
+    name: initialDefaultWorkspaceName(),
+    sourceFolders: [getDefaultWorkspaceDir()],
+    ...defaultProjectSettings,
+    capabilities: structuredClone(defaultCapabilities),
+    restrictSubagents: defaultRestrictSubagents
+  }
+}
+
+function applyDefaultWorkspacePolicy(store: StoredProjects): StoredProjects {
+  const settings = defaultWorkspaceSettings()
+  // The default workspace always follows application defaults, regardless of saved overrides.
+  // Keep the persisted v0 format readable; reading alone does not rewrite the original file.
+  return { ...store, projects: store.projects.map(project => project.id === DEFAULT_WORKSPACE_PROJECT_ID
+    ? { ...project, ...settings }
+    : project) }
+}
+
 function requireProject(value: unknown, index: number): Project {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`Project ${index + 1} has an invalid format.`)
@@ -80,7 +102,7 @@ function requireProject(value: unknown, index: number): Project {
   } else {
     throw new Error(`Project ${index + 1} has an invalid format.`)
   }
-  const { model_config_id, model_parameter_preset_id, capabilities, restrict_subagents, advanced_settings, coding_mode, ...metadata } = project
+  const { model_config_id, model_parameter_preset_id, capabilities, restrict_subagents, advanced_settings, coding_mode, compression_prompt, ...metadata } = project
   const selection = validateProjectModelSelection({
     modelConfigId: model_config_id,
     modelParameterPresetId: model_parameter_preset_id
@@ -90,7 +112,7 @@ function requireProject(value: unknown, index: number): Project {
   if (project.kind === 'workspace' && typeof coding_mode !== 'boolean') throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Invalid project coding mode.')
   return {
     ...metadata, ...selection,
-    ...(project.kind === 'workspace' ? { capabilities: parseCapabilities(capabilities), restrictSubagents: restrict_subagents, advancedSettings: advanced_settings, codingMode: coding_mode, prompt: validateProjectPrompt(project.prompt) } : {})
+    ...(project.kind === 'workspace' ? { capabilities: parseCapabilities(capabilities), restrictSubagents: restrict_subagents, advancedSettings: advanced_settings, codingMode: coding_mode, compressionPrompt: normalizeCompressionPrompt(compression_prompt), prompt: validateProjectPrompt(project.prompt) } : {})
   } as Project
 }
 
@@ -128,10 +150,11 @@ function serializeProjectStore(store: StoredProjects) {
       delete stored.capabilities
       delete stored.restrictSubagents
       delete stored.advancedSettings
+      delete stored.compressionPrompt
       delete stored.codingMode
       return {
         ...stored,
-        ...(project.kind === 'workspace' ? { capabilities: serializeCapabilities(project.capabilities), restrict_subagents: project.restrictSubagents, advanced_settings: project.advancedSettings, coding_mode: project.codingMode } : {}),
+        ...(project.kind === 'workspace' ? { capabilities: serializeCapabilities(project.capabilities), restrict_subagents: project.restrictSubagents, advanced_settings: project.advancedSettings, coding_mode: project.codingMode, ...(project.compressionPrompt ? { compression_prompt: project.compressionPrompt } : {}) } : {}),
         ...(modelConfigId ? { model_config_id: modelConfigId } : {}),
         ...(modelConfigId && modelParameterPresetId !== undefined
           ? { model_parameter_preset_id: modelParameterPresetId }
@@ -144,7 +167,7 @@ function serializeProjectStore(store: StoredProjects) {
 async function readStore(): Promise<StoredProjects> {
   const path = getProjectStoreFile()
   try {
-    return await readProjectStoreFile(path)
+    return await applyDefaultWorkspacePolicy(await readProjectStoreFile(path))
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       let pending = projectInitializations.get(path)
@@ -154,7 +177,7 @@ async function readStore(): Promise<StoredProjects> {
         void pending.finally(() => { projectInitializations.delete(path) }).catch(() => undefined)
       }
       await pending
-      return readProjectStoreFile(path)
+      return applyDefaultWorkspacePolicy(await readProjectStoreFile(path))
     }
     throw error
   }
@@ -289,7 +312,7 @@ function projectCapabilities(request: Extract<ProjectCreateRequest, { kind: 'wor
   } catch {
     throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Invalid capability settings.')
   }
-  return { capabilities, restrictSubagents: request.restrictSubagents, advancedSettings: request.advancedSettings, codingMode: request.codingMode, prompt: validateProjectPrompt(request.prompt) }
+  return { compressionPrompt: normalizeCompressionPrompt(request.compressionPrompt), capabilities, restrictSubagents: request.restrictSubagents, advancedSettings: request.advancedSettings, codingMode: request.codingMode, prompt: validateProjectPrompt(request.prompt) }
 }
 
 function hasDuplicateName(projects: Project[], name: string, excludedProjectId?: string): boolean {
@@ -317,6 +340,12 @@ export async function prepareProjectPreview(request: ProjectCreateRequest, proje
     throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Project request is invalid.')
   }
   const timestamp = now()
+  if (projectId === DEFAULT_WORKSPACE_PROJECT_ID) {
+    if (request.kind !== 'workspace') throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'The default project must be a workspace.')
+    const project = await getProject(projectId)
+    const selection = validateProjectModelSelection(request)
+    return { ...project, modelConfigId: selection.modelConfigId, modelParameterPresetId: selection.modelParameterPresetId }
+  }
   const common = {
     id: projectId,
     name: validateProjectName(request.name),
@@ -375,7 +404,13 @@ export async function updateProject(projectId: string, request: ProjectUpdateReq
     const current = store.projects.find((project) => project.id === projectId)
     if (!current) throw new ProjectOperationFailure({ code: 'not_found' }, 'Project was not found.')
     if (current.kind !== request.kind) throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Project kind cannot be changed.')
-    if (hasDuplicateName(store.projects, name, projectId)) {
+    if (projectId === DEFAULT_WORKSPACE_PROJECT_ID) {
+      const fixed = defaultWorkspaceSettings()
+      if (Object.entries(fixed).some(([key, value]) => !isDeepStrictEqual(request[key as keyof ProjectUpdateRequest], value))) {
+        throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Only the default project icon and model can be changed.')
+      }
+    }
+    if (name !== current.name && hasDuplicateName(store.projects, name, projectId)) {
       throw new ProjectOperationFailure({ code: 'duplicate_name', name }, `A project named "${name}" already exists.`)
     }
     const appearance = validateProjectAppearance(request)
@@ -393,7 +428,8 @@ export async function updateProject(projectId: string, request: ProjectUpdateReq
           ...modelSelection,
           kind: 'workspace',
           name,
-          sourceFolders: await validateProjectSourceFolders(request.sourceFolders),
+          sourceFolders: projectId === DEFAULT_WORKSPACE_PROJECT_ID && current.kind === 'workspace'
+            ? current.sourceFolders : await validateProjectSourceFolders(request.sourceFolders),
           ...projectCapabilities(request),
           updatedAt
         }

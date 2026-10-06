@@ -63,13 +63,6 @@
   gap: 9px;
 }
 
-.model-capability-controls {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--ui-grid-gap, 12px);
-  min-width: 0;
-}
-
 .model-template-menu {
   width: min(220px, calc(100vw - 20px));
   max-height: min(520px, calc(100vh - 20px));
@@ -215,7 +208,18 @@
   max-height: min(88vh, 820px);
 }
 
+.model-details-dialog > .ui-dialog-header {
+  grid-template-columns: var(--ui-dialog-icon-size) minmax(0, 1fr) auto;
+}
+
+.model-details-dialog > .ui-dialog-header > .ui-dialog-title {
+  overflow-wrap: anywhere;
+}
+
 .model-details-dialog-content {
+  min-width: 0;
+  margin: 0;
+  border: 0;
   display: grid;
   align-content: start;
   gap: 16px;

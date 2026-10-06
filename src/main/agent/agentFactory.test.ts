@@ -1645,7 +1645,7 @@ describe('subagent definition snapshots', () => {
     snapshot.defaultModel = { ...snapshot.defaultModel!, contextCompressionEnabled: true }
     const contextFactory = vi.spyOn(contextRuntimeModule, 'createAgentContextRuntime')
     const summaryFactory = vi.spyOn(summarizationModule, 'createAnasSummarizationMiddleware')
-    projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), codingMode, advancedSettings: false })
+    projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), codingMode, advancedSettings: false, compressionPrompt: 'Keep sources: {conversation}' })
     vi.mocked(toolsStore.listToolSnapshot).mockResolvedValue({ roots: [], tools: snapshot.customTools })
     appConfigMocks.getAppConfigSnapshot.mockResolvedValue(snapshot)
     const database = AgentDatabase.open(':memory:')
@@ -1655,19 +1655,24 @@ describe('subagent definition snapshots', () => {
       const instance = await createAgentInstance(owner, database, { prepareWorkspace: false, onConfigurationResolved: resolved })
       expect(contextFactory.mock.lastCall![0].codingMode).toBe(codingMode)
       expect(summaryFactory.mock.lastCall![0].codingMode).toBe(codingMode)
+      expect(summaryFactory.mock.lastCall![0].compressionPrompt).toBeUndefined()
+      expect(contextFactory.mock.lastCall![0].compressionPrompt).toBeUndefined()
       const originalStatus = await instance.context.status({ messages: [] })
       await instance.dispose()
       const configuration = resolved.mock.lastCall![0]
+      expect(configuration.compressionPrompt).toBeUndefined()
       expect(configuration.codingMode).toBe(codingMode)
       expect(configuration.capabilities).toMatchObject({ memory: true, workspace: true, toolMode: 'all' })
       const tools = runtimeToolMocks.createdToolNames.mock.lastCall![0]
       const prompt = await prepareAgentSystemPrompt(owner, snapshot)
       expect(prompt.systemPrompt.text.includes('<coding_instruction>')).toBe(codingMode)
-      projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), codingMode: !codingMode, advancedSettings: false })
+      projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), codingMode: !codingMode, advancedSettings: false, compressionPrompt: 'New sources: {conversation}' })
       resolved.mockClear()
       const resumed = await createAgentInstance(owner, database, { prepareWorkspace: false, configuration, onConfigurationResolved: resolved })
       expect(contextFactory.mock.lastCall![0].codingMode).toBe(codingMode)
       expect(summaryFactory.mock.lastCall![0].codingMode).toBe(codingMode)
+      expect(summaryFactory.mock.lastCall![0].compressionPrompt).toBeUndefined()
+      expect(contextFactory.mock.lastCall![0].compressionPrompt).toBeUndefined()
       expect((await resumed.context.status({ messages: [] })).breakdown.systemInstructionTokens).toBe(originalStatus.breakdown.systemInstructionTokens)
       await resumed.dispose()
       expect(resolved).not.toHaveBeenCalled()
@@ -1677,8 +1682,39 @@ describe('subagent definition snapshots', () => {
       const next = await createAgentInstance(owner, database, { prepareWorkspace: false })
       expect(contextFactory.mock.lastCall![0].codingMode).toBe(!codingMode)
       expect(summaryFactory.mock.lastCall![0].codingMode).toBe(!codingMode)
+      expect(summaryFactory.mock.lastCall![0].compressionPrompt).toBeUndefined()
       expect((await next.context.status({ messages: [] })).breakdown.systemInstructionTokens).not.toBe(originalStatus.breakdown.systemInstructionTokens)
       await next.dispose()
+    } finally { database.close() }
+  })
+
+  it('keeps a started task compression template when project customization is later disabled', async () => {
+    const contextFactory = vi.spyOn(contextRuntimeModule, 'createAgentContextRuntime')
+    const summaryFactory = vi.spyOn(summarizationModule, 'createAnasSummarizationMiddleware')
+    const project = { ...defaultWorkspaceProject(), advancedSettings: true, compressionPrompt: 'Keep sources: {conversation}' }
+    projectStoreMocks.getProject.mockResolvedValue(project)
+    appConfigMocks.getAppConfigSnapshot.mockResolvedValue(previewConfig())
+    const database = AgentDatabase.open(':memory:')
+    const owner = configuredThread(database, { title: 'Compression customization' })
+    const resolved = vi.fn()
+    try {
+      const initial = await createAgentInstance(owner, database, { prepareWorkspace: false, onConfigurationResolved: resolved })
+      const configuration = resolved.mock.lastCall![0]
+      expect(configuration.compressionPrompt).toBe(project.compressionPrompt)
+      await initial.dispose()
+      projectStoreMocks.getProject.mockResolvedValue({ ...project, advancedSettings: false })
+      const resumed = await createAgentInstance(owner, database, { prepareWorkspace: false, configuration })
+      expect(contextFactory.mock.lastCall![0].compressionPrompt).toBe(project.compressionPrompt)
+      expect(summaryFactory.mock.lastCall![0].compressionPrompt).toBe(project.compressionPrompt)
+      await resumed.dispose()
+      const next = await createAgentInstance(owner, database, { prepareWorkspace: false })
+      expect(contextFactory.mock.lastCall![0].compressionPrompt).toBeUndefined()
+      expect(summaryFactory.mock.lastCall![0].compressionPrompt).toBeUndefined()
+      await next.dispose()
+      projectStoreMocks.getProject.mockResolvedValue(project)
+      const enabled = await createAgentInstance(owner, database, { prepareWorkspace: false })
+      expect(contextFactory.mock.lastCall![0].compressionPrompt).toBe(project.compressionPrompt)
+      await enabled.dispose()
     } finally { database.close() }
   })
 
@@ -1707,7 +1743,7 @@ describe('subagent definition snapshots', () => {
     snapshot.defaultCapabilities.restrictSubagents = restricted
     snapshot.subagents.push({ ...snapshot.subagents[0], name: 'reviewer', enabled: false })
     snapshot.defaultCapabilities.capabilities.subagents = { mode: 'custom', names: ['reviewer'] }
-    const project = { ...defaultWorkspaceProject(), advancedSettings: customized, restrictSubagents: restricted,
+    const project = { ...defaultWorkspaceProject(), compressionPrompt: 'Parent-only summary: {conversation}', advancedSettings: customized, restrictSubagents: restricted,
       capabilities: { ...structuredClone(defaultCapabilities), toolMode: 'selected' as const, tools: ['read_file'] } }
     projectStoreMocks.getProject.mockResolvedValue(project)
     vi.mocked(toolsStore.listToolSnapshot).mockResolvedValue({ roots: [], tools: snapshot.customTools })
@@ -1738,6 +1774,8 @@ describe('subagent definition snapshots', () => {
         prepareWorkspace: false, subagentCall: call, parentConfiguration: configuration, onConfigurationResolved: resolved
       })
       await child.dispose()
+      expect(configuration.compressionPrompt).toBe(customized ? 'Parent-only summary: {conversation}' : undefined)
+      expect(resolved.mock.lastCall![0].compressionPrompt).toBeUndefined()
       const childCapabilities = resolved.mock.lastCall![0].capabilities
       expect(childCapabilities.profile).toBe(!restricted || customized)
       expect(childCapabilities.toolMode).toBe(restricted ? 'selected' : 'all')

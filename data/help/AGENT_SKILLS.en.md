@@ -44,8 +44,8 @@ The application supplies these system skills in `skills_system/` under applicati
 | Skill | Purpose |
 | --- | --- |
 | `config` | Changes application settings and the avatar; requires Update configuration capability. |
-| `skill-creator` | Creates or improves skills; requires file writing. Testing scripts also needs their runtimes. |
-| `skill-installer` | Installs skills from local directories or Git repositories; requires file reading and writing. Remote installation also needs Git and network access. |
+| `skill-manager` | Creates or modifies skills, or installs them from local directories and Git repositories. Requires file reading and writing; remote installation also needs Git and network access, and script testing needs the appropriate runtimes. |
+| `tool-manager` | Creates, modifies, and troubleshoots Anas custom tools, with a format reference and Python example template. Requires file reading and writing; testing also needs command execution and the appropriate runtime. |
 
 `skills_examples/` contains examples that are not loaded by default. Import them into **User** before use:
 

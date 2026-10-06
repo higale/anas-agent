@@ -7,6 +7,17 @@ const skill = (id: string, modelAvailable = false, userAvailable = false): Skill
   id, rootId: 'user', name: id, description: '', modelAvailable, userAvailable, dirPath: `/skills/${id}`, linked: false, relativePath: id, source: 'user', rootName: 'User', shortcutAlias: 'user'
 })
 
+describe('compression configuration compatibility', () => {
+  it('accepts absent fields and round trips a frozen custom template', () => {
+    const config = { customTools: [], codingMode: false, capabilities: structuredClone(defaultCapabilities) }
+    expect(parseRunConfiguration(serializeRunConfiguration(config))).not.toHaveProperty('compressionPrompt')
+    const raw = serializeRunConfiguration({ ...config, compressionPrompt: 'Remember sources: {conversation}' })
+    expect(raw.compression_prompt).toBe('Remember sources: {conversation}')
+    expect(parseRunConfiguration(raw).compressionPrompt).toBe(raw.compression_prompt)
+    expect(parseRunConfiguration({ ...raw, compression_prompt: '' })).not.toHaveProperty('compressionPrompt')
+  })
+})
+
 describe('scoped Agent capabilities', () => {
   it.each(['default', 'custom', 'off'] as const)('round trips %s selections without losing custom choices', (mode) => {
     const value: AgentCapabilities = { ...structuredClone(defaultCapabilities),

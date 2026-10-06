@@ -12,6 +12,7 @@ Anas 是基于 Electron、React 和 TypeScript 构建的本地桌面 AI Agent，
 
 - 用户指南：[English](data/help/USER_GUIDE.en.md) · [中文](data/help/USER_GUIDE.zh-CN.md)
 - Agent Skills：[English](data/help/AGENT_SKILLS.en.md) · [中文](data/help/AGENT_SKILLS.zh-CN.md)
+- [编码模式与项目规则](docs/CODING_MODE.md)
 - [自定义工具包](docs/CUSTOM_TOOLS.md)
 - [当前状态存储](docs/CURRENT_STATE_STORAGE.md)
 - [安全与审批模型](docs/SECURITY_MODEL.md)
@@ -25,6 +26,7 @@ Anas 是基于 Electron、React 和 TypeScript 构建的本地桌面 AI Agent，
 
 - 支持 OpenAI 兼容和 Anthropic 兼容的模型供应商、流式回复、上下文压缩，以及审批后的任务恢复。
 - 在设置中配置默认能力，按需为项目定制，并独立配置子 Agent。
+- 默认项目仅可修改图标（含颜色）和模型（含推理选项）；名称、工作目录等使用默认值，能力跟随全局设置。
 - 内置文件、图片、网络、记忆和命令工具，随应用提供 ripgrep，支持 MCP 与自定义工具包。
 - 支持用户级和项目级 Skills、提示词快捷输入、输入历史，以及语音输入与输出。
 - 支持文本、图片、PDF 和 DOCX 附件。图片通过原生多模态内容块发送，文档在本地提取内容。
@@ -69,6 +71,7 @@ npm run build
 npm run test:e2e -- --help-only
 npm run test:e2e -- --startup-only
 npm run test:e2e -- --storage-only
+npm run test:e2e -- --workspace-only
 ```
 
 构建、打包与后端测试共用生成文件和原生依赖，请串行运行。
@@ -104,7 +107,7 @@ npm run dev -- -- --data-dir "./runtime-data/research"
 | `.env` | 应用环境变量 |
 | `attachments/`、`file_edits/` | 已保存的附件与文件修改恢复材料 |
 | `skills/`、`tools/` | 用户管理的包 |
-| `skills_system/`、`skills_examples/`、`tools_examples/` | 启动时刷新的内置包；示例需先导入再使用 |
+| `skills_system/`、`skills_examples/`、`tools_system/`、`tools_examples/` | 启动时刷新的内置包；示例需先导入再使用 |
 | `help/`、`lang/` | 帮助与语言包 |
 | `assets/`、`log/`、`cache/`、`tmp/`、`electron/` | 资源、日志、缓存、临时文件与 Electron 用户配置 |
 

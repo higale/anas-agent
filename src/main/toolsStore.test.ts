@@ -35,15 +35,15 @@ beforeEach(async () => {
 afterEach(async () => { vi.doUnmock('./config/dataDir'); vi.doUnmock('node:fs/promises'); await rm(root, { recursive: true, force: true }) })
 
 describe('tool directory imports', () => {
-  it('loads the tool-creator template as an independent user package', async () => {
-    const result = await store.importToolDirectories([resolve('data/skills_system/tool-creator/assets/python-tool')])
+  it('loads the tool-manager template as an independent user package', async () => {
+    const result = await store.importToolDirectories([resolve('data/skills_system/tool-manager/assets/python-tool')])
     expect(result.ids).toEqual(['user:normalize-text-example'])
     expect((await store.listToolSnapshot()).tools).toEqual([expect.objectContaining({
       id: 'user:normalize-text-example', name: 'normalize_text',
       definition: expect.objectContaining({ command: 'scripts/run.py {{args}}' })
     })])
     await expect(readFile(join(root, 'tools/python-tool/scripts/run.py'), 'utf8')).resolves.toBe(
-      await readFile(resolve('data/skills_system/tool-creator/assets/python-tool/scripts/run.py'), 'utf8'))
+      await readFile(resolve('data/skills_system/tool-manager/assets/python-tool/scripts/run.py'), 'utf8'))
   })
   it('initializes examples and the user directory before import, then imports independent copies', async () => {
     await store.initializeToolsStore()

@@ -1,9 +1,9 @@
 import * as Dialog from '@radix-ui/react-dialog'
-import { SlidersHorizontal, X } from 'lucide-react'
-import { useId, useState } from 'react'
+import { Save, SlidersHorizontal, X } from 'lucide-react'
+import { useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { resolveModelListEndpoint } from '@shared/modelListEndpoint'
-import { CheckboxField } from '../CheckboxField'
+import { SegmentedMultiSelect } from '../SegmentedMultiSelect'
 import { CommitNumberInput } from '../CommitNumberInput'
 import { CommitTextInput } from '../CommitTextField'
 import { RangeField } from '../RangeField'
@@ -21,10 +21,10 @@ import {
   maxModelMaxContextTokens,
   maxModelMaxOutputTokens,
   minModelMaxContextTokens,
-  minModelMaxOutputTokens
+  minModelMaxOutputTokens,
+  validateProviderModelDraft
 } from './modelDraft'
 import type { ModelDraft } from './modelDraft'
-import { ModelListUrlPopover } from './ModelListUrlPopover'
 import { ModelParameterPresetsEditor } from './ModelParameterPresetsEditor'
 import { ModelExtraParametersField } from './ModelExtraParametersField'
 
@@ -35,21 +35,52 @@ interface ModelDetailsDialogProps {
   open: boolean
   onOpenChange(open: boolean): void
   onRefreshCandidates(): void | Promise<void>
-  onUpdateDraft(update: Partial<ModelDraft>): void
-  onUpdateParameters(parametersJson: string): void
+  onSaveDetails(draft: ModelDraft): Promise<void>
 }
 
 export function ModelDetailsDialog({
   candidates,
   listLoading,
-  modelDraft,
+  modelDraft: initialDraft,
   open,
   onOpenChange,
   onRefreshCandidates,
-  onUpdateDraft,
-  onUpdateParameters
+  onSaveDetails
 }: ModelDetailsDialogProps) {
   const { t } = useTranslation()
+  const [modelDraft, setModelDraft] = useState(() => structuredClone(initialDraft))
+  const draftRef = useRef(modelDraft)
+  const savingRef = useRef(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string>()
+  function onUpdateDraft(update: Partial<ModelDraft>): void {
+    draftRef.current = { ...draftRef.current, ...update }
+    setModelDraft(draftRef.current)
+    setError(undefined)
+  }
+  async function save(): Promise<void> {
+    if (savingRef.current) return
+    // Flush normalization of the currently focused number/text control before validation.
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+    const draft = draftRef.current
+    const validationError = validateProviderModelDraft(draft, t)
+    if (validationError) {
+      setError(validationError)
+      return
+    }
+    savingRef.current = true
+    setSaving(true)
+    setError(undefined)
+    try {
+      await onSaveDetails(draft)
+      onOpenChange(false)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t('settings.failed_save_model'))
+    } finally {
+      savingRef.current = false
+      setSaving(false)
+    }
+  }
   const tokenFieldId = useId()
   const [portalContainer, setPortalContainer] = useState<HTMLDivElement | null>(null)
   let modelListRequestReady = false
@@ -58,23 +89,14 @@ export function ModelDetailsDialog({
   } catch {
     modelListRequestReady = false
   }
-  const modelListUrlAction = (
-    <ModelListUrlPopover
-      baseUrl={modelDraft.baseUrl}
-      modelListAuth={modelDraft.modelListAuth}
-      modelListUrl={modelDraft.modelListUrl}
-      portalContainer={portalContainer}
-      protocol={modelDraft.protocol}
-      onChange={onUpdateDraft}
-    />
-  )
 
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    <Dialog.Root open={open} onOpenChange={(next) => { if (!savingRef.current) onOpenChange(next) }}>
       <Dialog.Portal>
         <Dialog.Overlay className="ui-backdrop" />
         <Dialog.Content
           className="model-details-dialog ui-dialog ui-dialog-wide ui-dialog-fixed-footer ui-dialog-centered ui-popover"
+          aria-describedby={undefined}
           onPointerDownOutside={(event) => event.preventDefault()}
           ref={setPortalContainer}
         >
@@ -82,21 +104,25 @@ export function ModelDetailsDialog({
             <div className="ui-dialog-icon">
               <SlidersHorizontal size={18} />
             </div>
-            <div>
-              <Dialog.Title asChild>
-                <h2 className="ui-dialog-title">
-                  {t('settings.edit_model_title', {
-                    name: modelDraft.displayName.trim() || modelDraft.model || t('settings.no_model_id')
-                  })}
-                </h2>
-              </Dialog.Title>
-              <Dialog.Description asChild>
-                <p className="ui-dialog-description">{t('settings.edit_model_description')}</p>
-              </Dialog.Description>
-            </div>
+            <Dialog.Title asChild>
+              <h2 className="ui-dialog-title">
+                {modelDraft.displayName.trim() || modelDraft.model || t('settings.no_model_id')}
+              </h2>
+            </Dialog.Title>
+            <SegmentedMultiSelect<'stream' | 'vision' | 'toolUse'> ariaLabel={t('settings.capabilities')}
+              disabled={saving}
+              options={[
+                { value: 'stream', label: t('settings.stream_output'), checked: modelDraft.stream },
+                { value: 'vision', label: t('settings.model_capability_vision'), checked: modelDraft.capabilities.vision },
+                { value: 'toolUse', label: t('settings.model_capability_tool_use'), checked: modelDraft.capabilities.toolUse }
+              ]}
+              onChange={(value, checked) => {
+                if (value === 'stream') onUpdateDraft({ stream: checked })
+                else onUpdateDraft({ capabilities: { ...modelDraft.capabilities, [value]: checked } })
+              }} />
           </header>
 
-          <div className="model-details-dialog-content ui-dialog-body">
+          <fieldset disabled={saving} className="model-details-dialog-content ui-dialog-body">
             <section className="ui-form-section">
               <div className="ui-grid-2">
                 <label className="ui-field-stack">
@@ -104,6 +130,7 @@ export function ModelDetailsDialog({
                   <CommitTextInput
                     placeholder={t('common.optional')}
                     value={modelDraft.displayName}
+                    onDraftChange={(displayName) => onUpdateDraft({ displayName })}
                     onCommit={(displayName) => onUpdateDraft({ displayName })}
                   />
                 </label>
@@ -115,7 +142,6 @@ export function ModelDetailsDialog({
                     emptyLabel={t('settings.no_model_id')}
                     footer={(
                       <div className="provider-model-picker-footer">
-                        {modelListUrlAction}
                         <RefreshButton
                           iconSize={UI_ICON_SIZE_MEDIUM}
                           label={t('settings.fetch_available_models')}
@@ -127,7 +153,7 @@ export function ModelDetailsDialog({
                         />
                       </div>
                     )}
-                    inputCommitMode="blur"
+                    inputCommitMode="change"
                     inputPlaceholder={t('settings.model_id_placeholder')}
                     options={Array.from(new Set(candidates.filter(Boolean))).map((candidate) => ({
                       value: candidate,
@@ -141,27 +167,6 @@ export function ModelDetailsDialog({
                   />
                 </div>
               </div>
-              <div className="model-capability-controls">
-                <CheckboxField
-                  checked={modelDraft.stream}
-                  label={t('settings.stream_output')}
-                  onChange={(stream) => onUpdateDraft({ stream })}
-                />
-                <CheckboxField
-                  checked={modelDraft.capabilities.vision}
-                  label={t('settings.model_capability_vision')}
-                  onChange={(vision) => onUpdateDraft({
-                    capabilities: { ...modelDraft.capabilities, vision }
-                  })}
-                />
-                <CheckboxField
-                  checked={modelDraft.capabilities.toolUse}
-                  label={t('settings.model_capability_tool_use')}
-                  onChange={(toolUse) => onUpdateDraft({
-                    capabilities: { ...modelDraft.capabilities, toolUse }
-                  })}
-                />
-              </div>
               <div className="model-context-controls ui-grid-3">
                 <div className="ui-field-stack">
                   <label className="ui-field-label" htmlFor={`${tokenFieldId}-context`}>{t('settings.max_context_tokens')}</label>
@@ -171,6 +176,7 @@ export function ModelDetailsDialog({
                     max={maxModelMaxContextTokens}
                     step={SETTINGS_TOKEN_STEP}
                     value={modelDraft.maxContextTokens}
+                    onDraftChange={(maxContextTokens) => onUpdateDraft({ maxContextTokens })}
                     onCommit={(maxContextTokens) => onUpdateDraft({ maxContextTokens })}
                   />
                 </div>
@@ -184,17 +190,14 @@ export function ModelDetailsDialog({
                     placeholder={t('settings.max_output_tokens_ignored')}
                     step={SETTINGS_TOKEN_STEP}
                     value={modelDraft.maxOutputTokens === '0' ? '' : modelDraft.maxOutputTokens}
-                    onDraftChange={(value) => {
-                      if (value === '' && modelDraft.maxOutputTokens !== '0') {
-                        onUpdateDraft({ maxOutputTokens: '0' })
-                      }
-                    }}
+                    onDraftChange={(value) => onUpdateDraft({ maxOutputTokens: value === '' ? '0' : value })}
                     onCommit={(value) => onUpdateDraft({ maxOutputTokens: value === '' ? '0' : value })}
                   />
                 </div>
                 <div className="ui-field-stack">
                   <RangeField
                     checked={modelDraft.contextCompressionEnabled}
+                    disabled={saving}
                     label={t('settings.context_compression_threshold', {
                       percent: Math.round(modelDraft.contextCompressionThreshold * 100)
                     })}
@@ -212,7 +215,8 @@ export function ModelDetailsDialog({
                 value={modelDraft.parametersJson}
                 protocol={modelDraft.protocol}
                 portalContainer={portalContainer}
-                onCommit={onUpdateParameters}
+                onDraftChange={(parametersJson) => onUpdateDraft({ parametersJson })}
+                onCommit={(parametersJson) => onUpdateDraft({ parametersJson })}
                 placeholder='{"temperature":0.7}'
               />
             </section>
@@ -222,15 +226,20 @@ export function ModelDetailsDialog({
                 onUpdate={onUpdateDraft}
               />
             </section>
-          </div>
+          </fieldset>
 
           <footer className="model-details-dialog-footer ui-dialog-footer">
+            {error && <span className="ui-dialog-footer-start ui-status-danger" role="alert">{error}</span>}
             <Dialog.Close asChild>
-              <button className="ui-button" type="button">
+              <button className="ui-button" type="button" disabled={saving}>
                 <X size={UI_ICON_SIZE_SMALL} />
-                <span>{t('common.close')}</span>
+                <span>{t('common.cancel')}</span>
               </button>
             </Dialog.Close>
+            <button className="ui-button ui-button-primary" type="button" disabled={saving} onClick={() => void save()}>
+              <Save size={UI_ICON_SIZE_SMALL} />
+              <span>{t('common.save')}</span>
+            </button>
           </footer>
         </Dialog.Content>
       </Dialog.Portal>

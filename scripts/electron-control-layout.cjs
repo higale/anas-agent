@@ -53,6 +53,8 @@ async function verifySegmentMinimumWidth(locator) {
     element.ownerDocument.body.append(control)
     const measure = () => ({
       width: control.getBoundingClientRect().width,
+      borderWidth: parseFloat(globalThis.getComputedStyle(control).borderLeftWidth)
+        + parseFloat(globalThis.getComputedStyle(control).borderRightWidth),
       items: [...control.querySelectorAll('label')].map(item => item.getBoundingClientRect().width)
     })
     try {
@@ -78,7 +80,7 @@ async function verifySegmentMinimumWidth(locator) {
     assert.ok(Math.abs(relative.width - relativeMinimum) < 0.5, `${mode}: relative units must follow the font size.`)
     const growth = larger.items.map((width, index) => width - natural.items[index])
     assert.ok(Math.max(...growth) - Math.min(...growth) < 0.5, `${mode}: extra space must be distributed evenly.`)
-    assert.ok(Math.abs(larger.items.reduce((sum, width) => sum + width, 0) - (larger.width - 2)) < 0.5,
+    assert.ok(Math.abs(larger.items.reduce((sum, width) => sum + width, 0) - (larger.width - larger.borderWidth)) < 0.5,
       `${mode}: items must fill the control inside its border.`)
   }
   const [equal, content] = measurements

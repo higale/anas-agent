@@ -1,9 +1,9 @@
 ---
-name: tool-creator
+name: tool-manager
 description: "Create, modify, or troubleshoot Anas custom tool packages containing TOOL.json and executable scripts. Use when the user wants a reusable model-callable tool in Anas. Do not use merely to run an existing tool, write a one-off script, create an Agent Skill, or configure an MCP server."
 ---
 
-# Create Anas Custom Tools
+# Manage Anas Custom Tools
 
 Deliver a working tool package for the requested operation. This Skill targets Anas's TOOL.json format. Authoring requires filesystem access; execution tests require command execution and the tool's runtime. The included Python template requires Python 3 and only its standard library. Skill availability does not grant these capabilities.
 

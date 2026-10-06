@@ -262,6 +262,7 @@ export function ModelParameterPresetsEditor({
                         autoFocus
                         value={preset.name}
                         onBlur={() => setEditingNameId(undefined)}
+                        onDraftChange={(name) => updateSelected({ name })}
                         onCommit={(name) => updateSelected({ name })}
                       />
                       {preset.id === draft.defaultParameterPresetId && <small>{t('common.default')}</small>}
@@ -308,6 +309,7 @@ export function ModelParameterPresetsEditor({
                   data-max-height="none"
                   readOnly={!isCustom}
                   value={selected.parametersJson}
+                  onDraftChange={(parametersJson) => updateSelected({ parametersJson })}
                   onCommit={(parametersJson) => updateSelected({ parametersJson })}
                   placeholder='{"enable_thinking":true}'
                   rows={UI_TEXTAREA_ROWS_COMPACT}

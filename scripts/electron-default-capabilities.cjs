@@ -18,7 +18,8 @@ async function verifySelectionModes(page, scope, finishOff = false) {
     const selected = section.locator('input[type="checkbox"]:checked')
     const index = await selected.count() ? await section.getByRole('checkbox').evaluateAll(inputs => inputs.findIndex(input => input.checked)) : 0
     const first = section.getByRole('checkbox').nth(index)
-    await first.check()
+    if (!await first.isChecked()) await first.press('Space')
+    await expect(first).toBeChecked()
     for (const mode of ['Off', 'Default']) {
       await choose(mode)
       await expect(section.getByRole('searchbox')).toHaveCount(0)
@@ -32,7 +33,7 @@ async function verifySelectionModes(page, scope, finishOff = false) {
 
 async function verifyMissingProjectSkills(page) {
   const result = await page.evaluate(async () => {
-    const project = (await globalThis.gale.projects.list()).find(item => item.id === 'default-workspace')
+    const project = (await globalThis.gale.projects.list()).find(item => item.name === 'E2E custom capabilities')
     return globalThis.gale.projects.update(project.id, { ...project, advancedSettings: true,
       capabilities: { ...project.capabilities, skills: { mode: 'custom', project: false, entries: [
         { id: 'project-deleted:unchecked-skill', shortcut: false, model: false },
@@ -44,12 +45,12 @@ async function verifyMissingProjectSkills(page) {
   await page.reload()
   const dialog = page.locator('.project-dialog')
   const openProject = async () => {
-    await page.locator('.project-thread-group[data-default-workspace] .project-thread-more').click()
+    await page.locator('.project-thread-group').filter({ hasText: 'E2E custom capabilities' }).locator('.project-thread-more').click()
     await page.locator('.project-details-action').filter({ hasText: 'Edit' }).click()
     await expect(dialog).toBeVisible()
   }
   const savedEntries = () => page.evaluate(async () =>
-    (await globalThis.gale.projects.list()).find(item => item.id === 'default-workspace').capabilities.skills.entries)
+    (await globalThis.gale.projects.list()).find(item => item.name === 'E2E custom capabilities').capabilities.skills.entries)
   await openProject()
   await verifySelectionModes(page, dialog)
   const removeUnchecked = dialog.getByRole('button', { name: 'Remove missing skill: project-deleted:unchecked-skill', exact: true })
@@ -94,8 +95,10 @@ async function verifyDefaultCapabilities(launchApplication) {
         defaultParameterPresetId: 'careful', capabilities: { vision: true, toolUse: true }, stream: true,
         maxContextTokens: 128000, maxOutputTokens: 16000, contextCompressionThreshold: 0.8, contextCompressionEnabled: true })
       await api.config.selectDefaultModel(configured.providers[0].models[0].id)
-      return { project: (await api.projects.list()).find(item => item.id === 'default-workspace'),
-        subagents: configured.subagents }
+      const defaults = (await api.projects.list()).find(item => item.id === 'default-workspace')
+      const result = await api.projects.create({ ...defaults, name: 'E2E custom capabilities' })
+      if (result.status !== 'ok') throw new Error(JSON.stringify(result.error))
+      return { project: result.value, subagents: configured.subagents }
     })
     await page.reload()
     await page.locator('.sidebar-settings').click()
@@ -110,7 +113,7 @@ async function verifyDefaultCapabilities(launchApplication) {
     const previews = await page.evaluate(async () => {
       const api = globalThis.gale
       const config = await api.config.get()
-      const project = (await api.projects.list()).find(item => item.id === 'default-workspace')
+      const project = (await api.projects.list()).find(item => item.name === 'E2E custom capabilities')
       const inherited = await api.agent.context.preview({ projectId: project.id, project: { ...project, advancedSettings: false }, settings: config.settings })
       const custom = await api.agent.context.preview({ projectId: project.id,
         project: { ...project, advancedSettings: true, capabilities: { ...project.capabilities, profile: true } }, settings: config.settings })
@@ -175,7 +178,7 @@ async function verifyDefaultCapabilities(launchApplication) {
     page = await application.firstWindow()
     await page.locator('[data-agent-composer-input]').waitFor()
     assert.deepEqual(await page.evaluate(async () =>
-      (await globalThis.gale.projects.list()).find(item => item.id === 'default-workspace').capabilities.skills.entries), [])
+      (await globalThis.gale.projects.list()).find(item => item.name === 'E2E custom capabilities').capabilities.skills.entries), [])
     await page.locator('.sidebar-settings').click()
     await page.locator('.app-menu-item').first().click()
     await page.locator('[data-settings-tab="capabilities"]').click()

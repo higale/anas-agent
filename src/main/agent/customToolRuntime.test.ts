@@ -50,11 +50,11 @@ describe('custom command tools', () => {
     await expect(tool.invoke({ query: 'test', timeout: true })).rejects.toThrow()
     await expect(tool.invoke({ query: 'test', timeout: 121 })).rejects.toThrow()
   })
-  it('runs the tool-creator template from a copied package and reports invalid business input as failure', async ({ skip }) => {
+  it('runs the tool-manager template from a copied package and reports invalid business input as failure', async ({ skip }) => {
     if (!await runtimeDiscovery.discoverPython3()) return skip()
     const { directory } = await fixture('')
     const packageDirectory = join(directory, 'tool with spaces')
-    await cp(resolve('data/skills_system/tool-creator/assets/python-tool'), packageDirectory, { recursive: true })
+    await cp(resolve('data/skills_system/tool-manager/assets/python-tool'), packageDirectory, { recursive: true })
     const [definition] = parseCustomTools([JSON.parse(await readFile(join(packageDirectory, 'TOOL.json'), 'utf8'))])
     const [tool] = createCustomTools([{ ...definition, directory: packageDirectory }], { env: process.env, backgroundTools: false })
     const text = '中文🙂 "quote"\n$() & {{tool_dir}}'

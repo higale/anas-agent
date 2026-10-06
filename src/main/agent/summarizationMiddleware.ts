@@ -371,6 +371,7 @@ export function selectCompressionRetention(
 
 export function createAnasSummarizationMiddleware(options: {
   codingMode?: boolean
+  compressionPrompt?: string
   responseTools?: Record<string, unknown>[]
   backend: FrameworkSummaryOptions['backend']
   outputLanguage: SummaryOutputLanguage
@@ -400,7 +401,7 @@ export function createAnasSummarizationMiddleware(options: {
       const keep = { type: 'messages' as const, value: 1 }
       const requestMiddleware = createSummarizationMiddleware({
         model: configuration.model,
-        summaryPrompt: summaryPromptForLanguage(options.outputLanguage, options.codingMode === true),
+        summaryPrompt: summaryPromptForLanguage(options.outputLanguage, options.codingMode === true, options.compressionPrompt),
         backend: options.backend,
         trigger,
         keep

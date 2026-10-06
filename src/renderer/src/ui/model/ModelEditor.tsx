@@ -5,7 +5,7 @@ import { CommitTextInput } from '../CommitTextField'
 import { SearchableOptionPicker } from '../SearchableOptionPicker'
 import { ModelDetailsDialog } from './ModelDetailsDialog'
 import { ModelExtraParametersField } from './ModelExtraParametersField'
-import type { ModelDraft } from './modelDraft'
+import { providerConfigToDraft, type ModelDraft } from './modelDraft'
 import { providerProtocolLabels } from './providerProtocol'
 import { ProviderModelAddDialog } from './ProviderModelAddDialog'
 import { ProviderModelList } from './ProviderModelList'
@@ -16,14 +16,13 @@ interface ModelEditorProps {
   modelDraft: ModelDraft
   provider?: ModelProviderConfigDetail
   selectedModelIndex?: number
-  onAddProviderModel?: () => boolean | void | Promise<boolean | void>
   onAddProviderModels?: (models: string[]) => boolean | void | Promise<boolean | void>
   onDeleteProviderModel?: () => boolean | void | Promise<boolean | void>
   onMoveProviderModel?: (direction: -1 | 1) => void | Promise<void>
   onSelectProviderModel?: (index: number) => boolean | void | Promise<boolean | void>
   onRefreshCandidates: () => void | Promise<void>
   onUpdateDraft: (update: Partial<ModelDraft>) => void
-  onUpdateParameters: (parametersJson: string) => void
+  onSaveDetails: (draft: ModelDraft) => Promise<void>
 }
 
 export function ModelEditor({
@@ -32,19 +31,19 @@ export function ModelEditor({
   modelDraft,
   provider,
   selectedModelIndex,
-  onAddProviderModel,
   onAddProviderModels,
   onDeleteProviderModel,
   onMoveProviderModel,
   onSelectProviderModel,
   onRefreshCandidates,
   onUpdateDraft,
-  onUpdateParameters
+  onSaveDetails
 }: ModelEditorProps) {
   const { t } = useTranslation()
   const [apiKeyFocused, setApiKeyFocused] = useState(false)
   const [modelAddOpen, setModelAddOpen] = useState(false)
   const [modelDetailsOpen, setModelDetailsOpen] = useState(false)
+  const [newModel, setNewModel] = useState(false)
   const providerOptions = [
     { value: 'openai_responses', label: providerProtocolLabels.openai_responses },
     { value: 'openai_chat_completions', label: providerProtocolLabels.openai_chat_completions },
@@ -52,9 +51,7 @@ export function ModelEditor({
   ]
 
   async function addProviderModel(): Promise<boolean> {
-    if (!onAddProviderModel) return false
-    const added = await onAddProviderModel()
-    if (added === false) return false
+    setNewModel(true)
     setModelDetailsOpen(true)
     return true
   }
@@ -73,6 +70,7 @@ export function ModelEditor({
       const selected = await onSelectProviderModel?.(index)
       if (selected === false) return
     }
+    setNewModel(false)
     setModelDetailsOpen(true)
   }
 
@@ -156,16 +154,17 @@ export function ModelEditor({
             onOpenChange={setModelAddOpen}
             onRefreshCandidates={onRefreshCandidates}
           />
-          <ModelDetailsDialog
-            candidates={candidates}
-            listLoading={listLoading}
-            modelDraft={modelDraft}
-            open={modelDetailsOpen}
-            onOpenChange={setModelDetailsOpen}
-            onRefreshCandidates={onRefreshCandidates}
-            onUpdateDraft={onUpdateDraft}
-            onUpdateParameters={onUpdateParameters}
-          />
+          {modelDetailsOpen && (
+            <ModelDetailsDialog
+              candidates={candidates}
+              listLoading={listLoading}
+              modelDraft={newModel ? providerConfigToDraft(provider) : modelDraft}
+              open
+              onOpenChange={setModelDetailsOpen}
+              onRefreshCandidates={onRefreshCandidates}
+              onSaveDetails={onSaveDetails}
+            />
+          )}
         </>
       )}
     </div>

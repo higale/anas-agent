@@ -413,7 +413,6 @@ export function App() {
   } = useMcpSettingsState({ config, openConfirmDialog, setConfig, t })
 
   const {
-    addProviderModel,
     addProviderModels,
     createModelDraft,
     deleteEditingModel,
@@ -433,7 +432,7 @@ export function App() {
     selectDefaultModel,
     selectProviderModel,
     updateModelDraft,
-    updateModelParameters
+    saveModelDetails
   } = useModelSettingsState({
     config,
     openConfirmDialog,
@@ -1208,7 +1207,6 @@ export function App() {
           onEditAvatar={editPersonaAvatar}
           onClearAvatar={clearPersonaAvatar}
           onCreateModel={createModelDraft}
-          onAddProviderModel={addProviderModel}
           onAddProviderModels={addProviderModels}
           onDeleteMcpServer={deleteEditingMcpServer}
           onDeleteSubagent={deleteSubagent}
@@ -1249,7 +1247,7 @@ export function App() {
           onUpdateMcpDraft={updateMcpDraft}
           onUpdateSubagentDraft={updateSubagentDraft}
           onUpdateModelDraft={updateModelDraft}
-          onUpdateModelParameters={updateModelParameters}
+          onSaveModelDetails={saveModelDetails}
           onUpdateSkillScriptApproval={updateSkillScriptApproval}
           onUpdateSkillAvailability={updateSkillAvailability}
         />

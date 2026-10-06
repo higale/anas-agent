@@ -8,6 +8,7 @@ import { mcpServerSelection, removeEmptyMissingMcpSelections, setMcpServerMode, 
 import type { McpServerConfigDetail, McpToolStatus, RuntimeToolStatus, SkillSnapshot } from '@shared/types'
 import { CheckboxField } from './CheckboxField'
 import { SegmentedControl } from './SegmentedControl'
+import { SegmentedMultiSelect } from './SegmentedMultiSelect'
 import { SettingsStatusIndicator } from './settings/SettingsStatusIndicator'
 import { skillSourceGroups } from './skillSourceGroups'
 import { UI_ICON_SIZE_MEDIUM, UI_ICON_SIZE_SMALL } from './uiConstants'
@@ -139,8 +140,14 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
           <Trash2 size={UI_ICON_SIZE_SMALL} />
         </button>}
       </span>
-      {!subagent && <CheckboxField className="ui-checkbox-field-inline" checked={selectedSkills.get(skill.id)?.shortcut ?? false} label={t('capabilities.shortcut')} aria-label={`${skill.name} ${t('capabilities.shortcut')}`} onChange={(checked) => setSkill(skill.id, 'shortcut', checked)} />}
-      <CheckboxField className="ui-checkbox-field-inline" checked={selectedSkills.get(skill.id)?.model ?? false} label={subagent ? '' : t('capabilities.model')} aria-label={`${skill.name} ${t('capabilities.model')}`} onChange={(checked) => setSkill(skill.id, 'model', checked)} />
+      {subagent
+        ? <CheckboxField className="ui-checkbox-field-inline" checked={selectedSkills.get(skill.id)?.model ?? false} label="" aria-label={`${skill.name} ${t('capabilities.model')}`} onChange={(checked) => setSkill(skill.id, 'model', checked)} />
+        : <SegmentedMultiSelect<'shortcut' | 'model'> ariaLabel={skill.name}
+          options={[
+            { value: 'shortcut', label: t('capabilities.shortcut'), ariaLabel: `${skill.name} ${t('capabilities.shortcut')}`, checked: selectedSkills.get(skill.id)?.shortcut ?? false },
+            { value: 'model', label: t('capabilities.model'), ariaLabel: `${skill.name} ${t('capabilities.model')}`, checked: selectedSkills.get(skill.id)?.model ?? false }
+          ]}
+          onChange={(key, checked) => setSkill(skill.id, key, checked)} />}
     </div>
   }
   return (

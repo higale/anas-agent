@@ -1,12 +1,14 @@
 import * as Dialog from '@radix-ui/react-dialog'
-import { ClipboardCopy, FileJson, FileText, Save, X } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import { ClipboardCopy, FileJson, FileText, Menu, Save, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AgentModelRequestPreview, AgentSystemContextPreview } from '@shared/agentTypes'
-import { summaryPromptForLanguage } from '@shared/summaryPrompt'
+import { compressionPromptError, summaryPromptForLanguage } from '@shared/summaryPrompt'
 import type { AppSettings, ProjectCreateRequest } from '@shared/types'
 import { getLanguageOptions, resolveLanguagePreference } from '../../i18n'
 import { notice } from '../notice'
+import { DropdownMenuContent, DropdownMenuRoot } from '../DropdownMenuShell'
 import { UI_ICON_SIZE_SMALL } from '../uiConstants'
 
 type PromptPreviewKind = 'system' | 'compression' | 'modelRequest'
@@ -25,18 +27,21 @@ export function ProjectPromptPreviews({
   projectId
 }: ProjectPromptPreviewsProps) {
   const { t } = useTranslation()
+  const triggerRef = useRef<HTMLButtonElement>(null)
   const [kind, setKind] = useState<PromptPreviewKind>()
   const [modelRequestPreview, setModelRequestPreview] = useState<AgentModelRequestPreview>()
   const [systemPreview, setSystemPreview] = useState<AgentSystemContextPreview>()
   const [previewFailed, setPreviewFailed] = useState(false)
   const [previewLoading, setPreviewLoading] = useState(false)
   const codingMode = project.kind === 'workspace' && project.codingMode
+  const customCompressionPrompt = project.kind === 'workspace' && project.advancedSettings ? project.compressionPrompt : undefined
+  const compressionInvalid = Boolean(compressionPromptError(customCompressionPrompt))
   const outputLanguageCode = resolveLanguagePreference(settings?.language)
   const outputLanguage = getLanguageOptions().find((language) => language.code === outputLanguageCode)
-  const compressionPrompt = useMemo(() => summaryPromptForLanguage({
+  const compressionPrompt = useMemo(() => compressionInvalid ? '' : summaryPromptForLanguage({
     code: outputLanguageCode,
     name: outputLanguage?.name ?? outputLanguageCode
-  }, codingMode), [codingMode, outputLanguage?.name, outputLanguageCode])
+  }, codingMode, customCompressionPrompt), [codingMode, compressionInvalid, customCompressionPrompt, outputLanguage?.name, outputLanguageCode])
 
   useEffect(() => {
     if ((kind !== 'system' && kind !== 'modelRequest') || !settings) return
@@ -109,40 +114,52 @@ export function ProjectPromptPreviews({
 
   return (
     <>
-      <div className="ui-row project-prompt-preview-actions">
-        <button
-          className="ui-button ui-button-compact"
-          type="button"
-          disabled={disabled || !settings || (project.kind === 'workspace' && !project.sourceFolders.length)}
-          onClick={() => setKind('system')}
-        >
-          <FileText size={UI_ICON_SIZE_SMALL} />
-          <span>{t('settings.view_effective_system_context')}</span>
-        </button>
-        <button
-          className="ui-button ui-button-compact"
-          type="button"
-          disabled={disabled}
-          onClick={() => setKind('compression')}
-        >
-          <FileText size={UI_ICON_SIZE_SMALL} />
-          <span>{t('settings.view_context_compression_prompt')}</span>
-        </button>
-        <button
-          className="ui-button ui-button-compact"
-          type="button"
-          disabled={disabled || !settings || (project.kind === 'workspace' && !project.sourceFolders.length)}
-          onClick={() => setKind('modelRequest')}
-        >
-          <FileJson size={UI_ICON_SIZE_SMALL} />
-          <span>{t('settings.view_model_request')}</span>
-        </button>
-      </div>
+      <DropdownMenuRoot modal>
+        <DropdownMenu.Trigger asChild>
+          <button ref={triggerRef} className="ui-icon-button" type="button" disabled={disabled}
+            aria-label={t('common.more')} title={t('common.more')}>
+            <Menu size={18} />
+          </button>
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenuContent className="ui-menu ui-menu-list" align="end" sideOffset={5}
+            onCloseAutoFocus={(event) => {
+              event.preventDefault()
+              if (!kind) triggerRef.current?.focus()
+            }}>
+            <DropdownMenu.Item
+              className="ui-menu-item ui-menu-item-row"
+              disabled={disabled || !settings || (project.kind === 'workspace' && !project.sourceFolders.length)}
+              onSelect={() => setKind('system')}
+            >
+              <FileText size={UI_ICON_SIZE_SMALL} />
+              <span>{t('settings.view_effective_system_context')}</span>
+            </DropdownMenu.Item>
+            <DropdownMenu.Item
+              className="ui-menu-item ui-menu-item-row"
+              disabled={disabled}
+              onSelect={() => setKind('compression')}
+            >
+              <FileText size={UI_ICON_SIZE_SMALL} />
+              <span>{t('settings.view_context_compression_prompt')}</span>
+            </DropdownMenu.Item>
+            <DropdownMenu.Item
+              className="ui-menu-item ui-menu-item-row"
+              disabled={disabled || !settings || (project.kind === 'workspace' && !project.sourceFolders.length)}
+              onSelect={() => setKind('modelRequest')}
+            >
+              <FileJson size={UI_ICON_SIZE_SMALL} />
+              <span>{t('settings.view_model_request')}</span>
+            </DropdownMenu.Item>
+          </DropdownMenuContent>
+        </DropdownMenu.Portal>
+      </DropdownMenuRoot>
 
       <Dialog.Root open={kind !== undefined} onOpenChange={(open) => { if (!open) setKind(undefined) }}>
         <Dialog.Portal>
           <Dialog.Overlay className="ui-backdrop" />
-          <Dialog.Content className="ui-dialog ui-dialog-wide ui-dialog-centered ui-popover settings-code-preview-dialog">
+          <Dialog.Content className="ui-dialog ui-dialog-wide ui-dialog-centered ui-popover settings-code-preview-dialog"
+            onCloseAutoFocus={(event) => { event.preventDefault(); triggerRef.current?.focus() }}>
             <header className="ui-dialog-header">
               <div className="ui-dialog-icon">
                 <FileText size={18} />
@@ -158,7 +175,9 @@ export function ProjectPromptPreviews({
             </header>
 
             <div className="settings-code-preview-content">
-              {currentPreviewLoading
+              {kind === 'compression' && compressionInvalid
+                ? <div className="ui-status-danger">{t('project.compression_prompt_invalid')}</div>
+                : currentPreviewLoading
                 ? <div className="ui-field-hint">{t('common.loading')}</div>
                 : currentPreviewFailed
                   ? <div className="ui-status-danger">{t(kind === 'modelRequest' ? 'settings.model_request_failed' : 'settings.effective_system_context_failed')}</div>

@@ -1,9 +1,9 @@
 const assert = require('node:assert/strict')
 const { execFile } = require('node:child_process')
 const { promisify } = require('node:util')
-const { mkdir, mkdtemp, rm, writeFile } = require('node:fs/promises')
+const { mkdtemp, rm, writeFile } = require('node:fs/promises')
 const { tmpdir } = require('node:os')
-const { join, resolve } = require('node:path')
+const { basename, join, resolve } = require('node:path')
 const { source: axeSource } = require('axe-core')
 const { _electron: electron } = require('playwright')
 const { expect } = require('playwright/test')
@@ -26,7 +26,6 @@ const { verifyCurrentData } = require('./electron-data-migrations.cjs')
 const { verifyModelSelection } = require('./electron-model-selection.cjs')
 const { verifySpeechReply } = require('./electron-speech-reply.cjs')
 const { verifyAttachmentPreviews } = require('./electron-attachment-previews.cjs')
-const { restrict_subagents: defaultRestrictSubagents, ...defaultCapabilities } = require('../data/config/capabilities.json')
 
 const repositoryRoot = resolve(__dirname, '..')
 const packagedExecutable = process.env.ANAS_E2E_EXECUTABLE
@@ -165,7 +164,14 @@ async function verifyApplication(electronApplication, verifyRestart = false) {
   await page.locator('.sidebar-footer button').click()
   await page.locator('[data-agent-composer-input]').waitFor({ state: 'visible' })
 
-  await page.locator('.project-thread-group[data-default-workspace] .project-thread-more').click()
+  const editableProject = await page.evaluate(async () => {
+    const defaults = (await globalThis.gale.projects.list()).find(project => project.id === 'default-workspace')
+    const result = await globalThis.gale.projects.create({ ...defaults, name: 'E2E editable capabilities' })
+    if (result.status !== 'ok') throw new Error(JSON.stringify(result.error))
+    return result.value
+  })
+  await page.reload()
+  await page.locator('.project-thread-group').filter({ hasText: editableProject.name }).locator('.project-thread-more').click()
   await page.locator('.project-details-action').filter({ hasText: /Edit|编辑/ }).click()
   const capabilityDialog = page.locator('.project-dialog')
   const duplicate = await page.evaluate(async () => {
@@ -194,7 +200,7 @@ async function verifyApplication(electronApplication, verifyRestart = false) {
   await expect(advancedSettings).not.toBeChecked()
   await expect(capabilityDialog.getByRole('region', { name: /^(能力|Capabilities)$/ })).toHaveCount(0)
   await advancedSettings.check()
-  const projectPrompt = capabilityDialog.getByRole('textbox', { name: /^(提示词|Prompt)$/ })
+  const projectPrompt = capabilityDialog.getByRole('textbox', { name: /^(项目提示词|Project prompt)$/ })
   await projectPrompt.fill('Follow this project instruction.')
   const promptBounds = await projectPrompt.boundingBox()
   const promptStyle = await projectPrompt.evaluate((element) => {
@@ -209,7 +215,7 @@ async function verifyApplication(electronApplication, verifyRestart = false) {
   assert.ok(promptBounds.height >= promptStyle.lineHeight * 2 + promptStyle.verticalChrome - 1, 'The prompt must visibly fit at least two lines plus padding and borders.')
   assert.ok(promptStyle.radius > 0, 'Prompt must use shared rounded text field styling.')
   if (process.env.ANAS_E2E_PROJECT_PROMPT_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_PROJECT_PROMPT_SCREENSHOT })
-  const folderBounds = await capabilityDialog.locator('.project-folder-add').boundingBox()
+  const folderBounds = await capabilityDialog.locator('.project-folders').boundingBox()
   assert.ok(promptBounds.y < folderBounds.y, 'The project prompt must appear before source folders.')
   await advancedSettings.uncheck()
   await expect(codingMode).toBeVisible()
@@ -277,7 +283,7 @@ async function verifyApplication(electronApplication, verifyRestart = false) {
   await skillPicker.getByText(/^(默认|Default)$/, { exact: true }).click()
   await capabilityDialog.locator('button[type="submit"]').click()
   await expect(capabilityDialog).not.toBeVisible()
-  const scopedProject = await page.evaluate(async () => (await globalThis.gale.projects.list()).find((project) => project.id === 'default-workspace'))
+  const scopedProject = await page.evaluate(async (id) => (await globalThis.gale.projects.list()).find((project) => project.id === id), editableProject.id)
   assert.equal(scopedProject.restrictSubagents, true)
   assert.equal(scopedProject.advancedSettings, true)
   assert.equal(scopedProject.prompt, 'Follow this project instruction.')
@@ -416,7 +422,14 @@ async function verifyCapabilityToolListLayout(electronApplication) {
   })
   const page = await electronApplication.firstWindow()
   await page.reload()
-  await page.locator('.project-thread-group[data-default-workspace] .project-thread-more').click()
+  const editableProject = await page.evaluate(async () => {
+    const defaults = (await globalThis.gale.projects.list()).find(project => project.id === 'default-workspace')
+    const result = await globalThis.gale.projects.create({ ...defaults, name: 'E2E MCP capabilities' })
+    if (result.status !== 'ok') throw new Error(JSON.stringify(result.error))
+    return result.value
+  })
+  await page.reload()
+  await page.locator('.project-thread-group').filter({ hasText: editableProject.name }).locator('.project-thread-more').click()
   await page.locator('.project-details-action').filter({ hasText: /Edit|编辑/ }).click()
   const dialog = page.locator('.project-dialog')
   await dialog.getByRole('checkbox', { name: /^(定制能力|Customize capabilities)$/ }).check()
@@ -551,7 +564,8 @@ async function verifyProjectModelSelection(electronApplication) {
     const globalId = models.find((model) => model.displayName === 'Global Model').id
     const preferredId = models.find((model) => model.displayName === 'Project Model').id
     await api.selectDefaultModel(globalId)
-    return { providerId, globalId, preferredId }
+    const defaultProjectName = (await globalThis.gale.projects.list()).find(project => project.id === 'default-workspace').name
+    return { providerId, globalId, preferredId, defaultProjectName }
   })
   await page.reload()
   const composerModel = page.locator('form .composer-model-trigger')
@@ -669,7 +683,7 @@ async function verifyProjectModelSelection(electronApplication) {
   assert.equal(project.modelConfigId, fixture.preferredId)
   assert.equal(project.modelParameterPresetId, 'off')
   await page.locator('.project-picker-trigger').click()
-  await page.locator('.project-picker-item').filter({ hasText: 'Default Workspace' }).click()
+  await page.locator('.project-picker-item').filter({ hasText: fixture.defaultProjectName }).click()
   await expect(composerModel).toHaveText('Select model')
   await page.locator('.project-picker-trigger').click()
   await page.locator('.project-picker-item').filter({ hasText: 'Model preference E2E' }).click()
@@ -728,17 +742,23 @@ async function verifyProjectModelSelection(electronApplication) {
 
 async function verifyCodingMode(electronApplication) {
   const page = await electronApplication.firstWindow()
+  const project = await page.evaluate(async () => {
+    const defaults = (await globalThis.gale.projects.list()).find(item => item.id === 'default-workspace')
+    const result = await globalThis.gale.projects.create({ ...defaults, name: 'E2E coding mode' })
+    if (result.status !== 'ok') throw new Error(JSON.stringify(result.error))
+    return result.value
+  })
   for (const language of ['zh-CN', 'en']) {
     await page.evaluate(async (language) => globalThis.gale.config.updateSettings({ language }), language)
     await page.reload()
-    const group = page.locator('.project-thread-group[data-default-workspace]')
+    const group = page.locator('.project-thread-group').filter({ hasText: project.name })
     const dialog = page.locator('.project-dialog')
     const open = async () => {
       await group.locator('.project-thread-more').click()
       await page.locator('.project-details-action').filter({ hasText: /Edit|编辑/ }).click()
     }
     const mode = dialog.getByRole('checkbox', { name: language === 'en' ? 'Coding mode' : '编码模式', exact: true })
-    const readMode = () => page.evaluate(async () => (await globalThis.gale.projects.list()).find((project) => project.id === 'default-workspace').codingMode)
+    const readMode = () => page.evaluate(async (id) => (await globalThis.gale.projects.list()).find((project) => project.id === id).codingMode, project.id)
     const verifyPreviews = async (codingMode) => {
       await open()
       const preview = page.locator('.settings-code-preview-dialog')
@@ -746,7 +766,8 @@ async function verifyCodingMode(electronApplication) {
         [/^(压缩提示词|Compression prompt)$/, 'Coding continuation handoff:'],
         [/^(完整提示词|Full prompt)$/, '<coding_instruction>']
       ]) {
-        await dialog.getByRole('button', { name: label }).click()
+        await dialog.getByRole('button', { name: /^(更多|More)$/ }).click()
+        await page.getByRole('menuitem', { name: label }).click()
         const content = preview.locator('pre')
         await expect(content).toBeVisible()
         if (codingMode) await expect(content).toContainText(marker)
@@ -1128,7 +1149,7 @@ async function main() {
     await verifyPtyLifecycle(launchApplication)
     return
   }
-  if (!process.argv.includes('--changes-only')) {
+  if (!process.argv.includes('--changes-only') && !process.argv.includes('--workspace-only')) {
     await verifyCurrentData(launchApplication)
     await verifySpeechReply(launchApplication)
     await verifyDefaultCapabilities(launchApplication)
@@ -1139,13 +1160,19 @@ async function main() {
     await verifyHelpDocuments(launchApplication)
     await verifyAttachmentPreviews(launchApplication)
   }
-  if (!packagedExecutable && !process.argv.includes('--changes-only')) await verifyEnvironmentStartup(repositoryRoot, electronExecutable)
+  if (!packagedExecutable && !process.argv.includes('--changes-only') && !process.argv.includes('--workspace-only')) await verifyEnvironmentStartup(repositoryRoot, electronExecutable)
   const testHome = await mkdtemp(join(tmpdir(), 'anas-electron-e2e-'))
   let electronApplication
+  let testWorkspace
   try {
-    const workspace = join(testHome, 'workspace')
-    const timestamp = new Date().toISOString()
-    await mkdir(workspace, { recursive: true })
+    electronApplication = await launchApplication(testHome)
+    const page = await electronApplication.firstWindow()
+    await page.locator('[data-agent-composer-input]').waitFor()
+    const workspace = await page.evaluate(async () =>
+      (await globalThis.gale.projects.list()).find(project => project.id === 'default-workspace').sourceFolders[0])
+    const expectedWorkspace = join(await electronApplication.evaluate(({ app }) => app.getPath('documents')), basename(testHome))
+    assert.equal(resolve(workspace), resolve(expectedWorkspace), 'Only the isolated profile workspace may contain test files.')
+    testWorkspace = resolve(expectedWorkspace)
     const git = (...args) => promisify(execFile)('git', args, { cwd: workspace })
     await git('init', '-b', 'main')
     await git('config', 'user.name', 'Anas E2E')
@@ -1154,25 +1181,6 @@ async function main() {
     await git('add', '--', 'greeting.txt')
     await git('commit', '-m', 'Initial fixture')
     await writeFile(join(workspace, 'greeting.txt'), 'Working tree edit\n')
-    await writeFile(join(testHome, 'projects.json'), `${JSON.stringify({
-      version: 0,
-      projects: [{
-        id: 'default-workspace',
-        kind: 'workspace',
-        name: 'Default Workspace',
-        pinned: false,
-        collapsed: false,
-        sourceFolders: [workspace],
-        capabilities: structuredClone(defaultCapabilities),
-        restrict_subagents: defaultRestrictSubagents,
-        advanced_settings: false,
-        coding_mode: false,
-        prompt: '',
-        createdAt: timestamp,
-        updatedAt: timestamp
-      }]
-    }, null, 2)}\n`, 'utf8')
-    electronApplication = await launchApplication(testHome)
     if (process.argv.includes('--changes-only')) {
       await verifyRecordedChanges(electronApplication)
       await verifyGitChanges(electronApplication)
@@ -1198,6 +1206,7 @@ async function main() {
   } finally {
     await electronApplication?.close().catch(() => undefined)
     await rm(testHome, { recursive: true, force: true })
+    if (testWorkspace) await rm(testWorkspace, { recursive: true, force: true })
   }
   await verifyPtyLifecycle(launchApplication)
   await verifyToolArguments(launchApplication)

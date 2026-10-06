@@ -332,8 +332,8 @@ describe('model settings state', () => {
 
   it('releases the navigation lock after a validation failure', async () => {
     const setSettingsTab = vi.fn()
-    const saveProviderModel = vi.fn()
-    vi.stubGlobal('gale', { config: { saveProviderModel } })
+    const saveModelProvider = vi.fn()
+    vi.stubGlobal('gale', { config: { saveModelProvider } })
     const { result } = renderHook(() => useModelSettingsState({
       config,
       openConfirmDialog: vi.fn(),
@@ -351,7 +351,7 @@ describe('model settings state', () => {
     })
 
     act(() => result.current.updateModelDraft({
-      parametersJson: '{bad json}'
+      providerParametersJson: '{bad json}'
     }))
     await waitFor(() => expect(notice.error).toHaveBeenCalledWith(
       'settings.model_parameters_invalid_json',
@@ -362,14 +362,14 @@ describe('model settings state', () => {
       expect(await result.current.selectProviderModel(0)).toBe(true)
     })
     expect(result.current.modelDraft.model).toBe('existing-model')
-    expect(saveProviderModel).not.toHaveBeenCalled()
+    expect(saveModelProvider).not.toHaveBeenCalled()
     expect(setSettingsTab).not.toHaveBeenCalled()
   })
 
   it('releases the navigation lock after the save request fails', async () => {
     const setSettingsTab = vi.fn()
-    const saveProviderModel = vi.fn(async () => { throw new Error('save failed') })
-    vi.stubGlobal('gale', { config: { saveProviderModel } })
+    const saveModelProvider = vi.fn(async () => { throw new Error('save failed') })
+    vi.stubGlobal('gale', { config: { saveModelProvider } })
     const { result } = renderHook(() => useModelSettingsState({
       config,
       openConfirmDialog: vi.fn(),
@@ -382,7 +382,7 @@ describe('model settings state', () => {
     }))
 
     await waitFor(() => expect(result.current.editingProvider?.id).toBe('provider-1'))
-    act(() => result.current.updateModelDraft({ stream: false }))
+    act(() => result.current.updateModelDraft({ name: 'Changed provider' }))
     await waitFor(() => expect(notice.error).toHaveBeenCalledWith(
       'settings.failed_save_model',
       { id: 'settings-model-status' }
@@ -391,7 +391,48 @@ describe('model settings state', () => {
     await act(async () => {
       expect(await result.current.selectProviderModel(1)).toBe(true)
     })
-    expect(saveProviderModel).toHaveBeenCalledOnce()
+    expect(saveModelProvider).toHaveBeenCalledOnce()
     expect(setSettingsTab).not.toHaveBeenCalled()
   })
+  it('saves all model fields in one request and leaves the original state intact on failure', async () => {
+    const savedConfig = structuredClone(config)
+    Object.assign(savedConfig.providers[0].models[0], { displayName: 'Saved', stream: false })
+    const saveProviderModel = vi.fn().mockRejectedValueOnce(new Error('disk unavailable')).mockResolvedValue(savedConfig)
+    const setConfig = vi.fn()
+    vi.stubGlobal('gale', { config: { saveProviderModel } })
+    const { result } = renderHook(() => useModelSettingsState({
+      config, openConfirmDialog: vi.fn(), setConfig, setError: vi.fn(), setSettingsTab: vi.fn(),
+      settingsOpen: false, settingsTab: 'model', t: ((key: string) => key) as TFunction
+    }))
+    await waitFor(() => expect(result.current.modelDraft.modelConfigId).toBe('model-1'))
+    const original = result.current.modelDraft
+    const draft = { ...original, displayName: 'Saved', stream: false }
+    await act(async () => {
+      await expect(result.current.saveModelDetails(draft)).rejects.toThrow('disk unavailable')
+    })
+    expect(result.current.modelDraft).toEqual(original)
+    expect(setConfig).not.toHaveBeenCalled()
+    await act(async () => { await result.current.saveModelDetails(draft) })
+    expect(saveProviderModel).toHaveBeenCalledTimes(2)
+    expect(saveProviderModel).toHaveBeenLastCalledWith(expect.objectContaining({
+      id: 'model-1', providerId: 'provider-1', displayName: 'Saved', stream: false
+    }))
+    expect(result.current.modelDraft.displayName).toBe('Saved')
+    expect(setConfig).toHaveBeenCalledExactlyOnceWith(savedConfig)
+  })
+
+  it('validates the entire draft before making a save request', async () => {
+    const saveProviderModel = vi.fn()
+    vi.stubGlobal('gale', { config: { saveProviderModel } })
+    const { result } = renderHook(() => useModelSettingsState({
+      config, openConfirmDialog: vi.fn(), setConfig: vi.fn(), setError: vi.fn(), setSettingsTab: vi.fn(),
+      settingsOpen: false, settingsTab: 'model', t: ((key: string) => key) as TFunction
+    }))
+    await waitFor(() => expect(result.current.modelDraft.modelConfigId).toBe('model-1'))
+    await expect(result.current.saveModelDetails({ ...result.current.modelDraft, parametersJson: '{bad' }))
+      .rejects.toThrow('settings.model_parameters_invalid_json')
+    expect(saveProviderModel).not.toHaveBeenCalled()
+    expect(result.current.modelDraft.parametersJson).toBe('')
+  })
+
 })

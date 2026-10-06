@@ -116,6 +116,21 @@ class SummaryOnlyBackend extends StateBackend {
 }
 
 describe('Anas summarization middleware', () => {
+  it('uses a custom project template for automatic compression', async () => {
+    const model = new TrackedFakeChatModel(['Saved research'], { onCompressionStart: () => 'custom-summary' })
+    const middleware = createAnasSummarizationMiddleware({ model, codingMode: true,
+      compressionPrompt: 'Keep research citations: {conversation}', backend: (runtime: BackendRuntime) => new StateBackend(runtime),
+      inputCapacityTokens: 12_000, outputLanguage, threshold: 100 })
+    const messages = [new HumanMessage('SOURCE-42'), ...toolTransaction('research', 'Source evidence '.repeat(350)), new AIMessage('Notes'), new HumanMessage('Continue')]
+    await middleware.wrapModelCall?.({ model, messages, state: { messages, files: {} },
+      systemMessage: new SystemMessage('Rules'), tools: [], runtime: {} } as never, vi.fn(async () => new AIMessage('Continue')) as never)
+    const prompt = (model.inputs[0] as HumanMessage[])[0].text
+    expect(prompt).toContain('Keep research citations:')
+    expect(prompt).toContain('SOURCE-42')
+    expect(prompt).not.toContain('Coding continuation handoff')
+    expect(prompt).not.toContain('{conversation}')
+  })
+
   it.each([false, true])('stops after selecting a smaller window without trimming summary source (coding=%s)', async (codingMode) => {
     const summary = new TrackedFakeChatModel(['No previous conversation was supplied.'], {})
     const generate = vi.spyOn(summary, '_generate')
