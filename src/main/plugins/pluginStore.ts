@@ -1,12 +1,23 @@
 import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, dirname, extname, join } from 'node:path'
 import fs from 'stubborn-fs'
 import { parsePluginManifest, requirePluginId, requirePluginJson, requirePluginPath, type PluginManifest, type PluginSummary } from '@shared/plugins'
 import { writeJsonFileAtomic } from '../atomicJson'
 import { isSameOrInsideDirectory, samePath } from '../pathContainment'
+import { extractZipArchive, type ZipArchiveLimits } from '../zipArchive'
 
 const MAX_FILE_BYTES = 128 * 1024 * 1024
 const MAX_PACKAGE_BYTES = 512 * 1024 * 1024
+const MAX_PACKAGE_ENTRIES = 10_000
+const pluginArchiveLimits: ZipArchiveLimits = {
+  maxArchiveBytes: MAX_PACKAGE_BYTES,
+  maxEntries: MAX_PACKAGE_ENTRIES,
+  maxEntryBytes: MAX_FILE_BYTES,
+  maxTotalBytes: MAX_PACKAGE_BYTES,
+  maxCompressionRatio: 1_000,
+  compressionRatioThresholdBytes: 1024 * 1024,
+  maxPathBytes: 1_024
+}
 
 async function optionalJson(path: string, maxBytes = 1024 * 1024): Promise<unknown> {
   try {
@@ -91,7 +102,35 @@ export class PluginStore {
     return Promise.all(names.sort().map(name => this.read(name)))
   }
 
-  async install(sourceDirectory: string): Promise<PluginSummary> {
+  async install(sourcePath: string): Promise<PluginSummary> {
+    const source = await realpath(sourcePath)
+    if (!(await stat(source)).isFile()) throw new Error('Select a plugin ZIP file or PLUGIN.json.')
+    if (basename(source) === 'PLUGIN.json') return this.installDirectory(dirname(source))
+    if (extname(source).toLowerCase() !== '.zip') throw new Error('Select a plugin ZIP file or PLUGIN.json.')
+
+    const tempRoot = await this.directory('tmp', undefined, true)
+    const stage = await mkdtemp(join(tempRoot, 'plugin-extract-'))
+    try {
+      const contents = join(stage, 'contents')
+      const extracted = await extractZipArchive(source, contents, pluginArchiveLimits, { validatePath: requirePluginPath })
+      const manifests = [...extracted.entryNames].filter(name => name === 'PLUGIN.json' || /^[^/]+\/PLUGIN\.json$/.test(name))
+      if (manifests.length > 1) throw new Error('Plugin ZIP contains multiple plugin roots; select a package with one PLUGIN.json.')
+      if (manifests.length === 0) throw new Error('Plugin ZIP must contain PLUGIN.json at its root or inside a single top-level directory.')
+      const manifest = manifests[0]
+      if (manifest !== 'PLUGIN.json') {
+        const entries = await readdir(contents, { withFileTypes: true })
+        if (entries.length !== 1 || !entries[0].isDirectory() || entries[0].name !== manifest.split('/')[0]) {
+          throw new Error('Plugin ZIP must contain PLUGIN.json at its root or inside a single top-level directory.')
+        }
+      }
+      return await this.installDirectory(dirname(join(contents, manifest)))
+    } finally {
+      // stage is a freshly generated direct child of the verified temporary root.
+      await rm(stage, { recursive: true, force: true })
+    }
+  }
+
+  private async installDirectory(sourceDirectory: string): Promise<PluginSummary> {
     const source = await realpath(sourceDirectory)
     if (!(await stat(source)).isDirectory()) throw new Error('Select a plugin directory.')
     const manifest = parsePluginManifest(await optionalJson(join(source, 'PLUGIN.json'), 64 * 1024))
@@ -105,7 +144,7 @@ export class PluginStore {
       let bytes = 0
       let entries = 0
       const copy = async (from: string, to: string, ancestors: Set<string>): Promise<void> => {
-        if (++entries > 10_000) throw new Error('Plugin package contains too many files.')
+        if (++entries > MAX_PACKAGE_ENTRIES) throw new Error('Plugin package contains too many files.')
         const actual = await realpath(from)
         if (!isSameOrInsideDirectory(source, actual)) throw new Error('Plugin package link leaves its directory.')
         const info = await stat(actual)

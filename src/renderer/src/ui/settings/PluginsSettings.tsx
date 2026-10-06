@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ExternalLink, FolderPlus, Play, RefreshCw, Square, Trash2 } from 'lucide-react'
+import { ExternalLink, PackagePlus, Play, RefreshCw, Square, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { PluginSummary } from '@shared/plugins'
 import { errorDetail } from '@shared/recovery'
@@ -24,7 +24,7 @@ export function PluginsSettings({ plugins, error, onRefresh, onOpen }: {
     <aside className="ui-list-pane">
       <div className="ui-list-pane-header ui-toolbar">
         <button type="button" className="ui-tool-button ui-tool-button-square" aria-label={t('plugins.install')} data-tooltip={t('plugins.install')} disabled={busy}
-          onClick={() => void act(async () => { const item = await window.gale.plugins.install(); if (item) setSelectedId(item.id) })}><FolderPlus size={18} /></button>
+          onClick={() => void act(async () => { const item = await window.gale.plugins.install(); if (item) setSelectedId(item.id) })}><PackagePlus size={18} /></button>
         <button type="button" className="ui-tool-button ui-tool-button-square" aria-label={t('common.refresh')} data-tooltip={t('common.refresh')} disabled={busy}
           onClick={() => void onRefresh()}><RefreshCw size={18} /></button>
       </div>

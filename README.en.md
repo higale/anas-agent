@@ -49,7 +49,7 @@ Shell commands preserve the model's command text, arguments, and search behavior
 
 ## Plugins
 
-Install optional prebuilt plugin folders in **Settings > Plugins**. Plugins can provide side panels, separate windows, and optional backends that start on demand. UI-only plugins require no backend process. See the [plugin API and limitations](docs/PLUGINS.md) and [examples](examples/plugins).
+Install optional plugins in **Settings > Plugins** by selecting a ZIP file or `PLUGIN.json` inside a prebuilt plugin folder. Plugins can provide side panels, separate windows, and optional backends that start on demand. UI-only plugins require no backend process. See the [plugin API and limitations](docs/PLUGINS.md) and [examples](examples/plugins).
 
 ## Development
 

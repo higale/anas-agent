@@ -49,7 +49,7 @@ Shell 命令保留模型提供的命令文本、参数及搜索行为。受支�
 
 ## 插件
 
-可选插件在“设置 > 插件”中从已构建的文件夹安装，可提供侧边页面、独立窗口和按需启动的后台。纯界面插件无需后台进程。开发接口与限制见[插件文档](docs/PLUGINS.md)，示例位于 [examples/plugins](examples/plugins)。
+可选插件在“设置 > 插件”中选择 ZIP 文件或已构建插件目录中的 `PLUGIN.json` 安装，可提供侧边页面、独立窗口和按需启动的后台。纯界面插件无需后台进程。开发接口与限制见[插件文档](docs/PLUGINS.md)，示例位于 [examples/plugins](examples/plugins)。
 
 ## 开发
 

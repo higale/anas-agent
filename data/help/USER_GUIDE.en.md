@@ -284,7 +284,7 @@ Preview request in the project editor shows the context and tools that would be 
 
 ## Plugins
 
-In **Settings > Plugins**, install a prebuilt folder containing `PLUGIN.json`; extract ZIP packages first. Open a plugin in the right workspace or a separate window, or launch it from the chat toolbar's plugin menu. UI-only plugins create no backend process. An optional backend starts on its first call and can be stopped in settings.
+In **Settings > Plugins**, click **Install plugin** and select a ZIP file or `PLUGIN.json` in a prebuilt plugin folder. ZIPs are extracted automatically; the manifest must be at the archive root or inside its sole top-level folder. Selecting `PLUGIN.json` installs its entire folder. Open a plugin in the right workspace or a separate window, or launch it from the chat toolbar's plugin menu. UI-only plugins create no backend process. An optional backend starts on its first call and can be stopped in settings.
 
 Hiding a panel, switching conversations, or opening settings preserves its page state. Closing a tab destroys that page. Separate windows share saved data and the backend with the side panel, but do not share unsaved page content. Disabling or uninstalling closes its pages and backend. Uninstalling retains saved data for a later installation with the same ID.
 

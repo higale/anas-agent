@@ -140,7 +140,10 @@ export function registerPluginIpc(): void {
     return (await store.list()).map(item => ({ ...item, ...backends.status(item.id) }))
   })
   handleMainIpc('plugins:install', async event => {
-    const result = await showModalOpenDialog(dialogParentFromEvent(event), { properties: ['openDirectory'], title: 'Install plugin / 安装插件' })
+    const result = await showModalOpenDialog(dialogParentFromEvent(event), {
+      properties: ['openFile'], title: 'Install plugin / 安装插件',
+      filters: [{ name: 'Plugin ZIP or PLUGIN.json / 插件 ZIP 或 PLUGIN.json', extensions: ['zip', 'json'] }]
+    })
     if (result.canceled || !result.filePaths[0]) return null
     const { store } = runtime()
     const item = await store.exclusive(() => store.install(result.filePaths[0]))

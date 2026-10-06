@@ -136,7 +136,7 @@ describe('backup archive extraction', () => {
       { name: 'three.txt', data: Buffer.from('3') }
     ])
 
-    await expectRejectedAndClean(emptyArchive, join(root, 'empty-target'), 'Backup archive is empty')
+    await expectRejectedAndClean(emptyArchive, join(root, 'empty-target'), 'archive is empty')
     await expectRejectedAndClean(
       countArchive,
       join(root, 'count-target'),
@@ -217,8 +217,8 @@ describe('backup archive extraction', () => {
     }])
 
     await expectRejectedAndClean(duplicate, join(root, 'duplicate-target'), 'duplicate entry path')
-    await expectRejectedAndClean(traversal, join(root, 'traversal-target'), /invalid relative path|Invalid backup entry path/i)
-    await expectRejectedAndClean(encrypted, join(root, 'encrypted-target'), 'Encrypted backup archive entries')
+    await expectRejectedAndClean(traversal, join(root, 'traversal-target'), /invalid relative path|Invalid ZIP entry path/i)
+    await expectRejectedAndClean(encrypted, join(root, 'encrypted-target'), 'Encrypted ZIP archive entries')
     await expectRejectedAndClean(special, join(root, 'special-target'), 'not a regular file')
   })
 
@@ -245,7 +245,7 @@ describe('backup archive extraction', () => {
       { name: 'tools/run', data: Buffer.from(target), mode: 0o120777 },
       { name: 'tools/content.txt', data: Buffer.from('content') }
     ])
-    await expectRejectedAndClean(archive, join(root, 'restore'), /Invalid backup|Backup link target/)
+    await expectRejectedAndClean(archive, join(root, 'restore'), /Invalid ZIP|ZIP link target/)
   })
 
   it('rejects linked target chains and links colliding with extracted ancestors', async () => {
@@ -256,7 +256,7 @@ describe('backup archive extraction', () => {
     ]) {
       const archive = join(root, 'link.zip')
       await writeZip(archive, entries)
-      await expectRejectedAndClean(archive, join(root, 'restore'), /Backup link target|EEXIST/)
+      await expectRejectedAndClean(archive, join(root, 'restore'), /ZIP link target|EEXIST/)
     }
   })
 

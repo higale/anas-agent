@@ -1,10 +1,27 @@
 const assert = require('node:assert/strict')
-const { mkdtemp, mkdir, rm, readFile, writeFile } = require('node:fs/promises')
+const { createWriteStream } = require('node:fs')
+const { mkdtemp, mkdir, rm, readFile, readdir, writeFile } = require('node:fs/promises')
 const { createServer } = require('node:http')
 const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
 const { _electron: electron } = require('playwright')
 const { expect } = require('playwright/test')
+const { ZipFile } = require('yazl')
+
+async function zipExample(directory, archive, prefix = '') {
+  const files = await readdir(directory)
+  await new Promise((resolve, reject) => {
+    const zip = new ZipFile()
+    const output = createWriteStream(archive)
+    output.on('close', resolve)
+    output.on('error', reject)
+    zip.on('error', reject)
+    zip.outputStream.on('error', reject)
+    zip.outputStream.pipe(output)
+    for (const file of files) zip.addFile(join(directory, file), `${prefix}${file}`)
+    zip.end()
+  })
+}
 
 async function checkLifecycle(application, page, directory) {
   const source = join(directory, 'plugin-fixture')
@@ -30,7 +47,7 @@ async function checkLifecycle(application, page, directory) {
         }
       };
     `)
-    await application.evaluate(({ dialog }, source) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [source] }) }, source)
+    await application.evaluate(({ dialog }, source) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [source] }) }, join(source, 'PLUGIN.json'))
     await page.evaluate(() => globalThis.gale.plugins.install())
     await page.evaluate(() => {
       globalThis.pluginWindowResult = undefined
@@ -85,7 +102,7 @@ async function checkForms(application, page, directory, settings) {
   await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ version: 0, id: 'form-test', name: 'Form test', plugin_version: '1.0.0', api_version: 1, ui: 'index.html' }))
   await writeFile(join(source, 'index.html'), '<html><body><form id="form"><input id="name" required><button id="submit">Submit</button></form><output id="count">0</output><form id="navigation" action="https://example.com/blocked"><button id="navigate">Navigate</button></form><script src="app.js"></script></body></html>')
   await writeFile(join(source, 'app.js'), 'document.getElementById("form").addEventListener("submit", event => { event.preventDefault(); const output = document.getElementById("count"); output.textContent = String(Number(output.textContent) + 1); });')
-  await application.evaluate(({ dialog }, source) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [source] }) }, source)
+  await application.evaluate(({ dialog }, source) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [source] }) }, join(source, 'PLUGIN.json'))
   await page.evaluate(() => globalThis.gale.plugins.install())
   await settings()
   await page.getByRole('button', { name: 'Form test', exact: true }).click()
@@ -141,6 +158,10 @@ async function main() {
   delete environment.ELECTRON_RUN_AS_NODE
   let application
   try {
+    const backendZip = join(directory, 'backend.zip')
+    const notepadZip = join(directory, 'notepad.zip')
+    await zipExample(join(repository, 'examples/plugins/backend-demo'), backendZip, 'backend-demo/')
+    await zipExample(join(repository, 'examples/plugins/notepad'), notepadZip)
     application = await electron.launch({ args: [repository, '--data-dir', directory], cwd: repository, env: environment, executablePath: require('electron'), timeout: 45000 })
     const page = await application.firstWindow({ timeout: 45000 })
     const errors = []
@@ -152,17 +173,23 @@ async function main() {
     await application.evaluate(({ dialog, BrowserWindow }, paths) => {
       globalThis.__pluginTestErrors = []
       dialog.showErrorBox = (title, content) => globalThis.__pluginTestErrors.push(`${title}: ${content}`)
-      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [paths.shift()] })
+      dialog.showOpenDialog = async (...args) => {
+        globalThis.__pluginInstallDialog = args.at(-1)
+        return { canceled: false, filePaths: [paths.shift()] }
+      }
       BrowserWindow.getAllWindows()[0].setSize(1360, 800)
-    }, [join(repository, 'examples/plugins/notepad'), join(repository, 'examples/plugins/backend-demo'), join(repository, 'examples/plugins/notepad')])
+    }, [join(repository, 'examples/plugins/notepad/PLUGIN.json'), backendZip, notepadZip])
     const settings = async () => {
       await page.locator('.sidebar-settings').click()
       await page.getByRole('menuitem', { name: 'Settings', exact: true }).click()
       await page.locator('[data-settings-tab="plugins"]').click()
     }
     await settings()
-    await page.getByRole('button', { name: 'Install plugin from folder', exact: true }).click()
+    await page.getByRole('button', { name: 'Install plugin', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Open in side panel', exact: true })).toBeEnabled()
+    const installDialog = await application.evaluate(() => globalThis.__pluginInstallDialog)
+    assert.deepEqual(installDialog.properties, ['openFile'])
+    assert.deepEqual(installDialog.filters.flatMap(filter => filter.extensions), ['zip', 'json'])
     await page.getByRole('button', { name: 'Open in side panel', exact: true }).click()
     const frame = page.frameLocator('iframe[title="Notepad / 记事本"]')
     await expect(frame.locator('#draft')).toBeEnabled({ timeout: 10000 })
@@ -190,7 +217,7 @@ async function main() {
     await assert.rejects(page.evaluate(() => globalThis.gale.plugins.invoke('example-notepad', 'data.get', { key: 'draft' })), /disabled/)
     await page.getByRole('checkbox', { name: 'Enabled', exact: true }).click()
     await expect(page.getByRole('checkbox', { name: 'Enabled', exact: true })).toBeChecked()
-    await page.getByRole('button', { name: 'Install plugin from folder', exact: true }).click()
+    await page.getByRole('button', { name: 'Install plugin', exact: true }).click()
     await expect(page.getByText('Backend stopped; starts on the first call.', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'Open in side panel', exact: true }).click()
     const backend = page.frameLocator('iframe[title="Backend demo / 后台示例"]')
@@ -212,7 +239,7 @@ async function main() {
     await page.getByRole('alertdialog').getByRole('button', { name: /Confirm|确认/ }).click()
     await expect(page.getByRole('button', { name: 'Notepad / 记事本', exact: true })).toHaveCount(0)
     assert.equal(JSON.parse(await readFile(join(directory, 'plugin_data/example-notepad/state.json'), 'utf8')).values.draft, 'Plugin saved draft')
-    await page.getByRole('button', { name: 'Install plugin from folder', exact: true }).click()
+    await page.getByRole('button', { name: 'Install plugin', exact: true }).click()
     await page.getByRole('button', { name: 'Open in side panel', exact: true }).click()
     await expect(frame.locator('#draft')).toHaveValue('Plugin saved draft')
     await page.screenshot({ path: join(tmpdir(), 'anas-plugin-panel.png') })
@@ -240,7 +267,7 @@ async function main() {
     assert.equal(restored.length, 2)
     assert.equal(restored.find(item => item.id === 'example-backend').backendStatus, 'stopped')
     assert.equal(await restarted.evaluate(() => globalThis.gale.plugins.invoke('example-notepad', 'data.get', { key: 'draft' })), 'Plugin saved draft')
-    console.log('Plugins passed: install, sidebar and narrow drawer, page-state preservation, isolated popup, persistent data, disable, optional backend RPC/errors/stop, queued cancellation with active results, slow-resource isolation, backup/restore, reinstall, and restart without backend activation.')
+    console.log('Plugins passed: PLUGIN.json and root/wrapped ZIP installation, sidebar and narrow drawer, page-state preservation, isolated popup, persistent data, disable, optional backend RPC/errors/stop, queued cancellation with active results, slow-resource isolation, backup/restore, reinstall, and restart without backend activation.')
   } finally {
     await application?.close().catch(() => undefined)
     await rm(directory, { recursive: true, force: true })
