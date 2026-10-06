@@ -2,7 +2,7 @@ import { helpDocuments } from '@shared/helpDocuments'
 import { HelpDocumentPanel } from './HelpDocumentPanel'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Tabs from '@radix-ui/react-tabs'
-import { BookOpen, FileDiff, Maximize2, Minimize2, PanelLeftOpen, PanelRightClose, X } from 'lucide-react'
+import { BookOpen, FileDiff, Maximize2, Minimize2, PanelLeftOpen, PanelRightClose, Puzzle, X } from 'lucide-react'
 import { useEffect, useRef, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AgentRunActivity } from '@shared/agentTypes'
@@ -90,7 +90,7 @@ export function WorkspacePanels({ controller, scope, activities, project, narrow
                   ? <span role="img" aria-label={subagent ? subagentStatusLabel(subagent.status) : t('agent.panel_unavailable')}>
                       <AgentSubagentStatusIcon status={subagent?.status ?? 'failed'} size={14} />
                     </span>
-                  : panel.kind === 'document' ? <BookOpen size={14} /> : <FileDiff size={14} />}
+                  : panel.kind === 'document' ? <BookOpen size={14} /> : panel.kind === 'plugin' ? <Puzzle size={14} /> : <FileDiff size={14} />}
                 <span className="ui-truncate">{label}</span>
               </Tabs.Trigger>
               <button className="ui-tab-close ui-tool-button" type="button"
@@ -113,7 +113,8 @@ export function WorkspacePanels({ controller, scope, activities, project, narrow
       const panel = tab.panel
       return <Tabs.Content key={tab.id} className="ui-tab-content" value={tab.id}>
       <PanelViewState state={tab.view}>
-        {panel.kind === 'document'
+        {panel.kind === 'plugin' ? <div className="plugin-panel-slot" data-plugin-panel={panel.pluginId} />
+          : panel.kind === 'document'
           ? <HelpDocumentPanel request={panel} onOpen={(next) => controller.open(scope, next)} />
           : panel.kind === 'subagent'
           ? activities.some((run) => run.runId === panel.runId && run.subagents.some((item) => item.id === panel.subagentId))

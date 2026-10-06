@@ -57,7 +57,7 @@ function workspaceProps(
   error?: string
 ): ComponentProps<typeof AgentWorkspace> {
   return {
-    panels: { groups: {}, documents: { tabs: [], expanded: false, maximized: false }, open: vi.fn(), select: vi.fn(), close: vi.fn(), toggle: vi.fn(), dismiss: vi.fn(), toggleMaximized: vi.fn(), remove: vi.fn() },
+    panels: { groups: {}, documents: { tabs: [], expanded: false, maximized: false }, open: vi.fn(), select: vi.fn(), close: vi.fn(), toggle: vi.fn(), dismiss: vi.fn(), toggleMaximized: vi.fn(), remove: vi.fn(), closePlugins: vi.fn() },
     onPanelWidthCommit: vi.fn(),
     activeThreadId: 'thread-1',
     attachments: [],

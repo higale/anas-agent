@@ -6,6 +6,7 @@ import { handleMainIpc } from './ipcSecurity'
 import { beginApplicationDataTransition } from './applicationDataLifecycle'
 import { closeAgentRuntime } from './agent/agentIpcHandlers'
 import { closeCachedMcpRuntime } from './mcpRuntimeService'
+import { closePluginHost } from './plugins/pluginHost'
 import { createMainWindow } from './appShell'
 import { preserveRecoveryData, requireResettableConfigFile, resetRecoveryConfig } from './recoveryData'
 import { recoverInterruptedDataRestore, resetProjectData } from './backupService'
@@ -35,7 +36,7 @@ async function stopWriters(): Promise<void> {
   stopError = undefined
   try {
     await beginApplicationDataTransition()
-    const results = await Promise.allSettled([closeAgentRuntime(), closeCachedMcpRuntime()])
+    const results = await Promise.allSettled([closeAgentRuntime(), closeCachedMcpRuntime(), closePluginHost()])
     const errors = results.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])
     if (errors.length) throw new AggregateError(errors, 'Could not stop application data writers.')
     await recoverInterruptedDataRestore()

@@ -1,0 +1,9 @@
+:root { color-scheme: light dark; font: 14px system-ui, sans-serif; }
+* { box-sizing: border-box; }
+body { margin: 0; background: light-dark(#fff, #202020); color: light-dark(#252525, #e5e5e5); }
+main { display: flex; flex-direction: column; gap: 12px; height: 100vh; padding: 16px; }
+label { font-weight: 600; }
+textarea { flex: 1; resize: none; font: inherit; padding: 10px; border: 1px solid light-dark(#d4d4d4, #484848); border-radius: 6px; background: transparent; color: inherit; }
+button { font: inherit; min-height: max(30px, calc(1rem + 18px)); padding: 0 12px; border: 1px solid light-dark(#d4d4d4, #484848); border-radius: 6px; cursor: pointer; }
+main > div { display: flex; align-items: center; gap: 12px; }
+#status { font-size: .9rem; }

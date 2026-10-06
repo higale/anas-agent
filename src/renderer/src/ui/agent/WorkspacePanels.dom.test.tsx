@@ -43,6 +43,8 @@ function Harness({ narrow = false, activities = [activity] }: { narrow?: boolean
   const scope = workspacePanelScope(thread, project.id)
   return <>
     <button onClick={() => controller.open(scope, { kind: 'document', documentId: 'USER_GUIDE.en.md' })}>Open help</button>
+    <button onClick={() => controller.open(scope, { kind: 'plugin', pluginId: 'example', name: 'Example plugin' })}>Open plugin</button>
+    <button onClick={() => controller.closePlugins(['example'])}>Disable plugin</button>
     <button onClick={() => controller.remove(scope)}>Remove conversation</button>
     <button onClick={() => controller.open(scope, { kind: 'files', projectId: project.id, threadId: thread })}>Open Git</button>
     <button onClick={() => controller.open(scope, { kind: 'files', projectId: project.id, threadId: thread, runId: 'first' })}>Open first changes</button>
@@ -343,6 +345,30 @@ describe('Workspace panels', () => {
     await user.click(screen.getByRole('button', { name: 'agent.close_panel Alpha' }))
     await user.click(screen.getByText('Open Alpha'))
     expect(screen.getByRole('button', { name: 'agent.maximize_panels' })).toBeVisible()
+  })
+
+  it('keeps plugin tabs across conversations and removes them when their plugin is disabled', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+    await user.click(screen.getByText('Open plugin'))
+    await user.click(screen.getByText('Switch conversation'))
+    expect(screen.getByRole('tab', { name: 'Example plugin' })).toBeVisible()
+    await user.click(screen.getByText('Remove conversation'))
+    expect(screen.getByRole('tab', { name: 'Example plugin' })).toBeVisible()
+    await user.click(screen.getByText('Disable plugin'))
+    expect(screen.queryByRole('tab', { name: 'Example plugin' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the current conversation panel selected when an inactive plugin is disabled', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+    await user.click(screen.getByText('Open help'))
+    await user.click(screen.getByText('Open plugin'))
+    await user.click(screen.getByText('Open Git'))
+    expect(screen.getByRole('tab', { name: 'agent.file_changes' })).toHaveAttribute('aria-selected', 'true')
+    await user.click(screen.getByText('Disable plugin'))
+    expect(screen.getByRole('tab', { name: 'agent.file_changes' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByRole('tab', { name: 'Example plugin' })).not.toBeInTheDocument()
   })
 
   it('uses a non-blocking drawer on narrow windows and keeps tabs when Escape collapses it', async () => {

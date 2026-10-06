@@ -17,6 +17,8 @@ import {
 import { configureRuntimeLogger, openRuntimeLogDir, openRuntimeLogViewer, runtimeLog } from './runtimeLogger'
 import { applyNativeTheme, configureApplicationMenu, openExternalUrl } from './appShell'
 import { closeAgentRuntime, initializeAgentRuntime } from './agent/agentIpcHandlers'
+import { closePluginHost, stopPluginBackends } from './plugins/pluginHost'
+import { withApplicationDataSnapshot } from './applicationDataSnapshot'
 import { isDeveloperHttpTraceEnabled, setDeveloperHttpTraceEnabled } from './agent/developerHttpTraceState'
 import { dialogParentFromEvent, showModalOpenDialog, showModalSaveDialog } from './modalDialog'
 import { getRuntimeToolStatus } from './runtimeToolStatus'
@@ -197,7 +199,10 @@ export function registerAppIpcHandlers(): void {
     })
     if (result.canceled || !result.filePath) return null
     await updateBackupDirectory(dirname(result.filePath))
-    const backup = await createDataBackupZip(result.filePath)
+    const backup = await withApplicationDataSnapshot(async () => {
+      await stopPluginBackends()
+      return createDataBackupZip(result.filePath!)
+    })
     runtimeLog('info', 'backup', 'Data backup created.', backup)
     return backup
   })
@@ -219,6 +224,7 @@ export function registerAppIpcHandlers(): void {
     const deactivate = async (): Promise<void> => {
       await beginApplicationDataTransition()
       const stopped = await Promise.allSettled([
+        closePluginHost(),
         closeAgentRuntime(),
         closeCachedMcpRuntime()
       ])

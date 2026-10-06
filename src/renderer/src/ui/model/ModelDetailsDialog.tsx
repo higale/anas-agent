@@ -3,6 +3,7 @@ import { Save, SlidersHorizontal, X } from 'lucide-react'
 import { useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { resolveModelListEndpoint } from '@shared/modelListEndpoint'
+import { errorDetail } from '@shared/recovery'
 import { SegmentedMultiSelect } from '../SegmentedMultiSelect'
 import { CommitNumberInput } from '../CommitNumberInput'
 import { CommitTextInput } from '../CommitTextField'
@@ -52,7 +53,7 @@ export function ModelDetailsDialog({
   const draftRef = useRef(modelDraft)
   const savingRef = useRef(false)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string>()
+  const [error, setError] = useState<{ message: string; detail?: string }>()
   function onUpdateDraft(update: Partial<ModelDraft>): void {
     draftRef.current = { ...draftRef.current, ...update }
     setModelDraft(draftRef.current)
@@ -65,7 +66,7 @@ export function ModelDetailsDialog({
     const draft = draftRef.current
     const validationError = validateProviderModelDraft(draft, t)
     if (validationError) {
-      setError(validationError)
+      setError({ message: validationError })
       return
     }
     savingRef.current = true
@@ -75,7 +76,7 @@ export function ModelDetailsDialog({
       await onSaveDetails(draft)
       onOpenChange(false)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t('settings.failed_save_model'))
+      setError({ message: t('settings.failed_save_model'), detail: errorDetail(cause) })
     } finally {
       savingRef.current = false
       setSaving(false)
@@ -229,7 +230,7 @@ export function ModelDetailsDialog({
           </fieldset>
 
           <footer className="model-details-dialog-footer ui-dialog-footer">
-            {error && <span className="ui-dialog-footer-start ui-status-danger" role="alert">{error}</span>}
+            {error && <span className="ui-dialog-footer-start ui-status-danger" role="alert" data-tooltip={error.detail}>{error.message}</span>}
             <Dialog.Close asChild>
               <button className="ui-button" type="button" disabled={saving}>
                 <X size={UI_ICON_SIZE_SMALL} />

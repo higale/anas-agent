@@ -1,4 +1,5 @@
 import { initializeHelpFiles } from './helpDocuments'
+import { closePluginHost, registerPluginIpc, registerPluginProtocol, registerPluginScheme } from './plugins/pluginHost'
 import { registerAttachmentPreviewProtocol, registerAttachmentPreviewScheme } from './attachments'
 import { app, BrowserWindow, nativeTheme } from 'electron'
 import { applicationId, applicationName } from '@shared/appMetadata'
@@ -33,6 +34,7 @@ const packagedSmokeMode = process.env.ANAS_PACKAGED_SMOKE === '1'
 function startApplication(): void {
   let windowReady = false
   registerAttachmentPreviewScheme()
+  registerPluginScheme()
   installRuntimeNetworkPolicy()
   app.setName(applicationName)
   if (process.platform === 'win32') app.setAppUserModelId(applicationId)
@@ -54,6 +56,7 @@ function startApplication(): void {
   }
 
   registerAppIpcHandlers()
+  registerPluginIpc()
   registerRecoveryIpcHandlers()
   registerWorkspaceIpcHandlers()
   registerSpeechInputIpc()
@@ -75,6 +78,7 @@ function startApplication(): void {
 
   app.whenReady().then(async () => {
     registerAttachmentPreviewProtocol()
+    registerPluginProtocol()
     const recoveredInterruptedRestore = await recoverInterruptedDataRestore()
     await migrateDataDirectory(getDataDir())
     await recoverPendingProjectDeletion()
@@ -148,6 +152,7 @@ function startApplication(): void {
     markAppQuitting()
     let deadline: ReturnType<typeof setTimeout> | undefined
     const shutdown = Promise.allSettled([
+      closePluginHost(),
       closeAgentRuntime({ allowIncomplete: true, timeoutMs: 5_000 }),
       closeCachedMcpRuntime()
     ])

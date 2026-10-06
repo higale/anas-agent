@@ -1253,5 +1253,24 @@
     "select_item": "选择目录、工具或文件查看详情。",
     "expand": "展开工具“{{name}}”",
     "collapse": "收起工具“{{name}}”"
+  },
+  "plugins": {
+    "operation_failed": "插件操作失败。",
+    "load_failed": "无法加载插件列表。",
+    "title": "插件",
+    "description": "独立安装的界面与辅助功能",
+    "install": "从文件夹安装插件",
+    "uninstall": "卸载插件",
+    "uninstall_hint": "卸载“{{name}}”？插件窗口和后台会关闭，已保存的数据会保留。",
+    "empty": "尚未安装插件。选择包含 PLUGIN.json 的已构建插件文件夹。",
+    "open_panel": "在侧边打开",
+    "open_window": "独立窗口",
+    "start_backend": "启动后台",
+    "stop_backend": "停止后台",
+    "no_backend": "纯界面插件，无需后台进程。",
+    "backend_stopped": "后台未启动；首次调用时自动启动。",
+    "backend_starting": "后台正在启动。",
+    "backend_running": "后台运行中。",
+    "backend_failed": "后台已停止，请检查错误后重新启动。"
   }
 }

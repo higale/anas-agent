@@ -43,6 +43,9 @@ import { useAgentWorkspace } from './agent/useAgentWorkspace'
 import { agentActionError } from './agent/agentErrorMessage'
 import { AppSidebar } from './AppSidebar'
 import { useWorkspacePanels, workspacePanelScope } from './agent/useWorkspacePanels'
+import { usePlugins } from './plugins/usePlugins'
+import { PluginFrames } from './plugins/PluginFrames'
+import type { PluginSummary } from '@shared/plugins'
 import { sidebarWidthCssValue } from './SidebarResizeHandle'
 import { AboutDialog, AvatarCropDialog, ConfirmDialog, DataCleanupDialog } from './dialogs/AppDialogs'
 import type { ConfirmDialogRequest } from './dialogs/AppDialogs'
@@ -134,6 +137,7 @@ export function App() {
   const submissionLockRef = useRef(new SynchronousSubmissionLock())
   const draftModelInitializedRef = useRef(false)
   const workspacePanels = useWorkspacePanels()
+  const pluginRegistry = usePlugins(workspacePanels.closePlugins)
   const agent = useAgentWorkspace({ onAppError: setAppError })
   const {
     activeThreadId: agentActiveThreadId,
@@ -143,6 +147,16 @@ export function App() {
     workspaceState: agentWorkspaceState
   } = agent
   const activeProjectId = agent.activeThread?.projectId ?? agent.draftProjectId
+  const openPlugin = (plugin: PluginSummary) => {
+    if (!plugin.manifest || !plugin.enabled || plugin.error) return
+    if (!plugin.manifest.ui) {
+      void window.gale.plugins.startBackend(plugin.id).catch(() => setAppError(t('plugins.operation_failed')))
+      return
+    }
+    void closeSettings(ensureModelDraftCanLeave).then(() => {
+      workspacePanels.open(workspacePanelScope(agent.activeThreadId, activeProjectId), { kind: 'plugin', pluginId: plugin.id, name: plugin.manifest!.name })
+    })
+  }
   const activeProject = projects.find((project) => project.id === activeProjectId)
   const draftProject = projects.find((project) => project.id === agentDraftProjectId)
   const activeProjectThreadCount = agent.threads.filter((thread) => thread.projectId === activeProjectId).length
@@ -1156,6 +1170,10 @@ export function App() {
 
       {settingsOpen ? (
         <SettingsScreen
+          plugins={pluginRegistry.plugins}
+          pluginError={pluginRegistry.error}
+          onRefreshPlugins={pluginRegistry.refresh}
+          onOpenPlugin={openPlugin}
           onConfigChange={setConfig}
           activeTab={settingsTab}
           avatar={avatar}
@@ -1251,6 +1269,8 @@ export function App() {
         />
       ) : (
       <AgentWorkspace
+        plugins={pluginRegistry.plugins}
+        onOpenPlugin={openPlugin}
         onDiffPreferencesChange={async (update) => { setConfig(await window.gale.config.updateSettings(update)) }}
         panels={workspacePanels}
         onPanelWidthCommit={async (workspacePanelWidth) => {
@@ -1355,6 +1375,7 @@ export function App() {
       </div>
 
       <ConfirmDialog request={confirmDialog} onClose={() => setConfirmDialog(undefined)} />
+      <PluginFrames tabs={workspacePanels.documents.tabs} plugins={pluginRegistry.plugins} />
       <UserInputDialog />
       <AvatarCropDialog
         source={avatarCropSource}

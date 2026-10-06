@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -20,7 +21,7 @@ beforeEach(() => {
   git('add', '.')
   git('commit', '-m', 'source snapshot')
 })
-afterEach(() => rmSync(root, { recursive: true, force: true }))
+afterEach(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 }))
 
 describe('development version from synchronization baselines', () => {
   it('does not treat public release tags as development baselines', () => {
@@ -65,12 +66,12 @@ describe('development version from synchronization baselines', () => {
     git('merge', '--no-ff', 'feature', '-m', 'merge feature')
     expect(getDevelopmentVersion(root, '3.1.3')).toMatch(/^3\.1\.3-dev\.1\+g/)
   })
-  it('does not inherit metadata from a source archive parent directory', () => {
+  it('does not inherit metadata from a source archive parent directory', async () => {
     git('tag', 'github/v3.1.3')
     const archive = join(root, 'archive')
     mkdirSync(archive)
     expect(getDevelopmentVersion(archive, '3.1.3')).toBeUndefined()
-    rmSync(join(root, '.git'), { recursive: true, force: true })
+    await rm(join(root, '.git'), { recursive: true, force: true, maxRetries: 10, retryDelay: 25 })
     expect(getDevelopmentVersion(root, '3.1.3')).toBeUndefined()
   })
 })

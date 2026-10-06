@@ -2,7 +2,7 @@ import { app, BrowserWindow, Menu, nativeTheme, shell, type BrowserWindowConstru
 import { join } from 'node:path'
 import { getAppConfigSnapshot } from './config/appConfig'
 import { getLanguageResources } from './languageStore'
-import { registerMainRendererWindow, resolveRendererLocation } from './ipcSecurity'
+import { isMainRendererWindow, registerMainRendererWindow, resolveRendererLocation } from './ipcSecurity'
 import { runtimeLog } from './runtimeLogger'
 import { registerWindowZoomShortcuts, resetAppZoom, stepAppZoom } from './zoomService'
 import { buildNativeContextMenuTemplate, type NativeMenuLabel } from './nativeContextMenu'
@@ -50,12 +50,22 @@ function titleBarOptions(): Pick<BrowserWindowConstructorOptions, 'titleBarStyle
 }
 
 function requestAboutDialog(): void {
-  const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  const window = activeMainWindow()
+  window?.show()
+  window?.focus()
   window?.webContents.send('app:aboutRequested')
 }
 
 function openHelpFromMenu(): void {
-  activeWindow()?.webContents.send('app:helpRequested')
+  const window = activeMainWindow()
+  window?.show()
+  window?.focus()
+  window?.webContents.send('app:helpRequested')
+}
+
+function activeMainWindow(): BrowserWindow | undefined {
+  const focused = BrowserWindow.getFocusedWindow()
+  return focused && isMainRendererWindow(focused) ? focused : BrowserWindow.getAllWindows().find(isMainRendererWindow)
 }
 
 function activeWindow(): BrowserWindow | undefined {
@@ -67,7 +77,7 @@ export function markAppQuitting(): void {
 }
 
 export function activateMainWindow(): void {
-  const win = activeWindow()
+  const win = activeMainWindow()
   if (!win) {
     if (app.isReady()) createMainWindow()
     return

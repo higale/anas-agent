@@ -49,6 +49,8 @@ async function fixture() {
 describe('manual avatar rescue', () => {
   it('checks read-only and fixes only metadata when all images are usable', async () => {
     const { data, assets, backup, preserve } = await fixture()
+    const icon = await avatarWindowsIconPathForCrop(join(assets, 'avatar-crop.png'), data)
+    await writeFile(icon, 'good ico')
     const original = JSON.stringify({ version: 99, ...transform, annotation: 'keep' })
     await writeFile(join(assets, 'avatar-transform.json'), original)
     expect(await inspectAvatarRepair(data)).toEqual({ fields: ['assets/avatar-transform.json: version'], issues: [] })
@@ -63,6 +65,7 @@ describe('manual avatar rescue', () => {
     expect(await readAvatarTransform(data)).toEqual(transform)
     expect(JSON.parse(await readFile(join(assets, 'avatar-transform.json'), 'utf8')).annotation).toBe('keep')
     expect(mocks.display).not.toHaveBeenCalled()
+    expect(await readFile(icon, 'utf8')).toBe('good ico')
     expect(await repairAvatarData(data, preserve)).toEqual({ repaired: [], unresolved: [] })
     expect(preserve).toHaveBeenCalledOnce()
   })

@@ -5,6 +5,7 @@ export type WorkspacePanel =
   | { kind: 'subagent'; runId: string; subagentId: string; name: string }
   | { kind: 'files'; projectId: string; threadId?: string; runId?: string }
   | { kind: 'document'; documentId: HelpDocumentId; anchor?: string; navigationId?: string }
+  | { kind: 'plugin'; pluginId: string; name: string }
 
 export interface WorkspacePanelTab {
   id: string
@@ -24,6 +25,7 @@ export function workspacePanelId(panel: WorkspacePanel): string {
     case 'subagent': return JSON.stringify([panel.kind, panel.runId, panel.subagentId])
     case 'files': return JSON.stringify([panel.kind, panel.projectId])
     case 'document': return JSON.stringify([panel.kind, panel.documentId])
+    case 'plugin': return JSON.stringify([panel.kind, panel.pluginId])
   }
 }
 
@@ -47,8 +49,8 @@ export function useWorkspacePanels() {
   const update = useCallback((scope: string, change: (group: WorkspacePanelGroup) => WorkspacePanelGroup) => {
     setState((current) => {
       const group = change(visibleGroup(current, scope))
-      const localTabs = group.tabs.filter((tab) => tab.panel.kind !== 'document')
-      const documentTabs = group.tabs.filter((tab) => tab.panel.kind === 'document')
+      const localTabs = group.tabs.filter((tab) => tab.panel.kind !== 'document' && tab.panel.kind !== 'plugin')
+      const documentTabs = group.tabs.filter((tab) => tab.panel.kind === 'document' || tab.panel.kind === 'plugin')
       const documentActive = documentTabs.some((tab) => tab.id === group.activeId)
       const previousLocal = current.groups[scope] ?? emptyGroup
       const localActiveId = localTabs.some((tab) => tab.id === previousLocal.activeId)
@@ -95,7 +97,16 @@ export function useWorkspacePanels() {
       return { ...current, groups: next }
     })
   }, [])
-  return { ...state, open, select, close, toggle, dismiss, toggleMaximized, remove }
+  const closePlugins = useCallback((ids: string[] | 'all') => {
+    setState(current => {
+      const previous = current.documents
+      const tabs = previous.tabs.filter(tab => tab.panel.kind !== 'plugin' || (ids !== 'all' && !ids.includes(tab.panel.pluginId)))
+      if (tabs.length === previous.tabs.length) return current
+      return { ...current, documents: { ...previous, tabs, expanded: tabs.length > 0 && previous.expanded,
+        activeId: previous.activeId === undefined || tabs.some(tab => tab.id === previous.activeId) ? previous.activeId : tabs[0]?.id } }
+    })
+  }, [])
+  return { ...state, open, select, close, toggle, dismiss, toggleMaximized, remove, closePlugins }
 }
 
 export type WorkspacePanelsController = ReturnType<typeof useWorkspacePanels>

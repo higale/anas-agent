@@ -12,6 +12,8 @@ import { NoFocusButton } from '../NoFocusButton'
 import { AgentApprovalPanel } from './AgentApprovalPanel'
 import { DiffPreferences, type DiffViewSettings } from '../diff/DiffView'
 import { WorkspacePanels } from './WorkspacePanels'
+import { PluginMenu } from '../plugins/PluginMenu'
+import type { PluginSummary } from '@shared/plugins'
 import { workspacePanelGroup, workspacePanelScope, type WorkspacePanelsController } from './useWorkspacePanels'
 import { WORKSPACE_PANEL_WIDTH_DEFAULT } from '@shared/uiPreferences'
 import type { CodeReviewRequest } from '@shared/codeReview'
@@ -33,6 +35,8 @@ import { ThreadTopbar } from './ThreadTopbar'
 import { normalizeChatContentWidth } from '../settings/AppearanceSettings'
 
 interface AgentWorkspaceProps {
+  plugins?: PluginSummary[]
+  onOpenPlugin?(plugin: PluginSummary): void
   onDiffPreferencesChange?(update: Partial<DiffViewSettings>): Promise<void>
   panels: WorkspacePanelsController
   onPanelWidthCommit(width: number): void | Promise<void>
@@ -214,6 +218,7 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
           onToggleThreadPinned={props.onToggleThreadPinned}
         />
         <div className="ui-row ui-row-tight ui-push-end">
+          {props.onOpenPlugin && <PluginMenu plugins={props.plugins ?? []} onOpen={props.onOpenPlugin} />}
           {selectedProject && <NoFocusButton type="button" className="ui-tool-button ui-tool-button-square"
             aria-label={t('agent.file_changes')} data-tooltip={t('agent.file_changes')} onClick={() => props.panels.open(scope, {
               kind: 'files', projectId: selectedProject.id, threadId: props.activeThreadId

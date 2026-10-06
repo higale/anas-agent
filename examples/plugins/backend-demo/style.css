@@ -1,0 +1,26 @@
+:root {
+  color-scheme: light dark;
+  font: 14px system-ui, sans-serif;
+  --control-height: max(30px, calc(1rem + 18px));
+}
+* { box-sizing: border-box; }
+body { padding: 16px; background: light-dark(#fff, #202020); color: light-dark(#252525, #e5e5e5); }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--control-height);
+  padding: 0 9px;
+  border: 1px solid light-dark(#d4d4d4, #484848);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+button:hover { background: light-dark(#f0f0f0, #303030); }
+button:active { background: light-dark(#e5e5e5, #3a3a3a); }
+button:focus-visible { outline: 2px solid light-dark(#2563eb, #79a8ed); outline-offset: 2px; }
+#result { white-space: pre-wrap; overflow-wrap: anywhere; }

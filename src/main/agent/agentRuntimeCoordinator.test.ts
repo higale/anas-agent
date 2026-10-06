@@ -213,7 +213,7 @@ describe('conversation runtime routing', () => {
     coordinator.trimIdleConversations()
     expect(storage.openedConversations()).toHaveLength(33)
     expect((await coordinator.getSnapshot(held.id)).thread.title).toBe('Reading')
-  })
+  }, 15_000) // Initializes dozens of SQLite databases; this is a handle-lifecycle test, not a disk-speed benchmark.
 
   it('keeps the shared catalog open across a pending memory operation and excludes writes during maintenance', async () => {
     const { storage, coordinator } = await fixture()

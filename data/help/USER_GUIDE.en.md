@@ -282,6 +282,14 @@ Long conversations are compressed automatically. You can also compress manually 
 
 Preview request in the project editor shows the context and tools that would be supplied for the current project.
 
+## Plugins
+
+In **Settings > Plugins**, install a prebuilt folder containing `PLUGIN.json`; extract ZIP packages first. Open a plugin in the right workspace or a separate window, or launch it from the chat toolbar's plugin menu. UI-only plugins create no backend process. An optional backend starts on its first call and can be stopped in settings.
+
+Hiding a panel, switching conversations, or opening settings preserves its page state. Closing a tab destroys that page. Separate windows share saved data and the backend with the side panel, but do not share unsaved page content. Disabling or uninstalling closes its pages and backend. Uninstalling retains saved data for a later installation with the same ID.
+
+Application backups include plugins and their data. Backups stop plugin backends first; restoring does not restart them automatically. A plugin backend has your operating system user's permissions, so install plugins you choose to trust. Plugin errors appear individually in settings and do not require resetting application configuration.
+
 ## Local Data And Backups
 
 The default data directory is `~/.gale<program-name>/`; standard Anas uses `~/.galeAnas/`. Copying and renaming the application gives it a separate data directory.

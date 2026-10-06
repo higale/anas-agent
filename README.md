@@ -47,6 +47,10 @@ LangChain、LangGraph 和 Deep Agents 负责模型与工具循环、消息、che
 
 Shell 命令保留模型提供的命令文本、参数及搜索行为。受支持的只读命令通过目标与环境检查后可以自动获批；分析过程不会为获得批准而改写命令。其他命令遵循所选访问模式。平台支持与恢复规则由安全模型定义。
 
+## 插件
+
+可选插件在“设置 > 插件”中从已构建的文件夹安装，可提供侧边页面、独立窗口和按需启动的后台。纯界面插件无需后台进程。开发接口与限制见[插件文档](docs/PLUGINS.md)，示例位于 [examples/plugins](examples/plugins)。
+
 ## 开发
 
 先阅读 [AGENTS.md](AGENTS.md)，检查工作区和近期 Git 历史，再安装当前平台的依赖。内置 ripgrep 和原生模块需要 npm 可选依赖，请勿跳过。
@@ -107,6 +111,7 @@ npm run dev -- -- --data-dir "./runtime-data/research"
 | `.env` | 应用环境变量 |
 | `attachments/`、`file_edits/` | 已保存的附件与文件修改恢复材料 |
 | `skills/`、`tools/` | 用户管理的包 |
+| `plugins/`、`plugin_data/` | 已安装插件及独立数据；卸载插件保留数据 |
 | `skills_system/`、`skills_examples/`、`tools_system/`、`tools_examples/` | 启动时刷新的内置包；示例需先导入再使用 |
 | `help/`、`lang/` | 帮助与语言包 |
 | `assets/`、`log/`、`cache/`、`tmp/`、`electron/` | 资源、日志、缓存、临时文件与 Electron 用户配置 |

@@ -1,14 +1,16 @@
-## Anas v3.3.1
+## Anas v3.3.2
 
-- 设置页使用本地草稿和顺序保存，修复修改能力等选项时的闪烁及连续操作被旧保存结果覆盖的问题。
-- 保存失败时保留未保存内容并支持重试；模型供应商切换后可恢复失败草稿，MCP 和子 Agent 连续编辑时避免重复创建或显示已删除条目的草稿。
-- 项目可设置新对话的默认工具权限，包括默认项目；对话仍可单独切换，已有对话不受项目默认值变更影响。缺少新字段时使用“允许只读”，保持 v0 配置格式，无需迁移。
-- 项目文件夹下方左侧显示工具权限，模型与推理选项靠右对齐；同步中英文说明和权限切换入口文档。
+- 新增可选插件框架：从本地已构建文件夹安装，支持启用、停用、卸载、侧边面板和独立窗口。纯界面插件无需后台，可选 Node 后台按需启动。
+- 插件页面使用独立来源和专用宿主接口，支持普通数据持久化及脚本处理的表单提交；切换会话、收起面板或进入设置时保留页面状态。
+- 插件与数据纳入应用备份和恢复；卸载保留数据。后台调用按顺序执行，停止时取消排队任务，保留在途结果，并报告清理失败；完善慢资源加载和 Windows 文件占用处理。
+- 模型保存失败时显示本地化提示，并保留可查看的具体错误信息。
+- 增加纯界面记事本与可选后台示例、插件开发文档和中英用户说明。RDP 等具体功能由独立插件提供，本次发布不包含 RDP 客户端。
 
-- Use local drafts and sequential saves in settings to prevent flicker and older save responses from overwriting rapid edits.
-- Retain unsaved changes after failures and support retries. Restore failed provider drafts when switching back, and prevent duplicate MCP/subagent creation or deleted-item drafts during consecutive edits.
-- Configure the initial tool access mode for new conversations per project, including the default project. Conversations can override it, and existing conversations keep their own permissions. Omitted fields use Allow read-only within the existing v0 format, with no migration required.
-- Place tool access below project folders on the left and align model and reasoning selections to the right. Update both user guides and document the current permission-switching entry point.
+- Add an optional plugin framework with installation from prebuilt local folders, enable/disable and uninstall controls, side panels, and separate windows. UI-only plugins need no backend; optional Node backends start on demand.
+- Give plugin pages a separate origin and dedicated host APIs for ordinary persistent data and scripted form submission. Preserve page state when switching conversations, hiding panels, or opening settings.
+- Include plugins and their data in application backup and restore, and retain data on uninstall. Serialize backend calls, cancel queued work on stop, preserve in-flight results, and report cleanup failures. Handle slow resource loading and temporary Windows file locks.
+- Show localized model-save failure messages while retaining inspectable diagnostic details.
+- Add a UI-only notepad example, an optional-backend example, plugin developer documentation, and bilingual user guidance. Specialized features such as RDP belong in separate plugins; this release does not include an RDP client.
 
 ## 下载与安装 / Downloads & installation
 

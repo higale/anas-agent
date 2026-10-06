@@ -47,6 +47,10 @@ Custom tools run in their package directory. Sources include system packages, us
 
 Shell commands preserve the model's command text, arguments, and search behavior. Supported read-only commands may be approved automatically after target and environment checks; analysis does not rewrite commands to obtain approval. Other commands follow the selected access mode. The security model defines platform support and recovery rules.
 
+## Plugins
+
+Install optional prebuilt plugin folders in **Settings > Plugins**. Plugins can provide side panels, separate windows, and optional backends that start on demand. UI-only plugins require no backend process. See the [plugin API and limitations](docs/PLUGINS.md) and [examples](examples/plugins).
+
 ## Development
 
 Read [AGENTS.md](AGENTS.md), check the working tree and recent Git history, then install dependencies for the host platform. Optional npm dependencies are required for bundled ripgrep and native modules.
@@ -107,6 +111,7 @@ npm run dev -- -- --data-dir "./runtime-data/research"
 | `.env` | Application environment variables |
 | `attachments/`, `file_edits/` | Saved attachments and file-edit recovery material |
 | `skills/`, `tools/` | User-managed packages |
+| `plugins/`, `plugin_data/` | Installed plugins and independent data; uninstalling retains data |
 | `skills_system/`, `skills_examples/`, `tools_system/`, `tools_examples/` | Bundled packages refreshed at startup; examples must be imported before use |
 | `help/`, `lang/` | Help and language packs |
 | `assets/`, `log/`, `cache/`, `tmp/`, `electron/` | Assets, logs, cache, temporary files, and Electron profile |

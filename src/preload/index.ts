@@ -8,6 +8,21 @@ import type { AppAvatarImage, AppBuildInfo, AppConfigSnapshot, AppDataStorageUsa
 import { subscribeAgentRuntimeEvents } from './agentEventSubscription'
 
 const api: GaleApi = {
+  plugins: {
+    list: () => ipcRenderer.invoke('plugins:list'),
+    install: () => ipcRenderer.invoke('plugins:install'),
+    setEnabled: (id, enabled) => ipcRenderer.invoke('plugins:setEnabled', id, enabled),
+    uninstall: id => ipcRenderer.invoke('plugins:uninstall', id),
+    openWindow: id => ipcRenderer.invoke('plugins:openWindow', id),
+    startBackend: id => ipcRenderer.invoke('plugins:startBackend', id),
+    stopBackend: id => ipcRenderer.invoke('plugins:stopBackend', id),
+    invoke: (id, method, params) => ipcRenderer.invoke('plugins:invoke', id, method, params),
+    onChanged: listener => {
+      const handler = (_event: Electron.IpcRendererEvent, closeViews?: string[] | 'all') => listener(closeViews)
+      ipcRenderer.on('plugins:changed', handler)
+      return () => { ipcRenderer.removeListener('plugins:changed', handler) }
+    }
+  },
   recovery: {
     enter: (detail) => ipcRenderer.invoke('recovery:enter', detail),
     inspect: () => ipcRenderer.invoke('recovery:inspect'),

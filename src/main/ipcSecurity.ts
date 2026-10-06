@@ -9,7 +9,12 @@ export type RendererLocation =
 
 const rendererLocations = new WeakMap<WebContents, RendererLocation>()
 
+export function isMainRendererWindow(window: BrowserWindow): boolean {
+  return !window.isDestroyed() && rendererLocations.has(window.webContents)
+}
+
 const applicationDataIpcPrefixes = [
+  'plugins:',
   'agent:',
   'config:',
   'inputHistory:',

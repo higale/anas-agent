@@ -19,6 +19,7 @@ export default defineConfig(({ command }) => {
           output: { interop: 'auto' },
           input: {
             index: resolve('src/main/index.ts'),
+            pluginWorker: resolve('src/main/plugins/pluginWorker.ts'),
             packagedSmoke: resolve('src/main/packagedSmoke.ts')
           }
         }
@@ -30,6 +31,7 @@ export default defineConfig(({ command }) => {
       }
     },
     preload: {
+      build: { rollupOptions: { input: { index: resolve('src/preload/index.ts'), plugin: resolve('src/preload/plugin.ts') } } },
       plugins: [externalizeDepsPlugin()],
       resolve: {
         alias: {

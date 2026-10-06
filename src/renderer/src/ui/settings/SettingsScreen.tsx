@@ -38,9 +38,15 @@ import type { SubagentDraft } from '../subagent/subagentDraft'
 import { SubagentSettings } from '../subagent/SubagentSettings'
 import { settingsTabs, type SettingsTab } from './settingsTabs'
 import { ToolsSettings } from './ToolsSettings'
+import { PluginsSettings } from './PluginsSettings'
+import type { PluginSummary } from '@shared/plugins'
 import type { MemorySettingsState } from './useMemorySettingsState'
 
 interface SettingsScreenProps {
+  plugins: PluginSummary[]
+  pluginError?: string
+  onRefreshPlugins(): Promise<void>
+  onOpenPlugin(plugin: PluginSummary): void
   onConfigChange(config: AppConfigSnapshot): void
   activeTab: SettingsTab
   avatar: AppAvatarImage | null
@@ -140,6 +146,7 @@ function settingsSectionClass(activeTab: SettingsTab, tab: SettingsTab, extra = 
 }
 
 export function SettingsScreen({
+  plugins, pluginError, onRefreshPlugins, onOpenPlugin,
   onConfigChange,
   activeTab,
   avatar,
@@ -441,6 +448,9 @@ export function SettingsScreen({
             />
           )}
 
+          {activeTab === 'plugins' && <section className={sectionClass('plugins', 'settings-workbench ui-workbench ui-grid-sidebar')}>
+            <PluginsSettings plugins={plugins} error={pluginError} onRefresh={onRefreshPlugins} onOpen={onOpenPlugin} />
+          </section>}
           {activeTab === 'tools' && (
             <section className={sectionClass('tools', 'settings-workbench ui-workbench ui-grid-sidebar')}>
               <ToolsSettings

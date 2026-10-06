@@ -20,6 +20,7 @@ import {
   assertTrustedIpcEvent,
   handleMainIpc,
   ipcUsesApplicationData,
+  isMainRendererWindow,
   registerMainRendererWindow,
   rendererLocationMatches,
   resolveRendererLocation
@@ -30,6 +31,7 @@ function fakeWindow(frameUrl = 'file:///tmp/anas/renderer/index.html') {
   const webContents = { mainFrame }
   let closed: (() => void) | undefined
   const window = {
+    isDestroyed: () => false,
     webContents,
     once: vi.fn((event: string, listener: () => void) => {
       if (event === 'closed') closed = listener
@@ -128,6 +130,7 @@ describe('IPC sender security', () => {
     })
     const trusted = fakeWindow(location.url)
     registerMainRendererWindow(trusted.window as never, location)
+    expect(isMainRendererWindow(trusted.window as never)).toBe(true)
 
     expect(() => assertTrustedIpcEvent(trusted.event as never)).not.toThrow()
     expect(() => assertTrustedIpcEvent({
@@ -140,6 +143,7 @@ describe('IPC sender security', () => {
 
     trusted.mainFrame.url = location.url
     trusted.closed()
+    expect(isMainRendererWindow(trusted.window as never)).toBe(false)
     expect(() => assertTrustedIpcEvent(trusted.event as never)).toThrow('registered main window')
 
     const unregistered = fakeWindow()
@@ -260,6 +264,6 @@ describe('renderer content security policy', () => {
     expect(policy).toContain("img-src 'self' http: https: data: blob:")
     expect(policy).toContain("form-action 'none'")
     expect(policy).toContain("object-src 'none'")
-    expect(policy).toContain("frame-src 'none'")
+    expect(policy).toContain('frame-src anas-plugin:;')
   })
 })

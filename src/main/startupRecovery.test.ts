@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: any[]) => any>(),
-  transition: vi.fn(), closeAgent: vi.fn(), closeMcp: vi.fn(), recoverRestore: vi.fn(),
+  transition: vi.fn(), closeAgent: vi.fn(), closeMcp: vi.fn(), closePlugins: vi.fn(), recoverRestore: vi.fn(),
   createWindow: vi.fn(), preserve: vi.fn(), reset: vi.fn(), resetProjects: vi.fn(),
   relaunch: vi.fn(), quit: vi.fn(), configureLogger: vi.fn(),
   inspectRepair: vi.fn(), repair: vi.fn()
@@ -16,6 +16,7 @@ vi.mock('./config/dataDir', () => ({
 vi.mock('./applicationDataLifecycle', () => ({ beginApplicationDataTransition: mocks.transition }))
 vi.mock('./agent/agentIpcHandlers', () => ({ closeAgentRuntime: mocks.closeAgent }))
 vi.mock('./mcpRuntimeService', () => ({ closeCachedMcpRuntime: mocks.closeMcp }))
+vi.mock('./plugins/pluginHost', () => ({ closePluginHost: mocks.closePlugins }))
 vi.mock('./appShell', () => ({ createMainWindow: mocks.createWindow }))
 vi.mock('./recoveryData', async (importOriginal) => ({
   ...await importOriginal<typeof import('./recoveryData')>(),
@@ -83,6 +84,7 @@ describe('startup recovery lifecycle', () => {
     expect(mocks.transition).toHaveBeenCalledOnce()
     expect(mocks.closeAgent).toHaveBeenCalledOnce()
     expect(mocks.closeMcp).toHaveBeenCalledOnce()
+    expect(mocks.closePlugins).toHaveBeenCalledOnce()
     expect(mocks.configureLogger).toHaveBeenCalledWith('info', 0)
     expect(await invoke('inspect')).toMatchObject({ startupError: 'broken SQLite', canModify: true })
   })

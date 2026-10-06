@@ -1259,5 +1259,24 @@
     "select_item": "Select a directory, tool or file to view details.",
     "expand": "Expand tool “{{name}}”",
     "collapse": "Collapse tool “{{name}}”"
+  },
+  "plugins": {
+    "operation_failed": "Plugin operation failed.",
+    "load_failed": "Could not load plugins.",
+    "title": "Plugins",
+    "description": "Optional interfaces and companion features",
+    "install": "Install plugin from folder",
+    "uninstall": "Uninstall plugin",
+    "uninstall_hint": "Uninstall “{{name}}”? Its windows and backend will close. Saved data will be retained.",
+    "empty": "No plugins installed. Choose a prebuilt plugin folder containing PLUGIN.json.",
+    "open_panel": "Open in side panel",
+    "open_window": "Open window",
+    "start_backend": "Start backend",
+    "stop_backend": "Stop backend",
+    "no_backend": "UI-only plugin. No backend process required.",
+    "backend_stopped": "Backend stopped; starts on the first call.",
+    "backend_starting": "Backend starting.",
+    "backend_running": "Backend running.",
+    "backend_failed": "Backend stopped. Check the error before restarting."
   }
 }

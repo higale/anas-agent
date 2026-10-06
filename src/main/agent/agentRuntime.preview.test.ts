@@ -137,7 +137,7 @@ describe('AgentRuntime system prompt preview', () => {
 
   it('uses project draft settings without changing the persisted main model', async () => {
     database = AgentDatabase.open(':memory:')
-    const thread = database.createThread({ title: 'Preview' })
+    const thread = database.createThread({ title: 'Preview', projectId: 'preview-chat' })
     const firstProvider = provider(0, 'First')
     const selectedProvider = provider(1, 'Selected')
     const firstModel = resolveProviderModelConfig(firstProvider, firstProvider.models[0])
@@ -281,7 +281,7 @@ describe('AgentRuntime system prompt preview', () => {
     previewSelections.map((scenario) => ({ ...scenario, strategy }))
   )))('shares preview selection without persisting it: $name, chat strategy $strategy', async (scenario) => {
     database = AgentDatabase.open(':memory:')
-    const thread = database.createThread({ title: 'Request preview' })
+    const thread = database.createThread({ title: 'Request preview', projectId: 'preview-chat' })
     const providers = scenario.empty ? [] : ['First', 'Default', 'Project'].map((name, index) => {
       const entry = provider(index, name)
       entry.models[0].parameterPresetMode = 'custom'
