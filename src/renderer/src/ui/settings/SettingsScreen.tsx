@@ -42,7 +42,6 @@ import type { MemorySettingsState } from './useMemorySettingsState'
 
 interface SettingsScreenProps {
   onConfigChange(config: AppConfigSnapshot): void
-  pendingDefaultCapabilities?: DefaultCapabilitySettings
   activeTab: SettingsTab
   avatar: AppAvatarImage | null
   avatarDragActive: boolean
@@ -143,7 +142,6 @@ function settingsSectionClass(activeTab: SettingsTab, tab: SettingsTab, extra = 
 export function SettingsScreen({
   onConfigChange,
   activeTab,
-  pendingDefaultCapabilities,
   avatar,
   avatarDragActive,
   backupDir,
@@ -313,7 +311,7 @@ export function SettingsScreen({
           )}
           {activeTab === 'capabilities' && config && (
             <section className={sectionClass('capabilities')}>
-              <CapabilitySettings config={config} pending={pendingDefaultCapabilities} skills={skills} mcpStatus={mcpStatus}
+              <CapabilitySettings config={config} skills={skills} mcpStatus={mcpStatus}
                 runtimeToolStatus={runtimeToolStatus} onSave={onSaveDefaultCapabilities} />
             </section>
           )}

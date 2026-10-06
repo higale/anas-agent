@@ -35,6 +35,34 @@ afterEach(async () => {
 })
 
 describe('project store', () => {
+  it('defaults missing v0 tool permissions to read-only and persists explicit choices without a format upgrade', async () => {
+    const store = await import('./projectStore')
+    const request = { kind: 'workspace' as const, name: 'Permissions', sourceFolders: [tempDir],
+      codingMode: false, advancedSettings: false, prompt: '', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false }
+    const project = await store.createProject(request)
+    const original = await readFile(storePaths.projectFile, 'utf8')
+    expect(JSON.parse(original).projects.find((p: Project) => p.id === project.id)).not.toHaveProperty('access_mode')
+    expect(await store.getProject(project.id)).toMatchObject({ accessMode: 'read_only_allowed' })
+    expect(await readFile(storePaths.projectFile, 'utf8')).toBe(original)
+    for (const accessMode of ['strict_approval', 'full_access', 'read_only_allowed'] as const) {
+      await store.updateProject(project.id, { ...request, accessMode })
+      expect(await store.getProject(project.id)).toMatchObject({ accessMode, advancedSettings: false })
+      const raw = JSON.parse(await readFile(storePaths.projectFile, 'utf8'))
+      expect(raw.version).toBe(0)
+      const saved = raw.projects.find((p: Project) => p.id === project.id)
+      expect(saved.access_mode ?? 'read_only_allowed').toBe(accessMode)
+      expect(saved).not.toHaveProperty('accessMode')
+      expect(await store.prepareProjectPreview({ ...request, accessMode })).toMatchObject({ accessMode })
+    }
+    const beforeInvalid = await readFile(storePaths.projectFile, 'utf8')
+    await expect(store.updateProject(project.id, { ...request, accessMode: 'unknown' } as unknown as ProjectCreateRequest))
+      .rejects.toThrow('Invalid project tool access mode')
+    expect(await readFile(storePaths.projectFile, 'utf8')).toBe(beforeInvalid)
+    const invalid = JSON.parse(beforeInvalid)
+    invalid.projects.find((p: Project) => p.id === project.id).access_mode = 'unknown'
+    expect(() => store.parseProjectStore(invalid)).toThrow('Invalid project tool access mode')
+  })
+
   it('loads existing v0 projects without compression settings and saves or clears a custom prompt without changing the format', async () => {
     const store = await import('./projectStore')
     const request = { kind: 'workspace' as const, name: 'Summary', sourceFolders: [tempDir],
@@ -519,7 +547,7 @@ describe('project store', () => {
     expect(await store.listProjects()).toEqual(next.projects)
   })
 
-  it('keeps the default workspace last with only icon and model editable and rejects pinning or deletion', async () => {
+  it('keeps the default workspace last with icon, tool permissions and model editable and rejects pinning or deletion', async () => {
     const store = await import('./projectStore')
     const initial = await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)
     if (initial.kind !== 'workspace') throw new Error('Expected workspace')
@@ -528,6 +556,7 @@ describe('project store', () => {
       ...initial,
       kind: 'workspace',
       icon: 'folder',
+      accessMode: 'full_access',
       modelConfigId: 'workspace-model',
       modelParameterPresetId: null,
       sourceFolders: [join(tempDir, 'default-workspace')]
@@ -536,6 +565,7 @@ describe('project store', () => {
     expect(updated).toMatchObject({
       id: DEFAULT_WORKSPACE_PROJECT_ID,
       name: initial.name,
+      accessMode: 'full_access',
       modelConfigId: 'workspace-model',
       modelParameterPresetId: null,
       sourceFolders: [join(tempDir, 'default-workspace')]
@@ -595,7 +625,7 @@ describe('project store', () => {
     ]
     for (const change of changes) {
       await expect(store.updateProject(project.id, { ...project, ...change }))
-        .rejects.toThrow('Only the default project icon and model can be changed')
+        .rejects.toThrow('Only the default project icon, tool access mode and model can be changed')
     }
     expect(await readFile(storePaths.projectFile, 'utf8')).toBe(before)
     expect(await store.getProject(project.id)).toEqual(project)

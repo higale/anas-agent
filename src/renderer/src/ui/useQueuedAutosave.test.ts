@@ -10,6 +10,23 @@ function deferred<T>() {
 }
 
 describe('QueuedAutosave', () => {
+  it('waits for edits queued while waiting for an earlier save', async () => {
+    const autosave = new QueuedAutosave()
+    const first = deferred<void>()
+    const second = deferred<void>()
+    const firstSave = autosave.enqueue(autosave.revise('item'), async () => first.promise)
+    const idle = vi.fn()
+    const wait = autosave.waitForIdle().then(idle)
+    const secondSave = autosave.enqueue(autosave.revise('item'), async () => second.promise)
+    first.resolve()
+    await firstSave
+    await Promise.resolve()
+    expect(idle).not.toHaveBeenCalled()
+    second.resolve()
+    await Promise.all([wait, secondSave])
+    expect(idle).toHaveBeenCalledOnce()
+  })
+
   it('makes an in-flight valid save stale when a later edit is invalid or empty', async () => {
     const autosave = new QueuedAutosave()
     const pending = deferred<void>()

@@ -1,4 +1,5 @@
 import { normalizeCompressionPrompt } from '@shared/summaryPrompt'
+import type { AgentAccessMode } from '@shared/agentTypes'
 import { ProjectOperationFailure } from '@shared/projectOperation'
 import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
@@ -102,7 +103,7 @@ function requireProject(value: unknown, index: number): Project {
   } else {
     throw new Error(`Project ${index + 1} has an invalid format.`)
   }
-  const { model_config_id, model_parameter_preset_id, capabilities, restrict_subagents, advanced_settings, coding_mode, compression_prompt, ...metadata } = project
+  const { model_config_id, model_parameter_preset_id, capabilities, restrict_subagents, advanced_settings, coding_mode, compression_prompt, access_mode, ...metadata } = project
   const selection = validateProjectModelSelection({
     modelConfigId: model_config_id,
     modelParameterPresetId: model_parameter_preset_id
@@ -112,7 +113,7 @@ function requireProject(value: unknown, index: number): Project {
   if (project.kind === 'workspace' && typeof coding_mode !== 'boolean') throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Invalid project coding mode.')
   return {
     ...metadata, ...selection,
-    ...(project.kind === 'workspace' ? { capabilities: parseCapabilities(capabilities), restrictSubagents: restrict_subagents, advancedSettings: advanced_settings, codingMode: coding_mode, compressionPrompt: normalizeCompressionPrompt(compression_prompt), prompt: validateProjectPrompt(project.prompt) } : {})
+    ...(project.kind === 'workspace' ? { accessMode: validateProjectAccessMode(access_mode), capabilities: parseCapabilities(capabilities), restrictSubagents: restrict_subagents, advancedSettings: advanced_settings, codingMode: coding_mode, compressionPrompt: normalizeCompressionPrompt(compression_prompt), prompt: validateProjectPrompt(project.prompt) } : {})
   } as Project
 }
 
@@ -151,9 +152,12 @@ function serializeProjectStore(store: StoredProjects) {
       delete stored.restrictSubagents
       delete stored.advancedSettings
       delete stored.compressionPrompt
+      delete stored.accessMode
       delete stored.codingMode
       return {
         ...stored,
+        ...(project.kind === 'workspace' && project.accessMode && project.accessMode !== 'read_only_allowed'
+          ? { access_mode: project.accessMode } : {}),
         ...(project.kind === 'workspace' ? { capabilities: serializeCapabilities(project.capabilities), restrict_subagents: project.restrictSubagents, advanced_settings: project.advancedSettings, coding_mode: project.codingMode, ...(project.compressionPrompt ? { compression_prompt: project.compressionPrompt } : {}) } : {}),
         ...(modelConfigId ? { model_config_id: modelConfigId } : {}),
         ...(modelConfigId && modelParameterPresetId !== undefined
@@ -302,6 +306,12 @@ function validateProjectAppearance(request: ProjectCreateRequest): {
   return appearance
 }
 
+function validateProjectAccessMode(value: unknown): AgentAccessMode {
+  if (value === undefined) return 'read_only_allowed'
+  if (value === 'strict_approval' || value === 'read_only_allowed' || value === 'full_access') return value
+  throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Invalid project tool access mode.')
+}
+
 function projectCapabilities(request: Extract<ProjectCreateRequest, { kind: 'workspace' }>) {
   if (typeof request.restrictSubagents !== 'boolean') throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Invalid project subagent restriction.')
   if (typeof request.advancedSettings !== 'boolean') throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Invalid project advanced settings.')
@@ -312,7 +322,7 @@ function projectCapabilities(request: Extract<ProjectCreateRequest, { kind: 'wor
   } catch {
     throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Invalid capability settings.')
   }
-  return { compressionPrompt: normalizeCompressionPrompt(request.compressionPrompt), capabilities, restrictSubagents: request.restrictSubagents, advancedSettings: request.advancedSettings, codingMode: request.codingMode, prompt: validateProjectPrompt(request.prompt) }
+  return { accessMode: validateProjectAccessMode(request.accessMode), compressionPrompt: normalizeCompressionPrompt(request.compressionPrompt), capabilities, restrictSubagents: request.restrictSubagents, advancedSettings: request.advancedSettings, codingMode: request.codingMode, prompt: validateProjectPrompt(request.prompt) }
 }
 
 function hasDuplicateName(projects: Project[], name: string, excludedProjectId?: string): boolean {
@@ -344,7 +354,7 @@ export async function prepareProjectPreview(request: ProjectCreateRequest, proje
     if (request.kind !== 'workspace') throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'The default project must be a workspace.')
     const project = await getProject(projectId)
     const selection = validateProjectModelSelection(request)
-    return { ...project, modelConfigId: selection.modelConfigId, modelParameterPresetId: selection.modelParameterPresetId }
+    return { ...project, ...(project.kind === 'workspace' ? { accessMode: validateProjectAccessMode(request.accessMode) } : {}), modelConfigId: selection.modelConfigId, modelParameterPresetId: selection.modelParameterPresetId }
   }
   const common = {
     id: projectId,
@@ -407,7 +417,7 @@ export async function updateProject(projectId: string, request: ProjectUpdateReq
     if (projectId === DEFAULT_WORKSPACE_PROJECT_ID) {
       const fixed = defaultWorkspaceSettings()
       if (Object.entries(fixed).some(([key, value]) => !isDeepStrictEqual(request[key as keyof ProjectUpdateRequest], value))) {
-        throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Only the default project icon and model can be changed.')
+        throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Only the default project icon, tool access mode and model can be changed.')
       }
     }
     if (name !== current.name && hasDuplicateName(store.projects, name, projectId)) {

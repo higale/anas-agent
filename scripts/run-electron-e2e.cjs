@@ -571,14 +571,18 @@ async function verifyProjectModelSelection(electronApplication) {
   const composerModel = page.locator('form .composer-model-trigger')
   const composerReasoning = page.locator('form .composer-model-parameter-preset-trigger')
   const dialog = page.locator('.project-dialog')
-  async function verifyModelHeading() {
-    const row = dialog.locator('.ui-toolbar-between').filter({ has: page.locator('.composer-model-selection-group') })
-    const labelBox = await row.locator('.ui-field-label').boundingBox()
-    const groupBox = await row.locator('.composer-model-selection-group').boundingBox()
-    const rowBox = await row.boundingBox()
+  async function verifyModelPosition() {
+    const groupBox = await dialog.locator('.composer-model-selection-group').boundingBox()
+    const rowBox = await dialog.locator('.composer-model-selection-group').locator('..').boundingBox()
     assert.ok(Math.abs(groupBox.x + groupBox.width - rowBox.x - rowBox.width) < 1, 'Project model controls must align to the right edge.')
-    assert.ok(Math.abs(labelBox.y + labelBox.height / 2 - groupBox.y - groupBox.height / 2) < 1, 'The project name label and model controls must share one vertically centered row.')
-    assert.ok(groupBox.x >= labelBox.x + labelBox.width, 'Project model controls must not overlap the project name label.')
+    const contentBox = await dialog.locator('.ui-dialog-pane-fill section').last().boundingBox()
+    assert.ok(groupBox.y >= contentBox.y + contentBox.height, 'Model controls must follow the folder or prompt section.')
+    const access = dialog.locator('.composer-access-trigger')
+    if (await access.count()) {
+      const accessBox = await access.boundingBox()
+      assert.ok(Math.abs(accessBox.y + accessBox.height / 2 - groupBox.y - groupBox.height / 2) < 1, 'Tool permissions and model controls must share one vertically centered row.')
+      assert.ok(groupBox.x >= accessBox.x + accessBox.width, 'Model controls must follow tool permissions without overlap.')
+    }
   }
   async function verifySegmentFocus(segment) {
     await expect(segment).toBeFocused()
@@ -617,7 +621,7 @@ async function verifyProjectModelSelection(electronApplication) {
   await page.getByRole('menuitemradio', { name: /^Project Model/ }).click()
   await expect(dialog.locator('.composer-model-parameter-preset-trigger')).toHaveText('Thinking on')
   await verifySegmentFocus(dialog.locator('.composer-model-trigger'))
-  await verifyModelHeading()
+  await verifyModelPosition()
   if (process.env.ANAS_E2E_PROJECT_SCREENSHOT) {
     await page.screenshot({ path: process.env.ANAS_E2E_PROJECT_SCREENSHOT.replace(/\.png$/, '-workspace.png') })
   }
@@ -669,7 +673,7 @@ async function verifyProjectModelSelection(electronApplication) {
     await page.keyboard.press('Backspace')
   }
   await modelSegment.focus()
-  await verifyModelHeading()
+  await verifyModelPosition()
   if (process.env.ANAS_E2E_PROJECT_SCREENSHOT) {
     await page.screenshot({ path: process.env.ANAS_E2E_PROJECT_SCREENSHOT })
   }

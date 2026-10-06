@@ -69,6 +69,12 @@ export function EnvironmentSettingsSections({
     customInformationDraftRef.current = value
   }
 
+  function saveEnvironment(update: Partial<EnvironmentContextSettings>): void | Promise<void> {
+    const next = { ...environmentContextRef.current, ...update }
+    environmentContextRef.current = next
+    return onSaveSettings({ environmentContext: next })
+  }
+
   async function detectEnvironment(): Promise<void> {
     if (detectingEnvironment) return
     setDetectingEnvironment(true)
@@ -83,12 +89,7 @@ export function EnvironmentSettingsSections({
         ? `${current}\n\n${detection.content}`
         : detection.content
       customInformationDraftRef.current = customInformation
-      await onSaveSettings({
-        environmentContext: {
-          ...environmentContextRef.current,
-          customInformation
-        }
-      })
+      await saveEnvironment({ customInformation })
     } catch {
       notice.error(t('settings.environment_detection_failed'))
     } finally {
@@ -100,12 +101,7 @@ export function EnvironmentSettingsSections({
     feature: keyof EnvironmentContextSettings,
     enabled: boolean
   ): void {
-    void onSaveSettings({
-      environmentContext: {
-        ...environmentContext,
-        [feature]: enabled
-      }
-    })
+    void saveEnvironment({ [feature]: enabled })
   }
 
   return (
@@ -142,9 +138,7 @@ export function EnvironmentSettingsSections({
                 checked={environmentContext.customInformationEnabled}
                 className="ui-checkbox-field-inline"
                 label={t('settings.custom_environment_information')}
-                onChange={(customInformationEnabled) => void onSaveSettings({
-                  environmentContext: { ...environmentContext, customInformationEnabled }
-                })}
+                onChange={(enabled) => updateEnvironmentContext('customInformationEnabled', enabled)}
               />
               <button
                 className="ui-button ui-button-compact"
@@ -167,9 +161,7 @@ export function EnvironmentSettingsSections({
               value={environmentContext.customInformation}
               onInput={onAutosizeInput}
               onDraftChange={updateCustomInformationDraft}
-              onCommit={(customInformation) => void onSaveSettings({
-                environmentContext: { ...environmentContextRef.current, customInformation }
-              })}
+              onCommit={(customInformation) => void saveEnvironment({ customInformation })}
             />
           </div>
         </SettingsGroup>

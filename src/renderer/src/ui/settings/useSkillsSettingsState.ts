@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { TFunction } from 'i18next'
 import type { SkillAvailabilityUpdate, SkillImportError, SkillRootSummary, SkillRootUpdate, SkillSnapshot } from '@shared/types'
 import type { ConfirmDialogRequest } from '../dialogs/AppDialogs'
 import { notice } from '../notice'
+import { useQueuedDraftSave } from '../useQueuedAutosave'
 import type { SettingsTab } from './settingsTabs'
 
 interface Options {
@@ -10,6 +11,11 @@ interface Options {
   settingsOpen: boolean
   settingsTab: SettingsTab
   t: TFunction
+}
+
+interface SkillEdits {
+  scriptAutoApprove?: boolean
+  skills?: Record<string, SkillAvailabilityUpdate & { scriptAutoApprove?: boolean }>
 }
 
 function skillImportErrorText(t: TFunction, error: SkillImportError): string {
@@ -28,11 +34,45 @@ function skillImportErrorText(t: TFunction, error: SkillImportError): string {
 }
 
 export function useSkillsSettingsState({ openConfirmDialog, settingsOpen, settingsTab, t }: Options) {
-  const [skills, setSkills] = useState<SkillSnapshot>()
+  const [savedSkills, setSavedSkills] = useState<SkillSnapshot>()
+  const snapshotRevision = useRef(0)
   const noticeId = 'settings-skill-status'
+  function setSkills(snapshot: SkillSnapshot) {
+    snapshotRevision.current++
+    setSavedSkills(snapshot)
+  }
+  const edits = useQueuedDraftSave<SkillEdits, SkillSnapshot>({
+    merge: (previous, update) => {
+      const skills = { ...previous?.skills }
+      for (const [id, patch] of Object.entries(update.skills ?? {})) skills[id] = { ...skills[id], ...patch }
+      return { ...previous, ...update, skills }
+    },
+    persist: async (draft) => {
+      let result: SkillSnapshot | undefined
+      if (draft.scriptAutoApprove !== undefined) {
+        result = await window.gale.skills.updateScriptApproval(undefined, undefined, draft.scriptAutoApprove)
+      }
+      for (const [id, { scriptAutoApprove, ...availability }] of Object.entries(draft.skills ?? {})) {
+        if (Object.keys(availability).length) result = await window.gale.skills.updateAvailability(undefined, id, availability)
+        if (scriptAutoApprove !== undefined) result = await window.gale.skills.updateScriptApproval(undefined, id, scriptAutoApprove)
+      }
+      return result ?? await window.gale.skills.get()
+    },
+    onSaved: (snapshot) => { setSkills(snapshot); notice.dismiss(noticeId) },
+    onError: (retry) => notice.error(t('settings.failed_save_skill'), {
+      id: noticeId, duration: Infinity, action: { label: t('common.retry'), onClick: retry }
+    })
+  })
+  const skills = savedSkills && edits.draft ? {
+    ...savedSkills,
+    scriptAutoApprove: edits.draft.scriptAutoApprove ?? savedSkills.scriptAutoApprove,
+    skills: savedSkills.skills.map((skill) => ({ ...skill, ...edits.draft?.skills?.[skill.id] }))
+  } : savedSkills
   const refreshSkills = useCallback(async (): Promise<void> => {
+    const revision = ++snapshotRevision.current
     try {
-      setSkills(await window.gale.skills.get())
+      const snapshot = await window.gale.skills.get()
+      if (revision === snapshotRevision.current) setSavedSkills(snapshot)
     } catch {
       notice.error(t('chat.failed_load_skill'), { id: noticeId })
     }
@@ -48,6 +88,7 @@ export function useSkillsSettingsState({ openConfirmDialog, settingsOpen, settin
 
   async function addDirectory(): Promise<void> {
     try {
+      await edits.waitForIdle()
       const result = await window.gale.skills.addDirectory()
       if (result.status === 'added') setSkills(result.snapshot)
     } catch {
@@ -57,6 +98,7 @@ export function useSkillsSettingsState({ openConfirmDialog, settingsOpen, settin
 
   async function importDirectories(): Promise<void> {
     try {
+      await edits.waitForIdle()
       const result = await window.gale.skills.importDirectories()
       if (result.status === 'cancelled') return
       if (result.status === 'error') {
@@ -79,7 +121,16 @@ export function useSkillsSettingsState({ openConfirmDialog, settingsOpen, settin
       variant: 'danger',
       onConfirm: async () => {
         try {
-          setSkills(await window.gale.skills.removeDirectory(undefined, root.id))
+          await edits.waitForIdle()
+          const snapshot = await window.gale.skills.removeDirectory(undefined, root.id)
+          const remaining = new Set(snapshot.skills.map((skill) => skill.id))
+          const hasPendingEdits = edits.discardPending((draft) => {
+            const skills = Object.fromEntries(Object.entries(draft.skills ?? {}).filter(([id]) => remaining.has(id)))
+            return draft.scriptAutoApprove === undefined && Object.keys(skills).length === 0
+              ? undefined : { ...draft, skills }
+          })
+          if (!hasPendingEdits) notice.dismiss(noticeId)
+          setSkills(snapshot)
         } catch {
           notice.error(t('settings.failed_remove_skill_directory'), { id: noticeId })
         }
@@ -89,6 +140,7 @@ export function useSkillsSettingsState({ openConfirmDialog, settingsOpen, settin
 
   async function moveDirectory(rootId: string, direction: -1 | 1): Promise<void> {
     try {
+      await edits.waitForIdle()
       setSkills(await window.gale.skills.moveDirectory(undefined, rootId, direction))
     } catch {
       notice.error(t('settings.failed_move_skill_directory'), { id: noticeId })
@@ -104,19 +156,13 @@ export function useSkillsSettingsState({ openConfirmDialog, settingsOpen, settin
   }
 
   async function updateAvailability(skillId: string, update: SkillAvailabilityUpdate): Promise<void> {
-    try {
-      setSkills(await window.gale.skills.updateAvailability(undefined, skillId, update))
-    } catch {
-      notice.error(t('settings.failed_save_skill'), { id: noticeId })
-    }
+    await edits.save({ skills: { [skillId]: update } })
   }
 
   async function updateScriptApproval(skillId: string | undefined, enabled: boolean): Promise<void> {
-    try {
-      setSkills(await window.gale.skills.updateScriptApproval(undefined, skillId, enabled))
-    } catch {
-      notice.error(t('settings.failed_save_skill'), { id: noticeId })
-    }
+    await edits.save(skillId === undefined
+      ? { scriptAutoApprove: enabled }
+      : { skills: { [skillId]: { scriptAutoApprove: enabled } } })
   }
 
   return {

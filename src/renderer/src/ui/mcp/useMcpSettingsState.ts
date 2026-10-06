@@ -30,6 +30,11 @@ export function useMcpSettingsState({ config, openConfirmDialog, setConfig, t }:
   const [mcpReloadingFailed, setMcpReloadingFailed] = useState(false)
   const mcpDraftRef = useRef<McpDraft>(emptyMcpDraft(t))
   const mcpAutosave = useQueuedAutosave()
+  const additions = useQueuedAutosave()
+  const configRef = useRef(config)
+  configRef.current = config
+  const creationRef = useRef<{ index?: number }>({})
+  const saveFailed = useRef(false)
   const mcpNoticeId = 'settings-mcp-status'
 
   const mcpRuntimeEnabled = Boolean(config)
@@ -78,22 +83,35 @@ export function useMcpSettingsState({ config, openConfirmDialog, setConfig, t }:
   }, [config, creatingMcpServer, editingMcpIndex, t])
 
   async function saveMcpDraftImmediately(draft: McpDraft): Promise<void> {
+    const creation = creationRef.current
     const revision = mcpAutosave.revise(draft.index === undefined
       ? `mcp:new:${draft.id}`
       : `mcp:${draft.index}`)
     await mcpAutosave.enqueue(revision, async (request) => {
       try {
-        const nextConfig = await window.gale.config.saveMcpServer(buildMcpPayload(draft))
+        const nextConfig = await window.gale.config.saveMcpServer(buildMcpPayload({
+          ...draft, index: draft.index ?? creation.index
+        }))
+        if (draft.index === undefined) creation.index ??= nextConfig.mcpServers.at(-1)?.index
         if (!request.isCurrent()) return
+        saveFailed.current = false
+        notice.dismiss(mcpNoticeId)
+        configRef.current = nextConfig
         setConfig(nextConfig)
         if (draft.index === undefined) {
           const nextIndex = nextConfig.mcpServers[nextConfig.mcpServers.length - 1]?.index
           setEditingMcpIndex(nextIndex)
+          mcpDraftRef.current = { ...mcpDraftRef.current, index: creation.index }
+          setMcpDraft(mcpDraftRef.current)
         }
         setCreatingMcpServer(false)
       } catch {
         if (!request.isCurrent()) return
-        notice.error(t('settings.failed_save_mcp'), { id: mcpNoticeId })
+        saveFailed.current = true
+        notice.error(t('settings.failed_save_mcp'), {
+          id: mcpNoticeId, duration: Infinity,
+          action: { label: t('common.retry'), onClick: () => { if (request.isCurrent()) void saveMcpDraftImmediately(mcpDraftRef.current) } }
+        })
       }
     })
   }
@@ -132,18 +150,26 @@ export function useMcpSettingsState({ config, openConfirmDialog, setConfig, t }:
   }
 
   async function addMcpServer(): Promise<void> {
-    const draft = {
-      ...emptyMcpDraft(t),
-      id: nextMcpServerId(config?.mcpServers)
-    }
-    mcpDraftRef.current = draft
-    setCreatingMcpServer(true)
-    setEditingMcpIndex(undefined)
-    setMcpDraft(draft)
-    await saveMcpDraftImmediately(draft)
+    await additions.enqueue(additions.revise('add'), async () => {
+      await mcpAutosave.waitForIdle()
+      if (saveFailed.current) return
+      creationRef.current = {}
+      const draft = {
+        ...emptyMcpDraft(t),
+        id: nextMcpServerId(configRef.current?.mcpServers)
+      }
+      mcpDraftRef.current = draft
+      setCreatingMcpServer(true)
+      setEditingMcpIndex(undefined)
+      setMcpDraft(draft)
+      await saveMcpDraftImmediately(draft)
+    })
   }
 
   async function editMcpServer(index: number): Promise<void> {
+    await additions.waitForIdle()
+    await mcpAutosave.waitForIdle()
+    if (saveFailed.current) return
     setCreatingMcpServer(false)
     setEditingMcpIndex(index)
   }
@@ -159,10 +185,18 @@ export function useMcpSettingsState({ config, openConfirmDialog, setConfig, t }:
       variant: 'danger',
       onConfirm: async () => {
         try {
+          await additions.waitForIdle()
+          await mcpAutosave.waitForIdle()
           const nextConfig = await window.gale.config.deleteMcpServer(index)
+          saveFailed.current = false
+          notice.dismiss(mcpNoticeId)
+          configRef.current = nextConfig
           setConfig(nextConfig)
           setCreatingMcpServer(false)
-          setEditingMcpIndex(nextConfig.mcpServers[Math.min(index, nextConfig.mcpServers.length - 1)]?.index)
+          const next = nextConfig.mcpServers[Math.min(index, nextConfig.mcpServers.length - 1)]
+          setEditingMcpIndex(next?.index)
+          mcpDraftRef.current = next ? mcpDetailToDraft(next) : emptyMcpDraft(t)
+          setMcpDraft(mcpDraftRef.current)
         } catch {
           notice.error(t('settings.failed_delete_mcp'), { id: mcpNoticeId })
         }
@@ -173,6 +207,9 @@ export function useMcpSettingsState({ config, openConfirmDialog, setConfig, t }:
   async function moveEditingMcpServer(direction: -1 | 1): Promise<void> {
     if (editingMcpIndex === undefined) return
     try {
+      await additions.waitForIdle()
+      await mcpAutosave.waitForIdle()
+      if (saveFailed.current) return
       const nextConfig = await window.gale.config.moveMcpServer(editingMcpIndex, direction)
       const nextIndex = editingMcpIndex + direction
       setConfig(nextConfig)

@@ -199,21 +199,29 @@ async function verifyDefaultCapabilities(launchApplication) {
     const snapshot = await page.evaluate(() => globalThis.gale.config.get())
     await application.evaluate(({ ipcMain }, snapshot) => {
       ipcMain.removeHandler('config:saveDefaultCapabilities')
+      let first = true
       ipcMain.handle('config:saveDefaultCapabilities', async (_event, value) => {
-        await new Promise(resolve => { globalThis.__finishCapabilitySave = resolve })
+        if (first) {
+          first = false
+          await new Promise(resolve => { globalThis.__finishCapabilitySave = resolve })
+        }
+        globalThis.__savedCapabilities = value
         return { ...snapshot, defaultCapabilities: value }
       })
     }, snapshot)
     await page.getByRole('checkbox', { name: 'Profile', exact: true }).uncheck()
-    await expect(page.getByRole('checkbox', { name: 'Profile', exact: true })).toBeDisabled()
+    await expect(page.getByRole('checkbox', { name: 'Profile', exact: true })).toBeEnabled()
     await page.getByRole('button', { name: 'Back to app', exact: true }).click()
     await page.locator('.sidebar-settings').click()
     await page.locator('.app-menu-item').first().click()
     await page.locator('[data-settings-tab="capabilities"]').click()
     const pendingProfile = page.getByRole('checkbox', { name: 'Profile', exact: true })
     await expect(pendingProfile).not.toBeChecked()
-    await expect(pendingProfile).toBeDisabled()
+    await expect(pendingProfile).toBeEnabled()
+    await page.getByRole('checkbox', { name: 'Project information', exact: true }).uncheck()
     await application.evaluate(() => { globalThis.__finishCapabilitySave(); delete globalThis.__finishCapabilitySave })
+    await expect.poll(() => application.evaluate(() => globalThis.__savedCapabilities?.capabilities.workspace)).toBe(false)
+    assert.equal(await application.evaluate(() => globalThis.__savedCapabilities.capabilities.profile), false)
     await expect(pendingProfile).toBeEnabled()
     await expect(pendingProfile).not.toBeChecked()
     await page.evaluate(() => globalThis.gale.config.updateSettings({ fontSize: 18, sidebarWidth: 420 }))

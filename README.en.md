@@ -26,14 +26,14 @@ The application's Help menu opens bundled guides in the right workspace pane, wi
 
 - OpenAI-compatible and Anthropic-compatible providers, streamed replies, context compression, and resumable approvals.
 - Default capabilities in Settings, optional project customization, and independently configured subagents.
-- The default project allows only icon (including color) and model (including reasoning options) changes. Its name, working folder, and other settings use defaults; capabilities follow global settings.
+- The default project allows only icon (including color), tool access mode, and model (including reasoning options) changes. Its name, working folder, and other settings use defaults; capabilities follow global settings.
 - Built-in file, image, network, memory, and command tools; bundled ripgrep; MCP integration and custom tool packages.
 - User and project Skills, prompt shortcuts, input history, and speech input/output.
 - Text, image, PDF, and DOCX attachments. Images use native multimodal content blocks; documents are extracted locally.
 - A resizable right workspace for subagents, help, and read-only Git or recorded file differences. Monaco supports inline and side-by-side comparison; settings retain a two-column layout.
 - Local data backup, restore, logs, and startup recovery.
 
-Capability selection and execution approval are separate. See the user guide for each capability's tools and dependencies, and the security model for the three conversation access modes.
+Capability selection and execution approval are separate. Projects can set the initial tool access mode for new conversations, defaulting to Allow read-only when omitted. Each conversation can change its own mode; changing the project default does not affect existing conversations. See the user guide for each capability's tools and dependencies, and the security model for the three conversation access modes.
 
 ## Runtime architecture
 

@@ -91,7 +91,21 @@ export function App() {
   const [editingProject, setEditingProject] = useState<Project | undefined>()
   const [appError, setAppError] = useState<string | undefined>()
   const [settingsError, setSettingsError] = useState<string | undefined>()
-  const [config, setConfig] = useState<AppConfigSnapshot | undefined>()
+  const [savedConfig, setConfig] = useState<AppConfigSnapshot | undefined>()
+  const {
+    closeSettings,
+    config,
+    saveLanguage,
+    saveProfile,
+    saveSettings,
+    saveDefaultCapabilities,
+    saveSpeechReply,
+    setSettingsOpen,
+    setSettingsTab,
+    settingsOpen,
+    settingsTab,
+    switchSettingsTab
+  } = useSettingsController({ config: savedConfig, setConfig, t })
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light')
   const [appMenuOpen, setAppMenuOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
@@ -144,7 +158,7 @@ export function App() {
     setAttachments,
     setAccessMode: setDraftAccessMode,
     setInput
-  } = useComposerDrafts(composerDraftKey)
+  } = useComposerDrafts(composerDraftKey, draftProject?.kind === 'workspace' ? draftProject.accessMode : undefined)
   const speech = useAgentSpeech(config?.settings.speechReply, agent.activeThreadId)
   const generationBusy = agent.activeRun?.status === 'running'
   const threadLocked = submissionBusy || Boolean(agent.activeRun)
@@ -249,20 +263,6 @@ export function App() {
       if (zoomHudTimeoutRef.current) clearTimeout(zoomHudTimeoutRef.current)
     }
   }, [])
-  const {
-    closeSettings,
-    pendingDefaultCapabilities,
-    saveLanguage,
-    saveProfile,
-    saveSettings,
-    saveDefaultCapabilities,
-    saveSpeechReply,
-    setSettingsOpen,
-    setSettingsTab,
-    settingsOpen,
-    settingsTab,
-    switchSettingsTab
-  } = useSettingsController({ setConfig, t })
   useEffect(() => {
     if (!settingsOpen || (settingsTab !== 'tools' && settingsTab !== 'subagents' && settingsTab !== 'capabilities')) return
     void window.gale.app.getRuntimeTools()
@@ -438,7 +438,6 @@ export function App() {
     openConfirmDialog,
     setConfig,
     setError: setSettingsError,
-    setSettingsTab,
     settingsOpen,
     settingsTab,
     t
@@ -1158,7 +1157,6 @@ export function App() {
       {settingsOpen ? (
         <SettingsScreen
           onConfigChange={setConfig}
-          pendingDefaultCapabilities={pendingDefaultCapabilities}
           activeTab={settingsTab}
           avatar={avatar}
           avatarDragActive={avatarDragActive}

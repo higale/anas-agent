@@ -202,15 +202,17 @@ describe('renderer interaction accessibility', () => {
     modelConfigId: 'model-1', modelParameterPresetId: 'thinking-off'
   }
 
-  it.each(['workspace', 'simple_chat'] as const)('places model selection beside the %s project name without changing input labels', (kind) => {
+  it.each(['workspace', 'simple_chat'] as const)('keeps %s labels accessible after moving model selection below project content', (kind) => {
     render(<ProjectDialog open kind={kind} config={modelPickerConfig(true)} onClose={vi.fn()} onSave={vi.fn()} />)
     const label = screen.getByText('project.name')
     const header = label.parentElement!
-    expect(within(header).getByRole('button', { name: 'chat.select_model' })).toBeInTheDocument()
+    expect(within(header).queryByRole('button', { name: 'chat.select_model' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'chat.select_model' })).toBeVisible()
     expect(screen.getByRole('textbox', { name: 'project.name' })).toBeVisible()
     expect(header.closest('label')).toBeNull()
     if (kind === 'simple_chat') {
       expect(screen.getByRole('textbox', { name: 'project.simple_chat_prompt' })).toBeVisible()
+      expect(screen.queryByRole('button', { name: 'chat.access_mode' })).not.toBeInTheDocument()
     }
   })
 
@@ -1349,6 +1351,35 @@ describe('renderer interaction accessibility', () => {
       name: 'Workspace',
       sourceFolders: ['/workspace/additional', '/workspace/primary']
     })
+  })
+
+  it.each(['workspace-project', DEFAULT_WORKSPACE_PROJECT_ID])('edits tool permissions independently of capabilities in project %s', async (id) => {
+    const user = userEvent.setup()
+    const project: Project = { id, kind: 'workspace', name: 'Permissions', sourceFolders: ['/workspace'],
+      codingMode: false, advancedSettings: false, prompt: '', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false,
+      pinned: false, collapsed: false, createdAt: '2026-10-06T00:00:00Z', updatedAt: '2026-10-06T00:00:00Z' }
+    const onSave = vi.fn().mockResolvedValue(project)
+    const onClose = vi.fn()
+    const view = render(<ProjectDialog open kind="workspace" project={project} config={modelPickerConfig(true)} onClose={onClose} onSave={onSave} />)
+    const access = screen.getByRole('button', { name: 'chat.access_mode' })
+    expect(access).toHaveTextContent('chat.access_read_only_allowed')
+    await user.click(access)
+    await user.keyboard('{Escape}')
+    expect(access).toHaveFocus()
+    expect(onClose).not.toHaveBeenCalled()
+    await user.click(access)
+    await user.click(screen.getByRole('menuitem', { name: /^chat.access_full/ }))
+    await waitFor(() => expect(access).toHaveTextContent('chat.access_full'))
+    expect(onSave).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ accessMode: 'full_access', advancedSettings: false }))
+
+    view.rerender(<ProjectDialog open kind="workspace" project={{ ...project, accessMode: 'full_access' }} config={modelPickerConfig(true)} onClose={onClose} onSave={onSave} />)
+    await user.click(access)
+    await user.click(screen.getByRole('menuitem', { name: /^chat.access_read_only_allowed/ }))
+    await waitFor(() => expect(access).toHaveTextContent('chat.access_read_only_allowed'))
+    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    expect(onSave.mock.lastCall![0].accessMode).toBeUndefined()
   })
 
   it('selects a project icon color and returns to automatic color', async () => {

@@ -1,7 +1,7 @@
 import type { PackageFilePreview } from './packageFiles'
 import type { HelpDocumentId } from './helpDocuments'
 import type { ProjectOperationResult } from './projectOperation'
-import type { AgentApi } from './agentTypes'
+import type { AgentAccessMode, AgentApi } from './agentTypes'
 import type { AgentCapabilities, DefaultCapabilitySettings } from './agentCapabilities'
 import type { ProjectIconColor, ProjectIconName } from './projectAppearance'
 
@@ -27,6 +27,7 @@ interface ProjectBase extends ProjectModelSelection {
 
 export interface WorkspaceProject extends ProjectBase {
   kind: 'workspace'
+  accessMode?: AgentAccessMode
   advancedSettings: boolean
   codingMode: boolean
   compressionPrompt?: string
@@ -59,6 +60,7 @@ export function compareProjects(left: Project, right: Project): number {
 
 export interface WorkspaceProjectRequest extends ProjectModelSelection {
   kind: 'workspace'
+  accessMode?: AgentAccessMode
   advancedSettings: boolean
   codingMode: boolean
   compressionPrompt?: string

@@ -749,7 +749,7 @@ export function useAgentWorkspace({ onAppError }: UseAgentWorkspaceOptions) {
     text: string,
     attachments: SelectedAttachment[],
     displayText = text,
-    newThreadAccessMode: AgentAccessMode = 'read_only_allowed',
+    newThreadAccessMode?: AgentAccessMode,
     newThreadModelConfigId?: string,
     newThreadModelParameterPresetId?: string | null,
     review?: import('@shared/codeReview').CodeReviewRequest

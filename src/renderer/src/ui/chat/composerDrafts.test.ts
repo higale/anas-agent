@@ -22,6 +22,23 @@ function attachment(path: string, temporary = false): SelectedAttachment {
 describe('ComposerDraftStore', () => {
   afterEach(() => vi.unstubAllGlobals())
 
+  it('inherits each project default until explicitly overridden, including an explicit read-only choice', () => {
+    const store = new ComposerDraftStore()
+    const projectA = newThreadComposerDraftKey('project-a')
+    const projectB = newThreadComposerDraftKey('project-b')
+    expect(store.get(projectA, 'full_access').accessMode).toBe('full_access')
+    store.setInput(projectA, 'My task')
+    store.setAttachments(projectA, [attachment('/project/a.txt')])
+    expect(store.get(projectA, 'strict_approval').accessMode).toBe('strict_approval')
+    store.setAccessMode(projectA, 'read_only_allowed')
+    store.setInput(projectA, '')
+    store.setAttachments(projectA, [])
+    expect(store.get(projectA, 'full_access').accessMode).toBe('read_only_allowed')
+    expect(store.get(projectB, 'full_access').accessMode).toBe('full_access')
+    store.discard(projectA)
+    expect(store.get(projectA, 'full_access').accessMode).toBe('full_access')
+  })
+
   it('isolates and restores input and attachments for existing threads', () => {
     const store = new ComposerDraftStore()
     const threadA = threadComposerDraftKey('thread-a')

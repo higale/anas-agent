@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { TFunction } from 'i18next'
 import type { AppConfigSnapshot, ModelProviderConfigDetail } from '@shared/types'
 import { getModelTemplate } from '@shared/modelTemplates'
@@ -10,9 +10,9 @@ import {
   buildProviderModelPayload,
   buildProviderPayload,
   emptyModelDraft,
-  modelConfigToDraft,
+  modelConfigToDraft as savedModelConfigToDraft,
   modelTemplateToDraft,
-  providerConfigToDraft,
+  providerConfigToDraft as savedProviderConfigToDraft,
   validateModelProviderDraft,
   validateProviderModelDraft
 } from './modelDraft'
@@ -20,12 +20,19 @@ import type { ModelDraft } from './modelDraft'
 import { useCachedModelCandidates } from './useCachedModelCandidates'
 import { useModelCandidateRefresh } from './useModelCandidateRefresh'
 
+type ProviderDraftFields = Pick<ModelDraft,
+  'name' | 'protocol' | 'baseUrl' | 'modelListUrl' | 'modelListAuth' | 'apiKey' | 'providerParametersJson'>
+
+function providerDraftFields(draft: ModelDraft): ProviderDraftFields {
+  const { name, protocol, baseUrl, modelListUrl, modelListAuth, apiKey, providerParametersJson } = draft
+  return { name, protocol, baseUrl, modelListUrl, modelListAuth, apiKey, providerParametersJson }
+}
+
 interface UseModelSettingsStateOptions {
   config: AppConfigSnapshot | undefined
   openConfirmDialog: (request: ConfirmDialogRequest) => void
   setConfig: (config: AppConfigSnapshot) => void
   setError: (message: string | undefined) => void
-  setSettingsTab: (tab: SettingsTab) => void
   settingsOpen: boolean
   settingsTab: SettingsTab
   t: TFunction
@@ -36,7 +43,6 @@ export function useModelSettingsState({
   openConfirmDialog,
   setConfig,
   setError,
-  setSettingsTab,
   settingsOpen,
   settingsTab,
   t
@@ -49,6 +55,18 @@ export function useModelSettingsState({
   const modelListRef = useRef<HTMLDivElement | null>(null)
   const modelDirtyRef = useRef(false)
   const modelAutosave = useQueuedAutosave()
+  const configRef = useRef(config)
+  configRef.current = config
+  const failedProviderDrafts = useRef(new Map<string, ProviderDraftFields>())
+  const withFailedProviderDraft = useCallback((draft: ModelDraft): ModelDraft => ({
+    ...draft, ...failedProviderDrafts.current.get(draft.providerId ?? '')
+  }), [])
+  const providerConfigToDraft = useCallback((...args: Parameters<typeof savedProviderConfigToDraft>) => (
+    withFailedProviderDraft(savedProviderConfigToDraft(...args))
+  ), [withFailedProviderDraft])
+  const modelConfigToDraft = useCallback((...args: Parameters<typeof savedModelConfigToDraft>) => (
+    withFailedProviderDraft(savedModelConfigToDraft(...args))
+  ), [withFailedProviderDraft])
   const modelNoticeId = 'settings-model-status'
   const [modelCandidates, setModelCandidates] = useCachedModelCandidates({
     draft: modelDraft,
@@ -94,7 +112,7 @@ export function useModelSettingsState({
     modelDraftRef.current = draft
     setModelDraft(draft)
     setModelDirtyState(false)
-  }, [config, editingModelIndex, editingProviderModelIndex, modelDirty])
+  }, [config, editingModelIndex, editingProviderModelIndex, modelDirty, providerConfigToDraft])
 
   useEffect(() => {
     if (settingsTab !== 'model' || editingModelIndex === undefined) return
@@ -114,11 +132,18 @@ export function useModelSettingsState({
   async function ensureModelDraftCanLeave(): Promise<boolean> {
     if (!modelDirtyRef.current) return true
     await modelAutosave.waitForIdle()
-    if (modelDirtyRef.current) {
-      setSettingsTab('model')
-      return false
-    }
     return true
+  }
+
+  function showProviderSaveFailure(providerId: string): void {
+    notice.error(t('settings.failed_save_model'), {
+      id: modelNoticeId, duration: Infinity,
+      action: { label: t('common.retry'), onClick: () => {
+        if (modelDraftRef.current.providerId === providerId && failedProviderDrafts.current.has(providerId)) {
+          void saveProviderDraftImmediately(modelDraftRef.current)
+        }
+      } }
+    })
   }
 
   async function selectDefaultModel(modelConfigId: string | null): Promise<void> {
@@ -133,7 +158,7 @@ export function useModelSettingsState({
 
   async function editModel(index: number): Promise<void> {
     if (!(await ensureModelDraftCanLeave())) return
-    const provider = config?.providers[index]
+    const provider = configRef.current?.providers[index]
     const model = provider?.models[0]
     if (!provider) return
     modelAutosave.revise(`provider:${provider.id}`)
@@ -144,11 +169,13 @@ export function useModelSettingsState({
     modelDraftRef.current = draft
     setModelDraft(draft)
     setModelDirtyState(false)
+    if (failedProviderDrafts.current.has(provider.id)) showProviderSaveFailure(provider.id)
+    else notice.dismiss(modelNoticeId)
   }
 
   async function selectProviderModel(index: number): Promise<boolean> {
     if (!(await ensureModelDraftCanLeave())) return false
-    const provider = editingModelIndex === undefined ? undefined : config?.providers[editingModelIndex]
+    const provider = editingModelIndex === undefined ? undefined : configRef.current?.providers[editingModelIndex]
     const model = provider?.models[index]
     if (!provider || !model) return false
     setEditingProviderModelIndex(index)
@@ -224,6 +251,9 @@ export function useModelSettingsState({
       || update.apiKey !== undefined
     if (modelCandidateSourceUpdate) setModelCandidates([])
     modelDraftRef.current = nextDraft
+    if (nextDraft.providerId && failedProviderDrafts.current.has(nextDraft.providerId)) {
+      failedProviderDrafts.current.set(nextDraft.providerId, providerDraftFields(nextDraft))
+    }
     setModelDraft(nextDraft)
     void saveProviderDraftImmediately(nextDraft)
   }
@@ -265,8 +295,11 @@ export function useModelSettingsState({
     await modelAutosave.enqueue(revision, async (request) => {
       try {
         const nextConfig = await window.gale.config.saveModelProvider(payload)
-        setConfig(nextConfig)
         if (!request.isCurrent()) return
+        failedProviderDrafts.current.delete(draft.providerId!)
+        configRef.current = nextConfig
+        setConfig(nextConfig)
+        notice.dismiss(modelNoticeId)
         const provider = nextConfig.providers.find((candidate) => candidate.id === draft.providerId)
         if (!provider) throw new Error('Saved provider is missing from the returned config.')
         const requestedModel = provider.models.find((candidate) => candidate.id === draft.modelConfigId)
@@ -278,8 +311,9 @@ export function useModelSettingsState({
         setModelDirtyState(false)
       } catch {
         if (request.isCurrent()) {
-          notice.error(t('settings.failed_save_model'), { id: modelNoticeId })
+          failedProviderDrafts.current.set(draft.providerId!, providerDraftFields(draft))
           setModelDirtyState(false)
+          showProviderSaveFailure(draft.providerId!)
         }
       }
     })
@@ -298,6 +332,8 @@ export function useModelSettingsState({
           modelAutosave.revise(`provider:delete:${provider.id}`)
           await modelAutosave.waitForIdle()
           const nextConfig = await window.gale.config.deleteModelProvider(provider.id)
+          failedProviderDrafts.current.delete(provider.id)
+          notice.dismiss(modelNoticeId)
           const nextProvider = nextConfig.providers[Math.min(provider.index, nextConfig.providers.length - 1)]
           const nextModel = nextProvider?.models[0]
           const draft = nextProvider ? providerConfigToDraft(nextProvider, nextModel) : emptyModelDraft()

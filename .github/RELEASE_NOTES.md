@@ -1,16 +1,14 @@
-## Anas v3.3.0
+## Anas v3.3.1
 
-- 项目支持自定义压缩提示词，使用标签切换编辑项目提示词与压缩提示词；菜单可预览完整提示词、压缩模板和模型请求。关闭定制能力时，项目自定义提示词不生效。
-- 模型编辑改为保存／取消，取消时丢弃草稿；精简标题区并统一能力选项的分段多选样式。
-- 默认项目仅允许修改图标和模型，其余使用默认设置；修复目录异常和旧项目名称冲突对项目管理的影响。项目文件夹区域采用紧凑、稳定的两行布局。
-- 合并技能创建与安装说明为 `skill-manager`，将自定义工具技能统一命名为 `tool-manager`；同步中英用户指南并新增编码模式说明。
-- 优化技能设置的分段多选交互，统一预览与源码编辑器的滚动条样式。新增可选压缩配置在缺失时使用默认模板，保持现有 v0 配置可读。
+- 设置页使用本地草稿和顺序保存，修复修改能力等选项时的闪烁及连续操作被旧保存结果覆盖的问题。
+- 保存失败时保留未保存内容并支持重试；模型供应商切换后可恢复失败草稿，MCP 和子 Agent 连续编辑时避免重复创建或显示已删除条目的草稿。
+- 项目可设置新对话的默认工具权限，包括默认项目；对话仍可单独切换，已有对话不受项目默认值变更影响。缺少新字段时使用“允许只读”，保持 v0 配置格式，无需迁移。
+- 项目文件夹下方左侧显示工具权限，模型与推理选项靠右对齐；同步中英文说明和权限切换入口文档。
 
-- Customize project compression prompts in tabs alongside project instructions, with menu previews for full prompts, compression templates, and model requests. Project prompt overrides are inactive when capability customization is off.
-- Save or cancel model edits explicitly, discarding cancelled drafts. Simplify the editor header and use consistent segmented multi-select controls for model capabilities.
-- Limit the default project to icon and model edits while using application defaults elsewhere. Fix project management failures caused by an unavailable default directory or existing name collisions. Use a compact, stable two-row project-folder area.
-- Merge skill creation and installation guidance into `skill-manager` and rename the custom-tool skill to `tool-manager`. Update both user guides and add coding-mode documentation.
-- Refine segmented multi-select interactions in skill settings and align preview/editor scrollbars. Missing optional compression settings use the default template, keeping existing v0 configuration readable.
+- Use local drafts and sequential saves in settings to prevent flicker and older save responses from overwriting rapid edits.
+- Retain unsaved changes after failures and support retries. Restore failed provider drafts when switching back, and prevent duplicate MCP/subagent creation or deleted-item drafts during consecutive edits.
+- Configure the initial tool access mode for new conversations per project, including the default project. Conversations can override it, and existing conversations keep their own permissions. Omitted fields use Allow read-only within the existing v0 format, with no migration required.
+- Place tool access below project folders on the left and align model and reasoning selections to the right. Update both user guides and document the current permission-switching entry point.
 
 ## 下载与安装 / Downloads & installation
 

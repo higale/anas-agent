@@ -21,6 +21,8 @@ import type { SkillSnapshot, McpToolStatus, RuntimeToolStatus } from '@shared/ty
 import { CapabilityEditor } from '../CapabilityEditor'
 import { notice } from '../notice'
 import { CheckboxField } from '../CheckboxField'
+import type { AgentAccessMode } from '@shared/agentTypes'
+import { ComposerAccessPicker } from '../chat/ComposerAccessPicker'
 import { ModelPicker } from '../model/ModelPicker'
 import { ModelParameterPresetPicker } from '../model/ModelParameterPresetPicker'
 import { projectDraftModelSelection } from '@shared/draftModelSelection'
@@ -67,6 +69,7 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
   const [skills, setSkills] = useState<SkillSnapshot>()
   const [mcpStatus, setMcpStatus] = useState<McpToolStatus>()
   const [runtimeToolStatus, setRuntimeToolStatus] = useState<RuntimeToolStatus>()
+  const [accessMode, setAccessMode] = useState<AgentAccessMode>('read_only_allowed')
   const [modelConfigId, setModelConfigId] = useState<string>()
   const [modelParameterPresetId, setModelParameterPresetId] = useState<string | null>()
   const [busy, setBusy] = useState(false)
@@ -90,8 +93,8 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
       ? { ...preferences, kind: 'simple_chat', prompt }
       : { ...preferences, kind: 'workspace', sourceFolders,
         capabilities: config ? removeEmptyMissingMcpSelections(capabilities, new Set(config.mcpServers.map((server) => server.id))) : capabilities,
-        restrictSubagents, prompt, advancedSettings, codingMode, ...(compressionPrompt.trim() ? { compressionPrompt } : {}) }
-  }, [advancedSettings, capabilities, codingMode, compressionPrompt, config, icon, iconColor, modelConfigId,
+        restrictSubagents, prompt, advancedSettings, codingMode, ...(accessMode !== 'read_only_allowed' ? { accessMode } : {}), ...(compressionPrompt.trim() ? { compressionPrompt } : {}) }
+  }, [accessMode, advancedSettings, capabilities, codingMode, compressionPrompt, config, icon, iconColor, modelConfigId,
     modelParameterPresetId, name, prompt, restrictSubagents, simpleChat, sourceFolders, t])
 
   useEffect(() => {
@@ -107,6 +110,7 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
     const defaults = defaultsRef.current
     setCapabilities(structuredClone(defaultWorkspace ? defaultCapabilities : project?.kind === 'workspace' ? project.capabilities : defaults.capabilities))
     setRestrictSubagents(defaultWorkspace ? defaultRestrictSubagents : project?.kind === 'workspace' ? project.restrictSubagents : defaults.restrictSubagents)
+    setAccessMode(project?.kind === 'workspace' ? project.accessMode ?? 'read_only_allowed' : 'read_only_allowed')
     setModelConfigId(project?.modelConfigId)
     setModelParameterPresetId(project?.modelParameterPresetId)
     setCompressionPrompt(!defaultWorkspace && project?.kind === 'workspace' ? project.compressionPrompt ?? '' : '')
@@ -288,33 +292,7 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
                   </header>
 
                   <div className="ui-field-stack">
-                    <div className="ui-toolbar ui-toolbar-between">
-                      <label className="ui-field-label" htmlFor={nameInputId}>{t('project.name')}</label>
-                      <div className="composer-model-selection-group">
-                        <ModelPicker
-                          modal
-                          providers={config?.providers}
-                          selectedId={selection?.modelConfigId}
-                          defaultModelId={config?.defaultModelId}
-                          disabled={busy || !config}
-                          onClear={() => {
-                            setModelConfigId(undefined)
-                            setModelParameterPresetId(undefined)
-                          }}
-                          onSelect={(id) => {
-                            setModelConfigId(id)
-                            setModelParameterPresetId(findProviderModelConfig(config?.providers ?? [], id)?.defaultParameterPresetId ?? null)
-                          }}
-                        />
-                        <ModelParameterPresetPicker
-                          modal
-                          disabled={busy}
-                          model={selectedModel}
-                          selectedId={selection?.modelParameterPresetId ?? undefined}
-                          onSelect={setModelParameterPresetId}
-                        />
-                      </div>
-                    </div>
+                    <label className="ui-field-label" htmlFor={nameInputId}>{t('project.name')}</label>
                     <input
                       className="ui-input"
                       id={nameInputId}
@@ -438,6 +416,33 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
                       </button>
                     </div>}
                   </section>
+                  <div className="ui-row">
+                    {!simpleChat && <ComposerAccessPicker modal disabled={busy} accessMode={accessMode} onChange={setAccessMode} />}
+                    <div className="composer-model-selection-group ui-push-end">
+                      <ModelPicker
+                        modal
+                        providers={config?.providers}
+                        selectedId={selection?.modelConfigId}
+                        defaultModelId={config?.defaultModelId}
+                        disabled={busy || !config}
+                        onClear={() => {
+                          setModelConfigId(undefined)
+                          setModelParameterPresetId(undefined)
+                        }}
+                        onSelect={(id) => {
+                          setModelConfigId(id)
+                          setModelParameterPresetId(findProviderModelConfig(config?.providers ?? [], id)?.defaultParameterPresetId ?? null)
+                        }}
+                      />
+                      <ModelParameterPresetPicker
+                        modal
+                        disabled={busy}
+                        model={selectedModel}
+                        selectedId={selection?.modelParameterPresetId ?? undefined}
+                        onSelect={setModelParameterPresetId}
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
               {!defaultWorkspace && !simpleChat && advancedSettings && <section className="ui-dialog-pane ui-form-section" aria-label={t('settings.capabilities')}>

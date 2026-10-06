@@ -3,7 +3,7 @@ import type { ExternalToast } from 'sonner'
 import { DismissableLayerBranch } from '@radix-ui/react-dismissable-layer'
 import { useTranslation } from 'react-i18next'
 
-type NoticeOptions = Pick<ExternalToast, 'description' | 'duration' | 'id'>
+type NoticeOptions = Pick<ExternalToast, 'description' | 'duration' | 'id' | 'action'>
 type NoticeTheme = 'light' | 'dark'
 
 const defaultDuration = 3200

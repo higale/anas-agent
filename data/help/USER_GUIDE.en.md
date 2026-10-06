@@ -18,7 +18,7 @@ Choose Help from the lower-left menu to read this guide in the right workspace. 
 
 Enable **Customize capabilities** in the project editor to choose the project prompt, context, tools, skills, and subagents. Turning it off uses **Settings > Capabilities** and preserves your custom choices. These defaults are not master switches: customized projects can independently enable or disable capabilities. **Coding mode** separately changes the development workflow; it does not enable tools or increase access permissions.
 
-The default project only allows changes to its icon, color, model, and reasoning option. Its name, working directory, and other project settings use defaults, and capabilities follow global settings. Create a regular project to customize folders, prompts, or capabilities.
+The default project only allows changes to its icon, color, tool access mode, model, and reasoning option. Its name, working directory, and other project settings use defaults, and capabilities follow global settings. Create a regular project to customize folders, prompts, or capabilities.
 
 - File read, File write, Memory, and Custom tools expand into individual choices. Use each group switch to select or clear all items. Saved selections that are deleted or unavailable can still be deselected.
 - Every tool listed below requires a model that supports tool use with **Tool use** enabled. Context-only capabilities do not require tool use. Using a skill also requires tools for reading its instructions and performing its task.
@@ -206,11 +206,13 @@ Set Vision and Tool use to match the model's actual capabilities. Turning Tool u
 
 Project Customize capabilities selects available tools; the model's Tool use setting determines whether it can call them. See [Projects And Capabilities](#projects-and-capabilities) for functions and dependencies.
 
+Below the folders in project settings, choose the default tool access mode on the left and the model and reasoning option on the right. New conversations inherit this mode and can override it beside the input. Changing the project default does not affect existing conversations. An omitted setting defaults to Allow read-only; Customize capabilities does not need to be enabled.
+
 Conversations offer three access modes:
 
 - **Allow read-only**: the default. Files outside projects can be read directly; external writes and commands that cannot be verified as supported read-only operations require confirmation.
 - **Strict approval**: external reads also require confirmation. Only supported read-only commands targeting project files run without a prompt.
-- **Full access**: skips pre-execution approval. Revoke it from the conversation's More menu; operations already started are not interrupted.
+- **Full access**: skips pre-execution approval. Switch to Allow read-only or Strict approval from the tool access menu beside the input; operations already started are not interrupted.
 
 An external operation with an uncertain outcome still requires confirmation before retrying. A conversation awaiting confirmation cannot accept messages, history edits, regeneration, or compression. Other conversations remain available.
 

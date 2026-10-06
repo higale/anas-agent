@@ -95,7 +95,6 @@ describe('model settings state', () => {
       openConfirmDialog: vi.fn(),
       setConfig,
       setError: vi.fn(),
-      setSettingsTab: vi.fn(),
       settingsOpen: false,
       settingsTab: 'model',
       t: ((key: string) => key) as TFunction
@@ -135,7 +134,6 @@ describe('model settings state', () => {
       openConfirmDialog: vi.fn(),
       setConfig: vi.fn(),
       setError: vi.fn(),
-      setSettingsTab: vi.fn(),
       settingsOpen: false,
       settingsTab: 'model',
       t: ((key: string) => key) as TFunction
@@ -165,7 +163,6 @@ describe('model settings state', () => {
       openConfirmDialog: vi.fn(),
       setConfig: vi.fn(),
       setError: vi.fn(),
-      setSettingsTab: vi.fn(),
       settingsOpen: false,
       settingsTab: 'model',
       t: ((key: string) => key) as TFunction
@@ -197,7 +194,6 @@ describe('model settings state', () => {
       openConfirmDialog: vi.fn(),
       setConfig: vi.fn(),
       setError: vi.fn(),
-      setSettingsTab: vi.fn(),
       settingsOpen: false,
       settingsTab: 'model',
       t: ((key: string) => key) as TFunction
@@ -229,7 +225,6 @@ describe('model settings state', () => {
       openConfirmDialog: vi.fn(),
       setConfig: vi.fn(),
       setError: vi.fn(),
-      setSettingsTab: vi.fn(),
       settingsOpen: false,
       settingsTab: 'model',
       t: ((key: string) => key) as TFunction
@@ -268,7 +263,6 @@ describe('model settings state', () => {
       openConfirmDialog,
       setConfig,
       setError: vi.fn(),
-      setSettingsTab: vi.fn(),
       settingsOpen: false,
       settingsTab: 'model',
       t: ((key: string) => key) as TFunction
@@ -309,7 +303,6 @@ describe('model settings state', () => {
       openConfirmDialog: vi.fn(),
       setConfig,
       setError: vi.fn(),
-      setSettingsTab: vi.fn(),
       settingsOpen: false,
       settingsTab: 'model',
       t: ((key: string) => key) as TFunction
@@ -331,7 +324,6 @@ describe('model settings state', () => {
   })
 
   it('releases the navigation lock after a validation failure', async () => {
-    const setSettingsTab = vi.fn()
     const saveModelProvider = vi.fn()
     vi.stubGlobal('gale', { config: { saveModelProvider } })
     const { result } = renderHook(() => useModelSettingsState({
@@ -339,7 +331,6 @@ describe('model settings state', () => {
       openConfirmDialog: vi.fn(),
       setConfig: vi.fn(),
       setError: vi.fn(),
-      setSettingsTab,
       settingsOpen: false,
       settingsTab: 'model',
       t: ((key: string) => key) as TFunction
@@ -363,19 +354,20 @@ describe('model settings state', () => {
     })
     expect(result.current.modelDraft.model).toBe('existing-model')
     expect(saveModelProvider).not.toHaveBeenCalled()
-    expect(setSettingsTab).not.toHaveBeenCalled()
   })
 
-  it('releases the navigation lock after the save request fails', async () => {
-    const setSettingsTab = vi.fn()
-    const saveModelProvider = vi.fn(async () => { throw new Error('save failed') })
+  it('allows leaving after failure and restores the provider draft when switching back', async () => {
+    const initial = structuredClone(config)
+    initial.providers.push({ ...initial.providers[0], id: 'provider-2', index: 1, name: 'Other provider' })
+    const saved = structuredClone(initial)
+    saved.providers[0].name = 'Changed provider'
+    const saveModelProvider = vi.fn().mockRejectedValueOnce(new Error('save failed')).mockResolvedValue(saved)
     vi.stubGlobal('gale', { config: { saveModelProvider } })
     const { result } = renderHook(() => useModelSettingsState({
-      config,
+      config: initial,
       openConfirmDialog: vi.fn(),
       setConfig: vi.fn(),
       setError: vi.fn(),
-      setSettingsTab,
       settingsOpen: false,
       settingsTab: 'model',
       t: ((key: string) => key) as TFunction
@@ -385,14 +377,23 @@ describe('model settings state', () => {
     act(() => result.current.updateModelDraft({ name: 'Changed provider' }))
     await waitFor(() => expect(notice.error).toHaveBeenCalledWith(
       'settings.failed_save_model',
-      { id: 'settings-model-status' }
+      expect.objectContaining({ id: 'settings-model-status' })
     ))
 
     await act(async () => {
+      expect(await result.current.ensureModelDraftCanLeave()).toBe(true)
       expect(await result.current.selectProviderModel(1)).toBe(true)
     })
+    expect(result.current.modelDraft.name).toBe('Changed provider')
+    await act(async () => { await result.current.editModel(1) })
+    expect(result.current.modelDraft.name).toBe('Other provider')
+    await act(async () => { await result.current.editModel(0) })
+    expect(result.current.modelDraft.name).toBe('Changed provider')
     expect(saveModelProvider).toHaveBeenCalledOnce()
-    expect(setSettingsTab).not.toHaveBeenCalled()
+    const action = vi.mocked(notice.error).mock.calls.at(-1)?.[1]?.action as unknown as { onClick: () => void }
+    await act(async () => action.onClick())
+    await waitFor(() => expect(saveModelProvider).toHaveBeenCalledTimes(2))
+    await act(async () => { expect(await result.current.selectProviderModel(1)).toBe(true) })
   })
   it('saves all model fields in one request and leaves the original state intact on failure', async () => {
     const savedConfig = structuredClone(config)
@@ -401,7 +402,7 @@ describe('model settings state', () => {
     const setConfig = vi.fn()
     vi.stubGlobal('gale', { config: { saveProviderModel } })
     const { result } = renderHook(() => useModelSettingsState({
-      config, openConfirmDialog: vi.fn(), setConfig, setError: vi.fn(), setSettingsTab: vi.fn(),
+      config, openConfirmDialog: vi.fn(), setConfig, setError: vi.fn(),
       settingsOpen: false, settingsTab: 'model', t: ((key: string) => key) as TFunction
     }))
     await waitFor(() => expect(result.current.modelDraft.modelConfigId).toBe('model-1'))
@@ -425,7 +426,7 @@ describe('model settings state', () => {
     const saveProviderModel = vi.fn()
     vi.stubGlobal('gale', { config: { saveProviderModel } })
     const { result } = renderHook(() => useModelSettingsState({
-      config, openConfirmDialog: vi.fn(), setConfig: vi.fn(), setError: vi.fn(), setSettingsTab: vi.fn(),
+      config, openConfirmDialog: vi.fn(), setConfig: vi.fn(), setError: vi.fn(),
       settingsOpen: false, settingsTab: 'model', t: ((key: string) => key) as TFunction
     }))
     await waitFor(() => expect(result.current.modelDraft.modelConfigId).toBe('model-1'))

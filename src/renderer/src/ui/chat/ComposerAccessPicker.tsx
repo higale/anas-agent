@@ -7,18 +7,22 @@ import { NoFocusButton } from '../NoFocusButton'
 import type { AgentAccessMode } from '@shared/agentTypes'
 
 interface ComposerAccessPickerProps {
+  modal?: boolean
   disabled: boolean
   accessMode: AgentAccessMode
   onChange(accessMode: AgentAccessMode): void
 }
 
 export function ComposerAccessPicker({
+  modal,
   disabled,
   accessMode,
   onChange
 }: ComposerAccessPickerProps) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
+  const Trigger = modal ? DropdownMenu.Trigger : DropdownMenuTrigger
+  const TriggerButton = modal ? 'button' : NoFocusButton
   const platform = document.documentElement.dataset.platform
   const hintSuffix = platform === 'win32' || platform === 'darwin' ? `_${platform}` : ''
   const label = accessMode === 'full_access'
@@ -33,9 +37,9 @@ export function ComposerAccessPicker({
   }
 
   return (
-    <DropdownMenuRoot open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
-        <NoFocusButton
+    <DropdownMenuRoot modal={modal} open={open} onOpenChange={setOpen}>
+      <Trigger asChild>
+        <TriggerButton
           className={[
             'composer-access-trigger',
             accessMode === 'full_access' ? 'composer-access-trigger-full' : ''
@@ -51,10 +55,11 @@ export function ComposerAccessPicker({
               : <Shield size={14} />}
           <span>{label}</span>
           <ChevronDown size={12} />
-        </NoFocusButton>
-      </DropdownMenuTrigger>
+        </TriggerButton>
+      </Trigger>
       <DropdownMenu.Portal>
         <DropdownMenuContent
+          restoreFocus={modal}
           className="composer-access-menu ui-menu ui-menu-list"
           side="top"
           align="start"

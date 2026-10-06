@@ -1,24 +1,81 @@
 import type { DefaultCapabilitySettings } from '@shared/agentCapabilities'
-import { useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import type { TFunction } from 'i18next'
 import type { AppConfigSnapshot, AppProfileUpdate, AppSettings, SpeechReplyConfig } from '@shared/types'
 import { applyLanguagePreference } from '../../i18n'
 import { notice } from '../notice'
+import { useQueuedDraftSave } from '../useQueuedAutosave'
 import type { SettingsTab } from './settingsTabs'
 
 type CanLeaveSettingsTab = () => boolean | Promise<boolean>
 
 interface UseSettingsControllerOptions {
+  config?: AppConfigSnapshot
   setConfig: Dispatch<SetStateAction<AppConfigSnapshot | undefined>>
   t: TFunction
 }
 
-export function useSettingsController({ setConfig, t }: UseSettingsControllerOptions) {
+export function useSettingsController({ config, setConfig, t }: UseSettingsControllerOptions) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('general')
-  const [pendingDefaultCapabilities, setPendingDefaultCapabilities] = useState<DefaultCapabilitySettings>()
-  const capabilitiesSavePending = useRef(false)
+  function reportFailure(key: string, id: string, retry: () => void) {
+    notice.error(t(key), { id, duration: Infinity, action: { label: t('common.retry'), onClick: retry } })
+  }
+
+  const settingsSave = useQueuedDraftSave<Partial<AppSettings>, AppConfigSnapshot>({
+    merge: (previous, update) => ({ ...previous, ...update }),
+    persist: (draft) => window.gale.config.updateSettings(draft),
+    onSaved: (result, draft) => {
+      const saved = Object.fromEntries(Object.keys(draft).map((key) => [key, result.settings[key as keyof AppSettings]]))
+      setConfig((current) => current ? { ...current, settings: { ...current.settings, ...saved } } : result)
+      notice.dismiss('settings-save')
+    },
+    onError: (retry) => reportFailure('chat.failed_save_settings', 'settings-save', retry)
+  })
+  const capabilitiesSave = useQueuedDraftSave<DefaultCapabilitySettings, AppConfigSnapshot>({
+    merge: (_previous, update) => update,
+    persist: (draft) => window.gale.config.saveDefaultCapabilities(draft),
+    onSaved: (result) => {
+      setConfig((current) => current ? { ...current, defaultCapabilities: result.defaultCapabilities } : result)
+      notice.dismiss('capabilities-save')
+    },
+    onError: (retry) => reportFailure('chat.failed_save_settings', 'capabilities-save', retry)
+  })
+  const profileSave = useQueuedDraftSave<AppProfileUpdate, AppConfigSnapshot>({
+    merge: (previous, update) => ({
+      assistant: { ...previous?.assistant, ...update.assistant },
+      user: { ...previous?.user, ...update.user }
+    }),
+    persist: (draft) => window.gale.config.updateProfile(draft),
+    onSaved: (result) => {
+      setConfig((current) => current ? { ...current, settings: { ...current.settings, profile: result.settings.profile } } : result)
+      notice.dismiss('profile-save')
+    },
+    onError: (retry) => reportFailure('chat.failed_save_profile', 'profile-save', retry)
+  })
+  const speechSave = useQueuedDraftSave<Partial<SpeechReplyConfig>, AppConfigSnapshot>({
+    merge: (previous, update) => ({ ...previous, ...update }),
+    persist: (draft) => window.gale.config.updateSpeechReply(draft),
+    onSaved: (result) => {
+      setConfig((current) => current ? { ...current, settings: { ...current.settings, speechReply: result.settings.speechReply } } : result)
+      notice.dismiss('speech-save')
+    },
+    onError: (retry) => reportFailure('chat.failed_save_speech', 'speech-save', retry)
+  })
+  const displayConfig = useMemo(() => config ? {
+    ...config,
+    defaultCapabilities: capabilitiesSave.draft ?? config.defaultCapabilities,
+    settings: {
+      ...config.settings,
+      ...settingsSave.draft,
+      profile: profileSave.draft ? {
+        assistant: { ...config.settings.profile.assistant, ...profileSave.draft.assistant },
+        user: { ...config.settings.profile.user, ...profileSave.draft.user }
+      } : config.settings.profile,
+      speechReply: speechSave.draft ? { ...config.settings.speechReply, ...speechSave.draft } : config.settings.speechReply
+    }
+  } : undefined, [config, capabilitiesSave.draft, settingsSave.draft, profileSave.draft, speechSave.draft])
 
   async function switchSettingsTab(tab: SettingsTab, canLeave?: CanLeaveSettingsTab): Promise<void> {
     if (tab === settingsTab) return
@@ -31,60 +88,26 @@ export function useSettingsController({ setConfig, t }: UseSettingsControllerOpt
     setSettingsOpen(false)
   }
 
-  async function saveSettings(settings: Partial<AppSettings>): Promise<void> {
-    try {
-      const nextConfig = await window.gale.config.updateSettings(settings)
-      setConfig(nextConfig)
-    } catch {
-      notice.error(t('chat.failed_save_settings'))
-    }
-  }
-
-  async function saveDefaultCapabilities(value: DefaultCapabilitySettings): Promise<void> {
-    if (capabilitiesSavePending.current) return
-    capabilitiesSavePending.current = true
-    setPendingDefaultCapabilities(value)
-    try {
-      setConfig(await window.gale.config.saveDefaultCapabilities(value))
-    } catch {
-      notice.error(t('chat.failed_save_settings'))
-    } finally {
-      capabilitiesSavePending.current = false
-      setPendingDefaultCapabilities(undefined)
-    }
-  }
-
   async function saveLanguage(language: string): Promise<void> {
-    await applyLanguagePreference(language)
-    await saveSettings({ language })
+    await Promise.all([applyLanguagePreference(language), settingsSave.save({ language })])
   }
 
-  async function saveProfile(profile: AppProfileUpdate): Promise<void> {
-    try {
-      const nextConfig = await window.gale.config.updateProfile(profile)
-      setConfig(nextConfig)
-    } catch {
-      notice.error(t('chat.failed_save_profile'))
+  async function saveProfile(update: AppProfileUpdate): Promise<void> {
+    if (update.assistant?.name !== undefined && !update.assistant.name.trim()) {
+      notice.error(t('settings.assistant_name_required'))
+      return
     }
-  }
-
-  async function saveSpeechReply(settings: Partial<SpeechReplyConfig>): Promise<void> {
-    try {
-      const nextConfig = await window.gale.config.updateSpeechReply(settings)
-      setConfig(nextConfig)
-    } catch {
-      notice.error(t('chat.failed_save_speech'))
-    }
+    await profileSave.save(update)
   }
 
   return {
     closeSettings,
-    pendingDefaultCapabilities,
+    config: displayConfig,
     saveLanguage,
     saveProfile,
-    saveSettings,
-    saveDefaultCapabilities,
-    saveSpeechReply,
+    saveSettings: settingsSave.save,
+    saveDefaultCapabilities: capabilitiesSave.save,
+    saveSpeechReply: speechSave.save,
     setSettingsOpen,
     setSettingsTab,
     settingsOpen,

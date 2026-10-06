@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useRef, useState } from 'react'
 
 export interface AutosaveRevision {
   entityId: string
@@ -41,8 +41,59 @@ export class QueuedAutosave {
   }
 
   async waitForIdle(): Promise<void> {
-    await this.queue.catch(() => undefined)
+    let tail: Promise<void>
+    do {
+      tail = this.queue
+      await tail.catch(() => undefined)
+    } while (tail !== this.queue)
   }
+}
+
+// Keep unacknowledged edits across renders and page changes. Every queued payload
+// includes earlier edits, so a failed write can be retried by the next edit too.
+export function useQueuedDraftSave<Draft, Result>(options: {
+  merge: (previous: Draft | undefined, update: Draft) => Draft
+  persist: (draft: Draft) => Promise<Result>
+  onSaved: (result: Result, draft: Draft) => void
+  onError: (retry: () => void) => void
+}) {
+  const [draft, setDraft] = useState<Draft>()
+  const draftRef = useRef<Draft | undefined>(undefined)
+  const autosave = useQueuedAutosave()
+
+  async function save(update: Draft): Promise<void> {
+    const next = options.merge(draftRef.current, update)
+    draftRef.current = next
+    setDraft(next)
+    const revision = autosave.revise('draft')
+    await autosave.enqueue(revision, async (request) => {
+      try {
+        const result = await options.persist(next)
+        if (!request.isCurrent()) return
+        options.onSaved(result, next)
+        draftRef.current = undefined
+        setDraft(undefined)
+      } catch {
+        if (!request.isCurrent()) return
+        options.onError(() => {
+          if (draftRef.current !== undefined) void save(draftRef.current)
+        })
+      }
+    })
+  }
+
+  // Structural actions call this after the queue is idle, to discard edits for
+  // entities the user explicitly removed without dropping other failed edits.
+  function discardPending(filter: (pending: Draft) => Draft | undefined): boolean {
+    if (draftRef.current === undefined) return false
+    const next = filter(draftRef.current)
+    autosave.revise('draft')
+    draftRef.current = next
+    setDraft(next)
+    return next !== undefined
+  }
+
+  return { draft, save, discardPending, waitForIdle: autosave.waitForIdle }
 }
 
 export function useQueuedAutosave(): {

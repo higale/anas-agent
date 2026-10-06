@@ -9,16 +9,17 @@ export interface ComposerDraft {
   accessMode: AgentAccessMode
 }
 
-const emptyDraft = (): ComposerDraft => ({
+type StoredComposerDraft = Omit<ComposerDraft, 'accessMode'> & { accessMode?: AgentAccessMode }
+
+const emptyDraft = (): StoredComposerDraft => ({
   input: '',
-  attachments: [],
-  accessMode: 'read_only_allowed'
+  attachments: []
 })
 
-function isEmptyDraft(draft: ComposerDraft): boolean {
+function isEmptyDraft(draft: StoredComposerDraft): boolean {
   return draft.input.length === 0
     && draft.attachments.length === 0
-    && draft.accessMode === 'read_only_allowed'
+    && draft.accessMode === undefined
 }
 
 export function threadComposerDraftKey(threadId: string): string {
@@ -30,18 +31,19 @@ export function newThreadComposerDraftKey(projectId: string): string {
 }
 
 export class ComposerDraftStore {
-  private readonly drafts = new Map<string, ComposerDraft>()
+  private readonly drafts = new Map<string, StoredComposerDraft>()
 
-  get(key: string): ComposerDraft {
-    return this.drafts.get(key) ?? emptyDraft()
+  get(key: string, defaultAccessMode: AgentAccessMode = 'read_only_allowed'): ComposerDraft {
+    const draft = this.drafts.get(key) ?? emptyDraft()
+    return { ...draft, accessMode: draft.accessMode ?? defaultAccessMode }
   }
 
   setInput(key: string, input: string): void {
-    this.write(key, { ...this.get(key), input })
+    this.write(key, { ...(this.drafts.get(key) ?? emptyDraft()), input })
   }
 
   setAttachments(key: string, attachments: SelectedAttachment[]): void {
-    this.write(key, { ...this.get(key), attachments })
+    this.write(key, { ...(this.drafts.get(key) ?? emptyDraft()), attachments })
   }
 
   setAccessMode(key: string, accessMode: AgentAccessMode): void {
@@ -52,7 +54,7 @@ export class ComposerDraftStore {
     const draft = this.drafts.get(key)
     if (!draft) return undefined
     this.drafts.delete(key)
-    return draft
+    return { ...draft, accessMode: draft.accessMode ?? 'read_only_allowed' }
   }
 
   discardMany(keys: Iterable<string>): ComposerDraft[] {
@@ -64,7 +66,7 @@ export class ComposerDraftStore {
     return discarded
   }
 
-  private write(key: string, draft: ComposerDraft): void {
+  private write(key: string, draft: StoredComposerDraft): void {
     if (isEmptyDraft(draft)) {
       this.drafts.delete(key)
       return
@@ -73,12 +75,12 @@ export class ComposerDraftStore {
   }
 }
 
-export function useComposerDrafts(activeKey: string) {
+export function useComposerDrafts(activeKey: string, defaultAccessMode: AgentAccessMode = 'read_only_allowed') {
   const storeRef = useRef<ComposerDraftStore | null>(null)
   const [, setRevision] = useState(0)
   if (!storeRef.current) storeRef.current = new ComposerDraftStore()
   const store = storeRef.current
-  const draft = store.get(activeKey)
+  const draft = store.get(activeKey, defaultAccessMode)
 
   const update = useCallback((action: () => void): void => {
     action()

@@ -33,6 +33,7 @@ import { ManagedCallService } from './managedCallService'
 import { ModelSelectionError, resolveThreadModelSelection } from './modelSelection'
 import * as modelSelection from './modelSelection'
 import * as appConfig from '../config/appConfig'
+import { getProject } from '../projectStore'
 import bundledSettings from '../../../data/config/settings.json'
 import bundledCapabilities from '../../../data/config/capabilities.json'
 import type { RawAppConfig } from '../config/rawAppConfig'
@@ -4543,6 +4544,36 @@ describe('AgentRuntime', () => {
     streams.get(secondThread.id)?.complete('Second done')
     expect((await firstEvents).at(-1)).toMatchObject({ type: 'run_completed' })
     expect((await secondEvents).at(-1)).toMatchObject({ type: 'run_completed' })
+  })
+
+  it.each([
+    { projectMode: undefined, override: undefined, expected: 'read_only_allowed' },
+    { projectMode: 'full_access', override: undefined, expected: 'full_access' },
+    { projectMode: 'strict_approval', override: undefined, expected: 'strict_approval' },
+    { projectMode: 'full_access', override: 'read_only_allowed', expected: 'read_only_allowed' },
+    { projectMode: 'read_only_allowed', override: 'full_access', expected: 'full_access' }
+  ] as const)('initializes a new thread with project permission $projectMode and conversation override $override', async ({ projectMode, override, expected }) => {
+    database = AgentDatabase.open(':memory:')
+    const project = await getProject('default-workspace')
+    if (project.kind !== 'workspace') throw new Error('Expected workspace')
+    vi.mocked(getProject).mockResolvedValueOnce({ ...project, accessMode: projectMode })
+    const runtime = new AgentRuntime(database, async () => ({
+      agent: {
+        streamEvents: () => completedStream('Done') as never,
+        getState: async () => ({ values: {}, tasks: [] }) as never
+      },
+      dispose: async () => {}
+    }))
+    const input = { submissionId: 'permissions', runId: 'permissions-run', threadId: 'permissions-thread',
+      newThread: { projectId: project.id, accessMode: override }, text: 'First message' }
+    const first = await runtime.submitRunWithAttachments(input)
+    expect(first.thread.accessMode).toBe(expected)
+    if (!first.events) throw new Error('Expected event stream')
+    await collect(first.events)
+    expect(database.getThread(first.thread.id)?.accessMode).toBe(expected)
+    // Retrying the same submission must keep the committed conversation permission.
+    const duplicate = await runtime.submitRunWithAttachments({ ...input, newThread: { projectId: project.id, accessMode: 'strict_approval' } })
+    expect(duplicate.thread.accessMode).toBe(expected)
   })
 
   it('returns the durable first submission instead of creating a second new thread or run', async () => {

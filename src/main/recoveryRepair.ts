@@ -175,6 +175,7 @@ export function repairDocument(file: string, input: unknown): { value: RecordVal
       if (project.kind === 'workspace') {
         repair.fill(project, { ...projectDefaults, sourceFolders: [], restrict_subagents: capabilityDefaults.restrict_subagents }, path)
         if (compressionPromptError(project.compression_prompt)) repair.replace(project, 'compression_prompt', '', `${path}.compression_prompt`)
+        if (project.access_mode !== undefined) repair.choice(project, 'access_mode', ['strict_approval', 'read_only_allowed', 'full_access'], 'read_only_allowed', path)
         repair.capabilities(project, projectCapabilityDefaults, path)
       }
     }

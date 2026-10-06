@@ -33,6 +33,11 @@ export function useSubagentSettingsState({
   const draftRef = useRef(draft)
   const listRef = useRef<HTMLDivElement | null>(null)
   const autosave = useQueuedAutosave()
+  const additions = useQueuedAutosave()
+  const creationRef = useRef<{ index?: number }>({})
+  const saveFailed = useRef(false)
+  const configRef = useRef(config)
+  configRef.current = config
   const noticeId = 'settings-subagent'
 
   useEffect(() => {
@@ -61,15 +66,20 @@ export function useSubagentSettingsState({
   }, [config, creating, editingIndex, t])
 
   async function saveImmediately(nextDraft: SubagentDraft): Promise<void> {
+    const creation = creationRef.current
     const revision = autosave.revise(nextDraft.index === undefined
       ? 'subagent:new'
       : `subagent:${nextDraft.index}`)
     await autosave.enqueue(revision, async (request) => {
       try {
         const nextConfig = await window.gale.config.saveSubagent(
-          subagentSavePayload(nextDraft)
+          subagentSavePayload({ ...nextDraft, index: nextDraft.index ?? creation.index })
         )
+        if (nextDraft.index === undefined) creation.index ??= nextConfig.subagents.at(-1)?.index
         if (!request.isCurrent()) return
+        saveFailed.current = false
+        notice.dismiss(noticeId)
+        configRef.current = nextConfig
         setConfig(nextConfig)
         if (nextDraft.index === undefined) {
           const created = nextConfig.subagents.at(-1)
@@ -84,9 +94,11 @@ export function useSubagentSettingsState({
         setCreating(false)
       } catch {
         if (!request.isCurrent()) return
+        saveFailed.current = true
         notice.error(
           t('settings.subagent_failed_save'),
-          { id: noticeId }
+          { id: noticeId, duration: Infinity,
+            action: { label: t('common.retry'), onClick: () => { if (request.isCurrent()) void saveImmediately(draftRef.current) } } }
         )
       }
     })
@@ -115,16 +127,24 @@ export function useSubagentSettingsState({
   }
 
   async function addSubagent(): Promise<void> {
-    const next = createSubagentDraft(config, t)
-    draftRef.current = next
-    setCreating(true)
-    setEditingIndex(undefined)
-    setDraft(next)
-    await saveImmediately(next)
+    await additions.enqueue(additions.revise('add'), async () => {
+      await autosave.waitForIdle()
+      if (saveFailed.current) return
+      creationRef.current = {}
+      const next = createSubagentDraft(configRef.current, t)
+      draftRef.current = next
+      setCreating(true)
+      setEditingIndex(undefined)
+      setDraft(next)
+      await saveImmediately(next)
+    })
   }
 
-  function editSubagent(index: number): void {
-    const selected = config?.subagents.find((subagent) => subagent.index === index)
+  async function editSubagent(index: number): Promise<void> {
+    await additions.waitForIdle()
+    await autosave.waitForIdle()
+    if (saveFailed.current) return
+    const selected = configRef.current?.subagents.find((subagent) => subagent.index === index)
     if (!selected) return
     const next = subagentToDraft(selected)
     draftRef.current = next
@@ -143,11 +163,17 @@ export function useSubagentSettingsState({
       variant: 'danger',
       onConfirm: async () => {
         try {
+          await additions.waitForIdle()
           await autosave.waitForIdle()
           const nextConfig = await window.gale.config.deleteSubagent(selected.index)
+          saveFailed.current = false
+          notice.dismiss(noticeId)
+          configRef.current = nextConfig
           setConfig(nextConfig)
           const next = nextConfig.subagents[Math.min(selected.index, nextConfig.subagents.length - 1)]
           setEditingIndex(next?.index)
+          draftRef.current = next ? subagentToDraft(next) : createSubagentDraft(nextConfig, t)
+          setDraft(draftRef.current)
           setCreating(false)
         } catch {
           notice.error(
@@ -163,7 +189,9 @@ export function useSubagentSettingsState({
     if (editingIndex === undefined) return
     const index = editingIndex
     try {
+      await additions.waitForIdle()
       await autosave.waitForIdle()
+      if (saveFailed.current) return
       const nextConfig = await window.gale.config.moveSubagent(index, direction)
       const nextIndex = index + direction
       setConfig(nextConfig)
@@ -186,8 +214,11 @@ export function useSubagentSettingsState({
       confirmText: t('settings.restore_default'),
       onConfirm: async () => {
         try {
+          await additions.waitForIdle()
           await autosave.waitForIdle()
           const nextConfig = await window.gale.config.restoreSubagent(selected.index)
+          saveFailed.current = false
+          notice.dismiss(noticeId)
           setConfig(nextConfig)
           const restored = nextConfig.subagents[selected.index]
           if (restored) {

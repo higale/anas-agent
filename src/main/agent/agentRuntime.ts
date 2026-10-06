@@ -1304,7 +1304,7 @@ async function resolveAgentPreviewTarget(
     modelConfigId: selection.modelConfigId,
     modelParameterPresetId: selection.modelParameterPresetId ?? undefined,
     pinned: false,
-    accessMode: 'read_only_allowed',
+    accessMode: project.kind === 'workspace' ? project.accessMode ?? 'read_only_allowed' : 'read_only_allowed',
     status: 'idle',
     userTurnCount: 0,
     createdAt: now,
@@ -1484,7 +1484,14 @@ export class AgentRuntime {
   ): Promise<AgentRuntimeSubmission> {
     const existing = this.getRunSubmission(input.submissionId)
     if (existing) return existing
-    if (input.newThread) await getProject(input.newThread.projectId)
+    let newThread = input.newThread
+    if (newThread) {
+      const project = await getProject(newThread.projectId)
+      newThread = {
+        ...newThread,
+        accessMode: newThread.accessMode ?? (project.kind === 'workspace' ? project.accessMode : undefined) ?? 'read_only_allowed'
+      }
+    }
     const messageId = `${input.runId}:input`
     const archived = await archiveAgentAttachments(
       input.attachments ?? [],
@@ -1497,7 +1504,7 @@ export class AgentRuntime {
     )
     try {
       return this.startPreparedRun(input, archived, {
-        ...(input.newThread ? { newThread: input.newThread } : {}),
+        ...(newThread ? { newThread } : {}),
         submissionId: input.submissionId
       })
     } catch (reason) {

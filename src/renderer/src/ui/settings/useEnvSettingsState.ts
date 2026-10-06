@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { TFunction } from 'i18next'
 import type { EnvFileSnapshot } from '@shared/types'
 import { notice } from '../notice'
@@ -15,6 +15,8 @@ export function useEnvSettingsState({ settingsOpen, settingsTab, t }: UseEnvSett
   const [envFile, setEnvFile] = useState<EnvFileSnapshot | undefined>()
   const [envDraft, setEnvDraft] = useState('')
   const envAutosave = useQueuedAutosave()
+  const dirtyRef = useRef(false)
+  const editRevision = useRef(0)
   const envNoticeId = 'settings-env-status'
 
   useEffect(() => {
@@ -22,9 +24,10 @@ export function useEnvSettingsState({ settingsOpen, settingsTab, t }: UseEnvSett
     let cancelled = false
 
     async function loadEnvFile(): Promise<void> {
+      const revision = editRevision.current
       try {
         const snapshot = await window.gale.app.readEnvFile()
-        if (cancelled) return
+        if (cancelled || dirtyRef.current || revision !== editRevision.current) return
         setEnvFile(snapshot)
         setEnvDraft(snapshot.content)
       } catch {
@@ -39,6 +42,8 @@ export function useEnvSettingsState({ settingsOpen, settingsTab, t }: UseEnvSett
   }, [settingsOpen, settingsTab, t])
 
   function updateEnvDraft(value: string): void {
+    dirtyRef.current = true
+    editRevision.current++
     setEnvDraft(value)
     notice.info(t('settings.env_saving'), { id: envNoticeId, duration: 600000 })
     const revision = envAutosave.revise('env')
@@ -46,12 +51,16 @@ export function useEnvSettingsState({ settingsOpen, settingsTab, t }: UseEnvSett
       try {
         const snapshot = await window.gale.app.saveEnvFile(value)
         if (!request.isCurrent()) return
+        dirtyRef.current = false
         setEnvFile(snapshot)
         setEnvDraft(snapshot.content)
         notice.success(t('settings.env_saved'), { id: envNoticeId })
       } catch {
         if (!request.isCurrent()) return
-        notice.error(t('settings.failed_save_env'), { id: envNoticeId })
+        notice.error(t('settings.failed_save_env'), {
+          id: envNoticeId, duration: Infinity,
+          action: { label: t('common.retry'), onClick: () => { if (request.isCurrent()) updateEnvDraft(value) } }
+        })
       }
     })
   }

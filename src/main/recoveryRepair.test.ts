@@ -189,6 +189,18 @@ describe('field-level recovery', () => {
     expect(invalid.subagents[0].name).toBe(raw.subagents[0].name)
   })
 
+  it.each([undefined, 'strict_approval', 'read_only_allowed', 'full_access', 'unknown', null])('preserves optional project permissions and repairs only invalid choices: %s', accessMode => {
+    const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep', pinned: false, collapsed: true,
+      createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z', sourceFolders: ['/keep/path'],
+      prompt: 'Keep project rules', coding_mode: false, advanced_settings: false, restrict_subagents: false,
+      capabilities: structuredClone(capabilities), ...(accessMode === undefined ? {} : { access_mode: accessMode }) }
+    const raw = { version: 0, projects: [project] }
+    const result = repairDocument('projects.json', raw)
+    const invalid = accessMode === 'unknown' || accessMode === null
+    expect(result.value).toEqual(invalid ? { ...raw, projects: [{ ...project, access_mode: 'read_only_allowed' }] } : raw)
+    expect(result.fields).toHaveLength(invalid ? 1 : 0)
+  })
+
   it.each([undefined, '', 'Keep sources: {conversation}', 42, 'Missing placeholder'])('preserves valid optional compression prompts and repairs only invalid values: %s', compressionPrompt => {
     const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep', pinned: false, collapsed: true,
       createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z', sourceFolders: ['/keep/path'],
