@@ -27,6 +27,7 @@ import { handleMainIpc } from './ipcSecurity'
 import { resolveWorkspaceImagePath } from './workspaceImagePath'
 import { consumePendingAvatarUpdate } from './avatarConfigService'
 import { runApplicationDataOperation } from './applicationDataLifecycle'
+import { refreshPluginWindowTitles } from './plugins/pluginHost'
 
 function runMcpUpdateInBackground(operation: Promise<unknown>, action: string): void {
   void operation.catch((reason) => {
@@ -181,6 +182,7 @@ export function registerWorkspaceIpcHandlers(): void {
     const snapshot = await updateSettings(settings)
     if (settings.language !== undefined) {
       await configureApplicationMenu()
+      await refreshPluginWindowTitles(snapshot.settings.language)
     }
     if (settings.theme !== undefined) applyNativeTheme(snapshot.settings.theme)
     if (settings.logLevel !== undefined || settings.logRetentionDays !== undefined) {

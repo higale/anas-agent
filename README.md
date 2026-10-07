@@ -65,7 +65,7 @@ npm test -- <test-file>
 npm run build
 ```
 
-日常开发保持正式版本号不变，仅在准备同步 GitHub 时递增一次 PATCH。开发仓库通过 `github/v<版本>` 标签记录同步基点；运行及打包后的菜单和“关于”均显示如 `3.1.3-dev.5+g9e8317f8.dirty` 的启动／构建时标记。GitHub 独立源码快照发布包只显示正式版本。无 Git 或无基点时不生成开发标记。详见[发布流程](docs/SOURCE_PUBLISHING.md)。
+日常开发保持正式版本号不变，仅在准备同步 GitHub 时递增一次 PATCH。开发仓库通过 `refs/anas/github/v<版本>` 普通 Git 引用记录同步基点，不创建标签；运行及打包后的菜单和“关于”均显示如 `3.1.3-dev.5+g9e8317f8.dirty` 的启动／构建时标记。GitHub 独立源码快照发布包只显示正式版本。无 Git 或无基点时不生成开发标记。详见[发布流程](docs/SOURCE_PUBLISHING.md)。
 
 启动后，在“设置 > 模型”中添加模型供应商，再在消息工具栏选择模型。应用不内置模型服务凭据。`data/config/` 和 `data/.env` 是随包分发的默认配置；个人设置与密钥应保存在应用数据目录中。
 
@@ -111,7 +111,7 @@ npm run dev -- -- --data-dir "./runtime-data/research"
 | `.env` | 应用环境变量 |
 | `attachments/`、`file_edits/` | 已保存的附件与文件修改恢复材料 |
 | `skills/`、`tools/` | 用户管理的包 |
-| `plugins/`、`plugin_data/` | 已安装插件及独立数据；卸载插件保留数据 |
+| `plugins/`、`plugin_data/` | 已安装插件及独立数据；卸载默认保留数据，可勾选删除 |
 | `skills_system/`、`skills_examples/`、`tools_system/`、`tools_examples/` | 启动时刷新的内置包；示例需先导入再使用 |
 | `help/`、`lang/` | 帮助与语言包 |
 | `assets/`、`log/`、`cache/`、`tmp/`、`electron/` | 资源、日志、缓存、临时文件与 Electron 用户配置 |

@@ -5,7 +5,7 @@ export type WorkspacePanel =
   | { kind: 'subagent'; runId: string; subagentId: string; name: string }
   | { kind: 'files'; projectId: string; threadId?: string; runId?: string }
   | { kind: 'document'; documentId: HelpDocumentId; anchor?: string; navigationId?: string }
-  | { kind: 'plugin'; pluginId: string; name: string }
+  | { kind: 'plugin'; pluginId: string; name: string; instanceId?: string; customTitle?: boolean }
 
 export interface WorkspacePanelTab {
   id: string
@@ -25,7 +25,7 @@ export function workspacePanelId(panel: WorkspacePanel): string {
     case 'subagent': return JSON.stringify([panel.kind, panel.runId, panel.subagentId])
     case 'files': return JSON.stringify([panel.kind, panel.projectId])
     case 'document': return JSON.stringify([panel.kind, panel.documentId])
-    case 'plugin': return JSON.stringify([panel.kind, panel.pluginId])
+    case 'plugin': return JSON.stringify([panel.kind, panel.pluginId, panel.instanceId ?? 'main'])
   }
 }
 
@@ -106,7 +106,19 @@ export function useWorkspacePanels() {
         activeId: previous.activeId === undefined || tabs.some(tab => tab.id === previous.activeId) ? previous.activeId : tabs[0]?.id } }
     })
   }, [])
-  return { ...state, open, select, close, toggle, dismiss, toggleMaximized, remove, closePlugins }
+  const localizePlugins = useCallback((names: Record<string, string>) => {
+    setState(current => {
+      let changed = false
+      const tabs = current.documents.tabs.map(tab => {
+        const panel = tab.panel
+        if (panel.kind !== 'plugin' || panel.customTitle || !Object.hasOwn(names, panel.pluginId) || panel.name === names[panel.pluginId]) return tab
+        changed = true
+        return { ...tab, panel: { ...panel, name: names[panel.pluginId] } }
+      })
+      return changed ? { ...current, documents: { ...current.documents, tabs } } : current
+    })
+  }, [])
+  return { ...state, open, select, close, toggle, dismiss, toggleMaximized, remove, closePlugins, localizePlugins }
 }
 
 export type WorkspacePanelsController = ReturnType<typeof useWorkspacePanels>

@@ -31,6 +31,8 @@ UI 和后台均为可选入口，至少提供一个。纯 UI 插件不创建后�
 - `api_version` 必须为 `1`，不兼容时显示原因，不运行插件。
 - `ui` 为包内 HTML 相对路径；`backend` 为可选的包内 `.cjs` 相对路径。
 - 可选 `platforms` 为 `win32`、`darwin`、`linux` 的数组；缺失表示所有平台。
+- 可选 `lang` 指定包内语言目录，例如 `"lang": "lang"`；缺失时仍显示清单中的固定名称。
+- 可选 `home` 声明首页位置，例如 `"home": { "default_location": "window", "locations": ["window", "sidebar"] }`。`locations` 缺失时为两种位置，`default_location` 缺失时取第一种；整个声明缺失时默认侧边栏。只声明一种位置表示固定首页位置，空列表、重复项或不在列表中的默认值拒绝安装。
 - 路径使用 `/`，不得为绝对路径、包含 `..` 或指向包外资源。
 - 插件文件最多 10,000 个，总计最多 512 MiB，单个文件最多 128 MiB。包内链接需指向包内普通文件／目录，安装时复制实际内容；循环链接拒绝安装。
 
@@ -40,7 +42,7 @@ ZIP 原文件最多 512 MiB，解包同时执行上述文件数量、单文件�
 
 安装先在应用临时目录暂存、检查，再原子移动到 `plugins/<id>/package/`。同 ID 已安装时拒绝覆盖；卸载后重新安装可用于手动更新。`plugins/<id>/installation.json` 保存 `version: 0` 与 `enabled`，缺失 `enabled` 默认为 `true`。损坏插件单独显示错误，不阻止 Anas 启动或其他插件使用。
 
-插件数据位于 `plugin_data/<id>/`，卸载保留数据，重新安装同 ID 后可以继续使用。应用数据备份包含插件和数据；备份、恢复、进入数据修复、停用、卸载及退出应用会停止后台，恢复不会自动重启插件后台。
+插件数据位于 `plugin_data/<id>/`，卸载默认保留数据，重新安装同 ID 后可以继续使用。卸载确认框的「删除插件数据」默认不勾选；明确勾选后同时删除当前插件的数据目录（含插件自行保存的配置及凭据），不删除其他插件数据或已有备份。删除前关闭页面、停止后台并验证目录归属；移动数据失败时回滚插件安装，回滚失败则保留暂存文件并报告位置。应用数据备份包含插件和数据；备份、恢复、进入数据修复、停用、卸载及退出应用会停止后台，恢复不会自动重启插件后台。
 
 ## 界面 API
 
@@ -55,13 +57,45 @@ HTML 引入宿主 SDK，业务脚本单独保存：
 
 ```js
 const info = await anas.getInfo();
+const home = await anas.getHome(); // { location, locations }
+await anas.data.set('home_open_location', 'window');
+await anas.openHome();
+await anas.openView({ instanceId: 'document-123', location: 'sidebar', title: 'Example' });
 const value = await anas.data.get('draft'); // 未设置时返回 null
 await anas.data.set('draft', { text: 'Hello' });
 await anas.openExternal('https://example.com');
 const result = await anas.backend.call('example', { value: 1 });
 ```
 
-`getInfo()` 返回 API 版本、应用版本、插件 ID、当前语言、明暗主题和字号。数据键最长 80 个字符，允许字母、数字、点、下划线和短横线；数据为 JSON，单个插件的数据文件最多 1 MiB。写入按顺序原子保存。不存在的键使用 `null`，有效的 `false`、`0`、空字符串和空数组原样保留。
+`getInfo()` 返回 API 版本、应用版本、插件 ID、当前语言、明暗主题、字号及 `view: { instanceId, location }`。语言是宿主按可用语言包解析后的代码，包含 `system` 的解析结果。设置更新不会重建页面，插件可在聚焦时或以有界频率重新读取，以保留活动连接和输入状态。
+
+### 首页位置
+
+顶部插件菜单与 `openHome()` 使用同一打开流程：从插件自己的 `plugin_data/<id>/state.json` 中读取 `values.home_open_location`，不存在或为 `null` 时取清单默认值；无需加载首页或启动后台来决定位置。「设置 → 插件」选中启用的界面插件后可修改首页打开位置，固定位置时控件只读。该键通过现有 `data.get/set` 读写，无第二份宿主配置，卸载默认保留、备份恢复包含。值只能是清单允许的 `sidebar`、`window` 或恢复默认的 `null`；无效值报错并保留原文件，不擅自重置。`getHome()` 返回实际位置及允许的位置列表，插件首页无需提供重复设置控件。
+
+设置保存仅影响下次打开首页；已有页面不关闭、不迁移、不丢弃表单。`openHome()` 固定打开 `main` 实例，在选定位置复用已有页面。宿主设置中的显式侧边栏／窗口按钮不修改偏好，也受清单允许的位置约束；`openView({ instanceId: 'main', ... })` 遵守同样约束。其他实例的位置仍由插件独立指定，不受首页策略限制。停用、卸载及恢复继续回收所有实例。`getHome()`、`openHome()` 是 API 1 新增接口，依赖它们的插件须检测旧宿主并提示升级。
+
+### 多语言
+
+声明 `"lang": "lang"` 后，宿主读取该包内目录的 `<语言代码>.json`。格式与 Anas 相同：`version: 0`、`_meta: { name, author? }`、嵌套翻译键和 i18next 的 `{{变量}}` 占位符。`plugin.name`（最多 120 字符）和 `plugin.description`（最多 2,000 字符）用于宿主菜单、设置和默认标题；未提供时逐项回退英文，再回退清单文本。显式 `openView` 标题为用户内容，不翻译。
+
+```js
+const { resources, errors } = await anas.getLanguageResources();
+// resources: { en: { version: 0, _meta: { name: 'English' }, ... }, ... }
+// 使用插件自己的 i18next 实例；不要导入宿主内部模块。
+```
+
+此 API 1 新增接口只返回当前启用插件的资源，不暴露宿主或其他插件的内容。旧宿主需检查 `typeof anas.getLanguageResources`。宿主不执行语言文件，不把翻译注入 HTML。语言选择按完整代码（不区分大小写）、同基础代码、英文回退；插件使用 i18next 的 `fallbackLng: 'en'`、`returnEmptyString: false` 逐项回退。
+
+可选语种只由宿主内置及宿主数据目录 `lang/` 中的语言包决定，插件不能增加语言选项。用户在 ZIP 内新增或修改插件 `lang/` 文件，重打包后安装；插件匹配宿主当前语言，缺失翻译回退英文。宿主没有的语种不显示、不能选择，须先向宿主添加对应语言包并重新打开 Anas。语言是包的一部分，卸载重装不保留或合并旧翻译，无独立覆盖目录；完整数据备份照常包含插件包。
+
+每插件最多 128 个语言 JSON，单文件 128 KiB，总计 512 KiB；语言文件名使用字母开头的字母、数字及短横线代码。资源路径须留在包内。损坏 JSON、未知格式或重复语种会在插件设置中报告，合法语言继续使用；目录或总量错误则拒绝加载该目录。原文件不修改，语言错误不阻止停用或卸载。
+
+`openView()` 只打开当前插件的 UI，`location` 为 `sidebar` 或 `window`；`instanceId` 必填，允许 1–80 位英文字母、数字、下划线和短横线；可选 `title` 为最多 120 字符的非空标题。插件可把自己的配置 ID 用作页面实例 ID，通过 `getInfo().view` 读取。实例 ID 出现在页面 URL，不应放密码或其他秘密。默认菜单页面使用 `main`。此接口是 API 1 的新增能力；依赖它的插件应检查 `typeof anas.openView` 并提示旧宿主升级。
+
+同一插件、打开位置和实例 ID 重复打开时聚焦已有页面，保留内存和连接；不同位置是独立页面，不迁移会话。插件每种位置的 `main` 仍兼容原菜单入口。独立窗口每插件最多 32 个；侧边调用完成表示已向主界面发送打开请求，窗口调用完成表示 DOM 已就绪，均不保证插件业务初始化完成。停用、卸载、恢复和宿主关闭会回收所有实例。插件自行决定是否自动执行连接等业务操作。
+
+数据键最长 80 个字符，允许字母、数字、点、下划线和短横线；数据为 JSON，单个插件的数据文件最多 1 MiB。写入按顺序原子保存。不存在的键使用 `null`，有效的 `false`、`0`、空字符串和空数组原样保留。
 
 页面使用独立的 `anas-plugin://<id>/` 来源，通过专用消息接口访问宿主，没有 `window.gale`、Node 或任意文件读取接口。页面可以请求网络；允许 WASM、包内脚本和样式，禁止内联脚本。外部链接用 `openExternal` 打开。
 

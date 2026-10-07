@@ -44,6 +44,8 @@ function Harness({ narrow = false, activities = [activity] }: { narrow?: boolean
   return <>
     <button onClick={() => controller.open(scope, { kind: 'document', documentId: 'USER_GUIDE.en.md' })}>Open help</button>
     <button onClick={() => controller.open(scope, { kind: 'plugin', pluginId: 'example', name: 'Example plugin' })}>Open plugin</button>
+    <button onClick={() => controller.open(scope, { kind: 'plugin', pluginId: 'example', name: 'Other instance', instanceId: 'other', customTitle: true })}>Open other instance</button>
+    <button onClick={() => controller.localizePlugins({ example: '示例插件' })}>Translate plugins</button>
     <button onClick={() => controller.closePlugins(['example'])}>Disable plugin</button>
     <button onClick={() => controller.remove(scope)}>Remove conversation</button>
     <button onClick={() => controller.open(scope, { kind: 'files', projectId: project.id, threadId: thread })}>Open Git</button>
@@ -75,6 +77,19 @@ beforeEach(() => {
 })
 
 describe('Workspace panels', () => {
+  it('keeps named plugin instances distinct, reuses a repeated instance and closes all on disable', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+    await user.click(screen.getByText('Open plugin'))
+    await user.click(screen.getByText('Open other instance'))
+    await user.click(screen.getByText('Open other instance'))
+    expect(screen.getAllByRole('tab')).toHaveLength(2)
+    expect(screen.getByRole('tab', { name: 'Other instance' })).toHaveAttribute('data-state', 'active')
+    await user.click(screen.getByText('Open plugin'))
+    expect(screen.getByRole('tab', { name: 'Example plugin' })).toHaveAttribute('data-state', 'active')
+    await user.click(screen.getByText('Disable plugin'))
+    expect(screen.queryAllByRole('tab')).toHaveLength(0)
+  })
   it('middle-clicks inactive and active tabs closed without selecting a background tab or cancelling a task', async () => {
     const user = userEvent.setup()
     render(<Harness />)
@@ -369,6 +384,18 @@ describe('Workspace panels', () => {
     await user.click(screen.getByText('Disable plugin'))
     expect(screen.getByRole('tab', { name: 'agent.file_changes' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.queryByRole('tab', { name: 'Example plugin' })).not.toBeInTheDocument()
+  })
+
+  it('translates default plugin titles without changing custom titles or the selected instance', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+    await user.click(screen.getByText('Open plugin'))
+    await user.click(screen.getByText('Open other instance'))
+    const slot = document.querySelector('[data-plugin-instance="other"]')
+    await user.click(screen.getByText('Translate plugins'))
+    expect(screen.getByRole('tab', { name: '示例插件' })).toBeVisible()
+    expect(screen.getByRole('tab', { name: 'Other instance' })).toHaveAttribute('aria-selected', 'true')
+    expect(document.querySelector('[data-plugin-instance="other"]')).toBe(slot)
   })
 
   it('uses a non-blocking drawer on narrow windows and keeps tabs when Escape collapses it', async () => {

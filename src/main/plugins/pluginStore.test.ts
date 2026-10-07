@@ -1,10 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import fs from 'stubborn-fs'
 import { createWriteStream } from 'node:fs'
 import { mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ZipFile } from 'yazl'
 import { PluginStore } from './pluginStore'
+import { pluginDisplayText } from '@shared/plugins'
 
 let root: string
 let source: string
@@ -19,7 +21,7 @@ beforeEach(async () => {
   await writeFile(join(source, 'index.html'), '<p>Hello</p>')
   store = new PluginStore(join(root, 'data'))
 })
-afterEach(async () => { await rm(root, { recursive: true, force: true }) })
+afterEach(async () => { vi.restoreAllMocks(); await rm(root, { recursive: true, force: true }) })
 
 describe('plugin installation and data', () => {
   it('needs no existing config, copies a plugin and retains falsy data across reinstall', async () => {
@@ -93,6 +95,208 @@ describe('plugin installation and data', () => {
     await store.data(manifest.id, 'text', true, 'previous')
     await expect(store.data(manifest.id, 'text', true, 'x'.repeat(1024 * 1024))).rejects.toThrow('limit')
     expect(await store.data(manifest.id, 'text')).toBe('previous')
+  })
+})
+
+describe('optional data removal on uninstall', () => {
+  it('deletes only the selected plugin data and permits a fresh installation', async () => {
+    await store.install(join(source, 'PLUGIN.json'))
+    await store.data(manifest.id, 'home_open_location', true, 'window')
+    const data = join(root, 'data/plugin_data/test-plugin')
+    await writeFile(join(data, 'profiles.json'), '{broken credentials file')
+    const other = join(root, 'data/plugin_data/other-plugin')
+    await mkdir(other)
+    await writeFile(join(other, 'state.json'), 'keep')
+    await store.uninstall(manifest.id, true)
+    await expect(stat(data)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(join(other, 'state.json'), 'utf8')).toBe('keep')
+    await store.install(join(source, 'PLUGIN.json'))
+    expect(await store.data(manifest.id, 'home_open_location')).toBeNull()
+  })
+
+  it('supports no saved data and rejects a non-boolean option before uninstalling', async () => {
+    await store.install(join(source, 'PLUGIN.json'))
+    await expect(store.uninstall(manifest.id, 'true' as unknown as boolean)).rejects.toThrow('deletion option')
+    expect((await store.read(manifest.id)).enabled).toBe(true)
+    await store.uninstall(manifest.id, true)
+    expect(await store.list()).toEqual([])
+  })
+
+  it('refuses linked data directories without uninstalling or touching their targets', async () => {
+    await store.install(join(source, 'PLUGIN.json'))
+    const group = join(root, 'data/plugin_data')
+    await mkdir(group)
+    const outside = join(root, 'outside-data')
+    await mkdir(outside)
+    await writeFile(join(outside, 'keep'), 'untouched')
+    await symlink(outside, join(group, manifest.id), process.platform === 'win32' ? 'junction' : 'dir')
+    await expect(store.uninstall(manifest.id, true)).rejects.toThrow('managed directory')
+    expect((await store.read(manifest.id)).enabled).toBe(true)
+    expect(await readFile(join(outside, 'keep'), 'utf8')).toBe('untouched')
+  })
+
+  it('restores the installation when staging its data fails', async () => {
+    await store.install(join(source, 'PLUGIN.json'))
+    await store.data(manifest.id, 'draft', true, 'keep')
+    const rename = fs.retry.rename({ timeout: 2_000, interval: 25 })
+    const data = join(root, 'data/plugin_data/test-plugin')
+    vi.spyOn(fs.retry, 'rename').mockImplementation(() => async (from, to) => {
+      if (from === data) throw new Error('Data directory is busy')
+      return rename(from, to)
+    })
+    await expect(store.uninstall(manifest.id, true)).rejects.toThrow('busy')
+    expect((await store.read(manifest.id)).enabled).toBe(true)
+    expect(await store.data(manifest.id, 'draft')).toBe('keep')
+    expect(await readdir(join(root, 'data/tmp'))).toEqual([])
+  })
+
+  it('preserves staged files when rolling back removal also fails', async () => {
+    await store.install(join(source, 'PLUGIN.json'))
+    await store.data(manifest.id, 'draft', true, 'keep')
+    const rename = fs.retry.rename({ timeout: 2_000, interval: 25 })
+    const installation = join(root, 'data/plugins/test-plugin')
+    vi.spyOn(fs.retry, 'rename').mockImplementation(() => async (from, to) => {
+      if (from !== installation) throw new Error('Directory busy')
+      return rename(from, to)
+    })
+    await expect(store.uninstall(manifest.id, true)).rejects.toThrow('preserved files remain')
+    const [stage] = await readdir(join(root, 'data/tmp'))
+    expect(await readFile(join(root, 'data/tmp', stage, 'removed/package/index.html'), 'utf8')).toBe('<p>Hello</p>')
+    expect(JSON.parse(await readFile(join(root, 'data/plugin_data/test-plugin/state.json'), 'utf8')).values.draft).toBe('keep')
+  })
+})
+
+describe('plugin home location', () => {
+  it('uses the legacy default, stores a preference in plugin data and retains it across reinstall', async () => {
+    await store.install(join(source, 'PLUGIN.json'))
+    expect((await store.home(manifest.id)).location).toBe('sidebar')
+    await store.data(manifest.id, 'draft', true, 'keep')
+    await store.data(manifest.id, 'home_open_location', true, 'window')
+    expect((await store.home(manifest.id)).location).toBe('window')
+    const saved = JSON.parse(await readFile(join(root, 'data/plugin_data/test-plugin/state.json'), 'utf8'))
+    expect(saved.values).toEqual({ draft: 'keep', home_open_location: 'window' })
+    await store.uninstall(manifest.id)
+    await store.install(join(source, 'PLUGIN.json'))
+    expect((await store.home(manifest.id)).location).toBe('window')
+    await store.data(manifest.id, 'home_open_location', true, null)
+    expect((await store.home(manifest.id)).location).toBe('sidebar')
+  })
+
+  it('uses declared defaults and rejects unsupported choices without overwriting configuration', async () => {
+    await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ ...manifest, home: { locations: ['window'], default_location: 'window' } }))
+    await store.install(join(source, 'PLUGIN.json'))
+    expect(await store.home(manifest.id)).toEqual({ location: 'window', locations: ['window'] })
+    await store.data(manifest.id, 'home_open_location', true, 'window')
+    for (const value of ['sidebar', 'invalid', false, 0, []]) {
+      await expect(store.data(manifest.id, 'home_open_location', true, value)).rejects.toThrow('home location')
+    }
+    expect(await store.data(manifest.id, 'home_open_location')).toBe('window')
+    await store.setEnabled(manifest.id, false)
+    await expect(store.home(manifest.id)).rejects.toThrow('disabled')
+  })
+
+  it('preserves corrupted stored preferences and rejects invalid home declarations', async () => {
+    await store.install(join(source, 'PLUGIN.json'))
+    await store.data(manifest.id, 'draft', true, 'keep')
+    const file = join(root, 'data/plugin_data/test-plugin/state.json')
+    const broken = '{"version":0,"values":{"home_open_location":"invalid","draft":"keep"}}'
+    await writeFile(file, broken)
+    await expect(store.home(manifest.id)).rejects.toThrow('home location')
+    expect(await readFile(file, 'utf8')).toBe(broken)
+    await store.data(manifest.id, 'home_open_location', true, 'sidebar')
+    expect(await store.data(manifest.id, 'draft')).toBe('keep')
+    await store.uninstall(manifest.id)
+    for (const home of [{ locations: [] }, { locations: ['bad'] }, { locations: ['window'], default_location: 'sidebar' }, { default_location: false }]) {
+      await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ ...manifest, home }))
+      await expect(store.install(join(source, 'PLUGIN.json'))).rejects.toThrow('home')
+    }
+  })
+})
+
+describe('plugin language packs', () => {
+  async function localized() {
+    await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ ...manifest, lang: 'lang' }))
+    await mkdir(join(source, 'lang'))
+    await writeFile(join(source, 'lang/en.json'), JSON.stringify({ version: 0, _meta: { name: 'English' }, plugin: { name: 'Notebook', description: 'English description' }, actions: { save: 'Save' } }))
+    await writeFile(join(source, 'lang/zh-CN.json'), JSON.stringify({ version: 0, _meta: { name: '简体中文' }, plugin: { name: '记事本' } }))
+    await store.install(join(source, 'PLUGIN.json'))
+    return join(root, 'data/plugins/test-plugin/package/lang')
+  }
+
+  it('reads user-added languages without a backend and resolves localized metadata per field', async () => {
+    const lang = await localized()
+    await writeFile(join(lang, 'fr.json'), JSON.stringify({ version: 0, _meta: { name: 'Français', author: 'Translator' }, plugin: { name: 'Carnet' }, actions: { save: 'Enregistrer' } }))
+    const item = await store.read(manifest.id)
+    expect(item.languages).toContainEqual(expect.objectContaining({ code: 'fr', name: 'Français', author: 'Translator' }))
+    expect(pluginDisplayText(item, 'FR-ca')).toBe('Carnet')
+    expect(pluginDisplayText(item, 'zh-TW')).toBe('记事本')
+    expect(pluginDisplayText(item, 'fr', 'description')).toBe('English description')
+    expect(pluginDisplayText(item, 'ja')).toBe('Notebook')
+    expect((await store.languageResources(manifest.id)).resources.fr.actions).toEqual({ save: 'Enregistrer' })
+    await store.setEnabled(manifest.id, false)
+    await expect(store.languageResources(manifest.id)).rejects.toThrow('disabled')
+  })
+
+  it('isolates invalid packs, reports them, and keeps valid resources and original files', async () => {
+    const lang = await localized()
+    await writeFile(join(lang, 'fr.json'), '{broken')
+    await writeFile(join(lang, 'ja.json'), '{"version":1}')
+    const item = await store.read(manifest.id)
+    expect(item.error).toBeUndefined()
+    expect(item.languageErrors).toHaveLength(2)
+    expect(pluginDisplayText(item, 'fr')).toBe('Notebook')
+    expect(Object.keys((await store.languageResources(manifest.id)).resources)).toEqual(['en', 'zh-CN'])
+    expect(await readFile(join(lang, 'fr.json'), 'utf8')).toBe('{broken')
+  })
+
+  it('uses language files from the new package on reinstall without merging previous edits', async () => {
+    const lang = await localized()
+    const french = '{"version":0,"_meta":{"name":"Français"},"plugin":{"name":"Mon carnet"}}'
+    const edited = '{"version":0,"plugin":{"name":"My notebook"}}'
+    await writeFile(join(lang, 'fr.json'), french)
+    await writeFile(join(lang, 'en.json'), edited)
+    await writeFile(join(lang, 'de.json'), '{unfinished')
+    await store.setEnabled(manifest.id, false)
+    await store.uninstall(manifest.id)
+    await writeFile(join(source, 'lang/en.json'), '{"version":0,"plugin":{"name":"New English"}}')
+    await writeFile(join(source, 'lang/zh-CN.json'), '{"version":0,"plugin":{"name":"新版记事本"}}')
+    await store.install(join(source, 'PLUGIN.json'))
+    await expect(stat(join(lang, 'fr.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(join(lang, 'de.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(pluginDisplayText(await store.read(manifest.id), 'en')).toBe('New English')
+    expect(pluginDisplayText(await store.read(manifest.id), 'zh-CN')).toBe('新版记事本')
+    await expect(stat(join(root, 'data/plugin_data/test-plugin'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('reports oversized language files without disabling the plugin or preventing uninstall', async () => {
+    const lang = await localized()
+    await writeFile(join(lang, 'fr.json'), 'x'.repeat(128 * 1024 + 1))
+    expect((await store.read(manifest.id)).languageErrors?.join()).toContain('size limit')
+    expect((await store.read(manifest.id)).manifest?.id).toBe(manifest.id)
+    await store.uninstall(manifest.id)
+    expect(await store.list()).toEqual([])
+  })
+
+  it('rejects a language directory link outside the package without reading or removing its files', async () => {
+    await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ ...manifest, lang: 'lang' }))
+    await store.install(join(source, 'PLUGIN.json'))
+    const outside = join(root, 'outside-languages')
+    await mkdir(outside)
+    await writeFile(join(outside, 'en.json'), '{"version":0}')
+    await symlink(outside, join(root, 'data/plugins/test-plugin/package/lang'), process.platform === 'win32' ? 'junction' : 'dir')
+    expect((await store.read(manifest.id)).languageErrors?.join()).toContain('directory')
+    await store.uninstall(manifest.id)
+    expect(await readFile(join(outside, 'en.json'), 'utf8')).toBe('{"version":0}')
+  })
+
+  it('loads custom translations supplied inside a ZIP', async () => {
+    const zip = await pluginZip([
+      { name: 'PLUGIN.json', text: JSON.stringify({ ...manifest, lang: 'lang' }) },
+      { name: 'index.html', text: '<p>Plugin</p>' },
+      { name: 'lang/fr.json', text: '{"version":0,"_meta":{"name":"Français"},"plugin":{"name":"Carnet"}}' }
+    ])
+    await store.install(zip)
+    expect(pluginDisplayText(await store.read(manifest.id), 'fr')).toBe('Carnet')
   })
 })
 

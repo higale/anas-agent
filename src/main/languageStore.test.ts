@@ -31,6 +31,11 @@ describe('languageStore', () => {
     })
   })
 
+  it('falls back when a configured or system language has no host language pack', () => {
+    expect(resolveLanguagePack('fr', 'zh-CN', languages).code).toBe('en')
+    expect(resolveLanguagePack('system', 'fr-FR', languages).code).toBe('en')
+  })
+
   it('builds localized profile defaults while leaving user-owned fields empty', () => {
     const profile = profileDefaultsFromResources('zh-CN', {
       en: {

@@ -65,7 +65,7 @@ npm test -- <test-file>
 npm run build
 ```
 
-Daily development keeps the release version unchanged; increment PATCH once when preparing a GitHub sync. The development repository records sync baselines with `github/v<version>` tags. Both unpackaged and packaged development builds show a startup/build-time marker such as `3.1.3-dev.5+g9e8317f8.dirty` in the app menu and About dialog. Releases built from independent GitHub source snapshots show only the release version. Without Git or a baseline, no development marker is generated. See the [publishing workflow](docs/SOURCE_PUBLISHING.md).
+Daily development keeps the release version unchanged; increment PATCH once when preparing a GitHub sync. The development repository records sync baselines with ordinary Git refs under `refs/anas/github/v<version>`, without creating tags. Both unpackaged and packaged development builds show a startup/build-time marker such as `3.1.3-dev.5+g9e8317f8.dirty` in the app menu and About dialog. Releases built from independent GitHub source snapshots show only the release version. Without Git or a baseline, no development marker is generated. See the [publishing workflow](docs/SOURCE_PUBLISHING.md).
 
 After startup, add your model provider in **Settings > Model**, then select a model in the message toolbar. No model service credentials are bundled. `data/config/` and `data/.env` are distribution defaults; store personal settings and keys in the application's data directory.
 
@@ -111,7 +111,7 @@ npm run dev -- -- --data-dir "./runtime-data/research"
 | `.env` | Application environment variables |
 | `attachments/`, `file_edits/` | Saved attachments and file-edit recovery material |
 | `skills/`, `tools/` | User-managed packages |
-| `plugins/`, `plugin_data/` | Installed plugins and independent data; uninstalling retains data |
+| `plugins/`, `plugin_data/` | Installed plugins and independent data; uninstalling retains data unless deletion is selected |
 | `skills_system/`, `skills_examples/`, `tools_system/`, `tools_examples/` | Bundled packages refreshed at startup; examples must be imported before use |
 | `help/`, `lang/` | Help and language packs |
 | `assets/`, `log/`, `cache/`, `tmp/`, `electron/` | Assets, logs, cache, temporary files, and Electron profile |

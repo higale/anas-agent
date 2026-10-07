@@ -45,7 +45,7 @@ import { AppSidebar } from './AppSidebar'
 import { useWorkspacePanels, workspacePanelScope } from './agent/useWorkspacePanels'
 import { usePlugins } from './plugins/usePlugins'
 import { PluginFrames } from './plugins/PluginFrames'
-import type { PluginSummary } from '@shared/plugins'
+import { pluginDisplayText, type PluginSummary } from '@shared/plugins'
 import { sidebarWidthCssValue } from './SidebarResizeHandle'
 import { AboutDialog, AvatarCropDialog, ConfirmDialog, DataCleanupDialog } from './dialogs/AppDialogs'
 import type { ConfirmDialogRequest } from './dialogs/AppDialogs'
@@ -137,6 +137,7 @@ export function App() {
   const submissionLockRef = useRef(new SynchronousSubmissionLock())
   const draftModelInitializedRef = useRef(false)
   const workspacePanels = useWorkspacePanels()
+  const { open: openWorkspacePanel, localizePlugins } = workspacePanels
   const pluginRegistry = usePlugins(workspacePanels.closePlugins)
   const agent = useAgentWorkspace({ onAppError: setAppError })
   const {
@@ -147,15 +148,15 @@ export function App() {
     workspaceState: agentWorkspaceState
   } = agent
   const activeProjectId = agent.activeThread?.projectId ?? agent.draftProjectId
-  const openPlugin = (plugin: PluginSummary) => {
+
+  const openPlugin = (plugin: PluginSummary, location?: 'sidebar') => {
     if (!plugin.manifest || !plugin.enabled || plugin.error) return
     if (!plugin.manifest.ui) {
       void window.gale.plugins.startBackend(plugin.id).catch(() => setAppError(t('plugins.operation_failed')))
       return
     }
-    void closeSettings(ensureModelDraftCanLeave).then(() => {
-      workspacePanels.open(workspacePanelScope(agent.activeThreadId, activeProjectId), { kind: 'plugin', pluginId: plugin.id, name: plugin.manifest!.name })
-    })
+    void window.gale.plugins.invoke(plugin.id, location ? 'host.openView' : 'host.openHome',
+      location ? { instanceId: 'main', location } : undefined).catch(() => setAppError(t('plugins.operation_failed')))
   }
   const activeProject = projects.find((project) => project.id === activeProjectId)
   const draftProject = projects.find((project) => project.id === agentDraftProjectId)
@@ -456,6 +457,18 @@ export function App() {
     settingsTab,
     t
   })
+
+  useEffect(() => window.gale.plugins.onOpenView(view => {
+    void closeSettings(ensureModelDraftCanLeave).then(() => {
+      openWorkspacePanel(workspacePanelScope(agent.activeThreadId, activeProjectId), {
+        kind: 'plugin', pluginId: view.pluginId, name: view.name, instanceId: view.instanceId, customTitle: view.title !== undefined
+      })
+    }).catch(() => setAppError(t('plugins.operation_failed')))
+  }), [openWorkspacePanel, agent.activeThreadId, activeProjectId, closeSettings, ensureModelDraftCanLeave, t])
+
+  useEffect(() => {
+    localizePlugins(Object.fromEntries(pluginRegistry.plugins.map(plugin => [plugin.id, pluginDisplayText(plugin, i18n.language)])))
+  }, [pluginRegistry.plugins, i18n.language, localizePlugins])
 
   async function openModelSettings(): Promise<void> {
     if (!settingsOpen) captureChatScrollSnapshot()
@@ -1173,7 +1186,7 @@ export function App() {
           plugins={pluginRegistry.plugins}
           pluginError={pluginRegistry.error}
           onRefreshPlugins={pluginRegistry.refresh}
-          onOpenPlugin={openPlugin}
+          onOpenPlugin={plugin => openPlugin(plugin, 'sidebar')}
           onConfigChange={setConfig}
           activeTab={settingsTab}
           avatar={avatar}

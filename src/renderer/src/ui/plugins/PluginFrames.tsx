@@ -4,10 +4,10 @@ import type { WorkspacePanelTab } from '../agent/useWorkspacePanels'
 
 interface FrameBounds { left: number; top: number; width: number; height: number; zIndex: number }
 
-function PluginFrame({ manifest }: { manifest: PluginManifest }) {
+function PluginFrame({ manifest, instanceId, name }: { manifest: PluginManifest; instanceId?: string; name: string }) {
   const frame = useRef<HTMLIFrameElement>(null)
   const [bounds, setBounds] = useState<FrameBounds>()
-  const url = pluginPageUrl(manifest)
+  const url = pluginPageUrl(manifest, instanceId)
   useEffect(() => {
     const origin = `${PLUGIN_SCHEME}://${manifest.id}`
     let disposed = false
@@ -35,7 +35,7 @@ function PluginFrame({ manifest }: { manifest: PluginManifest }) {
     let observed: Element | undefined
     const measure = () => {
       request = 0
-      const slot = document.querySelector<HTMLElement>(`[data-plugin-panel="${manifest.id}"]`)
+      const slot = document.querySelector<HTMLElement>(`[data-plugin-panel="${manifest.id}"][data-plugin-instance="${instanceId ?? 'main'}"]`)
       if (observed !== slot) {
         if (observed) resize.unobserve(observed)
         observed = slot ?? undefined
@@ -58,15 +58,18 @@ function PluginFrame({ manifest }: { manifest: PluginManifest }) {
     window.addEventListener('scroll', schedule, true)
     schedule()
     return () => { cancelAnimationFrame(request); resize.disconnect(); mutations.disconnect(); window.removeEventListener('resize', schedule); window.removeEventListener('scroll', schedule, true) }
-  }, [manifest.id])
+  }, [manifest.id, instanceId])
 
-  return <iframe ref={frame} src={url} title={manifest.name} className="plugin-frame"
+  return <iframe ref={frame} src={url} title={name} className="plugin-frame"
     sandbox="allow-scripts allow-same-origin allow-forms" style={bounds ? { ...bounds, display: 'block' } : { display: 'none' }} />
 }
 
 // Keep the browsing context outside the changing workspace tab tree.
 export function PluginFrames({ tabs, plugins }: { tabs: WorkspacePanelTab[]; plugins: PluginSummary[] }) {
-  const opened = new Set(tabs.flatMap(tab => tab.panel.kind === 'plugin' ? [tab.panel.pluginId] : []))
-  return <>{plugins.filter(item => opened.has(item.id) && item.enabled && !item.error && item.manifest?.ui)
-    .map(item => <PluginFrame key={item.id} manifest={item.manifest!} />)}</>
+  return <>{tabs.map(tab => {
+    if (tab.panel.kind !== 'plugin') return null
+    const panel = tab.panel
+    const item = plugins.find(plugin => plugin.id === panel.pluginId && plugin.enabled && !plugin.error && plugin.manifest?.ui)
+    return item ? <PluginFrame key={tab.id} manifest={item.manifest!} instanceId={panel.instanceId} name={panel.name} /> : null
+  })}</>
 }

@@ -1,5 +1,6 @@
 import { createWriteStream } from 'node:fs'
-import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import fs from 'stubborn-fs'
 import { hostname } from 'node:os'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
@@ -27,6 +28,9 @@ const projectResetEntries = [
   'sqlite/conversations'
 ] as const
 let restoreTail: Promise<void> = Promise.resolve()
+// Windows can retain a directory handle briefly after plugin processes exit.
+// Retry the same atomic move within a bound; permanent failures still roll back.
+const rename = fs.retry.rename({ timeout: 2_000, interval: 25 })
 
 function pad(value: number): string {
   return value.toString().padStart(2, '0')

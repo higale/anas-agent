@@ -151,6 +151,42 @@ async function checkBackup(application, page) {
   }
 }
 
+async function checkHomePolicies(application, page, directory) {
+  for (const location of ['window', 'sidebar']) {
+    const id = `home-${location}`
+    const source = join(directory, id)
+    await mkdir(source)
+    await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ version: 0, id, name: id, plugin_version: '1.0.0', api_version: 1,
+      ui: 'index.html', home: { locations: [location] } }))
+    await writeFile(join(source, 'index.html'), '<script src="/_anas/sdk.js"></script><p>Home fixture</p>')
+    await application.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, join(source, 'PLUGIN.json'))
+    await page.evaluate(() => globalThis.gale.plugins.install())
+    await page.getByRole('button', { name: 'Plugins', exact: true }).click()
+    await page.getByRole('menuitem', { name: id, exact: true }).click()
+    const selector = `iframe[src="anas-plugin://${id}/index.html"]`
+    if (location === 'window') {
+      await expect.poll(() => application.windows().length).toBe(2)
+      await expect(page.locator(selector)).toHaveCount(0)
+      const popup = application.windows().find(window => window !== page)
+      await expect(popup.locator('p')).toHaveText('Home fixture')
+      assert.deepEqual(await popup.evaluate(() => globalThis.anas.getHome()), { location, locations: [location] })
+      await popup.evaluate(() => globalThis.anas.openHome())
+      assert.equal(application.windows().length, 2)
+    } else {
+      await expect(page.frameLocator(selector).locator('p')).toHaveText('Home fixture')
+      await assert.rejects(page.evaluate(id => globalThis.gale.plugins.openWindow(id), id), /home location/)
+    }
+    const other = location === 'window' ? 'sidebar' : 'window'
+    await assert.rejects(page.evaluate(({ id, other }) => globalThis.gale.plugins.invoke(id, 'host.openView', { instanceId: 'main', location: other }), { id, other }), /home location/)
+    await assert.rejects(page.evaluate(({ id, other }) => globalThis.gale.plugins.invoke(id, 'data.set', { key: 'home_open_location', value: other }), { id, other }), /home location/)
+    // Home restrictions do not constrain a plugin's other pages.
+    await page.evaluate(({ id, other }) => globalThis.gale.plugins.invoke(id, 'host.openView', { instanceId: 'document', location: other }), { id, other })
+    await page.evaluate(id => globalThis.gale.plugins.uninstall(id), id)
+    await expect.poll(() => application.windows().length).toBe(1)
+    await expect(page.locator(`iframe[src^="anas-plugin://${id}/"]`)).toHaveCount(0)
+  }
+}
+
 async function main() {
   const repository = resolve(__dirname, '..')
   const directory = await mkdtemp(join(tmpdir(), 'anas-plugin-e2e-'))
@@ -210,6 +246,29 @@ async function main() {
     const popup = await expect.poll(() => application.windows().length).toBe(2).then(() => application.windows().find(window => window !== page))
     await expect(popup.locator('#draft')).toHaveValue('Plugin saved draft')
     assert.equal(await popup.evaluate(() => typeof globalThis.gale), 'undefined')
+    // The same public API works in isolated windows and sidebar iframes.
+    await popup.evaluate(() => globalThis.anas.openView({ instanceId: 'second', location: 'window', title: 'Second notepad' }))
+    await expect.poll(() => application.windows().length).toBe(3)
+    const second = application.windows().find(window => window !== page && window !== popup)
+    await expect(second.locator('#draft')).toBeEnabled()
+    assert.deepEqual(await second.evaluate(async () => (await globalThis.anas.getInfo()).view), { instanceId: 'second', location: 'window' })
+    await second.locator('#draft').fill('Second window state')
+    await popup.evaluate(() => globalThis.anas.openView({ instanceId: 'second', location: 'window' }))
+    assert.equal(application.windows().length, 3)
+    await expect(second.locator('#draft')).toHaveValue('Second window state')
+    await second.evaluate(() => globalThis.anas.openView({ instanceId: 'side-two', location: 'sidebar', title: 'Second sidebar' }))
+    const sideTwo = page.frameLocator('iframe[title="Second sidebar"]')
+    await expect(sideTwo.locator('#draft')).toBeEnabled()
+    assert.deepEqual(await sideTwo.locator('body').evaluate(async () => (await globalThis.anas.getInfo()).view), { instanceId: 'side-two', location: 'sidebar' })
+    await sideTwo.locator('#draft').fill('Second sidebar state')
+    await second.evaluate(() => globalThis.anas.openView({ instanceId: 'side-two', location: 'sidebar', title: 'Second sidebar' }))
+    await expect(page.locator('iframe[title="Second sidebar"]')).toHaveCount(1)
+    await expect(sideTwo.locator('#draft')).toHaveValue('Second sidebar state')
+    await second.evaluate(() => globalThis.anas.openView({ instanceId: 'main', location: 'sidebar', title: 'Notepad / 记事本' }))
+    await expect(frame.locator('#draft')).toHaveValue('Unsaved page state')
+    await expect(page.locator('iframe[title="Notepad / 记事本"]')).toHaveCount(1)
+    await assert.rejects(second.evaluate(() => globalThis.anas.openView({ instanceId: '../bad', location: 'window' })), /Invalid plugin view/)
+    await settings()
     await page.getByRole('checkbox', { name: 'Enabled', exact: true }).click()
     await expect(page.getByRole('checkbox', { name: 'Enabled', exact: true })).not.toBeChecked()
     await expect.poll(() => application.windows().length).toBe(1)
@@ -267,7 +326,8 @@ async function main() {
     assert.equal(restored.length, 2)
     assert.equal(restored.find(item => item.id === 'example-backend').backendStatus, 'stopped')
     assert.equal(await restarted.evaluate(() => globalThis.gale.plugins.invoke('example-notepad', 'data.get', { key: 'draft' })), 'Plugin saved draft')
-    console.log('Plugins passed: PLUGIN.json and root/wrapped ZIP installation, sidebar and narrow drawer, page-state preservation, isolated popup, persistent data, disable, optional backend RPC/errors/stop, queued cancellation with active results, slow-resource isolation, backup/restore, reinstall, and restart without backend activation.')
+    await checkHomePolicies(application, restarted, directory)
+    console.log('Plugins passed: PLUGIN.json and root/wrapped ZIP installation, sidebar and narrow drawer, named sidebar/window instances, duplicate/default instance reuse, isolated popup, persistent data, disable, optional backend RPC/errors/stop, queued cancellation with active results, slow-resource isolation, backup/restore, reinstall, and restart without backend activation.')
   } finally {
     await application?.close().catch(() => undefined)
     await rm(directory, { recursive: true, force: true })

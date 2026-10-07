@@ -113,7 +113,7 @@ export function WorkspacePanels({ controller, scope, activities, project, narrow
       const panel = tab.panel
       return <Tabs.Content key={tab.id} className="ui-tab-content" value={tab.id}>
       <PanelViewState state={tab.view}>
-        {panel.kind === 'plugin' ? <div className="plugin-panel-slot" data-plugin-panel={panel.pluginId} />
+        {panel.kind === 'plugin' ? <div className="plugin-panel-slot" data-plugin-panel={panel.pluginId} data-plugin-instance={panel.instanceId ?? 'main'} />
           : panel.kind === 'document'
           ? <HelpDocumentPanel request={panel} onOpen={(next) => controller.open(scope, next)} />
           : panel.kind === 'subagent'

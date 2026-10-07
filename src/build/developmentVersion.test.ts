@@ -24,20 +24,22 @@ beforeEach(() => {
 afterEach(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 }))
 
 describe('development version from synchronization baselines', () => {
-  it('does not treat public release tags as development baselines', () => {
+  it('does not treat release or legacy synchronization tags as development baselines', () => {
     git('tag', 'v3.1.3')
+    git('tag', 'github/v3.1.3')
     expect(getDevelopmentVersion(root, '3.1.3')).toBeUndefined()
   })
   it('counts commits from the baseline without changing the release version', () => {
-    git('tag', '-a', 'github/v3.1.3', '-m', 'synced')
+    git('update-ref', 'refs/anas/github/v3.1.3', 'HEAD')
+    expect(git('tag', '--list')).toBe('')
     expect(getDevelopmentVersion(root, '3.1.3')).toBe(`3.1.3-dev.0+g${git('rev-parse', '--short=8', 'HEAD')}`)
     git('commit', '--allow-empty', '-m', 'development change')
     expect(getDevelopmentVersion(root, '3.1.3')).toBe(`3.1.3-dev.1+g${git('rev-parse', '--short=8', 'HEAD')}`)
-    git('tag', '-a', 'github/v3.1.4', '-m', 'next sync')
+    git('update-ref', 'refs/anas/github/v3.1.4', 'HEAD')
     expect(getDevelopmentVersion(root, '3.1.4')).toBe(`3.1.4-dev.0+g${git('rev-parse', '--short=8', 'HEAD')}`)
   })
   it('marks tracked, staged and untracked changes, but ignores build output', () => {
-    git('tag', 'github/v3.1.3')
+    git('update-ref', 'refs/anas/github/v3.1.3', 'HEAD')
     writeFileSync(join(root, '.git/info/exclude'), 'out/\n')
     mkdirSync(join(root, 'out'))
     writeFileSync(join(root, 'out/bundle.js'), 'build')
@@ -52,22 +54,33 @@ describe('development version from synchronization baselines', () => {
     expect(getDevelopmentVersion(root, '3.1.3')).toMatch(/\.dirty$/)
   })
   it('uses the current release version while preparing the next sync', () => {
-    git('tag', 'github/v3.1.3')
+    git('update-ref', 'refs/anas/github/v3.1.3', 'HEAD')
     git('commit', '--allow-empty', '-m', 'prepare release')
     expect(getDevelopmentVersion(root, '3.1.4')).toMatch(/^3\.1\.4-dev\.1\+g/)
   })
-  it('counts mainline commits and ignores baseline tags on merged side branches', () => {
-    git('tag', 'github/v3.1.3')
+  it('counts mainline commits and ignores baseline refs on merged side branches', () => {
+    git('update-ref', 'refs/anas/github/v3.1.3', 'HEAD')
     git('checkout', '-b', 'feature')
     git('commit', '--allow-empty', '-m', 'feature one')
     git('commit', '--allow-empty', '-m', 'feature two')
-    git('tag', 'github/v9.0.0')
+    git('update-ref', 'refs/anas/github/v9.0.0', 'HEAD')
     git('checkout', 'main')
     git('merge', '--no-ff', 'feature', '-m', 'merge feature')
     expect(getDevelopmentVersion(root, '3.1.3')).toMatch(/^3\.1\.3-dev\.1\+g/)
   })
+  it('restores development baselines through a configured fetch without creating tags', () => {
+    git('update-ref', 'refs/anas/github/v3.1.3', 'HEAD')
+    git('commit', '--allow-empty', '-m', 'development change')
+    const clone = join(root, 'clone')
+    git('clone', '--no-tags', root, clone)
+    expect(getDevelopmentVersion(clone, '3.1.3')).toBeUndefined()
+    git('-C', clone, 'config', '--add', 'remote.origin.fetch', 'refs/anas/github/*:refs/anas/github/*')
+    git('-C', clone, 'fetch', 'origin')
+    expect(getDevelopmentVersion(clone, '3.1.3')).toBe(`3.1.3-dev.1+g${git('rev-parse', '--short=8', 'HEAD')}`)
+    expect(git('-C', clone, 'tag', '--list')).toBe('')
+  })
   it('does not inherit metadata from a source archive parent directory', async () => {
-    git('tag', 'github/v3.1.3')
+    git('update-ref', 'refs/anas/github/v3.1.3', 'HEAD')
     const archive = join(root, 'archive')
     mkdirSync(archive)
     expect(getDevelopmentVersion(archive, '3.1.3')).toBeUndefined()

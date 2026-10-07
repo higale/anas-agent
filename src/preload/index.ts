@@ -6,17 +6,23 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AgentAccessMode, AgentMessageEditResult, AgentMessageRangeInput, AgentMessageRegenerateInput, AgentMessageWindowInput, AgentModelRequestPreview, AgentModelRequestPreviewInput, AgentQueuedInput, AgentQueuedInputCreate, AgentResumeInput, AgentRun, AgentRunCancellationResult, AgentRunDirectionInput, AgentRunDirectionReferenceInput, AgentRunReferenceInput, AgentRunSubmission, AgentRunSubmissionInput, AgentRuntimeEvent, AgentStorageUsageSnapshot, AgentSystemContextPreview, AgentSystemContextPreviewInput, AgentThread, AgentThreadCleanupResult, AgentThreadSnapshot, AgentThreadUpdate, AgentWorkspaceState } from '@shared/agentTypes'
 import type { AppAvatarImage, AppBuildInfo, AppConfigSnapshot, AppDataStorageUsageSnapshot, AppProfileUpdate, AppSettingsUpdate, AttachmentPreview, AttachmentPreviewOptions, AvatarCropSaveRequest, AvatarCropSource, AvatarCropSourceReadResult, DataBackupResult, DataCleanupRequest, DataCleanupResult, DataRestoreResult, EnvFileSnapshot, FileIconImage, FileIconSize, GaleApi, InputHistorySnapshot, LanguageResourcesSnapshot, McpMaintenanceResult, McpServerConfigSave, McpServerUpdate, McpToolStatus, MemoryItem, MemorySaveRequest, MemorySearchRequest, MemorySearchResult, ModelListRequest, ModelListResponse, ModelProviderConfigSave, Project, ProjectCreateRequest, ProjectDeleteResult, ProjectStateUpdate, ProjectUpdateRequest, ProviderModelConfigSave, RuntimeToolStatus, SelectedAttachment, SkillAvailabilityUpdate, SkillDirectoryAddResult, SkillFileNode, SkillFilePreview, SkillImportResult, SkillInvocationResult, SkillRootUpdate, SkillSnapshot, SpeechGenerateRequest, SpeechRendererDiagnostics, SpeechRendererWarningKind, SpeechReplyConfig, SpeechVoiceInfo, SubagentConfigSave, SystemEnvironmentDetection } from '@shared/types'
 import { subscribeAgentRuntimeEvents } from './agentEventSubscription'
+import type { PluginSidebarView } from '@shared/plugins'
 
 const api: GaleApi = {
   plugins: {
     list: () => ipcRenderer.invoke('plugins:list'),
     install: () => ipcRenderer.invoke('plugins:install'),
     setEnabled: (id, enabled) => ipcRenderer.invoke('plugins:setEnabled', id, enabled),
-    uninstall: id => ipcRenderer.invoke('plugins:uninstall', id),
+    uninstall: (id, deleteData) => ipcRenderer.invoke('plugins:uninstall', id, deleteData),
     openWindow: id => ipcRenderer.invoke('plugins:openWindow', id),
     startBackend: id => ipcRenderer.invoke('plugins:startBackend', id),
     stopBackend: id => ipcRenderer.invoke('plugins:stopBackend', id),
     invoke: (id, method, params) => ipcRenderer.invoke('plugins:invoke', id, method, params),
+    onOpenView: listener => {
+      const handler = (_event: Electron.IpcRendererEvent, view: PluginSidebarView) => listener(view)
+      ipcRenderer.on('plugins:openView', handler)
+      return () => { ipcRenderer.removeListener('plugins:openView', handler) }
+    },
     onChanged: listener => {
       const handler = (_event: Electron.IpcRendererEvent, closeViews?: string[] | 'all') => listener(closeViews)
       ipcRenderer.on('plugins:changed', handler)

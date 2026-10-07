@@ -1,10 +1,11 @@
 import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat } from 'node:fs/promises'
 import { basename, dirname, extname, join } from 'node:path'
 import fs from 'stubborn-fs'
-import { parsePluginManifest, requirePluginId, requirePluginJson, requirePluginPath, type PluginManifest, type PluginSummary } from '@shared/plugins'
+import { parsePluginManifest, pluginHomePolicy, requirePluginHomeLocation, requirePluginId, requirePluginJson, requirePluginPath, type PluginManifest, type PluginSummary } from '@shared/plugins'
 import { writeJsonFileAtomic } from '../atomicJson'
 import { isSameOrInsideDirectory, samePath } from '../pathContainment'
 import { extractZipArchive, type ZipArchiveLimits } from '../zipArchive'
+import { loadPluginLanguages } from './pluginLanguages'
 
 const MAX_FILE_BYTES = 128 * 1024 * 1024
 const MAX_PACKAGE_BYTES = 512 * 1024 * 1024
@@ -70,7 +71,7 @@ export class PluginStore {
     return path
   }
 
-  async read(id: string): Promise<PluginSummary> {
+  async read(id: string, includeLanguages = true): Promise<PluginSummary> {
     requirePluginId(id)
     try {
       const root = await this.directory('plugins', id)
@@ -80,16 +81,33 @@ export class PluginStore {
       if (manifest.id !== id) throw new Error('Plugin ID does not match its installation directory.')
       for (const entry of [manifest.ui, manifest.backend]) if (entry) await this.packageFile(id, entry)
       const error = manifest.platforms && !manifest.platforms.includes(process.platform) ? 'Plugin does not support this platform.' : undefined
-      return { id, manifest, enabled: raw.enabled ?? true, error, backendStatus: 'stopped' }
+      const language = includeLanguages ? await loadPluginLanguages(await this.packageDirectory(id), manifest) : undefined
+      return { id, manifest, enabled: raw.enabled ?? true, error, backendStatus: 'stopped', languages: language?.languages, languageErrors: language?.errors }
     } catch (error) {
       return { id, enabled: false, error: error instanceof Error ? error.message : String(error), backendStatus: 'stopped' }
     }
   }
 
   async requireEnabled(id: string): Promise<PluginManifest> {
-    const item = await this.read(id)
+    const item = await this.read(id, false)
     if (item.error || !item.enabled || !item.manifest) throw new Error(item.error ?? 'Plugin is disabled.')
     return item.manifest
+  }
+
+  async languageResources(id: string) {
+    const manifest = await this.requireEnabled(id)
+    const { resources, errors } = await loadPluginLanguages(await this.packageDirectory(id), manifest)
+    const snapshot = { resources, errors }
+    requirePluginJson(snapshot)
+    return snapshot
+  }
+
+  async home(id: string) {
+    const manifest = await this.requireEnabled(id)
+    if (!manifest.ui) throw new Error('Plugin has no UI entry.')
+    const policy = pluginHomePolicy(manifest)
+    const saved = await this.data(id, 'home_open_location')
+    return { location: saved === null ? policy.defaultLocation : requirePluginHomeLocation(manifest, saved), locations: policy.locations }
   }
 
   async list(): Promise<PluginSummary[]> {
@@ -186,21 +204,38 @@ export class PluginStore {
     await writeJsonFileAtomic(join(root, 'installation.json'), { version: 0, enabled })
   }
 
-  async uninstall(id: string): Promise<void> {
+  async uninstall(id: string, deleteData = false): Promise<void> {
+    if (typeof deleteData !== 'boolean') throw new Error('Invalid plugin data deletion option.')
     const root = await this.directory('plugins', id)
+    const data = deleteData ? await this.directory('plugin_data', id).catch(error => {
+      if (error.code === 'ENOENT') return undefined
+      throw error
+    }) : undefined
     const temp = await this.directory('tmp', undefined, true)
     const stage = await mkdtemp(join(temp, 'plugin-remove-'))
+    let moved = false
+    let committed = false
     try {
       // Windows can briefly retain a package directory handle after a page or
       // utility process exits. Retry the same atomic move; never delete in place.
       await fs.retry.rename({ timeout: 2_000, interval: 25 })(root, join(stage, 'removed'))
+      moved = true
+      if (data) await fs.retry.rename({ timeout: 2_000, interval: 25 })(data, join(stage, 'data'))
+      committed = true
+    } catch (error) {
+      if (moved) {
+        try { await fs.retry.rename({ timeout: 2_000, interval: 25 })(join(stage, 'removed'), root); moved = false }
+        catch (rollback) { throw new AggregateError([error, rollback], `Plugin removal failed; preserved files remain at ${stage}.`) }
+      }
+      throw error
     } finally {
-      await rm(stage, { recursive: true, force: true })
+      // Never discard staged files if restoring the installation failed.
+      if (committed || !moved) await rm(stage, { recursive: true, force: true })
     }
   }
 
   async data(id: string, key: unknown, write = false, value?: unknown): Promise<unknown> {
-    await this.requireEnabled(id)
+    const manifest = await this.requireEnabled(id)
     if (typeof key !== 'string' || !/^[a-zA-Z0-9_.-]{1,80}$/.test(key) || ['__proto__', 'constructor', 'prototype'].includes(key)) throw new Error('Invalid plugin data key.')
     const root = await this.directory('plugin_data', id, true)
     const path = join(root, 'state.json')
@@ -208,6 +243,7 @@ export class PluginStore {
     if (raw !== undefined && (!raw || raw.version !== 0 || !raw.values || typeof raw.values !== 'object' || Array.isArray(raw.values))) throw new Error('Invalid plugin data file; original content was preserved.')
     const values = (raw?.values ?? {}) as Record<string, unknown>
     if (!write) return Object.hasOwn(values, key) ? values[key] : null
+    if (key === 'home_open_location' && value !== null) requirePluginHomeLocation(manifest, value)
     requirePluginJson(value)
     const next = { version: 0, values: { ...values, [key]: value } }
     requirePluginJson(next)

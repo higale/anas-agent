@@ -1,11 +1,22 @@
-import { createWriteStream } from 'node:fs'
+import nativeFs, { createWriteStream } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
 import { promisify } from 'node:util'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { ZipFile } from 'yazl'
+
+const nativeRename = nativeFs.rename
+let renameFailure: ((source: string, target: string) => boolean | string) | undefined
+// Keep the real retry implementation and filesystem, injecting only an OS error.
+nativeFs.rename = Object.assign((...args: Parameters<typeof nativeRename>) => {
+  const [source, target, callback] = args
+  const failure = renameFailure?.(String(source), String(target))
+  if (failure) callback(Object.assign(new Error('injected rename failure'), { code: failure === true ? 'EIO' : failure }))
+  else nativeRename(source, target, callback)
+}, nativeRename)
+afterAll(() => { nativeFs.rename = nativeRename })
 
 const temporaryDirectories: string[] = []
 const configFileNames = ['capabilities.json', 'settings.json', 'models.json', 'subagents.json', 'mcp_servers.json', 'tools.json', 'skills.json'] as const
@@ -40,24 +51,11 @@ async function writeZip(path: string, entries: Array<{ name: string; data?: stri
 async function loadBackupService(
   dataRoot: string,
   validateRestoredDataDirectory: (root: string) => Promise<void> = async () => undefined,
-  failRename?: (source: string, target: string) => boolean,
+  failRename?: (source: string, target: string) => boolean | string,
   snapshotStorage: typeof import('./agent/agentDatabaseBackup').snapshotAgentStorage = async () => []
 ) {
   vi.resetModules()
-  if (failRename) {
-    vi.doMock('node:fs/promises', async (importOriginal) => {
-      const original = await importOriginal<typeof import('node:fs/promises')>()
-      return {
-        ...original,
-        async rename(source: Parameters<typeof original.rename>[0], target: Parameters<typeof original.rename>[1]) {
-          if (failRename(String(source), String(target))) {
-            throw Object.assign(new Error('injected rename failure'), { code: 'EIO' })
-          }
-          return original.rename(source, target)
-        }
-      }
-    })
-  }
+  renameFailure = failRename
   vi.doMock('./config/dataDir', () => ({
     configDirName: 'config',
     customToolsConfigFileName: 'tools.json',
@@ -80,12 +78,12 @@ async function loadBackupService(
 }
 
 afterEach(async () => {
+  renameFailure = undefined
   vi.doUnmock('./config/dataDir')
   vi.doUnmock('./config/rawAppConfig')
   vi.doUnmock('./config/profileConfig')
   vi.doUnmock('./agent/agentDatabaseBackup')
   vi.doUnmock('./dataRestoreValidation')
-  vi.doUnmock('node:fs/promises')
   vi.resetModules()
   await Promise.all(temporaryDirectories.splice(0).map((directory) => (
     rm(directory, { recursive: true, force: true })
@@ -550,6 +548,39 @@ describe('data backup restore', () => {
     })
 
     expect(order).toEqual(['deactivate:old', 'activate:new', 'committed', 'finish'])
+  })
+
+  it.each(['EPERM', 'EACCES', 'EBUSY'])('restores after a temporary %s on the active plugin directory', async code => {
+    const root = await temporaryDirectory(), dataRoot = join(root, 'data'), archive = join(root, 'sharing.zip')
+    await writeText(join(dataRoot, 'plugins', 'sample', 'state.txt'), 'old plugin')
+    await writeZip(archive, [
+      ...configFileNames.map(name => ({ name: 'config/' + name, data: name === 'tools.json' ? '{"version":0,"order":[],"external_directories":[]}' : 'new config' })),
+      { name: 'plugins/sample/state.txt', data: 'new plugin' }
+    ])
+    let attempts = 0
+    const service = await loadBackupService(dataRoot, undefined, source => source === join(dataRoot, 'plugins') && ++attempts <= 2 ? code : false)
+    await service.restoreDataBackupZip(archive)
+    expect(attempts).toBe(3)
+    expect(await readFile(join(dataRoot, 'plugins', 'sample', 'state.txt'), 'utf8')).toBe('new plugin')
+    expect((await readdir(root)).filter(name => name.startsWith('.anas-restore-'))).toEqual([])
+  })
+
+  it('bounds persistent plugin directory sharing failures and restores previously moved data', async () => {
+    const root = await temporaryDirectory(), dataRoot = join(root, 'data'), archive = join(root, 'locked.zip')
+    await writeText(join(dataRoot, 'plugins', 'sample', 'state.txt'), 'old plugin')
+    await writeText(join(dataRoot, 'config', 'settings.json'), 'old settings')
+    await writeZip(archive, configFileNames.map(name => ({ name: 'config/' + name, data: name === 'tools.json' ? '{"version":0,"order":[],"external_directories":[]}' : 'new config' })))
+    let attempts = 0
+    const service = await loadBackupService(dataRoot, undefined, source => {
+      if (source !== join(dataRoot, 'plugins')) return false
+      attempts++
+      return 'EPERM'
+    })
+    await expect(service.restoreDataBackupZip(archive)).rejects.toMatchObject({ code: 'EPERM' })
+    expect(attempts).toBeGreaterThan(1)
+    expect(await readFile(join(dataRoot, 'plugins', 'sample', 'state.txt'), 'utf8')).toBe('old plugin')
+    expect(await readFile(join(dataRoot, 'config', 'settings.json'), 'utf8')).toBe('old settings')
+    expect((await readdir(root)).filter(name => name.startsWith('.anas-restore-'))).toEqual([])
   })
 
   it('serializes complete restore lifecycles', async () => {

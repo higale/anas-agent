@@ -1,12 +1,18 @@
-## Anas v3.3.3
+## Anas v3.3.4
 
-- 插件安装支持直接选择 ZIP 或 `PLUGIN.json`；ZIP 自动解包，选择清单则安装它所在的整个目录。
-- ZIP 支持清单位于根目录或唯一的顶层文件夹中；校验路径、大小、压缩比、重复条目和 CRC，安装失败清理暂存文件，保留原始文件、已安装插件和数据。
-- 更新安装按钮、插件开发文档、示例说明和中英用户文档，补充两种安装入口及失败处理的回归验证。插件配置格式不变。
+- 插件支持按实例打开多个侧边页或独立窗口，同一位置重复打开复用原页面；停用、卸载和备份恢复回收全部实例。
+- 插件可声明首页默认位置及允许位置；宿主设置提供位置控件，偏好保存在插件自己的数据中，顶部入口在加载首页前读取，下次打开生效。
+- 插件名称、说明及默认窗口标题支持包内 i18next JSON 语言文件，跟随宿主语种，缺失文字回退英文。语言选项仍仅来自宿主；重装不保留或合并旧插件翻译。
+- 卸载确认框新增「删除插件数据」选项，默认保留。勾选后仅删除当前插件数据，操作失败时回滚或保留暂存文件。
+- 修复 Windows 恢复备份时，插件停止后的短暂目录占用导致恢复失败的问题；原子移动采用有界重试，持续失败仍回滚并保留原数据。
+- 开发版同步基点改用普通 Git 引用，不再使用开发标签；更新中英文档和插件界面、存储、语言及生命周期回归测试。插件 API 和持久化格式保持兼容。
 
-- Install plugins directly from a ZIP file or `PLUGIN.json`. ZIPs are extracted automatically; selecting a manifest installs its entire folder.
-- Support manifests at the archive root or inside its sole top-level folder. Validate paths, sizes, compression ratios, duplicate entries, and CRC checksums. Failed installations clean up temporary files while preserving the source, installed plugins, and saved data.
-- Update the install button, developer documentation, examples, and bilingual user guidance, with regression coverage for both installation paths and failure handling. The plugin configuration format is unchanged.
+- Open multiple named plugin views in sidebars or separate windows and reuse existing views in the same location. Disabling, uninstalling, and backup/restore clean up all instances.
+- Plugins can declare default and allowed home locations. Host settings save the preference in the plugin's own data; the top menu reads it before loading the home page, taking effect on the next opening.
+- Localize plugin names, descriptions, and default window titles with packaged i18next JSON files, following the host language with English fallback. Only host language packs create language choices; reinstalling does not preserve or merge old plugin translations.
+- Add an optional Delete plugin data checkbox to uninstall confirmation, keeping data by default. Deletion targets only the selected plugin, with rollback or staged-file preservation on failure.
+- Fix Windows backup restoration failing on a brief directory lock after a plugin stops. Atomic moves use bounded retries; persistent failures still roll back and preserve existing data.
+- Track development sync baselines with ordinary Git references instead of development tags. Update bilingual documentation and plugin UI, storage, language, and lifecycle regression coverage while retaining plugin API and data-format compatibility.
 
 ## 下载与安装 / Downloads & installation
 

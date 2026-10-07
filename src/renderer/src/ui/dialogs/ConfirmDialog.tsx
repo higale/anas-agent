@@ -1,9 +1,10 @@
 import * as AlertDialog from '@radix-ui/react-alert-dialog'
 import { Check, Trash2, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import type { ReactNode } from 'react'
 import type { ConfirmDialogRequest } from './dialogTypes'
 
-export function ConfirmDialog({ request, onClose }: { request?: ConfirmDialogRequest; onClose: () => void }) {
+export function ConfirmDialog({ request, onClose, children }: { request?: ConfirmDialogRequest; onClose: () => void; children?: ReactNode }) {
   const { t } = useTranslation()
   const variant = request?.variant ?? 'default'
   return (
@@ -24,6 +25,7 @@ export function ConfirmDialog({ request, onClose }: { request?: ConfirmDialogReq
               </AlertDialog.Description>
             </div>
           </header>
+          {children}
           <footer className="ui-dialog-footer">
             <AlertDialog.Cancel asChild>
               <button className="ui-button ui-button-compact" type="button">

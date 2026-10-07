@@ -23,7 +23,14 @@ export const pluginSdk = `(() => {
     else request.resolve(event.data.result);
   });
   window.anas = Object.freeze({
-    getInfo: () => invoke('host.info'),
+    getInfo: async () => ({ ...await invoke('host.info'), view: {
+      instanceId: new URL(window.location.href).searchParams.get('instance') || 'main',
+      location: window.parent === window ? 'window' : 'sidebar'
+    } }),
+    openView: options => invoke('host.openView', options),
+    getHome: () => invoke('host.home'),
+    openHome: () => invoke('host.openHome'),
+    getLanguageResources: () => invoke('host.languages'),
     openExternal: url => invoke('host.openExternal', { url }),
     data: Object.freeze({ get: key => invoke('data.get', { key }), set: (key, value) => invoke('data.set', { key, value }) }),
     backend: Object.freeze({ call: (method, params) => invoke('backend.call', { method, params }) })

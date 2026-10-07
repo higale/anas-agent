@@ -1,5 +1,6 @@
 import i18next from 'i18next'
 import type { Resource } from 'i18next'
+import { matchLanguageCode } from '@shared/languages'
 import { initReactI18next } from 'react-i18next'
 import type { LanguagePackSummary, LanguageResourcesSnapshot } from '@shared/types'
 import bundledEnglish from '../../../data/lang/en.json'
@@ -28,12 +29,7 @@ function availableLanguageCodes(): string[] {
 }
 
 function matchLanguage(code: string, available: string[]): string | undefined {
-  const normalized = code.trim()
-  if (!normalized) return undefined
-  const exact = available.find((item) => item.toLowerCase() === normalized.toLowerCase())
-  if (exact) return exact
-  const base = normalized.split('-')[0]?.toLowerCase()
-  return available.find((item) => item.split('-')[0]?.toLowerCase() === base)
+  return matchLanguageCode(code, available)
 }
 
 export function resolveLanguagePreference(preference?: string): string {

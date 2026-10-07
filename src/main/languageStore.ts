@@ -3,6 +3,7 @@ import { app } from 'electron'
 import { copyFile, mkdir, readFile, readdir } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
 import { getBundledLangDir, getLangDir } from './config/dataDir'
+import { matchLanguageCode } from '@shared/languages'
 import { runtimeLog } from './runtimeLogger'
 import type { AppProfile, LanguagePackSummary, LanguageResourcesSnapshot } from '@shared/types'
 
@@ -149,16 +150,8 @@ function matchLanguage(
   code: string,
   languages: LanguagePackSummary[]
 ): LanguagePackSummary | undefined {
-  const normalized = code.trim()
-  if (!normalized) return undefined
-  const exact = languages.find((language) =>
-    language.code.toLowerCase() === normalized.toLowerCase()
-  )
-  if (exact) return exact
-  const base = normalized.split('-')[0]?.toLowerCase()
-  return languages.find((language) =>
-    language.code.split('-')[0]?.toLowerCase() === base
-  )
+  const matched = matchLanguageCode(code, languages.map(language => language.code))
+  return languages.find(language => language.code === matched)
 }
 
 export async function resolveConfiguredLanguage(
