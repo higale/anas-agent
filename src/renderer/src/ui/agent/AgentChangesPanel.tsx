@@ -1,3 +1,4 @@
+import { contentServices } from '../panels/contentServices'
 import { RefreshCw } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -31,7 +32,7 @@ export function AgentChangesPanel({ threadId, runId, onRunChange, compareCurrent
     let active = true
     const requestId = crypto.randomUUID()
     setLoading(true); setError(undefined)
-    void window.gale.agent.changes.rounds({ threadId, after, limit: 20, ...(runId ? { selectedRunId: runId } : {}) }, requestId).then((result) => {
+    void contentServices().agent.changes.rounds({ threadId, after, limit: 20, ...(runId ? { selectedRunId: runId } : {}) }, requestId).then((result) => {
       if (!active) return
       setRounds((current) => {
         let next = after === undefined ? result.rounds
@@ -47,7 +48,7 @@ export function AgentChangesPanel({ threadId, runId, onRunChange, compareCurrent
       }
     }).catch((reason: unknown) => { if (active) setError(reason instanceof Error ? reason.message : String(reason)) })
       .finally(() => { if (active) setLoading(false) })
-    return () => { active = false; void window.gale.agent.changes.cancelRead(requestId).catch(() => {}) }
+    return () => { active = false; void contentServices().agent.changes.cancelRead(requestId).catch(() => {}) }
   }, [threadId, runId, after, revision, setRounds])
 
   useEffect(() => {
@@ -56,7 +57,7 @@ export function AgentChangesPanel({ threadId, runId, onRunChange, compareCurrent
       if (timer !== undefined) return
       timer = setTimeout(() => { timer = undefined; setAfter(undefined); setRevision((value) => value + 1) }, 250)
     }
-    const unsubscribe = window.gale.agent.onEvent((event) => {
+    const unsubscribe = contentServices().agent.onEvent((event) => {
       const owner = 'threadId' in event ? event.threadId : 'run' in event ? event.run.threadId : undefined
       if (owner === threadId && ['file_changes', 'run_completed', 'run_cancelled', 'run_failed', 'run_settled'].includes(event.type)) invalidate()
     }, async () => { invalidate() }, invalidate)
@@ -112,7 +113,7 @@ function RoundFiles({ threadId, runId, compareCurrent, revision, onRefresh, onRe
     if (invalidated) {
       setCursors(['']); version.current = undefined; setPageRevision(revision)
     }
-    void window.gale.agent.changes.roundFiles(query, requestId).then((data) => {
+    void contentServices().agent.changes.roundFiles(query, requestId).then((data) => {
       if (!active) return
       if (data.runId !== runId) throw new Error(t('agent.changes_scope_changed'))
       if (!after) version.current = data.version
@@ -120,7 +121,7 @@ function RoundFiles({ threadId, runId, compareCurrent, revision, onRefresh, onRe
     }).catch((reason: unknown) => {
       if (active) setResult({ key, error: reason instanceof Error ? reason.message : String(reason) })
     })
-    return () => { active = false; void window.gale.agent.changes.cancelRead(requestId).catch(() => {}) }
+    return () => { active = false; void contentServices().agent.changes.cancelRead(requestId).catch(() => {}) }
     // The request identity owns reads; selecting a file only loads that file's contents.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])

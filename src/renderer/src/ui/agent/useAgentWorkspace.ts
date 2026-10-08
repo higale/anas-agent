@@ -13,7 +13,7 @@ import {
   type AgentThreadSnapshot,
   type AgentWorkspaceState
 } from '@shared/agentTypes'
-import { applySubagentActivityUpdate } from '@shared/agentActivity'
+import { applyRunActivityEvent } from '@shared/agentActivityProjection'
 import { DEFAULT_WORKSPACE_PROJECT_ID, type SelectedAttachment } from '@shared/types'
 import {
   loadAgentThreadSnapshotAndRecover,
@@ -449,139 +449,6 @@ export function useAgentWorkspace({ onAppError }: UseAgentWorkspaceOptions) {
       }
       return
     }
-    if (event.type === 'memory_recalled') {
-      setRuns((current) => {
-        const run = current[threadId]
-        if (!run || run.runId !== event.runId) return current
-        const memoryRecalls = run.memoryRecalls ?? []
-        const existingIndex = memoryRecalls.findIndex((recall) => recall.id === event.recall.id)
-        return {
-          ...current,
-          [threadId]: {
-            ...run,
-            memoryRecalls: existingIndex < 0
-              ? [...memoryRecalls, event.recall]
-              : memoryRecalls.map((recall, index) => index === existingIndex ? event.recall : recall)
-          }
-        }
-      })
-      return
-    }
-    if (event.type === 'model_started' || event.type === 'model_completed') {
-      setRuns((current) => {
-        const run = current[threadId]
-        if (!run || run.runId !== event.runId) return current
-        const existingIndex = run.models.findIndex((item) => item.id === event.model.id
-          && item.subagentId === event.model.subagentId)
-        const models = existingIndex === -1
-          ? [...run.models, event.model]
-          : run.models.map((item, index) => index === existingIndex
-            ? { ...event.model, round: event.model.round ?? item.round, toolCallProgress: item.toolCallProgress }
-            : item)
-        return {
-          ...current,
-          [threadId]: {
-            ...run,
-            models
-          }
-        }
-      })
-      return
-    }
-    if (
-      event.type === 'context_compression_started'
-      || event.type === 'context_compression_completed'
-    ) {
-      setRuns((current) => {
-        const run = current[threadId]
-        if (!run || run.runId !== event.runId) return current
-        const summaries = run.summaries ?? []
-        const existingIndex = summaries.findIndex((item) => item.id === event.summary.id)
-        return {
-          ...current,
-          [threadId]: {
-            ...run,
-            summaries: existingIndex < 0
-              ? [...summaries, event.summary]
-              : summaries.map((item, index) => index === existingIndex ? event.summary : item)
-          }
-        }
-      })
-      return
-    }
-    if (event.type === 'context_compression_discarded') {
-      setRuns((current) => {
-        const run = current[threadId]
-        if (!run || run.runId !== event.runId) return current
-        return {
-          ...current,
-          [threadId]: {
-            ...run,
-            summaries: run.summaries?.filter(
-              (summary) => summary.id !== event.summaryId
-            )
-          }
-        }
-      })
-      return
-    }
-    if (event.type === 'model_delta' || event.type === 'model_tool_calls') {
-      setRuns((current) => {
-        const run = current[threadId]
-        if (!run || run.runId !== event.runId) return current
-        return {
-          ...current,
-          [threadId]: {
-            ...run,
-            models: run.models.map((model) => {
-              if (model.id !== event.modelId || model.subagentId !== event.subagentId) return model
-              if (event.type === 'model_tool_calls') {
-                return { ...model, toolCallProgress: event.progress }
-              }
-              if (model.status === 'completed') return model
-              return event.delta.type === 'reasoning'
-                ? { ...model, reasoning: model.reasoning + event.delta.text }
-                : { ...model, text: model.text + event.delta.text }
-            })
-          }
-        }
-      })
-      return
-    }
-    if (
-      event.type === 'tool_started'
-      || event.type === 'tool_approval_requested'
-      || event.type === 'tool_completed'
-    ) {
-      setRuns((current) => {
-        const run = current[threadId]
-        if (!run || run.runId !== event.runId) return current
-        const tool = {
-          call: event.call,
-          sequence: event.sequence,
-          status: event.type === 'tool_completed' ? 'completed' as const : 'running' as const,
-          subagentId: event.subagentId,
-          startedAt: event.startedAt,
-          ...(event.type === 'tool_approval_requested' ? { approval: event.approval } : {}),
-          ...(event.type === 'tool_completed' ? { output: event.output } : {}),
-          ...(event.type === 'tool_completed' ? { completedAt: event.completedAt } : {})
-        }
-        const existingIndex = run.tools.findIndex((item) =>
-          item.call.id === event.call.id && item.subagentId === event.subagentId
-        )
-        const tools = existingIndex === -1
-          ? [...run.tools, tool]
-          : run.tools.map((item, index) => index === existingIndex ? tool : item)
-        return {
-          ...current,
-          [threadId]: {
-            ...run,
-            tools
-          }
-        }
-      })
-      return
-    }
     if (event.type === 'todos_updated') {
       setSnapshots((current) => {
         const snapshot = current[threadId]
@@ -594,14 +461,14 @@ export function useAgentWorkspace({ onAppError }: UseAgentWorkspaceOptions) {
       })
       return
     }
-    if (event.type === 'subagent_updated') {
-      setRuns((current) => {
+    if (['memory_recalled', 'model_started', 'model_completed', 'context_compression_started',
+      'context_compression_completed', 'context_compression_discarded', 'model_delta', 'model_tool_calls',
+      'tool_started', 'tool_approval_requested', 'tool_completed', 'subagent_updated'].includes(event.type)) {
+      setRuns(current => {
         const run = current[threadId]
-        if (!run || run.runId !== event.runId) return current
-        return {
-          ...current,
-          [threadId]: applySubagentActivityUpdate(run, event.subagent)
-        }
+        if (!run) return current
+        const updated = applyRunActivityEvent(run, event)
+        return updated === run ? current : { ...current, [threadId]: updated }
       })
       return
     }

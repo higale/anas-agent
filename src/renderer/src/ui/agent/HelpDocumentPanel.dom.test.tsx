@@ -4,12 +4,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HelpDocumentId } from '@shared/helpDocuments'
 import { HelpDocumentPanel } from './HelpDocumentPanel'
 import { PanelViewState } from './PanelViewState'
-import type { WorkspacePanel } from './useWorkspacePanels'
+import type { BuiltinPanel } from '@shared/panels'
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 const readHelp = vi.fn(), external = vi.fn()
 const english = '# Guide\n\n[中文](./USER_GUIDE.zh-CN.md#记忆)\n\n[Web](https://example.com/)\n\n[Section](#tools)\n\n## Tools\n\nSome **text**\n\n## Tools'
-const request: Extract<WorkspacePanel, { kind: 'document' }> = { kind: 'document', documentId: 'USER_GUIDE.en.md' }
+const request: Extract<BuiltinPanel, { kind: 'document' }> = { kind: 'document', documentId: 'USER_GUIDE.en.md' }
 beforeEach(() => {
   readHelp.mockReset().mockResolvedValue(english)
   external.mockReset().mockResolvedValue('')

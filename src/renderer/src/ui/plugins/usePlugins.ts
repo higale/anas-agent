@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PluginSummary } from '@shared/plugins'
 import { errorDetail } from '@shared/recovery'
 
-export function usePlugins(closeViews: (ids: string[] | 'all') => void) {
+export function usePlugins() {
   const [plugins, setPlugins] = useState<PluginSummary[]>([])
   const [error, setError] = useState<string>()
   const revision = useRef(0)
@@ -17,8 +17,8 @@ export function usePlugins(closeViews: (ids: string[] | 'all') => void) {
   }, [])
   useEffect(() => {
     void refresh()
-    const unsubscribe = window.gale.plugins.onChanged(ids => { if (ids) closeViews(ids); void refresh() })
+    const unsubscribe = window.gale.plugins.onChanged(() => { void refresh() })
     return () => { revision.current++; unsubscribe() }
-  }, [refresh, closeViews])
+  }, [refresh])
   return { plugins, error, refresh }
 }

@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict')
+const { panelPage } = require('./electron-panel-helpers.cjs')
 const { expect } = require('playwright/test')
 
 // Inspect the same locally bundled Monaco instance as the renderer.
@@ -30,7 +31,8 @@ async function monacoState(application, page) {
   }, url)
 }
 
-async function verifyReadonlyDiff(application, page) {
+async function verifyReadonlyDiff(application, main) {
+  const page = await panelPage(application, 'files')
   await expect(page.locator('.monaco-diff-editor')).toBeVisible({ timeout: 20000 })
   const initial = await monacoState(application, page)
   assert.equal(initial.models.length, 2)
@@ -41,7 +43,7 @@ async function verifyReadonlyDiff(application, page) {
   await sideBySide.focus()
   await page.keyboard.press('Enter')
   await expect(sideBySide).toHaveAttribute('aria-pressed', String(!initiallySideBySide))
-  await expect.poll(() => page.evaluate(async () => (await globalThis.gale.config.get()).settings.diffViewMode))
+  await expect.poll(() => main.evaluate(async () => (await globalThis.gale.config.get()).settings.diffViewMode))
     .toBe(initiallySideBySide ? 'inline' : 'side_by_side')
   await page.locator('.monaco-editor.modified-in-monaco-diff-editor .lines-content > .view-lines').click()
   await page.keyboard.type('Must not edit')
@@ -53,19 +55,19 @@ async function verifyReadonlyDiff(application, page) {
   await fold.click()
   await expect(fold).toHaveAttribute('aria-pressed', 'false')
   await fold.click()
-  await expect.poll(() => page.evaluate(async () => (await globalThis.gale.config.get()).settings.diffViewMode)).toBe('inline')
-  const workspace = page.locator('.agent-workspace')
-  const panel = page.locator('.workspace-panels')
+  await expect.poll(() => main.evaluate(async () => (await globalThis.gale.config.get()).settings.diffViewMode)).toBe('inline')
+  const workspace = main.locator('.agent-workspace')
+  const panel = main.locator('.workspace-panels')
   const originalBounds = await panel.boundingBox(), workspaceBounds = await workspace.boundingBox()
-  const files = panel.locator('.ui-diff-file-list'), contents = panel.locator('.ui-diff-content')
+  const files = page.locator('.ui-diff-file-list'), contents = page.locator('.ui-diff-content')
   const selectedFile = await files.locator('[aria-pressed="true"]').innerText()
   assert.ok((await files.boundingBox()).y < (await contents.boundingBox()).y, 'Narrow file lists must appear above the diff.')
 
   assert.ok(Math.abs(originalBounds.y - workspaceBounds.y) <= 1, 'Right workspace must reach the title bar.')
-  const composer = page.locator('[data-agent-composer-input]')
+  const composer = main.locator('[data-agent-composer-input]')
   const draft = await composer.inputValue()
   await composer.fill('Unsent draft survives expanded viewing')
-  await page.getByRole('button', { name: /^(展开右栏以占满对话区|Expand right workspace to fill conversation area)$/ }).click()
+  await main.getByRole('button', { name: /^(展开右栏以占满对话区|Expand right workspace to fill conversation area)$/ }).click()
   await expect(composer).not.toBeVisible()
   const expandedBounds = await panel.boundingBox()
   const filesBounds = await files.boundingBox(), diffBounds = await contents.boundingBox()
@@ -76,17 +78,17 @@ async function verifyReadonlyDiff(application, page) {
   assert.ok(Math.abs(expandedBounds.x - workspaceBounds.x) <= 1 && Math.abs(expandedBounds.width - workspaceBounds.width) <= 1,
     'Expanded right workspace must fill the conversation area.')
   assert.deepEqual((await monacoState(application, page)).models, initial.models)
-  await page.getByRole('button', { name: /^(还原右栏宽度|Restore right workspace width)$/ }).click()
+  await main.getByRole('button', { name: /^(还原右栏宽度|Restore right workspace width)$/ }).click()
   await expect(composer).toHaveValue('Unsent draft survives expanded viewing')
   await expect(composer).toBeVisible()
   assert.equal(await files.locator('[aria-pressed="true"]').innerText(), selectedFile)
   assert.deepEqual((await monacoState(application, page)).modelUris, initial.modelUris)
   assert.ok(Math.abs((await panel.boundingBox()).width - originalBounds.width) <= 1, 'Restore must retain the previous panel width.')
   await composer.fill(draft)
-  const topbar = page.locator('.topbar')
+  const topbar = main.locator('.topbar')
   for (let index = 0; index < 3; index++) {
     await panel.getByRole('button', { name: /^(收起右侧工作区|Hide right workspace)$/ }).click()
-    assert.equal((await monacoState(application, page)).models.length, 0)
+    assert.deepEqual((await monacoState(application, page)).modelUris, initial.modelUris)
     await topbar.getByRole('button', { name: /^(展开右侧工作区|Show right workspace)$/ }).click()
     await expect(page.locator('.monaco-diff-editor')).toBeVisible()
     assert.equal((await monacoState(application, page)).models.length, 2)

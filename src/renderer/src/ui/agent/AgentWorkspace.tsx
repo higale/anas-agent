@@ -16,7 +16,6 @@ import { PluginMenu } from '../plugins/PluginMenu'
 import type { PluginSummary } from '@shared/plugins'
 import { workspacePanelGroup, workspacePanelScope, type WorkspacePanelsController } from './useWorkspacePanels'
 import { WORKSPACE_PANEL_WIDTH_DEFAULT } from '@shared/uiPreferences'
-import type { CodeReviewRequest } from '@shared/codeReview'
 import { interruptActions } from './agentApproval'
 import { AgentMessageList, type EarlierActivityRequest } from './AgentMessageList'
 import type { AgentRunView } from './useAgentWorkspace'
@@ -40,7 +39,6 @@ interface AgentWorkspaceProps {
   onDiffPreferencesChange?(update: Partial<DiffViewSettings>): Promise<void>
   panels: WorkspacePanelsController
   onPanelWidthCommit(width: number): void | Promise<void>
-  onReview?(request: CodeReviewRequest): Promise<void>
   activeThreadId?: string
   attachments: SelectedAttachment[]
   chatPanelRef: RefObject<HTMLElement | null>
@@ -170,7 +168,7 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
   ]
   const openSubagent = (runId: string, subagentId: string) => {
     const subagent = visibleActivities.find((run) => run.runId === runId)?.subagents.find((item) => item.id === subagentId)
-    props.panels.open(scope, { kind: 'subagent', runId, subagentId, name: subagent?.name ?? subagentId })
+    if (props.activeThreadId && selectedProject) props.panels.open({ kind: 'subagent', projectId: selectedProject.id, threadId: props.activeThreadId, runId, subagentId, name: subagent?.name ?? subagentId })
   }
 
   const chatContentWidth = normalizeChatContentWidth(props.config?.settings.chatContentWidth)
@@ -220,8 +218,9 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
         <div className="ui-row ui-row-tight ui-push-end">
           {props.onOpenPlugin && <PluginMenu plugins={props.plugins ?? []} onOpen={props.onOpenPlugin} />}
           {selectedProject && <NoFocusButton type="button" className="ui-tool-button ui-tool-button-square"
-            aria-label={t('agent.file_changes')} data-tooltip={t('agent.file_changes')} onClick={() => props.panels.open(scope, {
-              kind: 'files', projectId: selectedProject.id, threadId: props.activeThreadId
+            aria-label={t('agent.file_changes')} data-tooltip={t('agent.file_changes')} onClick={() => props.panels.open({
+              kind: 'files', projectId: selectedProject.id, threadId: props.activeThreadId,
+              ...(!props.activeThreadId ? { draft: { modelConfigId: selectedModel?.id, modelParameterPresetId: props.selectedModelParameterPresetId ?? null, accessMode: props.accessMode } } : {})
             })}>
             <FileDiff size={18} />
           </NoFocusButton>}
@@ -237,7 +236,7 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
       <AgentMessageList
         onOpenChanges={(runId) => {
           const threadId = props.activeThreadId
-          if (threadId) props.panels.open(scope, { kind: 'files', projectId: props.selectedProjectId, threadId, runId })
+          if (threadId) props.panels.open({ kind: 'files', projectId: props.selectedProjectId, threadId, runId })
         }}
         title={title}
         navigationKey={props.activeThreadId}
@@ -331,13 +330,9 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
       />
       </div>
       <WorkspacePanels controller={props.panels} scope={scope} activities={visibleActivities}
-        project={selectedProject?.kind === 'workspace' ? selectedProject : undefined}
         sidebarVisible={props.sidebarVisible} onToggleSidebar={props.onToggleSidebar}
         narrow={narrow} width={panelWidth} minWidth={panelMinWidth} maxWidth={panelMaxWidth}
-        toggleRef={panelToggleRef} inputRef={props.composerInputRef} onWidthCommit={props.onPanelWidthCommit} onOpenSubagent={openSubagent}
-        onLoadEarlierActivities={props.onLoadEarlierActivities} onLoadEarlierError={props.onLoadEarlierError}
-        onLoadSubagentDetails={props.onLoadSubagentDetails}
-        onReview={!props.submissionBusy && !isAgentThreadLocked(props.thread?.status) ? props.onReview : undefined} />
+        toggleRef={panelToggleRef} inputRef={props.composerInputRef} onWidthCommit={props.onPanelWidthCommit} />
       </div>
       </main>
       </DiffPreferences.Provider>

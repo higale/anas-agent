@@ -1,4 +1,15 @@
 {
+  "panels": {
+    "move_window": "移到独立窗口",
+    "move_sidebar": "移回侧边栏",
+    "view_conflict": "目标位置已打开此实例，请先关闭那份页面再移动。",
+    "view_target_unavailable": "目标位置尚未准备好，已保留原页面。",
+    "view_closed": "此面板已关闭。",
+    "operation_failed": "面板操作失败。",
+    "action_unavailable": "该面板操作当前不可用。",
+    "action_failed": "面板操作失败，请查看面板中的详细信息。",
+    "action_timeout": "面板操作未响应，请确认当前状态后再重试。"
+  },
   "version": 0,
   "capabilities": {
     "off": "关闭",

@@ -26,3 +26,11 @@ if (mainBundle.includes('Could not dynamically require')) {
 }
 
 console.log('Electron main bundle dependency boundaries verified.')
+
+// Sandboxed preloads cannot require Rollup's shared chunks or Node packages.
+for (const path of listJavaScriptFiles(resolve('out/preload'))) {
+  const source = readFileSync(path, 'utf8')
+  const imports = [...source.matchAll(/\brequire\((['"])([^'"]+)\1\)/g)].map(match => match[2])
+  if (imports.some(id => id !== 'electron')) throw new Error(`Sandboxed preload has an external dependency: ${path}`)
+}
+console.log('Sandboxed preload entries are standalone.')

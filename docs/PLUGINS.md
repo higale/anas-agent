@@ -8,7 +8,7 @@
 
 UI 和后台均为可选入口，至少提供一个。纯 UI 插件不创建后台进程；后台首次启动或调用时才创建独立 Electron utility process。插件不导入 Anas 内部 React 模块，也不建立另一套 Agent 执行循环。Skills、Tools 和 MCP 继续使用各自现有机制，本版不自动授予插件模型工具权限。
 
-侧边面板收起、切换标签、进入设置及切换会话只隐藏已打开的插件页面，保留其页面状态。关闭插件标签销毁该页面。独立窗口是另一份页面实例，插件后台和持久化数据按插件共享；侧边页与独立窗口之间不承诺转移浏览器内存状态。RDP 等功能应自行管理连接会话，后续接入时验证其生命周期。
+侧边面板收起、切换标签、进入设置及切换会话只隐藏已打开的插件页面，保留其页面状态。关闭插件标签销毁该页面。所有页面由主进程统一管理，通过同一个 WebContentsView 在侧边栏和独立窗口之间移动，保留 DOM、JavaScript、WASM 和 WebSocket；不重新加载。插件后台和持久化数据按插件共享。
 
 ## 插件包
 
@@ -61,6 +61,8 @@ const home = await anas.getHome(); // { location, locations }
 await anas.data.set('home_open_location', 'window');
 await anas.openHome();
 await anas.openView({ instanceId: 'document-123', location: 'sidebar', title: 'Example' });
+await anas.moveView('window'); // 移动当前页面
+const unsubscribe = anas.onViewChanged(({ instanceId, location }) => { /* 更新位置相关业务 */ });
 const value = await anas.data.get('draft'); // 未设置时返回 null
 await anas.data.set('draft', { text: 'Hello' });
 await anas.openExternal('https://example.com');
@@ -91,17 +93,47 @@ const { resources, errors } = await anas.getLanguageResources();
 
 每插件最多 128 个语言 JSON，单文件 128 KiB，总计 512 KiB；语言文件名使用字母开头的字母、数字及短横线代码。资源路径须留在包内。损坏 JSON、未知格式或重复语种会在插件设置中报告，合法语言继续使用；目录或总量错误则拒绝加载该目录。原文件不修改，语言错误不阻止停用或卸载。
 
-`openView()` 只打开当前插件的 UI，`location` 为 `sidebar` 或 `window`；`instanceId` 必填，允许 1–80 位英文字母、数字、下划线和短横线；可选 `title` 为最多 120 字符的非空标题。插件可把自己的配置 ID 用作页面实例 ID，通过 `getInfo().view` 读取。实例 ID 出现在页面 URL，不应放密码或其他秘密。默认菜单页面使用 `main`。此接口是 API 1 的新增能力；依赖它的插件应检查 `typeof anas.openView` 并提示旧宿主升级。
+`openView()` 只打开当前插件的 UI，`location` 为 `sidebar` 或 `window`；`instanceId` 必填，允许 1–80 位英文字母、数字、下划线和短横线；可选 `title` 为最多 120 字符的非空标题。插件可把自己的配置 ID 用作页面实例 ID，通过 `getInfo().view` 读取。实例 ID 出现在页面 URL，不应放密码或其他秘密。默认菜单页面使用 `main`。
 
-同一插件、打开位置和实例 ID 重复打开时聚焦已有页面，保留内存和连接；不同位置是独立页面，不迁移会话。插件每种位置的 `main` 仍兼容原菜单入口。独立窗口每插件最多 32 个；侧边调用完成表示已向主界面发送打开请求，窗口调用完成表示 DOM 已就绪，均不保证插件业务初始化完成。停用、卸载、恢复和宿主关闭会回收所有实例。插件自行决定是否自动执行连接等业务操作。
+同一插件、打开位置和实例 ID 重复打开时聚焦已有页面，保留内存和连接；分别在不同位置调用 `openView` 会得到独立页面。默认菜单使用 `main` 实例。每插件最多 64 个页面，其中独立窗口最多 32 个；调用完成表示目标容器与页面 DOM 已就绪，不保证插件业务初始化完成。停用、卸载、恢复和宿主关闭会回收所有实例。插件自行决定是否自动执行连接等业务操作。
 
 数据键最长 80 个字符，允许字母、数字、点、下划线和短横线；数据为 JSON，单个插件的数据文件最多 1 MiB。写入按顺序原子保存。不存在的键使用 `null`，有效的 `false`、`0`、空字符串和空数组原样保留。
 
 页面使用独立的 `anas-plugin://<id>/` 来源，通过专用消息接口访问宿主，没有 `window.gale`、Node 或任意文件读取接口。页面可以请求网络；允许 WASM、包内脚本和样式，禁止内联脚本。外部链接用 `openExternal` 打开。
 
-侧边 iframe 允许表单事件和 HTML 表单校验，插件可以在 `submit` 监听器中调用 `preventDefault()` 后通过公开 API 执行操作。CSP 的 `form-action 'none'` 继续禁止表单网络提交；表单自身不会获得额外宿主权限。
+插件页面允许表单事件和 HTML 表单校验，插件可以在 `submit` 监听器中调用 `preventDefault()` 后通过公开 API 执行操作。CSP 的 `form-action 'none'` 继续禁止表单网络提交；表单自身不会获得额外宿主权限。
 
-侧边页面使用独立来源 iframe，持久挂载在界面层；面板插槽提供位置和尺寸，切换页面树不会重建 iframe。弹出窗口使用独立 preload，仅暴露同一组插件 API；页面 DOM 就绪后显示，不等待远程图片等资源，加载不占用插件数据操作队列，DOM 就绪最多等待 30 秒。主界面的 IPC 不向插件页面开放。
+### 移动页面与宿主结构
+
+侧边栏标题区的「移到独立窗口」和窗口标题栏的「移回侧边栏」调用同一管理器。插件可用 `moveView(location)` 移动自己；首页遵守清单 `home.locations`，其他实例允许两种位置。`getInfo().view.location` 返回当前实际位置，移动成功后 `onViewChanged` 通知新位置；返回的函数解除订阅。移动不修改首页偏好或插件配置。
+
+页面加载与位置切换独立：先展示目标容器和加载状态，DOM 就绪后显示页面，加载期间也可移动或关闭。同一页面的并发移动按顺序执行；目标已有同插件、同实例页面时明确报错，不覆盖或关闭任何一方。目标准备失败、用户拒绝离开未保存设置或等待超时均保留原页面及其当前布局；关闭、停用、卸载和恢复会取消未完成的移动并回收视图。侧边目标等待最多 15 秒，页面 DOM 与窗口容器分别最多等待 30 秒，不等待远程图片等资源。
+
+- `src/main/panels/panelViews.ts`：唯一的页面注册表，负责创建、移动、几何布局和销毁；运行时 `viewId` 不持久化。
+- `src/renderer/src/ui/panels/PanelLayouts.tsx`：投影侧边标签和插槽尺寸，不持有插件页面；主界面刷新后按主进程状态恢复投影。
+- `src/renderer/src/panelWindow.tsx`：独立窗口的宿主标题栏，提供移回侧边栏图标；保留系统窗口按钮，插件原生视图位于标题栏下方。
+- `src/preload/plugin.ts` 与 `panelWindow.ts`：分别提供有限的插件 API 和窗口容器 API，不开放主界面 IPC。
+
+原生视图位于网页 DOM 上方。侧边插槽留出完整拖拽命中区；拖拽和重叠的宿主弹窗、菜单、通知期间暂时隐藏视图，保持页面运行。尺寸按宿主缩放换算。布局回执和取消操作不读取应用数据、不等待备份锁；打开时在应用数据生命周期内准备内容及语言快照，再等待界面布局；移动复用已准备的页面，恢复和退出统一关闭注册表。页面不再通过 iframe 或跨窗口消息桥加载。
+
+### 窗口标题栏
+
+页面可用 `setToolbar` 替换自己的标题栏状态和操作，传 `null` 清空；只在独立窗口显示，移动时保留，刷新或关闭后清除，不写入配置。内置面板通过 `panelContent` 使用相同接口。
+
+```js
+const unsubscribe = anas.onToolbarAction(async id => {
+  if (id === 'disconnect') await disconnect(); // 仍在原页面执行
+});
+await anas.setToolbar({
+  status: { label: '已连接', tone: 'success' },
+  actions: [{ id: 'disconnect', label: '断开', icon: 'unplug', disabled: false }]
+});
+```
+
+每页注册一个操作处理器，返回函数解除订阅。`actions` 必填、最多 4 项；`id` 为 1–64 位英文字母、数字、下划线或短横线，不能重复；`label` 为最多 120 字符的非空本地化文本，用于提示及无障碍名称。`icon` 支持 `unplug`、`x`、`refresh-cw`、`play`、`pause`、`square`、`settings`、`save`；`disabled` 缺失为 `false`。可选 `status` 的 `label` 遵守同样限制，`tone` 为 `neutral`（默认）、`success`、`warning` 或 `danger`。页面负责跟随业务状态及语言更新，宿主不读取插件业务状态、不代调后台。
+
+宿主校验当前页面及窗口归属，只派发已登记且可用的操作。同页一次只执行一个标题栏操作，执行中按钮禁用；处理器拒绝时显示失败消息，30 秒无结果时显示超时消息，不自动重试，超时不代表业务被取消；操作保持禁用，直到处理器完成或页面关闭／刷新。关闭或刷新取消未完成回执，旧回执不能完成其他页面的操作。需要停止业务时由插件实现取消。页面确认 `setToolbar` 成功后再隐藏原操作栏；更新失败应保留可用入口并报告错误。此接口属于 API 1 的新增能力，使用它的开发插件需配套宿主。
+
 
 ## 可选后台
 
@@ -133,3 +165,5 @@ module.exports = {
 在完成 `npm run build` 后运行 `node scripts/electron-plugins.cjs`，使用临时数据目录验证真实应用，不修改个人配置。
 
 新增宿主接口需有具体插件需求、参数与生命周期约定、可观察的失败行为及测试。插件更新事务及 RDP 等具体插件按实际需求单独评估。
+
+内置面板使用同一管理器，数据接口与插件分离；详见[面板框架](PANEL_FRAMEWORK.md)。

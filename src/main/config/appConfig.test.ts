@@ -251,6 +251,19 @@ describe('MCP runtime configuration snapshot', () => {
   })
 })
 
+describe('display settings', () => {
+  it('does not wait for tool discovery and preserves explicit display preferences', async () => {
+    const raw = rawConfig()
+    raw.settings!.font_size = 18
+    raw.settings!.diff_word_wrap = false
+    const { appConfig } = await loadAppConfig(raw)
+    const { listToolSnapshot } = await import('../toolsStore')
+    await vi.mocked(listToolSnapshot).withImplementation(() => new Promise(() => {}), async () => {
+      expect(await appConfig.getAppSettings()).toMatchObject({ fontSize: 18, diffWordWrap: false, theme: 'system' })
+    })
+  })
+})
+
 describe('configuration domain writes', () => {
   const modelSave = {
     name: 'Generated model',
@@ -388,6 +401,23 @@ describe('configuration domain writes', () => {
     expect(raw.settings).toMatchObject({ diff_view_mode: 'side_by_side', diff_fold_unchanged: false, diff_word_wrap: true })
     await appConfig.updateSettings({ diffViewMode: 'inline' })
     expect((await appConfig.getAppConfigSnapshot()).settings).toMatchObject({ diffViewMode: 'inline', diffFoldUnchanged: false, diffWordWrap: true })
+  })
+
+  it('broadcasts committed settings and merges overlapping partial saves', async () => {
+    const { appConfig, writeRawSettingsConfig } = await loadAppConfig(rawConfig())
+    const changed = vi.fn()
+    appConfig.onAppConfigChanged(changed)
+    await Promise.all([
+      appConfig.updateSettings({ diffViewMode: 'side_by_side', fontSize: 18 }),
+      appConfig.updateSettings({ diffWordWrap: true })
+    ])
+    const saved = await appConfig.getAppConfigSnapshot()
+    expect(saved.settings).toMatchObject({ diffViewMode: 'side_by_side', diffWordWrap: true, fontSize: 18 })
+    expect(changed).toHaveBeenLastCalledWith({ config: 'settings', key: 'settings', snapshot: saved })
+    expect(changed).toHaveBeenCalledTimes(2)
+    writeRawSettingsConfig.mockRejectedValueOnce(new Error('Disk full'))
+    await expect(appConfig.updateSettings({ diffWordWrap: false })).rejects.toThrow('Disk full')
+    expect(changed).toHaveBeenCalledTimes(2)
   })
 
   it('persists runtime environment details separately from the environment capability', async () => {

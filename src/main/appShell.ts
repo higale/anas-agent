@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, nativeTheme, shell, type BrowserWindowConstructorOptions, type MenuItemConstructorOptions } from 'electron'
+import { app, BrowserWindow, Menu, nativeTheme, shell, type MenuItemConstructorOptions, type WebContents } from 'electron'
 import { join } from 'node:path'
 import { getAppConfigSnapshot } from './config/appConfig'
 import { getLanguageResources } from './languageStore'
@@ -7,6 +7,7 @@ import { runtimeLog } from './runtimeLogger'
 import { registerWindowZoomShortcuts, resetAppZoom, stepAppZoom } from './zoomService'
 import { buildNativeContextMenuTemplate, type NativeMenuLabel } from './nativeContextMenu'
 import { applyProfileWindowIcon } from './profileIconService'
+import { applyWindowTheme, titleBarColors, titleBarOptions } from './windowAppearance'
 import { applicationName, applicationRepositoryUrl } from '@shared/appMetadata'
 
 const externalUrlProtocols = new Set(['http:', 'https:', 'mailto:'])
@@ -22,31 +23,6 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function normalizeThemeSource(value?: string): ThemeSource {
   return value === 'light' || value === 'dark' ? value : 'system'
-}
-
-function titleBarColors(): { backgroundColor: string; symbolColor: string } {
-  return nativeTheme.shouldUseDarkColors
-    ? { backgroundColor: '#202020', symbolColor: '#e5e5e5' }
-    : { backgroundColor: '#f5f5f5', symbolColor: '#252525' }
-}
-
-function titleBarOptions(): Pick<BrowserWindowConstructorOptions, 'titleBarStyle' | 'titleBarOverlay' | 'trafficLightPosition'> {
-  if (process.platform === 'darwin') {
-    return {
-      titleBarStyle: 'hiddenInset',
-      trafficLightPosition: { x: 16, y: 18 }
-    }
-  }
-
-  const colors = titleBarColors()
-  return {
-    titleBarStyle: 'hidden',
-    titleBarOverlay: {
-      color: colors.backgroundColor,
-      symbolColor: colors.symbolColor,
-      height: 36
-    }
-  }
 }
 
 function requestAboutDialog(): void {
@@ -232,21 +208,6 @@ export function applyNativeTheme(theme?: string): void {
   }
 }
 
-export function applyWindowTheme(win: BrowserWindow): void {
-  const colors = titleBarColors()
-  win.setBackgroundColor(colors.backgroundColor)
-  if (process.platform === 'darwin') return
-  try {
-    win.setTitleBarOverlay({
-      color: colors.backgroundColor,
-      symbolColor: colors.symbolColor,
-      height: 36
-    })
-  } catch {
-    // Some Linux window managers ignore or reject title bar overlay updates.
-  }
-}
-
 function registerExternalNavigationGuards(win: BrowserWindow): void {
   win.webContents.setWindowOpenHandler(({ url }) => {
     void openExternalUrl(url).catch((reason) => {
@@ -300,10 +261,12 @@ function registerWindowDiagnostics(win: BrowserWindow): void {
   })
 }
 
-function registerNativeContextMenu(win: BrowserWindow): void {
-  win.webContents.on('context-menu', (_event, params) => {
+export function registerNativeContextMenu(contents: WebContents, owner: () => BrowserWindow | undefined): void {
+  contents.on('context-menu', (_event, params) => {
+    const window = owner()
+    if (!window || window.isDestroyed()) return
     const menu = Menu.buildFromTemplate(buildNativeContextMenuTemplate(params, currentMenuLabel))
-    menu.popup({ window: win })
+    menu.popup({ window, frame: params.frame ?? contents.mainFrame })
   })
 }
 
@@ -347,7 +310,7 @@ export function createMainWindow(options: { recovery?: boolean } = {}): void {
   applyWindowTheme(win)
   registerExternalNavigationGuards(win)
   registerWindowDiagnostics(win)
-  registerNativeContextMenu(win)
+  registerNativeContextMenu(win.webContents, () => win)
   registerWindowZoomShortcuts(win)
 
   if (rendererLocation.kind === 'development') {

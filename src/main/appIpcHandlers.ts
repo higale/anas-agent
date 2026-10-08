@@ -1,3 +1,4 @@
+import { panelViews } from './panels/panelRegistry'
 import { readHelpDocument } from './helpDocuments'
 import { app, session, shell } from 'electron'
 import { mkdir, readFile, stat } from 'node:fs/promises'
@@ -224,6 +225,7 @@ export function registerAppIpcHandlers(): void {
     const deactivate = async (): Promise<void> => {
       await beginApplicationDataTransition()
       const stopped = await Promise.allSettled([
+        Promise.resolve().then(() => panelViews.closeAll()),
         closePluginHost(),
         closeAgentRuntime(),
         closeCachedMcpRuntime()

@@ -2221,16 +2221,16 @@ button.ui-avatar:has(> img):focus-visible,
 .ui-resize-handle {
   -webkit-app-region: no-drag;
   position: absolute;
-  inset: 0 -8px 0 auto;
-  z-index: 4;
-  width: 16px;
+  inset: 0 calc(var(--resize-handle-width) / -2) 0 auto;
+  z-index: 6;
+  width: var(--resize-handle-width);
   cursor: col-resize;
   touch-action: none;
 }
 
 .ui-resize-handle::after {
   position: absolute;
-  inset: 0 auto 0 7px;
+  inset: 0 auto 0 calc(var(--resize-handle-width) / 2 - 1px);
   width: 2px;
   background: transparent;
   content: '';
@@ -2281,6 +2281,7 @@ html.ui-resizing * {
   flex: 1 1 0;
   min-width: 0;
   overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .ui-tab-item {
@@ -2317,6 +2318,27 @@ html.ui-resizing * {
 
 .ui-tab-trigger svg, .ui-tab-close { flex-shrink: 0; }
 .ui-tab-close { width: 22px; height: 22px; padding: 3px; }
+
+/* Share available space before scrolling. Each tab can shrink to one icon. */
+.ui-tab-list-adaptive {
+  /* Keep unused titlebar space outside the interactive scroll area. */
+  flex: 0 1 auto;
+  -webkit-app-region: no-drag;
+}
+.ui-tab-list-adaptive > .ui-tab-item {
+  flex: 1 1 auto;
+  width: 220px;
+  min-width: var(--control-height);
+  padding-right: 0;
+  container: adaptive-tab / inline-size;
+}
+.ui-tab-list-adaptive .ui-tab-trigger { flex: 1; padding-inline: 8px; }
+.ui-tab-list-adaptive .ui-tab-close { margin-right: 4px; }
+@container adaptive-tab (width < 6em) {
+  .ui-tab-title, .ui-tab-close { display: none; }
+  .ui-tab-trigger { justify-content: center; gap: 0; }
+}
+
 .ui-tab-content { min-width: 0; min-height: 0; overflow: hidden; }
 .ui-tab-content[data-state="inactive"] { display: none; }
 

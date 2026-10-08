@@ -1,3 +1,4 @@
+const { verifyUnifiedPanels } = require('./electron-panels.cjs')
 const assert = require('node:assert/strict')
 const { execFile } = require('node:child_process')
 const { promisify } = require('node:util')
@@ -17,6 +18,7 @@ const { verifyCurrentStorage } = require('./electron-current-storage.cjs')
 const { verifyProjectPreviews } = require('./electron-project-previews.cjs')
 const { verifyProjectModelPicker } = require('./electron-project-model-picker.cjs')
 const { verifyHelpDocuments } = require('./electron-help-documents.cjs')
+const { verifyWorkspaceTabs } = require('./electron-workspace-tabs.cjs')
 const { verifyDefaultCapabilities } = require('./electron-default-capabilities.cjs')
 const { verifyGlobalSettings } = require('./electron-global-settings.cjs')
 const { verifyControlLayout } = require('./electron-control-layout.cjs')
@@ -1119,6 +1121,14 @@ async function main() {
     await verifyHelpDocuments(launchApplication)
     return
   }
+  if (process.argv.includes('--panels-only')) {
+    await verifyUnifiedPanels()
+    return
+  }
+  if (process.argv.includes('--workspace-tabs-only')) {
+    await verifyWorkspaceTabs(launchApplication)
+    return
+  }
   if (process.argv.includes('--settings-only')) {
     await verifyGlobalSettings(launchApplication)
     return
@@ -1162,6 +1172,7 @@ async function main() {
     await verifyCustomTools(launchApplication)
     await verifySkillApproval(launchApplication)
     await verifyHelpDocuments(launchApplication)
+    await verifyWorkspaceTabs(launchApplication)
     await verifyAttachmentPreviews(launchApplication)
   }
   if (!packagedExecutable && !process.argv.includes('--changes-only') && !process.argv.includes('--workspace-only')) await verifyEnvironmentStartup(repositoryRoot, electronExecutable)

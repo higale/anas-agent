@@ -31,8 +31,7 @@ export default defineConfig(({ command }) => {
       }
     },
     preload: {
-      build: { rollupOptions: { input: { index: resolve('src/preload/index.ts'), plugin: resolve('src/preload/plugin.ts') } } },
-      plugins: [externalizeDepsPlugin()],
+      build: { isolatedEntries: true, externalizeDeps: false, rollupOptions: { input: { index: resolve('src/preload/index.ts'), plugin: resolve('src/preload/plugin.ts'), panelWindow: resolve('src/preload/panelWindow.ts'), panelContent: resolve('src/preload/panelContent.ts') } } },
       resolve: {
         alias: {
           '@shared': resolve('src/shared')
@@ -41,6 +40,7 @@ export default defineConfig(({ command }) => {
     },
     renderer: {
       root: 'src/renderer',
+      build: { rollupOptions: { input: { index: resolve('src/renderer/index.html'), panelWindow: resolve('src/renderer/panel-window.html'), panelContent: resolve('src/renderer/panel-content.html') } } },
       server: {
         host: '127.0.0.1',
         port: 15173,

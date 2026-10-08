@@ -1,4 +1,5 @@
 import type { AttachmentPreview, AttachmentPreviewOptions } from '@shared/types'
+import { contentServices } from '../panels/contentServices'
 
 const maxConcurrentPreviewRequests = 4
 const maxQueuedPreviewRequests = 96
@@ -41,7 +42,7 @@ function pumpQueue(): void {
     const task = queued.shift()
     if (!task) return
     activeCount += 1
-    void window.gale.files.readAttachmentPreview(task.path, task.options)
+    void contentServices().files.readAttachmentPreview(task.path, task.options)
       .then(task.resolve, task.reject)
       .finally(() => {
         activeCount -= 1

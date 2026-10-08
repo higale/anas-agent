@@ -27,7 +27,7 @@ import { handleMainIpc } from './ipcSecurity'
 import { resolveWorkspaceImagePath } from './workspaceImagePath'
 import { consumePendingAvatarUpdate } from './avatarConfigService'
 import { runApplicationDataOperation } from './applicationDataLifecycle'
-import { refreshPluginWindowTitles } from './plugins/pluginHost'
+import { refreshPanelAppearance, updatePanelProject } from './panels/panelHost'
 
 function runMcpUpdateInBackground(operation: Promise<unknown>, action: string): void {
   void operation.catch((reason) => {
@@ -85,7 +85,9 @@ export function registerWorkspaceIpcHandlers(): void {
   }))
   handleMainIpc('projects:update', async (_event, projectId: string, request: ProjectUpdateRequest) => projectOperation(async () => {
     await recoverPendingProjectDeletion()
-    return updateProject(projectId, request)
+    const project = await updateProject(projectId, request)
+    updatePanelProject(project)
+    return project
   }))
   handleMainIpc('projects:updateState', async (_event, projectId: string, update: ProjectStateUpdate): Promise<Project> => {
     await recoverPendingProjectDeletion()
@@ -182,7 +184,7 @@ export function registerWorkspaceIpcHandlers(): void {
     const snapshot = await updateSettings(settings)
     if (settings.language !== undefined) {
       await configureApplicationMenu()
-      await refreshPluginWindowTitles(snapshot.settings.language)
+      await refreshPanelAppearance()
     }
     if (settings.theme !== undefined) applyNativeTheme(snapshot.settings.theme)
     if (settings.logLevel !== undefined || settings.logRetentionDays !== undefined) {

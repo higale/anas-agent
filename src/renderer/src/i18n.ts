@@ -64,12 +64,16 @@ export async function initializeI18n(recovery = false): Promise<LanguageResource
     window.gale.app.getLanguageResources().catch(() => bundledSnapshot),
     window.gale.config.get().catch(() => undefined)
   ])
+  return initializeI18nFromResources(snapshot, config?.settings.language)
+}
+
+export async function initializeI18nFromResources(snapshot: LanguageResourcesSnapshot, preference?: string): Promise<LanguageResourcesSnapshot> {
   languageSnapshot = snapshot
   await i18next
     .use(initReactI18next)
     .init({
       resources: normalizeResources(snapshot.resources),
-      lng: resolveLanguagePreference(config?.settings.language),
+      lng: resolveLanguagePreference(preference),
       fallbackLng,
       interpolation: {
         escapeValue: false

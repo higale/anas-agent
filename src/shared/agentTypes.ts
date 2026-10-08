@@ -523,6 +523,7 @@ export interface AgentApi {
     loadEarlier(input: AgentMessageWindowInput): Promise<AgentThreadSnapshot>
   }
   activities: {
+    get(input: AgentRunReferenceInput): Promise<AgentRunActivity>
     loadEarlier(input: AgentActivityWindowInput): Promise<AgentRunActivity>
     subagent(input: AgentRunReferenceInput & { subagentId: string }): Promise<AgentSubagentActivity>
   }

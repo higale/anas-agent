@@ -32,6 +32,14 @@ describe('attachment preview loader', () => {
     await expect(refreshed).resolves.toEqual(preview('C:\\images\\same.png'))
   })
 
+  it('loads previews through the content-page bridge without a main-window API', async () => {
+    const readAttachmentPreview = vi.fn(async (path: string) => preview(path))
+    vi.stubGlobal('window', { panelContent: { services: { files: { readAttachmentPreview } } } })
+    const { loadAttachmentPreview } = await import('./attachmentPreviewLoader')
+    await expect(loadAttachmentPreview('/project/result.png', { projectId: 'origin' })).resolves.toEqual(preview('/project/result.png'))
+    expect(readAttachmentPreview).toHaveBeenCalledWith('/project/result.png', { mode: 'thumbnail', size: 240, projectId: 'origin' })
+  })
+
   it('limits preview IPC concurrency across independently rendered messages', async () => {
     const pending = new Map<string, (value: AttachmentPreview) => void>()
     const readAttachmentPreview = vi.fn((path: string) => new Promise<AttachmentPreview>((resolve) => {

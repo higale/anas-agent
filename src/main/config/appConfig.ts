@@ -271,6 +271,11 @@ export async function getAppConfigSnapshot(): Promise<AppConfigSnapshot> {
   return { ...normalizeAppConfigSnapshot(raw), customTools: catalog.tools }
 }
 
+/** Read display settings without waiting for tool-directory discovery. */
+export async function getAppSettings(): Promise<AppSettings> {
+  return normalizeSettings(await readRawConfig())
+}
+
 export function normalizeAppConfigSnapshot(raw: RawAppConfig): AppConfigSnapshot {
   const settings = normalizeSettings(raw)
   const providers = (raw.providers ?? []).map(normalizeModelProvider)
@@ -876,7 +881,9 @@ export async function updateSettings(settings: AppSettingsUpdate): Promise<AppCo
       backup_dir: settings.backupDir ?? raw.settings?.backup_dir
     }
     await writeRawSettingsConfig(raw)
-    return getAppConfigSnapshot()
+    const snapshot = await getAppConfigSnapshot()
+    emitAppConfigChanged({ config: 'settings', key: 'settings', snapshot })
+    return snapshot
   })
 }
 

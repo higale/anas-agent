@@ -1,3 +1,4 @@
+import { contentServices } from '../panels/contentServices'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, File, FileCode, FileText, Image as ImageIcon, Pin, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -128,7 +129,7 @@ export function AttachmentGrid({
     async function loadFileIcons(): Promise<void> {
       const loaded = await Promise.all(paths.map(async (path) => {
         try {
-          const icon = await window.gale.files.readFileIcon(path, 'normal')
+          const icon = await contentServices().files.readFileIcon(path, 'normal')
           return [path, icon] as const
         } catch {
           return [path, null] as const
@@ -176,7 +177,7 @@ export function AttachmentGrid({
   async function showItemInFolder(file: AttachmentGridItem): Promise<void> {
     if (!file.path) return
     try {
-      await window.gale.files.showItemInFolder(file.path)
+      await contentServices().files.showItemInFolder(file.path)
     } catch {
       notice.error(t('chat.failed_open_attachment'))
     }

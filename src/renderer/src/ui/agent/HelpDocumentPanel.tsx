@@ -1,3 +1,4 @@
+import { contentServices } from '../panels/contentServices'
 import { PopoverContent } from '../PopoverContent'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as Popover from '@radix-ui/react-popover'
@@ -7,9 +8,9 @@ import { helpDocuments, resolveHelpLink } from '@shared/helpDocuments'
 import { MarkdownText } from '../chat/MarkdownText'
 import { UI_ICON_SIZE_MEDIUM } from '../uiConstants'
 import { usePanelRef, usePanelScroll, usePanelState } from './PanelViewState'
-import type { WorkspacePanel } from './useWorkspacePanels'
+import type { BuiltinPanel } from '@shared/panels'
 
-type DocumentPanel = Extract<WorkspacePanel, { kind: 'document' }>
+type DocumentPanel = Extract<BuiltinPanel, { kind: 'document' }>
 type Heading = { id: string; text: string; level: number; element: HTMLElement }
 
 function DocumentOutline({ headings, active, popup, onSelect }: {
@@ -76,7 +77,7 @@ export function HelpDocumentPanel({ request, onOpen }: {
     if (content !== undefined) return
     let cancelled = false
     setFailed(false)
-    void window.gale.app.readHelp(request.documentId).then((text) => {
+    void contentServices().app.readHelp(request.documentId).then((text) => {
       if (!cancelled) setContent(text)
     }).catch(() => { if (!cancelled) setFailed(true) })
     return () => { cancelled = true }
@@ -145,7 +146,7 @@ export function HelpDocumentPanel({ request, onOpen }: {
   const navigate = useCallback(async (href: string): Promise<void> => {
     const target = resolveHelpLink(href, request.documentId)
     if (target) onOpen({ kind: 'document', ...target, navigationId: crypto.randomUUID() })
-    else await window.gale.app.openExternalUrl(href)
+    else await contentServices().app.openExternalUrl(href)
   }, [request.documentId, onOpen])
   // Updating the highlighted chapter must not reparse the entire document on scroll.
   const markdown = useMemo(() => content === undefined ? null : <MarkdownText text={content} onNavigate={navigate} />, [content, navigate])

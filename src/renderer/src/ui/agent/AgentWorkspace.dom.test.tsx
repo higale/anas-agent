@@ -57,7 +57,7 @@ function workspaceProps(
   error?: string
 ): ComponentProps<typeof AgentWorkspace> {
   return {
-    panels: { groups: {}, documents: { tabs: [], expanded: false, maximized: false }, open: vi.fn(), select: vi.fn(), close: vi.fn(), toggle: vi.fn(), dismiss: vi.fn(), toggleMaximized: vi.fn(), remove: vi.fn(), closePlugins: vi.fn(), localizePlugins: vi.fn() },
+    panels: { groups: {}, documents: { tabs: [], expanded: false, maximized: false }, open: vi.fn(), select: vi.fn(), toggle: vi.fn(), dismiss: vi.fn(), toggleMaximized: vi.fn(), remove: vi.fn(), syncViews: vi.fn(), present: vi.fn() },
     onPanelWidthCommit: vi.fn(),
     activeThreadId: 'thread-1',
     attachments: [],
@@ -128,7 +128,7 @@ function workspaceProps(
 }
 
 describe('AgentWorkspace', () => {
-  beforeEach(() => vi.stubGlobal('gale', { agent: { context: { status: vi.fn(async () => undefined) } } }))
+  beforeEach(() => vi.stubGlobal('gale', { panels: { onEscape: () => () => {} }, agent: { context: { status: vi.fn(async () => undefined) } } }))
   afterEach(() => vi.unstubAllGlobals())
   it('keeps an open context window mounted while model parameters require an asynchronous reestimate', async () => {
     let finish!: (status: AgentContextStatus) => void
@@ -314,7 +314,7 @@ describe('AgentWorkspace', () => {
   it('shows the main panel opener only while collapsed and one panel closer while expanded', () => {
     const props = workspaceProps(interruptedRun([]))
     const scope = workspacePanelScope(props.activeThreadId, props.selectedProjectId)
-    const group = { tabs: [{ id: 'subagent:one', panel: { kind: 'subagent' as const, runId: 'run', subagentId: 'one', name: 'One' }, view: new Map() }], activeId: 'subagent:one', expanded: false, maximized: false }
+    const group = { tabs: [{ id: 'subagent:one', name: 'One', viewId: 'view-one', locations: ['sidebar', 'window'] as ('sidebar' | 'window')[], moving: false, panel: { kind: 'subagent' as const, projectId: 'project', threadId: 'thread-1', runId: 'run', subagentId: 'one', name: 'One' } }], activeId: 'subagent:one', expanded: false, maximized: false }
     props.panels.groups = { [scope]: group }
     const { rerender } = render(<AgentWorkspace {...props} />)
     fireEvent.click(screen.getByRole('button', { name: 'agent.show_panels' }))

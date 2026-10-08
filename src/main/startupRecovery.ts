@@ -1,3 +1,4 @@
+import { panelViews } from './panels/panelRegistry'
 import { app, shell } from 'electron'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -36,7 +37,10 @@ async function stopWriters(): Promise<void> {
   stopError = undefined
   try {
     await beginApplicationDataTransition()
-    const results = await Promise.allSettled([closeAgentRuntime(), closeCachedMcpRuntime(), closePluginHost()])
+    const results = await Promise.allSettled([
+      Promise.resolve().then(() => panelViews.closeAll()),
+      closePluginHost(), closeAgentRuntime(), closeCachedMcpRuntime()
+    ])
     const errors = results.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])
     if (errors.length) throw new AggregateError(errors, 'Could not stop application data writers.')
     await recoverInterruptedDataRestore()

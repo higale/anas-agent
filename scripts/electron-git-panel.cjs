@@ -1,12 +1,12 @@
 const assert = require('node:assert/strict')
 const { execFile } = require('node:child_process')
 const { promisify } = require('node:util')
-const { mkdir, mkdtemp, rm, writeFile } = require('node:fs/promises')
+const { mkdir, mkdtemp, realpath, rm, writeFile } = require('node:fs/promises')
 const { tmpdir } = require('node:os')
 const { join } = require('node:path')
 const { expect } = require('playwright/test')
+const { panelPage, panelGeometry } = require('./electron-panel-helpers.cjs')
 const { monacoState } = require('./electron-diff-view.cjs')
-const { restrict_subagents, ...capabilities } = require('../data/config/capabilities.json')
 
 async function verifyTopbarActions(page) {
   const aligned = await page.locator('.topbar').evaluate((bar) => {
@@ -38,28 +38,31 @@ async function verifyPanelTogglePosition(application, page) {
 }
 
 async function verifyGitPanelStates(launchApplication) {
-  const home = await mkdtemp(join(tmpdir(), 'anas-git-panel-e2e-'))
+  const home = await realpath(await mkdtemp(join(tmpdir(), 'anas-git-panel-e2e-')))
   let application
   try {
-    const workspace = join(home, 'workspace'), timestamp = new Date().toISOString()
+    const workspace = join(home, 'workspace')
     await mkdir(workspace)
-    await writeFile(join(home, 'projects.json'), JSON.stringify({ version: 0, projects: [{
-      id: 'default-workspace', kind: 'workspace', name: 'Git panel fixture', sourceFolders: [workspace],
-      capabilities, restrict_subagents, advanced_settings: false, coding_mode: false,
-      pinned: false, collapsed: false, prompt: '', createdAt: timestamp, updatedAt: timestamp
-    }] }))
     application = await launchApplication(home)
+    application.process().stderr.on('data', chunk => { if (/Error|failed/i.test(String(chunk))) console.error(String(chunk).trim()) })
     const page = await application.firstWindow()
     const pageErrors = []
     page.on('pageerror', (error) => pageErrors.push(error.message))
     await page.locator('[data-agent-composer-input]').waitFor({ timeout: 45000 })
+    await page.evaluate(async workspace => {
+      const defaults = (await globalThis.gale.projects.list()).find(project => project.id === 'default-workspace')
+      const created = await globalThis.gale.projects.create({ ...defaults, name: 'Git panel fixture', sourceFolders: [workspace] })
+      if (created.status !== 'ok') throw new Error(JSON.stringify(created))
+      await globalThis.gale.agent.workspace.set({ mode: 'new_thread', projectId: created.value.id, modelParameterPresetId: null })
+    }, workspace)
     for (const language of ['zh-CN', 'en']) {
       await page.evaluate((language) => globalThis.gale.config.updateSettings({ language, theme: 'dark' }), language)
       await page.reload()
       await page.locator('[data-agent-composer-input]').waitFor()
       await verifyTopbarActions(page)
       await page.getByRole('button', { name: /^(文件改动|File changes)$/ }).click()
-      const panel = page.getByRole('tabpanel')
+      const contentPage = await panelPage(application, 'files')
+      const panel = contentPage.locator('.panel-content-root')
       await expect(panel.getByRole('status')).toHaveText(language === 'zh-CN'
         ? '此目录不是 Git 工作区，无法查看 Git 改动。'
         : 'This folder is not a Git working tree. Git changes are unavailable.')
@@ -71,7 +74,8 @@ async function verifyGitPanelStates(launchApplication) {
       })
       if (language === 'zh-CN') await page.getByRole('tablist').getByRole('button', { name: /^(关闭|Close) / }).click()
     }
-    const panel = page.getByRole('tabpanel'), git = (...args) => promisify(execFile)('git', args, { cwd: workspace })
+    const contentPage = await panelPage(application, 'files')
+    const panel = contentPage.locator('.panel-content-root'), git = (...args) => promisify(execFile)('git', args, { cwd: workspace })
     await verifyTopbarActions(page)
     await verifyPanelTogglePosition(application, page)
     await git('init', '-b', 'main')
@@ -83,11 +87,11 @@ async function verifyGitPanelStates(launchApplication) {
     await expect(panel.locator('.monaco-diff-editor')).toBeVisible({ timeout: 20000 })
     const wrap = panel.getByRole('button', { name: 'Word wrap', exact: true })
     await expect(wrap).toHaveAttribute('aria-pressed', 'false')
-    const original = await monacoState(application, page)
+    const original = await monacoState(application, contentPage)
     await wrap.click()
     await expect(wrap).toHaveAttribute('aria-pressed', 'true')
-    await expect.poll(async () => (await monacoState(application, page)).wrapping).toEqual([{ original: false, modified: true }])
-    assert.deepEqual((await monacoState(application, page)).models, original.models)
+    await expect.poll(async () => (await monacoState(application, contentPage)).wrapping).toEqual([{ original: false, modified: true }])
+    assert.deepEqual((await monacoState(application, contentPage)).models, original.models)
     await page.locator('.workspace-panels-titlebar').getByRole('button', { name: 'Hide right workspace', exact: true }).click()
     await verifyTopbarActions(page)
     await page.getByRole('button', { name: 'Show right workspace', exact: true }).click()
@@ -96,38 +100,39 @@ async function verifyGitPanelStates(launchApplication) {
       const layout = panel.getByRole('button', { name: 'Side by side', exact: true })
       await layout.click()
       await expect(layout).toHaveAttribute('aria-pressed', String(sideBySide))
-      await expect.poll(async () => (await monacoState(application, page)).wrapping).toEqual([{ original: sideBySide, modified: true }])
+      await expect.poll(async () => (await monacoState(application, contentPage)).wrapping).toEqual([{ original: sideBySide, modified: true }])
     }
     if (process.env.ANAS_E2E_GIT_PANEL_SCREENSHOT) await panel.screenshot({
       path: process.env.ANAS_E2E_GIT_PANEL_SCREENSHOT.replace(/\.png$/, '-wrap.png')
     })
     await panel.getByRole('button', { name: 'Refresh', exact: true }).click()
     await expect(wrap).toHaveAttribute('aria-pressed', 'true')
-    await expect.poll(async () => (await monacoState(application, page)).wrapping).toEqual([{ original: false, modified: true }])
+    await expect.poll(async () => (await monacoState(application, contentPage)).wrapping).toEqual([{ original: false, modified: true }])
     await wrap.click()
     await expect(wrap).toHaveAttribute('aria-pressed', 'false')
-    await expect.poll(async () => (await monacoState(application, page)).wrapping).toEqual([{ original: false, modified: false }])
-    assert.deepEqual((await monacoState(application, page)).models, original.models)
+    await expect.poll(async () => (await monacoState(application, contentPage)).wrapping).toEqual([{ original: false, modified: false }])
+    assert.deepEqual((await monacoState(application, contentPage)).models, original.models)
     for (const zoom of [1, 1.5]) {
       await application.evaluate(({ BrowserWindow }, zoom) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(zoom), zoom)
       const fold = panel.getByRole('button', { name: 'Fold unchanged regions', exact: true })
       await fold.hover()
-      await expect(page.getByRole('tooltip')).toHaveText('Fold unchanged regions')
-      await expect(page.getByRole('tooltip')).toBeVisible()
-      const geometry = await page.getByRole('tooltip').evaluate((element) => {
+      await expect(contentPage.getByRole('tooltip')).toHaveText('Fold unchanged regions')
+      await expect(contentPage.getByRole('tooltip')).toBeVisible()
+      const geometry = await contentPage.getByRole('tooltip').evaluate((element) => {
         const bounds = element.getBoundingClientRect(), overlay = navigator.windowControlsOverlay
         return { top: bounds.top, bottom: bounds.bottom, viewportHeight: globalThis.innerHeight,
           nativeBottom: overlay?.visible ? overlay.getTitlebarAreaRect().bottom : 0 }
       })
-      if (process.platform === 'win32') assert.ok(geometry.nativeBottom > 0, 'Windows must expose its native titlebar geometry.')
+      const placement = await panelGeometry(application, contentPage)
+      assert.ok(placement.y > 0, 'The native content view must stay below the titlebar.')
       assert.ok(geometry.top >= geometry.nativeBottom, 'Tooltip must stay below the native titlebar overlay.')
       assert.ok(geometry.bottom <= geometry.viewportHeight, 'Tooltip must stay inside the viewport.')
       if (process.env.ANAS_E2E_GIT_PANEL_SCREENSHOT) await application.evaluate(async ({ BrowserWindow }, path) => {
         const image = await BrowserWindow.getAllWindows()[0].webContents.capturePage()
         process.getBuiltinModule('node:fs').writeFileSync(path, image.toPNG())
       }, process.env.ANAS_E2E_GIT_PANEL_SCREENSHOT.replace(/\.png$/, `-tooltip-${zoom}.png`))
-      await page.mouse.move(0, 200)
-      await expect(page.getByRole('tooltip')).toHaveCount(0)
+      await contentPage.mouse.move(0, 200)
+      await expect(contentPage.getByRole('tooltip')).toHaveCount(0)
     }
     await writeFile(join(workspace, 'other.js'), 'initial other file\n')
     await panel.getByRole('button', { name: 'Refresh', exact: true }).click()
@@ -165,16 +170,16 @@ async function verifyGitPanelStates(launchApplication) {
     } finally {
       await application.evaluate(() => globalThis.__releaseGitRead())
     }
-    await expect.poll(async () => (await monacoState(application, page)).models).toContain('latest other file\n')
+    await expect.poll(async () => (await monacoState(application, contentPage)).models).toContain('latest other file\n')
     for (const control of controls) assert.ok(await control.evaluate((element) => element.isConnected), 'Loaded content must reuse the toolbar.')
-    await expect.poll(async () => (await monacoState(application, page)).wrapping).toEqual([{ original: true, modified: true }])
+    await expect.poll(async () => (await monacoState(application, contentPage)).wrapping).toEqual([{ original: true, modified: true }])
     await writeFile(join(workspace, 'other.js'), 'unrelated edit\n')
     await panel.getByRole('button', { name: 'A long-line.js', exact: true }).click()
-    await expect.poll(async () => (await monacoState(application, page)).models).toContain(longLine)
+    await expect.poll(async () => (await monacoState(application, contentPage)).models).toContain(longLine)
     await writeFile(join(workspace, 'long-line.js'), 'latest selected file\n')
     await panel.getByRole('button', { name: 'A other.js', exact: true }).click()
     await panel.getByRole('button', { name: 'A long-line.js', exact: true }).click()
-    await expect.poll(async () => (await monacoState(application, page)).models).toContain('latest selected file\n')
+    await expect.poll(async () => (await monacoState(application, contentPage)).models).toContain('latest selected file\n')
     await expect(fold).toHaveAttribute('aria-pressed', 'false')
     await expect(wrap).toHaveAttribute('aria-pressed', 'true')
     await expect(sideBySide).toHaveAttribute('aria-pressed', 'true')
@@ -188,9 +193,10 @@ async function verifyGitPanelStates(launchApplication) {
     assert.equal(settings.diffFoldUnchanged, false)
     assert.equal(settings.diffWordWrap, true)
     await reopenedPage.getByRole('button', { name: 'File changes', exact: true }).click()
-    await expect(reopenedPage.getByRole('button', { name: 'Side by side', exact: true })).toHaveAttribute('aria-pressed', 'true')
-    await expect(reopenedPage.getByRole('button', { name: 'Fold unchanged regions', exact: true })).toHaveAttribute('aria-pressed', 'false')
-    await expect(reopenedPage.getByRole('button', { name: 'Word wrap', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    const reopenedContent = await panelPage(application, 'files')
+    await expect(reopenedContent.getByRole('button', { name: 'Side by side', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await expect(reopenedContent.getByRole('button', { name: 'Fold unchanged regions', exact: true })).toHaveAttribute('aria-pressed', 'false')
+    await expect(reopenedContent.getByRole('button', { name: 'Word wrap', exact: true })).toHaveAttribute('aria-pressed', 'true')
     console.log('Git panel E2E passed: current file reads, persistent toolbar during loading, shared diff preferences, and settings retained after restart.')
   } finally {
     await application?.close().catch(() => {})

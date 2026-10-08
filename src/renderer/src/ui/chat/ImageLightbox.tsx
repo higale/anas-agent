@@ -1,3 +1,4 @@
+import { contentServices } from '../panels/contentServices'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { FolderOpen, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -98,7 +99,7 @@ export function ImageLightbox({
   async function showItemInFolder(): Promise<void> {
     if (!activeSlide?.path) return
     try {
-      await window.gale.files.showItemInFolder(activeSlide.path)
+      await contentServices().files.showItemInFolder(activeSlide.path)
     } catch {
       notice.error(t('chat.failed_open_attachment'))
     }

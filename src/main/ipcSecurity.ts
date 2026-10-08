@@ -57,6 +57,8 @@ const applicationDataIpcChannels = new Set([
 ])
 
 export function ipcUsesApplicationData(channel: string): boolean {
+  // Plugin opening performs data preparation inside the host, then awaits UI placement without a data lock.
+  if (channel === 'plugins:invoke' || channel === 'plugins:openWindow') return false
   return applicationDataIpcChannels.has(channel)
     || applicationDataIpcPrefixes.some((prefix) => channel.startsWith(prefix))
 }
@@ -98,7 +100,9 @@ export function rendererLocationMatches(location: RendererLocation, frameUrl: st
     if (location.kind === 'development') return candidate.origin === location.origin
     candidate.hash = ''
     candidate.search = ''
-    return candidate.toString() === location.url
+    const expected = new URL(location.url)
+    expected.hash = ''; expected.search = ''
+    return candidate.toString() === expected.toString()
   } catch {
     return false
   }
@@ -111,6 +115,25 @@ export function registerMainRendererWindow(
   const webContents = window.webContents
   rendererLocations.set(webContents, location)
   window.once('closed', () => rendererLocations.delete(webContents))
+}
+
+interface ContentRenderer {
+  location: RendererLocation
+  allows(channel: string, args: unknown[]): boolean
+}
+const contentRenderers = new WeakMap<WebContents, ContentRenderer>()
+
+export function registerContentRenderer(contents: WebContents, registration: ContentRenderer): void {
+  contentRenderers.set(contents, registration)
+  contents.once('destroyed', () => contentRenderers.delete(contents))
+}
+
+function assertApplicationIpcEvent(event: IpcMainInvokeEvent, channel: string, args: unknown[]): void {
+  const content = contentRenderers.get(event.sender)
+  if (!content) { assertTrustedIpcEvent(event); return }
+  if (event.senderFrame !== event.sender.mainFrame || !event.senderFrame
+    || !rendererLocationMatches(content.location, event.senderFrame.url)
+    || !content.allows(channel, args)) throw new Error('IPC is unavailable for this panel context.')
 }
 
 export function assertTrustedIpcEvent(event: IpcMainInvokeEvent): void {
@@ -132,7 +155,7 @@ export function handleMainIpc<Args extends unknown[], Result>(
   listener: (event: IpcMainInvokeEvent, ...args: Args) => Result
 ): void {
   ipcMain.handle(channel, (event, ...args) => {
-    assertTrustedIpcEvent(event)
+    assertApplicationIpcEvent(event, channel, args)
     const invoke = () => listener(event, ...args as Args)
     return ipcUsesApplicationData(channel)
       ? runApplicationDataOperation(invoke, { snapshot: channel === 'app:backupData' })

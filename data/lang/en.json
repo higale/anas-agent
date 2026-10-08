@@ -1,4 +1,15 @@
 {
+  "panels": {
+    "move_window": "Move to window",
+    "move_sidebar": "Move to side panel",
+    "view_conflict": "This instance is already open in the target location. Close that page before moving this one.",
+    "view_target_unavailable": "The target location is not ready. The original page has been kept.",
+    "view_closed": "This panel has closed.",
+    "operation_failed": "Panel operation failed.",
+    "action_unavailable": "This panel action is no longer available.",
+    "action_failed": "Panel action failed. Check the panel for details.",
+    "action_timeout": "The panel action has not responded. Check its state before retrying."
+  },
   "version": 0,
   "capabilities": {
     "off": "Off",

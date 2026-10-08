@@ -1,3 +1,4 @@
+import { contentServices } from '../panels/contentServices'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { GitReadError, type GitReadErrorCode, type GitReference, type GitReferenceQuery } from '@shared/gitChanges'
@@ -17,11 +18,11 @@ export function GitBaselinePicker({ projectId, sourceFolder, value, onChange, on
   loadError.current = onLoadError
   change.current = onChange; selected.current = value
   const query = async (kind: GitReferenceQuery['kind'], ref?: string, after?: number) => {
-    if (request.current) void window.gale.agent.changes.cancelRead(request.current).catch(() => {})
+    if (request.current) void contentServices().agent.changes.cancelRead(request.current).catch(() => {})
     const id = crypto.randomUUID(), generation = ++serial.current
     request.current = id; setBusy(true); setError(undefined)
     try {
-      const result = await window.gale.agent.changes.gitReferences({ projectId, sourceFolder, kind, ref, after }, id)
+      const result = await contentServices().agent.changes.gitReferences({ projectId, sourceFolder, kind, ref, after }, id)
       if (generation !== serial.current) return
       if ('error' in result) throw new GitReadError(result.error, result.error)
       root.current = result.repositoryRoot
@@ -29,7 +30,7 @@ export function GitBaselinePicker({ projectId, sourceFolder, value, onChange, on
         setEntries(result.entries)
         const previous = selected.current
         if (previous?.repositoryRoot === result.repositoryRoot && previous.commit) {
-          const resolved = await window.gale.agent.changes.gitReferences({ projectId, sourceFolder, kind: 'resolve', ref: previous.commit }, id)
+          const resolved = await contentServices().agent.changes.gitReferences({ projectId, sourceFolder, kind: 'resolve', ref: previous.commit }, id)
           if (generation !== serial.current) return
           if ('error' in resolved) throw new GitReadError(resolved.error, resolved.error)
           change.current(previous)
@@ -62,7 +63,7 @@ export function GitBaselinePicker({ projectId, sourceFolder, value, onChange, on
       // Invalidates an in-flight request, not a DOM ref.
       // eslint-disable-next-line react-hooks/exhaustive-deps
       serial.current++
-      if (request.current) void window.gale.agent.changes.cancelRead(request.current).catch(() => {})
+      if (request.current) void contentServices().agent.changes.cancelRead(request.current).catch(() => {})
     }
     // Repository identity owns candidate loading; selection callbacks use refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps

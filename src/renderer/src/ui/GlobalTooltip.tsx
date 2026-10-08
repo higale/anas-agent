@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { nativeTitlebarBottom, windowControlsOverlay } from './floatingViewport'
+import { tooltipStyleProperties, type NativeTooltip, type NativeTooltipApi } from '@shared/nativeTooltip'
 
 const tooltipOffset = 7
 const tooltipShowDelayMs = 450
@@ -86,9 +87,10 @@ function computePosition(state: TooltipState, tooltip: HTMLElement): TooltipPosi
   }
 }
 
-export function GlobalTooltip() {
+export function GlobalTooltip({ native }: { native?: NativeTooltipApi } = {}) {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
   const [position, setPosition] = useState<TooltipPosition | null>(null)
+  const [nativePresentation, setNativePresentation] = useState<NativeTooltip | null>(null)
   const tooltipRef = useRef<HTMLDivElement | null>(null)
   const activeTargetRef = useRef<HTMLElement | null>(null)
   const pendingTargetRef = useRef<HTMLElement | null>(null)
@@ -128,6 +130,7 @@ export function GlobalTooltip() {
       activeTargetRef.current = null
       setTooltip(null)
       setPosition(null)
+      setNativePresentation(null)
     }
 
     function refreshTooltip(): void {
@@ -180,12 +183,15 @@ export function GlobalTooltip() {
     function handleKeyDown(event: KeyboardEvent): void {
       if (event.key === 'Escape') hideTooltip()
     }
+    const dismiss = () => hideTooltip()
 
     document.addEventListener('pointerover', handlePointerOver, true)
     document.addEventListener('pointerout', handlePointerOut, true)
     document.addEventListener('focusin', handleFocusIn, true)
     document.addEventListener('focusout', handleFocusOut, true)
     document.addEventListener('keydown', handleKeyDown, true)
+    document.addEventListener('pointerdown', dismiss, true)
+    window.addEventListener('blur', dismiss)
     window.addEventListener('scroll', refreshTooltip, true)
     window.addEventListener('resize', refreshTooltip)
     const overlay = windowControlsOverlay()
@@ -197,6 +203,8 @@ export function GlobalTooltip() {
       document.removeEventListener('focusin', handleFocusIn, true)
       document.removeEventListener('focusout', handleFocusOut, true)
       document.removeEventListener('keydown', handleKeyDown, true)
+      document.removeEventListener('pointerdown', dismiss, true)
+      window.removeEventListener('blur', dismiss)
       window.removeEventListener('scroll', refreshTooltip, true)
       window.removeEventListener('resize', refreshTooltip)
       overlay?.removeEventListener('geometrychange', refreshTooltip)
@@ -205,8 +213,27 @@ export function GlobalTooltip() {
 
   useLayoutEffect(() => {
     if (!tooltip || !tooltipRef.current) return
-    setPosition(computePosition(tooltip, tooltipRef.current))
-  }, [tooltip])
+    const element = tooltipRef.current
+    const next = computePosition(tooltip, element)
+    const { width, height } = element.getBoundingClientRect()
+    const overlapsNativeView = native && Array.from(document.querySelectorAll<HTMLElement>('.panel-slot, .panel-window-slot')).some(slot => {
+      if (!slot.checkVisibility()) return false
+      const rect = slot.getBoundingClientRect()
+      return rect.width > 0 && rect.height > 0 && next.left < rect.right && next.left + width > rect.left
+        && next.top < rect.bottom && next.top + height > rect.top
+    })
+    setPosition(next)
+    setNativePresentation(overlapsNativeView ? {
+      label: tooltip.label, bounds: { x: next.left, y: next.top, width, height },
+      styles: Object.fromEntries(tooltipStyleProperties.map(key => [key, getComputedStyle(element).getPropertyValue(key)])) as NativeTooltip['styles']
+    } : null)
+  }, [tooltip, native])
+
+  useEffect(() => {
+    if (!native) return
+    void native.setTooltip(nativePresentation).catch(error => console.error('Tooltip display failed.', error))
+    return () => { void native.setTooltip(null).catch(() => undefined) }
+  }, [native, nativePresentation])
 
   if (!tooltip) return null
 
@@ -218,7 +245,7 @@ export function GlobalTooltip() {
       style={{
         left: position?.left ?? -9999,
         top: position?.top ?? -9999,
-        visibility: position ? 'visible' : 'hidden'
+        visibility: position && !nativePresentation ? 'visible' : 'hidden'
       }}
     >
       {tooltip.label}

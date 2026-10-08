@@ -43,9 +43,11 @@ import { useAgentWorkspace } from './agent/useAgentWorkspace'
 import { agentActionError } from './agent/agentErrorMessage'
 import { AppSidebar } from './AppSidebar'
 import { useWorkspacePanels, workspacePanelScope } from './agent/useWorkspacePanels'
+import { isPanelClosed } from './panels/panelError'
 import { usePlugins } from './plugins/usePlugins'
-import { PluginFrames } from './plugins/PluginFrames'
-import { pluginDisplayText, type PluginSummary } from '@shared/plugins'
+import { PanelLayouts } from './panels/PanelLayouts'
+import { panelScope } from '@shared/panels'
+import { type PluginSummary } from '@shared/plugins'
 import { sidebarWidthCssValue } from './SidebarResizeHandle'
 import { AboutDialog, AvatarCropDialog, ConfirmDialog, DataCleanupDialog } from './dialogs/AppDialogs'
 import type { ConfirmDialogRequest } from './dialogs/AppDialogs'
@@ -137,8 +139,8 @@ export function App() {
   const submissionLockRef = useRef(new SynchronousSubmissionLock())
   const draftModelInitializedRef = useRef(false)
   const workspacePanels = useWorkspacePanels()
-  const { open: openWorkspacePanel, localizePlugins } = workspacePanels
-  const pluginRegistry = usePlugins(workspacePanels.closePlugins)
+  const { present: presentWorkspacePanel, syncViews } = workspacePanels
+  const pluginRegistry = usePlugins()
   const agent = useAgentWorkspace({ onAppError: setAppError })
   const {
     activeThreadId: agentActiveThreadId,
@@ -156,7 +158,9 @@ export function App() {
       return
     }
     void window.gale.plugins.invoke(plugin.id, location ? 'host.openView' : 'host.openHome',
-      location ? { instanceId: 'main', location } : undefined).catch(() => setAppError(t('plugins.operation_failed')))
+      location ? { instanceId: 'main', location } : undefined).catch(reason => {
+        if (!isPanelClosed(reason)) setAppError(t('panels.operation_failed'))
+      })
   }
   const activeProject = projects.find((project) => project.id === activeProjectId)
   const draftProject = projects.find((project) => project.id === agentDraftProjectId)
@@ -458,17 +462,40 @@ export function App() {
     t
   })
 
-  useEffect(() => window.gale.plugins.onOpenView(view => {
-    void closeSettings(ensureModelDraftCanLeave).then(() => {
-      openWorkspacePanel(workspacePanelScope(agent.activeThreadId, activeProjectId), {
-        kind: 'plugin', pluginId: view.pluginId, name: view.name, instanceId: view.instanceId, customTitle: view.title !== undefined
-      })
-    }).catch(() => setAppError(t('plugins.operation_failed')))
-  }), [openWorkspacePanel, agent.activeThreadId, activeProjectId, closeSettings, ensureModelDraftCanLeave, t])
-
   useEffect(() => {
-    localizePlugins(Object.fromEntries(pluginRegistry.plugins.map(plugin => [plugin.id, pluginDisplayText(plugin, i18n.language)])))
-  }, [pluginRegistry.plugins, i18n.language, localizePlugins])
+    let changed = false
+    const unsubscribe = window.gale.panels.onChanged(views => { changed = true; syncViews(views) })
+    void window.gale.panels.list().then(views => { if (!changed) syncViews(views) }).catch(() => setAppError(t('panels.operation_failed')))
+    return () => { changed = true; unsubscribe() }
+  }, [syncViews, t])
+
+  const { activeThreadId: panelThreadId, draftProjectId: panelProjectId, openThread: openPanelThread,
+    startNewThread: startPanelThread, reloadThreads: reloadPanelThreads } = agent
+  useEffect(() => window.gale.panels.onOpen(({ requestId, view }) => {
+    void (async () => {
+      if (!(await ensureModelDraftCanLeave())) { await window.gale.panels.cancelRequest(requestId); return }
+      if (!(await window.gale.panels.hasRequest(requestId))) return
+      const content = view.content
+      if (content.kind === 'files' || content.kind === 'subagent') {
+        if (content.threadId && content.threadId !== panelThreadId) await openPanelThread(content.threadId)
+        else if (!content.threadId && (panelThreadId || content.projectId !== panelProjectId)) {
+          startPanelThread(content.projectId)
+        }
+      }
+      if (!(await window.gale.panels.hasRequest(requestId))) return
+      closeSettings()
+      presentWorkspacePanel(panelScope(content) ?? workspacePanelScope(panelThreadId, activeProjectId), view, requestId)
+    })().catch(() => { void window.gale.panels.cancelRequest(requestId); setAppError(t('panels.operation_failed')) })
+  }), [presentWorkspacePanel, panelThreadId, panelProjectId, openPanelThread, startPanelThread, activeProjectId, closeSettings, ensureModelDraftCanLeave, t])
+
+  useEffect(() => window.gale.panels.onReviewStarted(threadId => {
+    void (async () => {
+      await reloadPanelThreads()
+      if (!(await ensureModelDraftCanLeave())) return
+      closeSettings()
+      await openPanelThread(threadId)
+    })().catch(() => setAppError(t('chat.failed_load_app')))
+  }), [reloadPanelThreads, openPanelThread, ensureModelDraftCanLeave, closeSettings, t])
 
   async function openModelSettings(): Promise<void> {
     if (!settingsOpen) captureChatScrollSnapshot()
@@ -534,7 +561,7 @@ export function App() {
         if (!(await ensureModelDraftCanLeave())) return
         await closeSettings()
       }
-      workspacePanels.open(workspacePanelScope(agent.activeThreadId, activeProjectId), {
+      workspacePanels.open({
         kind: 'document', documentId: userGuideId(i18n.resolvedLanguage ?? i18n.language)
       })
     },
@@ -1096,7 +1123,7 @@ export function App() {
   return (
     <>
       <NoticeHost theme={resolvedTheme} />
-      <GlobalTooltip />
+      <GlobalTooltip native={window.gale.panels} />
       <div
         className={shellClassName}
         style={{ '--sidebar-width': sidebarWidthCssValue(sidebarWidth) } as CSSProperties}
@@ -1366,18 +1393,6 @@ export function App() {
         }}
         onSpeak={(messageId, text) => speech.playText(messageId, text, true)}
         onSubmit={handleSubmit}
-        onReview={async (request) => {
-          if (submissionLockRef.current.locked || threadLocked) throw new Error(t('agent.review_busy'))
-          if (!selectedModel?.capabilities.toolUse) throw new Error(t('agent.review_model_required'))
-          await submissionLockRef.current.run(async () => {
-            setSubmissionBusy(true)
-            try {
-              speech.stop()
-              await agent.send(t('agent.review_title'), [], t('agent.review_title'), draftAccessMode,
-                selectedModel.id, draftModelParameterPresetId ?? null, request)
-            } finally { setSubmissionBusy(false) }
-          })
-        }}
         onSteerQueuedMessage={agent.steerQueuedMessage}
         onToggleProjectPinned={(project) => updateProjectState(project, { pinned: !project.pinned })}
         onToggleSidebar={toggleSidebar}
@@ -1388,7 +1403,7 @@ export function App() {
       </div>
 
       <ConfirmDialog request={confirmDialog} onClose={() => setConfirmDialog(undefined)} />
-      <PluginFrames tabs={workspacePanels.documents.tabs} plugins={pluginRegistry.plugins} />
+      <PanelLayouts tabs={[...Object.values(workspacePanels.groups).flatMap(group => group.tabs), ...workspacePanels.documents.tabs]} />
       <UserInputDialog />
       <AvatarCropDialog
         source={avatarCropSource}

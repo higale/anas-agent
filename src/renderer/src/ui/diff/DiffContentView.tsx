@@ -1,3 +1,4 @@
+import { contentServices } from '../panels/contentServices'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { GitContentInput } from '@shared/gitChanges'
@@ -20,13 +21,13 @@ export function DiffContentView({ request, viewKey, onReadyChange }: {
     const requestId = crypto.randomUUID()
     const current = JSON.parse(identity) as typeof request
     readyChange.current?.(false)
-    const read = current.kind === 'git' ? window.gale.agent.changes.gitContents(current.input, requestId)
-      : window.gale.agent.changes.roundContents(current.input, requestId)
+    const read = current.kind === 'git' ? contentServices().agent.changes.gitContents(current.input, requestId)
+      : contentServices().agent.changes.roundContents(current.input, requestId)
     void read.then((data) => {
       if (active) { setResult({ identity, data }); readyChange.current?.(data.status === 'ready') }
     })
       .catch((error: unknown) => { if (active) setResult({ identity, error: error instanceof Error ? error.message : String(error) }) })
-    return () => { active = false; void window.gale.agent.changes.cancelRead(requestId).catch(() => {}) }
+    return () => { active = false; void contentServices().agent.changes.cancelRead(requestId).catch(() => {}) }
   }, [identity])
   if (result?.identity !== identity) return <p role="status">{t('common.loading')}</p>
   if (result.error) return <p role="alert" className="ui-status-danger">{result.error}</p>

@@ -59,8 +59,6 @@ function parsePluginHome(value: unknown): PluginHomePolicy | undefined {
   return { defaultLocation, locations } as PluginHomePolicy
 }
 
-export interface PluginSidebarView extends PluginViewOptions { pluginId: string; name: string }
-
 export function requirePluginView(value: unknown): PluginViewOptions {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid plugin view.')
   const input = value as Record<string, unknown>
@@ -105,8 +103,7 @@ export interface PluginsApi {
   startBackend(id: string): Promise<void>
   stopBackend(id: string): Promise<void>
   invoke(id: string, method: string, params?: unknown): Promise<unknown>
-  onChanged(listener: (closeViews?: string[] | 'all') => void): () => void
-  onOpenView(listener: (view: PluginSidebarView) => void): () => void
+  onChanged(listener: () => void): () => void
 }
 
 export function requirePluginId(value: unknown): string {

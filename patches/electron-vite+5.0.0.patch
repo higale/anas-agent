@@ -1,0 +1,19 @@
+diff --git a/node_modules/electron-vite/dist/chunks/lib-q6ns0vZr.js b/node_modules/electron-vite/dist/chunks/lib-q6ns0vZr.js
+--- a/node_modules/electron-vite/dist/chunks/lib-q6ns0vZr.js
++++ b/node_modules/electron-vite/dist/chunks/lib-q6ns0vZr.js
+@@ -1092,6 +1092,7 @@
+     };
+ }
+ function writeLine(output) {
++    if (!process.stdout.isTTY) return;
+     clearLine();
+     if (output.length < process.stdout.columns) {
+         process.stdout.write(output);
+@@ -1101,6 +1102,7 @@
+     }
+ }
+ function clearLine(move = 0) {
++    if (!process.stdout.isTTY) return;
+     if (move < 0) {
+         process.stdout.moveCursor(0, move);
+     }

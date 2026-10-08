@@ -1,3 +1,4 @@
+import { contentServices } from '../panels/contentServices'
 import { createContext, useContext, useEffect, useRef, useState, type ComponentProps, type ImgHTMLAttributes, type MouseEvent, type ReactNode } from 'react'
 import { Check, Copy } from 'lucide-react'
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
@@ -94,8 +95,8 @@ function MarkdownLink({ children, href, node: _node, onClick, onMouseDown, ...pr
   async function openLink(url: string): Promise<void> {
     try {
       if (navigate) await navigate(url)
-      else if (localPath) await window.gale.files.showItemInFolder(localPath)
-      else await window.gale.app.openExternalUrl(url)
+      else if (localPath) await contentServices().files.showItemInFolder(localPath)
+      else await contentServices().app.openExternalUrl(url)
     } catch {
       notice.error(t('chat.failed_open_link'))
     }

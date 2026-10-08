@@ -43,24 +43,33 @@ function notifyZoomChanged(webContents: WebContents): void {
 }
 
 export function registerWindowZoomShortcuts(win: BrowserWindow): void {
-  win.webContents.on('zoom-changed', (event, direction) => {
+  registerZoomShortcuts(win.webContents, () => win.webContents)
+}
+
+/** Resolve the owner for each input so a movable content page zooms its current window. */
+export function registerZoomShortcuts(contents: WebContents, owner: () => WebContents | undefined): void {
+  contents.on('zoom-changed', (event, direction) => {
+    const target = owner()
+    if (!target || target.isDestroyed()) return
     event.preventDefault()
     try {
-      stepAppZoom(win.webContents, direction === 'in' ? 1 : -1)
+      stepAppZoom(target, direction === 'in' ? 1 : -1)
     } catch (reason) {
       logZoomShortcutFailure(reason)
     }
   })
 
-  win.webContents.on('before-input-event', (event, input) => {
+  contents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown' || !input.control || input.alt || input.meta) return
+    const target = owner()
+    if (!target || target.isDestroyed()) return
 
     const key = input.key
     const code = input.code
     if (key === '=' || key === '+' || code === 'Equal' || code === 'NumpadAdd') {
       event.preventDefault()
       try {
-        stepAppZoom(win.webContents, 1)
+        stepAppZoom(target, 1)
       } catch (reason) {
         logZoomShortcutFailure(reason)
       }
@@ -70,7 +79,7 @@ export function registerWindowZoomShortcuts(win: BrowserWindow): void {
     if (key === '-' || code === 'Minus' || code === 'NumpadSubtract') {
       event.preventDefault()
       try {
-        stepAppZoom(win.webContents, -1)
+        stepAppZoom(target, -1)
       } catch (reason) {
         logZoomShortcutFailure(reason)
       }
@@ -80,7 +89,7 @@ export function registerWindowZoomShortcuts(win: BrowserWindow): void {
     if (key === '0' || code === 'Digit0' || code === 'Numpad0') {
       event.preventDefault()
       try {
-        resetAppZoom(win.webContents)
+        resetAppZoom(target)
       } catch (reason) {
         logZoomShortcutFailure(reason)
       }

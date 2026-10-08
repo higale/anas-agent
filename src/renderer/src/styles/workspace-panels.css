@@ -28,8 +28,31 @@
 .agent-chat-column > .agent-message-scroll-frame { flex: 1 1 0; }
 .agent-chat-column > .composer-area { flex: 0 0 auto; }
 
-.plugin-panel-slot { width: 100%; height: 100%; min-height: 120px; }
-.plugin-frame { position: fixed; border: 0; background: var(--bg-panel); }
+.panel-slot { width: 100%; height: 100%; min-height: 120px; }
+.workspace-panels:not([data-maximized="true"]):not(.workspace-panels-drawer) .panel-slot {
+  margin-left: var(--resize-handle-width);
+  width: calc(100% - var(--resize-handle-width));
+}
+.panel-window-shell { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100vh; background: var(--bg-panel); }
+.panel-window-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: max(36px, calc(env(titlebar-area-y, 0px) + env(titlebar-area-height, 36px)));
+  padding-left: calc(12px + var(--traffic-light-reserve));
+  padding-right: max(12px, calc(6px + 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - var(--titlebar-controls-width)))));
+  border-bottom: 1px solid var(--border-panel);
+  background: var(--bg-titlebar);
+  -webkit-app-region: drag;
+}
+.panel-window-titlebar > strong { flex: 1; min-width: 0; }
+.panel-window-titlebar > button { flex-shrink: 0; -webkit-app-region: no-drag; }
+.panel-toolbar-status { min-width: 0; max-width: 30%; color: var(--text-muted); font-size: 0.9em; }
+.panel-toolbar-status[data-tone="success"] { color: var(--success); }
+.panel-toolbar-status[data-tone="warning"] { color: var(--warning); }
+.panel-toolbar-status[data-tone="danger"] { color: var(--danger); }
+.panel-toolbar-actions { display: flex; flex-shrink: 0; gap: 4px; -webkit-app-region: no-drag; }
+.panel-window-slot { min-height: 0; min-width: 0; }
 
 .workspace-panels {
   position: relative;
@@ -50,7 +73,8 @@
   outline: none;
 }
 
-.workspace-panel-resize { inset: 0 auto 0 -1px; width: 8px; }
+/* Use the shared hit width inside the pane, clear of the conversation scrollbar. */
+.workspace-panel-resize { inset: 0 auto 0 -1px; }
 .workspace-panel-resize::after { left: 0; }
 .agent-subagent-panel { grid-template-rows: auto minmax(0, 1fr); }
 .agent-subagent-panel-title > h2 { font-family: inherit; }
@@ -77,8 +101,8 @@
   padding-left: var(--traffic-light-reserve);
 }
 
-/* Keep both sets of window actions on the first row. Only the tab strip wraps
-   when there is no longer room for a readable tab beside those actions. */
+/* Keep both sets of window actions on the first row. The adaptive strip can
+   shrink to one icon; wrap it only when even that cannot fit beside the actions. */
 :root[data-platform="win32"] .workspace-panels-titlebar {
   flex-flow: row-reverse wrap;
   align-items: flex-start;
@@ -88,13 +112,17 @@
 :root[data-platform="win32"] .workspace-panels-titlebar::before {
   content: '';
   order: -2;
-  flex: 0 0 calc(var(--titlebar-actions-inset) + 2 * var(--control-height));
+  flex: 0 0 calc(var(--titlebar-actions-inset) + var(--workspace-panel-action-count, 2) * var(--control-height));
   height: max(var(--topbar-height), calc(env(titlebar-area-y, 0px) + env(titlebar-area-height, 36px)));
 }
+.workspace-panels-titlebar:has([aria-label][data-panel-move]) { --workspace-panel-action-count: 3; }
 :root[data-platform="win32"] .workspace-panels-titlebar > .ui-tab-workspace-actions {
   position: absolute;
   inset: 0 var(--titlebar-actions-inset) auto auto;
 }
 :root[data-platform="win32"] .workspace-panels-titlebar > .ui-tab-workspace-tabs {
-  flex: 1 0 min(100%, 16em);
+  flex: 1 0 min(100%, var(--control-height));
 }
+
+.panel-content-root { height: 100vh; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-app); }
+.panel-content-root > .ui-detail-panel { flex: 1; min-height: 0; }

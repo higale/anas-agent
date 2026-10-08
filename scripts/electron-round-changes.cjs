@@ -1,10 +1,11 @@
 const assert = require('node:assert/strict')
+const { createServer } = require('node:http')
+const { panelPage } = require('./electron-panel-helpers.cjs')
 const { mkdir, mkdtemp, rm, writeFile } = require('node:fs/promises')
 const { tmpdir } = require('node:os')
 const { join } = require('node:path')
 const { expect } = require('playwright/test')
 const { monacoState } = require('./electron-diff-view.cjs')
-const { restrict_subagents, ...capabilities } = require('../data/config/capabilities.json')
 
 // The historical ledger responses are controlled fixtures. Current contents are
 // read from real temporary files; this exercises renderer/preload/IPC contracts
@@ -16,36 +17,67 @@ async function installRoundChangesFixture(application, directory) {
   await writeFile(paths[1], 'Child result with a later manual edit\n')
   const page = await application.firstWindow()
   await page.locator('[data-agent-composer-input]').waitFor({ timeout: 45000 })
-  const modelConfigId = await page.evaluate(async () => {
-    const api = globalThis.gale.config
-    const available = (await api.get()).providers.flatMap((provider) => provider.models).find((model) => model.capabilities.toolUse)
-    if (available) return available.id
-    const added = await api.saveModelProvider({ name: 'Round review fixture', protocol: 'openai_chat_completions',
-      baseUrl: 'https://round-review.invalid/v1', apiKey: '', parameters: {}, modelListAuth: 'bearer' })
-    const providerId = added.providers.find((provider) => provider.name === 'Round review fixture').id
-    const configured = await api.saveProviderModel({ providerId, displayName: 'Round review model', model: 'round-review', parameters: {},
-      parameterPresetMode: 'custom', parameterPresets: [], capabilities: { vision: false, toolUse: true }, stream: true,
-      maxContextTokens: 128000, maxOutputTokens: 16000, contextCompressionThreshold: 0.8, contextCompressionEnabled: true })
-    const id = configured.providers.find((provider) => provider.id === providerId).models[0].id
-    await api.selectDefaultModel(id)
-    return id
+  const projectId = await page.evaluate(async directory => {
+    const defaults = (await globalThis.gale.projects.list()).find(project => project.id === 'default-workspace')
+    const created = await globalThis.gale.projects.create({ ...defaults, name: 'Recorded changes fixture', sourceFolders: [directory] })
+    if (created.status !== 'ok') throw new Error(JSON.stringify(created))
+    return created.value.id
+  }, directory)
+  const server = createServer((request, response) => {
+    request.resume()
+    request.on('end', () => {
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ id: 'round-fixture', object: 'chat.completion', created: 1, model: 'round-review',
+        choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'Fixture completed.' } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } }))
+    })
   })
-  await application.evaluate(({ ipcMain }, { paths, modelConfigId }) => {
+  let fixture
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const modelConfigId = await page.evaluate(async port => {
+      const api = globalThis.gale.config
+      const added = await api.saveModelProvider({ name: 'Round review fixture', protocol: 'openai_chat_completions',
+        baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: '', parameters: {}, modelListAuth: 'bearer' })
+      const providerId = added.providers.find((provider) => provider.name === 'Round review fixture').id
+      const configured = await api.saveProviderModel({ providerId, displayName: 'Round review model', model: 'round-review', parameters: {},
+        parameterPresetMode: 'custom', parameterPresets: [], capabilities: { vision: false, toolUse: true }, stream: false,
+        maxContextTokens: 128000, maxOutputTokens: 16000, contextCompressionThreshold: 0.8, contextCompressionEnabled: true })
+      const id = configured.providers.find((provider) => provider.id === providerId).models[0].id
+      await api.selectDefaultModel(id)
+      return id
+    }, server.address().port)
+    const runs = []
+    let threadId
+    for (const text of ['Create the first greeting', 'Update greeting with child help']) {
+      const submitted = await page.evaluate(({ modelConfigId, projectId, threadId, text }) => globalThis.gale.agent.runs.submit({
+        requestId: crypto.randomUUID(), text,
+        ...(threadId ? { threadId } : { newThread: { title: 'Recorded changes', projectId, modelConfigId } })
+      }), { modelConfigId, projectId, threadId, text })
+      threadId = submitted.thread.id
+      await expect.poll(() => page.evaluate(({ threadId, runId }) => globalThis.gale.agent.activities.get({ threadId, runId }).then(run => run.status),
+        { threadId, runId: submitted.run.id }), { timeout: 20000 }).toBe('completed')
+      runs.push(submitted.run.id)
+    }
+    fixture = { projectId, threadId, oldRun: runs[0], newRun: runs[1], modelConfigId }
+  } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)) }
+  await application.evaluate(({ ipcMain }, { paths, fixture }) => {
+    const { projectId, threadId, oldRun, newRun, modelConfigId } = fixture
     const now = new Date().toISOString(), older = '2026-09-01T00:00:00.000Z'
-    const thread = { id: 'changes-review', projectId: 'default-workspace', modelConfigId, title: 'Recorded changes',
+    const thread = { id: threadId, projectId, modelConfigId, title: 'Recorded changes',
       status: 'idle', accessMode: 'read_only_allowed', pinned: false, userTurnCount: 2, createdAt: older, updatedAt: now }
     const rounds = [
-      { runId: 'changes-run-new', createdAt: now, summary: 'Update greeting with child help', status: 'completed' },
-      { runId: 'changes-run-old', createdAt: older, summary: 'Create the first greeting', status: 'completed' }
+      { runId: newRun, createdAt: now, summary: 'Update greeting with child help', status: 'completed' },
+      { runId: oldRun, createdAt: older, summary: 'Create the first greeting', status: 'completed' }
     ]
     const bodies = {
-      'changes-run-new': [
+      [newRun]: [
         ['export const greeting = "before"\n', 'export const greeting = "recorded result"\n'],
         ['Child original\n', 'Child recorded result\n']
       ],
-      'changes-run-old': [['export const greeting = "initial"\n', 'export const greeting = "before"\n']]
+      [oldRun]: [['export const greeting = "initial"\n', 'export const greeting = "before"\n']]
     }
-    const versionFor = (runId) => (runId === 'changes-run-new' ? 'b' : 'a').repeat(64)
+    const versionFor = (runId) => (runId === newRun ? 'b' : 'a').repeat(64)
     const snapshot = { thread, messages: rounds.slice().reverse().map((round) => ({ id: `${round.runId}-answer`, role: 'assistant', runId: round.runId,
       content: [{ type: 'text', text: round.summary }] })), todos: [], interrupts: [],
       activities: [{ runId: rounds[0].runId, operation: 'agent', status: 'completed', createdAt: now, updatedAt: now, models: [], tools: [],
@@ -82,40 +114,41 @@ async function installRoundChangesFixture(application, directory) {
         const after = input.target === 'current' ? await process.getBuiltinModule('node:fs/promises').readFile(input.filePath, 'utf8') : body[1]
         return { status: 'ready', path: input.filePath, beforeExists: true, afterExists: true, before: body[0], after }
       }],
-      ['agent:runs:submit', (_event, input) => {
-        probe.submission = input
+      ['agent:panels:review', (_event, input) => {
+        probe.submission = { review: input }
         return { thread, run: { id: 'round-review-run', threadId: thread.id, operation: 'agent', status: 'completed', createdAt: now, updatedAt: now } }
       }]
     ]) { ipcMain.removeHandler(channel); ipcMain.handle(channel, handler) }
-  }, { paths, modelConfigId })
-  return paths
+  }, { paths, fixture })
+  return { paths, fixture }
 }
 
 async function verifyRoundChangesInApplication(application, directory, { nonGit = false } = {}) {
-  const paths = await installRoundChangesFixture(application, directory)
+  const { paths, fixture } = await installRoundChangesFixture(application, directory)
   const page = await application.firstWindow()
   await page.evaluate(() => globalThis.gale.config.updateSettings({ language: 'en' }))
   await page.reload()
   await expect(page.locator('[data-agent-composer-input]')).toBeVisible({ timeout: 45000 })
   await page.getByRole('button', { name: 'File changes', exact: true }).click()
-  const panel = page.getByRole('tabpanel')
+  const contentPage = await panelPage(application, 'files')
+  const panel = contentPage.locator('.panel-content-root')
   if (nonGit) await expect(panel).toContainText('This folder is not a Git working tree.')
   await panel.getByRole('button', { name: 'Comparison', exact: true }).click()
-  await page.getByRole('menuitemradio', { name: 'Run changes', exact: true }).click()
+  await contentPage.getByRole('menuitemradio', { name: 'Run changes', exact: true }).click()
   const runs = panel.getByRole('combobox', { name: 'Select run', exact: true })
   const current = panel.getByRole('checkbox', { name: 'Compare with current file', exact: true })
   await expect(runs).toHaveValue(/Update greeting with child help/)
   await runs.click()
-  const options = page.getByRole('listbox').getByRole('option')
+  const options = contentPage.getByRole('listbox').getByRole('option')
   await expect(options).toHaveCount(2)
   const labels = await options.allTextContents()
   assert.match(labels[0], /Update greeting with child help/, 'Recent changed runs must appear newest first.')
   assert.match(labels[1], /Create the first greeting/)
-  await page.keyboard.press('Escape')
+  await contentPage.keyboard.press('Escape')
   await expect(current).not.toBeChecked()
   await expect(panel.locator('.ui-diff-file')).toHaveCount(2)
   await expect(panel.locator('.monaco-diff-editor')).toBeVisible({ timeout: 20000 })
-  await expect.poll(async () => (await monacoState(application, page)).models).toEqual([
+  await expect.poll(async () => (await monacoState(application, contentPage)).models).toEqual([
     'export const greeting = "before"\n', 'export const greeting = "recorded result"\n'
   ])
   const sideBySide = panel.getByRole('button', { name: 'Side by side', exact: true })
@@ -133,24 +166,24 @@ async function verifyRoundChangesInApplication(application, directory, { nonGit 
     for (const control of toolbar) assert.ok(await control.evaluate((element) => element.isConnected), 'Changing round or target must keep the shared toolbar mounted.')
   }
   await current.check()
-  await expect.poll(async () => (await monacoState(application, page)).models).toEqual([
+  await expect.poll(async () => (await monacoState(application, contentPage)).models).toEqual([
     'export const greeting = "before"\n', 'export const greeting = "current on disk"\n'
   ])
   await panel.locator('.ui-diff-file').filter({ hasText: paths[1] }).click()
-  await expect.poll(async () => (await monacoState(application, page)).models).toEqual([
+  await expect.poll(async () => (await monacoState(application, contentPage)).models).toEqual([
     'Child original\n', 'Child result with a later manual edit\n'
   ])
   await expectPreferences()
   await runs.click()
-  await page.getByRole('option', { name: /Create the first greeting/ }).click()
+  await contentPage.getByRole('option', { name: /Create the first greeting/ }).click()
   await expect(panel.locator('.ui-diff-file')).toHaveCount(1)
-  await expect.poll(async () => (await monacoState(application, page)).models).toEqual([
+  await expect.poll(async () => (await monacoState(application, contentPage)).models).toEqual([
     'export const greeting = "initial"\n', 'export const greeting = "current on disk"\n'
   ])
   await expectPreferences()
   await writeFile(paths[0], 'export const greeting = "edited after opening"\n')
   await panel.getByRole('button', { name: 'Refresh', exact: true }).click()
-  await expect.poll(async () => (await monacoState(application, page)).models).toContain('export const greeting = "edited after opening"\n')
+  await expect.poll(async () => (await monacoState(application, contentPage)).models).toContain('export const greeting = "edited after opening"\n')
   const shortcuts = page.getByRole('button', { name: 'Run changes', exact: true })
   await shortcuts.last().click()
   await expect(page.getByRole('tablist').getByRole('tab')).toHaveCount(1)
@@ -170,10 +203,10 @@ async function verifyRoundChangesInApplication(application, directory, { nonGit 
   }
   const review = await application.evaluate(() => globalThis.__anasRoundProbe.submission.review)
   assert.equal(review.kind, 'recorded')
-  assert.equal(review.threadId, 'changes-review')
-  assert.equal(review.runId, 'changes-run-old')
+  assert.equal(review.threadId, fixture.threadId)
+  assert.equal(review.runId, fixture.oldRun)
   await current.uncheck()
-  await expect.poll(async () => (await monacoState(application, page)).models).toEqual([
+  await expect.poll(async () => (await monacoState(application, contentPage)).models).toEqual([
     'export const greeting = "initial"\n', 'export const greeting = "before"\n'
   ])
   await application.evaluate(() => { globalThis.__anasRoundProbe.submission = undefined })
@@ -190,13 +223,6 @@ async function verifyRoundChanges(launchApplication) {
   const home = await mkdtemp(join(tmpdir(), 'anas-round-changes-e2e-'))
   let application
   try {
-    const workspace = join(home, 'workspace'), now = new Date().toISOString()
-    await mkdir(workspace)
-    await writeFile(join(home, 'projects.json'), JSON.stringify({ version: 0, projects: [{
-      id: 'default-workspace', kind: 'workspace', name: 'Round changes fixture', sourceFolders: [workspace],
-      capabilities, restrict_subagents, advanced_settings: false, coding_mode: false,
-      pinned: false, collapsed: false, prompt: '', createdAt: now, updatedAt: now
-    }] }))
     application = await launchApplication(home)
     const page = await application.firstWindow(), pageErrors = []
     page.on('pageerror', (error) => pageErrors.push(error.message))

@@ -22,6 +22,7 @@ import {
   ipcUsesApplicationData,
   isMainRendererWindow,
   registerMainRendererWindow,
+  registerContentRenderer,
   rendererLocationMatches,
   resolveRendererLocation
 } from './ipcSecurity'
@@ -169,6 +170,25 @@ describe('IPC sender security', () => {
     expect(() => registered(untrusted.event)).toThrow('registered main window')
   })
 
+  it('confines content pages to their registered context without granting main-window authority', () => {
+    const location = resolveRendererLocation({ isPackaged: true, rendererFile: '/tmp/anas/renderer/panel-content.html' })
+    let destroyed: (() => void) | undefined
+    const sender = { mainFrame: { url: `${location.url}?panel=one` }, once: (_event: string, callback: () => void) => { destroyed = callback } }
+    registerContentRenderer(sender as never, { location, allows: (channel, args) => channel === 'security:panel' && args[0] === 'bound-thread' })
+    handleMainIpc('security:panel', () => 'panel result')
+    const handler = electronMocks.handle.mock.calls.at(-1)![1]
+    const event = { sender, senderFrame: sender.mainFrame }
+    expect(handler(event, 'bound-thread')).toBe('panel result')
+    expect(() => handler(event, 'another-thread')).toThrow('panel context')
+    expect(() => handler({ ...event, senderFrame: { ...sender.mainFrame } }, 'bound-thread')).toThrow('panel context')
+    expect(() => assertTrustedIpcEvent(event as never)).toThrow('registered main window')
+    sender.mainFrame.url = 'file:///tmp/anas/renderer/index.html'
+    expect(() => handler(event, 'bound-thread')).toThrow('panel context')
+    sender.mainFrame.url = location.url
+    destroyed?.()
+    expect(() => handler(event, 'bound-thread')).toThrow('registered main window')
+  })
+
   it('gates every IPC operation that reads or writes managed application data', () => {
     for (const channel of [
       'agent:runs:submit',
@@ -215,6 +235,16 @@ describe('IPC sender security', () => {
       'files:readAvatarSourceFromDroppedPaths',
       'files:readFileIcon',
       'files:showItemInFolder',
+      'panels:cancel',
+      'panels:close',
+      'panels:hasRequest',
+      'panels:layout',
+      'panels:list',
+      'panels:move',
+      'panels:open',
+      'panels:tooltip',
+      'plugins:invoke',
+      'plugins:openWindow',
       'speech:logWarning'
     ]) {
       expect(ipcUsesApplicationData(channel), channel).toBe(false)
@@ -225,7 +255,9 @@ describe('IPC sender security', () => {
     const sources = [
       './appIpcHandlers.ts',
       './workspaceIpcHandlers.ts',
-      './agent/agentIpcHandlers.ts'
+      './agent/agentIpcHandlers.ts',
+      './plugins/pluginHost.ts',
+      './panels/panelHost.ts'
     ].map((path) => readFileSync(new URL(path, import.meta.url), 'utf8'))
     const channels = sources.flatMap((source) => [...source.matchAll(
       /handle(?:Main|Agent)Ipc\('([^']+)'/g
@@ -246,6 +278,16 @@ describe('IPC sender security', () => {
       'files:readAvatarSourceFromDroppedPaths',
       'files:readFileIcon',
       'files:showItemInFolder',
+      'panels:cancel',
+      'panels:close',
+      'panels:hasRequest',
+      'panels:layout',
+      'panels:list',
+      'panels:move',
+      'panels:open',
+      'panels:tooltip',
+      'plugins:invoke',
+      'plugins:openWindow',
       'speech:logWarning'
     ])
   })
@@ -264,6 +306,6 @@ describe('renderer content security policy', () => {
     expect(policy).toContain("img-src 'self' http: https: data: blob:")
     expect(policy).toContain("form-action 'none'")
     expect(policy).toContain("object-src 'none'")
-    expect(policy).toContain('frame-src anas-plugin:;')
+    expect(policy).toContain("frame-src 'none';")
   })
 })

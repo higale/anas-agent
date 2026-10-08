@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'stubborn-fs'
 import { createWriteStream } from 'node:fs'
-import { mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ZipFile } from 'yazl'
@@ -13,7 +13,7 @@ let source: string
 let store: PluginStore
 const manifest = { version: 0, id: 'test-plugin', name: 'Test', plugin_version: '1.0.0', api_version: 1, ui: 'index.html' }
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'anas-plugins-test-'))
+  root = await realpath(await mkdtemp(join(tmpdir(), 'anas-plugins-test-')))
   source = join(root, 'source')
   await mkdir(source)
   await mkdir(join(root, 'data'))

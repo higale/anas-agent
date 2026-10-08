@@ -1,33 +1,13 @@
 // Served from the plugin's own origin. No Anas renderer internals are exposed.
 export const pluginSdk = `(() => {
-  const pending = new Map();
-  let sequence = 0;
-  const invoke = (method, params) => {
-    if (window.anasPluginTransport) return window.anasPluginTransport.invoke(method, params);
-    if (window.parent === window) return Promise.reject(new Error('Plugin host is unavailable.'));
-    if (pending.size >= 32) return Promise.reject(new Error('Too many pending plugin requests.'));
-    const id = ++sequence;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { pending.delete(id); reject(new Error('Plugin host request timed out.')); }, 65000);
-      pending.set(id, { resolve, reject, timer });
-      window.parent.postMessage({ channel: 'anas-plugin-request', id, method, params }, '*');
-    });
-  };
-  window.addEventListener('message', event => {
-    if (event.source !== window.parent || event.data?.channel !== 'anas-plugin-response') return;
-    const request = pending.get(event.data.id);
-    if (!request) return;
-    pending.delete(event.data.id);
-    clearTimeout(request.timer);
-    if (event.data.error) request.reject(new Error(event.data.error));
-    else request.resolve(event.data.result);
-  });
+  const invoke = (method, params) => window.anasPluginTransport.invoke(method, params);
   window.anas = Object.freeze({
-    getInfo: async () => ({ ...await invoke('host.info'), view: {
-      instanceId: new URL(window.location.href).searchParams.get('instance') || 'main',
-      location: window.parent === window ? 'window' : 'sidebar'
-    } }),
+    getInfo: () => invoke('host.info'),
     openView: options => invoke('host.openView', options),
+    moveView: location => invoke('host.moveView', { location }),
+    onViewChanged: listener => window.anasPluginTransport.onViewChanged(listener),
+    setToolbar: toolbar => window.anasPluginTransport.setToolbar(toolbar),
+    onToolbarAction: listener => window.anasPluginTransport.onToolbarAction(listener),
     getHome: () => invoke('host.home'),
     openHome: () => invoke('host.openHome'),
     getLanguageResources: () => invoke('host.languages'),

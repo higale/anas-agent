@@ -782,6 +782,7 @@ export interface SkillInvocationResult {
 }
 
 export interface GaleApi {
+  panels: import('./panels').PanelsApi
   plugins: import('./plugins').PluginsApi
   recovery: import('./recovery').RecoveryApi
   speechInput: import('./speechInput').SpeechInputApi

@@ -1,3 +1,4 @@
+import { contentServices } from '../panels/contentServices'
 import { RefreshCw } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -43,13 +44,13 @@ function GitRepositoryChanges({ project, folder, scope, onReview }: { project: W
     if (scope !== 'unstaged' && (!ready || referenceError)) return
     let active = true
     const requestId = crypto.randomUUID()
-    void window.gale.agent.changes.git(query, requestId).then((data) => {
+    void contentServices().agent.changes.git(query, requestId).then((data) => {
       if (!active) return
       if ('error' in data) { setResult({ key, error: data.error }); return }
       if (!after) { version.current = data.version; head.current = data.head ?? undefined }
       setResult({ key, data })
     }).catch(() => { if (active) setResult({ key, error: 'read_failed' }) })
-    return () => { active = false; void window.gale.agent.changes.cancelRead(requestId).catch(() => {}) }
+    return () => { active = false; void contentServices().agent.changes.cancelRead(requestId).catch(() => {}) }
     // A serialized query prevents view-state renders from restarting the read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])

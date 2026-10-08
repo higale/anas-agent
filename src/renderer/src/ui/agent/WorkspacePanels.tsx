@@ -1,26 +1,23 @@
 import { helpDocuments } from '@shared/helpDocuments'
-import { HelpDocumentPanel } from './HelpDocumentPanel'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Tabs from '@radix-ui/react-tabs'
-import { BookOpen, FileDiff, Maximize2, Minimize2, PanelLeftOpen, PanelRightClose, Puzzle, X } from 'lucide-react'
+import { BookOpen, FileDiff, Maximize2, Minimize2, PanelLeftOpen, PanelRightClose, Puzzle, SquareArrowOutUpRight, X } from 'lucide-react'
 import { useEffect, useRef, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AgentRunActivity } from '@shared/agentTypes'
-import type { CodeReviewRequest } from '@shared/codeReview'
-import type { WorkspaceProject } from '@shared/types'
 import { WORKSPACE_PANEL_WIDTH_DEFAULT } from '@shared/uiPreferences'
 import { ResizeHandle } from '../ResizeHandle'
 import { AgentSubagentStatusIcon, subagentStatusLabel } from './AgentSubagentActivityDock'
-import { AgentSubagentPanel, type EarlierActivityRequest } from './AgentMessageList'
-import { FileChangesPanel } from './FileChangesPanel'
-import { PanelViewState } from './PanelViewState'
 import { workspacePanelGroup, type WorkspacePanelsController } from './useWorkspacePanels'
+import { notice } from '../notice'
+import { panelError } from '../panels/panelError'
+import { ContextMenuShell } from '../ContextMenuShell'
+import { MenuItemPrimitive } from '../MenuItemPrimitive'
 
 interface WorkspacePanelsProps {
   controller: WorkspacePanelsController
   scope: string
   activities: AgentRunActivity[]
-  project?: WorkspaceProject
   sidebarVisible?: boolean
   onToggleSidebar?(): void | Promise<void>
   narrow: boolean
@@ -30,23 +27,31 @@ interface WorkspacePanelsProps {
   toggleRef: RefObject<HTMLButtonElement | null>
   inputRef: RefObject<HTMLTextAreaElement | null>
   onWidthCommit(width: number): void | Promise<void>
-  onOpenSubagent(runId: string, subagentId: string): void
-  onLoadEarlierActivities?(request: EarlierActivityRequest): void | Promise<void>
-  onLoadEarlierError?(threadId: string, error: string): void
-  onLoadSubagentDetails?(threadId: string, runId: string, subagentId: string): Promise<void>
-  onReview?(request: CodeReviewRequest): Promise<void>
+
 }
 
-export function WorkspacePanels({ controller, scope, activities, project, narrow, width, minWidth, maxWidth,
-  toggleRef, inputRef, onWidthCommit, onOpenSubagent, onLoadEarlierActivities, onLoadEarlierError, onLoadSubagentDetails, onReview, sidebarVisible, onToggleSidebar }: WorkspacePanelsProps) {
+export function WorkspacePanels({ controller, scope, activities, narrow, width, minWidth, maxWidth,
+  toggleRef, inputRef, onWidthCommit, sidebarVisible, onToggleSidebar }: WorkspacePanelsProps) {
   const { t } = useTranslation()
   const rootRef = useRef<HTMLDivElement | null>(null)
   const group = workspacePanelGroup(controller, scope)
+  const activeTab = group.tabs.find(tab => tab.id === group.activeId)
+  const activeViewId = activeTab?.viewId
+  const { dismiss } = controller
+  useEffect(() => {
+    if (!narrow || !group.expanded || !activeViewId) return
+    return window.gale.panels.onEscape(viewId => {
+      if (activeViewId !== viewId) return
+      dismiss(scope)
+      requestAnimationFrame(() => (toggleRef.current ?? inputRef.current)?.focus({ preventScroll: true }))
+    })
+  }, [narrow, group.expanded, activeViewId, dismiss, scope, toggleRef, inputRef])
   const close = (id: string) => {
     const index = group.tabs.findIndex((tab) => tab.id === id)
     const remaining = group.tabs.filter((tab) => tab.id !== id)
     const next = group.activeId === id ? remaining[Math.min(index, remaining.length - 1)]?.id : group.activeId
-    controller.close(scope, id)
+    const tab = group.tabs[index]
+    if (tab) void window.gale.panels.close(tab.viewId).catch(reason => notice.error(panelError(reason, t)))
     requestAnimationFrame(() => {
       const trigger = Array.from(rootRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [])
         .find((button) => button.dataset.panelId === next)
@@ -59,7 +64,13 @@ export function WorkspacePanels({ controller, scope, activities, project, narrow
   }
   useEffect(() => {
     const selected = rootRef.current?.querySelector<HTMLElement>('[role="tab"][data-state="active"]')
-    selected?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    const list = rootRef.current?.querySelector<HTMLElement>('[role="tablist"]')
+    if (!selected || !list) return
+    const reveal = () => selected.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    reveal()
+    const observer = new ResizeObserver(reveal)
+    observer.observe(list)
+    return () => observer.disconnect()
   }, [scope, group.activeId, group.expanded, narrow])
 
   if (!group.expanded || !group.tabs.length) return null
@@ -69,37 +80,47 @@ export function WorkspacePanels({ controller, scope, activities, project, narrow
       <div className="ui-tab-workspace-tabs">
         {group.maximized && sidebarVisible === false && <button type="button" className="ui-tool-button ui-tool-button-square"
           aria-label={t('chat.show_sidebar')} data-tooltip={t('chat.show_sidebar')} onClick={() => void onToggleSidebar?.()}><PanelLeftOpen size={16} /></button>}
-        <Tabs.List className="ui-tab-list" aria-label={t('agent.workspace_panels')}>
+        <Tabs.List className="ui-tab-list ui-tab-list-adaptive" aria-label={t('agent.workspace_panels')}>
           {group.tabs.map((tab) => {
             const panel = tab.panel
             const subagent = panel.kind === 'subagent'
               ? activities.find((run) => run.runId === panel.runId)?.subagents.find((item) => item.id === panel.subagentId)
               : undefined
             const label = panel.kind === 'document' ? helpDocuments[panel.documentId]
-              : panel.kind === 'files' ? t('agent.file_changes') : subagent?.name ?? panel.name
-            return <div className="ui-tab-item" key={tab.id} data-active={group.activeId === tab.id}
+              : panel.kind === 'files' ? t('agent.file_changes') : subagent?.name ?? tab.name
+            return <ContextMenuShell key={tab.id} className="ui-menu ui-menu-list" trigger={<div className="ui-tab-item" data-active={group.activeId === tab.id}
               onMouseDownCapture={(event) => { if (event.button === 1) event.preventDefault() }}
               onAuxClick={(event) => {
                 if (event.button !== 1) return
                 event.preventDefault()
                 close(tab.id)
               }}>
-              <Tabs.Trigger className="ui-tab-trigger" value={tab.id} data-panel-id={tab.id}
+              <Tabs.Trigger className="ui-tab-trigger" value={tab.id} data-panel-id={tab.id} aria-label={label} title={label}
                 onKeyDown={(event) => { if (event.key === 'Delete') { event.preventDefault(); close(tab.id) } }}>
                 {panel.kind === 'subagent'
                   ? <span role="img" aria-label={subagent ? subagentStatusLabel(subagent.status) : t('agent.panel_unavailable')}>
                       <AgentSubagentStatusIcon status={subagent?.status ?? 'failed'} size={14} />
                     </span>
                   : panel.kind === 'document' ? <BookOpen size={14} /> : panel.kind === 'plugin' ? <Puzzle size={14} /> : <FileDiff size={14} />}
-                <span className="ui-truncate">{label}</span>
+                <span className="ui-tab-title ui-truncate">{label}</span>
               </Tabs.Trigger>
               <button className="ui-tab-close ui-tool-button" type="button"
                 aria-label={t('agent.close_panel', { name: label })} onClick={() => close(tab.id)}><X size={12} /></button>
-            </div>
+            </div>}>
+              <MenuItemPrimitive kind="context" className="ui-menu-item ui-menu-item-row" onSelect={() => close(tab.id)}>
+                <X size={16} /><span>{t('common.close')}</span>
+              </MenuItemPrimitive>
+            </ContextMenuShell>
           })}
         </Tabs.List>
       </div>
       <div className="ui-tab-workspace-actions">
+        {activeTab?.locations.includes('window') && <button type="button"
+          className="ui-tool-button ui-tool-button-square" disabled={activeTab.moving}
+          aria-label={t('panels.move_window')} data-tooltip={t('panels.move_window')} data-panel-move
+          onClick={() => void window.gale.panels.move(activeTab.viewId, 'window').catch(reason => notice.error(panelError(reason, t)))}>
+          <SquareArrowOutUpRight size={16} />
+        </button>}
         <button type="button" className="ui-tool-button ui-tool-button-square" onClick={() => controller.toggleMaximized(scope)}
           aria-label={t(group.maximized ? 'agent.restore_panels' : 'agent.maximize_panels')}
           data-tooltip={t(group.maximized ? 'agent.restore_panels' : 'agent.maximize_panels')} aria-pressed={group.maximized}>
@@ -109,23 +130,13 @@ export function WorkspacePanels({ controller, scope, activities, project, narrow
           aria-label={t('agent.hide_panels')} data-tooltip={t('agent.hide_panels')}><PanelRightClose size={18} /></button>
       </div>
     </div>
-    {group.tabs.map((tab) => {
-      const panel = tab.panel
-      return <Tabs.Content key={tab.id} className="ui-tab-content" value={tab.id}>
-      <PanelViewState state={tab.view}>
-        {panel.kind === 'plugin' ? <div className="plugin-panel-slot" data-plugin-panel={panel.pluginId} data-plugin-instance={panel.instanceId ?? 'main'} />
-          : panel.kind === 'document'
-          ? <HelpDocumentPanel request={panel} onOpen={(next) => controller.open(scope, next)} />
-          : panel.kind === 'subagent'
-          ? activities.some((run) => run.runId === panel.runId && run.subagents.some((item) => item.id === panel.subagentId))
-            ? <AgentSubagentPanel run={activities.find((run) => run.runId === panel.runId)}
-                subagentId={panel.subagentId} onOpenSubagent={onOpenSubagent} threadId={scope}
-                onLoadEarlierActivities={onLoadEarlierActivities} onLoadEarlierError={onLoadEarlierError}
-                onLoadSubagentDetails={onLoadSubagentDetails} />
-            : <p className="ui-detail-panel-empty">{t('agent.panel_unavailable')}</p>
-          : <FileChangesPanel project={project?.id === panel.projectId ? project : undefined} request={panel} onReview={onReview} />}
-      </PanelViewState>
-    </Tabs.Content>})}
+    {group.tabs.map(tab => <Tabs.Content key={tab.id} className="ui-tab-content" value={tab.id}>
+      <div className="panel-slot" data-panel-kind={tab.panel.kind} data-panel-view={tab.viewId} data-panel-request={tab.requestId}
+        data-plugin-panel={tab.panel.kind === 'plugin' ? tab.panel.pluginId : undefined}
+        data-plugin-instance={tab.panel.kind === 'plugin' ? tab.panel.instanceId : undefined} aria-busy={!!tab.loading}>
+        {tab.loading && <p className="ui-detail-panel-empty" role="status">{t('common.loading')}</p>}
+      </div>
+    </Tabs.Content>)}
   </Tabs.Root>
 
   if (narrow) return <Dialog.Root open modal={false} onOpenChange={(open) => { if (!open) collapse() }}>

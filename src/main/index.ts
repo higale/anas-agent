@@ -1,3 +1,5 @@
+import { registerPanelIpc } from './panels/panelHost'
+import { panelViews } from './panels/panelRegistry'
 import { initializeHelpFiles } from './helpDocuments'
 import { closePluginHost, registerPluginIpc, registerPluginProtocol, registerPluginScheme } from './plugins/pluginHost'
 import { registerAttachmentPreviewProtocol, registerAttachmentPreviewScheme } from './attachments'
@@ -8,7 +10,8 @@ import { acquireRuntimeLock, configureDataRuntime, getDataDir, getProgramName, r
 import { closeCachedMcpRuntime, loadMcpRuntimeForCurrentConfig } from './mcpRuntimeService'
 import { configureRuntimeLogger, runtimeLog } from './runtimeLogger'
 import { cleanupTempFiles, cleanupTempFilesInBackground } from './tempCleanupService'
-import { activateMainWindow, applyNativeTheme, applyWindowTheme, configureApplicationMenu, createMainWindow, markAppQuitting } from './appShell'
+import { activateMainWindow, applyNativeTheme, configureApplicationMenu, createMainWindow, markAppQuitting } from './appShell'
+import { applyWindowTheme } from './windowAppearance'
 import { registerAppIpcHandlers } from './appIpcHandlers'
 import { registerWorkspaceIpcHandlers } from './workspaceIpcHandlers'
 import { closeAgentRuntime, initializeAgentRuntime, recoverPendingProjectDeletion, registerAgentIpcHandlers } from './agent/agentIpcHandlers'
@@ -56,6 +59,7 @@ function startApplication(): void {
   }
 
   registerAppIpcHandlers()
+  registerPanelIpc()
   registerPluginIpc()
   registerRecoveryIpcHandlers()
   registerWorkspaceIpcHandlers()
@@ -152,6 +156,7 @@ function startApplication(): void {
     markAppQuitting()
     let deadline: ReturnType<typeof setTimeout> | undefined
     const shutdown = Promise.allSettled([
+      Promise.resolve().then(() => panelViews.closeAll()),
       closePluginHost(),
       closeAgentRuntime({ allowIncomplete: true, timeoutMs: 5_000 }),
       closeCachedMcpRuntime()

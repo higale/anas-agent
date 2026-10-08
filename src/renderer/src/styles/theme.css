@@ -3,6 +3,7 @@
   font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
   --font-mono: Consolas, "Cascadia Mono", monospace;
   --font-size-base: 14px;
+  --resize-handle-width: 16px;
   --font-size-ui: var(--font-size-base);
   --font-size-small: max(10px, calc(var(--font-size-base) - 2px));
   --font-size-code: max(10px, calc(var(--font-size-base) - 2px));
