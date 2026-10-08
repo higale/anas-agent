@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { app, BrowserWindow, WebContentsView, type WebContents, type IpcMainInvokeEvent } from 'electron'
-import { panelIdentity, requirePanelBounds, type PanelContent, type PanelBounds, type PanelLayout, type PanelLocation, type PanelState, type PanelWindowState } from '@shared/panels'
+import { app, BrowserWindow, Menu, WebContentsView, type WebContents, type IpcMainInvokeEvent } from 'electron'
+import { panelIdentity, requirePanelBounds, type PanelContent, type PanelBounds, type PanelLayout, type PanelLocation, type PanelState, type PanelTabMenuOptions, type PanelWindowState } from '@shared/panels'
 import { isMainRendererWindow, rendererLocationMatches, resolveRendererLocation, type RendererLocation } from '../ipcSecurity'
 import { titleBarColors, titleBarOptions } from '../windowAppearance'
 import { registerWindowZoomShortcuts } from '../zoomService'
@@ -33,6 +33,7 @@ interface ViewEntry {
   window?: BrowserWindow
   visible: boolean
   closed: boolean
+  dismissMenu?(): void
   action?: { requestId: string; finish(error?: Error): void }
 }
 interface SidebarRequest {
@@ -102,6 +103,7 @@ export class PanelViews {
       existing.state.content = content
       existing.definition = definition
       existing.state.name = definition.name(this.appearance.language)
+      existing.window?.setTitle(existing.state.name)
       definition.update?.(existing.view.webContents)
       this.changed()
       return Promise.all([this.enqueue(existing, () => this.present(existing, existing.state.location)), existing.ready]).then(() => undefined)
@@ -170,6 +172,7 @@ export class PanelViews {
   close(viewId: string): void {
     const entry = this.entries.get(viewId)
     if (!entry || entry.closed) return
+    entry.dismissMenu?.()
     entry.closed = true
     entry.action?.finish(new Error('PANEL_CLOSED'))
     this.entries.delete(viewId)
@@ -190,6 +193,41 @@ export class PanelViews {
   }
 
   closeAll(): void { this.closeWhere(() => true) }
+
+  /** Native menus can overlap the content view without hiding or resizing it. */
+  showTabMenu(owner: BrowserWindow, viewId: string, options: PanelTabMenuOptions): Promise<boolean> {
+    const entry = this.require(viewId)
+    const available = () => !entry.closed && !owner.isDestroyed() && entry.parent === owner && entry.state.location === 'sidebar' && !entry.state.pendingLocation
+    if (!available()) throw new Error('PANEL_TARGET_UNAVAILABLE')
+    for (const item of this.entries.values()) if (item.parent === owner) item.dismissMenu?.()
+    return new Promise((resolve, reject) => {
+      let settled = false
+      const finish = (selected = false) => {
+        if (settled) return
+        settled = true
+        delete entry.dismissMenu
+        owner.removeListener('hide', dismiss)
+        owner.removeListener('closed', dismiss)
+        owner.webContents.removeListener('did-start-navigation', dismiss)
+        resolve(selected && available())
+      }
+      const menu = Menu.buildFromTemplate([{ label: options.closeLabel.replaceAll('&', '&&'), click: () => finish(true) }])
+      const dismiss = () => { finish(); if (!owner.isDestroyed()) menu.closePopup(owner) }
+      entry.dismissMenu = dismiss
+      owner.on('hide', dismiss)
+      owner.on('closed', dismiss)
+      owner.webContents.on('did-start-navigation', dismiss)
+      const zoom = owner.webContents.getZoomFactor()
+      const origin = owner.getContentBounds()
+      const position = options.position ? { x: Math.round(origin.x + options.position.x * zoom), y: Math.round(origin.y + options.position.y * zoom) } : {}
+      try {
+        menu.popup({ window: owner, ...position, callback: () => finish() })
+      } catch (error) {
+        reject(error)
+        dismiss()
+      }
+    })
+  }
 
   pageState(event: IpcMainInvokeEvent): PanelWindowState {
     return { view: this.fromPage(event), ...this.appearance }
@@ -233,11 +271,15 @@ export class PanelViews {
     if (entry.action?.requestId === requestId) entry.action.finish(failed ? new Error('PANEL_ACTION_FAILED') : undefined)
   }
 
-  updateContent(viewId: string, content: PanelContent): void {
+  updateContent(viewId: string, content: PanelContent, presentation?: Pick<PanelDefinition, 'name' | 'update'>): void {
     const entry = this.require(viewId)
     const conflict = this.find(content)
     if (conflict && conflict !== entry) throw new Error('PANEL_CONFLICT')
     entry.state.content = content
+    entry.definition = { ...entry.definition, content, ...presentation }
+    presentation?.update?.(entry.view.webContents)
+    entry.state.name = entry.definition.name(this.appearance.language)
+    entry.window?.setTitle(entry.state.name)
     this.changed()
   }
 
@@ -304,6 +346,7 @@ export class PanelViews {
   }
 
   private async present(entry: ViewEntry, location: PanelLocation): Promise<void> {
+    entry.dismissMenu?.()
     const conflict = this.find(entry.state.content, location)
     if (conflict && conflict !== entry) throw new Error('PANEL_CONFLICT')
     if (location === 'window' && entry.window && !entry.window.isDestroyed()) {

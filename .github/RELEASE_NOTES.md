@@ -1,12 +1,14 @@
-## Anas v3.3.5
+## Anas v3.3.6
 
-- 文件变更、帮助、子 Agent 和插件统一使用面板框架，支持侧边栏与独立窗口切换并保留页面状态和插件连接。
-- 面板先展示再加载内容；改善侧边栏拖拽、标签自适应压缩及滚动条操作。
-- 窗口标题栏支持插件状态和图标操作；修复 Tooltip 遮黑原生内容及主题切换破坏透明度的问题。
+- 文件改动面板跟随当前项目和会话，切换项目时保留侧栏或独立窗口，重复打开复用已有页面。
+- 标签右键菜单不再隐藏原生内容；标签提示统一样式，修复独立窗口标题栏分隔线被系统按钮遮挡。
+- 插件设置与技能、MCP 等页面统一布局和操作样式。
+- 记事本示例演示中英文切换和草稿保留，后台示例统一为英文。
 
-- Unify file changes, help, subagents, and plugins under one panel framework, preserving page state and plugin connections when moving between sidebar and window.
-- Show panels before loading their content; improve sidebar resizing, adaptive tab widths, and scrollbar interaction.
-- Support plugin status and actions in window titlebars; fix tooltips obscuring native content and losing transparency on theme changes.
+- Follow the current project and conversation in the file changes panel, preserving sidebar or window placement and reusing the existing page.
+- Keep native content visible while a tab context menu is open; unify tab tooltips and fix the window titlebar divider being covered by system buttons.
+- Align plugin settings layout and actions with Skills, MCP, and other settings pages.
+- Demonstrate English/Chinese switching and draft preservation in Notepad; use English throughout the backend demo.
 
 ## 下载与安装 / Downloads & installation
 

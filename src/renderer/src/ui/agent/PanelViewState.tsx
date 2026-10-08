@@ -3,8 +3,9 @@ import type { Dispatch, ReactNode, RefObject, SetStateAction } from 'react'
 
 const PanelViewContext = createContext<Map<string, unknown> | undefined>(undefined)
 
-export function PanelViewState({ state, children }: { state: Map<string, unknown>; children: ReactNode }) {
-  return <PanelViewContext.Provider value={state}>{children}</PanelViewContext.Provider>
+export function PanelViewState({ state, children }: { state?: Map<string, unknown>; children: ReactNode }) {
+  const [local] = useState(() => state ?? new Map<string, unknown>())
+  return <PanelViewContext.Provider value={state ?? local}>{children}</PanelViewContext.Provider>
 }
 
 /** View preferences only; model history continues to belong to the runtime. */

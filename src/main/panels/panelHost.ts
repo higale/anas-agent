@@ -17,6 +17,7 @@ import { registerZoomShortcuts } from '../zoomService'
 import { builtinPanelCanInvoke } from './builtinPanelAccess'
 import { panelViews, panelLanguages, panelLabel, setPanelLanguages } from './panelRegistry'
 import { nativeTooltips } from './nativeTooltip'
+import type { PanelDefinition } from './panelViews'
 
 const id = z.string().min(1).max(256)
 const builtinSchema = z.discriminatedUnion('kind', [
@@ -26,10 +27,26 @@ const builtinSchema = z.discriminatedUnion('kind', [
 ])
 const contexts = new Map<Electron.WebContents, Pick<PanelContentState, 'project'>>()
 let preferences: PanelPreferences | undefined
+// Serialize context preparation, not page loading or placement acknowledgements.
+let filesPreparation: Promise<unknown> = Promise.resolve()
+function prepareFiles<T>(action: () => Promise<T>): Promise<T> {
+  const result = filesPreparation.then(action, action)
+  filesPreparation = result.catch(() => undefined)
+  return result
+}
+function presentation(content: BuiltinPanel, project?: Project): Pick<PanelDefinition, 'name' | 'update'> {
+  const context = { project }
+  return {
+    name: language => content.kind === 'document' ? helpDocuments[content.documentId]
+      : content.kind === 'subagent' ? content.name : `${panelLabel(language, 'file_changes')} · ${context.project!.name}`,
+    update: contents => contexts.set(contents, context)
+  }
+}
 export function updatePanelProject(project: Project): void {
   for (const [contents, context] of contexts) if (context.project?.id === project.id) {
     context.project = project
-    panelViews.notifyPageChanged(contents)
+    const view = panelViews.list().find(view => view.content === panelViews.pageContent(contents))
+    if (view) panelViews.updateContent(view.viewId, view.content)
   }
 }
 let appearanceRevision = 0
@@ -56,8 +73,8 @@ export function refreshPanelAppearance(snapshot?: Pick<AppConfigSnapshot, 'setti
 }
 
 export async function openBuiltinPanel(value: unknown, location: PanelLocation = 'sidebar'): Promise<void> {
-  const prepared = await runApplicationDataOperation(async () => {
-    const parsed = builtinSchema.parse(value)
+  const parsed = builtinSchema.parse(value)
+  const prepare = () => runApplicationDataOperation(async () => {
     const content: BuiltinPanel = parsed.kind === 'files' ? { ...parsed, navigationId: randomUUID() } : parsed
     const project = content.kind !== 'document' ? await getProject(content.projectId) : undefined
     validatePanelContext(content)
@@ -68,9 +85,7 @@ export async function openBuiltinPanel(value: unknown, location: PanelLocation =
     return { ready: panelViews.open({ content, location, locations: ['sidebar', 'window'], source,
       ownerId: 'builtin', reuse: 'page',
       preload: join(__dirname, '../preload/panelContent.js'),
-      name: language => content.kind === 'document' ? helpDocuments[content.documentId]
-        : content.kind === 'subagent' ? content.name : panelLabel(language, 'file_changes'),
-      update: contents => contexts.set(contents, { project }),
+      ...presentation(content, project),
       register: contents => {
         registerNativeContextMenu(contents, () => panelViews.pageOwner(contents))
         registerZoomShortcuts(contents, () => panelViews.pageOwner(contents)?.webContents)
@@ -82,7 +97,26 @@ export async function openBuiltinPanel(value: unknown, location: PanelLocation =
       }
     }) }
   })
+  const prepared = await (parsed.kind === 'files' ? prepareFiles(prepare) : prepare())
   await prepared.ready
+}
+
+export function followFilesPanel(value: unknown): Promise<void> {
+  const context = builtinSchema.options[1].omit({ kind: true, runId: true, navigationId: true }).parse(value)
+  return prepareFiles(() => runApplicationDataOperation(async () => {
+    const view = panelViews.list().find(view => view.content.kind === 'files')
+    if (!view || view.content.kind !== 'files') return
+    const previous = view.content
+    const sameContext = previous.projectId === context.projectId && previous.threadId === context.threadId
+    if (sameContext && JSON.stringify(previous.draft) === JSON.stringify(context.draft)) return
+    const content: BuiltinPanel = { kind: 'files', ...context, navigationId: randomUUID(),
+      ...(sameContext && previous.runId ? { runId: previous.runId } : {}) }
+    const project = await getProject(content.projectId)
+    validatePanelContext(content)
+    // Closing while the project is being read must not recreate the panel.
+    if (!panelViews.list().some(current => current.viewId === view.viewId)) return
+    panelViews.updateContent(view.viewId, content, presentation(content, project))
+  }))
 }
 
 export function registerPanelIpc(): void {
@@ -90,10 +124,17 @@ export function registerPanelIpc(): void {
   onAppConfigChanged(({ snapshot }) => refresh(snapshot))
   nativeTheme.on('updated', () => refresh())
   handleMainIpc('panels:open', (_event, content: unknown) => openBuiltinPanel(content))
+  handleMainIpc('panels:followFiles', (_event, context: unknown) => followFilesPanel(context))
   handleMainIpc('panels:list', () => panelViews.list())
   handleMainIpc('panels:tooltip', (event, value: unknown) => nativeTooltips.set(BrowserWindow.fromWebContents(event.sender)!, value))
   handleMainIpc('panels:move', (_event, viewId: string, location: PanelLocation) => panelViews.move(viewId, location))
   handleMainIpc('panels:close', (_event, viewId: string) => panelViews.close(viewId))
+  handleMainIpc('panels:tabMenu', (event, viewId: string, input: unknown) => {
+    const options = z.object({ closeLabel: z.string().trim().min(1).max(512),
+      position: z.object({ x: z.number().finite().min(0).max(100_000), y: z.number().finite().min(0).max(100_000) }).strict().optional()
+    }).strict().parse(input)
+    return panelViews.showTabMenu(BrowserWindow.fromWebContents(event.sender)!, id.parse(viewId), options)
+  })
   handleMainIpc('panels:layout', (event, layouts: PanelLayout[]) => panelViews.setLayouts(BrowserWindow.fromWebContents(event.sender)!, layouts))
   handleMainIpc('panels:cancel', (event, requestId: string) => panelViews.cancelRequest(BrowserWindow.fromWebContents(event.sender)!, requestId))
   handleMainIpc('panels:hasRequest', (event, requestId: string) => panelViews.hasRequest(BrowserWindow.fromWebContents(event.sender)!, requestId))

@@ -181,7 +181,7 @@ export function GlobalTooltip({ native }: { native?: NativeTooltipApi } = {}) {
     }
 
     function handleKeyDown(event: KeyboardEvent): void {
-      if (event.key === 'Escape') hideTooltip()
+      if (event.key === 'Escape' || event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) hideTooltip()
     }
     const dismiss = () => hideTooltip()
 
@@ -191,6 +191,7 @@ export function GlobalTooltip({ native }: { native?: NativeTooltipApi } = {}) {
     document.addEventListener('focusout', handleFocusOut, true)
     document.addEventListener('keydown', handleKeyDown, true)
     document.addEventListener('pointerdown', dismiss, true)
+    document.addEventListener('contextmenu', dismiss, true)
     window.addEventListener('blur', dismiss)
     window.addEventListener('scroll', refreshTooltip, true)
     window.addEventListener('resize', refreshTooltip)
@@ -204,6 +205,7 @@ export function GlobalTooltip({ native }: { native?: NativeTooltipApi } = {}) {
       document.removeEventListener('focusout', handleFocusOut, true)
       document.removeEventListener('keydown', handleKeyDown, true)
       document.removeEventListener('pointerdown', dismiss, true)
+      document.removeEventListener('contextmenu', dismiss, true)
       window.removeEventListener('blur', dismiss)
       window.removeEventListener('scroll', refreshTooltip, true)
       window.removeEventListener('resize', refreshTooltip)

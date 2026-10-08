@@ -38,7 +38,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  height: max(36px, calc(env(titlebar-area-y, 0px) + env(titlebar-area-height, 36px)));
+  height: calc(max(36px, calc(env(titlebar-area-y, 0px) + env(titlebar-area-height, 36px))) + 1px);
   padding-left: calc(12px + var(--traffic-light-reserve));
   padding-right: max(12px, calc(6px + 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - var(--titlebar-controls-width)))));
   border-bottom: 1px solid var(--border-panel);

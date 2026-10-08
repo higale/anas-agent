@@ -270,7 +270,7 @@ Spoken replies connect directly to Microsoft Edge online speech services and req
 
 The Agent page has projects and conversations on the left, chat in the center, and a right workspace for Help, subagents, and File changes. Drag the divider to resize or maximize the right pane; narrow windows use a drawer. Collapsing the pane or switching conversations preserves tabs and view positions. Closing a subagent tab does not stop its task.
 
-Help, File changes, subagent, and plugin panels can move to a separate window and back using the titlebar icons. Moving preserves page state and connections. Detached file and subagent panels stay bound to their original project and conversation; moving back returns to that conversation.
+Help, File changes, subagent, and plugin panels can move to a separate window and back using the titlebar icons. Moving preserves page state and connections. File changes uses one panel that follows the current project and conversation, with the project name in its title. Switching projects keeps the sidebar open; reopening a detached panel focuses its existing window. Select the run and file again after switching context. Detached subagent panels stay bound to their original project and conversation; moving back returns to that conversation.
 
 In **File changes**, choose a comparison scope and file to view a read-only diff. The top toolbar switches inline/side-by-side views and folds unchanged regions. Git comparisons support the working tree, staging area, branches, tags, and commits. Missing history, binary files, and files over 1 MB show why their diff is unavailable.
 

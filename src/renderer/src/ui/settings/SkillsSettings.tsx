@@ -236,13 +236,13 @@ export function SkillsSettings({
 
       <div className="ui-editor settings-skill-viewer">
         {selection?.kind === 'all' && (
-          <div className="settings-skill-viewer-heading ui-toolbar ui-toolbar-between">
+          <div className="settings-detail-heading ui-toolbar ui-toolbar-between">
             <div><strong>{t('settings.skill_group_all')}</strong><small>{t('settings.skill_total', { count: allSkills.length })}</small></div>
           </div>
         )}
 
         {selectedRoot && <>
-          <div className="settings-skill-viewer-heading ui-toolbar ui-toolbar-between">
+          <div className="settings-detail-heading ui-toolbar ui-toolbar-between">
             <div><div className="ui-row"><button className="ui-link-button" type="button" disabled={!selectedRoot.available} data-tooltip={t('chat.show_in_folder')} onClick={() => void showItemInFolder(selectedRoot.path)}>{rootLabel(selectedRoot)}</button><small>@{selectedRoot.shortcutAlias}</small></div><small>{selectedRoot.path}</small></div>
             <div className="ui-toolbar">
               {selectedRoot.kind === 'user' && <button className="ui-icon-button" type="button" aria-label={t('settings.import_skill')} data-tooltip={t('settings.import_skill')} onClick={() => void onImportDirectories()}><FolderDown size={14} /></button>}
@@ -293,7 +293,7 @@ export function SkillsSettings({
           }))} />}
 
         {selectedSkill && !preview && selection?.kind === 'skill' && <>
-          <div className="settings-skill-viewer-heading ui-toolbar ui-toolbar-between">
+          <div className="settings-detail-heading ui-toolbar ui-toolbar-between">
             <div><button className="ui-link-button" type="button" disabled={selectedSkill.linked && !selectedSkill.resolvedDirPath}
               data-tooltip={t('chat.show_in_folder')} onClick={() => void showItemInFolder(selectedSkill.dirPath)}>{selectedSkill.name}</button></div>
             <SegmentedMultiSelect<'modelAvailable' | 'userAvailable' | 'scriptAutoApprove'> ariaLabel={selectedSkill.name}

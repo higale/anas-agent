@@ -1,16 +1,16 @@
 const assert = require('node:assert/strict')
 const { createWriteStream } = require('node:fs')
-const { mkdtemp, mkdir, rm, readFile, readdir, writeFile } = require('node:fs/promises')
+const { cp, mkdtemp, mkdir, rm, readFile, readdir, writeFile } = require('node:fs/promises')
 const { createServer } = require('node:http')
 const { tmpdir } = require('node:os')
-const { join, resolve } = require('node:path')
+const { join, relative, resolve } = require('node:path')
 const { _electron: electron } = require('playwright')
 const { expect } = require('playwright/test')
 const { ZipFile } = require('yazl')
 const { pluginPage, pluginGeometry, pluginWindow, windowCount, tooltipPage } = require('./electron-plugin-helpers.cjs')
 
 async function zipExample(directory, archive, prefix = '') {
-  const files = await readdir(directory)
+  const files = await readdir(directory, { recursive: true, withFileTypes: true })
   await new Promise((resolve, reject) => {
     const zip = new ZipFile()
     const output = createWriteStream(archive)
@@ -19,9 +19,37 @@ async function zipExample(directory, archive, prefix = '') {
     zip.on('error', reject)
     zip.outputStream.on('error', reject)
     zip.outputStream.pipe(output)
-    for (const file of files) zip.addFile(join(directory, file), `${prefix}${file}`)
+    for (const file of files) {
+      if (!file.isFile()) continue
+      const path = join(file.parentPath, file.name)
+      zip.addFile(path, `${prefix}${relative(directory, path).replaceAll('\\', '/')}`)
+    }
     zip.end()
   })
+}
+
+async function checkNotepadLanguages(application, page, sidebar, popup) {
+  const shell = await pluginWindow(application, popup)
+  await popup.locator('#draft').fill('Window language draft')
+  for (const [language, title, save, status] of [
+    ['zh-CN', '记事本', '保存', '未保存'],
+    ['fr', 'Bloc-notes', 'Save', 'Unsaved'],
+    ['en', 'Notepad', 'Save', 'Unsaved']
+  ]) {
+    await page.evaluate(language => globalThis.gale.config.updateSettings({ language }), language)
+    for (const [view, value] of [[sidebar, 'Unsaved page state'], [popup, 'Window language draft']]) {
+      await view.evaluate(() => globalThis.dispatchEvent(new Event('focus')))
+      await expect(view.locator('#save')).toHaveText(save, { timeout: 10000 })
+      await expect(view.locator('label')).toHaveText(title)
+      await expect(view.locator('#status')).toHaveText(status)
+      await expect(view.locator('#draft')).toHaveValue(value)
+      await expect(view.locator('html')).toHaveAttribute('lang', language)
+      await expect(view.locator('#language-warning')).toBeHidden()
+    }
+    await expect(shell.locator('.panel-window-titlebar > strong')).toHaveText(title)
+    if (language === 'zh-CN') await popup.screenshot({ path: join(tmpdir(), 'anas-notepad-chinese.png') })
+    if (language === 'en') await sidebar.screenshot({ path: join(tmpdir(), 'anas-notepad-english.png') })
+  }
 }
 
 async function checkPanelResize(application, page, frame) {
@@ -273,6 +301,12 @@ async function main() {
   try {
     const backendZip = join(directory, 'backend.zip')
     const notepadZip = join(directory, 'notepad.zip')
+    const notepadSource = join(directory, 'notepad-source')
+    await cp(join(repository, 'examples/plugins/notepad'), notepadSource, { recursive: true })
+    // Partial translations exercise missing and empty text fallback in the real example.
+    await writeFile(join(notepadSource, 'lang/fr.json'), JSON.stringify({ version: 0, _meta: { name: 'Français' }, plugin: { name: 'Bloc-notes' }, actions: { save: '' } }))
+    await mkdir(join(directory, 'lang'))
+    await writeFile(join(directory, 'lang/fr.json'), JSON.stringify({ version: 0, _meta: { name: 'Français' } }))
     await zipExample(join(repository, 'examples/plugins/backend-demo'), backendZip, 'backend-demo/')
     await zipExample(join(repository, 'examples/plugins/notepad'), notepadZip)
     application = await electron.launch({ args: [repository, '--data-dir', directory], cwd: repository, env: environment, executablePath: require('electron'), timeout: 45000 })
@@ -291,7 +325,7 @@ async function main() {
         return { canceled: false, filePaths: [paths.shift()] }
       }
       BrowserWindow.getAllWindows()[0].setSize(1360, 800)
-    }, [join(repository, 'examples/plugins/notepad/PLUGIN.json'), backendZip, notepadZip])
+    }, [join(notepadSource, 'PLUGIN.json'), backendZip, notepadZip])
     const settings = async () => {
       await page.locator('.sidebar-settings').click()
       await page.getByRole('menuitem', { name: 'Settings', exact: true }).click()
@@ -309,13 +343,13 @@ async function main() {
     assert.equal(await frame.locator('body').evaluate(() => typeof globalThis.gale), 'undefined')
     await frame.locator('#draft').fill('Plugin saved draft')
     await frame.locator('#save').click()
-    await expect(frame.locator('#status')).toHaveText('Saved / 已保存')
+    await expect(frame.locator('#status')).toHaveText('Saved')
     await frame.locator('#draft').fill('Unsaved page state')
     await checkPanelResize(application, page, frame)
     await page.getByRole('button', { name: 'Hide right workspace', exact: true }).click()
     await expect.poll(async () => (await pluginGeometry(application, frame))?.visible).toBe(false)
     await page.getByRole('button', { name: 'Plugins', exact: true }).click()
-    await page.getByRole('menuitem', { name: 'Notepad / 记事本', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Notepad', exact: true }).click()
     await expect(frame.locator('#draft')).toHaveValue('Unsaved page state')
     await settings()
     await expect.poll(async () => (await pluginGeometry(application, frame))?.visible).toBe(false)
@@ -343,8 +377,9 @@ async function main() {
     await second.evaluate(() => globalThis.anas.openView({ instanceId: 'side-two', location: 'sidebar', title: 'Second sidebar' }))
     assert.equal(application.context().pages().filter(item => item.url() === sideTwo.url()).length, 1)
     await expect(sideTwo.locator('#draft')).toHaveValue('Second sidebar state')
-    await second.evaluate(() => globalThis.anas.openView({ instanceId: 'main', location: 'sidebar', title: 'Notepad / 记事本' }))
+    await second.evaluate(() => globalThis.anas.openView({ instanceId: 'main', location: 'sidebar', title: 'Notepad' }))
     await expect(frame.locator('#draft')).toHaveValue('Unsaved page state')
+    await checkNotepadLanguages(application, page, frame, popup)
     assert.equal((await page.evaluate(() => globalThis.gale.panels.list())).filter(view => view.content.pluginId === 'example-notepad' && view.content.instanceId === 'main' && view.location === 'sidebar').length, 1)
     await assert.rejects(second.evaluate(() => globalThis.anas.openView({ instanceId: '../bad', location: 'window' })), /Invalid plugin view/)
     await settings()
@@ -360,7 +395,10 @@ async function main() {
     await page.getByRole('button', { name: 'Open in side panel', exact: true }).click()
     const backend = await pluginPage(application, 'example-backend')
     await backend.locator('#call').waitFor()
-    await page.screenshot({ path: join(tmpdir(), 'anas-plugin-backend.png') })
+    await expect(backend.getByRole('heading')).toHaveText('Optional backend')
+    await expect(backend.locator('#call')).toHaveText('Call')
+    await expect(backend.locator('#fail')).toHaveText('Test error')
+    await backend.screenshot({ path: join(tmpdir(), 'anas-plugin-backend.png') })
     await backend.locator('#call').click()
     await expect(backend.locator('#result')).toContainText('"count": 1', { timeout: 10000 })
     await backend.locator('#fail').click()
@@ -369,18 +407,24 @@ async function main() {
     const status = await page.evaluate(() => globalThis.gale.plugins.list())
     assert.equal(status.find(item => item.id === 'example-backend').backendStatus, 'running')
     await settings()
-    await page.getByRole('button', { name: 'Backend demo / 后台示例', exact: true }).click()
+    await page.getByRole('button', { name: 'Backend demo', exact: true }).click()
     await page.getByRole('button', { name: 'Stop backend', exact: true }).click()
     await expect(page.getByText('Backend stopped; starts on the first call.', { exact: true })).toBeVisible()
-    await page.getByRole('button', { name: 'Notepad / 记事本', exact: true }).click()
+    await page.getByRole('button', { name: 'Notepad', exact: true }).click()
     await page.getByRole('button', { name: 'Uninstall plugin', exact: true }).click()
     await page.getByRole('alertdialog').getByRole('button', { name: /Confirm|确认/ }).click()
-    await expect(page.getByRole('button', { name: 'Notepad / 记事本', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Notepad', exact: true })).toHaveCount(0)
     assert.equal(JSON.parse(await readFile(join(directory, 'plugin_data/example-notepad/state.json'), 'utf8')).values.draft, 'Plugin saved draft')
     await page.getByRole('button', { name: 'Install plugin', exact: true }).click()
     await page.getByRole('button', { name: 'Open in side panel', exact: true }).click()
     frame = await pluginPage(application, 'example-notepad')
     await expect(frame.locator('#draft')).toHaveValue('Plugin saved draft')
+    await page.evaluate(() => globalThis.gale.config.updateSettings({ language: 'fr' }))
+    await frame.evaluate(() => globalThis.dispatchEvent(new Event('focus')))
+    await expect.poll(() => frame.evaluate(async () => (await globalThis.anas.getInfo()).language)).toBe('fr')
+    await expect(frame.locator('#save')).toHaveText('Save')
+    await expect(frame.locator('html')).toHaveAttribute('lang', 'en')
+    await page.evaluate(() => globalThis.gale.config.updateSettings({ language: 'en' }))
     await page.screenshot({ path: join(tmpdir(), 'anas-plugin-panel.png') })
     await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(900, 700))
     await expect(page.locator('.workspace-panels-drawer')).toBeVisible()
@@ -408,7 +452,7 @@ async function main() {
     assert.equal(restored.find(item => item.id === 'example-backend').backendStatus, 'stopped')
     assert.equal(await restarted.evaluate(() => globalThis.gale.plugins.invoke('example-notepad', 'data.get', { key: 'draft' })), 'Plugin saved draft')
     await checkHomePolicies(application, restarted, directory)
-    console.log('Plugins passed: PLUGIN.json and root/wrapped ZIP installation, sidebar and narrow drawer, named sidebar/window instances, duplicate/default instance reuse, isolated popup, persistent data, disable, optional backend RPC/errors/stop, queued cancellation with active results, slow-resource isolation, backup/restore, reinstall, and restart without backend activation.')
+    console.log('Plugins passed: PLUGIN.json and root/wrapped ZIP installation, nested language files, live translations and English fallback with unsaved drafts, sidebar and narrow drawer, named sidebar/window instances, duplicate/default instance reuse, isolated popup, persistent data, disable, optional backend RPC/errors/stop, queued cancellation with active results, slow-resource isolation, backup/restore, reinstall, and restart without backend activation.')
   } finally {
     await application?.close().catch(() => undefined)
     await rm(directory, { recursive: true, force: true })

@@ -11,6 +11,7 @@ export type BuiltinPanel =
   | { kind: 'files'; projectId: string; threadId?: string; runId?: string; navigationId?: string; draft?: Pick<AgentThreadCreate, 'modelConfigId' | 'modelParameterPresetId' | 'accessMode'> }
   | { kind: 'subagent'; projectId: string; threadId: string; runId: string; subagentId: string; name: string }
 export type PanelContent = BuiltinPanel | { kind: 'plugin'; pluginId: string; instanceId: string }
+export type FilesPanelContext = Pick<Extract<BuiltinPanel, { kind: 'files' }>, 'projectId' | 'threadId' | 'draft'>
 export interface PanelState {
   viewId: string
   content: PanelContent
@@ -28,6 +29,7 @@ export interface PanelState {
 export interface PanelBounds { x: number; y: number; width: number; height: number }
 export interface PanelLayout { viewId: string; requestId?: string; bounds: PanelBounds | null }
 export interface PanelRequest { requestId: string; view: PanelState }
+export interface PanelTabMenuOptions { closeLabel: string; position?: Pick<PanelBounds, 'x' | 'y'> }
 export interface PanelWindowState {
   view: PanelState
   language: string
@@ -44,14 +46,16 @@ export interface PanelWindowApi extends NativeTooltipApi {
 }
 export interface PanelsApi extends NativeTooltipApi {
   open(panel: BuiltinPanel): Promise<void>
+  followFiles(context: FilesPanelContext): Promise<void>
   list(): Promise<PanelState[]>
   move(viewId: string, location: PanelLocation): Promise<void>
   close(viewId: string): Promise<void>
+  showTabMenu(viewId: string, options: PanelTabMenuOptions): Promise<boolean>
   setLayouts(layouts: PanelLayout[]): Promise<void>
   cancelRequest(requestId: string): Promise<void>
   hasRequest(requestId: string): Promise<boolean>
   onChanged(listener: (views: PanelState[]) => void): () => void
-  onReviewStarted(listener: (threadId: string) => void): () => void
+  onReviewStarted(listener: (threadId: string, context: FilesPanelContext) => void): () => void
   onOpen(listener: (request: PanelRequest) => void): () => void
   onEscape(listener: (viewId: string) => void): () => void
 }
@@ -74,11 +78,11 @@ export interface PanelContentApi extends PanelToolbarApi {
   open(panel: BuiltinPanel): Promise<void>
   updatePreferences(preferences: Partial<PanelPreferences>): Promise<void>
   escape(): Promise<void>
-  review(request: CodeReviewRequest): Promise<void>
+  review(request: CodeReviewRequest, navigationId: string): Promise<void>
 }
 
 export function panelScope(content: PanelContent): string | undefined {
-  return content.kind === 'files' || content.kind === 'subagent'
+  return content.kind === 'subagent'
     ? workspacePanelScope(content.threadId, content.projectId) : undefined
 }
 export function workspacePanelScope(threadId: string | undefined, projectId: string): string {
@@ -88,7 +92,7 @@ export function panelIdentity(content: PanelContent): string {
   switch (content.kind) {
     case 'plugin': return JSON.stringify([content.kind, content.pluginId, content.instanceId])
     case 'document': return JSON.stringify([content.kind, content.documentId])
-    case 'files': return JSON.stringify([content.kind, content.projectId, content.threadId])
+    case 'files': return JSON.stringify([content.kind])
     case 'subagent': return JSON.stringify([content.kind, content.threadId, content.runId, content.subagentId])
   }
 }

@@ -236,7 +236,7 @@ export function CustomToolsGroup({ tools, onConfigChange, catalogNavigation, cat
     <div className="ui-editor settings-skill-viewer">
       {catalogView ?? <>
         {root && <>
-          <div className="settings-skill-viewer-heading ui-toolbar ui-toolbar-between"><div><button className="ui-link-button" type="button" disabled={Boolean(root.error)} data-tooltip={t('chat.show_in_folder')} onClick={() => void showItemInFolder(root.path)}>{rootLabel(root)}</button><small>{root.path}</small></div><div className="ui-toolbar">
+          <div className="settings-detail-heading ui-toolbar ui-toolbar-between"><div><button className="ui-link-button" type="button" disabled={Boolean(root.error)} data-tooltip={t('chat.show_in_folder')} onClick={() => void showItemInFolder(root.path)}>{rootLabel(root)}</button><small>{root.path}</small></div><div className="ui-toolbar">
             {(root.source === 'user' || root.source === 'external') && <>
               <button className="ui-icon-button" type="button" disabled={busy} aria-label={t('custom_tools.add')} data-tooltip={t('custom_tools.add')} onClick={() => setEditing({ rootId: root.id })}><Plus size={14} /></button>
               <button className="ui-icon-button" type="button" disabled={busy} aria-label={t('custom_tools.import')} data-tooltip={t('custom_tools.import')} onClick={() => void mutate(() => importDirectories(root.id))}><FolderDown size={14} /></button>
@@ -256,7 +256,7 @@ export function CustomToolsGroup({ tools, onConfigChange, catalogNavigation, cat
           </div>}
         </>}
         {selected && selection?.kind === 'tool' && <>
-          <div className="settings-skill-viewer-heading ui-toolbar ui-toolbar-between"><div><button className="ui-link-button" type="button" data-tooltip={t('chat.show_in_folder')} onClick={() => void showItemInFolder(selected.directory)}>{selected.name}</button></div><div className="ui-toolbar">
+          <div className="settings-detail-heading ui-toolbar ui-toolbar-between"><div><button className="ui-link-button" type="button" data-tooltip={t('chat.show_in_folder')} onClick={() => void showItemInFolder(selected.directory)}>{selected.name}</button></div><div className="ui-toolbar">
             {(selected.source === 'user' || selected.source === 'external') && <>
               <button className="ui-icon-button" disabled={busy || !selected.definition} type="button" aria-label={t('custom_tools.edit_information')} data-tooltip={t('custom_tools.edit_information')} onClick={() => setEditing(selected)}><Pencil size={14} /></button>
               <button className="ui-icon-button ui-button-danger" disabled={busy} type="button" aria-label={t('custom_tools.delete')} data-tooltip={t('custom_tools.delete')} onClick={() => setDeleting(selected)}><Trash2 size={14} /></button>
@@ -282,7 +282,7 @@ export function CustomToolsGroup({ tools, onConfigChange, catalogNavigation, cat
           {selected.definition && <ToolParameters key={selected.id} value={JSON.stringify(selected.definition.inputSchema, null, 2)} disabled={busy}
             onEdit={selected.source === 'user' || selected.source === 'external' ? () => setEditing({ ...selected, initialSection: 'parameters' }) : undefined} />}
         </>}
-        {selection?.kind === 'all' && <div className="settings-skill-viewer-heading ui-toolbar ui-toolbar-between">
+        {selection?.kind === 'all' && <div className="settings-detail-heading ui-toolbar ui-toolbar-between">
           <strong>{t('custom_tools.all')}</strong>
         </div>}
         {groupTools && <PackageList label={t('custom_tools.title')} emptyLabel={t('custom_tools.group_empty')}

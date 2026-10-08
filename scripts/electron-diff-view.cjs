@@ -4,14 +4,14 @@ const { expect } = require('playwright/test')
 
 // Inspect the same locally bundled Monaco instance as the renderer.
 async function monacoState(application, page) {
-  const url = await application.evaluate(({ BrowserWindow }) => {
+  const url = await application.evaluate((_, rendererUrl) => {
     const { dirname, join } = process.getBuiltinModule('node:path')
     const { fileURLToPath, pathToFileURL } = process.getBuiltinModule('node:url')
-    const directory = join(dirname(fileURLToPath(BrowserWindow.getAllWindows()[0].webContents.getURL())), 'assets')
+    const directory = join(dirname(fileURLToPath(rendererUrl)), 'assets')
     const name = process.getBuiltinModule('node:fs').readdirSync(directory).find((entry) => /^monacoRuntime-.*\.js$/.test(entry))
     if (!name) throw new Error('Bundled Monaco entry is missing.')
     return pathToFileURL(join(directory, name)).href
-  })
+  }, page.url())
   return page.evaluate(async (url) => {
     const module = await import(url)
     const monaco = Object.values(module).find((value) => value?.monaco?.editor?.getModels)?.monaco

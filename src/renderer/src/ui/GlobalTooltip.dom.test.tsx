@@ -50,3 +50,13 @@ it('uses a separate native surface over a panel and dismisses it before executin
   fireEvent.pointerDown(screen.getByRole('button'))
   expect(setTooltip).toHaveBeenLastCalledWith(null)
 })
+
+it.each(['pointer', 'ContextMenu', 'Shift+F10'])('dismisses the shared tooltip when opening a %s context menu', method => {
+  const setTooltip = vi.fn().mockResolvedValue(undefined)
+  fixture('top', true, { setTooltip })
+  const button = screen.getByRole('button')
+  if (method === 'pointer') fireEvent.contextMenu(button)
+  else fireEvent.keyDown(button, { key: method === 'ContextMenu' ? method : 'F10', shiftKey: method === 'Shift+F10' })
+  expect(setTooltip).toHaveBeenLastCalledWith(null)
+  expect(screen.queryByRole('tooltip', { hidden: true })).not.toBeInTheDocument()
+})

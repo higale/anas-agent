@@ -12,7 +12,7 @@ vi.mock('../notice', () => ({ notice: { error: vi.fn() } }))
 let views: PanelState[]
 let changed: ((views: PanelState[]) => void) | undefined
 let escape: ((viewId: string) => void) | undefined
-const move = vi.fn(), close = vi.fn(), cancelTask = vi.fn()
+const move = vi.fn(), close = vi.fn(), cancelTask = vi.fn(), showTabMenu = vi.fn()
 function Harness({ narrow = false }: { narrow?: boolean }) {
   const controller = useWorkspacePanels()
   const [thread, setThread] = useState('one')
@@ -42,11 +42,12 @@ function Harness({ narrow = false }: { narrow?: boolean }) {
 }
 beforeEach(() => {
   views = []; vi.clearAllMocks()
+  showTabMenu.mockResolvedValue(false)
   close.mockImplementation(async (id: string) => { views = views.filter(view => view.viewId !== id); changed?.(views) })
   move.mockImplementation(async (id: string, location: PanelState['location']) => {
     views = views.map(view => view.viewId === id ? { ...view, location } : view); changed?.(views)
   })
-  Object.defineProperty(window, 'gale', { configurable: true, value: { panels: { move, close,
+  Object.defineProperty(window, 'gale', { configurable: true, value: { panels: { move, close, showTabMenu,
     onEscape: (listener: typeof escape) => { escape = listener; return () => { escape = undefined } }
   }, agent: { runs: { cancel: cancelTask } } } })
 })
@@ -88,6 +89,23 @@ describe('native panel sidebar projection', () => {
     expect(screen.getByRole('tab', { name: 'Alpha' })).toBeVisible()
     expect(screen.queryByRole('tab', { name: 'Beta' })).not.toBeInTheDocument()
   })
+  it('keeps file changes visible and preserves explicit hiding across conversations', async () => {
+    const user = userEvent.setup(); render(<Harness />)
+    await user.click(screen.getByRole('button', { name: 'Files' }))
+    const viewId = views[0].viewId
+    await user.click(screen.getByRole('button', { name: 'agent.maximize_panels' }))
+    await user.click(screen.getByText('Switch conversation'))
+    expect(screen.getByRole('tab', { name: 'Files' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('button', { name: 'agent.restore_panels' })).toBeVisible()
+    expect(document.querySelector('[data-panel-view]')).toHaveAttribute('data-panel-view', viewId)
+    await user.click(screen.getByRole('button', { name: 'agent.hide_panels' }))
+    await user.click(screen.getByText('Switch conversation'))
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
+    await user.click(screen.getByText('Toggle panels'))
+    expect(screen.getByRole('tab', { name: 'Files' })).toBeVisible()
+    expect(views).toHaveLength(1)
+    expect(close).not.toHaveBeenCalled()
+  })
   it('deduplicates reopening, closes an adjacent tab, and never cancels execution', async () => {
     const user = userEvent.setup(); render(<Harness />)
     for (const name of ['Alpha', 'Beta', 'Alpha']) await user.click(screen.getByRole('button', { name }))
@@ -103,14 +121,30 @@ describe('native panel sidebar projection', () => {
     const user = userEvent.setup(); render(<Harness />)
     for (const name of ['Alpha', 'Beta', 'Help']) await user.click(screen.getByRole('button', { name }))
     const alpha = screen.getByRole('tab', { name: 'Alpha' })
-    expect(alpha).toHaveAttribute('title', 'Alpha')
+    expect(alpha).toHaveAttribute('data-tooltip', 'Alpha')
+    expect(alpha).not.toHaveAttribute('title')
+    showTabMenu.mockResolvedValueOnce(true)
     await user.pointer({ target: alpha, keys: '[MouseRight]' })
-    await user.click(screen.getByRole('menuitem', { name: 'common.close' }))
+    await waitFor(() => expect(screen.queryByRole('tab', { name: 'Alpha' })).not.toBeInTheDocument())
+    expect(showTabMenu).toHaveBeenCalledWith(expect.any(String), { closeLabel: 'common.close', position: undefined })
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
     await user.pointer({ target: screen.getByRole('tab', { name: 'Beta' }), keys: '[MouseMiddle]' })
     screen.getByRole('tab', { name: 'User Guide' }).focus()
     await user.keyboard('{Delete}')
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
     expect(cancelTask).not.toHaveBeenCalled()
+  })
+  it('opens a native menu from the keyboard and keeps the panel when the menu is cancelled', async () => {
+    const user = userEvent.setup(); render(<Harness />)
+    await user.click(screen.getByRole('button', { name: 'Files' }))
+    const tab = screen.getByRole('tab', { name: 'Files' })
+    tab.focus()
+    await user.keyboard('{Shift>}{F10}{/Shift}')
+    expect(showTabMenu).toHaveBeenCalledWith(views[0].viewId, { closeLabel: 'common.close', position: { x: 0, y: 0 } })
+    expect(close).not.toHaveBeenCalled()
+    expect(tab).toBeVisible()
+    expect(document.querySelector('[data-panel-view]')).toBeInTheDocument()
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
   it('retains tab selection and maximization while settings hide all native slots', async () => {
     const user = userEvent.setup(); render(<Harness />)

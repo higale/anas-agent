@@ -15,7 +15,7 @@ const api: PanelContentApi = {
   open: panel => ipcRenderer.invoke('panel-content:open', panel),
   updatePreferences: preferences => ipcRenderer.invoke('panel-content:preferences', preferences),
   escape: () => ipcRenderer.invoke('panel-content:escape'),
-  review: request => ipcRenderer.invoke('agent:panels:review', request),
+  review: (request, navigationId) => ipcRenderer.invoke('agent:panels:review', request, navigationId),
   services: contentServices
 }
 contextBridge.exposeInMainWorld('panelContent', api)

@@ -238,7 +238,7 @@ describe('Skills settings tree', () => {
     await openGroup(screen.getByRole('button', { name: /^settings\.skill_group_system/ }))
     const title = within(document.querySelector('.settings-skill-viewer') as HTMLElement).getByRole('button', { name: 'settings.skill_group_system' })
     expect(title).toHaveProperty('disabled', !available)
-    const heading = title.closest('.settings-skill-viewer-heading') as HTMLElement
+    const heading = title.closest('.settings-detail-heading') as HTMLElement
     expect(within(heading).getByText('@system')).toBeVisible()
     expect(screen.queryByText('settings.skill_source')).not.toBeInTheDocument()
     expect(screen.queryByText('settings.skill_shortcut_alias')).not.toBeInTheDocument()
@@ -339,7 +339,7 @@ describe('Skills settings tree', () => {
     if (!userRoot) throw new Error('Anas User root button was not rendered.')
     await openGroup(userRoot)
 
-    const importButton = within(document.querySelector('.settings-skill-viewer-heading') as HTMLElement).getByRole('button', { name: 'settings.import_skill' })
+    const importButton = within(document.querySelector('.settings-detail-heading') as HTMLElement).getByRole('button', { name: 'settings.import_skill' })
     expect(within(document.querySelector('.ui-list-pane') as HTMLElement).queryByRole('button', { name: 'settings.import_skill' })).not.toBeInTheDocument()
     await user.click(importButton)
     expect(onImportDirectories).toHaveBeenCalledOnce()

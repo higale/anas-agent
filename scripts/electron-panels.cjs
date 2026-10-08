@@ -151,11 +151,15 @@ async function verifyBuiltinInteractions(application, main, fixture) {
   await checkZoom()
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(900, 700))
   await expect(main.locator('.workspace-panels-drawer')).toBeVisible()
+  // DOM visibility precedes the resized native slot; CDP can otherwise target
+  // content that is still clipped or hidden by the host.
+  await expect.poll(async () => (await panelGeometry(application, help))?.visible).toBe(true)
   await help.getByRole('button', { name: 'Contents', exact: true }).click()
   await expect(help.locator('.ui-document-contents-popover')).toBeVisible()
   await help.keyboard.press('Escape')
   await expect(help.locator('.ui-document-contents-popover')).toHaveCount(0)
   await expect(main.locator('.workspace-panels-drawer')).toBeVisible()
+  await expect.poll(async () => (await panelGeometry(application, help))?.visible).toBe(true)
   await help.locator('.ui-document-panel h1').click()
   await help.keyboard.press('Escape')
   await expect(main.locator('.workspace-panels-drawer')).toHaveCount(0)
@@ -166,7 +170,8 @@ async function verifyBuiltinInteractions(application, main, fixture) {
   await checkContextMenu()
   await checkZoom()
 
-  await main.evaluate(content => globalThis.gale.panels.open(content), { kind: 'files', projectId: fixture.projectId, threadId: fixture.threadId })
+  await main.locator('.thread-open').filter({ hasText: 'Panel origin' }).click()
+  await main.getByRole('button', { name: 'File changes', exact: true }).click()
   const first = await panelPage(application, 'files')
   const firstId = (await first.evaluate(() => globalThis.panelContent.getState())).view.viewId
   await main.evaluate(() => globalThis.gale.config.updateSettings({ fontSize: 18, diffViewMode: 'inline', diffWordWrap: false, diffFoldUnchanged: true }))
@@ -183,18 +188,53 @@ async function verifyBuiltinInteractions(application, main, fixture) {
   await main.evaluate(id => globalThis.gale.panels.move(id, 'window'), firstId)
   await expect(first.getByRole('button', { name: 'Word wrap', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await expect(first.getByRole('button', { name: 'Side by side', exact: true })).toHaveAttribute('aria-pressed', 'true')
-  await main.evaluate(content => globalThis.gale.panels.open(content), { kind: 'files', projectId: fixture.projectId, threadId: fixture.otherId })
-  const second = await panelPage(application, 'files')
-  await second.getByRole('button', { name: 'Fold unchanged regions', exact: true }).click()
-  for (const page of [first, second]) await expect.poll(() => preferences(page)).toEqual({ diffViewMode: 'side_by_side', diffWordWrap: true, diffFoldUnchanged: false })
-  // Changes from two independently rendered pages must also merge and broadcast.
+  await main.locator('.thread-open').filter({ hasText: 'Another conversation' }).click()
+  const state = () => first.evaluate(() => globalThis.panelContent.getState())
+  await expect.poll(async () => (await state()).view.content.threadId).toBe(fixture.otherId)
+  await main.getByRole('button', { name: 'File changes', exact: true }).click()
+  assert.equal(await panelPage(application, 'files', 'window'), first)
+  assert.equal((await state()).view.viewId, firstId)
+  await expect(main.locator('[data-panel-kind="files"]')).toHaveCount(0)
+  assert.equal((await main.evaluate(() => globalThis.gale.panels.list())).filter(view => view.content.kind === 'files').length, 1)
+  await first.getByRole('button', { name: 'Fold unchanged regions', exact: true }).click()
+  await expect.poll(() => preferences(first)).toEqual({ diffViewMode: 'side_by_side', diffWordWrap: true, diffFoldUnchanged: false })
+  // Saves from settings and the content page still merge and broadcast.
   await Promise.all([
-    first.getByRole('button', { name: 'Side by side', exact: true }).click(),
-    second.getByRole('button', { name: 'Word wrap', exact: true }).click()
+    main.evaluate(() => globalThis.gale.config.updateSettings({ diffViewMode: 'inline' })),
+    first.getByRole('button', { name: 'Word wrap', exact: true }).click()
   ])
-  for (const page of [first, second]) await expect.poll(() => preferences(page)).toEqual({ diffViewMode: 'inline', diffWordWrap: false, diffFoldUnchanged: false })
+  await expect.poll(() => preferences(first)).toEqual({ diffViewMode: 'inline', diffWordWrap: false, diffFoldUnchanged: false })
   await first.keyboard.press('Escape')
-  assert.equal((await first.evaluate(() => globalThis.panelContent.getState())).view.location, 'window')
+  assert.equal((await state()).view.location, 'window')
+  await main.getByRole('button', { name: 'New chat in Panel alternate', exact: true }).click()
+  await expect.poll(async () => (await state()).project.name).toBe('Panel alternate')
+  assert.equal((await state()).view.content.threadId, undefined)
+  const filesShell = await panelWindow(application, first)
+  await expect(filesShell.locator('.panel-window-titlebar')).toContainText('Panel alternate')
+  await main.getByRole('button', { name: 'File changes', exact: true }).click()
+  assert.equal(await panelPage(application, 'files', 'window'), first)
+  await filesShell.getByRole('button', { name: 'Move to side panel', exact: true }).click()
+  await panelPage(application, 'files')
+  await expect(main.locator('.topbar').getByRole('button', { name: 'Show details for Panel alternate', exact: true })).toBeVisible()
+  await main.locator('.thread-open').filter({ hasText: 'Panel origin' }).click()
+  await expect(main.locator('[data-panel-kind="files"]')).toBeVisible()
+  await expect.poll(async () => (await state()).view.content.threadId).toBe(fixture.threadId)
+  await main.evaluate(content => globalThis.gale.panels.open(content), { kind: 'files', projectId: fixture.projectId, threadId: fixture.threadId, runId: fixture.runId })
+  await expect(first.getByRole('button', { name: 'Comparison', exact: true })).toContainText('Run changes')
+  await main.reload()
+  await main.locator('[data-agent-composer-input]').waitFor()
+  await expect.poll(async () => (await panelGeometry(application, first))?.visible).toBe(true)
+  await expect(first.getByRole('button', { name: 'Comparison', exact: true })).toContainText('Run changes')
+  await main.locator('.thread-open').filter({ hasText: 'Another conversation' }).click()
+  await expect(first.getByRole('button', { name: 'Comparison', exact: true })).toContainText('Base → working tree')
+  assert.equal((await state()).view.content.runId, undefined)
+  assert.equal((await state()).view.viewId, firstId)
+  // Review completion reloads the conversation list before opening its result.
+  await application.evaluate(({ BrowserWindow }, fixture) => {
+    const main = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().endsWith('/index.html'))
+    main.webContents.send('panels:reviewStarted', fixture.threadId, { projectId: fixture.projectId, threadId: fixture.otherId })
+  }, fixture)
+  await expect(main.locator('.topbar')).toContainText('Panel origin')
   await main.evaluate(async () => {
     for (const view of await globalThis.gale.panels.list()) await globalThis.gale.panels.close(view.viewId)
     await globalThis.gale.config.updateSettings({ fontSize: 14, diffFoldUnchanged: true })
@@ -234,6 +274,12 @@ async function verifyUnifiedPanels() {
     main.setDefaultTimeout(15000)
     await main.locator('[data-agent-composer-input]').waitFor({ timeout: 45000 })
     await main.evaluate(() => globalThis.gale.config.updateSettings({ language: 'en', theme: 'dark', workspacePanelWidth: 480 }))
+    await mkdir(join(root, 'alternate'))
+    await main.evaluate(async folder => {
+      const defaults = (await globalThis.gale.projects.list()).find(project => project.id === 'default-workspace')
+      const result = await globalThis.gale.projects.create({ ...defaults, name: 'Panel alternate', sourceFolders: [folder] })
+      if (result.status !== 'ok') throw new Error(JSON.stringify(result))
+    }, join(root, 'alternate'))
     await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1440, 800))
     const fixture = await application.evaluate(async () => {
       const { currentStorage } = globalThis.__panelFixture
@@ -265,6 +311,7 @@ async function verifyUnifiedPanels() {
       { kind: 'files', projectId: fixture.projectId, threadId: fixture.threadId },
       { kind: 'subagent', projectId: fixture.projectId, threadId: fixture.threadId, runId: fixture.runId, subagentId: 'child', name: 'Panel child' }
     ]) {
+      if (content.kind === 'files') await main.locator('.thread-open').filter({ hasText: 'Panel origin' }).click()
       await main.evaluate(content => globalThis.gale.panels.open(content), content)
       const page = await panelPage(application, content.kind)
       page.setDefaultTimeout(15000)
@@ -289,7 +336,8 @@ async function verifyUnifiedPanels() {
         assert.ok(header.height >= 36 && slot.y >= header.y + header.height)
         if (content.kind !== 'document') {
           await main.locator('.thread-open').filter({ hasText: 'Another conversation' }).click()
-          assert.equal((await page.evaluate(() => globalThis.panelContent.getState())).view.content.threadId, fixture.threadId)
+          await expect.poll(async () => (await page.evaluate(() => globalThis.panelContent.getState())).view.content.threadId)
+            .toBe(content.kind === 'files' ? fixture.otherId : fixture.threadId)
         }
         if (content.kind === 'subagent') {
           await application.evaluate((_, fixture) => globalThis.__panelFixture.publishAgentEvent({ type: 'subagent_updated', threadId: fixture.threadId,
@@ -300,7 +348,7 @@ async function verifyUnifiedPanels() {
         await panelPage(application, content.kind)
         assert.equal((await panelGeometry(application, page)).contentsId, geometry.contentsId)
         assert.deepEqual(await page.evaluate(() => [globalThis.__panelDraft, globalThis.__panelUnloadCount]), ['retained', 0])
-        if (content.kind !== 'document') await expect(main.locator('.topbar')).toContainText('Panel origin')
+        if (content.kind !== 'document') await expect(main.locator('.topbar')).toContainText(content.kind === 'files' ? 'Another conversation' : 'Panel origin')
       }
       await main.reload()
       await main.locator('[data-agent-composer-input]').waitFor()
@@ -312,7 +360,7 @@ async function verifyUnifiedPanels() {
       assert.equal(snapshot.thread.id, fixture.threadId, 'Closing a view must retain its conversation and run.')
     }
     assert.deepEqual(errors, [])
-    console.log('Unified panels passed: native text menus in both locations, nested and host Escape, live font/settings sync, concurrent diff saves across pages, help/files/subagent, actual storage and event subscriptions, older activity loading, repeated live transfers, scoped docking, main reload and closing without deleting task data.')
+    console.log('Unified panels passed: native text menus, Escape, live settings, concurrent diff saves, global file panel following projects/conversations without duplication, run reset, scoped subagent docking, repeated live transfers, main reload and closing without deleting task data.')
   } finally {
     await closeElectronTestApplication(application)
     await rm(root, { recursive: true, force: true })

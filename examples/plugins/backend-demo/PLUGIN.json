@@ -1,10 +1,10 @@
 {
   "version": 0,
   "id": "example-backend",
-  "name": "Backend demo / 后台示例",
+  "name": "Backend demo",
   "plugin_version": "0.1.0",
   "api_version": 1,
-  "description": "Starts its backend only when called. / 首次调用时才启动后台。",
+  "description": "Starts its backend only when called.",
   "ui": "index.html",
   "backend": "backend.cjs"
 }

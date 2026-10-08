@@ -469,29 +469,40 @@ export function App() {
     return () => { changed = true; unsubscribe() }
   }, [syncViews, t])
 
-  const { activeThreadId: panelThreadId, draftProjectId: panelProjectId, openThread: openPanelThread,
-    startNewThread: startPanelThread, reloadThreads: reloadPanelThreads } = agent
+  const { activeThreadId: panelThreadId, openThread: openPanelThread, reloadThreads: reloadPanelThreads } = agent
+  const panelSelection = useRef({ projectId: activeProjectId, threadId: panelThreadId })
+  if (panelSelection.current.projectId !== activeProjectId || panelSelection.current.threadId !== panelThreadId) {
+    panelSelection.current = { projectId: activeProjectId, threadId: panelThreadId }
+  }
+  const filesProjectId = activeProject?.id
+  const filesModelId = selectedModel?.id
+  useEffect(() => {
+    if (!filesProjectId || agentLoadingThreads) return
+    void window.gale.panels.followFiles({ projectId: filesProjectId, threadId: panelThreadId,
+      ...(!panelThreadId ? { draft: { modelConfigId: filesModelId,
+        modelParameterPresetId: selectedModelParameterPresetId ?? null, accessMode: draftAccessMode } } : {})
+    }).catch(() => setAppError(t('panels.operation_failed')))
+  }, [filesProjectId, panelThreadId, filesModelId, selectedModelParameterPresetId, draftAccessMode, agentLoadingThreads, t])
   useEffect(() => window.gale.panels.onOpen(({ requestId, view }) => {
     void (async () => {
       if (!(await ensureModelDraftCanLeave())) { await window.gale.panels.cancelRequest(requestId); return }
       if (!(await window.gale.panels.hasRequest(requestId))) return
       const content = view.content
-      if (content.kind === 'files' || content.kind === 'subagent') {
-        if (content.threadId && content.threadId !== panelThreadId) await openPanelThread(content.threadId)
-        else if (!content.threadId && (panelThreadId || content.projectId !== panelProjectId)) {
-          startPanelThread(content.projectId)
-        }
-      }
+      if (content.kind === 'subagent' && content.threadId !== panelThreadId) await openPanelThread(content.threadId)
+      const latest = (await window.gale.panels.list()).find(current => current.viewId === view.viewId)
       if (!(await window.gale.panels.hasRequest(requestId))) return
+      if (!latest) { await window.gale.panels.cancelRequest(requestId); return }
       closeSettings()
-      presentWorkspacePanel(panelScope(content) ?? workspacePanelScope(panelThreadId, activeProjectId), view, requestId)
+      presentWorkspacePanel(panelScope(latest.content) ?? workspacePanelScope(panelThreadId, activeProjectId), latest, requestId)
     })().catch(() => { void window.gale.panels.cancelRequest(requestId); setAppError(t('panels.operation_failed')) })
-  }), [presentWorkspacePanel, panelThreadId, panelProjectId, openPanelThread, startPanelThread, activeProjectId, closeSettings, ensureModelDraftCanLeave, t])
+  }), [presentWorkspacePanel, panelThreadId, openPanelThread, activeProjectId, closeSettings, ensureModelDraftCanLeave, t])
 
-  useEffect(() => window.gale.panels.onReviewStarted(threadId => {
+  useEffect(() => window.gale.panels.onReviewStarted((threadId, context) => {
+    const selection = panelSelection.current
     void (async () => {
       await reloadPanelThreads()
-      if (!(await ensureModelDraftCanLeave())) return
+      if (panelSelection.current !== selection || context.projectId !== selection.projectId || context.threadId !== selection.threadId) return
+      if (!(await ensureModelDraftCanLeave()) || panelSelection.current !== selection) return
       closeSettings()
       await openPanelThread(threadId)
     })().catch(() => setAppError(t('chat.failed_load_app')))

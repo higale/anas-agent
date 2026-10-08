@@ -3,6 +3,7 @@ const { mkdtemp, mkdir, rm, writeFile } = require('node:fs/promises')
 const { tmpdir } = require('node:os')
 const { join } = require('node:path')
 const { expect } = require('playwright/test')
+const { pluginPage, pluginGeometry, tooltipPage } = require('./electron-plugin-helpers.cjs')
 
 async function verifyWorkspaceTabs(launchApplication) {
   const directory = await mkdtemp(join(tmpdir(), 'anas-workspace-tabs-'))
@@ -11,7 +12,7 @@ async function verifyWorkspaceTabs(launchApplication) {
     const source = join(directory, 'fixture')
     await mkdir(source)
     await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ version: 0, id: 'tabs-test', name: 'Tabs fixture', plugin_version: '1.0.0', api_version: 1, ui: 'index.html' }))
-    await writeFile(join(source, 'index.html'), '<p>Tab content</p>')
+    await writeFile(join(source, 'index.html'), '<script src="/_anas/sdk.js"></script><p>Tab content</p>')
     application = await launchApplication(directory)
     const page = await application.firstWindow()
     const errors = []
@@ -57,7 +58,7 @@ async function verifyWorkspaceTabs(launchApplication) {
           return { left: bounds.left - box.left, right: bounds.right - box.left, width: bounds.width,
             titleVisible: title.checkVisibility(), titleClipped: title.scrollWidth > title.clientWidth,
             closeVisible: tab.querySelector('.ui-tab-close').checkVisibility(),
-            named: !!trigger.getAttribute('aria-label') && !!trigger.getAttribute('title'),
+            named: !!trigger.getAttribute('aria-label') && !!trigger.getAttribute('data-tooltip') && !trigger.hasAttribute('title'),
             iconInside: icon.left >= bounds.left && icon.right <= bounds.right }
         }) }
     })
@@ -126,9 +127,56 @@ async function verifyWorkspaceTabs(launchApplication) {
       await page.evaluate(platform => { globalThis.document.documentElement.dataset.platform = platform }, platform)
       await page.getByRole('separator', { name: 'Resize right workspace', exact: true }).press('Home')
     }
-    await page.getByRole('tab', { name: label(1), exact: true }).click({ button: 'right' })
-    await page.getByRole('menuitem', { name: 'Close', exact: true }).click()
-    await expect(page.getByRole('tab', { name: label(1), exact: true })).toHaveCount(0)
+    const content = await pluginPage(application, 'tabs-test', 'tab-0')
+    const geometry = await pluginGeometry(application, content)
+    await page.getByRole('tab', { name: label(0), exact: true }).hover()
+    const tooltip = await tooltipPage(application, label(0))
+    const tooltipStyle = element => {
+      const style = globalThis.getComputedStyle(element)
+      return ['background-color', 'color', 'border-radius', 'padding', 'font-size', 'box-shadow'].map(key => style.getPropertyValue(key))
+    }
+    assert.deepEqual(await tooltip.getByRole('tooltip').evaluate(tooltipStyle), await page.locator('.ui-global-tooltip').evaluate(tooltipStyle))
+    await tooltip.screenshot({ path: join(tmpdir(), 'anas-tabs-tooltip.png') })
+    assert.deepEqual(await pluginGeometry(application, content), geometry, 'The shared tooltip must preserve the native content view.')
+
+    await application.evaluate(({ Menu }) => {
+      globalThis.__tabMenuOriginalPopup = Menu.prototype.popup
+      Menu.prototype.popup = function(options) {
+        globalThis.__tabMenu = this
+        globalThis.__tabMenuOptions = options
+        return globalThis.__tabMenuOriginalPopup.call(this, options)
+      }
+    })
+    const finishMenu = selected => application.evaluate((_, selected) => {
+      const menu = globalThis.__tabMenu, options = globalThis.__tabMenuOptions
+      if (selected) menu.items[0].click(undefined, options.window)
+      menu.closePopup(options.window)
+      globalThis.__tabMenu = undefined
+    }, selected)
+    try {
+      const otherTab = page.getByRole('tab', { name: label(1), exact: true })
+      await otherTab.click({ button: 'right' })
+      await expect.poll(() => application.evaluate(() => globalThis.__tabMenu?.items.map(item => item.label))).toEqual(['Close'])
+      // Let the normal layout observer run while the real native popup is open.
+      await page.evaluate(() => new Promise(resolve => globalThis.requestAnimationFrame(() => globalThis.requestAnimationFrame(resolve))))
+      assert.deepEqual(await pluginGeometry(application, content), geometry, 'Right-clicking a background tab must leave the active content visible.')
+      await expect(page.getByRole('menu')).toHaveCount(0)
+      await finishMenu(false)
+      await expect(otherTab).toHaveCount(1)
+      await otherTab.focus()
+      const otherContent = await pluginPage(application, 'tabs-test', 'tab-1')
+      await otherTab.press('Shift+F10')
+      await expect.poll(() => application.evaluate(() => !!globalThis.__tabMenu)).toBe(true)
+      assert.equal(await application.evaluate(() => Number.isFinite(globalThis.__tabMenuOptions.x) && Number.isFinite(globalThis.__tabMenuOptions.y)), true)
+      assert.equal((await pluginGeometry(application, otherContent)).visible, true)
+      await finishMenu(true)
+      await expect(otherTab).toHaveCount(0)
+    } finally {
+      await application.evaluate(({ Menu }) => {
+        globalThis.__tabMenu?.closePopup(globalThis.__tabMenuOptions.window)
+        Menu.prototype.popup = globalThis.__tabMenuOriginalPopup
+      })
+    }
     await open(1)
 
     for (let i = 4; i < 10; i++) await open(i)
@@ -180,7 +228,7 @@ async function verifyWorkspaceTabs(launchApplication) {
       assert.ok(area.tabsRight <= area.actionsLeft || area.tabsTop >= area.actionsBottom)
     }
     assert.deepEqual(errors, [])
-    console.log('Workspace tabs passed: title truncation, icon-only fit at 10/14/18px, overflow only at minimum width, unused titlebar space outside no-drag regions, draggable scrollbar without window movement, context-menu and keyboard closing, resizing and titlebar boundaries.')
+    console.log('Workspace tabs passed: title truncation, icon-only fit at 10/14/18px, shared tooltips, native menus preserving content, menu cancellation and keyboard closing, overflow only at minimum width, unused titlebar space outside no-drag regions, draggable scrollbar without window movement, resizing and titlebar boundaries.')
   } finally {
     await application?.close().catch(() => undefined)
     await rm(directory, { recursive: true, force: true })

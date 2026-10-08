@@ -378,7 +378,7 @@ describe('custom tool settings', () => {
     await openGroup(await screen.findByRole('button', { name: new RegExp(`^${label}`) }))
     expectActions(source !== 'system')
     if (source !== 'system') {
-      const header = within(view.container.querySelector('.settings-skill-viewer-heading') as HTMLElement)
+      const header = within(view.container.querySelector('.settings-detail-heading') as HTMLElement)
       expect(header.getByRole('button', { name: 'custom_tools.add' })).toBeVisible()
       expect(header.getByRole('button', { name: 'custom_tools.import' })).toBeVisible()
       expect(within(view.container.querySelector('.settings-skill-tree') as HTMLElement).queryByRole('button', { name: 'custom_tools.add' })).not.toBeInTheDocument()

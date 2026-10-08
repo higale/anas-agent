@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
-import { ExternalLink, PackagePlus, Play, RefreshCw, Square, Trash2 } from 'lucide-react'
+import { ExternalLink, PanelRight, Play, RefreshCw, Square } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { pluginDisplayText, pluginHomePolicy, type PluginSummary, type PluginViewOptions } from '@shared/plugins'
 import { errorDetail } from '@shared/recovery'
-import { Checkbox } from '../Checkbox'
+import { CheckboxField } from '../CheckboxField'
 import { ConfirmDialog } from '../dialogs/ConfirmDialog'
 import { notice } from '../notice'
 import { SegmentedControl } from '../SegmentedControl'
+import { UI_ICON_SIZE_LARGE, UI_ICON_SIZE_SMALL } from '../uiConstants'
+import { SettingsListActions } from './SettingsListActions'
 
 function PluginHomeLocation({ plugin, busy, act }: {
   plugin: PluginSummary; busy: boolean; act(operation: () => Promise<unknown>): Promise<void>
@@ -24,7 +26,7 @@ function PluginHomeLocation({ plugin, busy, act }: {
   }, [plugin])
   return <div className="ui-form-row ui-form-row-narrow ui-form-row-fit-control">
     <span><strong>{t('plugins.home_location')}</strong><small>{t('plugins.home_location_hint')}</small>
-      {error && <small role="alert">{t('plugins.operation_failed')} {error}</small>}
+      {error && <small role="alert"><span className="ui-status-danger">{t('plugins.operation_failed')} {error}</span></small>}
     </span>
     <SegmentedControl ariaLabel={t('plugins.home_location')} value={location ?? ''}
       disabled={busy || !location || policy.locations.length === 1}
@@ -52,50 +54,63 @@ export function PluginsSettings({ plugins, error, onRefresh, onOpen }: {
   }
   return <>
     <aside className="ui-list-pane">
-      <div className="ui-list-pane-header ui-toolbar">
-        <button type="button" className="ui-tool-button ui-tool-button-square" aria-label={t('plugins.install')} data-tooltip={t('plugins.install')} disabled={busy}
-          onClick={() => void act(async () => { const item = await window.gale.plugins.install(); if (item) setSelectedId(item.id) })}><PackagePlus size={18} /></button>
-        <button type="button" className="ui-tool-button ui-tool-button-square" aria-label={t('common.refresh')} data-tooltip={t('common.refresh')} disabled={busy}
-          onClick={() => void onRefresh()}><RefreshCw size={18} /></button>
+      <div className="ui-list-pane-header">
+        <SettingsListActions addLabel={t('plugins.install')} deleteLabel={t('plugins.uninstall')}
+          canDelete={Boolean(selected)} canMoveDown={false} canMoveUp={false} disabled={busy}
+          leading={<button type="button" className="ui-icon-button" aria-label={t('common.refresh')} data-tooltip={t('common.refresh')} disabled={busy}
+            onClick={() => void onRefresh()}><RefreshCw size={UI_ICON_SIZE_LARGE} /></button>}
+          onAdd={() => act(async () => { const item = await window.gale.plugins.install(); if (item) setSelectedId(item.id) })}
+          onDelete={() => { if (selected) { setDeleteData(false); setRemoving(selected) } }} />
       </div>
-      <div className="ui-scroll-list" aria-label={t('plugins.title')}>
-        {plugins.map(item => <button type="button" key={item.id} className={`ui-list-item${selected?.id === item.id ? ' active' : ''}`} aria-pressed={selected?.id === item.id}
-          onClick={() => setSelectedId(item.id)}>{pluginDisplayText(item, i18n.language)}</button>)}
+      <div className="ui-scroll-list ui-list" aria-label={t('plugins.title')}>
+        {plugins.map(item => {
+          const name = pluginDisplayText(item, i18n.language)
+          const failed = Boolean(item.error || item.backendError || item.languageErrors?.length)
+          const state = failed ? 'error' : !item.enabled ? 'disabled'
+            : item.backendStatus === 'running' ? 'running' : item.backendStatus === 'starting' ? 'pending' : undefined
+          return <button type="button" key={item.id} className={`ui-list-item ui-list-item-split ui-list-item-compact${selected?.id === item.id ? ' active' : ''}`}
+            aria-label={name} aria-pressed={selected?.id === item.id} data-tooltip={name} onClick={() => setSelectedId(item.id)}>
+            <strong>{name}</strong>
+            {state && <em className={`ui-list-item-badge${failed ? ' ui-badge-danger' : state === 'running' ? ' ui-badge-success' : state === 'pending' ? ' ui-badge-warning' : ''}`}>{t(`settings.${state}`)}</em>}
+          </button>
+        })}
       </div>
     </aside>
     <div className="ui-editor">
-      {error && <div role="alert"><p>{t('plugins.load_failed')}</p><small>{error}</small></div>}
-      {selected ? <div className="ui-form-section">
-        <div className="ui-toolbar ui-toolbar-between">
-          <strong>{pluginDisplayText(selected, i18n.language)}</strong>
-          <div className="ui-row">
-            <label className="ui-row"><Checkbox checked={selected.enabled} disabled={busy || Boolean(selected.error)} onChange={enabled => void act(() => window.gale.plugins.setEnabled(selected.id, enabled))} />{t('settings.enabled')}</label>
-            <button type="button" className="ui-tool-button ui-tool-button-square" aria-label={t('plugins.uninstall')} data-tooltip={t('plugins.uninstall')} disabled={busy} onClick={() => { setDeleteData(false); setRemoving(selected) }}><Trash2 size={16} /></button>
+      {error && <div className="ui-note ui-note-danger" role="alert"><p>{t('plugins.load_failed')}</p><p>{error}</p></div>}
+      {selected ? <>
+        <div className="settings-detail-heading ui-toolbar ui-toolbar-between">
+          <div>
+            <strong>{pluginDisplayText(selected, i18n.language)}</strong>
+            <small>{[selected.id, selected.manifest?.pluginVersion].filter(Boolean).join(' · ')}</small>
           </div>
+          <CheckboxField checked={selected.enabled} disabled={busy || Boolean(selected.error)} label={t('settings.enabled')}
+            onChange={enabled => void act(() => window.gale.plugins.setEnabled(selected.id, enabled))} />
         </div>
-        <small className="ui-field-hint">{selected.id} · {selected.manifest?.pluginVersion}</small>
-        <p>{pluginDisplayText(selected, i18n.language, 'description')}</p>
-        {Boolean(selected.languageErrors?.length) && <p role="alert">{t('plugins.language_failed')}<small>{selected.languageErrors?.join('\n')}</small></p>}
-        {(selected.error || selected.backendError) && <p role="alert">{selected.error ?? selected.backendError}</p>}
+        {pluginDisplayText(selected, i18n.language, 'description') && <div className="ui-field-hint">{pluginDisplayText(selected, i18n.language, 'description')}</div>}
+        {Boolean(selected.languageErrors?.length) && <div className="ui-note ui-note-danger" role="alert"><p>{t('plugins.language_failed')}</p>{selected.languageErrors?.map((message, index) => <p key={index}>{message}</p>)}</div>}
+        {(selected.error || selected.backendError) && <div className="ui-note ui-note-danger" role="alert"><p>{selected.error ?? selected.backendError}</p></div>}
         {selected.manifest?.ui && selected.enabled && !selected.error && <PluginHomeLocation key={selected.id} plugin={selected} busy={busy} act={act} />}
-        <div className="ui-row">
-          {selected.manifest?.ui && <>
-            <button type="button" className="ui-button" disabled={busy || !selected.enabled || Boolean(selected.error) || !pluginHomePolicy(selected.manifest).locations.includes('sidebar')} onClick={() => onOpen(selected)}>{t('plugins.open_panel')}</button>
-            <button type="button" className="ui-button" disabled={busy || !selected.enabled || Boolean(selected.error) || !pluginHomePolicy(selected.manifest).locations.includes('window')} onClick={() => void act(() => window.gale.plugins.openWindow(selected.id))}><ExternalLink size={16} />{t('plugins.open_window')}</button>
-          </>}
-          {selected.manifest?.backend && <button type="button" className="ui-button" disabled={(busy && selected.backendStatus !== 'starting') || !selected.enabled || Boolean(selected.error)}
-            onClick={() => void act(() => selected.backendStatus === 'running' || selected.backendStatus === 'starting'
-              ? window.gale.plugins.stopBackend(selected.id) : window.gale.plugins.startBackend(selected.id))}>
-            {selected.backendStatus === 'running' || selected.backendStatus === 'starting' ? <Square size={16} /> : <Play size={16} />}
-            {t(selected.backendStatus === 'running' || selected.backendStatus === 'starting' ? 'plugins.stop_backend' : 'plugins.start_backend')}</button>}
-        </div>
-        <small className="ui-field-hint">{selected.manifest?.backend ? t(`plugins.backend_${selected.backendStatus}`) : t('plugins.no_backend')}</small>
-      </div> : <div className="ui-empty-state">{t('plugins.empty')}</div>}
+        {selected.manifest && <div className="ui-form-section ui-form-section-divided">
+          <div className="ui-toolbar">
+            {selected.manifest.ui && <>
+              <button type="button" className="ui-button ui-button-compact" disabled={busy || !selected.enabled || Boolean(selected.error) || !pluginHomePolicy(selected.manifest).locations.includes('sidebar')} onClick={() => onOpen(selected)}><PanelRight size={UI_ICON_SIZE_SMALL} />{t('plugins.open_panel')}</button>
+              <button type="button" className="ui-button ui-button-compact" disabled={busy || !selected.enabled || Boolean(selected.error) || !pluginHomePolicy(selected.manifest).locations.includes('window')} onClick={() => void act(() => window.gale.plugins.openWindow(selected.id))}><ExternalLink size={UI_ICON_SIZE_SMALL} />{t('plugins.open_window')}</button>
+            </>}
+            {selected.manifest.backend && <button type="button" className="ui-button ui-button-compact" disabled={(busy && selected.backendStatus !== 'starting') || !selected.enabled || Boolean(selected.error)}
+              onClick={() => void act(() => selected.backendStatus === 'running' || selected.backendStatus === 'starting'
+                ? window.gale.plugins.stopBackend(selected.id) : window.gale.plugins.startBackend(selected.id))}>
+              {selected.backendStatus === 'running' || selected.backendStatus === 'starting' ? <Square size={UI_ICON_SIZE_SMALL} /> : <Play size={UI_ICON_SIZE_SMALL} />}
+              {t(selected.backendStatus === 'running' || selected.backendStatus === 'starting' ? 'plugins.stop_backend' : 'plugins.start_backend')}</button>}
+          </div>
+          <small className="ui-field-hint">{selected.manifest.backend ? t(`plugins.backend_${selected.backendStatus}`) : t('plugins.no_backend')}</small>
+        </div>}
+      </> : <div className="ui-empty-state">{t('plugins.empty')}</div>}
     </div>
     <ConfirmDialog request={removing ? { title: t('plugins.uninstall'), description: t('plugins.uninstall_hint', { name: pluginDisplayText(removing, i18n.language) }), variant: 'danger',
       onConfirm: () => act(() => window.gale.plugins.uninstall(removing.id, deleteData)) } : undefined} onClose={() => setRemoving(undefined)}>
       <div className="ui-form-section">
-        <label className="ui-row"><Checkbox checked={deleteData} onChange={setDeleteData} />{t('plugins.delete_data')}</label>
+        <CheckboxField checked={deleteData} onChange={setDeleteData} label={t('plugins.delete_data')} />
         <small className="ui-field-hint">{t('plugins.delete_data_hint')}</small>
       </div>
     </ConfirmDialog>

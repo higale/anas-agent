@@ -1,0 +1,11 @@
+{
+  "version": 0,
+  "_meta": { "name": "English" },
+  "plugin": {
+    "name": "Notepad",
+    "description": "A persistent notepad with no backend."
+  },
+  "actions": { "save": "Save" },
+  "status": { "saved": "Saved", "unsaved": "Unsaved" },
+  "errors": { "languages": "Some language files could not be loaded." }
+}

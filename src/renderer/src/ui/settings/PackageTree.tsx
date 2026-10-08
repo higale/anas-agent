@@ -92,7 +92,7 @@ export function PackageFileViewer({ preview, file, onOpen, t, onSave }: {
   const [source, setSource] = useState(false)
   const markdown = preview?.kind === 'text' && /\.(md|markdown)$/i.test(preview.name)
   if (preview) return <>
-    <div className="settings-skill-viewer-heading ui-toolbar ui-toolbar-between"><div><button className="ui-link-button" type="button" data-tooltip={t('chat.show_in_folder')} onClick={() => void onOpen(preview.path)}>{preview.relativePath}</button></div><div className="ui-row">
+    <div className="settings-detail-heading ui-toolbar ui-toolbar-between"><div><button className="ui-link-button" type="button" data-tooltip={t('chat.show_in_folder')} onClick={() => void onOpen(preview.path)}>{preview.relativePath}</button></div><div className="ui-row">
       {preview.kind === 'text' && preview.editable && preview.revision && onSave && <button className="ui-icon-button" type="button" aria-label={t('common.edit')} data-tooltip={t('common.edit')} onClick={() => setEditing(true)}><Pencil size={14} /></button>}
       {markdown && <SegmentedControl ariaLabel={t('settings.file_view_mode')} value={source ? 'source' : 'preview'}
         options={[{ value: 'preview', label: t('settings.file_preview') }, { value: 'source', label: t('settings.file_source') }]}
@@ -104,7 +104,7 @@ export function PackageFileViewer({ preview, file, onOpen, t, onSave }: {
   </>
   if (!file) return null
   return <>
-    <div className="settings-skill-viewer-heading ui-toolbar ui-toolbar-between"><div><button className="ui-link-button" type="button" data-tooltip={t('chat.show_in_folder')} disabled={file.kind === 'symlink' && !file.resolvedPath} onClick={() => void onOpen(file.path)}>{file.relativePath}</button></div></div>
+    <div className="settings-detail-heading ui-toolbar ui-toolbar-between"><div><button className="ui-link-button" type="button" data-tooltip={t('chat.show_in_folder')} disabled={file.kind === 'symlink' && !file.resolvedPath} onClick={() => void onOpen(file.path)}>{file.relativePath}</button></div></div>
     {file.linkTarget && <div className="ui-note"><Link2 size={14} /> {file.linkTarget} → {file.resolvedPath ?? t('settings.skill_link_unavailable')}</div>}
     <div className="ui-empty-state">{t(file.kind === 'directory' || file.linkDirectory ? 'settings.skill_directory_preview' : 'settings.skill_file_preview_unavailable')}</div>
   </>

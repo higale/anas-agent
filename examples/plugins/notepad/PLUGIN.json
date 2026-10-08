@@ -1,9 +1,10 @@
 {
   "version": 0,
   "id": "example-notepad",
-  "name": "Notepad / 记事本",
+  "name": "Notepad",
   "plugin_version": "0.1.0",
   "api_version": 1,
-  "description": "A persistent notepad with no backend. / 无需后台的持久化记事本。",
+  "description": "A persistent notepad with no backend.",
+  "lang": "lang",
   "ui": "index.html"
 }

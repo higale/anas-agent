@@ -5,14 +5,13 @@ import { BookOpen, FileDiff, Maximize2, Minimize2, PanelLeftOpen, PanelRightClos
 import { useEffect, useRef, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AgentRunActivity } from '@shared/agentTypes'
+import type { PanelTabMenuOptions } from '@shared/panels'
 import { WORKSPACE_PANEL_WIDTH_DEFAULT } from '@shared/uiPreferences'
 import { ResizeHandle } from '../ResizeHandle'
 import { AgentSubagentStatusIcon, subagentStatusLabel } from './AgentSubagentActivityDock'
 import { workspacePanelGroup, type WorkspacePanelsController } from './useWorkspacePanels'
 import { notice } from '../notice'
 import { panelError } from '../panels/panelError'
-import { ContextMenuShell } from '../ContextMenuShell'
-import { MenuItemPrimitive } from '../MenuItemPrimitive'
 
 interface WorkspacePanelsProps {
   controller: WorkspacePanelsController
@@ -58,6 +57,11 @@ export function WorkspacePanels({ controller, scope, activities, narrow, width, 
       ;(trigger ?? toggleRef.current ?? inputRef.current)?.focus({ preventScroll: true })
     })
   }
+  const showTabMenu = (id: string, position?: PanelTabMenuOptions['position']) => {
+    void window.gale.panels.showTabMenu(id, { closeLabel: t('common.close'), position })
+      .then(selected => { if (selected) close(id) })
+      .catch(reason => notice.error(panelError(reason, t)))
+  }
   const collapse = () => {
     controller.dismiss(scope)
     requestAnimationFrame(() => (toggleRef.current ?? inputRef.current)?.focus({ preventScroll: true }))
@@ -87,16 +91,26 @@ export function WorkspacePanels({ controller, scope, activities, narrow, width, 
               ? activities.find((run) => run.runId === panel.runId)?.subagents.find((item) => item.id === panel.subagentId)
               : undefined
             const label = panel.kind === 'document' ? helpDocuments[panel.documentId]
-              : panel.kind === 'files' ? t('agent.file_changes') : subagent?.name ?? tab.name
-            return <ContextMenuShell key={tab.id} className="ui-menu ui-menu-list" trigger={<div className="ui-tab-item" data-active={group.activeId === tab.id}
+              : subagent?.name ?? tab.name
+            return <div key={tab.id} className="ui-tab-item" data-active={group.activeId === tab.id} data-app-context-menu
+              onContextMenu={event => {
+                event.preventDefault()
+                showTabMenu(tab.id)
+              }}
               onMouseDownCapture={(event) => { if (event.button === 1) event.preventDefault() }}
               onAuxClick={(event) => {
                 if (event.button !== 1) return
                 event.preventDefault()
                 close(tab.id)
               }}>
-              <Tabs.Trigger className="ui-tab-trigger" value={tab.id} data-panel-id={tab.id} aria-label={label} title={label}
-                onKeyDown={(event) => { if (event.key === 'Delete') { event.preventDefault(); close(tab.id) } }}>
+              <Tabs.Trigger className="ui-tab-trigger" value={tab.id} data-panel-id={tab.id} aria-label={label} data-tooltip={label}
+                onKeyDown={event => {
+                  if (event.key === 'Delete') { event.preventDefault(); close(tab.id) }
+                  if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return
+                  event.preventDefault()
+                  const bounds = event.currentTarget.getBoundingClientRect()
+                  showTabMenu(tab.id, { x: bounds.left, y: bounds.bottom })
+                }}>
                 {panel.kind === 'subagent'
                   ? <span role="img" aria-label={subagent ? subagentStatusLabel(subagent.status) : t('agent.panel_unavailable')}>
                       <AgentSubagentStatusIcon status={subagent?.status ?? 'failed'} size={14} />
@@ -106,11 +120,7 @@ export function WorkspacePanels({ controller, scope, activities, narrow, width, 
               </Tabs.Trigger>
               <button className="ui-tab-close ui-tool-button" type="button"
                 aria-label={t('agent.close_panel', { name: label })} onClick={() => close(tab.id)}><X size={12} /></button>
-            </div>}>
-              <MenuItemPrimitive kind="context" className="ui-menu-item ui-menu-item-row" onSelect={() => close(tab.id)}>
-                <X size={16} /><span>{t('common.close')}</span>
-              </MenuItemPrimitive>
-            </ContextMenuShell>
+            </div>
           })}
         </Tabs.List>
       </div>

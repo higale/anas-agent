@@ -793,10 +793,11 @@ export function registerAgentIpcHandlers(): void {
     }
   }
   handleAgentIpc('agent:runs:submit', submitRun)
-  handleAgentIpc('agent:panels:review', async (event, value: unknown): Promise<void> => {
+  handleAgentIpc('agent:panels:review', async (event, value: unknown, navigationId: unknown): Promise<void> => {
     const view = panelViews.fromPage(event)
     const content = view.content
     if (content.kind !== 'files') throw new Error('File changes panel required.')
+    if (typeof navigationId !== 'string' || navigationId !== content.navigationId) throw new Error('Panel context changed. Retry from the current file changes.')
     validatePanelContext(content)
     const review = codeReviewRequestSchema.parse(value)
     if (review.kind === 'git' ? review.projectId !== content.projectId : review.threadId !== content.threadId) throw new Error('Review must belong to the panel context.')
@@ -811,9 +812,13 @@ export function registerAgentIpcHandlers(): void {
         accessMode: content.draft?.accessMode ?? (project.kind === 'workspace' ? project.accessMode : undefined)
       } })
     })
-    // A draft panel becomes bound to the created conversation after its first review.
-    if (!content.threadId && panelViews.pageContent(event.sender)) panelViews.updateContent(view.viewId, { ...content, threadId: submission.thread.id })
-    for (const window of BrowserWindow.getAllWindows()) if (isMainRendererWindow(window)) window.webContents.send('panels:reviewStarted', submission.thread.id)
+    // Finish in the captured context, but never restore it after the user navigates away.
+    const current = panelViews.pageContent(event.sender)
+    if (!content.threadId && current?.kind === 'files' && current.navigationId === navigationId) {
+      panelViews.updateContent(view.viewId, { ...content, threadId: submission.thread.id, navigationId: randomUUID(), draft: undefined })
+    }
+    for (const window of BrowserWindow.getAllWindows()) if (isMainRendererWindow(window)) window.webContents.send('panels:reviewStarted', submission.thread.id,
+      { projectId: content.projectId, threadId: content.threadId })
   })
   handleAgentIpc('agent:runs:compress', async (
     event,

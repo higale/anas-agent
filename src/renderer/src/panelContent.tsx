@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { useTranslation } from 'react-i18next'
-import type { BuiltinPanel, PanelContentState } from '@shared/panels'
+import { panelIdentity, workspacePanelScope, type BuiltinPanel, type PanelContentState } from '@shared/panels'
 import { applyLanguagePreference, initializeI18nFromResources } from './i18n'
 import { installNativeContextMenuPolicy } from './nativeContextMenuPolicy'
 import { HelpDocumentPanel } from './ui/agent/HelpDocumentPanel'
@@ -37,7 +37,6 @@ function SubagentContent({ content, open }: { content: Extract<BuiltinPanel, { k
 
 function PanelContent({ initial }: { initial: PanelContentState }) {
   const [state, setState] = useState(initial)
-  const cache = useRef(new Map<string, unknown>())
   const { t } = useTranslation()
   useEffect(() => installPanelEscapeHandler(() => {
     void api.escape().catch(reason => notice.error(panelError(reason, t)))
@@ -66,13 +65,15 @@ function PanelContent({ initial }: { initial: PanelContentState }) {
     void api.open(content).catch(reason => { if (!isPanelClosed(reason)) notice.error(panelError(reason, t)) })
   }, [t])
   const content = state.view.content
+  const contextKey = content.kind === 'files' ? JSON.stringify([content.projectId, workspacePanelScope(content.threadId, content.projectId)]) : panelIdentity(content)
   const project = state.project?.kind === 'workspace' ? state.project : undefined
   return <div className="panel-content-root">
     <MarkdownWorkspaceProjectProvider projectId={project?.id}>
       <DiffPreferences.Provider value={{ ...state.preferences, onChange: api.updatePreferences }}>
-        <PanelViewState state={cache.current}>
+        <PanelViewState key={contextKey}>
           {content.kind === 'document' ? <HelpDocumentPanel request={content} onOpen={open} />
-            : content.kind === 'files' ? <FileChangesPanel project={project} request={content} onReview={api.review} />
+            : content.kind === 'files' ? <FileChangesPanel project={project} request={content}
+                onReview={request => api.review(request, content.navigationId!)} />
               : content.kind === 'subagent' ? <SubagentContent content={content} open={open} /> : null}
         </PanelViewState>
       </DiffPreferences.Provider>

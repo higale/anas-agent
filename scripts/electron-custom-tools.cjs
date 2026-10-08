@@ -88,7 +88,7 @@ async function verifyCustomTools(launchApplication) {
     for (const name of ['Add directory', 'Move up', 'Move down', 'Refresh']) {
       await expect(sourceActions.getByRole('button', { name, exact: true })).toBeVisible()
     }
-    await expect(page.locator('.settings-skill-viewer-heading').getByRole('button', { name: 'Import tools', exact: true })).toBeVisible()
+    await expect(page.locator('.settings-detail-heading').getByRole('button', { name: 'Import tools', exact: true })).toBeVisible()
     const navigation = page.getByRole('navigation', { name: 'Tools', exact: true })
     await navigation.getByRole('button', { name: /^Built-in tools\s*\d+$/ }).click()
     await expect(importTools).toHaveCount(0)

@@ -481,7 +481,7 @@
   font: var(--font-size-small)/1.55 var(--font-mono);
 }
 
-.settings-skill-viewer-heading {
+.settings-detail-heading {
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border-muted);
 }
@@ -515,21 +515,21 @@
   min-height: 0;
 }
 
-.settings-skill-viewer-heading > div:first-child {
+.settings-detail-heading > div:first-child {
   display: grid;
   flex: 1 1 0;
   gap: 4px;
   min-width: 0;
 }
 
-.settings-skill-viewer-heading strong,
-.settings-skill-viewer-heading .ui-link-button,
-.settings-skill-viewer-heading small,
+.settings-detail-heading strong,
+.settings-detail-heading .ui-link-button,
+.settings-detail-heading small,
 .settings-skill-metadata dd {
   overflow-wrap: anywhere;
 }
 
-.settings-skill-viewer-heading small,
+.settings-detail-heading small,
 .settings-skill-metadata dt {
   color: var(--text-muted);
 }

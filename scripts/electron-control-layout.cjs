@@ -242,7 +242,7 @@ async function verifyControlLayout(launchApplication) {
     await page.getByRole('button', { name: 'Expand tool “json_format”', exact: true }).click()
     await page.getByRole('button', { name: 'README.md', exact: true }).click()
     await expectHeight(page.locator('.settings-skill-viewer .ui-segmented-control'), 36)
-    await expectChildrenInside(page.locator('.settings-skill-viewer-heading'))
+    await expectChildrenInside(page.locator('.settings-detail-heading'))
     if (process.env.ANAS_E2E_CONTROL_LAYOUT_SCREENSHOT) {
       await page.screenshot({ path: `${process.env.ANAS_E2E_CONTROL_LAYOUT_SCREENSHOT}.narrow.png` })
     }

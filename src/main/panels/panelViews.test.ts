@@ -1,14 +1,15 @@
 import { EventEmitter } from 'node:events'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { BrowserWindow, WebContents, IpcMainInvokeEvent } from 'electron'
+import type { BrowserWindow, WebContents, IpcMainInvokeEvent, PopupOptions } from 'electron'
 import type { PluginSummary } from '@shared/plugins'
 import type { PanelRequest, BuiltinPanel } from '@shared/panels'
 import { pluginPanel } from '../plugins/pluginPanel'
 import type { LanguageResourcesSnapshot } from '@shared/types'
 
-const mocks = vi.hoisted(() => ({ window: vi.fn(), view: vi.fn(), windows: vi.fn() }))
+const mocks = vi.hoisted(() => ({ window: vi.fn(), view: vi.fn(), windows: vi.fn(), menu: vi.fn() }))
 vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: false }, app: { isPackaged: true },
-  BrowserWindow: Object.assign(mocks.window, { getAllWindows: mocks.windows }), WebContentsView: mocks.view }))
+  BrowserWindow: Object.assign(mocks.window, { getAllWindows: mocks.windows }), WebContentsView: mocks.view,
+  Menu: { buildFromTemplate: mocks.menu } }))
 vi.mock('../ipcSecurity', () => ({
   isMainRendererWindow: (window: { main: boolean; destroyed: boolean }) => window.main && !window.destroyed,
   rendererLocationMatches: () => true, resolveRendererLocation: () => ({ url: 'file:///panel-window.html' })
@@ -51,8 +52,15 @@ class Window extends EventEmitter {
   setMenuBarVisibility = vi.fn()
   isDestroyed = () => this.destroyed
   getContentSize = () => [1200, 800]
+  getContentBounds = () => ({ x: 100, y: 80, width: 1200, height: 800 })
   loadURL = vi.fn(async () => { manager.setWindowLayout(this.webContents as unknown as WebContents, bounds) })
   destroy() { if (!this.destroyed) { this.destroyed = true; this.emit('closed'); this.webContents.close() } }
+}
+class PopupMenu {
+  options?: PopupOptions
+  constructor(readonly items: { label: string; click(): void }[]) {}
+  popup = vi.fn((options: PopupOptions) => { this.options = options })
+  closePopup = vi.fn(() => this.options?.callback?.())
 }
 const bounds = { x: 600, y: 100, width: 400, height: 650 }
 const summary = { id: 'example', manifest: { id: 'example', name: 'Example', ui: 'index.html' } } as PluginSummary
@@ -62,9 +70,11 @@ let windows: Window[]
 let nativeViews: View[]
 let requests: PanelRequest[]
 let acceptSidebar: boolean
+let menus: PopupMenu[]
 
 beforeEach(() => {
-  windows = []; nativeViews = []; requests = []; acceptSidebar = true
+  windows = []; nativeViews = []; requests = []; menus = []; acceptSidebar = true
+  mocks.menu.mockImplementation(items => { const menu = new PopupMenu(items); menus.push(menu); return menu })
   manager = new PanelViews(async () => ({ resources: {}, languages: [] }) as unknown as LanguageResourcesSnapshot)
   mocks.windows.mockImplementation(() => windows.filter(window => !window.destroyed))
   mocks.window.mockImplementation(function () { const window = new Window(); windows.push(window); return window })
@@ -89,6 +99,46 @@ function delayPageLoad() {
 }
 
 describe('plugin page ownership and placement', () => {
+  it('keeps native content visible while a tab menu opens, cancels or chooses close', async () => {
+    await open('sidebar')
+    const { viewId } = manager.list()[0], page = nativeViews[0]
+    main.webContents.zoom = 1.25
+    const cancelled = manager.showTabMenu(main as unknown as BrowserWindow, viewId, { closeLabel: 'Close', position: { x: 10, y: 20 } })
+    expect(menus[0].popup).toHaveBeenCalledWith({ window: main, x: 113, y: 105, callback: expect.any(Function) })
+    expect(page.visible).toBe(true)
+    expect(page.bounds).toEqual(bounds)
+    menus[0].options!.callback!()
+    await expect(cancelled).resolves.toBe(false)
+    const selected = manager.showTabMenu(main as unknown as BrowserWindow, viewId, { closeLabel: '关闭' })
+    expect(menus[1].items[0].label).toBe('关闭')
+    expect(page.visible).toBe(true)
+    menus[1].items[0].click()
+    menus[1].options!.callback!()
+    await expect(selected).resolves.toBe(true)
+    expect(page.webContents.loadURL).toHaveBeenCalledTimes(1)
+    expect(manager.list()).toHaveLength(1)
+  })
+  it.each(['move', 'close', 'hide', 'reload', 'destroy'])('dismisses an open tab menu on %s and ignores a late selection', async action => {
+    await open('sidebar')
+    const { viewId } = manager.list()[0]
+    const result = manager.showTabMenu(main as unknown as BrowserWindow, viewId, { closeLabel: 'Close' })
+    if (action === 'move') await manager.move(viewId, 'window')
+    else if (action === 'close') manager.close(viewId)
+    else if (action === 'reload') main.webContents.emit('did-start-navigation')
+    else if (action === 'destroy') main.destroy()
+    else main.emit('hide')
+    await expect(result).resolves.toBe(false)
+    menus[0].items[0].click()
+    expect(main.listenerCount('hide')).toBe(0)
+  })
+  it('rejects tab menus for another owner or a detached page', async () => {
+    await open('sidebar')
+    const { viewId } = manager.list()[0]
+    expect(() => manager.showTabMenu(new Window() as unknown as BrowserWindow, viewId, { closeLabel: 'Close' })).toThrow('PANEL_TARGET_UNAVAILABLE')
+    await manager.move(viewId, 'window')
+    expect(() => manager.showTabMenu(main as unknown as BrowserWindow, viewId, { closeLabel: 'Close' })).toThrow('PANEL_TARGET_UNAVAILABLE')
+    expect(menus).toHaveLength(0)
+  })
   it('retains toolbar and dispatches to the same page after moving, with one action at a time', async () => {
     await open('sidebar')
     const { viewId } = manager.list()[0]
@@ -415,6 +465,32 @@ describe('plugin page ownership and placement', () => {
     manager.setLayouts(main as unknown as BrowserWindow, [{ viewId, bounds }])
     expect(page.visible).toBe(true)
     expect(page.webContents.loadURL).toHaveBeenCalledTimes(1)
+  })
+
+  it('updates a global file page without changing placement or focus and reuses it when opened for another project', async () => {
+    const definition = { content: { kind: 'files' as const, projectId: 'one', threadId: 'thread-one' }, ownerId: 'builtin',
+      reuse: 'page' as const, location: 'sidebar' as const, locations: ['sidebar', 'window'] as ('sidebar' | 'window')[],
+      source: { kind: 'local' as const, url: 'file:///panel-content.html' }, preload: 'panelContent.js', name: () => 'Files · one' }
+    await manager.open(definition)
+    const { viewId } = manager.list()[0], page = nativeViews[0]
+    await manager.move(viewId, 'window')
+    const shell = windows[1]
+    shell.focus.mockClear(); shell.show.mockClear(); requests.length = 0
+    const content = { kind: 'files' as const, projectId: 'two' }
+    const update = vi.fn()
+    manager.updateContent(viewId, content, { name: () => 'Files · two', update })
+    expect(manager.state(viewId)).toMatchObject({ content, name: 'Files · two', location: 'window' })
+    expect(update).toHaveBeenCalledExactlyOnceWith(page.webContents)
+    expect(shell.setTitle).toHaveBeenLastCalledWith('Files · two')
+    expect(shell.focus).not.toHaveBeenCalled()
+    expect(shell.show).not.toHaveBeenCalled()
+    expect(requests).toHaveLength(0)
+    await manager.open({ ...definition, content, name: () => 'Files · two' })
+    expect(manager.list()).toHaveLength(1)
+    expect(manager.state(viewId).location).toBe('window')
+    expect(nativeViews).toHaveLength(1)
+    expect(page.webContents.loadURL).toHaveBeenCalledTimes(1)
+    expect(shell.focus).toHaveBeenCalledTimes(1)
   })
 
   it('plugin teardown leaves built-in pages alive, while shutdown cancels every pending transfer', async () => {

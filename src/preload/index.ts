@@ -6,7 +6,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AgentAccessMode, AgentMessageEditResult, AgentMessageRangeInput, AgentMessageRegenerateInput, AgentMessageWindowInput, AgentModelRequestPreview, AgentModelRequestPreviewInput, AgentQueuedInput, AgentQueuedInputCreate, AgentResumeInput, AgentRun, AgentRunCancellationResult, AgentRunDirectionInput, AgentRunDirectionReferenceInput, AgentRunReferenceInput, AgentRunSubmission, AgentRunSubmissionInput, AgentRuntimeEvent, AgentStorageUsageSnapshot, AgentSystemContextPreview, AgentSystemContextPreviewInput, AgentThread, AgentThreadCleanupResult, AgentThreadSnapshot, AgentThreadUpdate, AgentWorkspaceState } from '@shared/agentTypes'
 import type { AppAvatarImage, AppBuildInfo, AppConfigSnapshot, AppDataStorageUsageSnapshot, AppProfileUpdate, AppSettingsUpdate, AttachmentPreview, AttachmentPreviewOptions, AvatarCropSaveRequest, AvatarCropSource, AvatarCropSourceReadResult, DataBackupResult, DataCleanupRequest, DataCleanupResult, DataRestoreResult, EnvFileSnapshot, FileIconImage, FileIconSize, GaleApi, InputHistorySnapshot, LanguageResourcesSnapshot, McpMaintenanceResult, McpServerConfigSave, McpServerUpdate, McpToolStatus, MemoryItem, MemorySaveRequest, MemorySearchRequest, MemorySearchResult, ModelListRequest, ModelListResponse, ModelProviderConfigSave, Project, ProjectCreateRequest, ProjectDeleteResult, ProjectStateUpdate, ProjectUpdateRequest, ProviderModelConfigSave, RuntimeToolStatus, SelectedAttachment, SkillAvailabilityUpdate, SkillDirectoryAddResult, SkillFileNode, SkillFilePreview, SkillImportResult, SkillInvocationResult, SkillRootUpdate, SkillSnapshot, SpeechGenerateRequest, SpeechRendererDiagnostics, SpeechRendererWarningKind, SpeechReplyConfig, SpeechVoiceInfo, SubagentConfigSave, SystemEnvironmentDetection } from '@shared/types'
 import { subscribeAgentRuntimeEvents } from './agentEventSubscription'
-import type { PanelRequest, PanelState } from '@shared/panels'
+import type { FilesPanelContext, PanelRequest, PanelState } from '@shared/panels'
 
 const api: GaleApi = {
   panels: {
@@ -17,14 +17,16 @@ const api: GaleApi = {
       return () => ipcRenderer.removeListener('panels:escape', handler)
     },
     onReviewStarted: listener => {
-      const handler = (_event: Electron.IpcRendererEvent, threadId: string) => listener(threadId)
+      const handler = (_event: Electron.IpcRendererEvent, threadId: string, context: FilesPanelContext) => listener(threadId, context)
       ipcRenderer.on('panels:reviewStarted', handler)
       return () => ipcRenderer.removeListener('panels:reviewStarted', handler)
     },
     open: panel => ipcRenderer.invoke('panels:open', panel),
+    followFiles: context => ipcRenderer.invoke('panels:followFiles', context),
     list: () => ipcRenderer.invoke('panels:list'),
     move: (viewId, location) => ipcRenderer.invoke('panels:move', viewId, location),
     close: viewId => ipcRenderer.invoke('panels:close', viewId),
+    showTabMenu: (viewId, options) => ipcRenderer.invoke('panels:tabMenu', viewId, options),
     setLayouts: layouts => ipcRenderer.invoke('panels:layout', layouts),
     cancelRequest: requestId => ipcRenderer.invoke('panels:cancel', requestId),
     hasRequest: requestId => ipcRenderer.invoke('panels:hasRequest', requestId),

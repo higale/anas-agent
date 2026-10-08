@@ -44,8 +44,8 @@ export function useWorkspacePanels() {
   const update = useCallback((scope: string, change: (group: WorkspacePanelGroup) => WorkspacePanelGroup) => {
     setState((current) => {
       const group = change(visibleGroup(current, scope))
-      const localTabs = group.tabs.filter((tab) => tab.panel.kind !== 'document' && tab.panel.kind !== 'plugin')
-      const documentTabs = group.tabs.filter((tab) => tab.panel.kind === 'document' || tab.panel.kind === 'plugin')
+      const localTabs = group.tabs.filter((tab) => panelScope(tab.panel) !== undefined)
+      const documentTabs = group.tabs.filter((tab) => panelScope(tab.panel) === undefined)
       const documentActive = documentTabs.some((tab) => tab.id === group.activeId)
       const previousLocal = current.groups[scope] ?? emptyGroup
       const localActiveId = localTabs.some((tab) => tab.id === previousLocal.activeId)

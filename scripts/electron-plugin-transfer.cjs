@@ -91,12 +91,14 @@ module.exports = async function checkTransfer(application, page, directory) {
             return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, right: bounds.right, bottom: bounds.bottom }
           }
           return { header: rect(header), action: rect(action), title: rect(title), slot: rect(globalThis.document.querySelector('.panel-window-slot')),
+            borderWidth: Number.parseFloat(globalThis.getComputedStyle(header).borderBottomWidth), overlayBottom: area?.bottom ?? 0,
             titleDrag: globalThis.getComputedStyle(header).getPropertyValue('-webkit-app-region'),
             actionDrag: globalThis.getComputedStyle(action).getPropertyValue('-webkit-app-region'),
             safeRight: area?.right ?? globalThis.innerWidth, platform: globalThis.document.documentElement.dataset.platform }
         })
         assert.equal(layout.header.y, 0)
-        assert.equal(layout.header.height, 36)
+        assert.ok(layout.header.height >= 36 && layout.header.height < 48, 'Keep a single compact title row.')
+        assert.ok(layout.header.bottom - layout.borderWidth >= layout.overlayBottom, 'The divider must be below the native window controls.')
         assert.equal(layout.slot.y, layout.header.bottom)
         assert.ok(layout.action.bottom <= layout.header.bottom && layout.action.y >= 0)
         assert.ok(layout.action.right <= layout.safeRight)
