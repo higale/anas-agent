@@ -1,5 +1,5 @@
 import { registerPanelIpc } from './panels/panelHost'
-import { panelViews } from './panels/panelRegistry'
+import { panelPages } from './panels/panelRegistry'
 import { initializeHelpFiles } from './helpDocuments'
 import { closePluginHost, registerPluginIpc, registerPluginProtocol, registerPluginScheme } from './plugins/pluginHost'
 import { registerAttachmentPreviewProtocol, registerAttachmentPreviewScheme } from './attachments'
@@ -156,7 +156,7 @@ function startApplication(): void {
     markAppQuitting()
     let deadline: ReturnType<typeof setTimeout> | undefined
     const shutdown = Promise.allSettled([
-      Promise.resolve().then(() => panelViews.closeAll()),
+      Promise.resolve().then(() => panelPages.closeAll()),
       closePluginHost(),
       closeAgentRuntime({ allowIncomplete: true, timeoutMs: 5_000 }),
       closeCachedMcpRuntime()

@@ -1,12 +1,5 @@
 import { nativeTheme, type BrowserWindow, type BrowserWindowConstructorOptions } from 'electron'
 
-const independentWindows = new WeakSet<BrowserWindow>()
-
-/** Transient surfaces own their background and do not use application chrome. */
-export function preserveWindowAppearance(win: BrowserWindow): void {
-  independentWindows.add(win)
-}
-
 export function titleBarColors(): { backgroundColor: string; symbolColor: string } {
   return nativeTheme.shouldUseDarkColors
     ? { backgroundColor: '#202020', symbolColor: '#e5e5e5' }
@@ -33,7 +26,6 @@ export function titleBarOptions(options: { compact?: boolean } = {}): Pick<Brows
 }
 
 export function applyWindowTheme(win: BrowserWindow): void {
-  if (independentWindows.has(win)) return
   const colors = titleBarColors()
   win.setBackgroundColor(colors.backgroundColor)
   if (process.platform === 'darwin') return

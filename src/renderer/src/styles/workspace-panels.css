@@ -10,6 +10,8 @@
 }
 
 .agent-workspace-body {
+  --workspace-panel-resize-left: 2px;
+  --workspace-panel-gutter: 0px;
   position: relative;
   display: flex;
   min-width: 0;
@@ -17,7 +19,12 @@
   overflow: hidden;
 }
 
-.agent-chat-column {
+.agent-workspace-body:has(> .workspace-panels:not([hidden]):not(.workspace-panels-drawer) > .workspace-panel-resize) {
+  --workspace-panel-gutter: var(--workspace-panel-resize-left);
+}
+
+.agent-chat-column,
+.agent-chat-body {
   display: flex;
   flex: 1 1 0;
   flex-direction: column;
@@ -25,14 +32,12 @@
   min-height: 0;
 }
 
-.agent-chat-column > .agent-message-scroll-frame { flex: 1 1 0; }
-.agent-chat-column > .composer-area { flex: 0 0 auto; }
+/* Keep the conversation scrollbar outside the splitter's left hit area. */
+.agent-chat-body { padding-right: var(--workspace-panel-gutter); }
+.agent-chat-body > .agent-message-scroll-frame { flex: 1 1 0; }
+.agent-chat-body > .composer-area { flex: 0 0 auto; }
 
 .panel-slot { width: 100%; height: 100%; min-height: 120px; }
-.workspace-panels:not([data-maximized="true"]):not(.workspace-panels-drawer) .panel-slot {
-  margin-left: var(--resize-handle-width);
-  width: calc(100% - var(--resize-handle-width));
-}
 .panel-window-shell { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100vh; background: var(--bg-panel); }
 .panel-window-titlebar {
   display: flex;
@@ -73,9 +78,12 @@
   outline: none;
 }
 
-/* Use the shared hit width inside the pane, clear of the conversation scrollbar. */
-.workspace-panel-resize { inset: 0 auto 0 -1px; }
-.workspace-panel-resize::after { left: 0; }
+/* The 13px overlay covers 2px left of the border and 10px inside the panel. */
+.workspace-panel-resize {
+  inset: 0 auto 0 calc(-1 * var(--workspace-panel-resize-left) - 1px);
+  z-index: 21;
+}
+.workspace-panel-resize::after { left: calc(var(--workspace-panel-resize-left) - 0.5px); }
 .agent-subagent-panel { grid-template-rows: auto minmax(0, 1fr); }
 .agent-subagent-panel-title > h2 { font-family: inherit; }
 
@@ -91,10 +99,11 @@
   background: var(--bg-titlebar);
 }
 .workspace-panels-titlebar > .ui-tab-workspace-tabs {
-  min-height: var(--topbar-height);
+  /* The shared titlebar height already includes its bottom border. */
+  min-height: calc(var(--topbar-height) - 1px);
 }
 .workspace-panels-titlebar > .ui-tab-workspace-actions {
-  height: var(--topbar-height);
+  height: calc(var(--topbar-height) - 1px);
 }
 .workspace-panels-titlebar button { -webkit-app-region: no-drag; }
 :root[data-platform="darwin"] .sidebar-collapsed .workspace-panels[data-maximized="true"] .workspace-panels-titlebar {
@@ -112,10 +121,9 @@
 :root[data-platform="win32"] .workspace-panels-titlebar::before {
   content: '';
   order: -2;
-  flex: 0 0 calc(var(--titlebar-actions-inset) + var(--workspace-panel-action-count, 2) * var(--control-height));
-  height: max(var(--topbar-height), calc(env(titlebar-area-y, 0px) + env(titlebar-area-height, 36px)));
+  flex: 0 0 calc(var(--titlebar-actions-inset) + 2 * var(--control-height));
+  height: max(calc(var(--topbar-height) - 1px), calc(env(titlebar-area-y, 0px) + env(titlebar-area-height, 36px)));
 }
-.workspace-panels-titlebar:has([aria-label][data-panel-move]) { --workspace-panel-action-count: 3; }
 :root[data-platform="win32"] .workspace-panels-titlebar > .ui-tab-workspace-actions {
   position: absolute;
   inset: 0 var(--titlebar-actions-inset) auto auto;
@@ -124,5 +132,12 @@
   flex: 1 0 min(100%, var(--control-height));
 }
 
-.panel-content-root { height: 100vh; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-app); }
+.panel-content-root { height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-app); }
 .panel-content-root > .ui-detail-panel { flex: 1; min-height: 0; }
+
+.agent-workspace-container { height: 100%; min-height: 0; }
+.agent-workspace-container[hidden], .workspace-panels[hidden], .panel-page[hidden] { display: none; }
+.panel-slot, .panel-pages { min-height: 0; min-width: 0; flex: 1; position: relative; }
+.panel-pages { height: 100%; }
+.panel-page { height: 100%; width: 100%; min-height: 0; }
+.plugin-page { display: block; border: 0; height: 100%; width: 100%; }

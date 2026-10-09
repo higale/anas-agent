@@ -26,7 +26,7 @@ describe('review from an independent file panel', () => {
     const updateContent = vi.fn(), notify = vi.fn()
     vi.doMock('electron', () => ({ BrowserWindow: { getAllWindows: () => [{ webContents: { send: notify } }] } }))
     vi.doMock('../ipcSecurity', () => ({ handleMainIpc: handle, isMainRendererWindow: () => true }))
-    vi.doMock('./panelRegistry', () => ({ panelLabel: () => 'Code review', panelViews: {
+    vi.doMock('./panelRegistry', () => ({ panelLabel: () => 'Code review', panelPages: {
       fromPage: () => ({ ...view }), pageState: () => ({ view, language: 'en' }), pageContent: () => view.content, updateContent
     } }))
     vi.doMock('../agent/agentStorage', () => ({ AgentStorage: { open: () => storage } }))
@@ -40,10 +40,10 @@ describe('review from an independent file panel', () => {
     registerAgentIpcHandlers()
     const review = handlers.get('agent:panels:review')!
     const request = { kind: 'git', projectId: 'origin-project', sourceFolder: '/origin', scope: 'workspace', version: 'a'.repeat(64) }
-    await expect(review({ sender: {} }, { ...request, projectId: 'currently-selected-project' }, content.navigationId)).rejects.toThrow('panel context')
-    await expect(review({ sender: {} }, request, 'obsolete-navigation')).rejects.toThrow('Panel context changed')
+    await expect(review({ sender: {} }, 'page-id', { ...request, projectId: 'currently-selected-project' }, content.navigationId)).rejects.toThrow('panel context')
+    await expect(review({ sender: {} }, 'page-id', request, 'obsolete-navigation')).rejects.toThrow('Panel context changed')
     expect(capture).not.toHaveBeenCalled()
-    await review({ sender: {} }, request, content.navigationId)
+    await review({ sender: {} }, 'page-id', request, content.navigationId)
     expect(capture).toHaveBeenCalledExactlyOnceWith(database, request, 'origin-project')
     expect(submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       text: 'Captured review prompt', codeReview: { id: 'captured-scope' },

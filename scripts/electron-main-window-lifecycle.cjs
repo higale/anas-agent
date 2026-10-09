@@ -17,9 +17,10 @@ async function verifyMainWindowLifecycle(launchApplication) {
   try {
     const source = join(root, 'fixture')
     await mkdir(source)
-    await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ version: 0, id: 'window-lifecycle', name: 'Window lifecycle', plugin_version: '1.0.0', api_version: 1, ui: 'index.html', backend: 'backend.cjs' }))
+    await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ version: 0, id: 'window-lifecycle', name: 'Window lifecycle', plugin_version: '1.0.0', api_version: 2, ui: 'index.html', backend: 'backend.cjs' }))
     await writeFile(join(source, 'index.html'), '<script src="/_anas/sdk.js"></script><script src="app.js" defer></script><input id="draft">')
     await writeFile(join(source, 'app.js'), `
+      anas.registerLifecycle({ prepare: async () => null }); anas.ready();
       globalThis.echoes = 0;
       const socket = new WebSocket('ws://127.0.0.1:${server.address().port}');
       socket.onopen = () => { setInterval(() => socket.send(String(echoes)), 25); };
@@ -100,7 +101,7 @@ async function verifyMainWindowLifecycle(launchApplication) {
     }
     await expect.poll(() => child.exitCode !== null || child.signalCode !== null, { timeout: 10000 }).toBe(true)
     assert.equal(child.exitCode, 0, 'Main-window close must complete normal application shutdown.')
-    assert.equal(plugin.isClosed(), true)
+    assert.equal(plugin.page().isClosed(), true)
     assert.deepEqual(JSON.parse(await readFile(join(root, 'plugins_data/window-lifecycle/stopped.json'), 'utf8')), { stopped: true })
     await expect.poll(() => server.clients.size).toBe(0)
     await expect.poll(() => {

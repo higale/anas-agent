@@ -49,6 +49,13 @@
   -webkit-app-region: no-drag;
 }
 
+.topbar-sidebar-toggle,
+.topbar-sidebar-divider,
+.topbar-actions,
+.topbar-actions > button {
+  flex-shrink: 0;
+}
+
 .topbar-sidebar-divider {
   width: 1px;
   height: 20px;

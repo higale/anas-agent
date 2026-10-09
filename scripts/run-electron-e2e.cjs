@@ -305,9 +305,9 @@ async function verifyApplication(electronApplication, verifyRestart = false) {
   const resizeHandle = page.locator('.sidebar-resize-handle')
   const sidebarBox = await sidebar.boundingBox()
   const resizeHandleBox = await resizeHandle.boundingBox()
-  assert.equal(Math.round(resizeHandleBox.width), 16, 'Sidebar resize target must remain 16 pixels wide.')
+  assert.equal(resizeHandleBox.width, 13, 'Sidebar resize target must include the 1px divider and 6px on either side.')
   assert.ok(
-    Math.abs(resizeHandleBox.x - (sidebarBox.x + sidebarBox.width - 8)) <= 1,
+    Math.abs(resizeHandleBox.x - (sidebarBox.x + sidebarBox.width - 7)) < 0.1,
     'Sidebar resize target must extend equally across both sides of the divider.'
   )
   const resizeHitTargets = await page.evaluate(({ leftX, rightX, y }) => {
@@ -315,7 +315,7 @@ async function verifyApplication(electronApplication, verifyRestart = false) {
     return { left: hitsResizeHandle(leftX), right: hitsResizeHandle(rightX) }
   }, {
     leftX: sidebarBox.x + sidebarBox.width - 6,
-    rightX: sidebarBox.x + sidebarBox.width + 6,
+    rightX: sidebarBox.x + sidebarBox.width + 5,
     y: resizeHandleBox.y + 100
   })
   assert.deepEqual(resizeHitTargets, { left: true, right: true }, 'Sidebar divider must respond on both sides.')
@@ -933,8 +933,11 @@ async function verifyWorkspacePanelTitlebar(electronApplication) {
       verifySafeArea(narrow)
       const resizeBounds = await resize.boundingBox()
       const panelBounds = await page.locator('.workspace-panels').boundingBox()
-      assert.ok(resizeBounds.x >= panelBounds.x - 1 && resizeBounds.x + resizeBounds.width <= panelBounds.x + panelBounds.width,
-        'The panel resize hit area must stay inside its pane, leaving the adjacent conversation scrollbar available.')
+      const scrollBounds = await page.locator('.agent-message-panel').boundingBox()
+      assert.ok(Math.abs(resizeBounds.x + 2 - panelBounds.x) < 1
+        && Math.abs(resizeBounds.x + resizeBounds.width - panelBounds.x - 11) < 1
+        && scrollBounds.x + scrollBounds.width <= resizeBounds.x + 1,
+      'The panel resize target must extend 2px left and 10px right of the divider, leaving the conversation scrollbar available.')
       assert.ok(Math.abs(narrow.actions.x - wide.actions.x) < 1 && Math.abs(narrow.actions.y - wide.actions.y) < 1, 'Panel actions must not move when tabs wrap.')
       await expect(tabs.getByRole('tab', { name: /文件改动|File changes/ })).toHaveAttribute('aria-selected', 'true')
       if (zoom === 1 && process.env.ANAS_E2E_TITLEBAR_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_TITLEBAR_SCREENSHOT })

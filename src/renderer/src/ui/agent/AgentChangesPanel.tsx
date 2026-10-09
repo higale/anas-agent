@@ -8,7 +8,7 @@ import { CheckboxField } from '../CheckboxField'
 import { SearchableOptionPicker } from '../SearchableOptionPicker'
 import { DiffContentView } from '../diff/DiffContentView'
 import { CodeReviewButton } from './CodeReviewButton'
-import { usePanelScroll, usePanelState } from './PanelViewState'
+import { usePanelReady, usePanelRef, usePanelScroll, usePanelState } from './PanelViewState'
 
 export function AgentChangesPanel({ threadId, runId, onRunChange, compareCurrent, onCompareCurrentChange, onReview }: {
   threadId: string
@@ -19,7 +19,7 @@ export function AgentChangesPanel({ threadId, runId, onRunChange, compareCurrent
   onReview?(request: CodeReviewRequest): Promise<void>
 }) {
   const { t } = useTranslation()
-  const [rounds, setRounds] = usePanelState<FileChangeRoundListResult['rounds']>(`round.candidates:${threadId}`, [])
+  const [rounds, setRounds] = useState<FileChangeRoundListResult['rounds']>([])
   const [after, setAfter] = useState<number>()
   const [page, setPage] = useState<FileChangeRoundListResult>()
   const [loading, setLoading] = useState(true)
@@ -64,6 +64,7 @@ export function AgentChangesPanel({ threadId, runId, onRunChange, compareCurrent
     return () => { unsubscribe(); if (timer !== undefined) clearTimeout(timer) }
   }, [threadId])
 
+  usePanelReady(!loading, Boolean(error))
   const options = rounds.map((round) => ({ value: round.runId,
     label: `${new Date(round.createdAt).toLocaleString()} · ${round.summary || t('agent.changes_untitled_round')}`,
     searchText: `${round.summary} ${round.createdAt} ${round.runId}` }))
@@ -98,8 +99,8 @@ function RoundFiles({ threadId, runId, compareCurrent, revision, onRefresh, onRe
 }) {
   const { t } = useTranslation()
   const [filePath, setFilePath] = usePanelState(`round.file:${runId}`, '')
-  const [cursors, setCursors] = useState<string[]>([''])
-  const version = useRef<string | undefined>(undefined)
+  const [cursors, setCursors] = usePanelState<string[]>(`round.cursors:${runId}`, [''])
+  const version = usePanelRef<string | undefined>(`round.version:${runId}`, undefined)
   const [pageRevision, setPageRevision] = useState(revision)
   const [result, setResult] = useState<{ key: string; data?: RoundFileChangesResult; error?: string }>()
   const [readyContent, setReadyContent] = useState<string>()
@@ -128,6 +129,7 @@ function RoundFiles({ threadId, runId, compareCurrent, revision, onRefresh, onRe
   const data = result?.key === key ? result.data : undefined
   const error = result?.key === key ? result.error : undefined
   const loading = result?.key !== key
+  usePanelReady(!loading, Boolean(error))
   const selected = data?.files.find((file) => file.path === filePath) ?? data?.files[0]
   const target = compareCurrent ? 'current' : 'recorded'
   const contentKey = JSON.stringify([runId, selected?.path, data?.version, target, revision])

@@ -7,7 +7,7 @@ import type { GitChangeQuery, GitChangeResult, GitReadErrorCode } from '@shared/
 import type { CodeReviewRequest } from '@shared/codeReview'
 import { SearchableOptionPicker } from '../SearchableOptionPicker'
 import { CodeReviewButton } from './CodeReviewButton'
-import { usePanelRef, usePanelScroll, usePanelState } from './PanelViewState'
+import { usePanelReady, usePanelRef, usePanelScroll, usePanelState } from './PanelViewState'
 import { GitBaselinePicker, type GitBaseline } from './GitBaselinePicker'
 import { DiffContentView } from '../diff/DiffContentView'
 
@@ -56,6 +56,7 @@ function GitRepositoryChanges({ project, folder, scope, onReview }: { project: W
   }, [key])
   const data = result?.key === key ? result.data : undefined
   const error = (scope !== 'unstaged' ? referenceError : undefined) ?? (result?.key === key ? result.error : undefined)
+  usePanelReady(Boolean(data) || error === 'not_repository', Boolean(error) && error !== 'not_repository')
   const selected = data?.files.find((entry) => entry.path === file) ?? data?.files[0]
   const scroll = useRef<HTMLDivElement>(null), onScroll = usePanelScroll(scroll, Boolean(data), true, `git.scroll:${folder}:${scope}`)
   const reset = () => { setCursors([0]); setFile(''); version.current = undefined; head.current = undefined }

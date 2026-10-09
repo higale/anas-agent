@@ -1,4 +1,4 @@
-import { panelViews } from './panels/panelRegistry'
+import { panelPages } from './panels/panelRegistry'
 import { app, shell } from 'electron'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -38,7 +38,7 @@ async function stopWriters(): Promise<void> {
   try {
     await beginApplicationDataTransition()
     const results = await Promise.allSettled([
-      Promise.resolve().then(() => panelViews.closeAll()),
+      Promise.resolve().then(() => panelPages.closeAll()),
       closePluginHost(), closeAgentRuntime(), closeCachedMcpRuntime()
     ])
     const errors = results.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { panelIdentity, type PanelContent, type PanelState } from '@shared/panels'
@@ -9,10 +9,11 @@ import { useWorkspacePanels, workspacePanelScope } from './useWorkspacePanels'
 const { t } = vi.hoisted(() => ({ t: (key: string, options?: { name?: string }) => options?.name ? `${key} ${options.name}` : key }))
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t }) }))
 vi.mock('../notice', () => ({ notice: { error: vi.fn() } }))
+vi.mock('../panels/PanelPageHost', () => ({ PanelPageHost: ({ activeId }: { activeId?: string }) => <div data-page-host={activeId} /> }))
 let views: PanelState[]
 let changed: ((views: PanelState[]) => void) | undefined
 let escape: ((viewId: string) => void) | undefined
-const move = vi.fn(), close = vi.fn(), cancelTask = vi.fn(), showTabMenu = vi.fn()
+const move = vi.fn(), close = vi.fn(), cancelTask = vi.fn(), reorder = vi.fn()
 function Harness({ narrow = false }: { narrow?: boolean }) {
   const controller = useWorkspacePanels()
   const [thread, setThread] = useState('one')
@@ -36,46 +37,150 @@ function Harness({ narrow = false }: { narrow?: boolean }) {
     <button onClick={() => setSettings(!settings)}>Settings</button>
     <button ref={toggleRef} onClick={() => controller.toggle(scope)}>Toggle panels</button>
     <textarea ref={inputRef} aria-label="Message" />
-    {!settings && <WorkspacePanels controller={controller} scope={scope} activities={[]} narrow={narrow}
-      width={480} minWidth={320} maxWidth={700} toggleRef={toggleRef} inputRef={inputRef} onWidthCommit={vi.fn()} />}
+    <div hidden={settings}><WorkspacePanels controller={controller} scope={scope} activities={[]} narrow={narrow}
+      width={480} minWidth={320} maxWidth={700} toggleRef={toggleRef} inputRef={inputRef} onWidthCommit={vi.fn()} /></div>
   </>
 }
 beforeEach(() => {
   views = []; vi.clearAllMocks()
-  showTabMenu.mockResolvedValue(false)
   close.mockImplementation(async (id: string) => { views = views.filter(view => view.viewId !== id); changed?.(views) })
   move.mockImplementation(async (id: string, location: PanelState['location']) => {
     views = views.map(view => view.viewId === id ? { ...view, location } : view); changed?.(views)
   })
-  Object.defineProperty(window, 'gale', { configurable: true, value: { panels: { move, close, showTabMenu,
+  reorder.mockImplementation(async (id: string, beforeId: string | null) => {
+    const view = views.find(view => view.viewId === id)!
+    views = views.filter(view => view.viewId !== id)
+    views.splice(beforeId === null ? views.length : views.findIndex(view => view.viewId === beforeId), 0, view)
+    changed?.(views)
+  })
+  Object.defineProperty(window, 'gale', { configurable: true, value: { panels: { move, close, reorder, acknowledge: vi.fn().mockResolvedValue(undefined),
     onEscape: (listener: typeof escape) => { escape = listener; return () => { escape = undefined } }
   }, agent: { runs: { cancel: cancelTask } } } })
 })
 
-describe('native panel sidebar projection', () => {
+describe('panel sidebar', () => {
+  it('projects authoritative order across scoped and global tabs and conversation switches', async () => {
+    const user = userEvent.setup(); render(<Harness />)
+    for (const name of ['Alpha', 'Help', 'Beta']) await user.click(screen.getByRole('button', { name }))
+    const [alpha, help, beta] = views
+    act(() => { views = [beta, help, alpha]; changed?.(views) })
+    const tabs = () => screen.getAllByRole('tab').map(tab => tab.getAttribute('aria-label'))
+    expect(tabs()).toEqual(['Beta', 'User Guide', 'Alpha'])
+    await user.click(screen.getByRole('tab', { name: 'User Guide' }))
+    await user.click(screen.getByText('Switch conversation'))
+    expect(tabs()).toEqual(['User Guide'])
+    await user.click(screen.getByText('Switch conversation'))
+    expect(tabs()).toEqual(['Beta', 'User Guide', 'Alpha'])
+    act(() => { views = views.map(view => ({ ...view })); changed?.(views) })
+    expect(tabs()).toEqual(['Beta', 'User Guide', 'Alpha'])
+  })
+  it('commits a reorder only on release and cancels a detached preview with Escape', async () => {
+    const user = userEvent.setup(); render(<Harness />)
+    for (const name of ['Alpha', 'Help', 'Beta']) await user.click(screen.getByRole('button', { name }))
+    const rect = (left: number, width: number) => ({ x: left, y: 0, left, right: left + width, top: 0, bottom: 40, width, height: 40, toJSON() {} })
+    vi.spyOn(screen.getByRole('tablist'), 'getBoundingClientRect').mockReturnValue(rect(0, 600))
+    vi.spyOn(document.querySelector('.workspace-panels-titlebar')!, 'getBoundingClientRect').mockReturnValue(rect(0, 700))
+    screen.getAllByRole('tab').forEach((tab, index) => vi.spyOn(tab.closest('.ui-tab-item')!, 'getBoundingClientRect').mockReturnValue(rect(index * 200, 200)))
+    const beta = screen.getByRole('tab', { name: 'Beta' })
+    const down = () => fireEvent.pointerDown(beta, { button: 0, isPrimary: true, pointerId: 7, clientX: 500, clientY: 20 })
+    down()
+    fireEvent.pointerMove(window, { pointerId: 7, buttons: 1, clientX: 25, clientY: 20 })
+    expect(reorder).not.toHaveBeenCalled()
+    expect(document.querySelector('.ui-tab-insertion-marker')).toBeInTheDocument()
+    fireEvent.pointerUp(window, { pointerId: 7, clientX: 25, clientY: 20 })
+    await waitFor(() => expect(screen.getAllByRole('tab').map(tab => tab.getAttribute('aria-label'))).toEqual(['Beta', 'Alpha', 'User Guide']))
+    expect(document.documentElement).not.toHaveClass('ui-tab-dragging')
+    down()
+    fireEvent.pointerMove(window, { pointerId: 7, buttons: 1, clientX: 500, clientY: 120 })
+    expect(screen.getByRole('status')).toHaveTextContent('panels.drop_to_window')
+    fireEvent.keyDown(window, { key: 'Escape' })
+    fireEvent.pointerUp(window, { pointerId: 7, clientX: 500, clientY: 120 })
+    expect(move).not.toHaveBeenCalled()
+    expect(reorder).toHaveBeenCalledTimes(1)
+    expect(document.documentElement).not.toHaveClass('ui-tab-dragging')
+  })
   it('shows loading in the common slot and keeps the panel controls usable', async () => {
     const user = userEvent.setup(); render(<Harness />)
     await user.click(screen.getByRole('button', { name: 'Help' }))
     act(() => { views = views.map(view => ({ ...view, loading: true })); changed?.(views) })
     expect(screen.getByRole('status')).toHaveTextContent('common.loading')
-    expect(document.querySelector('[data-panel-view]')).toHaveAttribute('aria-busy', 'true')
-    expect(screen.getByRole('button', { name: 'panels.move_window' })).toBeEnabled()
+    expect(document.querySelector('.panel-slot')).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByRole('button', { name: 'agent.maximize_panels' })).toBeEnabled()
     await user.click(screen.getByRole('button', { name: 'agent.hide_panels' }))
     act(() => { views = views.map(view => ({ ...view, loading: false })); changed?.(views) })
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
     await user.click(screen.getByText('Toggle panels'))
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
-    expect(document.querySelector('[data-panel-view]')).toHaveAttribute('aria-busy', 'false')
+    expect(document.querySelector('.panel-slot')).toHaveAttribute('aria-busy', 'false')
+  })
+  it('allows a sidebar-only tab to reorder but refuses to detach it', async () => {
+    const user = userEvent.setup(); render(<Harness />)
+    for (const name of ['Help', 'Plugin']) await user.click(screen.getByRole('button', { name }))
+    const plugin = views[1]
+    act(() => { plugin.locations = ['sidebar']; changed?.([...views]) })
+    const tab = screen.getByRole('tab', { name: 'Example' })
+    fireEvent.contextMenu(tab)
+    expect(screen.queryByRole('menuitem', { name: 'panels.move_window' })).not.toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'common.close' })).toBeVisible()
+    await user.keyboard('{Escape}')
+    fireEvent.pointerDown(tab, { button: 0, isPrimary: true, pointerId: 7, clientX: 0, clientY: 0 })
+    fireEvent.pointerMove(window, { pointerId: 7, buttons: 1, clientX: 0, clientY: 100 })
+    expect(screen.getByRole('status')).toHaveTextContent('panels.sidebar_only')
+    fireEvent.pointerUp(window, { pointerId: 7, clientX: 0, clientY: 100 })
+    expect(move).not.toHaveBeenCalled()
+    expect(reorder).not.toHaveBeenCalled()
+    fireEvent.pointerDown(tab, { button: 0, isPrimary: true, pointerId: 7, clientX: 0, clientY: 0 })
+    fireEvent.pointerUp(window, { pointerId: 7, clientX: -10, clientY: 0 })
+    await waitFor(() => expect(screen.getAllByRole('tab').map(tab => tab.getAttribute('aria-label'))).toEqual(['Example', 'User Guide']))
+    expect(reorder).toHaveBeenCalledWith(plugin.viewId, views[1].viewId)
+  })
+  it.each(['capture loss', 'conversation change', 'unmount'])('cancels dragging after %s without moving the page', async reason => {
+    const user = userEvent.setup(); const rendered = render(<Harness />)
+    await user.click(screen.getByRole('button', { name: 'Help' }))
+    const tab = screen.getByRole('tab', { name: 'User Guide' })
+    fireEvent.pointerDown(tab, { button: 0, isPrimary: true, pointerId: 7, clientX: 0, clientY: 0 })
+    fireEvent.pointerMove(window, { pointerId: 7, buttons: 1, clientX: 0, clientY: 100 })
+    expect(screen.getByRole('status')).toHaveTextContent('panels.drop_to_window')
+    if (reason === 'capture loss') fireEvent.lostPointerCapture(tab, { pointerId: 7 })
+    else if (reason === 'conversation change') fireEvent.click(screen.getByText('Switch conversation'))
+    else rendered.unmount()
+    fireEvent.pointerUp(window, { pointerId: 7, clientX: 0, clientY: 100 })
+    expect(move).not.toHaveBeenCalled()
+    expect(reorder).not.toHaveBeenCalled()
+    expect(document.documentElement).not.toHaveClass('ui-tab-dragging')
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
   it.each(['Help', 'Plugin', 'Files', 'Alpha'])('offers the same detach action for %s and removes only its sidebar projection', async name => {
     const user = userEvent.setup(); render(<Harness />)
     await user.click(screen.getByRole('button', { name }))
-    expect(document.querySelector('[data-panel-view]')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'panels.move_window' }))
+    expect(document.querySelector('.panel-slot')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'panels.move_window' })).not.toBeInTheDocument()
+    fireEvent.contextMenu(screen.getByRole('tab'))
+    await user.click(screen.getByRole('menuitem', { name: 'panels.move_window' }))
     expect(move).toHaveBeenCalledWith(views[0].viewId, 'window')
     expect(views).toHaveLength(1)
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
     expect(cancelTask).not.toHaveBeenCalled()
+  })
+  it('moves the right-clicked tab without changing the active tab', async () => {
+    const user = userEvent.setup(); render(<Harness />)
+    await user.click(screen.getByRole('button', { name: 'Plugin' }))
+    await user.click(screen.getByRole('button', { name: 'Help' }))
+    const target = views[0].viewId
+    fireEvent.contextMenu(screen.getByRole('tab', { name: 'Example' }))
+    await user.click(screen.getByRole('menuitem', { name: 'panels.move_window' }))
+    expect(move).toHaveBeenCalledWith(target, 'window')
+    expect(screen.getByRole('tab', { name: 'User Guide' })).toHaveAttribute('aria-selected', 'true')
+  })
+  it('disables the detach menu action while that tab is moving', async () => {
+    const user = userEvent.setup(); render(<Harness />)
+    await user.click(screen.getByRole('button', { name: 'Plugin' }))
+    act(() => { views = views.map(view => ({ ...view, pendingLocation: 'window' as const })); changed?.(views) })
+    fireEvent.contextMenu(screen.getByRole('tab', { name: 'Example' }))
+    const action = screen.getByRole('menuitem', { name: 'panels.move_window' })
+    expect(action).toHaveAttribute('aria-disabled', 'true')
+    await user.click(action)
+    expect(move).not.toHaveBeenCalled()
   })
   it('keeps scoped tabs separate and global tabs shared across conversations', async () => {
     const user = userEvent.setup(); render(<Harness />)
@@ -97,7 +202,7 @@ describe('native panel sidebar projection', () => {
     await user.click(screen.getByText('Switch conversation'))
     expect(screen.getByRole('tab', { name: 'Files' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByRole('button', { name: 'agent.restore_panels' })).toBeVisible()
-    expect(document.querySelector('[data-panel-view]')).toHaveAttribute('data-panel-view', viewId)
+    expect(document.querySelector('[data-page-host]')).toHaveAttribute('data-page-host', viewId)
     await user.click(screen.getByRole('button', { name: 'agent.hide_panels' }))
     await user.click(screen.getByText('Switch conversation'))
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
@@ -123,10 +228,9 @@ describe('native panel sidebar projection', () => {
     const alpha = screen.getByRole('tab', { name: 'Alpha' })
     expect(alpha).toHaveAttribute('data-tooltip', 'Alpha')
     expect(alpha).not.toHaveAttribute('title')
-    showTabMenu.mockResolvedValueOnce(true)
     await user.pointer({ target: alpha, keys: '[MouseRight]' })
+    await user.click(screen.getByRole('menuitem', { name: 'common.close' }))
     await waitFor(() => expect(screen.queryByRole('tab', { name: 'Alpha' })).not.toBeInTheDocument())
-    expect(showTabMenu).toHaveBeenCalledWith(expect.any(String), { closeLabel: 'common.close', position: undefined })
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
     await user.pointer({ target: screen.getByRole('tab', { name: 'Beta' }), keys: '[MouseMiddle]' })
     screen.getByRole('tab', { name: 'User Guide' }).focus()
@@ -134,24 +238,25 @@ describe('native panel sidebar projection', () => {
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
     expect(cancelTask).not.toHaveBeenCalled()
   })
-  it('opens a native menu from the keyboard and keeps the panel when the menu is cancelled', async () => {
+  it('opens a DOM menu from the keyboard and keeps the panel when the menu is cancelled', async () => {
     const user = userEvent.setup(); render(<Harness />)
     await user.click(screen.getByRole('button', { name: 'Files' }))
     const tab = screen.getByRole('tab', { name: 'Files' })
     tab.focus()
     await user.keyboard('{Shift>}{F10}{/Shift}')
-    expect(showTabMenu).toHaveBeenCalledWith(views[0].viewId, { closeLabel: 'common.close', position: { x: 0, y: 0 } })
+    expect(screen.getByRole('menuitem', { name: 'common.close' })).toBeVisible()
+    await user.keyboard('{Escape}')
     expect(close).not.toHaveBeenCalled()
     expect(tab).toBeVisible()
-    expect(document.querySelector('[data-panel-view]')).toBeInTheDocument()
+    expect(document.querySelector('.panel-slot')).toBeInTheDocument()
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
-  it('retains tab selection and maximization while settings hide all native slots', async () => {
+  it('retains tab selection and maximization while settings hide the page without unmounting it', async () => {
     const user = userEvent.setup(); render(<Harness />)
     await user.click(screen.getByRole('button', { name: 'Alpha' }))
     await user.click(screen.getByRole('button', { name: 'agent.maximize_panels' }))
     await user.click(screen.getByText('Settings'))
-    expect(document.querySelector('[data-panel-view]')).not.toBeInTheDocument()
+    expect(document.querySelector('.panel-slot')).not.toBeVisible()
     await user.click(screen.getByText('Settings'))
     expect(screen.getByRole('button', { name: 'agent.restore_panels' })).toBeVisible()
     await user.click(screen.getByRole('button', { name: 'agent.hide_panels' }))
@@ -159,14 +264,14 @@ describe('native panel sidebar projection', () => {
     await user.click(screen.getByText('Toggle panels'))
     expect(screen.getByRole('button', { name: 'agent.maximize_panels' })).toBeVisible()
   })
-  it('uses a non-modal drawer and Escape only hides its projection', async () => {
+  it.each(['tab', 'separator'] as const)('uses a non-modal drawer and Escape from its %s only hides its projection', async (role) => {
     const user = userEvent.setup(); render(<Harness narrow />)
     await user.click(screen.getByRole('button', { name: 'Alpha' }))
     await user.type(screen.getByRole('textbox', { name: 'Message' }), 'Continue')
-    expect(screen.getByRole('dialog')).toBeVisible()
-    await user.click(screen.getByRole('tab', { name: 'Alpha' }))
+    expect(screen.getByRole('complementary')).toBeVisible()
+    await user.click(screen.getByRole(role, { name: role === 'tab' ? 'Alpha' : 'agent.resize_panels' }))
     await user.keyboard('{Escape}')
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.queryByRole('complementary')).not.toBeInTheDocument()
     expect(close).not.toHaveBeenCalled()
   })
   it('routes unhandled content Escape only from the active drawer page', async () => {
@@ -174,9 +279,9 @@ describe('native panel sidebar projection', () => {
     await user.click(screen.getByRole('button', { name: 'Alpha' }))
     await user.click(screen.getByRole('button', { name: 'Beta' }))
     act(() => escape?.(views[0].viewId))
-    expect(screen.getByRole('dialog')).toBeVisible()
+    expect(screen.getByRole('complementary')).toBeVisible()
     act(() => escape?.(views[1].viewId))
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.queryByRole('complementary')).not.toBeInTheDocument()
     expect(close).not.toHaveBeenCalled()
     expect(views).toHaveLength(2)
   })

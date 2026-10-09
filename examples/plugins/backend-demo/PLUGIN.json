@@ -3,7 +3,7 @@
   "id": "example-backend",
   "name": "Backend demo",
   "plugin_version": "0.1.0",
-  "api_version": 1,
+  "api_version": 2,
   "description": "Starts its backend only when called.",
   "ui": "index.html",
   "backend": "backend.cjs"

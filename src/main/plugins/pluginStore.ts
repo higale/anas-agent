@@ -1,7 +1,8 @@
 import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { basename, dirname, extname, join } from 'node:path'
 import fs from 'stubborn-fs'
-import { parsePluginManifest, pluginHomePolicy, requirePluginHomeLocation, requirePluginId, requirePluginJson, requirePluginPath, type PluginManifest, type PluginSummary } from '@shared/plugins'
+import { parsePluginManifest, pluginHomePolicy, requirePluginHomeLocation, requirePluginIconPath, requirePluginId, requirePluginJson, requirePluginPath, type PluginManifest, type PluginSummary, type PluginInstallPreview } from '@shared/plugins'
 import { writeJsonFileAtomic } from '../atomicJson'
 import { isSameOrInsideDirectory, samePath } from '../pathContainment'
 import { extractZipArchive, type ZipArchiveLimits } from '../zipArchive'
@@ -33,6 +34,7 @@ async function optionalJson(path: string, maxBytes = 1024 * 1024): Promise<unkno
 
 export class PluginStore {
   private tail: Promise<unknown> = Promise.resolve()
+  private pending?: { stage: string; preview: PluginInstallPreview; identity?: string }
   constructor(readonly dataDirectory: string) {}
 
   exclusive<T>(operation: () => Promise<T>): Promise<T> {
@@ -88,6 +90,18 @@ export class PluginStore {
     }
   }
 
+  /** Cosmetic package assets remain available in settings while a plugin is disabled. */
+  async iconResource(id: string, name: string): Promise<{ bytes: Buffer; mime: string }> {
+    requirePluginIconPath(name)
+    const path = await this.packageFile(id, name)
+    const maxBytes = 256 * 1024
+    if ((await stat(path)).size > maxBytes) throw new Error('Plugin icon exceeds 256 KiB.')
+    const bytes = await readFile(path)
+    if (bytes.length > maxBytes) throw new Error('Plugin icon exceeds 256 KiB.')
+    const mime = { '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp' }[extname(name).toLowerCase()]!
+    return { bytes, mime }
+  }
+
   async requireEnabled(id: string): Promise<PluginManifest> {
     const item = await this.read(id, false)
     if (item.error || !item.enabled || !item.manifest) throw new Error(item.error ?? 'Plugin is disabled.')
@@ -121,6 +135,12 @@ export class PluginStore {
   }
 
   async install(sourcePath: string): Promise<PluginSummary> {
+    const prepared = await this.prepareInstall(sourcePath)
+    return this.finishInstall(prepared.token)
+  }
+
+  async prepareInstall(sourcePath: string): Promise<PluginInstallPreview> {
+    await this.cancelInstall()
     const source = await realpath(sourcePath)
     if (!(await stat(source)).isFile()) throw new Error('Select a plugin ZIP file or PLUGIN.json.')
     if (basename(source) === 'PLUGIN.json') return this.installDirectory(dirname(source))
@@ -148,17 +168,20 @@ export class PluginStore {
     }
   }
 
-  private async installDirectory(sourceDirectory: string): Promise<PluginSummary> {
+  private async installDirectory(sourceDirectory: string): Promise<PluginInstallPreview> {
     const source = await realpath(sourceDirectory)
     if (!(await stat(source)).isDirectory()) throw new Error('Select a plugin directory.')
     const manifest = parsePluginManifest(await optionalJson(join(source, 'PLUGIN.json'), 64 * 1024))
     const root = await this.directory('plugins', undefined, true)
     if (isSameOrInsideDirectory(source, this.dataDirectory) || isSameOrInsideDirectory(root, source)) throw new Error('Plugin source must be outside the managed installation directory.')
-    const target = join(root, manifest.id)
-    if (await lstat(target).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error })) throw new Error('Plugin is already installed. Uninstall it before installing another version; saved data is retained.')
+    const identity = await this.installationIdentity(manifest.id)
+    const installed = identity === undefined ? undefined : await this.read(manifest.id)
     const tempRoot = await this.directory('tmp', undefined, true)
     const stage = await mkdtemp(join(tempRoot, 'plugin-install-'))
+    let retained = false
     try {
+      const incoming = join(stage, 'incoming')
+      await mkdir(incoming)
       let bytes = 0
       let entries = 0
       const copy = async (from: string, to: string, ancestors: Set<string>): Promise<void> => {
@@ -181,18 +204,95 @@ export class PluginStore {
           await chmod(to, info.mode & 0o777)
         }
       }
-      await copy(source, join(stage, 'package'), new Set())
-      const staged = parsePluginManifest(await optionalJson(join(stage, 'package', 'PLUGIN.json'), 64 * 1024))
+      await copy(source, join(incoming, 'package'), new Set())
+      const staged = parsePluginManifest(await optionalJson(join(incoming, 'package', 'PLUGIN.json'), 64 * 1024))
       if (JSON.stringify(staged) !== JSON.stringify(manifest)) throw new Error('Plugin manifest changed while installing.')
       for (const entry of [manifest.ui, manifest.backend]) {
-        if (entry && !(await stat(join(stage, 'package', entry))).isFile()) throw new Error('Missing plugin entry.')
+        if (entry && !(await stat(join(incoming, 'package', entry))).isFile()) throw new Error('Missing plugin entry.')
       }
-      await writeJsonFileAtomic(join(stage, 'installation.json'), { version: 0, enabled: true })
-      await fs.retry.rename({ timeout: 2_000, interval: 25 })(stage, target)
-      return this.read(manifest.id)
+      const preview = { token: randomUUID(), incoming: manifest, installed }
+      this.pending = { stage, preview, identity }
+      retained = true
+      return preview
     } finally {
-      // stage is a freshly generated direct child of the verified temporary root.
-      await rm(stage, { recursive: true, force: true })
+      if (!retained) await rm(stage, { recursive: true, force: true })
+    }
+  }
+
+  private async installationIdentity(id: string): Promise<string | undefined> {
+    try {
+      const info = await stat(await this.directory('plugins', id))
+      return JSON.stringify([info.dev, info.ino, info.birthtimeMs])
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+      throw error
+    }
+  }
+
+  async cancelInstall(token?: string): Promise<void> {
+    if (!this.pending || (token !== undefined && this.pending.preview.token !== token)) return
+    const { stage } = this.pending
+    await rm(stage, { recursive: true, force: true })
+    this.pending = undefined
+  }
+
+  async finishInstall(token: string, options: { replace?: boolean; deleteData?: boolean } = {}, beforeReplace?: (id: string) => Promise<void>): Promise<PluginSummary> {
+    const { replace = false, deleteData = false } = options
+    if (typeof replace !== 'boolean' || typeof deleteData !== 'boolean') throw new Error('Invalid plugin replacement options.')
+    if (typeof token !== 'string' || !this.pending || this.pending.preview.token !== token) throw new Error('Plugin installation is no longer pending. Select the package again.')
+    const { preview, identity } = this.pending
+    let stage = this.pending.stage
+    this.pending = undefined
+    const { incoming: manifest, installed } = preview
+    let incoming = join(stage, 'incoming'), previous = join(stage, 'previous'), savedData = join(stage, 'data')
+    let target: string | undefined, data: string | undefined
+    let moved = false, dataMoved = false, committed = false, preserve = false
+    const rename = fs.retry.rename({ timeout: 2_000, interval: 25 })
+    try {
+      const unchanged = async () => {
+        if (await this.installationIdentity(manifest.id) !== identity
+          || (installed && JSON.stringify((await this.read(manifest.id)).manifest) !== JSON.stringify(installed.manifest))) {
+          throw new Error('Installed plugin changed. Select the package again before replacing it.')
+        }
+      }
+      await unchanged()
+      if (installed && !replace) throw new Error('Plugin is already installed. Confirm replacement before installing another version.')
+      target = join(await this.directory('plugins', undefined, true), manifest.id)
+      const dataDirectory = () => this.directory('plugins_data', manifest.id).catch(error => {
+        if (error.code === 'ENOENT') return undefined
+        throw error
+      })
+      if (installed && deleteData) await dataDirectory()
+      if (installed) {
+        // Old files must survive both a crash and the application's temp cleanup.
+        const recoveryStage = join(dirname(target), '.replace-' + token)
+        await rename(stage, recoveryStage)
+        stage = recoveryStage
+        incoming = join(stage, 'incoming'); previous = join(stage, 'previous'); savedData = join(stage, 'data')
+        await beforeReplace?.(manifest.id)
+      }
+      await unchanged()
+      // Backend shutdown may finish writing or create its data directory.
+      if (installed && deleteData) data = await dataDirectory()
+      const enabled = installed ? (await this.read(manifest.id)).enabled : true
+      await writeJsonFileAtomic(join(incoming, 'installation.json'), { version: 0, enabled })
+      if (installed) { await rename(target, previous); moved = true }
+      if (data) { await rename(data, savedData); dataMoved = true }
+      await rename(incoming, target)
+      committed = true
+      return this.read(manifest.id)
+    } catch (error) {
+      const failures: unknown[] = []
+      if (dataMoved) { try { await rename(savedData, data!); dataMoved = false } catch (rollback) { failures.push(rollback) } }
+      if (moved) { try { await rename(previous, target!); moved = false } catch (rollback) { failures.push(rollback) } }
+      if (failures.length) {
+        preserve = true
+        throw new AggregateError([error, ...failures], 'Plugin replacement failed; preserved files remain at ' + stage + '.')
+      }
+      throw error
+    } finally {
+      // Preserve the only remaining copies if rollback failed. Never delete in place.
+      if (committed || !preserve) await rm(stage, { recursive: true, force: true })
     }
   }
 

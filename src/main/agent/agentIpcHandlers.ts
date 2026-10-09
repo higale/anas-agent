@@ -1,5 +1,5 @@
 import { BrowserWindow } from 'electron'
-import { panelViews, panelLabel } from '../panels/panelRegistry'
+import { panelPages, panelLabel } from '../panels/panelRegistry'
 import { isMainRendererWindow } from '../ipcSecurity'
 import { codeReviewRequestSchema } from '@shared/codeReview'
 import type { BuiltinPanel } from '@shared/panels'
@@ -662,13 +662,13 @@ export function registerAgentIpcHandlers(): void {
   })
   handleAgentIpc('agent:threads:delete', async (_event, threadId: string): Promise<void> => {
     await currentRuntime().deleteThread(threadId)
-    panelViews.closeWhere(content => (content.kind === 'files' || content.kind === 'subagent') && content.threadId === threadId)
+    panelPages.closeWhere(content => (content.kind === 'files' || content.kind === 'subagent') && content.threadId === threadId)
   })
   handleAgentIpc('agent:threads:cleanup', (): Promise<AgentThreadCleanupResult> => (
     enqueueWorkspaceMutation(async () => {
       const result = await currentRuntime().cleanupThreads()
       const deleted = new Set(result.deletedThreadIds)
-      panelViews.closeWhere(content => (content.kind === 'files' || content.kind === 'subagent') && !!content.threadId && deleted.has(content.threadId))
+      panelPages.closeWhere(content => (content.kind === 'files' || content.kind === 'subagent') && !!content.threadId && deleted.has(content.threadId))
       return result
     })
   ))
@@ -793,8 +793,8 @@ export function registerAgentIpcHandlers(): void {
     }
   }
   handleAgentIpc('agent:runs:submit', submitRun)
-  handleAgentIpc('agent:panels:review', async (event, value: unknown, navigationId: unknown): Promise<void> => {
-    const view = panelViews.fromPage(event)
+  handleAgentIpc('agent:panels:review', async (event, pageId: string, value: unknown, navigationId: unknown): Promise<void> => {
+    const view = panelPages.fromPage(event, pageId)
     const content = view.content
     if (content.kind !== 'files') throw new Error('File changes panel required.')
     if (typeof navigationId !== 'string' || navigationId !== content.navigationId) throw new Error('Panel context changed. Retry from the current file changes.')
@@ -802,7 +802,7 @@ export function registerAgentIpcHandlers(): void {
     const review = codeReviewRequestSchema.parse(value)
     if (review.kind === 'git' ? review.projectId !== content.projectId : review.threadId !== content.threadId) throw new Error('Review must belong to the panel context.')
     const project = await getProject(content.projectId)
-    const state = panelViews.pageState(event)
+    const state = panelPages.pageState(event, pageId)
     const title = panelLabel(state.language, 'review_title')
     const submission = await submitRun(event, {
       requestId: randomUUID(), text: title, review,
@@ -813,9 +813,9 @@ export function registerAgentIpcHandlers(): void {
       } })
     })
     // Finish in the captured context, but never restore it after the user navigates away.
-    const current = panelViews.pageContent(event.sender)
+    const current = panelPages.pageContent(pageId)
     if (!content.threadId && current?.kind === 'files' && current.navigationId === navigationId) {
-      panelViews.updateContent(view.viewId, { ...content, threadId: submission.thread.id, navigationId: randomUUID(), draft: undefined })
+      panelPages.updateContent(view.viewId, { ...content, threadId: submission.thread.id, navigationId: randomUUID(), draft: undefined })
     }
     for (const window of BrowserWindow.getAllWindows()) if (isMainRendererWindow(window)) window.webContents.send('panels:reviewStarted', submission.thread.id,
       { projectId: content.projectId, threadId: content.threadId })
@@ -946,7 +946,7 @@ export async function deleteProjectLifecycle(projectId: string): Promise<Project
   return enqueueWorkspaceMutation(async () => {
     await recoverPendingProjectDeletion()
     const result = await currentRuntime().deleteProject(projectId)
-    panelViews.closeWhere(content => (content.kind === 'files' || content.kind === 'subagent') && content.projectId === projectId)
+    panelPages.closeWhere(content => (content.kind === 'files' || content.kind === 'subagent') && content.projectId === projectId)
     return result
   })
 }
@@ -955,7 +955,7 @@ export async function deleteProjectThreadsLifecycle(projectId: string): Promise<
   return enqueueWorkspaceMutation(async () => {
     await recoverPendingProjectDeletion()
     const result = await currentRuntime().deleteProjectThreads(projectId)
-    panelViews.closeWhere(content => (content.kind === 'files' || content.kind === 'subagent') && content.projectId === projectId && !!content.threadId)
+    panelPages.closeWhere(content => (content.kind === 'files' || content.kind === 'subagent') && content.projectId === projectId && !!content.threadId)
     return result
   })
 }

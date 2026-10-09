@@ -2221,7 +2221,7 @@ button.ui-avatar:has(> img):focus-visible,
 .ui-resize-handle {
   -webkit-app-region: no-drag;
   position: absolute;
-  inset: 0 calc(var(--resize-handle-width) / -2) 0 auto;
+  inset: 0 calc(-1 * var(--resize-handle-gutter) - 1px) 0 auto;
   z-index: 6;
   width: var(--resize-handle-width);
   cursor: col-resize;
@@ -2253,6 +2253,12 @@ html.ui-resizing * {
   user-select: none !important;
 }
 
+/* Keep pointer events in the dragging document while iframe content stays visible. */
+.ui-resizing iframe,
+.ui-tab-dragging iframe {
+  pointer-events: none;
+}
+
 .ui-tab-workspace {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -2270,7 +2276,7 @@ html.ui-resizing * {
 }
 
 .ui-panel-toolbar { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.ui-tab-workspace-tabs { display: flex; align-items: center; flex: 1 1 0; min-width: 0; }
+.ui-tab-workspace-tabs { position: relative; display: flex; align-items: center; flex: 1 1 0; min-width: 0; }
 .ui-tab-workspace-actions { display: flex; align-items: center; flex: 0 0 auto; }
 .ui-panel-toolbar > :first-child { flex: 1 1 0; min-width: 0; }
 .ui-panel-actions { flex-shrink: 0; }
@@ -2298,6 +2304,7 @@ html.ui-resizing * {
 }
 
 .ui-tab-item[data-active="true"] {
+  --ui-tab-background: var(--bg-panel);
   border-bottom-color: var(--text-strong);
   background: var(--bg-panel);
   color: var(--text-strong);
@@ -2317,15 +2324,26 @@ html.ui-resizing * {
 }
 
 .ui-tab-trigger svg, .ui-tab-close { flex-shrink: 0; }
+
+.plugin-icon { display: inline-flex; flex: none; align-items: center; justify-content: center; }
+.plugin-icon img, .plugin-icon svg { display: block; object-fit: contain; }
+.plugin-icon-dark { display: none; }
+:root[data-theme="dark"] .plugin-icon-light { display: none; }
+:root[data-theme="dark"] .plugin-icon-dark { display: inline; }
+.plugin-label { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .ui-tab-close { width: 22px; height: 22px; padding: 3px; }
 
 /* Share available space before scrolling. Each tab can shrink to one icon. */
 .ui-tab-list-adaptive {
+  --ui-tab-background: var(--bg-titlebar);
+  position: relative;
+  user-select: none;
   /* Keep unused titlebar space outside the interactive scroll area. */
   flex: 0 1 auto;
   -webkit-app-region: no-drag;
 }
 .ui-tab-list-adaptive > .ui-tab-item {
+  position: relative;
   flex: 1 1 auto;
   width: 220px;
   min-width: var(--control-height);
@@ -2333,9 +2351,33 @@ html.ui-resizing * {
   container: adaptive-tab / inline-size;
 }
 .ui-tab-list-adaptive .ui-tab-trigger { flex: 1; padding-inline: 8px; }
-.ui-tab-list-adaptive .ui-tab-close { margin-right: 4px; }
+/* Cover the title's tail without changing its width on hover or selection. */
+.ui-tab-close-overlay {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  display: flex;
+  padding: 2px 4px;
+  background: var(--ui-tab-background);
+  transform: translateY(-50%);
+  opacity: 0;
+  pointer-events: none;
+}
+.ui-tab-item:is([data-active="true"], :hover, :focus-within) > .ui-tab-close-overlay {
+  opacity: 1;
+  pointer-events: auto;
+}
+.ui-tab-list[data-dragging="true"] .ui-tab-close-overlay { opacity: 0; pointer-events: none; }
+.ui-tab-item[data-dragging="true"] { opacity: 0.5; }
+.ui-tab-insertion-marker { position: absolute; inset-block: 3px; width: 2px; background: var(--accent); pointer-events: none; }
+.ui-tab-drag-hint {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  padding: 4px 8px; background: var(--bg-titlebar); color: var(--text); font-size: var(--font-size-small);
+  pointer-events: none;
+}
+html.ui-tab-dragging, html.ui-tab-dragging * { cursor: grabbing !important; user-select: none !important; }
 @container adaptive-tab (width < 6em) {
-  .ui-tab-title, .ui-tab-close { display: none; }
+  .ui-tab-title, .ui-tab-close-overlay { display: none; }
   .ui-tab-trigger { justify-content: center; gap: 0; }
 }
 

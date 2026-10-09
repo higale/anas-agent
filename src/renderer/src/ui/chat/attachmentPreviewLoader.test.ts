@@ -34,7 +34,7 @@ describe('attachment preview loader', () => {
 
   it('loads previews through the content-page bridge without a main-window API', async () => {
     const readAttachmentPreview = vi.fn(async (path: string) => preview(path))
-    vi.stubGlobal('window', { panelContent: { services: { files: { readAttachmentPreview } } } })
+    vi.stubGlobal('window', { panelWindow: { services: { files: { readAttachmentPreview } } } })
     const { loadAttachmentPreview } = await import('./attachmentPreviewLoader')
     await expect(loadAttachmentPreview('/project/result.png', { projectId: 'origin' })).resolves.toEqual(preview('/project/result.png'))
     expect(readAttachmentPreview).toHaveBeenCalledWith('/project/result.png', { mode: 'thumbnail', size: 240, projectId: 'origin' })

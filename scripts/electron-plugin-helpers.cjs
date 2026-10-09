@@ -4,49 +4,25 @@ async function pluginPage(application, pluginId, instanceId = 'main', location =
   let found
   await expect.poll(async () => {
     for (const page of application.context().pages()) {
-      if (!page.url().startsWith(`anas-plugin://${pluginId}/`)) continue
-      const info = await page.evaluate(async () => globalThis.anas?.getInfo()).catch(() => null)
-      if (info?.view?.instanceId === instanceId && info.view.location === location
-        && await page.evaluate(() => globalThis.innerWidth > 0 && globalThis.innerHeight > 0)) { found = page; return true }
+      if (page.url().includes('panel-window.html') !== (location === 'window')) continue
+      for (const frame of page.frames()) {
+        if (!frame.url().startsWith(`anas-plugin://${pluginId}/`)) continue
+        const context = await frame.evaluate(() => globalThis.anas?.getContext()).catch(() => null)
+        if (context?.view.content.instanceId !== instanceId || context.phase !== 'active') continue
+        if (!(await (await frame.frameElement()).isVisible())) continue
+        found = frame; return true
+      }
     }
     return false
   }, { timeout: 20000 }).toBe(true)
-  await expect.poll(async () => (await pluginGeometry(application, found))?.visible, { timeout: 20000 }).toBe(true)
   return found
 }
-
-const windowCount = application => application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()
-  .filter(window => !window.webContents.getURL().endsWith('#anas-native-tooltip')).length)
-
-async function pluginGeometry(application, page) {
-  const url = page.url()
-  const info = await page.evaluate(() => globalThis.anas.getInfo())
-  return application.evaluate(({ BrowserWindow }, { url, location }) => {
-    for (const window of BrowserWindow.getAllWindows()) {
-      const shell = window.webContents.getURL().includes('panel-window.html')
-      if (shell !== (location === 'window')) continue
-      for (const child of window.contentView.children) {
-        if (child.webContents?.getURL() === url) return { ...child.getBounds(), visible: child.getVisible(), contentsId: child.webContents.id }
-      }
-    }
-    return null
-  }, { url, location: info.view.location })
+const windowCount = application => application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)
+async function pluginGeometry(_application, frame) {
+  const element = await frame.frameElement()
+  return { ...await element.boundingBox(), visible: await element.isVisible() }
 }
-
-async function pluginWindow(application, plugin) {
-  const info = await plugin.evaluate(() => globalThis.anas.getInfo())
-  let found
-  await expect.poll(async () => {
-    for (const page of application.context().pages()) {
-      if (!page.url().includes('panel-window.html')) continue
-      const state = await page.evaluate(() => globalThis.panelWindow.getState()).catch(() => null)
-      if (state?.view.content.pluginId === info.pluginId && state.view.content.instanceId === info.view.instanceId) { found = page; return true }
-    }
-    return false
-  }).toBe(true)
-  return found
-}
-
+async function pluginWindow(_application, frame) { return frame.page() }
 async function pluginByTitle(application, host, pluginId, title, location) {
   let view
   await expect.poll(async () => {
@@ -56,20 +32,15 @@ async function pluginByTitle(application, host, pluginId, title, location) {
   }).toBe(true)
   return pluginPage(application, pluginId, view.content.instanceId, location)
 }
-
 async function tooltipPage(application, label) {
   let found
   await expect.poll(async () => {
     for (const page of application.context().pages()) {
-      if (!page.url().endsWith('#anas-native-tooltip')) continue
-      if (await page.getByRole('tooltip').textContent().catch(() => null) === label) { found = page; return true }
+      const tooltip = page.getByRole('tooltip')
+      if (await tooltip.isVisible() && await tooltip.textContent() === label) { found = page; return true }
     }
     return false
   }).toBe(true)
-  await expect.poll(() => application.evaluate(({ BrowserWindow }, url) => {
-    return BrowserWindow.getAllWindows().some(window => window.webContents.getURL() === url && window.isVisible())
-  }, found.url())).toBe(true)
   return found
 }
-
 module.exports = { pluginPage, windowCount, pluginGeometry, pluginWindow, pluginByTitle, tooltipPage }

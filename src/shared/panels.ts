@@ -1,8 +1,9 @@
 import type { AgentApi, AgentThreadCreate } from './agentTypes'
 import type { CodeReviewRequest } from './codeReview'
 import type { HelpDocumentId } from './helpDocuments'
-import type { PanelToolbar, PanelToolbarApi } from './panelToolbar'
-import type { NativeTooltipApi } from './nativeTooltip'
+import type { PanelToolbar } from './panelToolbar'
+import type { PanelPageApi } from './panelLifecycle'
+import type { PluginIconSources } from './plugins'
 import type { AppSettings, GaleApi, LanguageResourcesSnapshot, Project } from './types'
 
 export type PanelLocation = 'sidebar' | 'window'
@@ -16,42 +17,47 @@ export interface PanelState {
   viewId: string
   content: PanelContent
   name: string
+  icon?: PluginIconSources
   location: PanelLocation
   locations: PanelLocation[]
   pendingLocation?: PanelLocation
   /** Page loading is independent of placement and never blocks opening the host. */
   loading?: boolean
-  /** Last sidebar presentation; retained while its renderer reloads. */
-  sidebarVisible?: boolean
   toolbar?: PanelToolbar
   pendingActionId?: string
 }
-export interface PanelBounds { x: number; y: number; width: number; height: number }
-export interface PanelLayout { viewId: string; requestId?: string; bounds: PanelBounds | null }
 export interface PanelRequest { requestId: string; view: PanelState }
-export interface PanelTabMenuOptions { closeLabel: string; position?: Pick<PanelBounds, 'x' | 'y'> }
+export interface PanelMoveOptions { atCursor?: boolean }
 export interface PanelWindowState {
   view: PanelState
   language: string
   theme: 'light' | 'dark'
   fontSize: number
 }
-export interface PanelWindowApi extends NativeTooltipApi {
+export interface PanelWindowApi {
+  pages: PanelPageApi
+  services: ContentServices
   getState(): Promise<PanelWindowState>
   getLanguageResources(): Promise<LanguageResourcesSnapshot>
   moveToSidebar(): Promise<void>
   invokeToolbarAction(id: string): Promise<void>
-  setLayout(bounds: PanelBounds | null): Promise<void>
+  open(panel: BuiltinPanel): Promise<void>
+  updatePreferences(preferences: Partial<PanelPreferences>): Promise<void>
+  review(pageId: string, request: CodeReviewRequest, navigationId: string): Promise<void>
+  onCloseFailed(listener: () => void): () => void
   onChanged(listener: (state: PanelWindowState) => void): () => void
 }
-export interface PanelsApi extends NativeTooltipApi {
+export interface PanelsApi {
+  pages: PanelPageApi
   open(panel: BuiltinPanel): Promise<void>
   followFiles(context: FilesPanelContext): Promise<void>
   list(): Promise<PanelState[]>
-  move(viewId: string, location: PanelLocation): Promise<void>
+  move(viewId: string, location: PanelLocation, options?: PanelMoveOptions): Promise<void>
+  reorder(viewId: string, beforeViewId: string | null): Promise<void>
   close(viewId: string): Promise<void>
-  showTabMenu(viewId: string, options: PanelTabMenuOptions): Promise<boolean>
-  setLayouts(layouts: PanelLayout[]): Promise<void>
+  acknowledge(requestId: string): Promise<void>
+  review(pageId: string, request: CodeReviewRequest, navigationId: string): Promise<void>
+  updatePreferences(preferences: Partial<PanelPreferences>): Promise<void>
   cancelRequest(requestId: string): Promise<void>
   hasRequest(requestId: string): Promise<boolean>
   onChanged(listener: (views: PanelState[]) => void): () => void
@@ -70,17 +76,6 @@ export interface PanelContentState extends PanelWindowState {
   project?: Project
   preferences: PanelPreferences
 }
-export interface PanelContentApi extends PanelToolbarApi {
-  services: ContentServices
-  getState(): Promise<PanelContentState>
-  getLanguageResources(): Promise<LanguageResourcesSnapshot>
-  onChanged(listener: (state: PanelWindowState) => void): () => void
-  open(panel: BuiltinPanel): Promise<void>
-  updatePreferences(preferences: Partial<PanelPreferences>): Promise<void>
-  escape(): Promise<void>
-  review(request: CodeReviewRequest, navigationId: string): Promise<void>
-}
-
 export function panelScope(content: PanelContent): string | undefined {
   return content.kind === 'subagent'
     ? workspacePanelScope(content.threadId, content.projectId) : undefined
@@ -95,12 +90,4 @@ export function panelIdentity(content: PanelContent): string {
     case 'files': return JSON.stringify([content.kind])
     case 'subagent': return JSON.stringify([content.kind, content.threadId, content.runId, content.subagentId])
   }
-}
-export function requirePanelBounds(value: unknown): PanelBounds | null {
-  if (value === null) return null
-  if (!value || typeof value !== 'object') throw new Error('Invalid panel bounds.')
-  const bounds = value as PanelBounds
-  if (![bounds.x, bounds.y, bounds.width, bounds.height].every(n => typeof n === 'number' && Number.isFinite(n) && Math.abs(n) <= 100_000)
-    || bounds.width <= 0 || bounds.height <= 0) throw new Error('Invalid panel bounds.')
-  return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
 }

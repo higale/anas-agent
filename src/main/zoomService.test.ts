@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
-import type { WebContents } from 'electron'
+import type { BrowserWindow } from 'electron'
 import { describe, expect, it, vi } from 'vitest'
-import { registerZoomShortcuts } from './zoomService'
+import { registerWindowZoomShortcuts } from './zoomService'
 
 vi.mock('./runtimeLogger', () => ({ runtimeLog: vi.fn() }))
 class Contents extends EventEmitter {
@@ -14,27 +14,33 @@ class Contents extends EventEmitter {
   setZoomFactor = (factor: number) => { this.level = Math.log(factor) / Math.log(1.2) }
   send = vi.fn()
 }
-describe('movable content zoom shortcuts', () => {
-  it('resolves the current owner for keyboard and wheel zoom without zooming the source alone', () => {
-    const source = new Contents(), main = new Contents(), detached = new Contents()
-    let owner: Contents | undefined = main
-    registerZoomShortcuts(source as unknown as WebContents, () => owner as unknown as WebContents | undefined)
+describe('window zoom shortcuts', () => {
+  it('keeps keyboard and wheel zoom local to the window receiving input', () => {
+    const main = new Contents(), detached = new Contents()
+    for (const contents of [main, detached]) registerWindowZoomShortcuts({ webContents: contents } as unknown as BrowserWindow)
     const preventDefault = vi.fn()
-    source.emit('before-input-event', { preventDefault }, { type: 'keyDown', control: true, key: '=' })
+    main.emit('before-input-event', { preventDefault }, { type: 'keyDown', control: true, key: '=' })
     expect(main.getZoomFactor()).toBeGreaterThan(1)
-    expect(source.getZoomFactor()).toBe(1)
-    owner = detached
-    source.emit('zoom-changed', { preventDefault }, 'out')
+    expect(detached.getZoomFactor()).toBe(1)
+    detached.emit('zoom-changed', { preventDefault }, 'out')
     expect(detached.getZoomFactor()).toBeLessThan(1)
     expect(main.getZoomFactor()).toBeGreaterThan(1)
-    source.emit('before-input-event', { preventDefault }, { type: 'keyDown', control: true, key: '0' })
+    detached.emit('before-input-event', { preventDefault }, { type: 'keyDown', control: true, key: '0' })
     expect(detached.getZoomFactor()).toBe(1)
     expect(preventDefault).toHaveBeenCalledTimes(3)
-    source.emit('before-input-event', { preventDefault }, { type: 'keyDown', control: true, key: 'c' })
+    expect(main.send).toHaveBeenLastCalledWith('app:zoomChanged', expect.any(Number))
+    expect(detached.send).toHaveBeenLastCalledWith('app:zoomChanged', 100)
+  })
+  it('leaves other shortcuts and destroyed windows alone', () => {
+    const detached = new Contents()
+    registerWindowZoomShortcuts({ webContents: detached } as unknown as BrowserWindow)
+    const preventDefault = vi.fn()
+    detached.emit('before-input-event', { preventDefault }, { type: 'keyDown', control: true, key: 'c' })
+    detached.emit('before-input-event', { preventDefault }, { type: 'keyDown', control: true, alt: true, key: '=' })
     detached.destroyed = true
-    source.emit('zoom-changed', { preventDefault }, 'in')
-    owner = undefined
-    source.emit('zoom-changed', { preventDefault }, 'in')
-    expect(preventDefault).toHaveBeenCalledTimes(3)
+    detached.emit('zoom-changed', { preventDefault }, 'in')
+    detached.emit('before-input-event', { preventDefault }, { type: 'keyDown', control: true, key: '=' })
+    expect(preventDefault).not.toHaveBeenCalled()
+    expect(detached.getZoomFactor()).toBe(1)
   })
 })

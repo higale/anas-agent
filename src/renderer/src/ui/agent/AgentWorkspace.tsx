@@ -133,7 +133,9 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
   const panelMinWidth = 320 + fontGrowth * 16
   const chatMinWidth = 520 + fontGrowth * 20
   const narrow = availableWidth < panelMinWidth + chatMinWidth
-  const panelMaxWidth = Math.max(panelMinWidth, availableWidth - chatMinWidth)
+  const panelMaxWidth = narrow
+    ? Math.max(0, availableWidth - 16)
+    : Math.max(panelMinWidth, availableWidth - chatMinWidth)
   const panelWidth = Math.min(panelMaxWidth, Math.max(panelMinWidth, props.config?.settings.workspacePanelWidth ?? WORKSPACE_PANEL_WIDTH_DEFAULT))
   const title = props.snapshot?.thread.title ?? props.thread?.title ?? t('chat.new_thread')
   const selectedProject = props.projects.find((project) => project.id === props.selectedProjectId)
@@ -185,7 +187,7 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
       }}>
       <main className={`agent-workspace workspace-reading workspace-reading-${chatContentWidth} ui-main`}>
       <div className="agent-workspace-body" data-panels-open={panelGroup.expanded} ref={bodyRef}
-        style={{ '--workspace-panel-width': `${narrow ? Math.min(WORKSPACE_PANEL_WIDTH_DEFAULT + fontGrowth * 24, Math.max(0, availableWidth - 16)) : panelWidth}px` } as React.CSSProperties}>
+        style={{ '--workspace-panel-width': `${panelWidth}px` } as React.CSSProperties}>
       <div className="agent-chat-column" hidden={panelGroup.expanded && panelGroup.maximized}>
       <header className="topbar ui-main">
         {!props.sidebarVisible && (
@@ -215,7 +217,7 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
           onToggleProjectPinned={props.onToggleProjectPinned}
           onToggleThreadPinned={props.onToggleThreadPinned}
         />
-        <div className="ui-row ui-row-tight ui-push-end">
+        <div className="topbar-actions ui-row ui-row-tight ui-push-end">
           {props.onOpenPlugin && <PluginMenu plugins={props.plugins ?? []} onOpen={props.onOpenPlugin} />}
           {selectedProject && <NoFocusButton type="button" className="ui-tool-button ui-tool-button-square"
             aria-label={t('agent.file_changes')} data-tooltip={t('agent.file_changes')} onClick={() => props.panels.open({
@@ -233,6 +235,7 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
           </NoFocusButton>}
         </div>
       </header>
+      <div className="agent-chat-body">
       <AgentMessageList
         onOpenChanges={(runId) => {
           const threadId = props.activeThreadId
@@ -329,9 +332,10 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
         onToggleSuggestionPinned={props.onToggleSuggestionPinned}
       />
       </div>
+      </div>
       <WorkspacePanels controller={props.panels} scope={scope} activities={visibleActivities}
         sidebarVisible={props.sidebarVisible} onToggleSidebar={props.onToggleSidebar}
-        narrow={narrow} width={panelWidth} minWidth={panelMinWidth} maxWidth={panelMaxWidth}
+        narrow={narrow} width={panelWidth} minWidth={Math.min(panelMinWidth, panelMaxWidth)} maxWidth={panelMaxWidth}
         toggleRef={panelToggleRef} inputRef={props.composerInputRef} onWidthCommit={props.onPanelWidthCommit} />
       </div>
       </main>

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, nativeTheme, shell, type MenuItemConstructorOptions, type WebContents } from 'electron'
+import { app, BrowserWindow, Menu, nativeTheme, shell, type MenuItemConstructorOptions } from 'electron'
 import { join } from 'node:path'
 import { getAppConfigSnapshot } from './config/appConfig'
 import { getLanguageResources } from './languageStore'
@@ -261,10 +261,10 @@ function registerWindowDiagnostics(win: BrowserWindow): void {
   })
 }
 
-export function registerNativeContextMenu(contents: WebContents, owner: () => BrowserWindow | undefined): void {
+export function registerNativeContextMenu(window: BrowserWindow): void {
+  const contents = window.webContents
   contents.on('context-menu', (_event, params) => {
-    const window = owner()
-    if (!window || window.isDestroyed()) return
+    if (window.isDestroyed()) return
     const menu = Menu.buildFromTemplate(buildNativeContextMenuTemplate(params, currentMenuLabel))
     menu.popup({ window, frame: params.frame ?? contents.mainFrame })
   })
@@ -313,7 +313,7 @@ export function createMainWindow(options: { recovery?: boolean } = {}): void {
   applyWindowTheme(win)
   registerExternalNavigationGuards(win)
   registerWindowDiagnostics(win)
-  registerNativeContextMenu(win.webContents, () => win)
+  registerNativeContextMenu(win)
   registerWindowZoomShortcuts(win)
 
   if (rendererLocation.kind === 'development') {

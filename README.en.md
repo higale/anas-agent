@@ -49,6 +49,8 @@ Shell commands preserve the model's command text, arguments, and search behavior
 
 ## Plugins
 
+Anas 3.3.8 introduces plugin API 2; API 1 plugins must be updated. RDP users should upgrade to plugin 0.1.7.
+
 Install optional plugins in **Settings > Plugins** by selecting a ZIP file or `PLUGIN.json` inside a prebuilt plugin folder. Plugins can provide side panels, separate windows, and optional backends that start on demand. UI-only plugins require no backend process. See the [plugin API and limitations](docs/PLUGINS.md) and [examples](examples/plugins).
 
 ## Development

@@ -26,7 +26,7 @@ export function FileChangesPanel({ project, request, onReview }: {
   const appliedRequest = usePanelRef<typeof request | undefined>('changes.appliedRequest', undefined)
   const [actionsTarget, setActionsTarget] = useState<HTMLDivElement | null>(null)
   useEffect(() => {
-    if (appliedRequest.current === request) return
+    if (JSON.stringify(appliedRequest.current) === JSON.stringify(request)) return
     appliedRequest.current = request
     if (request.runId) { setMode('recorded'); setRunId(request.runId) }
   }, [request, setMode, setRunId, appliedRequest])

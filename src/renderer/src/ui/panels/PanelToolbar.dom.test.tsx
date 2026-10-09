@@ -1,14 +1,17 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
 import type { PanelState } from '@shared/panels'
+import { requirePanelToolbar } from '@shared/panelToolbar'
 import { PanelToolbar } from './PanelToolbar'
 
 it('shows accessible status and action labels and disables actions during execution or transfer', () => {
   const view: PanelState = { viewId: 'one', name: 'Example', content: { kind: 'plugin', pluginId: 'example', instanceId: 'main' },
-    location: 'window', locations: ['sidebar', 'window'], toolbar: { status: { label: 'Connected', tone: 'success' },
-      actions: [{ id: 'stop', label: 'Disconnect', icon: 'unplug' }] } }
+    location: 'window', locations: ['sidebar', 'window'], toolbar: requirePanelToolbar({ status: { label: 'Connected', tone: 'success' },
+      actions: [{ id: 'stop', label: 'Disconnect', icon: 'unplug' }, { id: 'servers', label: 'Server list', icon: 'list' }] }) }
   const onAction = vi.fn()
   const { rerender } = render(<PanelToolbar view={view} onAction={onAction} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Server list' }))
+  expect(onAction).toHaveBeenCalledWith('servers')
   expect(screen.getByRole('status')).toHaveTextContent('Connected')
   fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }))
   expect(onAction).toHaveBeenCalledWith('stop')

@@ -38,6 +38,10 @@ vi.mock('./ThreadTopbar', () => ({
   ThreadTopbar: () => null
 }))
 
+vi.mock('../panels/PanelPageHost', () => ({
+  PanelPageHost: () => null
+}))
+
 function interruptedRun(interrupts: AgentInterrupt[]): AgentRunView {
   return {
     runId: 'run-1',
@@ -57,7 +61,7 @@ function workspaceProps(
   error?: string
 ): ComponentProps<typeof AgentWorkspace> {
   return {
-    panels: { groups: {}, documents: { tabs: [], expanded: false, maximized: false }, open: vi.fn(), select: vi.fn(), toggle: vi.fn(), dismiss: vi.fn(), toggleMaximized: vi.fn(), remove: vi.fn(), syncViews: vi.fn(), present: vi.fn() },
+    panels: { order: [], groups: {}, documents: { tabs: [], expanded: false, maximized: false }, open: vi.fn(), select: vi.fn(), toggle: vi.fn(), dismiss: vi.fn(), toggleMaximized: vi.fn(), remove: vi.fn(), syncViews: vi.fn(), present: vi.fn() },
     onPanelWidthCommit: vi.fn(),
     activeThreadId: 'thread-1',
     attachments: [],

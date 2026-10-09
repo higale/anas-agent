@@ -45,7 +45,6 @@ import { AppSidebar } from './AppSidebar'
 import { useWorkspacePanels, workspacePanelScope } from './agent/useWorkspacePanels'
 import { isPanelClosed } from './panels/panelError'
 import { usePlugins } from './plugins/usePlugins'
-import { PanelLayouts } from './panels/PanelLayouts'
 import { panelScope } from '@shared/panels'
 import { type PluginSummary } from '@shared/plugins'
 import { sidebarWidthCssValue } from './SidebarResizeHandle'
@@ -1134,7 +1133,7 @@ export function App() {
   return (
     <>
       <NoticeHost theme={resolvedTheme} />
-      <GlobalTooltip native={window.gale.panels} />
+      <GlobalTooltip />
       <div
         className={shellClassName}
         style={{ '--sidebar-width': sidebarWidthCssValue(sidebarWidth) } as CSSProperties}
@@ -1318,7 +1317,8 @@ export function App() {
           onUpdateSkillScriptApproval={updateSkillScriptApproval}
           onUpdateSkillAvailability={updateSkillAvailability}
         />
-      ) : (
+      ) : null}
+      <div className="agent-workspace-container" hidden={settingsOpen}>
       <AgentWorkspace
         plugins={pluginRegistry.plugins}
         onOpenPlugin={openPlugin}
@@ -1410,11 +1410,10 @@ export function App() {
         onToggleThreadPinned={agent.togglePinned}
         onToggleSuggestionPinned={toggleInputHistoryPinned}
       />
-      )}
+      </div>
       </div>
 
       <ConfirmDialog request={confirmDialog} onClose={() => setConfirmDialog(undefined)} />
-      <PanelLayouts tabs={[...Object.values(workspacePanels.groups).flatMap(group => group.tabs), ...workspacePanels.documents.tabs]} />
       <UserInputDialog />
       <AvatarCropDialog
         source={avatarCropSource}

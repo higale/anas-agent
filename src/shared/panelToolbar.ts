@@ -1,16 +1,8 @@
-export const panelActionIcons = ['unplug', 'x', 'refresh-cw', 'play', 'pause', 'square', 'settings', 'save'] as const
+export const panelActionIcons = ['unplug', 'x', 'refresh-cw', 'play', 'pause', 'square', 'settings', 'save', 'list'] as const
 export interface PanelToolbar {
   status?: { label: string; tone?: 'neutral' | 'success' | 'warning' | 'danger' }
   actions: { id: string; label: string; icon: typeof panelActionIcons[number]; disabled?: boolean }[]
 }
-export interface PanelToolbarApi {
-  /** Replaces this live page's toolbar. Null clears it; nothing is persisted. */
-  setToolbar(toolbar: PanelToolbar | null): Promise<void>
-  /** One handler per page. Resolve after completion; reject to report failure. */
-  onToolbarAction(listener: (id: string) => void | Promise<void>): () => void
-}
-export interface PanelActionRequest { requestId: string; actionId: string }
-
 export function requirePanelToolbar(input: unknown): PanelToolbar | undefined {
   if (input === null) return undefined
   const invalid = () => { throw new Error('Invalid panel toolbar.') }

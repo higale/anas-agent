@@ -1,11 +1,11 @@
 import { createRequire } from 'node:module'
-import { requirePluginJson } from '@shared/plugins'
+import { requirePluginJson, type PluginBackendCallContext } from '@shared/plugins'
 
 const port = process.parentPort!
 const load = createRequire(__filename)
 interface PluginBackend {
   activate?(context: { pluginId: string; packageDirectory: string; dataDirectory: string }): unknown
-  call?(method: string, params: unknown): unknown
+  call?(method: string, params: unknown, context: PluginBackendCallContext): unknown
   deactivate?(): unknown
 }
 let backend: PluginBackend
@@ -18,7 +18,7 @@ async function start(): Promise<void> {
     if (backend[key] !== undefined && typeof backend[key] !== 'function') throw new Error(`Invalid backend ${key} function.`)
   }
   await backend.activate?.(JSON.parse(process.argv[3]))
-  port.on('message', ({ data }: { data: { id: number; method: string; params?: unknown; stop?: boolean } }) => {
+  port.on('message', ({ data }: { data: { id: number; method: string; params?: unknown; context: PluginBackendCallContext; stop?: boolean } }) => {
     tail = tail.then(async () => {
       if (data.stop) {
         try { await backend.deactivate?.() } catch (error) {
@@ -27,7 +27,7 @@ async function start(): Promise<void> {
       }
       try {
         if (!backend.call) throw new Error('Plugin backend has no call handler.')
-        const result = await backend.call(data.method, data.params) ?? null
+        const result = await backend.call(data.method, data.params, data.context) ?? null
         requirePluginJson(result)
         port.postMessage({ id: data.id, result })
       } catch (error) {

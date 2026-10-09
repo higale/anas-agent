@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import type { GitContentInput } from '@shared/gitChanges'
 import type { RoundFileContentInput } from '@shared/fileChanges'
 import type { DiffContents } from '@shared/diffContents'
+import { usePanelReady } from '../agent/PanelViewState'
 import { ReadonlyDiff } from './ReadonlyDiff'
 
 export function DiffContentView({ request, viewKey, onReadyChange }: {
@@ -29,6 +30,7 @@ export function DiffContentView({ request, viewKey, onReadyChange }: {
       .catch((error: unknown) => { if (active) setResult({ identity, error: error instanceof Error ? error.message : String(error) }) })
     return () => { active = false; void contentServices().agent.changes.cancelRead(requestId).catch(() => {}) }
   }, [identity])
+  usePanelReady(result?.identity === identity, result?.identity === identity && Boolean(result.error))
   if (result?.identity !== identity) return <p role="status">{t('common.loading')}</p>
   if (result.error) return <p role="alert" className="ui-status-danger">{result.error}</p>
   return result.data ? <ReadonlyDiff key={identity} data={result.data} viewKey={viewKey} /> : null

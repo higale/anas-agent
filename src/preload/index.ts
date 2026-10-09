@@ -1,3 +1,4 @@
+import { panelPagesApi } from './panelPages'
 import { contentServices } from './contentServices'
 import type { DefaultCapabilitySettings } from '@shared/agentCapabilities'
 import type { HelpDocumentId } from '@shared/helpDocuments'
@@ -10,7 +11,7 @@ import type { FilesPanelContext, PanelRequest, PanelState } from '@shared/panels
 
 const api: GaleApi = {
   panels: {
-    setTooltip: value => ipcRenderer.invoke('panels:tooltip', value),
+    pages: panelPagesApi,
     onEscape: listener => {
       const handler = (_event: Electron.IpcRendererEvent, viewId: string) => listener(viewId)
       ipcRenderer.on('panels:escape', handler)
@@ -24,10 +25,12 @@ const api: GaleApi = {
     open: panel => ipcRenderer.invoke('panels:open', panel),
     followFiles: context => ipcRenderer.invoke('panels:followFiles', context),
     list: () => ipcRenderer.invoke('panels:list'),
-    move: (viewId, location) => ipcRenderer.invoke('panels:move', viewId, location),
+    move: (viewId, location, options) => ipcRenderer.invoke('panels:move', viewId, location, options),
+    reorder: (viewId, beforeViewId) => ipcRenderer.invoke('panels:reorder', viewId, beforeViewId),
     close: viewId => ipcRenderer.invoke('panels:close', viewId),
-    showTabMenu: (viewId, options) => ipcRenderer.invoke('panels:tabMenu', viewId, options),
-    setLayouts: layouts => ipcRenderer.invoke('panels:layout', layouts),
+    acknowledge: requestId => ipcRenderer.invoke('panels:acknowledge', requestId),
+    review: (pageId, request, navigationId) => ipcRenderer.invoke('agent:panels:review', pageId, request, navigationId),
+    updatePreferences: preferences => ipcRenderer.invoke('panels:preferences', preferences),
     cancelRequest: requestId => ipcRenderer.invoke('panels:cancel', requestId),
     hasRequest: requestId => ipcRenderer.invoke('panels:hasRequest', requestId),
     onChanged: listener => {
@@ -44,6 +47,8 @@ const api: GaleApi = {
   plugins: {
     list: () => ipcRenderer.invoke('plugins:list'),
     install: () => ipcRenderer.invoke('plugins:install'),
+    confirmInstall: (token, deleteData) => ipcRenderer.invoke('plugins:confirmInstall', token, deleteData),
+    cancelInstall: token => ipcRenderer.invoke('plugins:cancelInstall', token),
     setEnabled: (id, enabled) => ipcRenderer.invoke('plugins:setEnabled', id, enabled),
     uninstall: (id, deleteData) => ipcRenderer.invoke('plugins:uninstall', id, deleteData),
     openWindow: id => ipcRenderer.invoke('plugins:openWindow', id),

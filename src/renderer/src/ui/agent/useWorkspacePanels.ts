@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { panelScope, type BuiltinPanel, type PanelContent, type PanelLocation, type PanelState } from '@shared/panels'
 import { notice } from '../notice'
 import { isPanelClosed, panelError } from '../panels/panelError'
@@ -8,6 +8,7 @@ export { workspacePanelScope } from '@shared/panels'
 export interface WorkspacePanelTab {
   id: string
   name: string
+  icon?: PanelState['icon']
   panel: PanelContent
   viewId: string
   requestId?: string
@@ -26,6 +27,7 @@ export interface WorkspacePanelGroup {
 const emptyGroup: WorkspacePanelGroup = { tabs: [], expanded: false, maximized: false }
 
 interface SidebarState {
+  order: string[]
   groups: Record<string, WorkspacePanelGroup>
   documents: WorkspacePanelGroup
 }
@@ -35,12 +37,14 @@ function visibleGroup(state: SidebarState, scope: string): WorkspacePanelGroup {
   const documents = state.documents
   const activeId = documents.activeId ?? local.activeId ?? documents.tabs[0]?.id
   const active = documents.tabs.some((tab) => tab.id === activeId) ? documents : local
-  return { ...active, activeId, tabs: [...local.tabs, ...documents.tabs] }
+  const ranks = new Map(state.order.map((id, index) => [id, index]))
+  const tabs = [...local.tabs, ...documents.tabs].sort((a, b) =>
+    (ranks.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (ranks.get(b.id) ?? Number.MAX_SAFE_INTEGER))
+  return { ...active, activeId, tabs }
 }
 
 export function useWorkspacePanels() {
-  const [state, setState] = useState<SidebarState>({ groups: {}, documents: emptyGroup })
-  const initialized = useRef(false)
+  const [state, setState] = useState<SidebarState>({ order: [], groups: {}, documents: emptyGroup })
   const update = useCallback((scope: string, change: (group: WorkspacePanelGroup) => WorkspacePanelGroup) => {
     setState((current) => {
       const group = change(visibleGroup(current, scope))
@@ -51,6 +55,7 @@ export function useWorkspacePanels() {
       const localActiveId = localTabs.some((tab) => tab.id === previousLocal.activeId)
         ? previousLocal.activeId : localTabs[0]?.id
       return {
+        order: current.order,
         groups: { ...current.groups, [scope]: documentActive
           ? { ...previousLocal, tabs: localTabs, activeId: localActiveId }
           : { ...group, tabs: localTabs } },
@@ -65,7 +70,7 @@ export function useWorkspacePanels() {
     })
   }, [])
   const present = useCallback((scope: string, view: PanelState, requestId?: string) => {
-    const tab: WorkspacePanelTab = { id: view.viewId, name: view.name, panel: view.content, viewId: view.viewId,
+    const tab: WorkspacePanelTab = { id: view.viewId, name: view.name, icon: view.icon, panel: view.content, viewId: view.viewId,
       requestId, locations: view.locations, moving: !!view.pendingLocation, loading: view.loading }
     update(panelScope(view.content) ?? scope, group => ({ ...group, expanded: true, activeId: tab.id,
       tabs: group.tabs.some(item => item.id === tab.id) ? group.tabs.map(item => item.id === tab.id ? tab : item) : [...group.tabs, tab] }))
@@ -90,24 +95,21 @@ export function useWorkspacePanels() {
     })
   }, [])
   const syncViews = useCallback((views: PanelState[]) => {
-    const restore = !initialized.current
-    initialized.current = true
     const visible = views.filter(view => view.location === 'sidebar' || view.pendingLocation === 'sidebar')
     setState(current => {
       const project = (group: WorkspacePanelGroup, scope?: string): WorkspacePanelGroup => {
         const relevant = visible.filter(view => panelScope(view.content) === scope)
-        const restored = restore ? relevant.find(view => view.sidebarVisible) : undefined
-        const tabs = relevant.map(view => ({ id: view.viewId, name: view.name, viewId: view.viewId, panel: view.content,
+        const tabs = relevant.map(view => ({ id: view.viewId, name: view.name, icon: view.icon, viewId: view.viewId, panel: view.content,
           locations: view.locations, moving: !!view.pendingLocation, loading: view.loading,
           requestId: group.tabs.find(tab => tab.id === view.viewId)?.requestId }))
         const previousIndex = group.tabs.findIndex(tab => tab.id === group.activeId)
-        const activeId = restored?.viewId ?? (tabs.some(tab => tab.id === group.activeId) ? group.activeId : tabs[Math.min(Math.max(0, previousIndex), tabs.length - 1)]?.id)
-        return { ...group, tabs, activeId, expanded: !!restored || (tabs.length > 0 && group.expanded), maximized: tabs.length > 0 && group.maximized }
+        const activeId = tabs.some(tab => tab.id === group.activeId) ? group.activeId : tabs[Math.min(Math.max(0, previousIndex), tabs.length - 1)]?.id
+        return { ...group, tabs, activeId, expanded: tabs.length > 0 && group.expanded, maximized: tabs.length > 0 && group.maximized }
       }
       const scopes = new Set([...Object.keys(current.groups), ...visible.flatMap(view => { const scope = panelScope(view.content); return scope ? [scope] : [] })])
-      return { groups: Object.fromEntries([...scopes].map(scope => [scope, project(current.groups[scope] ?? emptyGroup, scope)])),
-        documents: { ...project(current.documents), activeId: current.documents.activeId || (restore && visible.some(view => !panelScope(view.content) && view.sidebarVisible))
-          ? project(current.documents).activeId : undefined } }
+      return { order: views.map(view => view.viewId),
+        groups: Object.fromEntries([...scopes].map(scope => [scope, project(current.groups[scope] ?? emptyGroup, scope)])),
+        documents: { ...project(current.documents), activeId: current.documents.activeId ? project(current.documents).activeId : undefined } }
     })
   }, [])
   return { ...state, open, present, select, toggle, dismiss, toggleMaximized, remove, syncViews }

@@ -5,9 +5,10 @@ import type { PanelWindowApi, PanelWindowState } from '@shared/panels'
 import { applyLanguagePreference, initializeI18nFromResources } from './i18n'
 import { NoFocusButton } from './ui/NoFocusButton'
 import { SquareArrowInDownLeft } from './ui/SquareArrowInDownLeft'
-import { observePanelLayout, panelBounds } from './ui/panels/panelLayout'
+import { PanelPageHost } from './ui/panels/PanelPageHost'
 import { panelError } from './ui/panels/panelError'
 import { PanelToolbar } from './ui/panels/PanelToolbar'
+import { PluginIcon } from './ui/plugins/PluginIcon'
 import { GlobalTooltip } from './ui/GlobalTooltip'
 import { NoticeHost, notice } from './ui/notice'
 import 'sonner/dist/styles.css'
@@ -19,6 +20,7 @@ function PanelWindow({ initial }: { initial: PanelWindowState }) {
   const [state, setState] = useState(initial)
   const [moving, setMoving] = useState(false)
   const { t } = useTranslation()
+  useEffect(() => window.panelWindow.onCloseFailed(() => notice.error(t('panels.operation_failed'))), [t])
   useEffect(() => {
     let changed = false
     const stop = window.panelWindow.onChanged(value => { changed = true; setState(value) })
@@ -31,16 +33,6 @@ function PanelWindow({ initial }: { initial: PanelWindowState }) {
     document.documentElement.style.setProperty('--font-size-base', `${state.fontSize}px`)
     void applyLanguagePreference(state.language)
   }, [state.theme, state.fontSize, state.language])
-  useEffect(() => {
-    let previous = ''
-    return observePanelLayout(() => {
-      const bounds = panelBounds(document.querySelector('.panel-window-slot'))
-      const next = JSON.stringify(bounds)
-      if (next === previous) return
-      previous = next
-      void window.panelWindow.setLayout(bounds).catch(reason => notice.error(panelError(reason, t)))
-    })
-  }, [t])
   const move = async () => {
     setMoving(true)
     try { await window.panelWindow.moveToSidebar() }
@@ -49,6 +41,7 @@ function PanelWindow({ initial }: { initial: PanelWindowState }) {
   }
   return <div className="panel-window-shell">
     <div className="panel-window-titlebar">
+      {state.view.content.kind === 'plugin' && <PluginIcon icon={state.view.icon} />}
       <strong className="ui-truncate">{state.view.name}</strong>
       <PanelToolbar view={state.view} onAction={id => {
         void window.panelWindow.invokeToolbarAction(id).catch(reason => notice.error(panelError(reason, t)))
@@ -60,10 +53,11 @@ function PanelWindow({ initial }: { initial: PanelWindowState }) {
       </NoFocusButton>}
     </div>
     <div className="panel-window-slot" aria-busy={!!state.view.loading}>
+      <PanelPageHost activeId={state.view.viewId} />
       {state.view.loading && <p className="ui-detail-panel-empty" role="status">{t('common.loading')}</p>}
     </div>
     <NoticeHost theme={state.theme} />
-    <GlobalTooltip native={window.panelWindow} />
+    <GlobalTooltip />
   </div>
 }
 

@@ -1,4 +1,4 @@
-import { PanelViews } from './panelViews'
+import { PanelPages } from './panelPages'
 import type { LanguageResourcesSnapshot } from '@shared/types'
 
 let languages: LanguageResourcesSnapshot | undefined
@@ -17,4 +17,4 @@ export function panelLabel(language: string, key: 'file_changes' | 'review_title
   throw new Error(`Missing panel language label: agent.${key}`)
 }
 // Placement acknowledgements must not acquire application-data locks.
-export const panelViews = new PanelViews(async () => panelLanguages())
+export const panelPages = new PanelPages(async () => panelLanguages())

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'stubborn-fs'
 import { createWriteStream } from 'node:fs'
-import { mkdtemp, mkdir, readFile, readdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ZipFile } from 'yazl'
@@ -11,7 +11,7 @@ import { pluginDisplayText } from '@shared/plugins'
 let root: string
 let source: string
 let store: PluginStore
-const manifest = { version: 0, id: 'test-plugin', name: 'Test', plugin_version: '1.0.0', api_version: 1, ui: 'index.html' }
+const manifest = { version: 0, id: 'test-plugin', name: 'Test', plugin_version: '1.0.0', api_version: 2, ui: 'index.html' }
 beforeEach(async () => {
   root = await realpath(await mkdtemp(join(tmpdir(), 'anas-plugins-test-')))
   source = join(root, 'source')
@@ -24,6 +24,23 @@ beforeEach(async () => {
 afterEach(async () => { vi.restoreAllMocks(); await rm(root, { recursive: true, force: true }) })
 
 describe('plugin installation and data', () => {
+  it('reads bounded icon assets while disabled without granting access to plugin execution', async () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M1 1h20v20H1z"/></svg>'
+    await writeFile(join(source, 'icon.svg'), svg)
+    await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ ...manifest, icon: 'icon.svg' }))
+    await store.install(join(source, 'PLUGIN.json'))
+    await store.setEnabled(manifest.id, false)
+    expect((await store.read(manifest.id)).manifest?.icon).toBe('icon.svg')
+    const resource = await store.iconResource(manifest.id, 'icon.svg')
+    expect(resource.mime).toBe('image/svg+xml')
+    expect(resource.bytes.toString()).toBe(svg)
+    await expect(store.requireEnabled(manifest.id)).rejects.toThrow('disabled')
+    for (const path of ['index.html', '../icon.svg', 'missing.png']) await expect(store.iconResource(manifest.id, path)).rejects.toThrow()
+    await writeFile(join(root, 'data/plugins/test-plugin/package/icon.svg'), 'x'.repeat(256 * 1024 + 1))
+    await expect(store.iconResource(manifest.id, 'icon.svg')).rejects.toThrow('256 KiB')
+    expect((await store.read(manifest.id)).error).toBeUndefined()
+  })
+
   it('needs no existing config, copies a plugin and retains falsy data across reinstall', async () => {
     expect(await store.list()).toEqual([])
     expect((await store.install(join(source, 'PLUGIN.json'))).enabled).toBe(true)
@@ -444,5 +461,166 @@ describe('plugin package selection', () => {
     const archive = await pluginZip([...packageEntries(), { name: 'linked.html', text: 'index.html', mode: 0o120777 }])
     await store.install(archive)
     expect(await readFile(await store.packageFile(manifest.id, 'linked.html'), 'utf8')).toBe('<p>ZIP plugin</p>')
+  })
+})
+
+
+describe('confirmed plugin replacement', () => {
+  async function replacement(version = '2.0.0') {
+    await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ ...manifest, plugin_version: version }))
+    await writeFile(join(source, 'index.html'), '<p>New</p>')
+    return store.prepareInstall(join(source, 'PLUGIN.json'))
+  }
+  async function installedHtml() { return readFile(await store.packageFile(manifest.id, 'index.html'), 'utf8') }
+
+  it('previews both versions without changing the installation and cancels only the staged copy', async () => {
+    await store.install(join(source, 'PLUGIN.json'))
+    await store.data(manifest.id, 'draft', true, 'keep')
+    const preview = await replacement()
+    expect(preview.installed?.manifest?.pluginVersion).toBe('1.0.0')
+    expect(preview.incoming.pluginVersion).toBe('2.0.0')
+    expect(await installedHtml()).toBe('<p>Hello</p>')
+    expect(await store.data(manifest.id, 'draft')).toBe('keep')
+    await store.cancelInstall(preview.token)
+    expect(await installedHtml()).toBe('<p>Hello</p>')
+    expect(await store.data(manifest.id, 'draft')).toBe('keep')
+    expect(await readdir(join(root, 'data/tmp'))).toEqual([])
+    await expect(store.finishInstall(preview.token, { replace: true })).rejects.toThrow('no longer pending')
+  })
+
+  it('installs the approved snapshot and preserves enabled state and all data by default', async () => {
+    await store.install(join(source, 'PLUGIN.json'))
+    for (const [index, value] of [false, 0, '', [], null].entries()) await store.data(manifest.id, 'key' + index, true, value)
+    const data = join(root, 'data/plugins_data/test-plugin')
+    await writeFile(join(data, 'profiles.json'), '{unreadable but retained')
+    const preview = await replacement()
+    await store.setEnabled(manifest.id, false)
+    await writeFile(join(source, 'index.html'), 'changed after preview')
+    const stop = vi.fn(async () => { expect(await installedHtml()).toBe('<p>Hello</p>') })
+    const item = await store.finishInstall(preview.token, { replace: true }, stop)
+    expect(stop).toHaveBeenCalledExactlyOnceWith(manifest.id)
+    expect(item.enabled).toBe(false)
+    expect(item.manifest?.pluginVersion).toBe('2.0.0')
+    expect(await installedHtml()).toBe('<p>New</p>')
+    expect(await readFile(join(data, 'profiles.json'), 'utf8')).toBe('{unreadable but retained')
+    await store.setEnabled(manifest.id, true)
+    for (const [index, value] of [false, 0, '', [], null].entries()) expect(await store.data(manifest.id, 'key' + index)).toEqual(value)
+    expect(await readdir(join(root, 'data/tmp'))).toEqual([])
+  })
+
+  it('deletes only opted-in plugin data, including data written during backend shutdown', async () => {
+    await store.install(join(source, 'PLUGIN.json'))
+    const other = join(root, 'data/plugins_data/other-plugin')
+    await mkdir(other, { recursive: true })
+    await writeFile(join(other, 'keep'), 'untouched')
+    const preview = await replacement()
+    await store.finishInstall(preview.token, { replace: true, deleteData: true }, async () => {
+      await store.data(manifest.id, 'draft', true, 'last write')
+      await writeFile(join(root, 'data/plugins_data/test-plugin/profiles.json'), 'private data')
+    })
+    await expect(stat(join(root, 'data/plugins_data/test-plugin'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(join(other, 'keep'), 'utf8')).toBe('untouched')
+    expect(await installedHtml()).toBe('<p>New</p>')
+  })
+
+  it.each(['1.0.0', '0.9.0'])('requires confirmation for same-version and older packages (%s)', async version => {
+    await store.install(join(source, 'PLUGIN.json'))
+    const preview = await replacement(version)
+    const stop = vi.fn()
+    await expect(store.finishInstall(preview.token, {}, stop)).rejects.toThrow('already installed')
+    expect(stop).not.toHaveBeenCalled()
+    expect(await installedHtml()).toBe('<p>Hello</p>')
+    const retry = await replacement(version)
+    expect((await store.finishInstall(retry.token, { replace: true })).manifest?.pluginVersion).toBe(version)
+  })
+
+  it('cleans superseded staging and does not let an old token cancel or confirm a new selection', async () => {
+    await store.install(join(source, 'PLUGIN.json'))
+    const first = await replacement()
+    const second = await replacement('3.0.0')
+    expect(await readdir(join(root, 'data/tmp'))).toHaveLength(1)
+    await store.cancelInstall(first.token)
+    await expect(store.finishInstall(first.token, { replace: true })).rejects.toThrow('no longer pending')
+    expect((await store.finishInstall(second.token, { replace: true })).manifest?.pluginVersion).toBe('3.0.0')
+  })
+
+  it('refuses stale confirmation even after a different installation of the same version', async () => {
+    await store.install(join(source, 'PLUGIN.json'))
+    const preview = await replacement()
+    await rename(join(root, 'data/plugins/test-plugin'), join(root, 'old-installation'))
+    await writeFile(join(source, 'PLUGIN.json'), JSON.stringify(manifest))
+    await new PluginStore(store.dataDirectory).install(join(source, 'PLUGIN.json'))
+    const stop = vi.fn()
+    await expect(store.finishInstall(preview.token, { replace: true }, stop)).rejects.toThrow('Installed plugin changed')
+    expect(stop).not.toHaveBeenCalled()
+    expect((await store.read(manifest.id)).manifest?.pluginVersion).toBe('1.0.0')
+  })
+
+  it('rejects invalid packages before approval while allowing a damaged old package to be replaced', async () => {
+    await store.install(join(source, 'PLUGIN.json'))
+    await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ ...manifest, ui: 'missing.html' }))
+    await expect(store.prepareInstall(join(source, 'PLUGIN.json'))).rejects.toThrow()
+    expect(await installedHtml()).toBe('<p>Hello</p>')
+    expect(await readdir(join(root, 'data/tmp'))).toEqual([])
+    await writeFile(join(root, 'data/plugins/test-plugin/package/PLUGIN.json'), '{broken')
+    const preview = await replacement()
+    expect(preview.installed?.manifest).toBeUndefined()
+    expect(preview.installed?.error).toBeTruthy()
+    expect((await store.finishInstall(preview.token, { replace: true })).error).toBeUndefined()
+  })
+
+  it.each(['stop', 'data', 'package'])('preserves the old package and data when %s fails', async failure => {
+    await store.install(join(source, 'PLUGIN.json'))
+    await store.data(manifest.id, 'draft', true, 'keep')
+    const preview = await replacement()
+    const move = fs.retry.rename({ timeout: 2_000, interval: 25 })
+    const target = join(root, 'data/plugins/test-plugin'), data = join(root, 'data/plugins_data/test-plugin')
+    let failed = false
+    vi.spyOn(fs.retry, 'rename').mockImplementation(() => async (from, to) => {
+      if (!failed && ((failure === 'data' && from === data) || (failure === 'package' && to === target))) {
+        failed = true
+        throw new Error('Directory busy')
+      }
+      return move(from, to)
+    })
+    await expect(store.finishInstall(preview.token, { replace: true, deleteData: true }, async () => {
+      if (failure === 'stop') throw new Error('Backend busy')
+    })).rejects.toThrow('busy')
+    expect(await installedHtml()).toBe('<p>Hello</p>')
+    expect(await store.data(manifest.id, 'draft')).toBe('keep')
+    expect(await readdir(join(root, 'data/tmp'))).toEqual([])
+  })
+
+  it('preserves recoverable original files and reports their location if rollback also fails', async () => {
+    await store.install(join(source, 'PLUGIN.json'))
+    await store.data(manifest.id, 'draft', true, 'keep')
+    const preview = await replacement()
+    const move = fs.retry.rename({ timeout: 2_000, interval: 25 })
+    const target = join(root, 'data/plugins/test-plugin'), data = join(root, 'data/plugins_data/test-plugin')
+    vi.spyOn(fs.retry, 'rename').mockImplementation(() => async (from, to) => {
+      if (to === target || to === data) throw new Error('Directory busy')
+      return move(from, to)
+    })
+    await expect(store.finishInstall(preview.token, { replace: true, deleteData: true })).rejects.toThrow('preserved files remain at')
+    await rm(join(root, 'data/tmp'), { recursive: true, force: true })
+    const [stage] = (await readdir(join(root, 'data/plugins'))).filter(name => name.startsWith('.replace-'))
+    expect(await readFile(join(root, 'data/plugins', stage, 'previous/package/index.html'), 'utf8')).toBe('<p>Hello</p>')
+    expect(JSON.parse(await readFile(join(root, 'data/plugins', stage, 'data/state.json'), 'utf8')).values.draft).toBe('keep')
+    expect(await new PluginStore(store.dataDirectory).list()).toEqual([])
+  })
+
+  it('rejects linked data before stopping the plugin when deletion was selected', async () => {
+    await store.install(join(source, 'PLUGIN.json'))
+    await mkdir(join(root, 'data/plugins_data'))
+    const outside = join(root, 'outside-data')
+    await mkdir(outside)
+    await writeFile(join(outside, 'keep'), 'untouched')
+    await symlink(outside, join(root, 'data/plugins_data/test-plugin'), process.platform === 'win32' ? 'junction' : 'dir')
+    const preview = await replacement()
+    const stop = vi.fn()
+    await expect(store.finishInstall(preview.token, { replace: true, deleteData: true }, stop)).rejects.toThrow('managed directory')
+    expect(stop).not.toHaveBeenCalled()
+    expect(await installedHtml()).toBe('<p>Hello</p>')
+    expect(await readFile(join(outside, 'keep'), 'utf8')).toBe('untouched')
   })
 })

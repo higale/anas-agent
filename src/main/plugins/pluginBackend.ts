@@ -1,6 +1,6 @@
 import { utilityProcess, type UtilityProcess } from 'electron'
 import { join } from 'node:path'
-import { requirePluginId, requirePluginJson, type PluginSummary } from '@shared/plugins'
+import { requirePluginId, requirePluginJson, type PluginSummary, type PluginBackendCallContext } from '@shared/plugins'
 import type { PluginStore } from './pluginStore'
 
 interface BackendInstance {
@@ -10,7 +10,7 @@ interface BackendInstance {
   stopping: boolean
   activeId?: number
   stopError?: Error
-  pending: Map<number, { method: string; params: unknown; resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>
+  pending: Map<number, { method: string; params: unknown; context?: () => PluginBackendCallContext; resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>
 }
 
 export class PluginBackends {
@@ -107,7 +107,7 @@ export class PluginBackends {
     return instance
   }
 
-  async call(id: string, method: unknown, params: unknown, prepared?: BackendInstance): Promise<unknown> {
+  async call(id: string, method: unknown, params: unknown, prepared?: BackendInstance, context?: () => PluginBackendCallContext): Promise<unknown> {
     if (typeof method !== 'string' || !method || method.length > 120) throw new Error('Invalid plugin backend method.')
     requirePluginJson(params ?? null)
     const instance = this.instances.get(id)
@@ -124,7 +124,7 @@ export class PluginBackends {
         instance.process.kill()
         this.changed()
       }, this.timeoutMs)
-      instance.pending.set(requestId, { method, params: params ?? null, resolve, reject, timer })
+      instance.pending.set(requestId, { method, params: params ?? null, context, resolve, reject, timer })
       this.dispatch(instance)
     })
   }
@@ -135,7 +135,7 @@ export class PluginBackends {
     if (!next) return
     const [id, pending] = next
     instance.activeId = id
-    try { instance.process.postMessage({ id, method: pending.method, params: pending.params }) } catch (error) {
+    try { instance.process.postMessage({ id, method: pending.method, params: pending.params, context: pending.context?.() ?? { caller: null, views: [] } }) } catch (error) {
       clearTimeout(pending.timer)
       instance.pending.delete(id)
       instance.activeId = undefined

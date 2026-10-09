@@ -1,7 +1,4 @@
-import type { ContentServices, PanelContentApi } from '@shared/panels'
+import type { ContentServices } from '@shared/panels'
+export function contentServices(): ContentServices { return window.panelWindow?.services ?? window.gale }
 
-declare global { interface Window { panelContent?: PanelContentApi } }
-
-export function contentServices(): ContentServices {
-  return window.panelContent?.services ?? window.gale
-}
+export function panelApi() { return window.panelWindow ?? window.gale.panels }

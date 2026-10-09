@@ -29,6 +29,23 @@ async function started() {
 }
 
 describe('optional plugin backend', () => {
+  it('captures host context when a queued call is dispatched, not when enqueued', async () => {
+    await started()
+    let views = [{ panelId: 'home', instanceId: 'main', location: 'sidebar' as const }]
+    const context = () => ({ caller: null, views })
+    const first = backend.call('test-plugin', 'first', null, undefined, context)
+    const second = backend.call('test-plugin', 'second', null, undefined, context)
+    views = []
+    const sent = child.postMessage.mock.calls[0][0] as { id: number }
+    child.emit('message', { id: sent.id, result: null })
+    await first
+    expect(child.postMessage).toHaveBeenLastCalledWith(expect.objectContaining({ method: 'second', context: { caller: null, views: [] } }))
+    const next = child.postMessage.mock.calls[1][0] as { id: number }
+    child.emit('message', { id: next.id, result: null })
+    await second
+    await backend.stopAll()
+  })
+
   it('starts once for concurrent callers and shares the same process', async () => {
     expect(mocks.fork).not.toHaveBeenCalled()
     const first = backend.start('test-plugin')

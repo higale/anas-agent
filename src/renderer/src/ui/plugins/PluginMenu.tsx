@@ -1,8 +1,9 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { Puzzle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { pluginDisplayText, type PluginSummary } from '@shared/plugins'
+import { pluginDisplayText, pluginIconSources, type PluginSummary } from '@shared/plugins'
 import { DropdownMenuContent, DropdownMenuRoot, DropdownMenuTrigger } from '../DropdownMenuShell'
+import { PluginIcon } from './PluginIcon'
 
 export function PluginMenu({ plugins, onOpen }: { plugins: PluginSummary[]; onOpen(plugin: PluginSummary): void }) {
   const { t, i18n } = useTranslation()
@@ -11,7 +12,9 @@ export function PluginMenu({ plugins, onOpen }: { plugins: PluginSummary[]; onOp
   return <DropdownMenuRoot>
     <DropdownMenuTrigger asChild><button type="button" className="ui-tool-button ui-tool-button-square" aria-label={t('plugins.title')} data-tooltip={t('plugins.title')}><Puzzle size={18} /></button></DropdownMenuTrigger>
     <DropdownMenu.Portal><DropdownMenuContent className="ui-menu ui-menu-list" align="end">
-      {enabled.map(item => <DropdownMenu.Item className="ui-menu-item ui-menu-item-row" key={item.id} onSelect={() => onOpen(item)}>{pluginDisplayText(item, i18n.language)}</DropdownMenu.Item>)}
+      {enabled.map(item => <DropdownMenu.Item className="ui-menu-item ui-menu-item-row" key={item.id} onSelect={() => onOpen(item)}>
+        <PluginIcon icon={pluginIconSources(item.id, item.manifest?.icon)} /><span>{pluginDisplayText(item, i18n.language)}</span>
+      </DropdownMenu.Item>)}
     </DropdownMenuContent></DropdownMenu.Portal>
   </DropdownMenuRoot>
 }

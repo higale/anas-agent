@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { nativeTitlebarBottom, windowControlsOverlay } from './floatingViewport'
-import { tooltipStyleProperties, type NativeTooltip, type NativeTooltipApi } from '@shared/nativeTooltip'
 
 const tooltipOffset = 7
 const tooltipShowDelayMs = 450
@@ -87,10 +86,9 @@ function computePosition(state: TooltipState, tooltip: HTMLElement): TooltipPosi
   }
 }
 
-export function GlobalTooltip({ native }: { native?: NativeTooltipApi } = {}) {
+export function GlobalTooltip() {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
   const [position, setPosition] = useState<TooltipPosition | null>(null)
-  const [nativePresentation, setNativePresentation] = useState<NativeTooltip | null>(null)
   const tooltipRef = useRef<HTMLDivElement | null>(null)
   const activeTargetRef = useRef<HTMLElement | null>(null)
   const pendingTargetRef = useRef<HTMLElement | null>(null)
@@ -130,7 +128,6 @@ export function GlobalTooltip({ native }: { native?: NativeTooltipApi } = {}) {
       activeTargetRef.current = null
       setTooltip(null)
       setPosition(null)
-      setNativePresentation(null)
     }
 
     function refreshTooltip(): void {
@@ -217,25 +214,8 @@ export function GlobalTooltip({ native }: { native?: NativeTooltipApi } = {}) {
     if (!tooltip || !tooltipRef.current) return
     const element = tooltipRef.current
     const next = computePosition(tooltip, element)
-    const { width, height } = element.getBoundingClientRect()
-    const overlapsNativeView = native && Array.from(document.querySelectorAll<HTMLElement>('.panel-slot, .panel-window-slot')).some(slot => {
-      if (!slot.checkVisibility()) return false
-      const rect = slot.getBoundingClientRect()
-      return rect.width > 0 && rect.height > 0 && next.left < rect.right && next.left + width > rect.left
-        && next.top < rect.bottom && next.top + height > rect.top
-    })
     setPosition(next)
-    setNativePresentation(overlapsNativeView ? {
-      label: tooltip.label, bounds: { x: next.left, y: next.top, width, height },
-      styles: Object.fromEntries(tooltipStyleProperties.map(key => [key, getComputedStyle(element).getPropertyValue(key)])) as NativeTooltip['styles']
-    } : null)
-  }, [tooltip, native])
-
-  useEffect(() => {
-    if (!native) return
-    void native.setTooltip(nativePresentation).catch(error => console.error('Tooltip display failed.', error))
-    return () => { void native.setTooltip(null).catch(() => undefined) }
-  }, [native, nativePresentation])
+  }, [tooltip])
 
   if (!tooltip) return null
 
@@ -247,7 +227,7 @@ export function GlobalTooltip({ native }: { native?: NativeTooltipApi } = {}) {
       style={{
         left: position?.left ?? -9999,
         top: position?.top ?? -9999,
-        visibility: position && !nativePresentation ? 'visible' : 'hidden'
+        visibility: position ? 'visible' : 'hidden'
       }}
     >
       {tooltip.label}

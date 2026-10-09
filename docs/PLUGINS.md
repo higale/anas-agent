@@ -8,7 +8,7 @@
 
 UI 和后台均为可选入口，至少提供一个。纯 UI 插件不创建后台进程；后台首次启动或调用时才创建独立 Electron utility process。插件不导入 Anas 内部 React 模块，也不建立另一套 Agent 执行循环。Skills、Tools 和 MCP 继续使用各自现有机制，本版不自动授予插件模型工具权限。
 
-侧边面板收起、切换标签、进入设置及切换会话只隐藏已打开的插件页面，保留其页面状态。关闭插件标签销毁该页面。所有页面由主进程统一管理，通过同一个 WebContentsView 在侧边栏和独立窗口之间移动，保留 DOM、JavaScript、WASM 和 WebSocket；不重新加载。插件后台和持久化数据按插件共享。
+侧边面板收起、切换标签、进入设置及切换会话保留已有 iframe。同一窗口不搬动 iframe 节点；跨窗口创建新页面，通过异步交接恢复界面状态。连接、任务和数据由后台或原服务持有，关闭展示页面不应无条件结束业务资源。详见[面板框架](PANEL_FRAMEWORK.md)。
 
 ## 插件包
 
@@ -20,7 +20,7 @@ UI 和后台均为可选入口，至少提供一个。纯 UI 插件不创建后�
   "id": "example-notepad",
   "name": "Notepad",
   "plugin_version": "0.1.0",
-  "api_version": 1,
+  "api_version": 2,
   "description": "A small persistent notepad.",
   "ui": "index.html"
 }
@@ -28,10 +28,11 @@ UI 和后台均为可选入口，至少提供一个。纯 UI 插件不创建后�
 
 - `version` 是清单格式版本，目前为 `0`；`plugin_version` 是插件自己的三段版本号。
 - `id` 使用小写字母、数字和单个短横线，必须以字母开头，不使用 Windows 保留名称。
-- `api_version` 必须为 `1`，不兼容时显示原因，不运行插件。
+- `api_version` 必须为 `2`，不兼容时显示原因，不运行插件。API 2 要求页面主动获取上下文、登记生命周期并确认就绪；不会把 API 1 插件自动改写为新协议。
 - `ui` 为包内 HTML 相对路径；`backend` 为可选的包内 `.cjs` 相对路径。
 - 可选 `platforms` 为 `win32`、`darwin`、`linux` 的数组；缺失表示所有平台。
 - 可选 `lang` 指定包内语言目录，例如 `"lang": "lang"`；缺失时仍显示清单中的固定名称。
+- 可选 `icon` 指定包内 SVG、PNG 或 WebP，例如 `"icon": "assets/icon.svg"`；也可用 `{ "light": "assets/light.svg", "dark": "assets/dark.svg" }` 分别适配明暗主题。每张图标最多 256 KiB，建议 SVG 使用 `viewBox` 和明确颜色；以图片显示，不继承宿主 `currentColor`。
 - 可选 `home` 声明首页位置，例如 `"home": { "default_location": "window", "locations": ["window", "sidebar"] }`。`locations` 缺失时为两种位置，`default_location` 缺失时取第一种；整个声明缺失时默认侧边栏。只声明一种位置表示固定首页位置，空列表、重复项或不在列表中的默认值拒绝安装。
 - 路径使用 `/`，不得为绝对路径、包含 `..` 或指向包外资源。
 - 插件文件最多 10,000 个，总计最多 512 MiB，单个文件最多 128 MiB。包内链接需指向包内普通文件／目录，安装时复制实际内容；循环链接拒绝安装。
@@ -40,7 +41,7 @@ UI 和后台均为可选入口，至少提供一个。纯 UI 插件不创建后�
 
 ZIP 原文件最多 512 MiB，解包同时执行上述文件数量、单文件和总大小限制；达到 1 MiB 的条目压缩比最多 1,000 倍。解包流式校验大小、CRC、路径和重复条目，保留普通访问权限及可执行位，不套用应用备份的目录排除规则。失败时清理本次暂存文件，保留原始 ZIP、已安装插件和独立数据。
 
-安装先在应用临时目录暂存、检查，再原子移动到 `plugins/<id>/package/`。同 ID 已安装时拒绝覆盖；卸载后重新安装可用于手动更新。`plugins/<id>/installation.json` 保存 `version: 0` 与 `enabled`，缺失 `enabled` 默认为 `true`。损坏插件单独显示错误，不阻止 Anas 启动或其他插件使用。
+安装先在应用临时目录暂存、检查，再原子移动到 `plugins/<id>/package/`。同 ID 已安装时，先校验并暂存完整新包，再显示覆盖确认、新旧版本与默认不勾选的「删除插件数据」。取消保留现有页面、后台和数据；确认后关闭该插件页面、停止后台，保留启用状态并原子替换。默认保留独立数据，明确勾选才清除；失败回滚旧包与数据，替换事务在移动旧文件前转入受管理的 `plugins/.replace-<token>/`，回滚失败保留其中的文件并报告位置，避免临时目录清理删除恢复资料。确认只作用于暂存的新包及当时看到的安装实例，安装状态变化后须重新选择；同版本和降级也需要相同确认。`plugins/<id>/installation.json` 保存 `version: 0` 与 `enabled`，缺失 `enabled` 默认为 `true`。损坏插件单独显示错误，不阻止 Anas 启动或其他插件使用。
 
 插件数据位于 `plugins_data/<id>/`，卸载默认保留数据，重新安装同 ID 后可以继续使用。卸载确认框的「删除插件数据」默认不勾选；明确勾选后同时删除当前插件的数据目录（含插件自行保存的配置及凭据），不删除其他插件数据或已有备份。删除前关闭页面、停止后台并验证目录归属；移动数据失败时回滚插件安装，回滚失败则保留暂存文件并报告位置。应用数据备份包含插件和数据；备份、恢复、进入数据修复、停用、卸载及退出应用会停止后台，恢复不会自动重启插件后台。
 
@@ -62,6 +63,7 @@ await anas.data.set('home_open_location', 'window');
 await anas.openHome();
 await anas.openView({ instanceId: 'document-123', location: 'sidebar', title: 'Example' });
 await anas.moveView('window'); // 移动当前页面
+await anas.moveView({ location: 'sidebar', instanceId: 'document-123' }); // 移动本插件已打开的指定实例
 const unsubscribe = anas.onViewChanged(({ instanceId, location }) => { /* 更新位置相关业务 */ });
 const value = await anas.data.get('draft'); // 未设置时返回 null
 await anas.data.set('draft', { text: 'Hello' });
@@ -75,7 +77,7 @@ const result = await anas.backend.call('example', { value: 1 });
 
 顶部插件菜单与 `openHome()` 使用同一打开流程：从插件自己的 `plugins_data/<id>/state.json` 中读取 `values.home_open_location`，不存在或为 `null` 时取清单默认值；无需加载首页或启动后台来决定位置。「设置 → 插件」选中启用的界面插件后可修改首页打开位置，固定位置时控件只读。该键通过现有 `data.get/set` 读写，无第二份宿主配置，卸载默认保留、备份恢复包含。值只能是清单允许的 `sidebar`、`window` 或恢复默认的 `null`；无效值报错并保留原文件，不擅自重置。`getHome()` 返回实际位置及允许的位置列表，插件首页无需提供重复设置控件。
 
-每个插件最多保留一份 `main` 首页，与侧边栏／独立窗口位置无关。顶部菜单、`openHome()`、设置中的打开按钮及 `openView({ instanceId: 'main', ... })` 均显示并聚焦已有首页，保留当前位置、连接和表单；关闭首页后，才按本次请求的位置创建。首页位置设置仅决定下次创建的位置，不迁移已有页面。宿主设置中的显式侧边栏／窗口按钮不修改偏好，也受清单允许的位置约束；`openView({ instanceId: 'main', ... })` 遵守同样约束。其他实例的位置仍由插件独立指定，不受首页策略限制。停用、卸载及恢复继续回收所有实例。`getHome()`、`openHome()` 是 API 1 新增接口，依赖它们的插件须检测旧宿主并提示升级。
+每个插件最多保留一份 `main` 首页，与侧边栏／独立窗口位置无关。顶部菜单、`openHome()`、设置中的打开按钮及 `openView({ instanceId: 'main', ... })` 均显示并聚焦已有首页，保留当前位置、连接和表单；关闭首页后，才按本次请求的位置创建。首页位置设置仅决定下次创建的位置，不迁移已有页面。宿主设置中的显式侧边栏／窗口按钮不修改偏好，也受清单允许的位置约束；`openView({ instanceId: 'main', ... })` 遵守同样约束。其他实例的位置仍由插件独立指定，不受首页策略限制。停用、卸载及恢复继续回收所有实例。
 
 ### 多语言
 
@@ -87,7 +89,7 @@ const { resources, errors } = await anas.getLanguageResources();
 // 使用插件自己的 i18next 实例；不要导入宿主内部模块。
 ```
 
-此 API 1 新增接口只返回当前启用插件的资源，不暴露宿主或其他插件的内容。旧宿主需检查 `typeof anas.getLanguageResources`。宿主不执行语言文件，不把翻译注入 HTML。语言选择按完整代码（不区分大小写）、同基础代码、英文回退；插件使用 i18next 的 `fallbackLng: 'en'`、`returnEmptyString: false` 逐项回退。
+此接口只返回当前启用插件的资源，不暴露宿主或其他插件的内容。宿主不执行语言文件，不把翻译注入 HTML。语言选择按完整代码（不区分大小写）、同基础代码、英文回退；插件使用 i18next 的 `fallbackLng: 'en'`、`returnEmptyString: false` 逐项回退。
 
 可选语种只由宿主内置及宿主数据目录 `lang/` 中的语言包决定，插件不能增加语言选项。用户在 ZIP 内新增或修改插件 `lang/` 文件，重打包后安装；插件匹配宿主当前语言，缺失翻译回退英文。宿主没有的语种不显示、不能选择，须先向宿主添加对应语言包并重新打开 Anas。语言是包的一部分，卸载重装不保留或合并旧翻译，无独立覆盖目录；完整数据备份照常包含插件包。
 
@@ -95,7 +97,11 @@ const { resources, errors } = await anas.getLanguageResources();
 
 `openView()` 只打开当前插件的 UI，`location` 为 `sidebar` 或 `window`；`instanceId` 必填，允许 1–80 位英文字母、数字、下划线和短横线；可选 `title` 为最多 120 字符的非空标题。插件可把自己的配置 ID 用作页面实例 ID，通过 `getInfo().view` 读取。实例 ID 出现在页面 URL，不应放密码或其他秘密。默认菜单页面使用 `main`。
 
-首页使用 `main` 实例并跨位置复用。其他实例仍按同一插件、打开位置和实例 ID 复用，保留内存和连接；在不同位置调用 `openView` 可得到独立业务页面。每插件最多 64 个页面，其中独立窗口最多 32 个；调用完成表示目标容器与页面 DOM 已就绪，不保证插件业务初始化完成。停用、卸载、恢复和宿主关闭会回收所有实例。插件自行决定是否自动执行连接等业务操作。
+`openView({ instanceId, location, title, icon: 'assets/desktop.svg' })` 可覆盖该页面图标，格式与清单 `icon` 相同；未提供时使用清单默认图标。图标用于启动菜单、设置列表、首页／业务标签及独立窗口标题栏，跨窗口交接时保留，不放入插件 `restoreState`，也不修改操作系统任务栏图标。未配置时使用拼图图标；文件缺失、超限或无法解码时回退拼图并显示失败提示，清单图标的加载问题同时显示在插件设置中。图标资源独立于页面和后台，通过仅提供上述图片格式的 `anas-plugin://<id>/_anas/icon/` 读取，停用的插件仍可显示；其他页面资源仍要求插件启用。
+
+`moveView(location)` 移动当前页面；`moveView({ location, instanceId })` 指定实例时，仅能移动本插件已打开的页面。目标不存在、已关闭或位置不受支持时明确失败，不创建替代页面；移动失败保留原页面及业务状态。
+
+所有实例按插件 ID 和 instanceId 跨位置复用；需要独立业务实例时使用不同 instanceId。每插件最多 64 个面板，应用最多 32 个独立面板窗口。调用完成表示页面已确认恢复并激活。
 
 数据键最长 80 个字符，允许字母、数字、点、下划线和短横线；数据为 JSON，单个插件的数据文件最多 1 MiB。写入按顺序原子保存。不存在的键使用 `null`，有效的 `false`、`0`、空字符串和空数组原样保留。
 
@@ -103,26 +109,42 @@ const { resources, errors } = await anas.getLanguageResources();
 
 插件页面允许表单事件和 HTML 表单校验，插件可以在 `submit` 监听器中调用 `preventDefault()` 后通过公开 API 执行操作。CSP 的 `form-action 'none'` 继续禁止表单网络提交；表单自身不会获得额外宿主权限。
 
-### 移动页面与宿主结构
+### 页面交接
 
-侧边栏标题区的「移到独立窗口」和窗口标题栏的「移回侧边栏」调用同一管理器。插件可用 `moveView(location)` 移动自己；首页遵守清单 `home.locations`，其他实例允许两种位置。`getInfo().view.location` 返回当前实际位置，移动成功后 `onViewChanged` 通知新位置；返回的函数解除订阅。移动不修改首页偏好或插件配置。
+宿主创建页面与窗口，插件接入自身资源并保存、恢复界面状态。页面首先主动获取完整上下文，再显式确认就绪；不能依赖一次位置通知完成初始化。
 
-页面加载与位置切换独立：先展示目标容器和加载状态，DOM 就绪后显示页面，加载期间也可移动或关闭。同一页面的并发移动按顺序执行；目标已有同插件、同实例页面时明确报错，不覆盖或关闭任何一方。目标准备失败、用户拒绝离开未保存设置或等待超时均保留原页面及其当前布局；关闭、停用、卸载和恢复会取消未完成的移动并回收视图。侧边目标等待最多 15 秒，页面 DOM 与窗口容器分别最多等待 30 秒，不等待远程图片等资源。
+```js
+const page = await anas.getContext();
+// panelId、pageId、location、phase、transferId、restoreState、view
+await restoreInterface(page.restoreState);
+await attachExistingResources(page.restoreState); // 不重新认证或重新创建任务
+anas.registerLifecycle({
+  async prepare({ signal, targetPageId }) {
+    await finishPendingEdits(signal);
+    return captureInterface(); // 有界 JSON，可包含草稿和稳定资源引用
+  },
+  async activate({ signal }) { await acquireInput(signal); },
+  async resume({ signal }) { await reacquireInput(signal); },
+  async dispose({ reason, signal }) {
+    await releasePresentation(signal); // moved 或 closed；不无条件终止资源
+  }
+});
+await anas.ready(); // 恢复失败调用 anas.failed()
+```
 
-- `src/main/panels/panelViews.ts`：唯一的页面注册表，负责创建、移动、几何布局和销毁；运行时 `viewId` 不持久化。
-- `src/renderer/src/ui/panels/PanelLayouts.tsx`：投影侧边标签和插槽尺寸，不持有插件页面；主界面刷新后按主进程状态恢复投影。
-- `src/renderer/src/panelWindow.tsx`：独立窗口的宿主标题栏，提供移回侧边栏图标；保留系统窗口按钮，插件原生视图位于标题栏下方。
-- `src/preload/plugin.ts` 与 `panelWindow.ts`：分别提供有限的插件 API 和窗口容器 API，不开放主界面 IPC。
+源页面 prepare 期间暂停编辑，目标准备完成后 activate，再提交位置、释放源页面。失败销毁目标后 resume 源页面。异步处理器须检查 AbortSignal；后端应校验输入租约／版本，防止取消后的迟到操作接管资源。状态限制 1 MiB、深度 32、100,000 节点，不持久化、不写日志。页面的运行时 ID 不应代替插件自己的业务资源 ID。
 
-原生视图位于网页 DOM 上方。侧边插槽留出完整拖拽命中区；拖拽和重叠的宿主弹窗、菜单、通知期间暂时隐藏视图，保持页面运行。尺寸按宿主缩放换算。布局回执和取消操作不读取应用数据、不等待备份锁；打开时在应用数据生命周期内准备内容及语言快照，再等待界面布局；移动复用已准备的页面，恢复和退出统一关闭注册表。页面不再通过 iframe 或跨窗口消息桥加载。
+同一面板的移动串行执行，关闭取消在途交接。目标侧栏确认和生命周期命令通常等待 15 秒，目标加载／恢复等待 30 秒。插件必须登记 prepare，否则移动明确失败，保留原页面。`onViewChanged` 仍用于布局、工具栏和位置变化；`getContext` 始终提供当前完整状态。
+
+iframe 使用独立 `anas-plugin://<id>/` 来源和 sandbox。宿主把私有 MessagePort 交给指定 iframe；IPC 从已注册 pageId 推导插件身份。插件没有 Electron preload 或主界面 API。菜单、提示、弹窗直接使用 DOM，不隐藏侧栏避让。
 
 ### 窗口标题栏
 
-页面可用 `setToolbar` 替换自己的标题栏状态和操作，传 `null` 清空；只在独立窗口显示，移动时保留，刷新或关闭后清除，不写入配置。内置面板通过 `panelContent` 使用相同接口。
+页面可用 `setToolbar` 替换自己的标题栏状态和操作，传 `null` 清空；只在独立窗口显示；每个新页面恢复后提交自己的快照，关闭后清除，不写入配置。
 
 ```js
 const unsubscribe = anas.onToolbarAction(async id => {
-  if (id === 'disconnect') await disconnect(); // 仍在原页面执行
+  if (id === 'disconnect') await disconnect(); // 当前活动页面执行
 });
 await anas.setToolbar({
   status: { label: '已连接', tone: 'success' },
@@ -130,9 +152,9 @@ await anas.setToolbar({
 });
 ```
 
-每页注册一个操作处理器，返回函数解除订阅。`actions` 必填、最多 4 项；`id` 为 1–64 位英文字母、数字、下划线或短横线，不能重复；`label` 为最多 120 字符的非空本地化文本，用于提示及无障碍名称。`icon` 支持 `unplug`、`x`、`refresh-cw`、`play`、`pause`、`square`、`settings`、`save`；`disabled` 缺失为 `false`。可选 `status` 的 `label` 遵守同样限制，`tone` 为 `neutral`（默认）、`success`、`warning` 或 `danger`。页面负责跟随业务状态及语言更新，宿主不读取插件业务状态、不代调后台。
+每页注册一个操作处理器，返回函数解除订阅。`actions` 必填、最多 4 项；`id` 为 1–64 位英文字母、数字、下划线或短横线，不能重复；`label` 为最多 120 字符的非空本地化文本，用于提示及无障碍名称。`icon` 支持 `unplug`、`x`、`refresh-cw`、`play`、`pause`、`square`、`settings`、`save`、`list`；`disabled` 缺失为 `false`。可选 `status` 的 `label` 遵守同样限制，`tone` 为 `neutral`（默认）、`success`、`warning` 或 `danger`。页面负责跟随业务状态及语言更新，宿主不读取插件业务状态、不代调后台。
 
-宿主校验当前页面及窗口归属，只派发已登记且可用的操作。同页一次只执行一个标题栏操作，执行中按钮禁用；处理器拒绝时显示失败消息，30 秒无结果时显示超时消息，不自动重试，超时不代表业务被取消；操作保持禁用，直到处理器完成或页面关闭／刷新。关闭或刷新取消未完成回执，旧回执不能完成其他页面的操作。需要停止业务时由插件实现取消。页面确认 `setToolbar` 成功后再隐藏原操作栏；更新失败应保留可用入口并报告错误。此接口属于 API 1 的新增能力，使用它的开发插件需配套宿主。
+宿主校验当前页面及窗口归属，只派发已登记且可用的操作。同页一次只执行一个标题栏操作，执行中按钮禁用；处理器拒绝时显示失败消息，30 秒无结果时显示超时消息，不自动重试，超时不代表业务被取消；操作保持禁用，直到处理器完成或页面关闭／刷新。关闭或刷新取消未完成回执，旧回执不能完成其他页面的操作。需要停止业务时由插件实现取消。页面确认 `setToolbar` 成功后再隐藏原操作栏；更新失败应保留可用入口并报告错误。
 
 
 ## 可选后台
@@ -144,7 +166,8 @@ module.exports = {
   async activate(context) {
     // context.pluginId / packageDirectory / dataDirectory
   },
-  async call(method, params) {
+  async call(method, params, context) {
+    // context.caller: { panelId, instanceId } 或 null；context.views 为本插件的存续面板。
     if (method === 'example') return { received: params };
     throw new Error('Unknown method');
   },
@@ -155,6 +178,8 @@ module.exports = {
 ```
 
 三个函数都可省略；调用未提供的 `call` 会返回明确错误。后台按插件共享，宿主按顺序一次派发一个调用。启动和单次调用（含排队）限制为 30 秒，超时终止整个后台并拒绝尚未完成的调用，不自动重试。停止时取消尚未派发的调用，已开始的调用允许完成并返回真实结果，然后调用 `deactivate`；清理函数失败会向停止操作报告错误，阻止当次备份或卸载继续。停止总计最多等待 3 秒，再终止进程。强制终止不保证撤销已发生的外部操作。插件创建的原生子进程由插件负责关闭，宿主不承诺任意后代进程沙箱或托管能力。
+
+第三参数由宿主在派发时生成，不从页面参数读取。`views` 只包含当前插件的 `{ panelId, instanceId, location }`，包括正在加载、移动或关闭但尚未释放的面板；`panelId` 跨窗口移动不变。非页面调用的 `caller` 为 `null`；排队期间已关闭的调用页面会被拒绝。插件可据此管理自己的编辑互斥和资源引用，不依赖不可靠的页面卸载通知。它是调用时的快照，业务锁、打开预留及状态转换仍由插件负责。
 
 后台可使用 Node 能力与自带依赖，具有当前操作系统用户的权限；独立进程用于隔离依赖和故障，不是权限沙箱。插件自行打包 Windows/macOS 所需辅助程序，并在 `deactivate` 中清理。需要原生依赖的插件须自行适配 Electron 的运行时 ABI；纯 JS、WASM 或独立可执行程序可降低这类耦合。
 

@@ -7,7 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { helpDocuments, resolveHelpLink } from '@shared/helpDocuments'
 import { MarkdownText } from '../chat/MarkdownText'
 import { UI_ICON_SIZE_MEDIUM } from '../uiConstants'
-import { usePanelRef, usePanelScroll, usePanelState } from './PanelViewState'
+import { usePanelReady, usePanelRef, usePanelScroll, usePanelState } from './PanelViewState'
 import type { BuiltinPanel } from '@shared/panels'
 
 type DocumentPanel = Extract<BuiltinPanel, { kind: 'document' }>
@@ -55,7 +55,7 @@ export function HelpDocumentPanel({ request, onOpen }: {
   onOpen(panel: DocumentPanel): void
 }) {
   const { t } = useTranslation()
-  const [content, setContent] = usePanelState<string | undefined>('content', undefined)
+  const [content, setContent] = useState<string | undefined>(undefined)
   const [contentsOpen, setContentsOpen] = usePanelState('contentsOpen', true)
   const [failed, setFailed] = useState(false)
   const [attempt, setAttempt] = useState(0)
@@ -69,6 +69,7 @@ export function HelpDocumentPanel({ request, onOpen }: {
   const scrollRef = useRef<HTMLDivElement>(null)
   const navigation = usePanelRef<string | undefined>('navigation', undefined)
   const ready = headings !== undefined
+  usePanelReady(ready, failed)
   const saveScroll = usePanelScroll(scrollRef, ready)
   const updateCurrent = useRef<() => void>(() => {})
   const onScroll = useCallback(() => { saveScroll(); updateCurrent.current() }, [saveScroll])

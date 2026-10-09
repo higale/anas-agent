@@ -1,8 +1,8 @@
-import { Pause, Play, RefreshCw, Save, Settings, Square, Unplug, X } from 'lucide-react'
+import { List, Pause, Play, RefreshCw, Save, Settings, Square, Unplug, X } from 'lucide-react'
 import type { PanelState } from '@shared/panels'
 import { NoFocusButton } from '../NoFocusButton'
 
-const icons = { unplug: Unplug, x: X, 'refresh-cw': RefreshCw, play: Play, pause: Pause, square: Square, settings: Settings, save: Save }
+const icons = { unplug: Unplug, x: X, 'refresh-cw': RefreshCw, play: Play, pause: Pause, square: Square, settings: Settings, save: Save, list: List }
 
 export function PanelToolbar({ view, onAction }: { view: PanelState; onAction(id: string): void }) {
   const toolbar = view.toolbar

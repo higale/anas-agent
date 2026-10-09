@@ -1,12 +1,16 @@
-## Anas v3.3.7
+## Anas v3.3.8
 
-- 插件首页在侧栏和独立窗口间保持唯一，重复打开保留当前位置、连接和未保存内容。
-- 修复 Windows 关闭主窗口后插件窗口和后台残留；保留 macOS 隐藏主窗口的行为。
-- 插件数据目录统一为 `plugins_data/`；原有 `plugin_data/` 不自动迁移。
+- 统一侧栏与独立窗口的页面交接，恢复未保存内容和阅读位置，保留插件后台连接；交接失败时返回原页面。
+- 支持侧栏标签拖动排序、拖出为独立窗口，优化宽度调整、标签菜单和提示样式。
+- 插件增加默认／页面图标、后台调用页面信息、指定实例移动及列表操作图标。
+- 覆盖安装前显示新旧版本并确认，默认保留数据，可选择清除；失败时回滚并保全恢复文件。
+- 插件接口升级为 API 2，API 1 插件需更新后使用；内置示例已适配，RDP 插件请配套升级至 0.1.7。
 
-- Reuse one plugin home across the sidebar and windows, preserving its placement, connections, and unsaved content.
-- Clean up plugin windows and backends when the Windows main window closes; retain the macOS hide-on-close behavior.
-- Use `plugins_data/` for plugin data; existing `plugin_data/` directories are not migrated automatically.
+- Unify page handoff between the sidebar and separate windows, restoring drafts and reading positions while retaining plugin backend connections; return to the original page if a handoff fails.
+- Reorder sidebar tabs by dragging, drag tabs into separate windows, and improve panel resizing, tab menus, and tooltips.
+- Add default and per-page plugin icons, backend caller context, movement of a specified instance, and a list toolbar icon.
+- Confirm plugin replacement with installed and incoming versions. Keep data by default, allow explicit removal, and roll back failures while preserving recovery files.
+- Upgrade the plugin interface to API 2. API 1 plugins require updates; bundled examples are updated, and RDP users should upgrade to plugin 0.1.7.
 
 ## 下载与安装 / Downloads & installation
 

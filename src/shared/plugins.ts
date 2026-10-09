@@ -1,8 +1,36 @@
 import { matchLanguageCode } from './languages'
 
-export const PLUGIN_API_VERSION = 1
+export const PLUGIN_API_VERSION = 2
 export const PLUGIN_SCHEME = 'anas-plugin'
 export const PLUGIN_RPC_BYTES = 1024 * 1024
+export const PLUGIN_ICON_PATH = '_anas/icon/'
+
+/** Package-relative assets; a single image applies to both themes. */
+export type PluginIcon = string | { light: string; dark: string }
+export interface PluginBackendCallContext {
+  caller: { panelId: string; instanceId: string } | null
+  views: { panelId: string; instanceId: string; location: 'sidebar' | 'window' }[]
+}
+export interface PluginIconSources { light: string; dark: string }
+
+export function requirePluginIconPath(value: unknown): string {
+  const path = requirePluginPath(value)
+  if (!/\.(svg|png|webp)$/i.test(path)) throw new Error('Plugin icons must be SVG, PNG or WebP files.')
+  return path
+}
+
+export function requirePluginIcon(value: unknown): PluginIcon {
+  if (typeof value === 'string') return requirePluginIconPath(value)
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid plugin icon.')
+  const input = value as Record<string, unknown>
+  return { light: requirePluginIconPath(input.light), dark: requirePluginIconPath(input.dark) }
+}
+
+export function pluginIconSources(id: string, icon?: PluginIcon): PluginIconSources | undefined {
+  if (!icon) return undefined
+  const url = (path: string) => `${PLUGIN_SCHEME}://${id}/${PLUGIN_ICON_PATH}${path.split('/').map(encodeURIComponent).join('/')}`
+  return typeof icon === 'string' ? { light: url(icon), dark: url(icon) } : { light: url(icon.light), dark: url(icon.dark) }
+}
 
 export interface PluginLanguage {
   code: string
@@ -30,6 +58,7 @@ export interface PluginViewOptions {
   instanceId: string
   location: 'sidebar' | 'window'
   title?: string
+  icon?: PluginIcon
 }
 
 export interface PluginHomePolicy {
@@ -67,7 +96,8 @@ export function requirePluginView(value: unknown): PluginViewOptions {
     || (input.title !== undefined && (typeof input.title !== 'string' || !input.title.trim() || input.title.length > 120))) {
     throw new Error('Invalid plugin view.')
   }
-  return { instanceId: input.instanceId, location: input.location as PluginViewOptions['location'], title: input.title as string | undefined }
+  return { instanceId: input.instanceId, location: input.location as PluginViewOptions['location'], title: input.title as string | undefined,
+    icon: input.icon === undefined ? undefined : requirePluginIcon(input.icon) }
 }
 
 export interface PluginManifest {
@@ -81,6 +111,7 @@ export interface PluginManifest {
   platforms?: string[]
   lang?: string
   home?: PluginHomePolicy
+  icon?: PluginIcon
 }
 
 export interface PluginSummary {
@@ -94,9 +125,19 @@ export interface PluginSummary {
   languageErrors?: string[]
 }
 
+export interface PluginInstallPreview {
+  token: string
+  incoming: PluginManifest
+  installed?: PluginSummary
+}
+
+export type PluginInstallResult = PluginSummary | { replacement: PluginInstallPreview }
+
 export interface PluginsApi {
   list(): Promise<PluginSummary[]>
-  install(): Promise<PluginSummary | null>
+  install(): Promise<PluginInstallResult | null>
+  confirmInstall(token: string, deleteData?: boolean): Promise<PluginSummary>
+  cancelInstall(token: string): Promise<void>
   setEnabled(id: string, enabled: boolean): Promise<void>
   uninstall(id: string, deleteData?: boolean): Promise<void>
   openWindow(id: string): Promise<void>
@@ -140,7 +181,8 @@ export function parsePluginManifest(value: unknown): PluginManifest {
     || platforms.some(item => !['win32', 'darwin', 'linux'].includes(item)))) throw new Error('Invalid plugin platforms.')
   return { id, name: raw.name.trim(), pluginVersion: raw.plugin_version, apiVersion: raw.api_version,
     description: raw.description as string ?? '', ui, backend, platforms: platforms as string[] | undefined,
-    lang: raw.lang === undefined ? undefined : requirePluginPath(raw.lang), home: parsePluginHome(raw.home) }
+    lang: raw.lang === undefined ? undefined : requirePluginPath(raw.lang), home: parsePluginHome(raw.home),
+    icon: raw.icon === undefined ? undefined : requirePluginIcon(raw.icon) }
 }
 
 export function pluginPageUrl(manifest: PluginManifest, instanceId?: string): string {

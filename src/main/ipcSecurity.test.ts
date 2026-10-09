@@ -171,7 +171,7 @@ describe('IPC sender security', () => {
   })
 
   it('confines content pages to their registered context without granting main-window authority', () => {
-    const location = resolveRendererLocation({ isPackaged: true, rendererFile: '/tmp/anas/renderer/panel-content.html' })
+    const location = resolveRendererLocation({ isPackaged: true, rendererFile: '/tmp/anas/renderer/panel-window.html' })
     let destroyed: (() => void) | undefined
     const sender = { mainFrame: { url: `${location.url}?panel=one` }, once: (_event: string, callback: () => void) => { destroyed = callback } }
     registerContentRenderer(sender as never, { location, allows: (channel, args) => channel === 'security:panel' && args[0] === 'bound-thread' })
@@ -235,14 +235,15 @@ describe('IPC sender security', () => {
       'files:readAvatarSourceFromDroppedPaths',
       'files:readFileIcon',
       'files:showItemInFolder',
+      'panels:acknowledge',
       'panels:cancel',
       'panels:close',
+      'panels:followFiles',
       'panels:hasRequest',
-      'panels:layout',
       'panels:list',
       'panels:move',
       'panels:open',
-      'panels:tooltip',
+      'panels:reorder',
       'plugins:invoke',
       'plugins:openWindow',
       'speech:logWarning'
@@ -278,14 +279,15 @@ describe('IPC sender security', () => {
       'files:readAvatarSourceFromDroppedPaths',
       'files:readFileIcon',
       'files:showItemInFolder',
+      'panels:acknowledge',
       'panels:cancel',
       'panels:close',
+      'panels:followFiles',
       'panels:hasRequest',
-      'panels:layout',
       'panels:list',
       'panels:move',
       'panels:open',
-      'panels:tooltip',
+      'panels:reorder',
       'plugins:invoke',
       'plugins:openWindow',
       'speech:logWarning'
@@ -306,6 +308,6 @@ describe('renderer content security policy', () => {
     expect(policy).toContain("img-src 'self' http: https: data: blob:")
     expect(policy).toContain("form-action 'none'")
     expect(policy).toContain("object-src 'none'")
-    expect(policy).toContain("frame-src 'none';")
+    expect(policy).toContain("frame-src anas-plugin:;")
   })
 })

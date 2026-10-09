@@ -3,8 +3,9 @@
   "id": "example-notepad",
   "name": "Notepad",
   "plugin_version": "0.1.0",
-  "api_version": 1,
+  "api_version": 2,
   "description": "A persistent notepad with no backend.",
+  "icon": "assets/notepad.svg",
   "lang": "lang",
   "ui": "index.html"
 }

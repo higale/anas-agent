@@ -2,7 +2,7 @@ import { useContext, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { editor } from 'monaco-editor'
 import type { DiffContents } from '@shared/diffContents'
-import { usePanelRef } from '../agent/PanelViewState'
+import { usePanelCheckpoint, usePanelRef } from '../agent/PanelViewState'
 import { DiffPreferences } from './DiffView'
 
 export function ReadonlyDiff({ data, viewKey }: { data: DiffContents; viewKey: string }) {
@@ -10,6 +10,10 @@ export function ReadonlyDiff({ data, viewKey }: { data: DiffContents; viewKey: s
   const { diffViewMode: mode, diffFoldUnchanged: fold, diffWordWrap: wordWrap } = useContext(DiffPreferences)
   const host = useRef<HTMLDivElement>(null), instance = useRef<editor.IStandaloneDiffEditor | null>(null)
   const views = usePanelRef(`monaco:${viewKey}`, new Map<string, editor.IDiffEditorViewState>())
+  usePanelCheckpoint(() => {
+    const current = instance.current?.saveViewState()
+    if (current) views.current.set(mode, current)
+  })
   const [error, setError] = useState(''), [loading, setLoading] = useState(true)
   const modeRef = useRef(mode), foldRef = useRef(fold), wordWrapRef = useRef(wordWrap)
   modeRef.current = mode; foldRef.current = fold; wordWrapRef.current = wordWrap

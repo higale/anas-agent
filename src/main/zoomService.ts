@@ -43,17 +43,12 @@ function notifyZoomChanged(webContents: WebContents): void {
 }
 
 export function registerWindowZoomShortcuts(win: BrowserWindow): void {
-  registerZoomShortcuts(win.webContents, () => win.webContents)
-}
-
-/** Resolve the owner for each input so a movable content page zooms its current window. */
-export function registerZoomShortcuts(contents: WebContents, owner: () => WebContents | undefined): void {
+  const contents = win.webContents
   contents.on('zoom-changed', (event, direction) => {
-    const target = owner()
-    if (!target || target.isDestroyed()) return
+    if (contents.isDestroyed()) return
     event.preventDefault()
     try {
-      stepAppZoom(target, direction === 'in' ? 1 : -1)
+      stepAppZoom(contents, direction === 'in' ? 1 : -1)
     } catch (reason) {
       logZoomShortcutFailure(reason)
     }
@@ -61,15 +56,14 @@ export function registerZoomShortcuts(contents: WebContents, owner: () => WebCon
 
   contents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown' || !input.control || input.alt || input.meta) return
-    const target = owner()
-    if (!target || target.isDestroyed()) return
+    if (contents.isDestroyed()) return
 
     const key = input.key
     const code = input.code
     if (key === '=' || key === '+' || code === 'Equal' || code === 'NumpadAdd') {
       event.preventDefault()
       try {
-        stepAppZoom(target, 1)
+        stepAppZoom(contents, 1)
       } catch (reason) {
         logZoomShortcutFailure(reason)
       }
@@ -79,7 +73,7 @@ export function registerZoomShortcuts(contents: WebContents, owner: () => WebCon
     if (key === '-' || code === 'Minus' || code === 'NumpadSubtract') {
       event.preventDefault()
       try {
-        stepAppZoom(target, -1)
+        stepAppZoom(contents, -1)
       } catch (reason) {
         logZoomShortcutFailure(reason)
       }
@@ -89,7 +83,7 @@ export function registerZoomShortcuts(contents: WebContents, owner: () => WebCon
     if (key === '0' || code === 'Digit0' || code === 'Numpad0') {
       event.preventDefault()
       try {
-        resetAppZoom(target)
+        resetAppZoom(contents)
       } catch (reason) {
         logZoomShortcutFailure(reason)
       }

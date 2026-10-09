@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppSettings, LanguageResourcesSnapshot, Project } from '@shared/types'
 import type { PanelState } from '@shared/panels'
-import type { PanelDefinition } from './panelViews'
+import type { PanelDefinition } from './panelPages'
 
 const mocks = vi.hoisted(() => ({
   settings: vi.fn(), languages: vi.fn(), configure: vi.fn(), open: vi.fn(),
@@ -16,14 +16,9 @@ vi.mock('../config/appConfig', () => ({ getAppSettings: mocks.settings, onAppCon
 vi.mock('../languageStore', () => ({ getLanguageResources: mocks.languages, resolveConfiguredLanguage: async (code: string) => ({ code }) }))
 vi.mock('../projectStore', () => ({ getProject: mocks.project }))
 vi.mock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
-vi.mock('../appShell', () => ({ registerNativeContextMenu: vi.fn() }))
-vi.mock('../zoomService', () => ({ registerZoomShortcuts: vi.fn() }))
-vi.mock('../ipcSecurity', () => ({ handleMainIpc: vi.fn(), registerContentRenderer: vi.fn(),
-  resolveRendererLocation: () => ({ url: 'file:///panel-content.html' }) }))
-vi.mock('./panelRegistry', () => ({ panelLabel: () => 'Files', panelLanguages: vi.fn(), setPanelLanguages: mocks.setLanguages,
-  panelViews: { open: mocks.open, configure: mocks.configure, notifyPageChanged: vi.fn(),
-    list: mocks.list, updateContent: mocks.updateContent,
-    pageState: () => ({ view: { content: { kind: 'files' } } }) } }))
+vi.mock('../ipcSecurity', () => ({ handleMainIpc: vi.fn() }))
+vi.mock('./panelRegistry', () => ({ panelLabel: () => 'Files', setPanelLanguages: mocks.setLanguages,
+  panelPages: { open: mocks.open, configure: mocks.configure, list: mocks.list, updateContent: mocks.updateContent } }))
 
 function pending<T>() {
   let resolve!: (value: T) => void
@@ -46,8 +41,8 @@ describe('file panel follows the active workspace', () => {
     let view: PanelState = { viewId: 'files', content: { kind: 'files', projectId: 'one', threadId: 'thread-one', runId: 'run-one' },
       name: 'Files · one', location: 'window', locations: ['window', 'sidebar'] }
     mocks.list.mockImplementation(() => [view])
-    mocks.updateContent.mockImplementation((viewId, content, presentation: Pick<PanelDefinition, 'name' | 'update'>) => {
-      view = { ...view, viewId, content, name: presentation.name('en') }
+    mocks.updateContent.mockImplementation((viewId, content, presentation: Pick<PanelDefinition, 'name' | 'project'>) => {
+      view = { ...view, viewId, content, name: presentation.name('en', presentation.project) }
     })
     const slow = pending<Project>()
     mocks.project.mockReturnValueOnce(slow.promise)
@@ -87,8 +82,7 @@ describe('panel appearance preparation', () => {
     const read = pending<AppSettings>(), languages = pending<LanguageResourcesSnapshot>()
     if (phase === 'settings') mocks.settings.mockReturnValueOnce(read.promise)
     else mocks.languages.mockReturnValueOnce(languages.promise)
-    const contents = {}
-    mocks.open.mockImplementation(async (definition: PanelDefinition) => definition.update?.(contents as Electron.WebContents))
+    mocks.open.mockResolvedValue(undefined)
     const { openBuiltinPanel, refreshPanelAppearance, registerPanelIpc } = await import('./panelHost')
     registerPanelIpc()
     const opening = openBuiltinPanel({ kind: 'files', projectId: 'project' })
@@ -97,9 +91,8 @@ describe('panel appearance preparation', () => {
     await refreshPanelAppearance({ settings: latest })
     read.resolve(settings); languages.resolve({ ...resources, langDir: '/stale-languages' })
     await opening
-    const state = mocks.handlers.get('panel-content:state')!({ sender: contents })
-    expect(state).toMatchObject({ preferences: { diffViewMode: 'inline', diffFoldUnchanged: true, diffWordWrap: true } })
-    expect(mocks.configure).toHaveBeenLastCalledWith({ language: 'zh-CN', theme: 'dark', fontSize: 18 })
+    expect(mocks.configure).toHaveBeenLastCalledWith({ language: 'zh-CN', theme: 'dark', fontSize: 18 },
+      { diffViewMode: 'inline', diffFoldUnchanged: true, diffWordWrap: true })
     expect(mocks.setLanguages).toHaveBeenLastCalledWith(resources)
   })
 })
