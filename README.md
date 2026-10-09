@@ -111,7 +111,7 @@ npm run dev -- -- --data-dir "./runtime-data/research"
 | `.env` | 应用环境变量 |
 | `attachments/`、`file_edits/` | 已保存的附件与文件修改恢复材料 |
 | `skills/`、`tools/` | 用户管理的包 |
-| `plugins/`、`plugin_data/` | 已安装插件及独立数据；卸载默认保留数据，可勾选删除 |
+| `plugins/`、`plugins_data/` | 已安装插件及独立数据；卸载默认保留数据，可勾选删除 |
 | `skills_system/`、`skills_examples/`、`tools_system/`、`tools_examples/` | 启动时刷新的内置包；示例需先导入再使用 |
 | `help/`、`lang/` | 帮助与语言包 |
 | `assets/`、`log/`、`cache/`、`tmp/`、`electron/` | 资源、日志、缓存、临时文件与 Electron 用户配置 |

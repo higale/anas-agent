@@ -19,6 +19,7 @@ const { verifyProjectPreviews } = require('./electron-project-previews.cjs')
 const { verifyProjectModelPicker } = require('./electron-project-model-picker.cjs')
 const { verifyHelpDocuments } = require('./electron-help-documents.cjs')
 const { verifyWorkspaceTabs } = require('./electron-workspace-tabs.cjs')
+const { verifyMainWindowLifecycle } = require('./electron-main-window-lifecycle.cjs')
 const { verifyDefaultCapabilities } = require('./electron-default-capabilities.cjs')
 const { verifyGlobalSettings } = require('./electron-global-settings.cjs')
 const { verifyControlLayout } = require('./electron-control-layout.cjs')
@@ -1084,6 +1085,10 @@ async function verifyCodeReview(electronApplication) {
 }
 
 async function main() {
+  if (process.argv.includes('--window-lifecycle-only')) {
+    await verifyMainWindowLifecycle(launchApplication)
+    return
+  }
   if (process.argv.includes('--current-data-only')) {
     await verifyCurrentData(launchApplication)
     return
@@ -1173,6 +1178,7 @@ async function main() {
     await verifySkillApproval(launchApplication)
     await verifyHelpDocuments(launchApplication)
     await verifyWorkspaceTabs(launchApplication)
+    await verifyMainWindowLifecycle(launchApplication)
     await verifyAttachmentPreviews(launchApplication)
   }
   if (!packagedExecutable && !process.argv.includes('--changes-only') && !process.argv.includes('--workspace-only')) await verifyEnvironmentStartup(repositoryRoot, electronExecutable)

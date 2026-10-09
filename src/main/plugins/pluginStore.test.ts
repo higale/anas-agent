@@ -59,7 +59,7 @@ describe('plugin installation and data', () => {
   it('isolates a damaged plugin and preserves invalid data instead of resetting it', async () => {
     await store.install(join(source, 'PLUGIN.json'))
     await store.data(manifest.id, 'key', true, 'saved')
-    const dataFile = join(root, 'data/plugin_data/test-plugin/state.json')
+    const dataFile = join(root, 'data/plugins_data/test-plugin/state.json')
     await writeFile(dataFile, '{broken')
     await expect(store.data(manifest.id, 'key', true, 'new')).rejects.toThrow()
     expect(await readFile(dataFile, 'utf8')).toBe('{broken')
@@ -102,9 +102,9 @@ describe('optional data removal on uninstall', () => {
   it('deletes only the selected plugin data and permits a fresh installation', async () => {
     await store.install(join(source, 'PLUGIN.json'))
     await store.data(manifest.id, 'home_open_location', true, 'window')
-    const data = join(root, 'data/plugin_data/test-plugin')
+    const data = join(root, 'data/plugins_data/test-plugin')
     await writeFile(join(data, 'profiles.json'), '{broken credentials file')
-    const other = join(root, 'data/plugin_data/other-plugin')
+    const other = join(root, 'data/plugins_data/other-plugin')
     await mkdir(other)
     await writeFile(join(other, 'state.json'), 'keep')
     await store.uninstall(manifest.id, true)
@@ -124,7 +124,7 @@ describe('optional data removal on uninstall', () => {
 
   it('refuses linked data directories without uninstalling or touching their targets', async () => {
     await store.install(join(source, 'PLUGIN.json'))
-    const group = join(root, 'data/plugin_data')
+    const group = join(root, 'data/plugins_data')
     await mkdir(group)
     const outside = join(root, 'outside-data')
     await mkdir(outside)
@@ -139,7 +139,7 @@ describe('optional data removal on uninstall', () => {
     await store.install(join(source, 'PLUGIN.json'))
     await store.data(manifest.id, 'draft', true, 'keep')
     const rename = fs.retry.rename({ timeout: 2_000, interval: 25 })
-    const data = join(root, 'data/plugin_data/test-plugin')
+    const data = join(root, 'data/plugins_data/test-plugin')
     vi.spyOn(fs.retry, 'rename').mockImplementation(() => async (from, to) => {
       if (from === data) throw new Error('Data directory is busy')
       return rename(from, to)
@@ -162,7 +162,7 @@ describe('optional data removal on uninstall', () => {
     await expect(store.uninstall(manifest.id, true)).rejects.toThrow('preserved files remain')
     const [stage] = await readdir(join(root, 'data/tmp'))
     expect(await readFile(join(root, 'data/tmp', stage, 'removed/package/index.html'), 'utf8')).toBe('<p>Hello</p>')
-    expect(JSON.parse(await readFile(join(root, 'data/plugin_data/test-plugin/state.json'), 'utf8')).values.draft).toBe('keep')
+    expect(JSON.parse(await readFile(join(root, 'data/plugins_data/test-plugin/state.json'), 'utf8')).values.draft).toBe('keep')
   })
 })
 
@@ -173,7 +173,7 @@ describe('plugin home location', () => {
     await store.data(manifest.id, 'draft', true, 'keep')
     await store.data(manifest.id, 'home_open_location', true, 'window')
     expect((await store.home(manifest.id)).location).toBe('window')
-    const saved = JSON.parse(await readFile(join(root, 'data/plugin_data/test-plugin/state.json'), 'utf8'))
+    const saved = JSON.parse(await readFile(join(root, 'data/plugins_data/test-plugin/state.json'), 'utf8'))
     expect(saved.values).toEqual({ draft: 'keep', home_open_location: 'window' })
     await store.uninstall(manifest.id)
     await store.install(join(source, 'PLUGIN.json'))
@@ -198,7 +198,7 @@ describe('plugin home location', () => {
   it('preserves corrupted stored preferences and rejects invalid home declarations', async () => {
     await store.install(join(source, 'PLUGIN.json'))
     await store.data(manifest.id, 'draft', true, 'keep')
-    const file = join(root, 'data/plugin_data/test-plugin/state.json')
+    const file = join(root, 'data/plugins_data/test-plugin/state.json')
     const broken = '{"version":0,"values":{"home_open_location":"invalid","draft":"keep"}}'
     await writeFile(file, broken)
     await expect(store.home(manifest.id)).rejects.toThrow('home location')
@@ -265,7 +265,7 @@ describe('plugin language packs', () => {
     await expect(stat(join(lang, 'de.json'))).rejects.toMatchObject({ code: 'ENOENT' })
     expect(pluginDisplayText(await store.read(manifest.id), 'en')).toBe('New English')
     expect(pluginDisplayText(await store.read(manifest.id), 'zh-CN')).toBe('新版记事本')
-    await expect(stat(join(root, 'data/plugin_data/test-plugin'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(join(root, 'data/plugins_data/test-plugin'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('reports oversized language files without disabling the plugin or preventing uninstall', async () => {

@@ -42,7 +42,7 @@ export class PluginStore {
   }
 
   // Managed directories must retain their physical identity across reads and writes.
-  async directory(group: 'plugins' | 'plugin_data' | 'tmp', id?: string, create = false): Promise<string> {
+  async directory(group: 'plugins' | 'plugins_data' | 'tmp', id?: string, create = false): Promise<string> {
     if (id) requirePluginId(id)
     let target = await realpath(this.dataDirectory)
     for (const part of [group, ...(id ? [id] : [])]) {
@@ -207,7 +207,7 @@ export class PluginStore {
   async uninstall(id: string, deleteData = false): Promise<void> {
     if (typeof deleteData !== 'boolean') throw new Error('Invalid plugin data deletion option.')
     const root = await this.directory('plugins', id)
-    const data = deleteData ? await this.directory('plugin_data', id).catch(error => {
+    const data = deleteData ? await this.directory('plugins_data', id).catch(error => {
       if (error.code === 'ENOENT') return undefined
       throw error
     }) : undefined
@@ -237,7 +237,7 @@ export class PluginStore {
   async data(id: string, key: unknown, write = false, value?: unknown): Promise<unknown> {
     const manifest = await this.requireEnabled(id)
     if (typeof key !== 'string' || !/^[a-zA-Z0-9_.-]{1,80}$/.test(key) || ['__proto__', 'constructor', 'prototype'].includes(key)) throw new Error('Invalid plugin data key.')
-    const root = await this.directory('plugin_data', id, true)
+    const root = await this.directory('plugins_data', id, true)
     const path = join(root, 'state.json')
     const raw = await optionalJson(path) as { version?: unknown; values?: unknown } | undefined
     if (raw !== undefined && (!raw || raw.version !== 0 || !raw.values || typeof raw.values !== 'object' || Array.isArray(raw.values))) throw new Error('Invalid plugin data file; original content was preserved.')

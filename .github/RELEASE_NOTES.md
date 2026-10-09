@@ -1,14 +1,12 @@
-## Anas v3.3.6
+## Anas v3.3.7
 
-- 文件改动面板跟随当前项目和会话，切换项目时保留侧栏或独立窗口，重复打开复用已有页面。
-- 标签右键菜单不再隐藏原生内容；标签提示统一样式，修复独立窗口标题栏分隔线被系统按钮遮挡。
-- 插件设置与技能、MCP 等页面统一布局和操作样式。
-- 记事本示例演示中英文切换和草稿保留，后台示例统一为英文。
+- 插件首页在侧栏和独立窗口间保持唯一，重复打开保留当前位置、连接和未保存内容。
+- 修复 Windows 关闭主窗口后插件窗口和后台残留；保留 macOS 隐藏主窗口的行为。
+- 插件数据目录统一为 `plugins_data/`；原有 `plugin_data/` 不自动迁移。
 
-- Follow the current project and conversation in the file changes panel, preserving sidebar or window placement and reusing the existing page.
-- Keep native content visible while a tab context menu is open; unify tab tooltips and fix the window titlebar divider being covered by system buttons.
-- Align plugin settings layout and actions with Skills, MCP, and other settings pages.
-- Demonstrate English/Chinese switching and draft preservation in Notepad; use English throughout the backend demo.
+- Reuse one plugin home across the sidebar and windows, preserving its placement, connections, and unsaved content.
+- Clean up plugin windows and backends when the Windows main window closes; retain the macOS hide-on-close behavior.
+- Use `plugins_data/` for plugin data; existing `plugin_data/` directories are not migrated automatically.
 
 ## 下载与安装 / Downloads & installation
 

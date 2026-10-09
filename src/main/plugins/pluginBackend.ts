@@ -36,7 +36,7 @@ export class PluginBackends {
     const manifest = await this.store.requireEnabled(id)
     if (!manifest.backend) throw new Error('Plugin has no backend entry.')
     const [entry, packageDirectory, dataDirectory] = await Promise.all([
-      this.store.packageFile(id, manifest.backend), this.store.packageDirectory(id), this.store.directory('plugin_data', id, true)
+      this.store.packageFile(id, manifest.backend), this.store.packageDirectory(id), this.store.directory('plugins_data', id, true)
     ])
     // Another caller can finish the asynchronous package checks first.
     const concurrent = this.instances.get(id)

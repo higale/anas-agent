@@ -7,6 +7,7 @@ const { expect } = require('playwright/test')
 const { pluginPage, pluginWindow, pluginGeometry, windowCount, tooltipPage } = require('./electron-plugin-helpers.cjs')
 
 module.exports = async function checkTransfer(application, page, directory) {
+  await application.evaluate(({ BrowserWindow }, url) => BrowserWindow.getAllWindows().find(window => window.webContents.getURL() === url).setSize(1360, 800), page.url())
   const source = join(directory, 'transfer-fixture')
   await mkdir(source)
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 })
@@ -52,6 +53,15 @@ module.exports = async function checkTransfer(application, page, directory) {
       await retained('window')
       assert.equal(await windowCount(application), 2)
       const shell = await pluginWindow(application, live)
+      if (i === 0) {
+        await application.evaluate(({ BrowserWindow }, url) => BrowserWindow.getAllWindows().find(window => window.webContents.getURL() === url).minimize(), shell.url())
+        await page.getByRole('button', { name: 'Plugins', exact: true }).click()
+        await page.getByRole('menuitem', { name: 'Transfer test', exact: true }).click()
+        await retained('window')
+        assert.equal(await windowCount(application), 2)
+        assert.equal((await page.evaluate(() => globalThis.gale.panels.list())).filter(view => view.content.pluginId === 'transfer-test' && view.content.instanceId === 'main').length, 1)
+        await expect.poll(() => application.evaluate(({ BrowserWindow }, url) => BrowserWindow.getAllWindows().find(window => window.webContents.getURL() === url).isMinimized(), shell.url())).toBe(false)
+      }
       assert.equal(await shell.evaluate(() => typeof globalThis.gale), 'undefined')
       const move = shell.getByRole('button', { name: 'Move to side panel', exact: true })
       await expect(move).toHaveText('')
@@ -143,15 +153,24 @@ module.exports = async function checkTransfer(application, page, directory) {
       return Math.abs(slot.x * 1.25 - view.x) + Math.abs(slot.width * 1.25 - view.width)
     }).toBeLessThan(3)
     await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1))
-    // openView retains its independent-page semantics. Moving cannot replace that page.
+    // Directly requesting the other location also reuses the single home.
     await live.evaluate(() => globalThis.anas.openView({ instanceId: 'main', location: 'window' }))
-    const other = await pluginPage(application, 'transfer-test', 'main', 'window')
+    await retained('sidebar')
+    assert.equal(await windowCount(application), 1)
+    // Business pages retain independent instances per location and conflict protection.
+    await live.evaluate(() => globalThis.anas.openView({ instanceId: 'document', location: 'sidebar' }))
+    const document = await pluginPage(application, 'transfer-test', 'document', 'sidebar')
+    await document.locator('#draft').fill('Independent sidebar page')
+    await document.evaluate(() => globalThis.anas.openView({ instanceId: 'document', location: 'window' }))
+    const other = await pluginPage(application, 'transfer-test', 'document', 'window')
     await other.locator('#draft').fill('Other independent page')
-    await assert.rejects(live.evaluate(() => globalThis.anas.moveView('window')), /PANEL_CONFLICT/)
-    await expect(live.locator('#draft')).toHaveValue('Live connection and unsaved draft')
+    await assert.rejects(document.evaluate(() => globalThis.anas.moveView('window')), /PANEL_CONFLICT/)
+    await expect(document.locator('#draft')).toHaveValue('Independent sidebar page')
     await expect(other.locator('#draft')).toHaveValue('Other independent page')
     const registry = await page.evaluate(() => globalThis.gale.panels.list())
-    await page.evaluate(id => globalThis.gale.panels.close(id), registry.find(view => view.content.pluginId === 'transfer-test' && view.location === 'window').viewId)
+    for (const view of registry.filter(view => view.content.pluginId === 'transfer-test' && view.content.instanceId === 'document')) {
+      await page.evaluate(id => globalThis.gale.panels.close(id), view.viewId)
+    }
     await expect.poll(() => windowCount(application)).toBe(1)
     const locations = await live.evaluate(() => globalThis.events)
     assert.ok(locations.filter(value => value === 'window').length >= 4)

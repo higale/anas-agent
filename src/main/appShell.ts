@@ -303,9 +303,12 @@ export function createMainWindow(options: { recovery?: boolean } = {}): void {
     })
   })
   win.on('close', (event) => {
-    if (process.platform !== 'darwin' || appQuitting) return
+    if (process.platform !== 'darwin' || appQuitting || event.defaultPrevented) return
     event.preventDefault()
     win.hide()
+  })
+  win.once('closed', () => {
+    if (process.platform !== 'darwin' && !appQuitting) app.quit()
   })
   applyWindowTheme(win)
   registerExternalNavigationGuards(win)

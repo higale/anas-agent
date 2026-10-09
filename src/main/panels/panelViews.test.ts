@@ -87,7 +87,7 @@ beforeEach(() => {
   })
 })
 afterEach(() => { manager.closeAll(); vi.useRealTimers(); vi.unstubAllEnvs() })
-const open = (location: 'sidebar' | 'window') => manager.open(pluginPanel(summary, { instanceId: 'main', location }))
+const open = (location: 'sidebar' | 'window', instanceId = 'document') => manager.open(pluginPanel(summary, { instanceId, location }))
 const toolbar = { status: { label: 'Connected', tone: 'success' }, actions: [{ id: 'disconnect', label: 'Disconnect', icon: 'unplug' }] }
 const latestAction = (index = 0) => nativeViews[index].webContents.send.mock.calls.filter(call => call[0] === 'panel-toolbar:action').at(-1)![1]
 function delayPageLoad() {
@@ -99,6 +99,46 @@ function delayPageLoad() {
 }
 
 describe('plugin page ownership and placement', () => {
+  it.each(['sidebar', 'window'] as const)('reuses one home after moving from %s, then uses the requested location after closing it', async location => {
+    await open(location, 'main')
+    const { viewId } = manager.list()[0], page = nativeViews[0]
+    const destination = location === 'sidebar' ? 'window' : 'sidebar'
+    await manager.move(viewId, destination)
+    await open(location, 'main')
+    await open(destination, 'main')
+    expect(manager.list()).toHaveLength(1)
+    expect(manager.state(viewId).location).toBe(destination)
+    expect(nativeViews).toEqual([page])
+    expect(page.webContents.loadURL).toHaveBeenCalledTimes(1)
+    expect(page.webContents.destroyed).toBe(false)
+    if (destination === 'window') expect(windows[1].focus).toHaveBeenCalled()
+    else expect(main.children.has(page)).toBe(true)
+    manager.close(viewId)
+    await open(location, 'main')
+    expect(manager.list()).toHaveLength(1)
+    expect(manager.list()[0]).toMatchObject({ location })
+    expect(manager.list()[0].viewId).not.toBe(viewId)
+    expect(nativeViews).toHaveLength(2)
+  })
+  it('deduplicates concurrent home opens while keeping a separate home for each plugin', async () => {
+    await Promise.all([open('sidebar', 'main'), open('window', 'main')])
+    expect(manager.list()).toHaveLength(1)
+    expect(manager.list()[0].location).toBe('sidebar')
+    expect(nativeViews[0].webContents.loadURL).toHaveBeenCalledTimes(1)
+    const other = { ...summary, id: 'other', manifest: { ...summary.manifest!, id: 'other', name: 'Other' } }
+    await manager.open(pluginPanel(other, { instanceId: 'main', location: 'window' }))
+    expect(manager.list()).toHaveLength(2)
+    expect(nativeViews).toHaveLength(2)
+  })
+  it('rejects a forbidden home location even when its home already exists, without restricting business pages', async () => {
+    const limited = { ...summary, manifest: { ...summary.manifest!, home: { defaultLocation: 'sidebar' as const, locations: ['sidebar' as const] } } }
+    await manager.open(pluginPanel(limited, { instanceId: 'main', location: 'sidebar' }))
+    expect(() => manager.open(pluginPanel(limited, { instanceId: 'main', location: 'window' }))).toThrow('Unsupported panel location')
+    expect(manager.list()).toHaveLength(1)
+    expect(nativeViews[0].visible).toBe(true)
+    await manager.open(pluginPanel(limited, { instanceId: 'document', location: 'window' }))
+    expect(manager.list()).toHaveLength(2)
+  })
   it('keeps native content visible while a tab menu opens, cancels or chooses close', async () => {
     await open('sidebar')
     const { viewId } = manager.list()[0], page = nativeViews[0]

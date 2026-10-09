@@ -98,6 +98,7 @@ export class PanelViews {
 
   open(definition: PanelDefinition): Promise<void> {
     const { content, location, locations, source } = definition
+    if (!locations.includes(location)) throw new Error('Unsupported panel location.')
     const existing = this.find(content, definition.reuse === 'location' ? location : undefined)
     if (existing) {
       existing.state.content = content
@@ -108,7 +109,6 @@ export class PanelViews {
       this.changed()
       return Promise.all([this.enqueue(existing, () => this.present(existing, existing.state.location)), existing.ready]).then(() => undefined)
     }
-    if (!locations.includes(location)) throw new Error('Unsupported panel location.')
     if ([...this.entries.values()].filter(entry => entry.definition.ownerId === definition.ownerId).length >= 64) throw new Error('Too many panels.')
     const view = new WebContentsView({ webPreferences: {
       preload: definition.preload, sandbox: true, contextIsolation: true, nodeIntegration: false,

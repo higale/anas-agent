@@ -111,7 +111,7 @@ npm run dev -- -- --data-dir "./runtime-data/research"
 | `.env` | Application environment variables |
 | `attachments/`, `file_edits/` | Saved attachments and file-edit recovery material |
 | `skills/`, `tools/` | User-managed packages |
-| `plugins/`, `plugin_data/` | Installed plugins and independent data; uninstalling retains data unless deletion is selected |
+| `plugins/`, `plugins_data/` | Installed plugins and independent data; uninstalling retains data unless deletion is selected |
 | `skills_system/`, `skills_examples/`, `tools_system/`, `tools_examples/` | Bundled packages refreshed at startup; examples must be imported before use |
 | `help/`, `lang/` | Help and language packs |
 | `assets/`, `log/`, `cache/`, `tmp/`, `electron/` | Assets, logs, cache, temporary files, and Electron profile |

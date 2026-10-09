@@ -4,7 +4,7 @@ import type { PanelDefinition } from '../panels/panelViews'
 
 export function pluginPanel(summary: PluginSummary, options: PluginViewOptions): PanelDefinition {
   return {
-    ownerId: `plugin:${summary.id}`, reuse: 'location',
+    ownerId: `plugin:${summary.id}`, reuse: options.instanceId === 'main' ? 'page' : 'location',
     content: { kind: 'plugin', pluginId: summary.id, instanceId: options.instanceId },
     location: options.location,
     locations: options.instanceId === 'main' ? pluginHomePolicy(summary.manifest!).locations : ['sidebar', 'window'],
