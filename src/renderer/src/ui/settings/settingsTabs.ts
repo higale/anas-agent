@@ -1,7 +1,7 @@
-import { ListChecks, Bot, Brain, Code2, Earth, GitFork, Plug, Puzzle, Settings, SlidersHorizontal, Wand2, Wrench } from 'lucide-react'
+import { Bot, Brain, Code2, Earth, GitFork, Plug, Puzzle, Settings, SlidersHorizontal, Wand2, Wrench } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
-export type SettingsTab = 'capabilities' | 'general' | 'chatMode' | 'environment' | 'subagents' | 'memory' | 'dev' | 'model' | 'mcp' | 'tools' | 'skills' | 'plugins'
+export type SettingsTab = 'general' | 'chatMode' | 'environment' | 'subagents' | 'memory' | 'dev' | 'model' | 'mcp' | 'tools' | 'skills' | 'plugins'
 
 export const settingsTabs: Array<{
   id: SettingsTab
@@ -12,7 +12,6 @@ export const settingsTabs: Array<{
   { id: 'general', labelKey: 'settings.tabs.general', descriptionKey: 'settings.tab_descriptions.general', Icon: Settings },
   { id: 'model', labelKey: 'settings.tabs.model', descriptionKey: 'settings.tab_descriptions.model', Icon: Bot },
   { id: 'chatMode', labelKey: 'settings.tabs.chat_mode', descriptionKey: 'settings.tab_descriptions.chat_mode', Icon: SlidersHorizontal },
-  { id: 'capabilities', labelKey: 'settings.capabilities', descriptionKey: 'settings.tab_descriptions.capabilities', Icon: ListChecks },
   { id: 'environment', labelKey: 'settings.tabs.environment', descriptionKey: 'settings.tab_descriptions.environment', Icon: Earth },
   { id: 'subagents', labelKey: 'settings.tabs.subagents', descriptionKey: 'settings.tab_descriptions.subagents', Icon: GitFork },
   { id: 'skills', labelKey: 'settings.tabs.skills', descriptionKey: 'settings.tab_descriptions.skills', Icon: Wand2 },

@@ -1,4 +1,4 @@
-import { defaultCapabilities, defaultCapabilitySettings } from '@shared/agentCapabilities'
+import { defaultCapabilities } from '@shared/agentCapabilities'
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -34,7 +34,6 @@ async function loadSkillsStore(externalDirectories: unknown[] = []) {
   const examplesDir = join(root, 'skills_examples')
   const workspace = join(root, 'workspace')
   const projectCapabilities = structuredClone(defaultCapabilities)
-  const defaults = structuredClone(defaultCapabilitySettings)
   const projectSettings = { advancedSettings: true }
   await Promise.all([
     mkdir(join(bundledDataDir, 'skills_system'), { recursive: true }),
@@ -50,16 +49,16 @@ async function loadSkillsStore(externalDirectories: unknown[] = []) {
     getConfigFile: (name: string) => join(configDir, name),
     getSkillExamplesDir: () => examplesDir,
     getSkillsDir: () => skillsDir,
+    getDataDir: () => root,
     getSystemSkillsDir: () => systemDir
   }))
-  vi.doMock('./config/appConfig', () => ({ getAppConfigSnapshot: async () => ({ customTools: [], defaultCapabilities: defaults }) }))
+  vi.doMock('./config/appConfig', () => ({ getAppConfigSnapshot: async () => ({ customTools: [] }) }))
   vi.doMock('./projectStore', () => ({
     getProject: async (id: string) => ({
  capabilities: projectCapabilities, restrictSubagents: false, ...projectSettings, prompt: '', id, kind: 'workspace', name: 'Test', sourceFolders: [workspace] })
   }))
   return {
     projectCapabilities,
-    defaults,
     projectSettings,
     root,
     bundledSystemDir: join(bundledDataDir, 'skills_system'),
@@ -83,6 +82,48 @@ afterEach(async () => {
 })
 
 describe('skillsStore', () => {
+  it('uses plugin files in place, preserves ordinary skill precedence and checks tool dependencies for explicit calls', async () => {
+    const h = await loadSkillsStore()
+    const source = join(h.root, 'plugin-source')
+    const original = skillText('duplicate', 'Plugin instructions', 'Keep this exact body.')
+    await writeText(join(source, 'skills/duplicate/SKILL.md'), original)
+    await writeText(join(source, 'skills/duplicate/script.py'), 'print(1)')
+    await writeText(join(source, 'backend.cjs'), 'throw new Error("Static discovery must not execute this backend.")')
+    await writeText(join(source, 'PLUGIN.json'), JSON.stringify({ version: 0, id: 'skill-fixture', name: 'Skill fixture', plugin_version: '1.0.0', api_version: 2,
+      backend: 'backend.cjs', tools: [{ id: 'echo', handler: 'echo', description: 'Echo', input_schema: { type: 'object' }, effect: 'read' }],
+      skills: [{ id: 'guide', path: 'skills/duplicate/SKILL.md', tools: ['echo'] }] }))
+    const { store: plugins } = (await import('./plugins/pluginRuntime')).pluginRuntime()
+    await plugins.install(join(source, 'PLUGIN.json'))
+    await writeSkill(h.skillsDir, 'duplicate')
+    const catalog = await h.store.listSkillSnapshot('project')
+    const skill = catalog.skills.find(skill => skill.source === 'plugin')!
+    expect(skill).toMatchObject({ id: 'skill-fixture:skill:guide', shortcutAlias: 'plugin:skill-fixture', modelShadowedBy: 'User', requiredTools: ['skill-fixture:tool:echo'], scriptAutoApprove: false })
+    expect(skill.dirPath).toBe(join(h.root, 'plugins', 'skill-fixture', 'package', 'skills', 'duplicate'))
+    expect((await h.store.readSkillFile('project', skill.id, 'SKILL.md')).editable).toBe(false)
+    await expect(h.store.saveSkillFile('project', skill.id, 'SKILL.md', {} as never)).rejects.toThrow('read-only')
+    expect(await h.store.buildUserSkillInvocation('project', 'duplicate', 'plugin:skill-fixture', 'check')).toMatchObject({ errorCode: 'user_unavailable' })
+    await h.store.updateSkillAvailability(undefined, skill.id, { modelAvailable: true })
+    h.projectCapabilities.pluginMode = 'custom'
+    h.projectCapabilities.skills = { mode: 'off', project: false, entries: [{ id: skill.id, shortcut: true, model: true }] }
+    expect(await h.store.buildUserSkillInvocation('project', 'duplicate', 'plugin:skill-fixture', 'check')).toMatchObject({ errorCode: 'tools_unavailable', missingTools: ['skill-fixture:tool:echo'] })
+    h.projectCapabilities.pluginTools = ['skill-fixture:tool:echo']
+    const invocation = await h.store.buildUserSkillInvocation('project', 'duplicate', 'plugin:skill-fixture', 'check')
+    expect(invocation.promptText).toContain(original)
+    expect(invocation.promptText).toContain('skill-fixture:tool:echo: plugin__skill-fixture__echo')
+    const selection = h.projectCapabilities.skills
+    expect(await h.store.buildSkillsPrompt('project', selection)).toBe('')
+    expect(await h.store.buildSkillsPrompt('project', selection, undefined, h.projectCapabilities.pluginTools)).toContain('Plugin instructions')
+    await plugins.setEnabled('skill-fixture', false)
+    expect((await h.store.listSkillSnapshot('project')).skills.some(skill => skill.source === 'plugin')).toBe(false)
+    await plugins.setEnabled('skill-fixture', true)
+    expect((await h.store.listSkillSnapshot('project')).skills.find(skill => skill.source === 'plugin')?.id).toBe(skill.id)
+    await writeText(join(source, 'skills/duplicate/SKILL.md'), skillText('duplicate', 'Updated instructions'))
+    const replacement = await plugins.prepareInstall(join(source, 'PLUGIN.json'))
+    await plugins.finishInstall(replacement.token, { replace: true })
+    expect((await h.store.listSkillSnapshot('project')).skills.find(skill => skill.source === 'plugin')).toMatchObject({ id: skill.id, description: 'Updated instructions' })
+    await plugins.uninstall('skill-fixture')
+    expect((await h.store.listSkillSnapshot('project')).skills.some(skill => skill.source === 'plugin')).toBe(false)
+  })
   it('persists independent default-off script switches and applies OR to current and changed scripts', async () => {
     const h = await loadSkillsStore()
     const dir = await writeSkill(h.skillsDir, 'query')
@@ -123,7 +164,7 @@ describe('skillsStore', () => {
     await expect(h.store.findSkillScriptExemption(script, { ...scope, selection: { ...scope.selection, mode: 'off' } }, { name: 'query' })).resolves.toBeUndefined()
     const selected = { ...scope, selection: { mode: 'custom' as const, project: false,
       entries: [{ id: 'user:query', model: true, shortcut: false }] } }
-    await expect(h.store.findSkillScriptExemption(script, selected)).resolves.toBeDefined()
+    await expect(h.store.findSkillScriptExemption(script, selected)).resolves.toBeUndefined()
     await expect(h.store.findSkillScriptExemption(script, { ...selected, selection: { ...selected.selection, entries: [] } })).resolves.toBeUndefined()
   })
 
@@ -239,7 +280,7 @@ describe('skillsStore', () => {
     const fixture = await loadSkillsStore()
     await writeSkill(fixture.skillsDir, 'shortcut-only')
     const skill = (await fixture.store.listSkillSnapshot()).skills.find((item) => item.name === 'shortcut-only')!
-    await fixture.store.updateSkillAvailability(undefined, skill.id, { modelAvailable: false, userAvailable: false })
+    await fixture.store.updateSkillAvailability(undefined, skill.id, { modelAvailable: false, userAvailable: true })
     fixture.projectCapabilities.skills = { mode: 'custom', project: false, entries: [{ id: skill.id, shortcut: true, model: false }] }
     const invocation = await fixture.store.buildUserSkillInvocation('project-1', skill.name, undefined, 'details')
     expect(invocation).toMatchObject({ handled: true, promptText: expect.stringContaining('SKILL.md') })
@@ -456,7 +497,7 @@ Body
     })
   })
 
-  it('keeps model-hidden Skills out of inherited prompts but allows explicit subagent selection', async () => {
+  it('keeps globally disabled Skills out of explicit project and subagent selections', async () => {
     const fixture = await loadSkillsStore()
     await writeSkill(fixture.skillsDir, 'subagent-only')
     const skill = (await fixture.store.listSkillSnapshot()).skills.find((candidate) => candidate.name === 'subagent-only')!
@@ -466,7 +507,7 @@ Body
     })
 
     await expect(fixture.store.buildSkillsPrompt()).resolves.not.toContain('subagent-only')
-    await expect(fixture.store.buildSkillsPrompt(undefined, { mode: 'custom', project: false, entries: [{ id: skill.id, model: true, shortcut: false }] })).resolves.toContain(
+    await expect(fixture.store.buildSkillsPrompt(undefined, { mode: 'custom', project: false, entries: [{ id: skill.id, model: true, shortcut: false }] })).resolves.not.toContain(
       `(file: ${join(fixture.skillsDir, 'subagent-only', 'SKILL.md')})`
     )
   })
@@ -474,10 +515,10 @@ Body
   it('uses default skill choices only while project customization is off', async () => {
     const fixture = await loadSkillsStore()
     await writeSkill(fixture.skillsDir, 'example')
-    fixture.projectSettings.advancedSettings = false
-    fixture.defaults.capabilities.skills.mode = 'off'
-    await expect(fixture.store.buildUserSkillInvocation('project', 'example', undefined, '')).resolves.toMatchObject({ errorCode: 'user_unavailable' })
     fixture.projectSettings.advancedSettings = true
+    fixture.projectCapabilities.skills.mode = 'off'
+    await expect(fixture.store.buildUserSkillInvocation('project', 'example', undefined, '')).resolves.toMatchObject({ errorCode: 'user_unavailable' })
+    fixture.projectSettings.advancedSettings = false
     await expect(fixture.store.buildUserSkillInvocation('project', 'example', undefined, '')).resolves.toMatchObject({ promptText: expect.stringContaining('SKILL.md') })
   })
 

@@ -48,3 +48,11 @@ it('moves only a live instance of the calling plugin and retains the current-pag
   for (const instance of [null, 123, '', '../server']) expect(() => pluginMoveTarget('test', [home, desktop], home, 'sidebar', instance)).toThrow()
   expect(() => pluginMoveTarget('test', [home, desktop], home, 'invalid', 'server')).toThrow()
 })
+
+it('backend moves require an explicit instance of the same plugin', () => {
+  const panel: PanelState = { viewId: 'desktop', content: {kind:'plugin', pluginId:'test', instanceId:'server'},
+    location:'sidebar', locations:['sidebar','window'], name:'Desktop', loading:false };
+  expect(pluginMoveTarget('test', [panel], undefined, 'window', 'server')).toBe(panel);
+  expect(() => pluginMoveTarget('test', [panel], undefined, 'window')).toThrow('specify');
+  expect(() => pluginMoveTarget('other', [panel], undefined, 'window', 'server')).toThrow('not open');
+});

@@ -57,7 +57,7 @@ When background execution returns a call ID, use the available managed-call tool
 
 ## Activation and Updates
 
-Refresh the tool catalog after creating or changing packages. Select the tool in the applicable default, project, or subagent custom-tool capabilities; project overrides and subagent limits still apply. Subagents use their own selection and may allow the current project's tools. An interactive tool is unavailable while background tools are disabled even if selected.
+Refresh the tool catalog after creating or changing packages. Project and subagent custom-tool capabilities use All, Custom, or Off. All includes new enabled tools; Custom requires explicit selection; Off excludes them. Projects without capability customization use all enabled tools. Global availability and subagent limits still apply. Subagents use their own selection and may allow the current project's tools. An interactive tool is unavailable while background tools are disabled even if selected.
 
 Definitions are fixed for each run. A subsequent run reads new manifests; changing files does not inject a tool into an already-running Agent. Scripts and dependencies are read at execution time, so inspect whether an existing tool is in use before editing its behavior.
 

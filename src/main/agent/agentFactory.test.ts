@@ -1,8 +1,8 @@
 import { toolPackageFixture, selectedTools } from '../../test/toolPackageFixture'
 import * as toolsStore from '../toolsStore'
 vi.mock('../toolsStore', async importOriginal => ({ ...await importOriginal<typeof import('../toolsStore')>(), listToolSnapshot: vi.fn(async () => ({ roots: [], tools: [] })) }))
+import { parsePluginManifest } from '@shared/plugins'
 import { customToolDefaults } from '@shared/customTools'
-import { defaultCapabilitySettings } from '@shared/agentCapabilities'
 import { diffViewSettingsFixture } from '../../test/diffViewSettingsFixture'
 import * as subagentTools from './subagentTools'
 import { environmentContextFixture } from '../../test/environmentContextFixture'
@@ -60,6 +60,7 @@ import { isCommandShellToolName } from '@shared/commandShell'
 const testPaths = vi.hoisted(() => ({ root: '' }))
 vi.mock('../config/dataDir', async (importOriginal) => ({
   ...await importOriginal<typeof import('../config/dataDir')>(),
+  getDataDir: () => testPaths.root,
   getConfigFile: (name: string) => join(testPaths.root, 'config', name),
   getSkillsDir: () => join(testPaths.root, 'skills'),
   getSystemSkillsDir: () => join(testPaths.root, 'skills_system'),
@@ -140,7 +141,6 @@ vi.mock('langchain', async (importOriginal) => {
 
 function config(settings: Partial<AppConfigSnapshot['settings']> = {}): AppConfigSnapshot {
   return { customTools: [],
-    defaultCapabilities: structuredClone(defaultCapabilitySettings),
     providers: [],
     subagents: [{
  capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: true,
@@ -1596,8 +1596,8 @@ describe('subagent definition snapshots', () => {
       const resumed = await createAgentInstance(thread, database, { ...context, configuration })
       await resumed.dispose()
       const start = tools.mock.results.at(-1)!.value.find((tool: { name: string }) => tool.name === 'start_subagent')
-      expect(start.description).toContain('- general-purpose:')
-      expect(start.description).not.toContain('- reviewer:')
+      expect(start).toBeUndefined()
+      expect(configuration!.capabilities.subagents.names).toEqual(['general-purpose'])
       const next = await createAgentInstance(thread, database, context)
       await next.dispose()
       const nextStart = tools.mock.results.at(-1)!.value.find((tool: { name: string }) => tool.name === 'start_subagent')
@@ -1630,7 +1630,7 @@ describe('subagent definition snapshots', () => {
       })
       await instance.dispose()
       const start = tools.mock.results.at(-1)!.value.find((tool: { name: string }) => tool.name === 'start_subagent')
-      if (mode === 'empty') expect(start).toBeUndefined()
+      if (mode === 'empty' || mode === 'custom') expect(start).toBeUndefined()
       else {
         expect(start.description).toContain(`- ${mode === 'default' ? 'general-purpose' : 'reviewer'}:`)
         expect(start.description).not.toContain('- outside:')
@@ -1736,13 +1736,9 @@ describe('subagent definition snapshots', () => {
     } finally { database.close() }
   })
 
-  it.each([false, true].flatMap(customized => [false, true].map(restricted => ({ customized, restricted }))))('uses editable defaults, project overrides, independent children and stable snapshots ($customized, $restricted)', async ({ customized, restricted }) => {
+  it.each([false, true].flatMap(customized => [false, true].map(restricted => ({ customized, restricted }))))('uses all available capabilities or project customization and freezes each run ($customized, $restricted)', async ({ customized, restricted }) => {
     const snapshot = previewConfig()
-    snapshot.defaultCapabilities.capabilities = { ...structuredClone(defaultCapabilities), profile: false,
-      memory: false, workspace: false, toolMode: 'selected', tools: ['http_request'] }
-    snapshot.defaultCapabilities.restrictSubagents = restricted
     snapshot.subagents.push({ ...snapshot.subagents[0], name: 'reviewer', enabled: false })
-    snapshot.defaultCapabilities.capabilities.subagents = { mode: 'custom', names: ['reviewer'] }
     const project = { ...defaultWorkspaceProject(), compressionPrompt: 'Parent-only summary: {conversation}', advancedSettings: customized, restrictSubagents: restricted,
       capabilities: { ...structuredClone(defaultCapabilities), toolMode: 'selected' as const, tools: ['read_file'] } }
     projectStoreMocks.getProject.mockResolvedValue(project)
@@ -1758,12 +1754,12 @@ describe('subagent definition snapshots', () => {
       await parent.dispose()
       const configuration = structuredClone(resolved.mock.lastCall![0])
       const parentTools = runtimeToolMocks.createdToolNames.mock.lastCall![0]
-      expect(configuration.capabilities).toMatchObject({ profile: customized, workspace: customized,
-        toolMode: 'selected', tools: customized ? ['read_file'] : ['http_request'] })
-      expect(Boolean(configuration.subagentLimit)).toBe(restricted)
-      expect(configuration.capabilities.subagents.names).toEqual(customized ? ['general-purpose'] : ['reviewer'])
+      expect(configuration.capabilities).toMatchObject({ profile: true, workspace: true,
+        toolMode: customized ? 'selected' : 'all', tools: customized ? ['read_file'] : [] })
+      expect(Boolean(configuration.subagentLimit)).toBe(customized && restricted)
+      expect(configuration.capabilities.subagents.names).toEqual(['general-purpose'])
       const prompt = await prepareAgentSystemPrompt(owner, snapshot)
-      expect(prompt.systemPrompt.sections.some(section => section.kind === 'workspace')).toBe(customized)
+      expect(prompt.systemPrompt.sections.some(section => section.kind === 'workspace')).toBe(true)
       const call = database.createSubagentCall({
         id: '12929292-9292-8292-8292-929292929292', ownerThreadId: owner.id, parentThreadId: owner.id, parentRunId: run.id,
         childThreadId: '13939393-9393-8393-8393-939393939393', childRunId: '14949494-9494-8494-9494-949494949494',
@@ -1777,15 +1773,15 @@ describe('subagent definition snapshots', () => {
       expect(configuration.compressionPrompt).toBe(customized ? 'Parent-only summary: {conversation}' : undefined)
       expect(resolved.mock.lastCall![0].compressionPrompt).toBeUndefined()
       const childCapabilities = resolved.mock.lastCall![0].capabilities
-      expect(childCapabilities.profile).toBe(!restricted || customized)
-      expect(childCapabilities.toolMode).toBe(restricted ? 'selected' : 'all')
-      snapshot.defaultCapabilities.capabilities = { ...structuredClone(defaultCapabilities), toolMode: 'selected', tools: [] }
+      expect(childCapabilities.profile).toBe(true)
+      expect(childCapabilities.toolMode).toBe(customized && restricted ? 'selected' : 'all')
+      project.capabilities.tools = []
       const resumed = await createAgentInstance(owner, database, { prepareWorkspace: false, configuration })
       await resumed.dispose()
       expect(runtimeToolMocks.createdToolNames.mock.lastCall![0]).toEqual(parentTools)
       const next = await createAgentInstance(owner, database, { prepareWorkspace: false, onConfigurationResolved: resolved })
       await next.dispose()
-      expect(resolved.mock.lastCall![0].capabilities.tools).toEqual(customized ? ['read_file'] : [])
+      expect(resolved.mock.lastCall![0].capabilities.tools).toEqual([])
     } finally { database.close() }
   })
 
@@ -1837,7 +1833,7 @@ describe('subagent definition snapshots', () => {
     const snapshot = previewConfig()
     const definition = { ...customToolDefaults, description: 'Read data.', inputSchema: { type: 'object' }, command: 'node reader.cjs {{args}}' }
     const tools = ['default_reader', 'project_reader', 'unselected_reader'].map(name => toolPackageFixture({ ...definition, id: name, name }))
-    snapshot.defaultCapabilities.capabilities.customTools = selectedTools(['default_reader'])
+    tools[2].enabled = false
     appConfigMocks.getAppConfigSnapshot.mockResolvedValue(snapshot)
     vi.mocked(toolsStore.listToolSnapshot).mockResolvedValue({ roots: [], tools })
     projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), advancedSettings: customized,
@@ -1848,7 +1844,7 @@ describe('subagent definition snapshots', () => {
     try {
       const instance = await createAgentInstance(thread, database, { prepareWorkspace: false, onConfigurationResolved: resolved })
       await instance.dispose()
-      expect(resolved.mock.lastCall![0].customTools.map((tool: { id: string }) => tool.id)).toEqual([customized ? 'project_reader' : 'default_reader'])
+      expect(resolved.mock.lastCall![0].customTools.map((tool: { id: string }) => tool.id)).toEqual(customized ? ['project_reader'] : ['default_reader', 'project_reader'])
     } finally { database.close() }
   })
 
@@ -1915,7 +1911,37 @@ describe('subagent definition snapshots', () => {
       const selection = resolved.mock.lastCall![0].capabilities.skills
       expect(selection).toMatchObject({ project: false, entries: [{ id: 'current-project:search', model: !restricted, shortcut: false }] })
       expect(catalog).toHaveBeenCalledWith(owner.projectId, ['/workspace/default'])
-      expect(prompt).toHaveBeenCalledWith(owner.projectId, selection, ['/workspace/default'])
+      expect(prompt).toHaveBeenCalledWith(owner.projectId, selection, ['/workspace/default'], resolved.mock.lastCall![0].capabilities.pluginTools)
+    } finally { database.close(); catalog.mockRestore(); prompt.mockRestore() }
+  })
+
+  it.each(['default', 'custom', 'off'] as const)('resolves subagent plugin %s selection against enabled declarations before freezing the run', async (pluginMode) => {
+    const settings = previewConfig()
+    const runtime = (await import('../plugins/pluginRuntime')).pluginRuntime()
+    const plugins = vi.spyOn(runtime.store, 'list').mockResolvedValue([{ id: 'example', enabled: true, backendStatus: 'stopped',
+      manifest: parsePluginManifest({ version: 0, api_version: 2, id: 'example', name: 'Example', plugin_version: '1.0.0', skills: [{ id: 'guide', path: 'guide/SKILL.md' }] }) }])
+    appConfigMocks.getAppConfigSnapshot.mockResolvedValue(settings)
+    const catalog = vi.spyOn(skillsStore, 'listSkillSnapshot').mockResolvedValue({ scriptAutoApprove: false, roots: [], skills: [{
+      id: 'example:skill:guide', rootId: 'plugin:example', name: 'guide', description: 'Guide', source: 'plugin', rootName: 'Example', shortcutAlias: 'plugin:example',
+      linked: false, scriptAutoApprove: false, modelAvailable: true, userAvailable: true, dirPath: '/plugin/guide', relativePath: 'guide'
+    }] })
+    const prompt = vi.spyOn(skillsStore, 'buildSkillsPrompt').mockResolvedValue('')
+    const database = AgentDatabase.open(':memory:')
+    const owner = configuredThread(database, { title: 'Plugin inheritance' })
+    const parentRun = database.createRun(owner.id, 'plugin-parent')
+    const call = database.createSubagentCall({ id: '12929292-9292-8292-8292-929292929292', ownerThreadId: owner.id, parentThreadId: owner.id, parentRunId: parentRun.id,
+      childThreadId: '13939393-9393-8393-8393-939393939393', childRunId: '14949494-9494-8494-8494-949494949494',
+      config: { ...config().subagents[0], capabilities: { ...structuredClone(defaultCapabilities), pluginMode, skills: { mode: 'off', project: false, entries: [] } } },
+      description: 'Use plugin defaults.', childThread: { title: 'Child', projectId: owner.projectId } })
+    const resolved = vi.fn()
+    try {
+      const instance = await createAgentInstance(database.getThread(call.childThreadId)!, database, { requestId: call.childRunId, subagentCall: call, prepareWorkspace: false,
+        parentConfiguration: { customTools: [], codingMode: false, capabilities: defaultCapabilities }, onConfigurationResolved: resolved })
+      await instance.dispose()
+      const saved = resolved.mock.lastCall![0].capabilities
+      plugins.mockRestore()
+      expect(saved.pluginMode).toBe('custom')
+      expect(Boolean(saved.skills.entries.find((entry: { id: string; model: boolean }) => entry.id === 'example:skill:guide')?.model)).toBe(pluginMode === 'default')
     } finally { database.close(); catalog.mockRestore(); prompt.mockRestore() }
   })
 
@@ -2779,7 +2805,7 @@ describe('captureAgentModelRequest', () => {
   })
 
   it.each([
-    { mode: 'custom' as const, names: ['researcher', 'disabled-agent'], advanced: true, expected: ['researcher', 'disabled-agent'] },
+    { mode: 'custom' as const, names: ['researcher', 'disabled-agent'], advanced: true, expected: ['researcher'] },
     { mode: 'custom' as const, names: [], advanced: true, expected: [] },
     { mode: 'off' as const, names: ['general-purpose', 'researcher'], advanced: true, expected: [] as string[] },
     { mode: 'default' as const, names: [], advanced: true, expected: ['general-purpose', 'researcher'] },

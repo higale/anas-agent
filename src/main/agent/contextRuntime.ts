@@ -238,7 +238,7 @@ export function createAgentContextRuntime(options: {
       manualCompressionAvailable: hasRawSummarySource(messages),
       breakdown: {
         profileTokens: systemTokens.profile,
-        systemInstructionTokens: systemTokens.system_instruction + systemTokens.project_instruction + systemTokens.coding_instruction,
+        systemInstructionTokens: systemTokens.system_instruction + systemTokens.project_instruction + systemTokens.coding_instruction + systemTokens.plugin_instruction,
         runtimeContextTokens: systemTokens.runtime_context,
         workspaceTokens: systemTokens.workspace,
         memoryTokens: systemTokens.memory,
@@ -445,7 +445,8 @@ function allocatedSystemTokens(
     'runtime_context',
     'workspace',
     'memory',
-    'skills'
+    'skills',
+    'plugin_instruction'
   ]
   const weights = Object.fromEntries(kinds.map((kind) => [kind, 0])) as
     Record<AgentSystemPromptSectionKind, number>

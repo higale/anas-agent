@@ -1,4 +1,3 @@
-import { defaultCapabilitySettings } from '@shared/agentCapabilities'
 import { diffViewSettingsFixture } from '../../../../test/diffViewSettingsFixture'
 import { environmentContextFixture } from '../../../../test/environmentContextFixture'
 import { act, renderHook, waitFor } from '@testing-library/react'
@@ -31,7 +30,6 @@ const modelDefaults = {
 }
 
 const config = { customTools: [],
-  defaultCapabilities: structuredClone(defaultCapabilitySettings),
   providers: [{
     id: 'provider-1',
     index: 0,

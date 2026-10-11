@@ -8,6 +8,7 @@ import type { PackageFileNode, PackageFilePreview } from '@shared/packageFiles'
 import { getCustomToolCommandFile } from '@shared/customTools'
 import { CustomToolEditor, type CustomToolEditorSection } from './CustomToolEditor'
 import { ToolParameters } from './ToolParameters'
+import { CheckboxField } from '../CheckboxField'
 import { ConfirmDialog } from '../dialogs/ConfirmDialog'
 import { CommitTextInput } from '../CommitTextField'
 import { notice } from '../notice'
@@ -257,6 +258,8 @@ export function CustomToolsGroup({ tools, onConfigChange, catalogNavigation, cat
         </>}
         {selected && selection?.kind === 'tool' && <>
           <div className="settings-detail-heading ui-toolbar ui-toolbar-between"><div><button className="ui-link-button" type="button" data-tooltip={t('chat.show_in_folder')} onClick={() => void showItemInFolder(selected.directory)}>{selected.name}</button></div><div className="ui-toolbar">
+            <CheckboxField label={t('settings.enabled')} checked={selected.enabled !== false} disabled={busy || Boolean(selected.error)}
+              onChange={enabled => void mutate(() => window.gale.tools.setEnabled(selected.id, enabled))} />
             {(selected.source === 'user' || selected.source === 'external') && <>
               <button className="ui-icon-button" disabled={busy || !selected.definition} type="button" aria-label={t('custom_tools.edit_information')} data-tooltip={t('custom_tools.edit_information')} onClick={() => setEditing(selected)}><Pencil size={14} /></button>
               <button className="ui-icon-button ui-button-danger" disabled={busy} type="button" aria-label={t('custom_tools.delete')} data-tooltip={t('custom_tools.delete')} onClick={() => setDeleting(selected)}><Trash2 size={14} /></button>
@@ -289,7 +292,7 @@ export function CustomToolsGroup({ tools, onConfigChange, catalogNavigation, cat
           onSelect={id => select({ kind: 'tool', id })} items={groupTools.map(tool => ({
             id: tool.id, name: tool.name, description: tool.description,
             detail: selection?.kind === 'all' ? `${rootLabel(roots.find(root => root.id === tool.rootId)!)} · ${tool.directory}` : undefined,
-            status: tool.error ? t('capabilities.inactive') : undefined
+            status: tool.error || tool.enabled === false ? t('capabilities.inactive') : undefined
           }))} />}
         <PackageFileViewer key={preview?.path} onSave={preview && selected ? async update => {
           const saved = await window.gale.tools.saveFile(selected.id, preview.relativePath, update)

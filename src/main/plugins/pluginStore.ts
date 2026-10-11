@@ -1,16 +1,22 @@
 import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat } from 'node:fs/promises'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import { pluginToolId, pluginToolName, type ResolvedPluginTool } from '@shared/pluginTools'
 import { basename, dirname, extname, join } from 'node:path'
 import fs from 'stubborn-fs'
 import { parsePluginManifest, pluginHomePolicy, requirePluginHomeLocation, requirePluginIconPath, requirePluginId, requirePluginJson, requirePluginPath, type PluginManifest, type PluginSummary, type PluginInstallPreview } from '@shared/plugins'
 import { writeJsonFileAtomic } from '../atomicJson'
+import { canonicalizeAbsolutePath } from '../workspacePath'
 import { isSameOrInsideDirectory, samePath } from '../pathContainment'
 import { extractZipArchive, type ZipArchiveLimits } from '../zipArchive'
 import { loadPluginLanguages } from './pluginLanguages'
+import { inspectSkillText } from '../skillDefinition'
+import type { PluginContributionKind, PluginContributionPreview, PluginSkillSummary } from '@shared/plugins'
+import { pluginSettingValues, type PluginSettingsSnapshot } from '@shared/pluginSettings'
 
 const MAX_FILE_BYTES = 128 * 1024 * 1024
 const MAX_PACKAGE_BYTES = 512 * 1024 * 1024
 const MAX_PACKAGE_ENTRIES = 10_000
+const MAX_PLUGIN_PROMPT_BYTES = 16 * 1024
 const pluginArchiveLimits: ZipArchiveLimits = {
   maxArchiveBytes: MAX_PACKAGE_BYTES,
   maxEntries: MAX_PACKAGE_ENTRIES,
@@ -33,6 +39,7 @@ async function optionalJson(path: string, maxBytes = 1024 * 1024): Promise<unkno
 }
 
 export class PluginStore {
+  private resourceUses = new Map<string, number>()
   private tail: Promise<unknown> = Promise.resolve()
   private pending?: { stage: string; preview: PluginInstallPreview; identity?: string }
   constructor(readonly dataDirectory: string) {}
@@ -41,6 +48,35 @@ export class PluginStore {
     const result = this.tail.then(operation, operation)
     this.tail = result.then(() => undefined, () => undefined)
     return result
+  }
+
+  /** Pin actual path operations, not a model run or a serialized installation snapshot.
+   * null is a process whose dynamically loaded paths cannot be enumerated. */
+  async withPackageResources<T>(paths: readonly string[] | null, operation: () => Promise<T>): Promise<T> {
+    const held = await this.exclusive(async () => {
+      const root = join(await realpath(this.dataDirectory), 'plugins')
+      const resolved = paths === null ? [root] : await Promise.all(paths.map(async path =>
+        (await canonicalizeAbsolutePath(path, 'follow')).canonicalPath))
+      const held = [...new Set(resolved.filter(path => isSameOrInsideDirectory(root, path) || isSameOrInsideDirectory(path, root)))]
+      for (const path of held) this.resourceUses.set(path, (this.resourceUses.get(path) ?? 0) + 1)
+      return held
+    })
+    try { return await operation() }
+    finally {
+      for (const path of held) {
+        const count = this.resourceUses.get(path)! - 1
+        if (count) this.resourceUses.set(path, count)
+        else this.resourceUses.delete(path)
+      }
+    }
+  }
+
+  async assertPackageIdle(id: string): Promise<void> {
+    const root = await this.directory('plugins', id)
+    if ([...this.resourceUses].some(([path, count]) => count > 0
+      && (isSameOrInsideDirectory(root, path) || isSameOrInsideDirectory(path, root)))) {
+      throw new Error('Plugin package is in use by a file or process tool. Wait for the running call to finish before replacing or uninstalling it.')
+    }
   }
 
   // Managed directories must retain their physical identity across reads and writes.
@@ -79,15 +115,63 @@ export class PluginStore {
       const root = await this.directory('plugins', id)
       const raw = await optionalJson(join(root, 'installation.json')) as { version?: unknown; enabled?: unknown } | undefined
       if (!raw || raw.version !== 0 || (raw.enabled !== undefined && typeof raw.enabled !== 'boolean')) throw new Error('Invalid plugin installation state.')
-      const manifest = parsePluginManifest(await optionalJson(await this.packageFile(id, 'PLUGIN.json'), 64 * 1024))
-      if (manifest.id !== id) throw new Error('Plugin ID does not match its installation directory.')
+      const manifest = await this.readManifest(id)
       for (const entry of [manifest.ui, manifest.backend]) if (entry) await this.packageFile(id, entry)
+      const skillSummaries = await this.validateContributions(manifest, entry => this.packageFile(id, entry))
       const error = manifest.platforms && !manifest.platforms.includes(process.platform) ? 'Plugin does not support this platform.' : undefined
       const language = includeLanguages ? await loadPluginLanguages(await this.packageDirectory(id), manifest) : undefined
-      return { id, manifest, enabled: raw.enabled ?? true, error, backendStatus: 'stopped', languages: language?.languages, languageErrors: language?.errors }
+      return { id, manifest, skillSummaries, enabled: raw.enabled ?? true, error, backendStatus: 'stopped', languages: language?.languages, languageErrors: language?.errors }
     } catch (error) {
       return { id, enabled: false, error: error instanceof Error ? error.message : String(error), backendStatus: 'stopped' }
     }
+  }
+
+  private async readManifest(id: string): Promise<PluginManifest> {
+    const manifest = parsePluginManifest(await optionalJson(await this.packageFile(id, 'PLUGIN.json'), 64 * 1024))
+    if (manifest.id !== id) throw new Error('Plugin ID does not match its installation directory.')
+    return manifest
+  }
+
+  private async validateContributions(manifest: PluginManifest, file: (path: string) => Promise<string>): Promise<PluginSkillSummary[]> {
+    const names = new Set<string>()
+    const summaries: PluginSkillSummary[] = []
+    for (const skill of manifest.skills ?? []) {
+      const path = await file(skill.path)
+      if ((await stat(path)).size > 1024 * 1024) throw new Error('Plugin skill exceeds 1 MiB.')
+      const parsed = inspectSkillText(await readFile(path, 'utf8'), basename(dirname(path)))
+      if ('code' in parsed) throw new Error(`Invalid plugin skill ${skill.id}: ${parsed.code}`)
+      if (names.has(parsed.name)) throw new Error(`Duplicate plugin skill name: ${parsed.name}`)
+      names.add(parsed.name)
+      summaries.push({ id: skill.id, name: parsed.name, description: parsed.description })
+    }
+    for (const prompt of manifest.prompts ?? []) {
+      const path = await file(prompt.path)
+      if ((await stat(path)).size > MAX_PLUGIN_PROMPT_BYTES || !(await readFile(path, 'utf8')).trim()) throw new Error('Plugin prompt is empty or exceeds 16 KiB.')
+    }
+    return summaries
+  }
+
+  /** Inspect declared package content without enabling or starting the plugin. */
+  async readContribution(id: string, kind: PluginContributionKind, contributionId: string): Promise<PluginContributionPreview> {
+    if (kind !== 'skill' && kind !== 'prompt') throw new Error('Invalid plugin contribution kind.')
+    const manifest = await this.readManifest(id)
+    const items = kind === 'skill' ? manifest.skills : manifest.prompts
+    const item = items?.find(item => item.id === contributionId)
+    if (!item) throw new Error('Plugin contribution is not declared.')
+    const resolvedPath = await this.packageFile(id, item.path)
+    const limit = kind === 'skill' ? 1024 * 1024 : MAX_PLUGIN_PROMPT_BYTES
+    if ((await stat(resolvedPath)).size > limit) throw new Error('Plugin contribution exceeds its size limit.')
+    const content = await readFile(resolvedPath, 'utf8')
+    if (Buffer.byteLength(content) > limit) throw new Error('Plugin contribution exceeds its size limit.')
+    return { content, resolvedPath }
+  }
+
+  async promptText(id: string, path: string): Promise<string> {
+    const manifest = await this.requireEnabled(id)
+    if (!manifest.prompts?.some(prompt => prompt.path === path)) throw new Error('Plugin prompt is not declared.')
+    const contents = await readFile(await this.packageFile(id, path), 'utf8')
+    if (Buffer.byteLength(contents) > MAX_PLUGIN_PROMPT_BYTES || !contents.trim()) throw new Error('Plugin prompt is empty or exceeds 16 KiB.')
+    return contents
   }
 
   /** Cosmetic package assets remain available in settings while a plugin is disabled. */
@@ -100,6 +184,25 @@ export class PluginStore {
     if (bytes.length > maxBytes) throw new Error('Plugin icon exceeds 256 KiB.')
     const mime = { '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp' }[extname(name).toLowerCase()]!
     return { bytes, mime }
+  }
+
+  async resolveTools(selection: readonly string[]): Promise<ResolvedPluginTool[]> {
+    const tools: ResolvedPluginTool[] = []
+    for (const id of selection) {
+      const [pluginId, , localId] = id.split(':')
+      const manifest = await this.requireEnabled(pluginId)
+      const definition = manifest.tools.find(tool => tool.id === localId)
+      if (!definition) throw new Error(`Plugin tool is unavailable: ${id}`)
+      const name = pluginToolName(pluginId, localId)
+      tools.push({ ...definition, pluginId, name })
+    }
+    if (new Set(tools.map(tool => tool.name)).size !== tools.length) throw new Error('Plugin model tool names collide.')
+    return tools
+  }
+
+  async requireTool(tool: Pick<ResolvedPluginTool, 'pluginId' | 'id'>): Promise<void> {
+    const manifest = await this.requireEnabled(tool.pluginId)
+    if (!manifest.tools.some(item => item.id === tool.id)) throw new Error(`Plugin tool is unavailable: ${pluginToolId(tool.pluginId, tool.id)}`)
   }
 
   async requireEnabled(id: string): Promise<PluginManifest> {
@@ -117,7 +220,7 @@ export class PluginStore {
   }
 
   async home(id: string) {
-    const manifest = await this.requireEnabled(id)
+    const manifest = await this.readManifest(id)
     if (!manifest.ui) throw new Error('Plugin has no UI entry.')
     const policy = pluginHomePolicy(manifest)
     const saved = await this.data(id, 'home_open_location')
@@ -210,6 +313,11 @@ export class PluginStore {
       for (const entry of [manifest.ui, manifest.backend]) {
         if (entry && !(await stat(join(incoming, 'package', entry))).isFile()) throw new Error('Missing plugin entry.')
       }
+      await this.validateContributions(manifest, async path => {
+        const file = join(incoming, 'package', path)
+        if (!(await stat(file)).isFile()) throw new Error('Missing plugin contribution.')
+        return file
+      })
       const preview = { token: randomUUID(), incoming: manifest, installed }
       this.pending = { stage, preview, identity }
       retained = true
@@ -264,6 +372,7 @@ export class PluginStore {
       })
       if (installed && deleteData) await dataDirectory()
       if (installed) {
+        await this.assertPackageIdle(manifest.id)
         // Old files must survive both a crash and the application's temp cleanup.
         const recoveryStage = join(dirname(target), '.replace-' + token)
         await rename(stage, recoveryStage)
@@ -306,6 +415,7 @@ export class PluginStore {
 
   async uninstall(id: string, deleteData = false): Promise<void> {
     if (typeof deleteData !== 'boolean') throw new Error('Invalid plugin data deletion option.')
+    await this.assertPackageIdle(id)
     const root = await this.directory('plugins', id)
     const data = deleteData ? await this.directory('plugins_data', id).catch(error => {
       if (error.code === 'ENOENT') return undefined
@@ -335,7 +445,8 @@ export class PluginStore {
   }
 
   async data(id: string, key: unknown, write = false, value?: unknown): Promise<unknown> {
-    const manifest = await this.requireEnabled(id)
+    // The host-owned home preference remains configurable while the plugin is disabled.
+    const manifest = key === 'home_open_location' ? await this.readManifest(id) : await this.requireEnabled(id)
     if (typeof key !== 'string' || !/^[a-zA-Z0-9_.-]{1,80}$/.test(key) || ['__proto__', 'constructor', 'prototype'].includes(key)) throw new Error('Invalid plugin data key.')
     const root = await this.directory('plugins_data', id, true)
     const path = join(root, 'state.json')
@@ -350,5 +461,29 @@ export class PluginStore {
     if (Buffer.byteLength(`${JSON.stringify(next, null, 2)}\n`) > 1024 * 1024) throw new Error('Plugin data exceeds the 1 MiB limit.')
     await writeJsonFileAtomic(path, next)
     return null
+  }
+
+  /** Call under exclusive(). The revision covers both saved values and the current form. */
+  async settings(id: string, update?: { revision: unknown; values: unknown }): Promise<PluginSettingsSnapshot> {
+    const plugin = await this.read(id, false)
+    if (plugin.error || !plugin.manifest) throw new Error(plugin.error ?? 'Plugin is unavailable.')
+    const fields = plugin.manifest.settings ?? []
+    if (!fields.length) throw new Error('Plugin has no settings declaration.')
+    const path = join(await this.directory('plugins_data', id, true), 'anas-settings.json')
+    const raw = await optionalJson(path) as { version?: unknown; values?: unknown } | undefined
+    if (raw !== undefined && (!raw || raw.version !== 0 || !raw.values || typeof raw.values !== 'object' || Array.isArray(raw.values))) throw new Error('Invalid plugin settings file; original content was preserved.')
+    const saved = (raw?.values ?? {}) as Record<string, unknown>
+    const revision = (values: unknown) => createHash('sha256').update(JSON.stringify([fields, values])).digest('hex')
+    const current = { values: pluginSettingValues(fields, saved), revision: revision(saved) }
+    if (!update) return current
+    if (!plugin.enabled) throw new Error('Plugin is disabled.')
+    if (typeof update.revision !== 'string' || update.revision !== current.revision) throw new Error('Plugin settings changed. Reload before saving.')
+    const values = pluginSettingValues(fields, update.values, true)
+    // Preserve removed keys for a later supported package update; they are not exposed in the current form.
+    const next = { ...saved, ...values }
+    requirePluginJson(next)
+    if (Buffer.byteLength(JSON.stringify({ version: 0, values: next }, null, 2)) + 1 > 1024 * 1024) throw new Error('Plugin settings exceed 1 MiB.')
+    await writeJsonFileAtomic(path, { version: 0, values: next })
+    return { values, revision: revision(next) }
   }
 }

@@ -1,4 +1,3 @@
-import { defaultCapabilitySettings } from '@shared/agentCapabilities'
 import { diffViewSettingsFixture } from '../../test/diffViewSettingsFixture'
 import { environmentContextFixture } from '../../test/environmentContextFixture'
 import { describe, expect, it } from 'vitest'
@@ -8,7 +7,6 @@ import { capabilityFeatures, defaultCapabilities } from '@shared/agentCapabiliti
 
 function config(): AppConfigSnapshot {
   return { customTools: [],
-    defaultCapabilities: structuredClone(defaultCapabilitySettings),
     providers: [],
     subagents: [],
     mcpServers: [],

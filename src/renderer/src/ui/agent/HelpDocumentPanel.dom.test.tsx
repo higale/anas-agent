@@ -32,6 +32,9 @@ describe('Help document panel', () => {
   })
 
   it('waits for content before navigating, then preserves the reading position when remounted', async () => {
+    // JSDOM has no layout; this scenario represents a visible scrollable panel.
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600)
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(800)
     const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView')
     const state = new Map<string, unknown>()
     const anchorRequest = { ...request, anchor: 'tools', navigationId: 'jump' }
@@ -72,6 +75,7 @@ describe('Help document panel', () => {
   })
 
   it('tracks the visible chapter and preserves the desktop contents preference and scroll', async () => {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600)
     const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000)
     try {
       const state = new Map<string, unknown>()

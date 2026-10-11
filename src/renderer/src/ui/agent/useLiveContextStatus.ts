@@ -28,7 +28,6 @@ function projectionKey({ config, project, continuationRunId, continuationStatus 
         restrictSubagents: project.restrictSubagents
       } : {})
     },
-    defaultCapabilities: config?.defaultCapabilities,
     customTools: config?.customTools,
     subagents: config?.subagents,
     mcpServers: config?.mcpServers,

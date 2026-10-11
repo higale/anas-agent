@@ -5,6 +5,7 @@ import { open, readFile, rm, stat } from 'node:fs/promises'
 import { basename, extname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { imageDimensionsFromStream } from 'image-dimensions'
+import { maxImageSourceBytes, maxImagePixels, maxImageDimension } from '@shared/imageLimits'
 import { getAppConfigSnapshot } from './config/appConfig'
 import { getTempDir } from './config/dataDir'
 import { extractLocalAttachmentText, supportsLocalTextExtraction } from './attachmentTextExtractor'
@@ -18,10 +19,7 @@ import type { AppAvatarImage, AttachmentPreview, AttachmentPreviewOptions, Attac
 const textAttachmentProbeBytes = 8192
 const maxParsedAttachmentBytes = 20 * 1024 * 1024
 const imagePreviewSize = 240
-const maxImageSourceBytes = 25 * 1024 * 1024
 const maxThumbnailBytes = 4 * 1024 * 1024
-const maxImagePixels = 25_000_000
-const maxImageDimension = 16_384
 const imagePreviewTimeoutMs = 5_000
 const maxConcurrentImagePreviews = 3
 const maxQueuedImagePreviews = 64

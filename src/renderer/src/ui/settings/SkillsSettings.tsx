@@ -298,8 +298,8 @@ export function SkillsSettings({
               data-tooltip={t('chat.show_in_folder')} onClick={() => void showItemInFolder(selectedSkill.dirPath)}>{selectedSkill.name}</button></div>
             <SegmentedMultiSelect<'modelAvailable' | 'userAvailable' | 'scriptAutoApprove'> ariaLabel={selectedSkill.name}
               options={[
-                { value: 'modelAvailable', label: t('settings.skill_model_available'), checked: selectedSkill.modelAvailable },
                 { value: 'userAvailable', label: t('settings.skill_user_available'), checked: selectedSkill.userAvailable },
+                { value: 'modelAvailable', label: t('settings.skill_model_available'), checked: selectedSkill.modelAvailable },
                 { value: 'scriptAutoApprove', label: t('settings.skill_scripts_auto_approve'), checked: selectedSkill.scriptAutoApprove }
               ]}
               onChange={(value, checked) => {
@@ -311,6 +311,7 @@ export function SkillsSettings({
           <p>{selectedSkill.description}</p>
           {selectedSkill.compatibility && <p><strong>{t('settings.skill_compatibility')}：</strong>{selectedSkill.compatibility}</p>}
           <dl className="settings-skill-metadata">
+            {selectedSkill.requiredTools?.length ? <><dt>{t('plugins.required_tools')}</dt><dd>{selectedSkill.requiredTools.join(', ')}</dd></> : null}
             <dt>{t('settings.skill_path')}</dt><dd><button className="ui-link-button" type="button"
               disabled={selectedSkill.linked && !selectedSkill.resolvedDirPath}
               onClick={() => void showItemInFolder(selectedSkill.dirPath)}>{selectedSkill.dirPath}</button></dd>

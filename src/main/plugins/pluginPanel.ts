@@ -12,9 +12,11 @@ export function pluginBackendContext(id: string, panels: PanelState[], caller?: 
 }
 
 export function pluginMoveTarget(id: string, panels: PanelState[], caller: PanelState | undefined, location: unknown, instanceId?: unknown): PanelState {
-  if (!caller || caller.content.kind !== 'plugin' || caller.content.pluginId !== id) throw new Error('Invalid plugin view move.')
-  pluginBackendContext(id, panels, caller)
-  const target = requirePluginView({ instanceId: instanceId === undefined ? caller.content.instanceId : instanceId, location })
+  if (caller) {
+    if (caller.content.kind !== 'plugin' || caller.content.pluginId !== id) throw new Error('Invalid plugin view move.')
+    pluginBackendContext(id, panels, caller)
+  } else if (instanceId === undefined) throw new Error('A backend must specify the plugin instance to move.')
+  const target = requirePluginView({ instanceId: instanceId === undefined && caller?.content.kind === 'plugin' ? caller.content.instanceId : instanceId, location })
   const panel = panels.find(panel => panel.content.kind === 'plugin' && panel.content.pluginId === id && panel.content.instanceId === target.instanceId)
   if (!panel) throw new Error('Plugin view is not open.')
   return panel

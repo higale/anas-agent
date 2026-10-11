@@ -1,4 +1,3 @@
-import type { DefaultCapabilitySettings } from '@shared/agentCapabilities'
 import { useMemo, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import type { TFunction } from 'i18next'
@@ -33,15 +32,6 @@ export function useSettingsController({ config, setConfig, t }: UseSettingsContr
     },
     onError: (retry) => reportFailure('chat.failed_save_settings', 'settings-save', retry)
   })
-  const capabilitiesSave = useQueuedDraftSave<DefaultCapabilitySettings, AppConfigSnapshot>({
-    merge: (_previous, update) => update,
-    persist: (draft) => window.gale.config.saveDefaultCapabilities(draft),
-    onSaved: (result) => {
-      setConfig((current) => current ? { ...current, defaultCapabilities: result.defaultCapabilities } : result)
-      notice.dismiss('capabilities-save')
-    },
-    onError: (retry) => reportFailure('chat.failed_save_settings', 'capabilities-save', retry)
-  })
   const profileSave = useQueuedDraftSave<AppProfileUpdate, AppConfigSnapshot>({
     merge: (previous, update) => ({
       assistant: { ...previous?.assistant, ...update.assistant },
@@ -65,7 +55,6 @@ export function useSettingsController({ config, setConfig, t }: UseSettingsContr
   })
   const displayConfig = useMemo(() => config ? {
     ...config,
-    defaultCapabilities: capabilitiesSave.draft ?? config.defaultCapabilities,
     settings: {
       ...config.settings,
       ...settingsSave.draft,
@@ -75,7 +64,7 @@ export function useSettingsController({ config, setConfig, t }: UseSettingsContr
       } : config.settings.profile,
       speechReply: speechSave.draft ? { ...config.settings.speechReply, ...speechSave.draft } : config.settings.speechReply
     }
-  } : undefined, [config, capabilitiesSave.draft, settingsSave.draft, profileSave.draft, speechSave.draft])
+  } : undefined, [config, settingsSave.draft, profileSave.draft, speechSave.draft])
 
   async function switchSettingsTab(tab: SettingsTab, canLeave?: CanLeaveSettingsTab): Promise<void> {
     if (tab === settingsTab) return
@@ -106,7 +95,6 @@ export function useSettingsController({ config, setConfig, t }: UseSettingsContr
     saveLanguage,
     saveProfile,
     saveSettings: settingsSave.save,
-    saveDefaultCapabilities: capabilitiesSave.save,
     saveSpeechReply: speechSave.save,
     setSettingsOpen,
     setSettingsTab,

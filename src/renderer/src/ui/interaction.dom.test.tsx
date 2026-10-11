@@ -26,6 +26,7 @@ import { NoFocusButton } from './NoFocusButton'
 import { installNativeContextMenuPolicy } from '../nativeContextMenuPolicy'
 
 const capabilityApis = {
+  plugins: { list: vi.fn(async () => []), onChanged: vi.fn(() => () => {}) },
   tools: { get: vi.fn(async () => ({ roots: [], tools: [] })) },
   skills: { get: vi.fn(async () => ({ roots: [], skills: [] })) },
   mcp: { status: vi.fn(async () => null), onStatus: vi.fn(() => () => {}) },

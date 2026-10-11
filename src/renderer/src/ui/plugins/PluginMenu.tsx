@@ -7,12 +7,12 @@ import { PluginIcon } from './PluginIcon'
 
 export function PluginMenu({ plugins, onOpen }: { plugins: PluginSummary[]; onOpen(plugin: PluginSummary): void }) {
   const { t, i18n } = useTranslation()
-  const enabled = plugins.filter(item => item.enabled && !item.error && item.manifest)
-  if (!enabled.length) return null
+  const launchable = plugins.filter(item => item.enabled && !item.error && item.manifest?.ui)
+  if (!launchable.length) return null
   return <DropdownMenuRoot>
     <DropdownMenuTrigger asChild><button type="button" className="ui-tool-button ui-tool-button-square" aria-label={t('plugins.title')} data-tooltip={t('plugins.title')}><Puzzle size={18} /></button></DropdownMenuTrigger>
     <DropdownMenu.Portal><DropdownMenuContent className="ui-menu ui-menu-list" align="end">
-      {enabled.map(item => <DropdownMenu.Item className="ui-menu-item ui-menu-item-row" key={item.id} onSelect={() => onOpen(item)}>
+      {launchable.map(item => <DropdownMenu.Item className="ui-menu-item ui-menu-item-row" key={item.id} onSelect={() => onOpen(item)}>
         <PluginIcon icon={pluginIconSources(item.id, item.manifest?.icon)} /><span>{pluginDisplayText(item, i18n.language)}</span>
       </DropdownMenu.Item>)}
     </DropdownMenuContent></DropdownMenu.Portal>

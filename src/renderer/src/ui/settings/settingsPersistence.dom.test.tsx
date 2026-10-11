@@ -1,11 +1,10 @@
+vi.mock('../plugins/usePlugins', () => ({ usePlugins: () => ({ plugins: [], error: undefined }) }))
 import { useState } from 'react'
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { TFunction } from 'i18next'
 import type { AppConfigSnapshot, AppProfileUpdate, AppSettings } from '@shared/types'
-import { defaultCapabilitySettings, type DefaultCapabilitySettings } from '@shared/agentCapabilities'
 import { environmentContextFixture } from '../../../../test/environmentContextFixture'
-import { CapabilitySettings } from './CapabilitySettings'
 import { EnvironmentSettingsSections } from './EnvironmentSettingsSections'
 import { useSettingsController } from './useSettingsController'
 import { notice } from '../notice'
@@ -17,7 +16,7 @@ const t = ((key: string) => key) as TFunction
 
 function initialConfig(): AppConfigSnapshot {
   return {
-    customTools: [], defaultCapabilities: structuredClone(defaultCapabilitySettings), subagents: [], mcpServers: [], providers: [],
+    customTools: [], subagents: [], mcpServers: [], providers: [],
     settings: {
       fontSize: 14, theme: 'dark', environmentContext: environmentContextFixture(),
       speechReply: { enabled: true, voice: 'voice', speed: 1 },
@@ -36,7 +35,6 @@ function Harness() {
   return <>
     <button onClick={() => controller.setSettingsOpen(!controller.settingsOpen)}>Toggle settings</button>
     {controller.settingsOpen && <>
-      <CapabilitySettings config={controller.config!} onSave={controller.saveDefaultCapabilities} />
       <EnvironmentSettingsSections envDraft="" settings={controller.config?.settings} sectionClass={() => ''}
         onAutosizeInput={() => {}} onOpenEnvFile={() => {}} onUpdateEnvDraft={() => {}} onSaveSettings={controller.saveSettings} />
     </>}
@@ -71,52 +69,6 @@ describe('settings autosave', () => {
     expect(updateProfile).toHaveBeenCalledOnce()
     expect(result.current.config?.settings.profile.user.preferredName).toBe('Gale')
     expect(result.current.config?.settings.profile.assistant.name).toBe('Anas')
-  })
-
-  it('keeps capability edits enabled across page changes and serializes every choice', async () => {
-    const first = deferred<AppConfigSnapshot>()
-    const second = deferred<AppConfigSnapshot>()
-    const save = vi.fn<(value: DefaultCapabilitySettings) => Promise<AppConfigSnapshot>>()
-      .mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
-    vi.stubGlobal('gale', { config: { saveDefaultCapabilities: save } })
-    render(<Harness />)
-    const toggle = screen.getByRole('button', { name: 'Toggle settings' })
-    fireEvent.click(toggle)
-    fireEvent.click(screen.getByRole('checkbox', { name: 'settings.capability_profile' }))
-    fireEvent.click(toggle)
-    fireEvent.click(toggle)
-    const profile = screen.getByRole('checkbox', { name: 'settings.capability_profile' })
-    expect(profile).not.toBeChecked()
-    expect(profile).toBeEnabled()
-    fireEvent.click(screen.getByRole('checkbox', { name: 'settings.capability_workspaceContext' }))
-    await waitFor(() => expect(save).toHaveBeenCalledTimes(1))
-    await act(async () => first.resolve({ ...initialConfig(), defaultCapabilities: save.mock.calls[0][0] }))
-    await waitFor(() => expect(save).toHaveBeenCalledTimes(2))
-    expect(save.mock.calls[1][0].capabilities).toMatchObject({ profile: false, workspace: false })
-    expect(screen.getByRole('checkbox', { name: 'settings.capability_workspaceContext' })).not.toBeChecked()
-    await act(async () => second.resolve({ ...initialConfig(), defaultCapabilities: save.mock.calls[1][0] }))
-    expect(profile).not.toBeChecked()
-  })
-
-  it('retains failed edits after closing and retries the current draft', async () => {
-    const first = deferred<AppConfigSnapshot>()
-    const save = vi.fn<(value: DefaultCapabilitySettings) => Promise<AppConfigSnapshot>>()
-      .mockReturnValueOnce(first.promise).mockImplementation(async (value) => ({ ...initialConfig(), defaultCapabilities: value }))
-    vi.stubGlobal('gale', { config: { saveDefaultCapabilities: save } })
-    render(<Harness />)
-    const toggle = screen.getByRole('button', { name: 'Toggle settings' })
-    fireEvent.click(toggle)
-    fireEvent.click(screen.getByRole('checkbox', { name: 'settings.capability_profile' }))
-    await waitFor(() => expect(save).toHaveBeenCalledOnce())
-    fireEvent.click(toggle)
-    await act(async () => first.reject(new Error('Disk write failed')))
-    expect(notice.error).toHaveBeenCalledWith('chat.failed_save_settings', expect.objectContaining({ action: expect.any(Object) }))
-    fireEvent.click(toggle)
-    expect(screen.getByRole('checkbox', { name: 'settings.capability_profile' })).not.toBeChecked()
-    const options = vi.mocked(notice.error).mock.calls[0][1]!
-    await act(async () => { (options.action as unknown as { onClick: () => void }).onClick() })
-    await waitFor(() => expect(save).toHaveBeenCalledTimes(2))
-    expect(save.mock.calls[1][0].capabilities.profile).toBe(false)
   })
 
   it('combines rapid environment changes without old responses reverting them', async () => {

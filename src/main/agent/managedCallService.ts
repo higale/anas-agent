@@ -361,6 +361,8 @@ export class ManagedCallService {
         ? 'uncertain'
         : active.outcome?.local_commit_completed === true
           ? active.outcome?.ok === false ? 'failed' : 'completed'
+        : active.outcome?.remote_result_confirmed === true
+          ? failure || active.outcome?.ok === false ? 'failed' : 'completed'
         : active.cancelRequested
           ? options.uncertainWhenCancelledAfterDispatch && active.dispatched
             ? 'uncertain'

@@ -1,8 +1,11 @@
+import { isPluginSkillId, validatePluginToolSelection, validatePluginPromptSelection } from './pluginTools'
 import { normalizeCompressionPrompt } from './summaryPrompt'
 import { requireDataVersion } from './dataVersion'
 import { validateSubagentSelection, type SubagentSelection } from './subagentSelection'
 import defaults from '../../data/config/capabilities.json'
 import projectDefaults from '../../data/config/projects.json'
+import { requirePluginId, type PluginSummary } from './plugins'
+import { pluginToolId, pluginPromptId } from './pluginTools'
 import { builtinToolCatalog } from './toolRegistry'
 import { parseCustomTools, serializeCustomTool, validateCustomTools, type CustomToolDefinition } from './customTools'
 import { validateToolSelection, type ToolSelection, type ResolvedToolSelection } from './toolPackages'
@@ -17,7 +20,7 @@ export interface SkillSelection {
 
 export interface McpServerToolSelection {
   id: string
-  mode: 'all' | 'selected'
+  mode: 'all' | 'selected' | 'off'
   /** Retained when switching to all, restored when switching back to selected. */
   tools: string[]
 }
@@ -40,6 +43,10 @@ export interface AgentCapabilities {
   toolMode: 'all' | 'selected' | 'except'
   tools: string[]
   skills: SkillSelection
+  pluginMode: 'default' | 'custom' | 'off'
+  plugins?: Array<{ id: string; mode: 'all' | 'custom' | 'off' }>
+  pluginTools: string[]
+  pluginPrompts: string[]
   customTools: ToolSelection
   mcp: McpSelection
 }
@@ -99,10 +106,15 @@ export function validateCapabilities(value: unknown): AgentCapabilities {
   const servers = mcp.servers.map((value): McpServerToolSelection => {
     const entry = object(value)
     if (typeof entry.id !== 'string' || !entry.id.trim()) throw new Error('Invalid MCP server ID.')
-    if (entry.mode !== 'all' && entry.mode !== 'selected') throw new Error('Invalid MCP server tool mode.')
+    if (entry.mode !== 'all' && entry.mode !== 'selected' && entry.mode !== 'off') throw new Error('Invalid MCP server tool mode.')
     return { id: entry.id, mode: entry.mode, tools: strings(entry.tools) }
   })
   if (new Set(servers.map((entry) => entry.id)).size !== servers.length) throw new Error('Duplicate MCP server ID.')
+  const pluginMode = raw.pluginMode === undefined ? 'custom' : raw.pluginMode
+  if (!['default', 'custom', 'off'].includes(pluginMode as string)) throw new Error('Invalid plugin selection mode.')
+  const plugins = raw.plugins ?? []
+  if (!Array.isArray(plugins) || plugins.some(item => !item || typeof item.id !== 'string' || !item.id || !['all', 'custom', 'off'].includes(item.mode))
+    || new Set(plugins.map(item => item.id)).size !== plugins.length) throw new Error('Invalid plugin selections.')
   const tools = strings(raw.tools)
   if (tools.some((id) => id.startsWith('mcp:'))) throw new Error('MCP selections must use the per-server MCP policy.')
   if (raw.toolMode !== 'all' && raw.toolMode !== 'selected' && raw.toolMode !== 'except') throw new Error('Invalid capability tool mode.')
@@ -122,6 +134,10 @@ export function validateCapabilities(value: unknown): AgentCapabilities {
     planning: boolean(raw.planning),
     toolMode: raw.toolMode,
     tools,
+    pluginMode: pluginMode as AgentCapabilities['pluginMode'],
+    plugins: plugins.map(item => ({ id: requirePluginId(item.id), mode: item.mode })),
+    pluginTools: validatePluginToolSelection(raw.pluginTools),
+    pluginPrompts: validatePluginPromptSelection(raw.pluginPrompts),
     customTools: validateToolSelection(raw.customTools),
     mcp: { defaultMode: mcp.defaultMode, servers },
     skills: { mode: skills.mode, project: boolean(skills.project), entries }
@@ -131,52 +147,70 @@ export function validateCapabilities(value: unknown): AgentCapabilities {
 export function parseCapabilities(value: unknown): AgentCapabilities {
   const raw = object(value)
   const mcp = object(raw.mcp)
-  return validateCapabilities({ ...raw, customTools: raw.custom_tools, mcp: { ...mcp, defaultMode: mcp.default_mode }, applicationEnvironment: raw.application_environment, backgroundTools: raw.background_tools, toolMode: raw.tool_mode })
+  return validateCapabilities({ ...raw, pluginMode: raw.plugin_mode, pluginTools: raw.plugin_tools, pluginPrompts: raw.plugin_prompts, customTools: raw.custom_tools, mcp: { ...mcp, defaultMode: mcp.default_mode }, applicationEnvironment: raw.application_environment, backgroundTools: raw.background_tools, toolMode: raw.tool_mode })
 }
 
 export function serializeCapabilities(value: AgentCapabilities) {
-  const { applicationEnvironment, backgroundTools, toolMode, customTools, mcp, ...rest } = validateCapabilities(value)
-  return { ...rest, custom_tools: customTools, mcp: { default_mode: mcp.defaultMode, servers: mcp.servers }, application_environment: applicationEnvironment, background_tools: backgroundTools, tool_mode: toolMode }
+  const { applicationEnvironment, backgroundTools, toolMode, customTools, pluginMode, pluginTools, pluginPrompts, mcp, ...rest } = validateCapabilities(value)
+  return { ...rest, plugin_mode: pluginMode, plugin_tools: pluginTools, plugin_prompts: pluginPrompts, custom_tools: customTools, mcp: { default_mode: mcp.defaultMode, servers: mcp.servers }, application_environment: applicationEnvironment, background_tools: backgroundTools, tool_mode: toolMode }
 }
 
 export const defaultCapabilities = parseCapabilities(defaults)
 requireDataVersion(projectDefaults, 0, 'project defaults')
 export const defaultProjectSettings = { advancedSettings: projectDefaults.advanced_settings, codingMode: projectDefaults.coding_mode, prompt: projectDefaults.prompt }
 
-export interface DefaultCapabilitySettings {
-  capabilities: AgentCapabilities
-  restrictSubagents: boolean
+/** Editable scopes start with explicit choices. Uncustomized projects use all available sources. */
+export const allCapabilities: AgentCapabilities = {
+  ...defaultCapabilities, pluginMode: 'default', plugins: [],
+  customTools: { mode: 'all', project: true, entries: [] },
+  skills: { mode: 'default', project: true, entries: [] },
+  subagents: { mode: 'default', names: [] }, mcp: { defaultMode: 'all', servers: [] }
 }
 
-export function validateDefaultCapabilitySettings(value: unknown): DefaultCapabilitySettings {
-  const raw = object(value)
-  return {
-    capabilities: validateCapabilities(raw.capabilities),
-    restrictSubagents: boolean(raw.restrictSubagents)
+export function pluginSelectionMode(value: AgentCapabilities, id: string): 'all' | 'custom' | 'off' {
+  if (value.pluginMode === 'off') return 'off'
+  return value.plugins?.find(item => item.id === id)?.mode ?? (value.pluginMode === 'default' ? 'all'
+    : [...value.pluginTools, ...value.pluginPrompts, ...value.skills.entries.map(entry => entry.id)].some(key => key.startsWith(`${id}:`)) ? 'custom' : 'off')
+}
+
+/** Resolve current declarations once before freezing a run. No global capability inheritance. */
+export function resolvePluginCapabilities(value: AgentCapabilities, plugins: readonly PluginSummary[], subagent = false): AgentCapabilities {
+  const tools: string[] = [], prompts: string[] = []
+  const entries = value.skills.entries.filter(entry => !isPluginSkillId(entry.id))
+  for (const plugin of plugins) {
+    if (!plugin.enabled || plugin.error || !plugin.manifest) continue
+    const mode = pluginSelectionMode(value, plugin.id)
+    if (mode === 'off') continue
+    for (const tool of plugin.manifest.tools) {
+      const id = pluginToolId(plugin.id, tool.id)
+      if (mode === 'all' || value.pluginTools.includes(id)) tools.push(id)
+    }
+    for (const prompt of plugin.manifest.prompts ?? []) {
+      const id = pluginPromptId(plugin.id, prompt.id)
+      if ((mode === 'all' || value.pluginPrompts.includes(id)) && (prompt.scope === 'all' || prompt.scope === (subagent ? 'subagent' : 'main'))
+        && prompt.tools.every(tool => tools.includes(pluginToolId(plugin.id, tool)))) prompts.push(id)
+    }
+    for (const skill of plugin.manifest.skills ?? []) {
+      const id = `${plugin.id}:skill:${skill.id}`
+      const selected = value.skills.entries.find(entry => entry.id === id)
+      if (mode === 'all') entries.push({ id, model: true, shortcut: !subagent })
+      else if (selected) entries.push(selected)
+    }
   }
+  return { ...value, pluginMode: 'custom', plugins: [], pluginTools: tools, pluginPrompts: prompts, skills: { ...value.skills, entries } }
 }
 
-export function parseDefaultCapabilitySettings(value: unknown): DefaultCapabilitySettings {
-  const raw = object(value)
-  return validateDefaultCapabilitySettings({ capabilities: parseCapabilities(raw),
-    restrictSubagents: raw.restrict_subagents })
+export function skillSelectionEnabled(value: SkillSelection): boolean {
+  return value.mode !== 'off' || value.entries.some(entry => isPluginSkillId(entry.id) && (entry.model || entry.shortcut))
 }
 
-export function serializeDefaultCapabilitySettings(value: DefaultCapabilitySettings) {
-  const validated = validateDefaultCapabilitySettings(value)
-  return { ...serializeCapabilities(validated.capabilities), restrict_subagents: validated.restrictSubagents }
+export function effectiveProjectCapabilitySettings(project: WorkspaceProject) {
+  return { capabilities: project.advancedSettings ? project.capabilities : allCapabilities,
+    restrictSubagents: project.advancedSettings && project.restrictSubagents }
 }
 
-export const defaultCapabilitySettings = parseDefaultCapabilitySettings(defaults)
-
-export function effectiveProjectCapabilitySettings(project: WorkspaceProject, defaults: DefaultCapabilitySettings): DefaultCapabilitySettings {
-  return project.advancedSettings
-    ? { capabilities: project.capabilities, restrictSubagents: project.restrictSubagents }
-    : defaults
-}
-
-export function effectiveProjectCapabilities(project: WorkspaceProject, defaults: DefaultCapabilitySettings): AgentCapabilities {
-  return effectiveProjectCapabilitySettings(project, defaults).capabilities
+export function effectiveProjectCapabilities(project: WorkspaceProject): AgentCapabilities {
+  return effectiveProjectCapabilitySettings(project).capabilities
 }
 export function validateRunConfiguration(value: unknown): RunConfiguration {
   const raw = object(value)
@@ -236,7 +270,7 @@ export function toolAllowed(capabilities: AgentCapabilities, id: string): boolea
 }
 
 export function mcpServerSelection(selection: McpSelection, id: string): McpServerToolSelection {
-  return selection.servers.find((server) => server.id === id) ?? { id, mode: selection.defaultMode, tools: [] }
+  return selection.servers.find((server) => server.id === id) ?? { id, mode: selection.defaultMode === 'all' ? 'all' : 'off', tools: [] }
 }
 
 export function removeEmptyMissingMcpSelections(value: AgentCapabilities, configuredIds: ReadonlySet<string>): AgentCapabilities {
@@ -262,7 +296,7 @@ export function setMcpToolSelection(value: AgentCapabilities, id: string, name: 
 
 export function mcpToolAllowed(value: AgentCapabilities, id: string, name: string): boolean {
   const server = mcpServerSelection(value.mcp, id)
-  return server.mode === 'all' || server.tools.includes(name)
+  return server.mode === 'all' || server.mode === 'selected' && server.tools.includes(name)
 }
 
 function intersectMcpSelections(value: McpSelection, limit: McpSelection): McpSelection {
@@ -272,6 +306,7 @@ function intersectMcpSelections(value: McpSelection, limit: McpSelection): McpSe
     servers: [...ids].map((id) => {
       const own = mcpServerSelection(value, id)
       const ceiling = mcpServerSelection(limit, id)
+      if (own.mode === 'off' || ceiling.mode === 'off') return { id, mode: 'off', tools: [] }
       if (own.mode === 'all' && ceiling.mode === 'all') return { id, mode: 'all', tools: [] }
       const selected = own.mode === 'selected' ? own : ceiling
       const other = selected === own ? ceiling : own
@@ -290,7 +325,7 @@ export function capabilityFeatures(value: AgentCapabilities): AgentFeatures {
     applicationEnvironment: value.applicationEnvironment,
     workspaceContext: value.workspace,
     memory: value.memory || groupEnabled('memory'),
-    skills: value.skills.mode !== 'off',
+    skills: skillSelectionEnabled(value.skills),
     subagents: value.subagents.mode !== 'off',
     planning: value.planning,
     backgroundTools: value.backgroundTools,
@@ -298,32 +333,37 @@ export function capabilityFeatures(value: AgentCapabilities): AgentFeatures {
     networkAccess: toolAllowed(value, 'http_request'),
     fileRead: groupEnabled('fileRead'),
     fileWrite: groupEnabled('fileWrite'),
-    mcp: value.mcp.defaultMode === 'all' || value.mcp.servers.some((server) => server.mode === 'all' || server.tools.length > 0)
+    mcp: value.mcp.defaultMode === 'all' || value.mcp.servers.some((server) => server.mode === 'all' || server.mode === 'selected' && server.tools.length > 0)
   }
 }
 
-export function resolveSkillSelection(selection: SkillSelection, skills: readonly SkillSummary[], uniqueModels = false, subagent = false): ResolvedSkillSelection {
+export function resolveSkillSelection(selection: SkillSelection, skills: readonly SkillSummary[], uniqueModels = false, subagent = false, pluginTools?: readonly string[]): ResolvedSkillSelection {
   const modelNames = new Set<string>()
   return {
-    mode: selection.mode === 'off' ? 'off' : 'custom',
+    mode: skillSelectionEnabled(selection) ? 'custom' : 'off',
     project: false,
     entries: skills.filter((skill) => !skill.loadError).map((skill) => {
-      const chosen = selection.mode === 'default'
-        ? { shortcut: skill.userAvailable, model: skill.modelAvailable }
+      const plugin = skill.source === 'plugin'
+      const enabled = plugin || selection.mode !== 'off'
+      const chosen = plugin ? selection.entries.find(entry => entry.id === skill.id) : selection.mode === 'default'
+        ? { shortcut: skill.source === 'project' || skill.userAvailable, model: skill.source === 'project' || skill.modelAvailable }
         : subagent && skill.source === 'project'
           ? { shortcut: false, model: selection.project }
           : selection.entries.find((entry) => entry.id === skill.id)
       const name = skill.name.toLowerCase()
-      const model = selection.mode !== 'off' && Boolean(chosen?.model) && (!uniqueModels || !modelNames.has(name))
+      const available = !pluginTools || !skill.requiredTools?.some(id => !pluginTools.includes(id))
+      const modelAllowed = skill.source === 'project' || skill.modelAvailable
+      const shortcutAllowed = skill.source === 'project' || skill.userAvailable
+      const model = available && enabled && modelAllowed && Boolean(chosen?.model) && (!uniqueModels || !modelNames.has(name))
       if (model) modelNames.add(name)
-      return { id: skill.id, shortcut: selection.mode !== 'off' && Boolean(chosen?.shortcut), model }
+      return { id: skill.id, shortcut: !subagent && available && enabled && shortcutAllowed && Boolean(chosen?.shortcut), model }
     })
   }
 }
 
-export function projectSkillSnapshot(snapshot: SkillSnapshot | undefined, selection: SkillSelection): SkillSnapshot | undefined {
+export function projectSkillSnapshot(snapshot: SkillSnapshot | undefined, selection: SkillSelection, pluginTools?: readonly string[]): SkillSnapshot | undefined {
   if (!snapshot) return undefined
-  const resolved = resolveSkillSelection(selection, snapshot.skills)
+  const resolved = resolveSkillSelection(selection, snapshot.skills, false, false, pluginTools)
   const entries = new Map(resolved.entries.map((entry) => [entry.id, entry]))
   const shortcutNames = new Set<string>()
   const modelRoots = new Map<string, string>()
@@ -368,15 +408,19 @@ export function intersectCapabilities(value: ResolvedAgentCapabilities, limit: R
     planning: value.planning && limit.planning,
     toolMode: selected ? 'selected' : tools.length ? 'except' : 'all',
     tools: [...tools],
+    pluginMode: 'custom',
+    plugins: [],
+    pluginTools: value.pluginTools.filter(id => limit.pluginTools.includes(id)),
+    pluginPrompts: value.pluginPrompts.filter(id => limit.pluginPrompts.includes(id)),
     mcp: intersectMcpSelections(value.mcp, limit.mcp),
     customTools: { project: false, entries: value.customTools.entries.filter((id) => limit.customTools.entries.includes(id)) },
     skills: {
-      mode: value.skills.mode === 'off' || limit.skills.mode === 'off' ? 'off' : 'custom',
+      mode: 'custom',
       project: false,
       entries: value.skills.entries.map((entry) => ({
         ...entry,
         shortcut: false,
-        model: entry.model && value.skills.mode !== 'off' && limit.skills.mode !== 'off' && limit.skills.entries.some((allowed) => allowed.id === entry.id && allowed.model)
+        model: entry.model && limit.skills.entries.some((allowed) => allowed.id === entry.id && allowed.model)
       }))
     }
   }

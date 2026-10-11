@@ -24,6 +24,74 @@ beforeEach(async () => {
 afterEach(async () => { vi.restoreAllMocks(); await rm(root, { recursive: true, force: true }) })
 
 describe('plugin installation and data', () => {
+  it('persists ordinary settings, detects concurrent edits and form changes, and preserves existing data', async () => {
+    const settings = [{ key: 'enabled', label: 'Enabled', type: 'boolean', default: true }, { key: 'count', label: 'Count', type: 'number', default: 4, minimum: 0 }]
+    await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ ...manifest, settings }))
+    await store.install(join(source, 'PLUGIN.json'))
+    const initial = await store.settings(manifest.id)
+    expect(initial.values).toEqual({ enabled: true, count: 4 })
+    const first = await store.settings(manifest.id, { revision: initial.revision, values: { enabled: false, count: 0 } })
+    expect(first.values).toEqual({ enabled: false, count: 0 })
+    await expect(store.settings(manifest.id, { revision: initial.revision, values: initial.values })).rejects.toThrow('changed')
+    await expect(store.settings(manifest.id, { revision: first.revision, values: { enabled: false, count: -1 } })).rejects.toThrow('Invalid')
+    expect(await store.settings(manifest.id)).toEqual(first)
+    await store.setEnabled(manifest.id, false)
+    expect(await store.settings(manifest.id)).toEqual(first)
+    await expect(store.settings(manifest.id, { revision: first.revision, values: first.values })).rejects.toThrow('disabled')
+    await store.setEnabled(manifest.id, true)
+    await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ ...manifest, settings: [...settings, { key: 'label', label: 'Label', type: 'text', default: '' }] }))
+    const replacement = await store.prepareInstall(join(source, 'PLUGIN.json'))
+    await store.finishInstall(replacement.token, { replace: true })
+    const updated = await store.settings(manifest.id)
+    expect(updated.values).toEqual({ enabled: false, count: 0, label: '' })
+    await expect(store.settings(manifest.id, { revision: first.revision, values: first.values })).rejects.toThrow('changed')
+    const path = join(await store.directory('plugins_data', manifest.id), 'anas-settings.json')
+    await writeFile(path, '{broken')
+    await expect(store.settings(manifest.id)).rejects.toThrow()
+    expect(await readFile(path, 'utf8')).toBe('{broken')
+  })
+  it('installs pure static contributions and validates their files and dependencies before replacement', async () => {
+    const staticManifest = { ...manifest, ui: undefined, skills: [{ id: 'local-guide', path: 'skills/guide/SKILL.md' }],
+      prompts: [{ id: 'tone', path: 'tone.md', description: 'A concise tone.' }] }
+    await mkdir(join(source, 'skills/guide'), { recursive: true })
+    await writeFile(join(source, 'skills/guide/SKILL.md'), '---\nname: guide\ndescription: Guide\n---\nKeep the source meaning.\n')
+    await writeFile(join(source, 'tone.md'), 'Be concise.')
+    await writeFile(join(source, 'PLUGIN.json'), JSON.stringify(staticManifest))
+    const installed = await store.install(join(source, 'PLUGIN.json'))
+    expect(installed.manifest).toMatchObject({ skills: [{ id: 'local-guide', tools: [] }], prompts: [{ id: 'tone', scope: 'all', tools: [] }] })
+    expect(installed.skillSummaries).toEqual([{ id: 'local-guide', name: 'guide', description: 'Guide' }])
+    expect(installed.manifest?.backend).toBeUndefined()
+    expect(await store.promptText(manifest.id, 'tone.md')).toBe('Be concise.')
+    for (const changes of [
+      { skills: [{ id: 'guide', path: 'missing/SKILL.md' }] },
+      { prompts: [{ id: 'tone', path: '../tone.md', description: 'Invalid' }] },
+      { prompts: [{ id: 'tone', path: 'tone.md', description: 'Invalid', tools: ['missing'] }] },
+      { prompts: [{ id: 'tone', path: 'tone.md', description: 'Invalid', scope: 'request-hook' }] }
+    ]) {
+      await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ ...staticManifest, ...changes }))
+      await expect(store.prepareInstall(join(source, 'PLUGIN.json'))).rejects.toThrow()
+      expect(await store.promptText(manifest.id, 'tone.md')).toBe('Be concise.')
+    }
+    await writeFile(join(source, 'PLUGIN.json'), JSON.stringify(staticManifest))
+    await writeFile(join(source, 'tone.md'), 'x'.repeat(16 * 1024 + 1))
+    await expect(store.prepareInstall(join(source, 'PLUGIN.json'))).rejects.toThrow('16 KiB')
+    await store.setEnabled(manifest.id, false)
+    await expect(store.promptText(manifest.id, 'tone.md')).rejects.toThrow('disabled')
+    expect((await store.read(manifest.id)).skillSummaries).toEqual(installed.skillSummaries)
+    const preview = await store.readContribution(manifest.id, 'skill', 'local-guide')
+    expect(preview.content).toBe('---\nname: guide\ndescription: Guide\n---\nKeep the source meaning.\n')
+    expect(preview.resolvedPath).toBe(await realpath(join(await store.packageDirectory(manifest.id), 'skills/guide/SKILL.md')))
+    expect((await store.readContribution(manifest.id, 'prompt', 'tone')).content).toBe('Be concise.')
+    await expect(store.readContribution(manifest.id, 'prompt', '../tone.md')).rejects.toThrow('not declared')
+    await expect(store.readContribution(manifest.id, 'skill', 'tone')).rejects.toThrow('not declared')
+    await expect(store.readContribution(manifest.id, 'tool' as never, 'tone')).rejects.toThrow('Invalid')
+    await writeFile(await store.packageFile(manifest.id, 'tone.md'), 'Updated content.')
+    expect((await store.readContribution(manifest.id, 'prompt', 'tone')).content).toBe('Updated content.')
+    await writeFile(await store.packageFile(manifest.id, 'tone.md'), 'x'.repeat(16 * 1024 + 1))
+    await expect(store.readContribution(manifest.id, 'prompt', 'tone')).rejects.toThrow('size limit')
+    // Previewing an intact contribution does not depend on the other files remaining valid.
+    expect((await store.readContribution(manifest.id, 'skill', 'local-guide')).content).toBe(preview.content)
+  })
   it('reads bounded icon assets while disabled without granting access to plugin execution', async () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M1 1h20v20H1z"/></svg>'
     await writeFile(join(source, 'icon.svg'), svg)
@@ -209,7 +277,23 @@ describe('plugin home location', () => {
     }
     expect(await store.data(manifest.id, 'home_open_location')).toBe('window')
     await store.setEnabled(manifest.id, false)
-    await expect(store.home(manifest.id)).rejects.toThrow('disabled')
+    expect(await store.home(manifest.id)).toEqual({ location: 'window', locations: ['window'] })
+    await expect(store.data(manifest.id, 'home_open_location', true, 'sidebar')).rejects.toThrow('home location')
+    expect(await store.data(manifest.id, 'home_open_location')).toBe('window')
+  })
+
+  it('edits the home preference while disabled without enabling execution or changing other data', async () => {
+    await store.install(join(source, 'PLUGIN.json'))
+    await store.data(manifest.id, 'draft', true, 'keep')
+    await store.setEnabled(manifest.id, false)
+    expect((await store.home(manifest.id)).location).toBe('sidebar')
+    await store.data(manifest.id, 'home_open_location', true, 'window')
+    expect((await store.home(manifest.id)).location).toBe('window')
+    await expect(store.data(manifest.id, 'draft', true, 'change')).rejects.toThrow('disabled')
+    await expect(store.requireEnabled(manifest.id)).rejects.toThrow('disabled')
+    await store.setEnabled(manifest.id, true)
+    expect((await store.home(manifest.id)).location).toBe('window')
+    expect(await store.data(manifest.id, 'draft')).toBe('keep')
   })
 
   it('preserves corrupted stored preferences and rejects invalid home declarations', async () => {
@@ -622,5 +706,93 @@ describe('confirmed plugin replacement', () => {
     expect(stop).not.toHaveBeenCalled()
     expect(await installedHtml()).toBe('<p>Hello</p>')
     expect(await readFile(join(outside, 'keep'), 'utf8')).toBe('untouched')
+  })
+})
+
+describe('plugin tool resolution', () => {
+  async function installTools() {
+    await writeFile(join(source, 'backend.cjs'), 'module.exports = { tools: { echo: value => value } }')
+    await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ ...manifest, ui: undefined, backend: 'backend.cjs', tools: [
+      { id: 'echo', handler: 'echo', description: 'Echo.', effect: 'read', input_schema: { type: 'object' } }
+    ] }))
+    await store.install(join(source, 'PLUGIN.json'))
+    return (await store.resolveTools(['test-plugin:tool:echo']))[0]
+  }
+  it('resolves stable tool names after restart and replacement without installation fingerprints', async () => {
+    const tool = await installTools()
+    expect(tool.name).toBe('plugin__test-plugin__echo')
+    expect(tool.name.length).toBeLessThanOrEqual(64)
+    await new PluginStore(join(root, 'data')).requireTool(tool)
+    await store.setEnabled(manifest.id, false)
+    await expect(store.requireTool(tool)).rejects.toThrow('disabled')
+    await store.setEnabled(manifest.id, true)
+    const preview = await store.prepareInstall(join(source, 'PLUGIN.json'))
+    await store.finishInstall(preview.token, { replace: true })
+    await store.requireTool(tool)
+    expect((await store.resolveTools(['test-plugin:tool:echo']))[0]).toEqual(tool)
+    expect(JSON.parse(await readFile(join(root, 'data/plugins/test-plugin/installation.json'), 'utf8'))).toEqual({ version: 0, enabled: true })
+    expect(tool).not.toHaveProperty('binding')
+    expect(tool).not.toHaveProperty('pluginVersion')
+  })
+  it('does not silently drop a selected tool that is missing or disabled', async () => {
+    await installTools()
+    await expect(store.resolveTools(['test-plugin:tool:missing'])).rejects.toThrow('unavailable')
+    await store.setEnabled(manifest.id, false)
+    await expect(store.resolveTools(['test-plugin:tool:echo'])).rejects.toThrow('disabled')
+  })
+})
+
+describe('executing package resources', () => {
+  it('preserves occupied packages on replacement/removal, isolates unrelated reads and releases failed calls', async () => {
+    await store.install(join(source, 'PLUGIN.json'))
+    const path = await store.packageFile(manifest.id, 'index.html')
+    let finish!: () => void, entered!: () => void
+    const ready = new Promise<void>(resolve => { entered = resolve })
+    const running = store.withPackageResources([path], async () => {
+      entered(); await new Promise<void>(resolve => { finish = resolve })
+      expect(await readFile(path, 'utf8')).toContain('Hello')
+      throw new Error('operation failed')
+    })
+    const failure = expect(running).rejects.toThrow('operation failed')
+    await ready
+    const incoming = await store.prepareInstall(join(source, 'PLUGIN.json'))
+    const stop = vi.fn()
+    await expect(store.exclusive(() => store.finishInstall(incoming.token, {replace:true}, stop))).rejects.toThrow('in use')
+    expect(stop).not.toHaveBeenCalled()
+    await expect(store.exclusive(() => store.uninstall(manifest.id))).rejects.toThrow('in use')
+    expect(await readFile(path, 'utf8')).toContain('Hello')
+    finish(); await failure
+    await store.withPackageResources([join(root, 'unrelated')], () => store.exclusive(() => store.uninstall(manifest.id)))
+    expect(await store.list()).toEqual([])
+  })
+
+  it('keeps dynamically loaded process resources and linked paths until every owner finishes', async () => {
+    await store.install(join(source, 'PLUGIN.json'))
+    const path = await store.packageDirectory(manifest.id)
+    const linked = join(root,'linked')
+    await symlink(path,linked,process.platform === 'win32' ? 'junction' : 'dir')
+    await store.withPackageResources([join(linked,'index.html')], async () => {
+      await store.withPackageResources(null, async () => {
+        await expect(store.assertPackageIdle(manifest.id)).rejects.toThrow('in use')
+      })
+      await expect(store.assertPackageIdle(manifest.id)).rejects.toThrow('in use')
+    })
+    await store.assertPackageIdle(manifest.id)
+  })
+
+  it('queued readers enter after replacement and read the current package', async () => {
+    await store.install(join(source, 'PLUGIN.json'))
+    const path = await store.packageFile(manifest.id,'index.html')
+    await writeFile(join(source,'index.html'),'new package')
+    const next = await store.prepareInstall(join(source,'PLUGIN.json'))
+    let finish!: () => void, entered!: () => void
+    const ready = new Promise<void>(resolve => { entered = resolve })
+    const replacing = store.exclusive(() => store.finishInstall(next.token,{replace:true},async()=> {
+      entered(); await new Promise<void>(resolve=> { finish=resolve })
+    }))
+    await ready
+    const read = store.withPackageResources([path],()=>readFile(path,'utf8'))
+    finish(); await replacing
+    expect(await read).toBe('new package')
   })
 })

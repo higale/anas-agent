@@ -1,20 +1,21 @@
+vi.mock('./plugins/usePlugins', () => ({ usePlugins: () => ({ plugins: [], error: undefined }) }))
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { defaultCapabilities, mcpToolAllowed, toolAllowed, type AgentCapabilities } from '@shared/agentCapabilities'
+import { defaultCapabilities, mcpToolAllowed, toolAllowed, resolveSkillSelection, type AgentCapabilities } from '@shared/agentCapabilities'
 import type { SkillSnapshot, McpToolStatus } from '@shared/types'
 import { CapabilityEditor } from './CapabilityEditor'
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
-const skills: SkillSnapshot = { scriptAutoApprove: false, roots: [{ id: 'user', kind: 'user', name: 'User', path: '/skills', shortcutAlias: 'user', removable: false, available: true }], skills: [{ scriptAutoApprove: false, id: 'user:private', rootId: 'user', name: 'private', description: 'Private skill', modelAvailable: false, userAvailable: false, linked: false, dirPath: '/skills/private', relativePath: 'private', source: 'user', rootName: 'User', shortcutAlias: 'user' }] }
+const skills: SkillSnapshot = { scriptAutoApprove: false, roots: [{ id: 'user', kind: 'user', name: 'User', path: '/skills', shortcutAlias: 'user', removable: false, available: true }], skills: [{ scriptAutoApprove: false, id: 'user:private', rootId: 'user', name: 'private', description: 'Private skill', modelAvailable: true, userAvailable: true, linked: false, dirPath: '/skills/private', relativePath: 'private', source: 'user', rootName: 'User', shortcutAlias: 'user' }] }
 function Harness({ subagent = false, onChange = vi.fn(), mcpStatus, initial }: { subagent?: boolean; onChange?: (value: AgentCapabilities) => void; mcpStatus?: McpToolStatus; initial?: AgentCapabilities }) {
   const [value, setValue] = useState<AgentCapabilities>(() => initial ?? ({ ...structuredClone(defaultCapabilities), skills: { mode: 'custom', project: false, entries: [] } }))
   return <CapabilityEditor value={value} skills={skills} subagent={subagent} mcpStatus={mcpStatus} onChange={(next) => { setValue(next); onChange(next) }} />
 }
 async function selectSkills(mode: 'default' | 'custom' | 'off') {
-  await userEvent.click(within(screen.getByRole('radiogroup', { name: 'capabilities.skill_selection' }))
-    .getByRole('radio', { name: `capabilities.${mode}` }))
+  await userEvent.click(within(screen.getByRole('radiogroup', { name: 'settings.capability_skills' }))
+    .getByRole('radio', { name: `capabilities.${mode === 'default' ? 'all' : mode}` }))
 }
 describe('shared capability editor', () => {
   it.each([false, true])('removes stale skill selections regardless of checked state in subagent mode %s', async (subagent) => {
@@ -24,6 +25,7 @@ describe('shared capability editor', () => {
     render(<Harness subagent={subagent} onChange={onChange} initial={{ ...structuredClone(defaultCapabilities),
       skills: { mode: 'custom', project: true, entries } }} />)
 
+    await userEvent.click(screen.getByRole('button', { name: 'settings.capability_skills' }))
     for (const id of ['deleted:off', 'deleted:on']) {
       await userEvent.click(screen.getByRole('button', { name: `capabilities.remove_missing_skill: ${id}` }))
       expect(screen.queryByText(id)).toBeNull()
@@ -56,154 +58,68 @@ describe('shared capability editor', () => {
 
   const readyMcp: McpToolStatus = { ...emptyMcp, servers: [{ id: 'alpha', name: 'Alpha MCP', index: 0, type: 'stdio', state: 'ready', toolCount: 2, toolNames: ['search', 'read'] }] }
 
-  it.each([false, true])('collapses MCP tools independently from selection in subagent mode %s', async (subagent) => {
-    const onChange = vi.fn()
-    const initial: AgentCapabilities = { ...structuredClone(defaultCapabilities), mcp: { defaultMode: 'all', servers: [{ id: 'alpha', mode: 'selected', tools: ['search'] }] } }
-    render(<Harness initial={initial} subagent={subagent} mcpStatus={readyMcp} onChange={onChange} />)
-    const user = userEvent.setup()
-    const heading = screen.getByRole('button', { name: 'Alpha MCP' })
-    const all = screen.getByRole('checkbox', { name: 'Alpha MCP capabilities.use_all_tools' })
-    const search = screen.getByRole('checkbox', { name: 'Alpha MCP search' })
-    expect(heading).toHaveAttribute('aria-expanded', 'true')
-    await user.click(heading)
-    expect(heading).toHaveAttribute('aria-expanded', 'false')
-    expect(search).not.toBeVisible()
-    expect(all).toBeVisible()
-    expect(onChange).not.toHaveBeenCalled()
-    await user.click(all)
-    expect(all).toBeChecked()
-    expect(screen.queryByRole('button', { name: 'Alpha MCP' })).toBeNull()
-    expect(mcpToolAllowed(onChange.mock.lastCall![0], 'alpha', 'new_tool')).toBe(true)
-    await user.click(all)
-    expect(all).not.toBeChecked()
+  it.each([false, true])('collapses custom MCP selections and retains them through all and off (%s)', async subagent => {
+    const changed = vi.fn()
+    const { rerender } = render(<Harness subagent={subagent} mcpStatus={readyMcp} onChange={changed} />)
+    const mode = within(screen.getByRole('radiogroup', { name: 'Alpha MCP' }))
+    expect(mode.getByRole('radio', { name: 'capabilities.off' })).toBeChecked()
+    await userEvent.click(mode.getByRole('radio', { name: 'capabilities.custom' }))
     expect(screen.queryByRole('checkbox', { name: 'Alpha MCP search' })).toBeNull()
-    const restoredHeading = screen.getByRole('button', { name: 'Alpha MCP' })
-    expect(restoredHeading).toHaveAttribute('aria-expanded', 'false')
-    restoredHeading.focus()
-    await user.keyboard('{Enter}')
-    expect(restoredHeading).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByRole('checkbox', { name: 'Alpha MCP search' })).toBeChecked()
-    expect(screen.getByRole('checkbox', { name: 'Alpha MCP read' })).not.toBeChecked()
-  })
-
-  it.each([false, true])('separates all mode from selecting every current tool in subagent mode %s', async (subagent) => {
-    const onChange = vi.fn()
-    const { rerender } = render(<Harness subagent={subagent} mcpStatus={readyMcp} onChange={onChange} />)
-    const all = screen.getByRole('checkbox', { name: 'Alpha MCP capabilities.use_all_tools' })
-    expect(screen.queryByRole('checkbox', { name: 'Alpha MCP' })).toBeNull()
-    expect(all).toBeChecked()
-    expect(screen.queryByRole('button', { name: 'Alpha MCP' })).toBeNull()
-    expect(screen.queryByText('search')).toBeNull()
-    await userEvent.click(all)
-    expect(screen.getByRole('button', { name: 'Alpha MCP' })).toHaveAttribute('aria-expanded', 'true')
-    const search = screen.getByRole('checkbox', { name: 'Alpha MCP search' })
-    expect(search).not.toBeChecked()
-    await userEvent.click(search)
-    await userEvent.click(screen.getByRole('checkbox', { name: 'Alpha MCP read' }))
-    expect(all).not.toBeChecked()
-    expect(onChange.mock.lastCall?.[0].mcp.servers).toEqual([{ id: 'alpha', mode: 'selected', tools: ['search', 'read'] }])
+    const heading = screen.getByRole('button', { name: 'Alpha MCP' })
+    expect(heading).toHaveAttribute('aria-expanded', 'false')
+    heading.focus()
+    await userEvent.keyboard('{Enter}')
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Alpha MCP search' }))
     const added: McpToolStatus = { ...readyMcp, servers: [{ ...readyMcp.servers[0], toolCount: 3, toolNames: ['search', 'read', 'new_tool'] }] }
-    rerender(<Harness subagent={subagent} mcpStatus={added} onChange={onChange} />)
+    rerender(<Harness subagent={subagent} mcpStatus={added} onChange={changed} />)
     expect(screen.getByRole('checkbox', { name: 'Alpha MCP new_tool' })).not.toBeChecked()
-    await userEvent.click(all)
-    expect(screen.queryByText('new_tool')).toBeNull()
-    expect(mcpToolAllowed(onChange.mock.lastCall![0], 'alpha', 'new_tool')).toBe(true)
-    await userEvent.click(all)
+    await userEvent.click(mode.getByRole('radio', { name: 'capabilities.all' }))
+    expect(screen.queryByRole('checkbox', { name: 'Alpha MCP search' })).toBeNull()
+    expect(mcpToolAllowed(changed.mock.lastCall![0], 'alpha', 'new_tool')).toBe(true)
+    await userEvent.click(mode.getByRole('radio', { name: 'capabilities.off' }))
+    expect(mcpToolAllowed(changed.mock.lastCall![0], 'alpha', 'search')).toBe(false)
+    await userEvent.click(mode.getByRole('radio', { name: 'capabilities.custom' }))
     expect(screen.getByRole('checkbox', { name: 'Alpha MCP search' })).toBeChecked()
-    expect(screen.getByRole('checkbox', { name: 'Alpha MCP read' })).toBeChecked()
     expect(screen.getByRole('checkbox', { name: 'Alpha MCP new_tool' })).not.toBeChecked()
   })
-
-  it.each([false, true])('keeps the all mode switch usable and shows empty catalog guidance only when enabled (%s)', async (enabled) => {
-    function Offline() {
-      const [value, setValue] = useState(structuredClone(defaultCapabilities))
-      return <CapabilityEditor value={value} mcpServers={[{ id: 'alpha', name: 'Offline MCP', enabled }]} onChange={(next) => { setValue(next); onChange(next) }} />
-    }
-    const onChange = vi.fn()
-    render(<Offline />)
-    const all = screen.getByRole('checkbox', { name: 'Offline MCP capabilities.use_all_tools' })
-    expect(all).toBeChecked()
-    expect(screen.queryByRole('button', { name: 'Offline MCP' })).toBeNull()
-    expect(all.closest('[data-mcp-server-id]')).toHaveTextContent('capabilities.inactive')
-    await userEvent.click(all)
-    expect(all).not.toBeChecked()
-    if (enabled) expect(screen.getByText('capabilities.no_known_mcp_tools')).toBeVisible()
-    else expect(screen.queryByText('capabilities.no_known_mcp_tools')).toBeNull()
-    expect(onChange.mock.lastCall?.[0].mcp.servers).toEqual([{ id: 'alpha', mode: 'selected', tools: [] }])
+  it('keeps new MCP sources off after enable all and allows editing disabled servers', async () => {
+    const changed = vi.fn()
+    const view = render(<Harness mcpStatus={emptyMcp} onChange={changed} />)
+    await userEvent.click(screen.getByRole('button', { name: 'settings.capabilities_enable_all' }))
+    view.rerender(<Harness mcpStatus={readyMcp} onChange={changed} />)
+    expect(within(screen.getByRole('radiogroup', { name: 'Alpha MCP' })).getByRole('radio', { name: 'capabilities.off' })).toBeChecked()
+    view.rerender(<CapabilityEditor value={defaultCapabilities} mcpServers={[{ id: 'disabled', name: 'Disabled', enabled: false }]} onChange={changed} />)
+    expect(within(screen.getByRole('radiogroup', { name: 'Disabled' })).getByRole('radio', { name: 'capabilities.all' })).toBeEnabled()
   })
-
-  it.each([false, true])('removes missing server records after clearing their last tool in subagent mode %s', async (subagent) => {
-    const initial: AgentCapabilities = { ...structuredClone(defaultCapabilities), mcp: { defaultMode: 'all', servers: [{ id: 'alpha', mode: 'selected', tools: ['search'] }] } }
-    const onChange = vi.fn()
-    render(<Harness subagent={subagent} initial={initial} mcpStatus={emptyMcp} onChange={onChange} />)
+  it('retains unavailable MCP choices and allows removing missing references', async () => {
+    const initial: AgentCapabilities = { ...defaultCapabilities, mcp: { defaultMode: 'selected', servers: [{ id: 'alpha', mode: 'selected', tools: ['search'] }] } }
+    const changed = vi.fn()
+    render(<Harness initial={initial} mcpStatus={emptyMcp} onChange={changed} />)
+    await userEvent.click(screen.getByRole('button', { name: 'alpha' }))
     const search = screen.getByRole('checkbox', { name: 'alpha search' })
     expect(search).toBeChecked()
-    expect(search.closest('label')).not.toHaveTextContent('capabilities.inactive')
-    expect(search.closest('[data-mcp-server-id]')).toHaveTextContent('capabilities.inactive')
     await userEvent.click(search)
-    expect(onChange.mock.lastCall?.[0].mcp.servers).toEqual([])
-    expect(screen.queryByRole('checkbox', { name: 'alpha capabilities.use_all_tools' })).toBeNull()
+    expect(changed.mock.lastCall![0].mcp.servers).toEqual([])
   })
 
-  it.each([false, true])('shows inactive state at the server or individual tool level in subagent mode %s', (subagent) => {
-    const initial: AgentCapabilities = { ...structuredClone(defaultCapabilities), mcp: { defaultMode: 'all', servers: [{ id: 'alpha', mode: 'selected', tools: ['search', 'removed'] }] } }
-    const offline: McpToolStatus = { ...readyMcp, servers: [{ ...readyMcp.servers[0], state: 'idle' }] }
-    const { rerender } = render(<Harness initial={initial} subagent={subagent} mcpStatus={offline} />)
-    expect(screen.queryByRole('button', { name: 'Alpha MCP' })).toBeNull()
-    expect(screen.getByRole('checkbox', { name: 'Alpha MCP removed' }).closest('label')).not.toHaveTextContent('capabilities.inactive')
-    expect(screen.getAllByText('capabilities.inactive')).toHaveLength(1)
-    rerender(<Harness initial={initial} subagent={subagent} mcpStatus={readyMcp} />)
-    expect(screen.getByRole('button', { name: 'Alpha MCP' })).not.toHaveTextContent('capabilities.inactive')
-    expect(screen.getByRole('checkbox', { name: 'Alpha MCP search' }).closest('label')).not.toHaveTextContent('capabilities.inactive')
-    const removed = screen.getByRole('checkbox', { name: 'Alpha MCP removed' })
-    expect(removed).toBeChecked()
-    expect(removed).toBeEnabled()
-    expect(removed.closest('label')).toHaveTextContent('capabilities.inactive')
-    expect(screen.getAllByText('capabilities.inactive')).toHaveLength(1)
-    const restored: McpToolStatus = { ...readyMcp, servers: [{ ...readyMcp.servers[0], toolCount: 3, toolNames: ['search', 'read', 'removed'] }] }
-    rerender(<Harness initial={initial} subagent={subagent} mcpStatus={restored} />)
-    expect(screen.queryByText('capabilities.inactive')).toBeNull()
-  })
-
-  it('keeps saved tool selections accessible when a collapsed MCP becomes inactive', async () => {
-    const initial: AgentCapabilities = { ...structuredClone(defaultCapabilities), mcp: { defaultMode: 'all', servers: [{ id: 'alpha', mode: 'selected', tools: ['search'] }] } }
-    const { rerender } = render(<Harness initial={initial} mcpStatus={readyMcp} />)
+  it.each([false, true])('edits a disabled MCP source with catalog availability %s', async known => {
+    const changed = vi.fn()
+    function DisabledMcp() {
+      const [value, setValue] = useState<AgentCapabilities>({ ...defaultCapabilities,
+        mcp: { defaultMode: 'selected', servers: [{ id: 'alpha', mode: 'off', tools: ['saved'] }] } })
+      return <CapabilityEditor value={value} mcpServers={[{ id: 'alpha', name: 'Alpha MCP', enabled: false }]}
+        mcpStatus={known ? readyMcp : emptyMcp} onChange={next => { setValue(next); changed(next) }} />
+    }
+    render(<DisabledMcp />)
+    await userEvent.click(within(screen.getByRole('radiogroup', { name: 'Alpha MCP' })).getByRole('radio', { name: 'capabilities.custom' }))
     await userEvent.click(screen.getByRole('button', { name: 'Alpha MCP' }))
-    expect(screen.queryByRole('checkbox', { name: 'Alpha MCP search' })).toBeNull()
-    const offline: McpToolStatus = { ...readyMcp, servers: [{ ...readyMcp.servers[0], state: 'idle' }] }
-    rerender(<Harness initial={initial} mcpStatus={offline} />)
-    expect(screen.queryByRole('button', { name: 'Alpha MCP' })).toBeNull()
-    expect(screen.getByRole('checkbox', { name: 'Alpha MCP search' })).toBeChecked()
-    rerender(<Harness initial={initial} mcpStatus={readyMcp} />)
-    expect(screen.getByRole('button', { name: 'Alpha MCP' })).toHaveAttribute('aria-expanded', 'false')
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Alpha MCP saved' }))
+    expect(changed.mock.lastCall![0].mcp.servers[0].tools).toEqual([])
+    if (known) {
+      await userEvent.click(screen.getByRole('checkbox', { name: 'Alpha MCP search' }))
+      expect(changed.mock.lastCall![0].mcp.servers[0].tools).toEqual(['search'])
+    } else expect(screen.getByText('capabilities.no_known_mcp_tools')).toBeVisible()
   })
-
-  it('removes a missing server after turning off all tools and hides already empty records', async () => {
-    const initial: AgentCapabilities = { ...structuredClone(defaultCapabilities), mcp: { defaultMode: 'all', servers: [
-      { id: 'empty', mode: 'selected', tools: [] }, { id: 'alpha', mode: 'all', tools: [] }
-    ] } }
-    const onChange = vi.fn()
-    render(<Harness initial={initial} mcpStatus={emptyMcp} onChange={onChange} />)
-    expect(screen.queryByText('empty')).toBeNull()
-    await userEvent.click(screen.getByRole('checkbox', { name: 'alpha capabilities.use_all_tools' }))
-    expect(onChange.mock.lastCall?.[0].mcp.servers).toEqual([])
-    expect(screen.queryByText('alpha')).toBeNull()
-  })
-
-  it('uses all and none defaults for newly configured servers after the global actions', async () => {
-    const onChange = vi.fn()
-    const { rerender } = render(<Harness mcpStatus={emptyMcp} onChange={onChange} />)
-    await userEvent.click(screen.getByRole('button', { name: 'settings.capabilities_disable_all' }))
-    rerender(<Harness mcpStatus={readyMcp} onChange={onChange} />)
-    const all = screen.getByRole('checkbox', { name: 'Alpha MCP capabilities.use_all_tools' })
-    expect(all).not.toBeChecked()
-    expect(screen.getByRole('checkbox', { name: 'Alpha MCP search' })).not.toBeChecked()
-    await userEvent.click(screen.getByRole('button', { name: 'settings.capabilities_enable_all' }))
-    expect(all).toBeChecked()
-    expect(onChange.mock.lastCall?.[0].mcp.defaultMode).toBe('all')
-    expect(screen.queryByText('search')).toBeNull()
-  })
-
   it('allows a removed builtin tool exclusion to be restored and honors the editor disabled state', async () => {
     const onChange = vi.fn()
     const value: AgentCapabilities = { ...structuredClone(defaultCapabilities), toolMode: 'except', tools: ['removed_tool'] }
@@ -230,6 +146,7 @@ describe('shared capability editor', () => {
       return <CapabilityEditor value={value} skills={snapshot} subagent={subagent} onChange={(next) => { setValue(next); onChange(next) }} />
     }
     const { rerender } = render(<MissingSkills />)
+    await userEvent.click(screen.getByRole('button', { name: 'settings.capability_skills' }))
     expect(screen.getByRole('checkbox', { name: 'deleted:skill capabilities.model' })).toBeChecked()
     expect(screen.queryByRole('button', { name: /capabilities.remove_missing_skill/ })).toBeNull()
     rerender(<MissingSkills snapshot={fixture} />)
@@ -267,6 +184,7 @@ describe('shared capability editor', () => {
     }
     const onChange = vi.fn()
     render(<ProjectHarness />)
+    await userEvent.click(screen.getByRole('button', { name: 'settings.capability_skills' }))
     const project = screen.getByRole('checkbox', { name: 'capabilities.project_skills' })
     expect(project).not.toBeChecked()
     expect(screen.queryByText('project-only')).toBeNull()
@@ -281,7 +199,7 @@ describe('shared capability editor', () => {
     await userEvent.click(project)
     expect(summary).toHaveTextContent(/^1$/)
     await userEvent.click(project)
-    expect(document.querySelector('.settings-status-indicator')).toBeInTheDocument()
+    expect(document.querySelector('[data-tooltip="settings.subagent_skills_require_file_read"]')).toBeInTheDocument()
     await selectSkills('off')
     expect(screen.queryByRole('checkbox', { name: 'capabilities.project_skills' })).toBeNull()
   })
@@ -297,6 +215,7 @@ describe('shared capability editor', () => {
       id: `${root.id}:skill`, rootId: root.id, source: root.kind, name: `${root.id}-skill` })) }
     const onChange = vi.fn()
     render(<CapabilityEditor value={{ ...structuredClone(defaultCapabilities), skills: { mode: 'custom', project: false, entries: [] } }} skills={fixture} onChange={onChange} />)
+    await userEvent.click(screen.getByRole('button', { name: 'settings.capability_skills' }))
     for (const kind of ['system', 'user', 'project']) expect(screen.getByText(`settings.skill_group_${kind}`)).toBeInTheDocument()
     expect(screen.getByText('Custom directory')).toBeInTheDocument()
     expect(screen.queryByText('System')).toBeNull()
@@ -304,17 +223,17 @@ describe('shared capability editor', () => {
     expect(Boolean(screen.queryByText('Source 0'))).toBe(count > 1)
     await userEvent.click(screen.getByRole('checkbox', { name: 'project-0-skill capabilities.model' }))
     expect(onChange.mock.lastCall?.[0].skills.entries).toEqual([{ id: 'project-0:skill', model: true, shortcut: false }])
-    await userEvent.type(screen.getByRole('searchbox'), 'project-0')
-    expect(screen.queryByText('settings.skill_group_user')).toBeNull()
+    expect(screen.queryByRole('searchbox')).toBeNull()
+    expect(screen.getByText('settings.skill_group_user')).toBeInTheDocument()
     expect(screen.getByText('settings.skill_group_project')).toBeInTheDocument()
   })
 
-  it('keeps MCP enabled when its catalog arrives after an unrelated checkbox edit', async () => {
+  it('keeps new MCP off when its catalog arrives after an unrelated checkbox edit', async () => {
     const { rerender } = render(<Harness />)
     await userEvent.click(screen.getByRole('checkbox', { name: 'settings.capability_networkAccess' }))
     const status: McpToolStatus = { checkedAt: '', loaded: [], errors: [], tools: [], toolNames: ['search'], servers: [{ id: 'server', index: 0, name: 'Delayed MCP', type: 'stdio', state: 'ready', toolCount: 1, toolNames: ['search'] }] }
     rerender(<Harness mcpStatus={status} />)
-    expect(screen.getByRole('checkbox', { name: 'Delayed MCP capabilities.use_all_tools' })).toBeChecked()
+    expect(within(screen.getByRole('radiogroup', { name: 'Delayed MCP' })).getByRole('radio', { name: 'capabilities.off' })).toBeChecked()
     expect(screen.getByRole('checkbox', { name: 'settings.capability_networkAccess' })).not.toBeChecked()
   })
   it('visually groups the complete subagent capability controls under one heading', () => {
@@ -323,7 +242,7 @@ describe('shared capability editor', () => {
     expect(group).toHaveClass('ui-surface-flat')
     expect(group).toContainElement(screen.getByText('settings.capabilities'))
     expect(group).toContainElement(screen.getByRole('button', { name: 'settings.capabilities_enable_all' }))
-    expect(group).toContainElement(screen.getByRole('radiogroup', { name: 'capabilities.skill_selection' }))
+    expect(group).toContainElement(screen.getByRole('radiogroup', { name: 'settings.capability_skills' }))
   })
   it.each([false, true])('enables skills with global defaults when enabling all in subagent mode %s', async (subagent) => {
     const onChange = vi.fn()
@@ -332,8 +251,8 @@ describe('shared capability editor', () => {
     await userEvent.click(screen.getByRole('button', { name: 'settings.capabilities_enable_all' }))
     expect(onChange.mock.lastCall?.[0]).toMatchObject({ toolMode: 'all', skills: { mode: 'default' } })
     expect(screen.queryByRole('checkbox', { name: 'settings.capability_skills' })).toBeNull()
-    expect(within(screen.getByRole('radiogroup', { name: 'capabilities.skill_selection' }))
-      .getByRole('radio', { name: 'capabilities.default' })).toBeChecked()
+    expect(within(screen.getByRole('radiogroup', { name: 'settings.capability_skills' }))
+      .getByRole('radio', { name: 'capabilities.all' })).toBeChecked()
     expect(screen.queryByRole('searchbox')).toBeNull()
   })
   it.each([
@@ -375,15 +294,15 @@ describe('shared capability editor', () => {
     await userEvent.click(screen.getByRole('checkbox', { name: 'settings.capability_backgroundTools' }))
     for (const id of ids) expect(toolAllowed(onChange.mock.lastCall![0], id)).toBe(true)
   })
-  it.each([false, true])('uses the shared segmented control and search field in subagent mode %s', async (subagent) => {
+  it.each([false, true])('uses a segmented control without skill search in subagent mode %s', async (subagent) => {
     render(<Harness subagent={subagent} />)
-    const picker = screen.getByRole('radiogroup', { name: 'capabilities.skill_selection' })
+    const picker = screen.getByRole('radiogroup', { name: 'settings.capability_skills' })
     expect(picker).toHaveClass('ui-segmented-control')
     expect(picker.closest('.ui-form-row')).toContainElement(picker)
     expect(screen.queryByText('capabilities.skill_selection')).toBeNull()
-    expect(screen.getByRole('searchbox', { name: 'capabilities.search_skills' })).toHaveClass('ui-input')
-    await userEvent.click(within(picker).getByRole('radio', { name: 'capabilities.default' }))
-    expect(within(picker).getByRole('radio', { name: 'capabilities.default' })).toBeChecked()
+    expect(screen.queryByRole('searchbox', { name: 'capabilities.search_skills' })).toBeNull()
+    await userEvent.click(within(picker).getByRole('radio', { name: 'capabilities.all' }))
+    expect(within(picker).getByRole('radio', { name: 'capabilities.all' })).toBeChecked()
     expect(screen.queryByRole('searchbox')).toBeNull()
     await selectSkills('off')
     expect(within(picker).getByRole('radio', { name: 'capabilities.off' })).toBeChecked()
@@ -424,6 +343,79 @@ describe('shared capability editor', () => {
     expect(recall).not.toBeChecked()
     expect(toolAllowed(onChange.mock.lastCall![0], 'read_memory')).toBe(true)
   })
+  it('retains custom choices when bulk actions change each source mode', async () => {
+    const onChange = vi.fn()
+    const initial: AgentCapabilities = { ...structuredClone(defaultCapabilities),
+      customTools: { mode: 'custom', project: false, entries: ['user:chosen'] },
+      skills: { mode: 'custom', project: false, entries: [{ id: 'retired:skill:guide', model: true, shortcut: false }] },
+      subagents: { mode: 'custom', names: ['general-purpose'] },
+      pluginTools: ['retired:tool:read'], pluginPrompts: ['retired:prompt:context'],
+      mcp: { defaultMode: 'selected', servers: [{ id: 'alpha', mode: 'selected', tools: ['search'] }] }
+    }
+    render(<Harness initial={initial} mcpStatus={readyMcp} onChange={onChange} />)
+    for (const [button, mode] of [['settings.capabilities_enable_all', 'all'], ['settings.capabilities_disable_all', 'off']]) {
+      await userEvent.click(screen.getByRole('button', { name: button }))
+      const value: AgentCapabilities = onChange.mock.lastCall![0]
+      expect(value.plugins).toEqual([{ id: 'retired', mode }])
+      expect(value.pluginTools).toEqual(initial.pluginTools)
+      expect(value.pluginPrompts).toEqual(initial.pluginPrompts)
+      expect(value.customTools).toEqual({ ...initial.customTools, mode })
+      expect(value.skills.entries).toEqual(initial.skills.entries)
+      expect(value.subagents.names).toEqual(initial.subagents.names)
+      expect(value.mcp.servers).toEqual([{ id: 'alpha', mode, tools: ['search'] }])
+    }
+  })
+  it('blocks unselected globally disabled skill uses without warnings while project skills remain independent', async () => {
+    const root = { ...skills.roots[0], id: 'project', kind: 'project' as const }
+    const fixture: SkillSnapshot = { ...skills, roots: [...skills.roots, root], skills: [
+      { ...skills.skills[0], modelAvailable: false },
+      { ...skills.skills[0], id: 'project:local', rootId: 'project', name: 'local', source: 'project', modelAvailable: false, userAvailable: false }
+    ] }
+    render(<CapabilityEditor value={{ ...defaultCapabilities, skills: { mode: 'custom', project: false, entries: [] } }} skills={fixture} onChange={vi.fn()} />)
+    await userEvent.click(screen.getByRole('button', { name: 'settings.capability_skills' }))
+    expect(screen.getByRole('checkbox', { name: 'private capabilities.model' })).toBeDisabled()
+    expect(screen.getByRole('checkbox', { name: 'private capabilities.shortcut' })).toBeEnabled()
+    expect(screen.getByRole('checkbox', { name: 'local capabilities.model' })).toBeEnabled()
+    expect(screen.getByRole('checkbox', { name: 'local capabilities.shortcut' })).toBeEnabled()
+    expect(screen.queryByText('capabilities.skill_model_globally_off')).toBeNull()
+    expect(screen.queryByText('capabilities.skill_user_globally_off')).toBeNull()
+  })
+  it.each([false, true])('warns only about selected conflicting skill uses and allows clearing but not reselecting them (subagent %s)', async subagent => {
+    const changed = vi.fn()
+    function AvailabilityHarness({ available }: { available: boolean }) {
+      const [value, setValue] = useState<AgentCapabilities>({ ...defaultCapabilities,
+        skills: { mode: 'custom', project: false, entries: [{ id: 'user:private', model: true, shortcut: true }] } })
+      const catalog = { ...skills, skills: skills.skills.map(skill => ({ ...skill, modelAvailable: available, userAvailable: available })) }
+      return <CapabilityEditor value={value} skills={catalog} subagent={subagent} onChange={next => { setValue(next); changed(next) }} />
+    }
+    const view = render(<AvailabilityHarness available />)
+    await userEvent.click(screen.getByRole('button', { name: 'settings.capability_skills' }))
+    view.rerender(<AvailabilityHarness available={false} />)
+    const model = screen.getByRole('checkbox', { name: 'private capabilities.model' })
+    expect(model).toBeChecked()
+    expect(model).toBeEnabled()
+    expect(screen.getByRole('alert')).toHaveTextContent('capabilities.skill_model_globally_off')
+    expect(Boolean(screen.queryByText(/capabilities.skill_user_globally_off/))).toBe(!subagent)
+    for (const option of subagent ? ['model'] : ['model', 'shortcut']) {
+      const checkbox = screen.getByRole('checkbox', { name: `private capabilities.${option}` })
+      await userEvent.click(checkbox)
+      expect(checkbox).not.toBeChecked()
+      expect(checkbox).toBeDisabled()
+      expect(screen.queryByText(new RegExp(`capabilities.skill_${option === 'model' ? 'model' : 'user'}_globally_off`))).toBeNull()
+      if (!subagent && option === 'model') expect(screen.getByRole('alert')).toHaveTextContent('capabilities.skill_user_globally_off')
+      await userEvent.click(checkbox)
+      expect(checkbox).not.toBeChecked()
+    }
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(resolveSkillSelection(changed.mock.lastCall![0].skills, skills.skills.map(skill => ({ ...skill, modelAvailable: false, userAvailable: false }))).entries)
+      .toEqual([{ id: 'user:private', model: false, shortcut: false }])
+    view.rerender(<AvailabilityHarness available />)
+    expect(model).not.toBeChecked()
+    expect(model).toBeEnabled()
+    await userEvent.click(model)
+    expect(model).toBeChecked()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
   it('keeps individual file tools selectable and displays a mixed group', async () => {
     const onChange = vi.fn()
     render(<Harness onChange={onChange} />)
@@ -434,9 +426,10 @@ describe('shared capability editor', () => {
     expect(screen.getByRole('checkbox', { name: 'settings.capability_fileRead' })).toBePartiallyChecked()
     expect(onChange.mock.lastCall?.[0].toolMode).toBe('except')
   })
-  it('keeps shortcut and model selections independent even when globally disabled', async () => {
+  it('keeps allowed shortcut and model selections independent', async () => {
     const onChange = vi.fn()
     render(<Harness onChange={onChange} />)
+    await userEvent.click(screen.getByRole('button', { name: 'settings.capability_skills' }))
     await userEvent.click(screen.getByRole('checkbox', { name: 'private capabilities.shortcut' }))
     expect(screen.getByRole('checkbox', { name: 'private capabilities.model' })).not.toBeChecked()
     expect(onChange.mock.lastCall?.[0].skills.entries).toEqual([{ id: 'user:private', shortcut: true, model: false }])
@@ -447,6 +440,7 @@ describe('shared capability editor', () => {
   })
   it.each([false, true])('keeps custom choices across off and default modes (subagent %s)', async (subagent) => {
     render(<Harness subagent={subagent} />)
+    await userEvent.click(screen.getByRole('button', { name: 'settings.capability_skills' }))
     if (subagent) expect(screen.queryByRole('checkbox', { name: 'private capabilities.shortcut' })).toBeNull()
     await userEvent.click(screen.getByRole('checkbox', { name: 'private capabilities.model' }))
     await selectSkills('off')

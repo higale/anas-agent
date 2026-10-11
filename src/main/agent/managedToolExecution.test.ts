@@ -138,14 +138,17 @@ describe('unified tool execution', () => {
     vi.useFakeTimers()
     const h = harness()
     const finish = deferred<string>()
-    let entered = false
+    let entered = false, held = false
     const native = tool(() => { entered = true; return finish.promise }, {
       name: 'read_file', description: 'Read', schema: z.object({})
     })
     try {
       const agent = createAgent({
         model: new FakeToolCallingModel({ toolCalls: [[{ id: 'stream-call', name: 'read_file', args: {} }], []] }),
-        tools: [withManagedToolExecution(native, h)]
+        tools: [withManagedToolExecution(native, { ...h, withResources: async (_args, operation) => {
+          held = true
+          try { return await operation() } finally { held = false }
+        } })]
       })
       const stream = await agent.streamEvents({ messages: [{ role: 'user', content: 'read' }] }, { version: 'v3' })
       for (let index = 0; index < 20 && !entered; index++) await vi.advanceTimersByTimeAsync(0)
@@ -160,9 +163,11 @@ describe('unified tool execution', () => {
       expect(events).toHaveLength(1)
       expect(await events[0].status).toBe('finished')
       expect(await events[0].output).toBe(messages[0].content)
+      expect(held).toBe(true)
       finish.resolve('late actual result')
       await vi.advanceTimersByTimeAsync(1)
       expect((await h.service.readResult(handle.call_id, h.threadId))?.content).toBe('late actual result')
+      expect(held).toBe(false)
     } finally { h.database.close() }
   })
 

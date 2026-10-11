@@ -12,6 +12,7 @@ import { CapabilityEditor } from '../CapabilityEditor'
 import { notice } from '../notice'
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
+vi.mock('../plugins/usePlugins', () => ({ usePlugins: () => ({ plugins: [], error: undefined }) }))
 vi.mock('../notice', () => ({ notice: { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() } }))
 vi.mock('../CodeFileEditor', () => ({ CodeFileEditor: ({ content, onChange }: { content: string; onChange?(value: string): void }) => onChange
   ? <textarea aria-label="Code" defaultValue={content} onChange={event => onChange(event.target.value)} />
@@ -450,33 +451,27 @@ describe('custom tool settings', () => {
     if (status === 'error') expect(notice.error).toHaveBeenCalledWith('custom_tools.import_error_already_exists', { id: 'settings-tool-status' })
     else expect(notice.error).not.toHaveBeenCalled()
   })
-  it.each([false, true])('selects individual tools and toggles the whole group (subagent %s)', subagent => {
+  it.each([false, true])('selects custom tools and retains choices through all and off (%s)', subagent => {
     function Capabilities() {
       const [value, setValue] = useState(structuredClone(defaultCapabilities))
       return <CapabilityEditor subagent={subagent} value={value} onChange={setValue}
         customTools={[toolPackageFixture(definition), toolPackageFixture({ ...definition, id: 'other', name: 'other_tool' })]} />
     }
     render(<Capabilities />)
-    const group = screen.getByRole('checkbox', { name: 'custom_tools.title' })
-    expect(group).not.toBeChecked()
-    fireEvent.click(screen.getByText('custom_tools.title', { selector: 'summary' }))
-    const first = screen.getByRole('checkbox', { name: 'User submit_result' })
-    const second = screen.getByRole('checkbox', { name: 'User other_tool' })
-    expect(first).not.toBeChecked()
-    expect(second).not.toBeChecked()
-    fireEvent.click(first)
-    expect(group).toBePartiallyChecked()
-    fireEvent.click(group)
-    expect(first).toBeChecked()
-    expect(second).toBeChecked()
-    if (subagent) expect(screen.getByRole('checkbox', { name: 'custom_tools.project_tools' })).toBeChecked()
-    fireEvent.click(group)
-    expect(first).not.toBeChecked()
-    expect(second).not.toBeChecked()
+    const mode = within(screen.getByRole('radiogroup', { name: 'custom_tools.title' }))
+    expect(screen.queryByRole('checkbox', { name: 'User submit_result' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'custom_tools.title' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'User submit_result' }))
+    for (const name of ['capabilities.all', 'capabilities.off']) {
+      fireEvent.click(mode.getByRole('radio', { name }))
+      expect(screen.queryByRole('checkbox', { name: 'User submit_result' })).toBeNull()
+    }
+    fireEvent.click(mode.getByRole('radio', { name: 'capabilities.custom' }))
+    expect(screen.getByRole('checkbox', { name: 'User submit_result' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'User other_tool' })).not.toBeChecked()
     if (subagent) expect(screen.getByRole('checkbox', { name: 'custom_tools.project_tools' })).not.toBeChecked()
   })
-  it.each([false, true])('collapses sources independently and keeps selection counts current (subagent %s)', async subagent => {
-    const user = userEvent.setup()
+  it.each([false, true])('groups custom tools by source and retains missing selections (%s)', subagent => {
     const tools: ToolPackage[] = [
       { ...toolPackageFixture({ ...definition, id: 'external' }), source: 'external', rootId: 'external', rootName: 'Shared' },
       { ...toolPackageFixture({ ...definition, id: 'project' }), source: 'project', rootId: 'project', rootName: 'Project' },
@@ -488,35 +483,12 @@ describe('custom tool settings', () => {
       return <CapabilityEditor subagent={subagent} value={value} onChange={setValue} customTools={tools} />
     }
     render(<Capabilities />)
-    await user.click(screen.getByText('custom_tools.title', { selector: 'summary' }))
-    const system = screen.getByText('settings.skill_group_system', { selector: 'summary' })
-    const userSource = screen.getByText('settings.skill_group_user', { selector: 'summary' })
-    const shared = screen.getByText('Shared', { selector: 'summary' })
-    const missing = screen.getByText('capabilities.other_tools', { selector: 'summary' })
-    expect(system).toHaveTextContent('0/1')
-    expect(missing).toHaveTextContent('1/1')
-    expect(Boolean(system.compareDocumentPosition(userSource) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
-    expect(Boolean(userSource.compareDocumentPosition(shared) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
-    if (subagent) {
-      expect(screen.queryByText('Project', { selector: 'summary' })).not.toBeInTheDocument()
-      expect(screen.getByRole('checkbox', { name: 'custom_tools.project_tools' })).not.toBeChecked()
-    } else {
-      expect(screen.getByText('Project', { selector: 'summary' })).toHaveTextContent('0/1')
-    }
-    await user.click(userSource)
-    expect(screen.getByLabelText('User submit_result')).not.toBeVisible()
-    await user.click(screen.getByRole('checkbox', { name: 'System submit_result' }))
-    expect(system).toHaveTextContent('1/1')
-    expect(userSource).toHaveTextContent('0/1')
-    expect(screen.getByLabelText('User submit_result')).not.toBeVisible()
-    await user.click(screen.getByRole('checkbox', { name: 'custom_tools.title' }))
-    expect(userSource).toHaveTextContent('1/1')
-    expect(shared).toHaveTextContent('1/1')
-    expect(screen.getByLabelText('User submit_result')).not.toBeVisible()
-    await user.click(userSource)
-    expect(screen.getByRole('checkbox', { name: 'User submit_result' })).toBeChecked()
-    await user.click(screen.getByRole('checkbox', { name: 'missing' }))
-    expect(screen.queryByText('capabilities.other_tools', { selector: 'summary' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'custom_tools.title' }))
+    for (const name of ['settings.skill_group_system', 'settings.skill_group_user', 'Shared', 'capabilities.other_tools']) expect(screen.getByText(name)).toBeVisible()
+    expect(Boolean(screen.queryByText('Project'))).toBe(!subagent)
+    expect(screen.getByRole('checkbox', { name: 'missing' })).toBeChecked()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'missing' }))
+    expect(screen.queryByText('capabilities.other_tools')).toBeNull()
   })
   it.each([['', 0], ['0', 0], ['7200', 7200]] as const)('saves the timeout draft %s as %s seconds', async (value, timeoutSeconds) => {
     const onSave = vi.fn(async () => {})
@@ -534,12 +506,36 @@ describe('custom tool settings', () => {
     const props = { value: { ...defaultCapabilities, backgroundTools: false, customTools: selectedTools(['stable']) },
       customTools: [toolPackageFixture({ ...definition, interactive: true })], onChange: vi.fn() }
     const view = render(<CapabilityEditor {...props} />)
-    fireEvent.click(screen.getByText('custom_tools.title', { selector: 'summary' }))
+    fireEvent.click(screen.getByRole('button', { name: 'custom_tools.title' }))
     expect(screen.getByRole('checkbox', { name: 'User submit_result' })).toBeChecked()
     expect(screen.getByText('custom_tools.requires_background')).toBeVisible()
+    const count = screen.getByRole('button', { name: 'custom_tools.title' }).querySelector('small')
+    expect(count).toHaveTextContent(/^0$/)
     view.rerender(<CapabilityEditor {...props} value={{ ...props.value, backgroundTools: true }} />)
     expect(screen.queryByText('custom_tools.requires_background')).toBeNull()
+    expect(count).toHaveTextContent(/^1$/)
     expect(screen.getByRole('checkbox', { name: 'User submit_result' })).toBeChecked()
+  })
+  it('edits disabled tools and background-dependent tools without making them effective', () => {
+    function DisabledTools() {
+      const [value, setValue] = useState<AgentCapabilities>({ ...defaultCapabilities, backgroundTools: false,
+        customTools: { mode: 'custom', project: false, entries: [] } })
+      return <CapabilityEditor value={value} onChange={setValue} customTools={[
+        { ...toolPackageFixture(definition), enabled: false },
+        toolPackageFixture({ ...definition, id: 'interactive', name: 'interactive', interactive: true })
+      ]} />
+    }
+    render(<DisabledTools />)
+    fireEvent.click(screen.getByRole('button', { name: 'custom_tools.title' }))
+    for (const name of ['User submit_result', 'User interactive']) {
+      const checkbox = screen.getByRole('checkbox', { name })
+      expect(checkbox).toBeEnabled()
+      fireEvent.click(checkbox)
+      expect(checkbox).toBeChecked()
+    }
+    expect(screen.getByRole('button', { name: 'custom_tools.title' }).querySelector('small')).toHaveTextContent(/^0$/)
+    expect(screen.getByText('capabilities.inactive')).toBeVisible()
+    expect(screen.getByText('custom_tools.requires_background')).toBeVisible()
   })
   it('does not mark a usable tool shadowed by an interactive tool whose dependency is disabled', () => {
     const projectTool: ToolPackage = { ...toolPackageFixture({ ...definition, id: 'project-tool', interactive: true }),
@@ -547,7 +543,7 @@ describe('custom tool settings', () => {
     const props = { value: { ...defaultCapabilities, backgroundTools: false, customTools: selectedTools(['project-tool', 'stable']) },
       customTools: [projectTool, toolPackageFixture(definition)], onChange: vi.fn() }
     const view = render(<CapabilityEditor {...props} />)
-    fireEvent.click(screen.getByText('custom_tools.title', { selector: 'summary' }))
+    fireEvent.click(screen.getByRole('button', { name: 'custom_tools.title' }))
     expect(screen.queryByText('custom_tools.shadowed')).toBeNull()
     expect(screen.getByRole('checkbox', { name: 'User submit_result' })).toBeChecked()
     view.rerender(<CapabilityEditor {...props} value={{ ...props.value, backgroundTools: true }} />)
@@ -638,14 +634,14 @@ describe('custom tool settings', () => {
     const onChange = vi.fn()
     const props = { subagent, value: { ...defaultCapabilities, customTools: selectedTools(['stable']) }, onChange }
     const { rerender } = render(<CapabilityEditor {...props} customTools={[toolPackageFixture(definition)]} />)
-    fireEvent.click(screen.getByText('custom_tools.title', { selector: 'summary' }))
+    fireEvent.click(screen.getByRole('button', { name: 'custom_tools.title' }))
     expect(screen.getByRole('checkbox', { name: 'User submit_result' })).toBeChecked()
     rerender(<CapabilityEditor {...props} customTools={[toolPackageFixture({ ...definition, name: 'renamed' }), toolPackageFixture({ ...definition, id: 'new', name: 'new_tool' })]} />)
     expect(screen.getByRole('checkbox', { name: 'User renamed' })).toBeChecked()
     expect(screen.getByRole('checkbox', { name: 'User new_tool' })).not.toBeChecked()
     rerender(<CapabilityEditor {...props} customTools={[]} />)
     fireEvent.click(screen.getByRole('checkbox', { name: /stable/ }))
-    expect(onChange.mock.lastCall?.[0].customTools).toEqual(selectedTools())
+    expect(onChange.mock.lastCall?.[0].customTools).toMatchObject(selectedTools())
   })
 })
 

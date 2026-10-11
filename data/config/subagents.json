@@ -27,8 +27,13 @@
       },
       "custom_tools": {
         "project": false,
-        "entries": []
-      }
+        "entries": [],
+        "mode": "custom"
+      },
+      "plugin_mode": "custom",
+      "plugins": [],
+      "plugin_tools": [],
+      "plugin_prompts": []
     }
   },
   "subagents": [
@@ -58,13 +63,18 @@
         "workspace": true,
         "memory": true,
         "mcp": {
-          "default_mode": "all",
+          "default_mode": "selected",
           "servers": []
         },
         "custom_tools": {
           "project": false,
-          "entries": []
-        }
+          "entries": [],
+          "mode": "custom"
+        },
+        "plugin_mode": "custom",
+        "plugins": [],
+        "plugin_tools": [],
+        "plugin_prompts": []
       }
     },
     {
@@ -102,8 +112,13 @@
         },
         "custom_tools": {
           "project": false,
-          "entries": []
-        }
+          "entries": [],
+          "mode": "custom"
+        },
+        "plugin_mode": "custom",
+        "plugins": [],
+        "plugin_tools": [],
+        "plugin_prompts": []
       }
     },
     {
@@ -145,8 +160,13 @@
         },
         "custom_tools": {
           "project": false,
-          "entries": []
-        }
+          "entries": [],
+          "mode": "custom"
+        },
+        "plugin_mode": "custom",
+        "plugins": [],
+        "plugin_tools": [],
+        "plugin_prompts": []
       }
     }
   ]

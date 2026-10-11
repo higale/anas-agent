@@ -10,6 +10,8 @@ describe('parseSlashSkillInput', () => {
   })
 
   it('parses a qualified source alias', () => {
+    expect(parseSlashSkillInput('/proofread@plugin:writing-helper text')).toEqual({ name: 'proofread', sourceAlias: 'plugin:writing-helper', args: 'text' })
+    expect(parseSlashSkillInput('/proofread@plugin:../outside text')).toBeUndefined()
     expect(parseSlashSkillInput('/weather@agents Beijing')).toEqual({
       name: 'weather',
       sourceAlias: 'agents',

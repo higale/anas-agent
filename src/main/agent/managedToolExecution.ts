@@ -1,3 +1,4 @@
+import { pluginToolMetadata } from '@shared/pluginTools'
 import { isCustomToolMetadata } from '@shared/customTools'
 import { ToolMessage } from '@langchain/core/messages'
 import { isCommand } from '@langchain/langgraph'
@@ -21,12 +22,13 @@ interface ManagedToolOptions {
   runId?: string
   allowBackground: boolean
   signal?: AbortSignal
+  withResources?<T>(args: Record<string, unknown>, operation: () => Promise<T>): Promise<T>
 }
 
 export function supportsManagedTool(tool: StructuredToolInterface): boolean {
   if (tool.name === 'request_user_input') return false
   return !managementTools.has(tool.name) && (
-    builtinTools.has(tool.name) || isCustomToolMetadata((tool as { metadata?: unknown }).metadata) || isCommandShellMetadata((tool as { metadata?: unknown }).metadata) || tool.name.startsWith('mcp_')
+    builtinTools.has(tool.name) || Boolean(pluginToolMetadata((tool as { metadata?: unknown }).metadata)) || isCustomToolMetadata((tool as { metadata?: unknown }).metadata) || isCommandShellMetadata((tool as { metadata?: unknown }).metadata) || tool.name.startsWith('mcp_')
   )
 }
 
@@ -35,8 +37,9 @@ export function supportsManagedTool(tool: StructuredToolInterface): boolean {
  * overwrite the already-finished facade invocation. */
 export function withManagedToolExecution(tool: StructuredToolInterface, options: ManagedToolOptions): StructuredToolInterface {
   if (!supportsManagedTool(tool)) return tool
+  const plugin = Boolean(pluginToolMetadata((tool as { metadata?: unknown }).metadata))
   const kind: AgentManagedCallKind = isCommandShellMetadata((tool as { metadata?: unknown }).metadata)
-    ? 'shell' : isCustomToolMetadata((tool as { metadata?: unknown }).metadata) ? 'custom' : tool.name === 'http_request' ? 'http' : tool.name.startsWith('mcp_') ? 'mcp' : 'builtin'
+    ? 'shell' : (plugin || isCustomToolMetadata((tool as { metadata?: unknown }).metadata)) ? 'custom' : tool.name === 'http_request' ? 'http' : tool.name.startsWith('mcp_') ? 'mcp' : 'builtin'
   const target = tool
   return new DynamicStructuredTool({
     name: tool.name,
@@ -65,7 +68,7 @@ export function withManagedToolExecution(tool: StructuredToolInterface, options:
         retainInlineResult: effectful,
         // The Shell supervisor confirms process termination itself and calls
         // markUncertain only when that confirmation is unavailable.
-        uncertainWhenCancelledAfterDispatch: effectful && kind !== 'shell' && kind !== 'custom',
+        uncertainWhenCancelledAfterDispatch: effectful && (plugin || kind !== 'shell' && kind !== 'custom'),
         serialGroup: fileMutations.has(target.name) ? 'filesystem-writes'
           : target.name === 'update_config' ? 'configuration'
             : target.name === 'save_to_memory' || target.name === 'forget_memory' ? 'memory-writes' : undefined,
@@ -79,7 +82,11 @@ export function withManagedToolExecution(tool: StructuredToolInterface, options:
             // they receive cancellation through ToolExecutionContext instead.
             // MCP's adapter passes the request signal directly to the SDK.
             const signal = kind === 'mcp' ? control.signal : new AbortController().signal
-            const output = await target.invoke(invocation, { ...config, signal, callbacks: [] })
+            const invoke = async () => {
+              control.signal.throwIfAborted()
+              return target.invoke(invocation, { ...config, signal, callbacks: [] })
+            }
+            const output = await (options.withResources ? options.withResources(args, invoke) : invoke())
             if (isCommand(output)) throw new Error('Graph-state tools must execute natively, not as background calls.')
             const message = ToolMessage.isInstance(output) ? output : new ToolMessage({
               name: target.name,
@@ -97,8 +104,8 @@ export function withManagedToolExecution(tool: StructuredToolInterface, options:
             })
             return encodeManagedToolResult(options.database, message, { threadId: options.threadId, runId })
           } catch (error) {
-            if (effectful && control.dispatched && !control.outcome?.remote_failure_confirmed
-              && (kind === 'mcp' || toolLocalCommitStarted())) {
+            if (effectful && control.dispatched && !control.outcome?.remote_failure_confirmed && !(plugin && control.outcome?.remote_result_confirmed)
+              && (plugin || kind === 'mcp' || toolLocalCommitStarted())) {
               control.markUncertain('The tool did not return a confirmed outcome after dispatch.')
             }
             throw error

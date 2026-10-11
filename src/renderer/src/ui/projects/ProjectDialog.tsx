@@ -16,7 +16,7 @@ import {
 import { findProviderModelConfig } from '@shared/modelConfig'
 import { unwrapProjectResult } from '@shared/projectOperation'
 import { projectErrorDescription } from './projectErrorDescription'
-import { defaultCapabilitySettings, defaultCapabilities, defaultProjectSettings, defaultRestrictSubagents, removeEmptyMissingMcpSelections } from '@shared/agentCapabilities'
+import { defaultCapabilities, defaultProjectSettings, defaultRestrictSubagents, removeEmptyMissingMcpSelections } from '@shared/agentCapabilities'
 import type { SkillSnapshot, McpToolStatus, RuntimeToolStatus } from '@shared/types'
 import { CapabilityEditor } from '../CapabilityEditor'
 import { notice } from '../notice'
@@ -51,8 +51,6 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
   const { t } = useTranslation()
   const nameInputId = useId()
   const promptInputId = useId()
-  const defaultsRef = useRef(config?.defaultCapabilities ?? defaultCapabilitySettings)
-  defaultsRef.current = config?.defaultCapabilities ?? defaultCapabilitySettings
   const [name, setName] = useState('')
   const [icon, setIcon] = useState<ProjectIconName>()
   const [iconColor, setIconColor] = useState<ProjectIconColor>()
@@ -107,9 +105,8 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
     setPrompt(defaultWorkspace ? defaultProjectSettings.prompt : project?.prompt ?? defaultProjectSettings.prompt)
     setAdvancedSettings(defaultWorkspace ? defaultProjectSettings.advancedSettings : project?.kind === 'workspace' ? project.advancedSettings : defaultProjectSettings.advancedSettings)
     setCodingMode(initialCodingMode)
-    const defaults = defaultsRef.current
-    setCapabilities(structuredClone(defaultWorkspace ? defaultCapabilities : project?.kind === 'workspace' ? project.capabilities : defaults.capabilities))
-    setRestrictSubagents(defaultWorkspace ? defaultRestrictSubagents : project?.kind === 'workspace' ? project.restrictSubagents : defaults.restrictSubagents)
+    setCapabilities(structuredClone(defaultWorkspace ? defaultCapabilities : project?.kind === 'workspace' ? project.capabilities : defaultCapabilities))
+    setRestrictSubagents(defaultWorkspace ? defaultRestrictSubagents : project?.kind === 'workspace' ? project.restrictSubagents : defaultRestrictSubagents)
     setAccessMode(project?.kind === 'workspace' ? project.accessMode ?? 'read_only_allowed' : 'read_only_allowed')
     setModelConfigId(project?.modelConfigId)
     setModelParameterPresetId(project?.modelParameterPresetId)

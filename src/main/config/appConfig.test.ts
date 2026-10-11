@@ -1,13 +1,11 @@
 vi.mock('../toolsStore', () => ({ listToolSnapshot: vi.fn(async () => ({ roots: [], tools: [] })) }))
-import capabilityDefaults from '../../../data/config/capabilities.json'
 import { diffViewSettingsFixture } from '../../test/diffViewSettingsFixture'
-import { defaultCapabilitySettings, defaultCapabilities, serializeDefaultCapabilitySettings, serializeCapabilities } from '@shared/agentCapabilities'
+import { defaultCapabilities, serializeCapabilities } from '@shared/agentCapabilities'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RawAppConfig } from './rawAppConfig'
 
 function rawConfig(): RawAppConfig {
   return {
-    capabilities: structuredClone(capabilityDefaults),
     providers: [rawProvider('first', 'First')],
     settings: {
       profile: {
@@ -92,7 +90,6 @@ async function loadAppConfig(raw: RawAppConfig, bundled: RawAppConfig = raw) {
   vi.resetModules()
   const readRawConfig = vi.fn(async () => raw)
   const readBundledRawConfig = vi.fn(async () => bundled)
-  const writeRawCapabilitiesConfig = vi.fn()
   const writeRawSettingsConfig = vi.fn()
   const writeRawModelsConfig = vi.fn()
   const writeRawSubagentsConfig = vi.fn()
@@ -117,7 +114,6 @@ async function loadAppConfig(raw: RawAppConfig, bundled: RawAppConfig = raw) {
     readBundledRawConfig,
     readRawConfig,
     userSettingsConfigExists,
-    writeRawCapabilitiesConfig,
     writeRawSettingsConfig,
     writeRawModelsConfig,
     writeRawSubagentsConfig,
@@ -132,7 +128,6 @@ async function loadAppConfig(raw: RawAppConfig, bundled: RawAppConfig = raw) {
     readBundledRawConfig,
     readRawConfig,
     userSettingsConfigExists,
-    writeRawCapabilitiesConfig,
     writeRawSettingsConfig,
     writeRawModelsConfig,
     writeRawSubagentsConfig,
@@ -1101,28 +1096,5 @@ describe('subagent configuration', () => {
       systemPrompt: '',
     })).rejects.toThrow(/already used/)
     expect(writeRawSubagentsConfig).not.toHaveBeenCalled()
-  })
-})
-
-describe('default project capabilities', () => {
-  it('saves a validated independent domain and preserves project and subagent definitions', async () => {
-    const raw = rawConfig()
-    const before = structuredClone(raw)
-    const { appConfig, writeRawCapabilitiesConfig, writeRawSettingsConfig, writeRawSubagentsConfig } = await loadAppConfig(raw)
-    const value = structuredClone(defaultCapabilitySettings)
-    value.capabilities.profile = false
-    value.capabilities.toolMode = 'selected'
-    value.capabilities.tools = ['read_file']
-    value.restrictSubagents = true
-    value.capabilities.subagents = { mode: 'custom', names: ['reviewer'] }
-    const saved = await appConfig.saveDefaultCapabilities(value)
-    expect(saved.defaultCapabilities).toEqual(value)
-    expect(raw.capabilities).toEqual(serializeDefaultCapabilitySettings(value))
-    expect(writeRawCapabilitiesConfig).toHaveBeenCalledOnce()
-    expect(writeRawSettingsConfig).not.toHaveBeenCalled()
-    expect(writeRawSubagentsConfig).not.toHaveBeenCalled()
-    expect(raw).toEqual({ ...before, capabilities: serializeDefaultCapabilitySettings(value) })
-    await expect(appConfig.saveDefaultCapabilities({ ...value, restrictSubagents: 'yes' } as never)).rejects.toThrow()
-    expect(writeRawCapabilitiesConfig).toHaveBeenCalledOnce()
   })
 })

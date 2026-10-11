@@ -1,4 +1,3 @@
-import { defaultCapabilitySettings } from '@shared/agentCapabilities'
 import { diffViewSettingsFixture } from '../../test/diffViewSettingsFixture'
 import { environmentContextFixture } from '../../test/environmentContextFixture'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -75,8 +74,7 @@ describe('AgentRuntime system prompt preview', () => {
     const configuredProvider = provider(0, 'Configured')
     const defaultModel = resolveProviderModelConfig(configuredProvider, configuredProvider.models[0])
     previewMocks.getAppConfigSnapshot.mockResolvedValue({ customTools: [],
-      defaultCapabilities: structuredClone(defaultCapabilitySettings),
-      providers: [configuredProvider],
+        providers: [configuredProvider],
       subagents: [],
       mcpServers: [{
         index: 0,
@@ -168,8 +166,7 @@ describe('AgentRuntime system prompt preview', () => {
       backupDir: ''
     }
     previewMocks.getAppConfigSnapshot.mockResolvedValue({ customTools: [],
-      defaultCapabilities: structuredClone(defaultCapabilitySettings),
-      providers: [firstProvider, selectedProvider],
+        providers: [firstProvider, selectedProvider],
       subagents: [],
       mcpServers: [],
       settings,
@@ -227,8 +224,7 @@ describe('AgentRuntime system prompt preview', () => {
       backupDir: ''
     } satisfies AppSettings
     previewMocks.getAppConfigSnapshot.mockResolvedValue({ customTools: [],
-      defaultCapabilities: structuredClone(defaultCapabilitySettings),
-      providers: [defaultProvider, selectedProvider],
+        providers: [defaultProvider, selectedProvider],
       subagents: [],
       mcpServers: [],
       settings,
@@ -319,8 +315,7 @@ describe('AgentRuntime system prompt preview', () => {
       backupDir: ''
     } satisfies AppSettings
     const config: AppConfigSnapshot = { customTools: [],
-      defaultCapabilities: structuredClone(defaultCapabilitySettings),
-      providers,
+        providers,
       subagents: [],
       mcpServers: [],
       settings,

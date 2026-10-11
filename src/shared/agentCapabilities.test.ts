@@ -1,7 +1,8 @@
 import { selectedTools } from '../test/toolPackageFixture'
 import { describe, expect, it } from 'vitest'
-import { assertResolvedCapabilities, capabilityFeatures, defaultCapabilities, intersectCapabilities, mcpToolAllowed, mcpServerSelection, removeEmptyMissingMcpSelections, setMcpServerMode, setMcpToolSelection, parseCapabilities, parseRunConfiguration, projectSkillSnapshot, resolveSkillSelection, serializeCapabilities, serializeRunConfiguration, setToolSelection, toolAllowed, validateCapabilities, validateRunConfiguration, type AgentCapabilities } from './agentCapabilities'
-import type { SkillSummary } from './types'
+import { allCapabilities, pluginSelectionMode, assertResolvedCapabilities, capabilityFeatures, defaultCapabilities, intersectCapabilities, mcpToolAllowed, mcpServerSelection, removeEmptyMissingMcpSelections, setMcpServerMode, setMcpToolSelection, parseCapabilities, parseRunConfiguration, projectSkillSnapshot, resolveSkillSelection, resolvePluginCapabilities, effectiveProjectCapabilities, serializeCapabilities, serializeRunConfiguration, setToolSelection, toolAllowed, validateCapabilities, validateRunConfiguration, type AgentCapabilities } from './agentCapabilities'
+import { parsePluginManifest, type PluginSummary } from './plugins'
+import type { SkillSummary, WorkspaceProject } from './types'
 
 const skill = (id: string, modelAvailable = false, userAvailable = false): SkillSummary => ({ scriptAutoApprove: false,
   id, rootId: 'user', name: id, description: '', modelAvailable, userAvailable, dirPath: `/skills/${id}`, linked: false, relativePath: id, source: 'user', rootName: 'User', shortcutAlias: 'user'
@@ -19,6 +20,19 @@ describe('compression configuration compatibility', () => {
 })
 
 describe('scoped Agent capabilities', () => {
+  it('defaults optional prompt selections and limits them with the existing parent capability policy', () => {
+    const raw = serializeCapabilities(defaultCapabilities)
+    const { plugin_prompts: _prompts, ...withoutPrompts } = raw
+    expect(parseCapabilities(withoutPrompts).pluginPrompts).toEqual([])
+    const value = { ...structuredClone(defaultCapabilities), pluginPrompts: ['writer:prompt:tone', 'writer:prompt:review'],
+      skills: { mode: 'custom' as const, project: false as const, entries: [] }, customTools: selectedTools() }
+    const limit = { ...value, pluginPrompts: ['writer:prompt:review'] }
+    expect(intersectCapabilities(value, limit).pluginPrompts).toEqual(['writer:prompt:review'])
+    expect(parseCapabilities(serializeCapabilities(value))).toEqual(value)
+    const dependent = { ...skill('writer:skill:review', true, true), requiredTools: ['writer:tool:read'] }
+    expect(resolveSkillSelection(defaultCapabilities.skills, [dependent], true, false, []).entries[0]).toMatchObject({ model: false, shortcut: false })
+    expect(resolveSkillSelection(defaultCapabilities.skills, [dependent], true, false, ['writer:tool:read']).entries[0]).toMatchObject({ model: true, shortcut: true })
+  })
   it.each(['default', 'custom', 'off'] as const)('round trips %s selections without losing custom choices', (mode) => {
     const value: AgentCapabilities = { ...structuredClone(defaultCapabilities),
       subagents: { mode, names: ['reviewer'] },
@@ -82,12 +96,12 @@ describe('scoped Agent capabilities', () => {
     expect(value.toolMode).toBe('all')
     expect(mcpToolAllowed(value, 'alpha', 'search')).toBe(true)
     expect(mcpToolAllowed(value, 'alpha', 'future')).toBe(false)
-    expect(mcpToolAllowed(value, 'beta', 'future')).toBe(true)
+    expect(mcpToolAllowed(value, 'beta', 'future')).toBe(false)
     value = setMcpServerMode(value, 'alpha', 'all')
     expect(mcpToolAllowed(value, 'alpha', 'future')).toBe(true)
     expect(mcpServerSelection(value.mcp, 'alpha').tools).toEqual(['search'])
     value = parseCapabilities(serializeCapabilities(value))
-    expect(serializeCapabilities(value).mcp).toEqual({ default_mode: 'all', servers: [{ id: 'alpha', mode: 'all', tools: ['search'] }] })
+    expect(serializeCapabilities(value).mcp).toEqual({ default_mode: 'selected', servers: [{ id: 'alpha', mode: 'all', tools: ['search'] }] })
     value = setMcpServerMode(value, 'alpha', 'selected')
     expect(mcpToolAllowed(value, 'alpha', 'future')).toBe(false)
     expect(mcpToolAllowed(value, 'alpha', 'search')).toBe(true)
@@ -170,7 +184,7 @@ describe('scoped Agent capabilities', () => {
     const custom = { mode: 'custom' as const, project: true, entries: [{ id: 'user:search', model: true, shortcut: false }] }
     const resolved = resolveSkillSelection(custom, catalog, true, true)
     expect(resolved.entries.map((entry) => entry.model)).toEqual([true, false])
-    expect(resolveSkillSelection({ ...custom, mode: 'default' }, catalog, true, true).entries.map((entry) => entry.model)).toEqual([false, true])
+    expect(resolveSkillSelection({ ...custom, mode: 'default' }, catalog, true, true).entries.map((entry) => entry.model)).toEqual([true, false])
     const child = { ...defaultCapabilities, customTools: selectedTools(), skills: resolved }
     const limit = { ...defaultCapabilities, customTools: selectedTools(), skills: { ...resolved, entries: [{ id: 'project:search', model: false, shortcut: true }] } }
     expect(intersectCapabilities(child, limit).skills.entries.every((entry) => !entry.model)).toBe(true)
@@ -178,7 +192,7 @@ describe('scoped Agent capabilities', () => {
   })
 
   it('preserves unknown MCP tools when excluding an unrelated built-in tool', () => {
-    const selection = setToolSelection(defaultCapabilities, ['read_multiple_files'], false)
+    const selection = setToolSelection(allCapabilities, ['read_multiple_files'], false)
     expect(selection).toMatchObject({ toolMode: 'except', tools: ['read_multiple_files'] })
     expect(mcpToolAllowed(selection, 'not-loaded-yet', 'search')).toBe(true)
     expect(toolAllowed(selection, 'read_multiple_files')).toBe(false)
@@ -225,15 +239,15 @@ describe('scoped Agent capabilities', () => {
     expect(recallOnly.memory).toBe(true)
     expect(toolAllowed(recallOnly, 'read_memory')).toBe(false)
   })
-  it('lets explicit skill selection override global model and shortcut defaults', () => {
+  it('enforces global skill availability even for explicit selections', () => {
     const skills = [skill('private'), skill('public', true, true)]
     const resolved = resolveSkillSelection({ mode: 'custom', project: false, entries: [{ id: 'private', model: true, shortcut: false }] }, skills)
-    expect(resolved.entries).toEqual([{ id: 'private', model: true, shortcut: false }, { id: 'public', model: false, shortcut: false }])
+    expect(resolved.entries).toEqual([{ id: 'private', model: false, shortcut: false }, { id: 'public', model: false, shortcut: false }])
     expect(resolveSkillSelection(defaultCapabilities.skills, skills).entries[1]).toEqual({ id: 'public', model: true, shortcut: true })
   })
   it('keeps shortcut-only skills out of the model selection', () => {
     const selection = { mode: 'custom' as const, project: false, entries: [{ id: 'private', shortcut: true, model: false }] }
-    const snapshot = projectSkillSnapshot({ scriptAutoApprove: false, roots: [], skills: [skill('private')] }, selection)
+    const snapshot = projectSkillSnapshot({ scriptAutoApprove: false, roots: [], skills: [skill('private', false, true)] }, selection)
     expect(snapshot?.skills[0]).toMatchObject({ userAvailable: true, modelAvailable: false, shortcut: '/private' })
     expect(projectSkillSnapshot(snapshot, { ...selection, mode: 'off' })?.skills[0]).toMatchObject({ userAvailable: false, modelAvailable: false })
   })
@@ -255,7 +269,7 @@ describe('scoped Agent capabilities', () => {
     parent.backgroundTools = false
     parent.skills = { mode: 'custom', project: false, entries: [{ id: 'private', model: false, shortcut: true }, { id: 'public', model: true, shortcut: false }] }
     const child = structuredClone(defaultCapabilities)
-    child.skills = { mode: 'custom', project: false, entries: [{ id: 'private', model: true, shortcut: false }, { id: 'public', model: true, shortcut: false }] }
+    child.skills = { mode: 'custom', project: false, entries: [{ id: 'private', model: false, shortcut: false }, { id: 'public', model: true, shortcut: false }] }
     child.customTools = selectedTools()
     parent.customTools = selectedTools()
     assertResolvedCapabilities(child)
@@ -272,5 +286,53 @@ describe('scoped Agent capabilities', () => {
   })
   it.each([undefined, {}, { ...defaultCapabilities, customTools: selectedTools(), toolMode: 'invalid' }, { ...defaultCapabilities, customTools: selectedTools(), applicationEnvironment: 'yes' }, { ...defaultCapabilities, customTools: selectedTools(), skills: { mode: 'inherit', entries: [] } }])('rejects incomplete or invalid settings', (value) => {
     expect(() => validateCapabilities(value)).toThrow()
+  })
+})
+
+
+describe('plugin capability scope', () => {
+  const pluginSkill = { ...skill('writer:skill:review', true, true), source: 'plugin' as const, requiredTools: ['writer:tool:read'] }
+  const selected = { ...defaultCapabilities, pluginMode: 'custom' as const, pluginTools: ['writer:tool:read'], pluginPrompts: ['writer:prompt:help'],
+    skills: { mode: 'off' as const, project: false, entries: [{ id: pluginSkill.id, model: true, shortcut: true }] } }
+  const plugin: PluginSummary = { id: 'writer', enabled: true, backendStatus: 'stopped', manifest: parsePluginManifest({
+    version: 0, api_version: 2, id: 'writer', name: 'Writer', plugin_version: '1.0.0', backend: 'backend.cjs',
+    tools: ['read', 'new_tool'].map(id => ({ id, handler: id, description: id, effect: 'read', input_schema: { type: 'object' } })),
+    skills: [{ id: 'review', path: 'review/SKILL.md', tools: ['read'] }],
+    prompts: [{ id: 'help', path: 'help.md', scope: 'main', description: 'Help', tools: ['read'] }]
+  }) }
+  it('resolves all dynamically and keeps new sources and contributions out of custom selections', () => {
+    expect(pluginSelectionMode(defaultCapabilities, plugin.id)).toBe('off')
+    expect(resolvePluginCapabilities(defaultCapabilities, [plugin]).pluginTools).toEqual([])
+    const all = resolvePluginCapabilities(allCapabilities, [plugin])
+    expect(all.pluginTools).toEqual(['writer:tool:read', 'writer:tool:new_tool'])
+    expect(all.pluginPrompts).toEqual(['writer:prompt:help'])
+    expect(resolvePluginCapabilities(allCapabilities, [plugin], true).pluginPrompts).toEqual([])
+    expect(resolvePluginCapabilities(selected, [plugin]).pluginTools).toEqual(['writer:tool:read'])
+    expect(resolvePluginCapabilities({ ...selected, plugins: [{ id: 'writer', mode: 'off' }] }, [plugin]).pluginTools).toEqual([])
+    expect(resolvePluginCapabilities(allCapabilities, [{ ...plugin, enabled: false }]).pluginTools).toEqual([])
+    expect(parseCapabilities(serializeCapabilities(selected))).toEqual(selected)
+  })
+  it('uses all capabilities while project customization is off, without discarding custom choices', () => {
+    const project = { advancedSettings: true, restrictSubagents: false, capabilities: { ...selected, profile: false } } as WorkspaceProject
+    expect(effectiveProjectCapabilities(project)).toEqual(project.capabilities)
+    project.advancedSettings = false
+    expect(effectiveProjectCapabilities(project)).toEqual(allCapabilities)
+    project.advancedSettings = true
+    expect(effectiveProjectCapabilities(project).pluginTools).toEqual(selected.pluginTools)
+  })
+  it('selects plugin skills independently of ordinary skills while enforcing dependencies', () => {
+    expect(capabilityFeatures(selected).skills).toBe(true)
+    const resolved = resolveSkillSelection(selected.skills, [pluginSkill, skill('user:plain', true, true)], true, false, selected.pluginTools)
+    expect(resolved.mode).toBe('custom')
+    expect(resolved.entries).toEqual([{ id: pluginSkill.id, model: true, shortcut: true }, { id: 'user:plain', model: false, shortcut: false }])
+    expect(resolveSkillSelection(selected.skills, [pluginSkill], true, false, []).entries[0].model).toBe(false)
+    expect(resolveSkillSelection(defaultCapabilities.skills, [pluginSkill], true, false, selected.pluginTools).entries[0].model).toBe(false)
+    const snapshot = projectSkillSnapshot({ roots: [], skills: [pluginSkill], scriptAutoApprove: false }, selected.skills, selected.pluginTools)
+    expect(snapshot?.skills[0]).toMatchObject({ modelAvailable: true, userAvailable: true })
+    const frozen = { customTools: [], codingMode: false, capabilities: { ...selected, skills: resolved } }
+    expect(parseRunConfiguration(serializeRunConfiguration(frozen))).toEqual(frozen)
+    const parent = { ...selected, customTools: selectedTools(), skills: resolveSkillSelection({ ...selected.skills, entries: [{ id: pluginSkill.id, model: false, shortcut: true }] }, [pluginSkill], true, false, selected.pluginTools) }
+    const child = { ...selected, customTools: selectedTools(), skills: resolved }
+    expect(intersectCapabilities(child, parent).skills.entries[0].model).toBe(false)
   })
 })

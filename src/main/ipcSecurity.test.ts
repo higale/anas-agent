@@ -194,7 +194,7 @@ describe('IPC sender security', () => {
       'agent:runs:submit',
       'memory:save',
       'config:updateSettings',
-      'config:saveDefaultCapabilities',
+      'tools:setEnabled',
       'projects:create',
       'skills:updateAvailability',
       'inputHistory:add',

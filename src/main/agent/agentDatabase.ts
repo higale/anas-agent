@@ -6598,10 +6598,7 @@ export class AgentDatabase {
         completed_at
       ) VALUES (?, ?, ?, ?)
       ON CONFLICT (run_id, activity_key) DO UPDATE SET
-        completed_at = CASE
-          WHEN excluded.completed_at IS NOT NULL THEN excluded.completed_at
-          ELSE agent_activity_timing.completed_at
-        END
+        completed_at = COALESCE(agent_activity_timing.completed_at, excluded.completed_at)
     `).run(
       runId,
       activityKey,

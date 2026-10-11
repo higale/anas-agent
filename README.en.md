@@ -25,8 +25,8 @@ The application's Help menu opens bundled guides in the right workspace pane, wi
 ## Features
 
 - OpenAI-compatible and Anthropic-compatible providers, streamed replies, context compression, and resumable approvals.
-- Default capabilities in Settings, optional project customization, and independently configured subagents.
-- The default project allows only icon (including color), tool access mode, and model (including reasoning options) changes. Its name, working folder, and other settings use defaults; capabilities follow global settings.
+- Source availability in Settings, optional project customization, and independently configured subagents.
+- The default project allows only icon (including color), tool access mode, and model (including reasoning options) changes. Its name, working folder, and other settings use defaults; all enabled capabilities apply.
 - Built-in file, image, network, memory, and command tools; bundled ripgrep; MCP integration and custom tool packages.
 - User and project Skills, prompt shortcuts, input history, and speech input/output.
 - Text, image, PDF, and DOCX attachments. Images use native multimodal content blocks; documents are extracted locally.
@@ -43,15 +43,17 @@ Each main conversation and its subagents share a SQLite database; the catalog st
 
 Ordinary tools share a managed executor with **8 execution slots** and a **64-call active/queued limit**. Busy slots and conflicting mutations queue automatically. With Background tools enabled, a call waiting or running for over 10 seconds returns a handle for supervision. Cancellation retains execution ownership until the real executor settles; uncertain external outcomes are explicit. Planning, subagent orchestration, user questions, and supervision remain outside this execution pool.
 
-Custom tools run in their package directory. Sources include system packages, user packages in the data directory's `tools/`, added external directories, and project packages in each source folder's `.agents/tools/`. Tools and Skills share directory-tree and file-preview interactions; project tools appear only in project settings. They require explicit capability selection. See [Custom tool packages](docs/CUSTOM_TOOLS.md) for execution and import rules.
+Custom tools run in their package directory. Sources include system packages, user packages in the data directory's `tools/`, added external directories, and project packages in each source folder's `.agents/tools/`. Tools and Skills share directory-tree and file-preview interactions; project tools appear only in project settings. Uncustomized projects use enabled tools; customized projects select All, Custom, or Off. See [Custom tool packages](docs/CUSTOM_TOOLS.md) for execution and import rules.
 
 Shell commands preserve the model's command text, arguments, and search behavior. Supported read-only commands may be approved automatically after target and environment checks; analysis does not rewrite commands to obtain approval. Other commands follow the selected access mode. The security model defines platform support and recovery rules.
 
 ## Plugins
 
+The overview in **Settings > Plugins** previews a plugin's instructions, skills, and tools. Hover over a name for its description, or click to inspect and copy its content or tool parameters. Previews also work for disabled plugins and never start a backend.
+
 Anas 3.3.8 introduces plugin API 2; API 1 plugins must be updated. RDP users should upgrade to plugin 0.1.7.
 
-Install optional plugins in **Settings > Plugins** by selecting a ZIP file or `PLUGIN.json` inside a prebuilt plugin folder. Plugins can provide side panels, separate windows, and optional backends that start on demand. UI-only plugins require no backend process. See the [plugin API and limitations](docs/PLUGINS.md) and [examples](examples/plugins).
+Install optional plugins in **Settings > Plugins** from a ZIP file or `PLUGIN.json`. Plugins can provide side panels, separate windows, optional backends, tools, skills, and static instructions. UI-only or declarative plugins need no backend process. Projects and subagents group contributions by plugin with **All / Custom / Off**; uncustomized projects use all available contributions from enabled plugins. Plugin management controls overall availability. See the [plugin API](docs/PLUGINS.md) and [examples](examples/plugins).
 
 ## Development
 
@@ -106,7 +108,7 @@ npm run dev -- -- --data-dir "./runtime-data/research"
 
 | Path under the data directory | Contents |
 | --- | --- |
-| `config/` | Settings, default capabilities, providers/models, subagents, MCP, Skill sources/availability, and custom-tool sources/ordering |
+| `config/` | Settings, providers/models, subagents, MCP, Skill sources/availability, and custom-tool sources/ordering |
 | `sqlite/catalog.sqlite` | Main conversation directory and shared memory |
 | `sqlite/conversations/<threadId>.sqlite` | One main conversation and its subagents |
 | `projects.json` | Project definitions and source folders |

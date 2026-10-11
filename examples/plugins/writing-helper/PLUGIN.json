@@ -1,0 +1,10 @@
+{
+  "version": 0,
+  "id": "writing-helper",
+  "name": "Writing helper",
+  "plugin_version": "1.0.0",
+  "api_version": 2,
+  "description": "A static skill and optional writing instructions. No page or backend is needed.",
+  "skills": [{ "id": "proofread", "path": "skills/proofread/SKILL.md" }],
+  "prompts": [{ "id": "writing-tone", "path": "prompts/tone.md", "description": "Use clear, concise prose when editing text." }]
+}

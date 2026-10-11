@@ -35,7 +35,6 @@ import * as modelSelection from './modelSelection'
 import * as appConfig from '../config/appConfig'
 import { getProject } from '../projectStore'
 import bundledSettings from '../../../data/config/settings.json'
-import bundledCapabilities from '../../../data/config/capabilities.json'
 import type { RawAppConfig } from '../config/rawAppConfig'
 import { defaultModelConfig, modelContextKey } from '@shared/modelConfig'
 import type { ResolvedModelConfig } from '@shared/types'
@@ -542,7 +541,7 @@ describe('AgentRuntime', () => {
       models: [{ ...structuredClone(defaultModelConfig), id: 'child-model', index: 0, model: 'child-model', displayName: 'Child model',
         parameterPresetMode: 'custom' as const, defaultParameterPresetId: 'careful',
         parameterPresets: [{ id: 'careful', name: 'Careful', parameters: { temperature: 0.1 } }] }] }
-    const config = appConfig.normalizeAppConfigSnapshot({ capabilities: bundledCapabilities, settings: bundledSettings as RawAppConfig['settings'],
+    const config = appConfig.normalizeAppConfigSnapshot({ settings: bundledSettings as RawAppConfig['settings'],
       providers: [], subagents: [], mcp_servers: [] })
     vi.spyOn(appConfig, 'getAppConfigSnapshot').mockResolvedValue({ ...config, providers: missing ? [] : [provider] })
     const runtime = new AgentRuntime(database, async (_thread, _database, context) => ({

@@ -5,7 +5,6 @@ import path, { join, resolve } from 'node:path'
 import { applicationName } from '@shared/appMetadata'
 
 export const configDirName = 'config'
-export const capabilitiesConfigFileName = 'capabilities.json'
 export const settingsConfigFileName = 'settings.json'
 export const modelsConfigFileName = 'models.json'
 export const subagentsConfigFileName = 'subagents.json'
@@ -14,7 +13,6 @@ export const customToolsConfigFileName = 'tools.json'
 export const skillsConfigFileName = 'skills.json'
 export const inputHistoryFileName = 'input_history.json'
 export const configFileNames = [
-  capabilitiesConfigFileName,
   settingsConfigFileName,
   modelsConfigFileName,
   subagentsConfigFileName,

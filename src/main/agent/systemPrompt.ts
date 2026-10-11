@@ -12,6 +12,7 @@ export type AgentSystemPromptSectionKind =
   | 'workspace'
   | 'memory'
   | 'skills'
+  | 'plugin_instruction'
 
 export interface AgentSystemPromptSection {
   kind: AgentSystemPromptSectionKind
@@ -110,6 +111,7 @@ export function buildAgentSystemPrompt(
     workspace: string
     memory: string
     skills: string
+    pluginPrompts?: string
     commandShell?: string
     simpleChatPrompt?: string
     projectPrompt?: string
@@ -147,6 +149,7 @@ export function buildAgentSystemPrompt(
   if (features.workspaceContext) appendSection('workspace', context.workspace)
   if (features.memory) appendSection('memory', context.memory)
   if (features.skills) appendSection('skills', context.skills)
+  if (context.pluginPrompts) appendSection('plugin_instruction', context.pluginPrompts)
   return {
     text: sections.map((section) => section.content).join('\n\n'),
     sections

@@ -1,6 +1,5 @@
 import { panelPagesApi } from './panelPages'
 import { contentServices } from './contentServices'
-import type { DefaultCapabilitySettings } from '@shared/agentCapabilities'
 import type { HelpDocumentId } from '@shared/helpDocuments'
 import type { ProjectOperationResult } from '@shared/projectOperation'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
@@ -46,6 +45,7 @@ const api: GaleApi = {
   },
   plugins: {
     list: () => ipcRenderer.invoke('plugins:list'),
+    readContribution: (id, kind, contributionId) => ipcRenderer.invoke('plugins:readContribution', id, kind, contributionId),
     install: () => ipcRenderer.invoke('plugins:install'),
     confirmInstall: (token, deleteData) => ipcRenderer.invoke('plugins:confirmInstall', token, deleteData),
     cancelInstall: token => ipcRenderer.invoke('plugins:cancelInstall', token),
@@ -193,7 +193,6 @@ const api: GaleApi = {
     restoreSubagent: (index: number): Promise<AppConfigSnapshot> => ipcRenderer.invoke('config:restoreSubagent', index),
     getCachedModels: (request: ModelListRequest): Promise<ModelListResponse | null> => ipcRenderer.invoke('config:getCachedModels', request),
     fetchModels: (request: ModelListRequest): Promise<ModelListResponse> => ipcRenderer.invoke('config:fetchModels', request),
-    saveDefaultCapabilities: (value: DefaultCapabilitySettings): Promise<AppConfigSnapshot> => ipcRenderer.invoke('config:saveDefaultCapabilities', value),
     updateSettings: (settings: AppSettingsUpdate): Promise<AppConfigSnapshot> => ipcRenderer.invoke('config:updateSettings', settings),
     updateProfile: (profile: AppProfileUpdate): Promise<AppConfigSnapshot> => ipcRenderer.invoke('config:updateProfile', profile),
     onChanged: (listener: (config: AppConfigSnapshot) => void): (() => void) => {
@@ -214,6 +213,7 @@ const api: GaleApi = {
     clear: (): Promise<number> => ipcRenderer.invoke('memory:clear')
   },
   tools: {
+    setEnabled: (id, enabled) => ipcRenderer.invoke('tools:setEnabled', id, enabled),
     validateSchema: schema => ipcRenderer.invoke('tools:validateSchema', schema),
     get: (projectId, sourceFolders) => ipcRenderer.invoke('tools:get', projectId, sourceFolders),
     refresh: () => ipcRenderer.invoke('tools:refresh'),

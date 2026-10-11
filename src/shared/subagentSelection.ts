@@ -22,11 +22,11 @@ export function isSubagentConfigured(definition: Pick<SubagentConfig, 'descripti
   return Boolean(definition.description.trim() && definition.systemPrompt.trim())
 }
 
-/** Custom choices are explicit grants; enabled only selects the global defaults. */
+/** Both all and custom selections respect the definition enable switch. */
 export function selectedSubagents<T extends Pick<SubagentConfig, 'name' | 'enabled' | 'description' | 'systemPrompt'>>(
   definitions: readonly T[], selection = defaultSubagentSelection
 ): T[] {
   if (selection.mode === 'off') return []
-  return definitions.filter((definition) => isSubagentConfigured(definition)
-    && (selection.mode === 'default' ? definition.enabled : selection.names.includes(definition.name)))
+  return definitions.filter((definition) => definition.enabled && isSubagentConfigured(definition)
+    && (selection.mode === 'default' || selection.names.includes(definition.name)))
 }

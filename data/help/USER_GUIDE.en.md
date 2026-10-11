@@ -16,19 +16,21 @@ Choose Help from the lower-left menu to read this guide in the right workspace. 
 
 ## Projects And Capabilities
 
-Enable **Customize capabilities** in the project editor to choose the project prompt, context, tools, skills, and subagents. Turning it off uses **Settings > Capabilities** and preserves your custom choices. These defaults are not master switches: customized projects can independently enable or disable capabilities. **Coding mode** separately changes the development workflow; it does not enable tools or increase access permissions.
+Enable **Customize capabilities** in the project editor to choose prompts, context, tools, skills, and subagents. Turning it off uses all enabled capabilities and retains custom choices. Settings manages source availability; there is no global default-capability page. Coding mode controls the development workflow without increasing access permissions.
 
-The default project only allows changes to its icon, color, tool access mode, model, and reasoning option. Its name, working directory, and other project settings use defaults, and capabilities follow global settings. Create a regular project to customize folders, prompts, or capabilities.
+The default project only allows changes to its icon, color, tool access mode, model, and reasoning option. Its name, working directory, and other project settings use defaults, and all enabled capabilities apply. Create a regular project to customize folders, prompts, or capabilities.
 
-- File read, File write, Memory, and Custom tools expand into individual choices. Use each group switch to select or clear all items. Saved selections that are deleted or unavailable can still be deselected.
+- File read, File write, and Memory expand into individual choices. Use each group switch to select or clear all items. Saved selections that are deleted or unavailable can still be deselected.
 - Every tool listed below requires a model that supports tool use with **Tool use** enabled. Context-only capabilities do not require tool use. Using a skill also requires tools for reading its instructions and performing its task.
 - Capabilities select available tools; the conversation's access mode determines when an operation needs approval. Disabling File read, File write, or Network access removes those specific tools. Commands and MCP tools may still provide similar operations.
 - Changes apply to tasks started afterward. Running tasks and tasks awaiting recovery retain their original selection.
 
-The bulk actions at the top differ from individual switches:
+Each MCP server and plugin, plus Subagents, Skills, and Custom tools, uses **All / Custom / Off**. All includes current and future available entries. Custom includes only explicit choices and starts collapsed. Off hides the list and retains those choices. Newly added MCP servers and plugins start off in customized projects. Disabling a whole source does not lock customization: known entries remain editable but inactive. If the complete MCP catalog is unavailable, saved tools can still be deselected.
 
-- **Enable all** enables built-in capabilities and current custom tools, sets MCP to All tools, and switches Skills and Subagents to Default. In project or default capability settings, it also clears Limit subagent capabilities. It does not start globally disabled MCP servers.
-- **Disable all** turns capabilities off and clears built-in, custom, and MCP tool selections. Custom skill and subagent lists are retained.
+Skills follow global shortcut/model availability: a globally disabled use cannot be newly selected and shows no notice while unselected. Saved selections remain checked with a warning about the conflict and can be cleared. Selecting that use again requires enabling it globally. Project-local skills are independent of these global restrictions.
+
+- **Enable all** enables built-in capabilities, sets current MCP servers, plugins and the other groups to All, and clears the project capability limit. Global availability still applies.
+- **Disable all** turns capabilities off while retaining custom MCP, plugin, tool, skill and subagent selections.
 
 In **Settings > Tools**, select Built-in tools or MCP to view tools grouped by capability or server. Below the divider, browse custom tool sources and package files. Select a built-in or MCP tool name to inspect its parameters and full description.
 
@@ -163,7 +165,7 @@ Provides your configured programs or scripts as tools for the model. Prepare the
 
 ### MCP
 
-For each server, select **All tools** or choose specific tools. All tools follows the server's current and future tool list. With it off, only explicitly selected tools are allowed. Selecting every current tool individually still excludes tools added later. Switching modes preserves the previous specific selection.
+Each MCP server uses **All / Custom / Off**. All includes newly added tools; Custom only includes checked tools. Switching modes retains custom choices.
 
 The server must be enabled in **Settings > MCP** and connected successfully. Selecting it in a project does not start a globally disabled server. Tool functions, parameters, required software, and accounts depend on the server. They do not require similarly named built-in file or network capabilities. Saved selections remain removable when unavailable.
 
@@ -178,9 +180,9 @@ Delegates independent tasks to other Agents for parallel investigation and divis
 | `wait_subagent` | Wait for progress, completion, or a request for approval. |
 | `cancel_subagent` | Cancel a specified subtask. |
 
-Configure subagents in **Settings > Subagents**. Default, project, and subagent capability editors share **Default / Custom / Off**. Default selects globally default-enabled entries. Custom shows the list and may include entries that are off by default; an empty list prevents launches. Off hides the list and disables the capability while retaining custom choices. It does not require **Background tools**.
+Configure and enable subagents in **Settings > Subagents**. Projects and subagents use **All / Custom / Off**: All includes enabled, complete definitions; Custom includes only checked available definitions. An empty list prevents launches. Custom starts collapsed and shows entries directly when expanded, without a search field. Globally disabled definitions cannot be enabled locally. This capability does not require Background tools.
 
-Subagents keep their own capability settings rather than inheriting Settings > Capabilities. Subagents may delegate further, but their choices cannot exceed the original project's allowed set. **Limit subagent capabilities** separately constrains context, tools, and skills at every level: when selected, only capabilities allowed by both the project and the subagent remain available. Otherwise, the subagent uses its own configuration. It receives the delegated task, not the complete parent conversation automatically.
+Subagents use their own capability settings. Further delegation cannot exceed the original project’s allowed set. **Limit subagent capabilities** separately constrains context, tools, and skills at every level to the intersection of project and subagent choices. Otherwise each subagent uses its own configuration. It receives the delegated task, not the complete parent conversation automatically.
 
 Choose a model and parameter preset beside **Identifier**. **Follow parent Agent** uses the nearest ancestor's selected model and preset. An explicit selection applies to newly created subtasks; clear it to restore inheritance. Editing a subagent definition does not change existing subtasks' model bindings. Missing models or presets produce an error rather than switching to another model.
 
@@ -188,9 +190,9 @@ Choose a model and parameter preset beside **Identifier**. **Follow parent Agent
 
 Supplies the names, purposes, and instruction paths of available skills, or lets you invoke them with `/name`. Skills are instructions, not separate callable tools, and do not grant file, command, or network capabilities.
 
-Skills use **Default / Custom / Off**. Only Custom shows the entry list. Off disables skills while retaining individual choices, which are restored when you return to Custom.
+Skills use **All / Custom / Off**. Custom starts collapsed and has no search field. All and Off retain custom choices. Plugin skills are selected under their plugin and are independent of the ordinary Skills group.
 
-**Default** follows global availability. Custom mode independently selects user shortcuts and model availability, including skills off by default. Subagents configure model availability only.
+Settings lists **Shortcut**, **Available to model**, then **Auto-approve scripts**. The first two match the project's **Shortcut** and **Model** options and also apply to plugin skills. Projects and subagents cannot enable a globally disabled use. Subagents configure model availability only. Project skills in `.agents/skills/` are independent of these global switches and are selected within the project.
 
 Explicit invocation sends the unchanged skill file and its source path, keeping the user request separate; expand the skill entry to inspect the submitted text. Autonomous loading and reading supporting files require `read_file`, `read_multiple_files`, or **Command execution** capable of reading files. Scripts also need their command interpreter, runtime, tools, and accounts. Selecting a skill does not satisfy those dependencies automatically. Manage global sources and availability in **Settings > Skills**; put project skills in `.agents/skills/` under source folders. See the [Skills Guide](./AGENT_SKILLS.en.md) for importing, name conflicts, and authoring, and each skill's `SETUP.md`, if supplied, for installation requirements.
 
@@ -228,7 +230,7 @@ Edit the application `.env` in Settings > Environment to prepare variables for c
 
 ## Manage Custom Tools
 
-The bundled `tool-manager` Skill guides the model through creating, modifying, and troubleshooting custom tools, with a format reference and a Python example template. Enable the Skill and the required file capabilities, then ask the model to create a custom tool for the current project. Script testing also requires command execution and the appropriate runtime. Select the generated tool in capability settings before using it in a subsequent run.
+The bundled `tool-manager` Skill guides the model through creating, modifying, and troubleshooting custom tools, with a format reference and a Python example template. Enable the Skill and the required file capabilities, then ask the model to create a custom tool for the current project. Script testing also requires command execution and the appropriate runtime. All mode loads the generated tool on subsequent runs; Custom mode requires selecting it first.
 
 In **Settings > Tools**, Built-in tools and MCP appear above a divider. Below it, the custom-tool tree lists all packages, system and user sources, and added directories. Select a group name to list its tools on the right; use the boxed arrow to expand or collapse it. Select a tool from the list to view its details. Click a detail title to locate its directory, or expand packages to browse and preview files. User and added-directory tools support creation, editing by double-click, deletion, and ordering; deletion moves the entire tool package to the trash.
 
@@ -242,7 +244,7 @@ The **+** create and **Import tools** buttons appear in the right pane header wh
 
 Click a package-local script path in the command to locate it in the file list. If missing, confirm to create an empty file and its parent directories. System tools are read-only; existing files are never overwritten.
 
-After adding or importing a tool, select it under **Custom tools** in default, project, or subagent capabilities. Subagents use independent selections, may enable **Use current project tools**, and follow project limits. For duplicate names, the first valid, enabled entry wins: project source folders in order, then user tools, external directories in order, and system tools.
+Enable or disable a tool in its details. Under **Custom tools** in project and subagent capabilities, **All** includes new tools automatically, **Custom** requires explicit selection, with entries grouped by source and multiple tools per row when space allows, wrapping to fit the available width. **Off** disables the group while retaining choices. Subagents use independent selections, may enable **Use current project tools**, and follow project limits. For duplicate names, the first valid, enabled entry wins: project source folders in order, then user tools, external directories in order, and system tools.
 
 Commands run in the tool directory, where relative paths resolve, for example `scripts/run.py {{args}}`. A `.py` entry automatically selects an available Python 3; an explicit interpreter is also supported. A standalone `{{args}}` receives complete JSON; `{{tool_dir}}` supplies the absolute tool directory. A command starts one program with fixed arguments, without pipelines or redirection. Standard output is returned to the model; pass large inputs through files.
 
@@ -288,13 +290,21 @@ Preview request in the project editor shows the context and tools that would be 
 
 ## Plugins
 
+The overview in **Settings → Plugins** groups instructions, skills, and tools. Hover over a name for its description, or click to inspect and copy read-only details. Skills show the name from `SKILL.md`; tools show their actual model-facing names and full parameters. Instructions and skills support rendered and source views. Previews work while a plugin is disabled or stopped and never start its backend.
+
+Settings → Tools → Plugins lists tools grouped by plugin, with model definitions available to view and copy. Disabled plugins remain inspectable; browsing the catalog does not start plugin backends.
+
+Select plugin tools, skills and prompts together under each plugin in project and subagent capabilities with **All / Custom / Off**. All includes new contributions; Custom uses only explicit choices; Off retains those choices. Uncustomized projects use available contributions from enabled plugins, while new plugins start off in customized projects. Skills settings controls the global shortcut/model availability ceiling. The ordinary Skills group does not control plugin skills. Missing tool dependencies are shown without automatically selecting them. Plugin management controls installation, overall availability, plugin preferences, and content previews, without duplicating capability switches.
+
+Plugin tools selected for a project or subagent run without opening plugin pages, with text, JSON, or image results handled like other tool results. Disabled plugins cannot run tools. After an update, current tool definitions are used without requiring a new conversation solely because the version changed. Cancellation or timeout asks the backend to stop that call without terminating the entire backend. Sending cancellation does not confirm that the operation has stopped; the backend's response determines the outcome.
+
 Anas 3.3.8 requires plugin API 2. Update older plugins before use; use RDP plugin 0.1.7 or later.
 
-In **Settings > Plugins**, click **Install plugin** and select a ZIP file or `PLUGIN.json` in a prebuilt plugin folder. ZIPs are extracted automatically; the manifest must be at the archive root or inside its sole top-level folder. Selecting `PLUGIN.json` installs its entire folder. Open a plugin in the right workspace or a separate window, or launch it from the chat toolbar's plugin menu. UI-only plugins create no backend process. An optional backend starts on its first call and can be stopped in settings.
+In **Settings > Plugins**, click **Install plugin**. The file picker defaults to ZIP files; switch to the plugin manifest filter to select `PLUGIN.json` in a prebuilt plugin folder. ZIPs are extracted automatically; the manifest must be at the archive root or inside its sole top-level folder. Selecting `PLUGIN.json` installs its entire folder. The chat toolbar's plugin menu only lists enabled plugins with a home page and is hidden when none are available. The home page location determines whether a plugin opens in the right workspace or a separate window. Manage plugins without a home page in settings; their tools, skills, and instructions follow capability selections and need no manual launch. UI-only plugins create no backend process. An optional backend starts automatically on its first call and can also be started or stopped in settings.
 
 If the same plugin ID is already installed, Anas shows the installed and incoming versions and asks before replacing it. Confirmation closes its pages and backend, preserves its enabled state, and replaces the package. **Delete plugin data** is unchecked by default, retaining configuration, credentials, and other saved data; selecting it clears that plugin's data. Canceling leaves the current plugin untouched. If installation fails, Anas attempts to restore the old package and data; if restoration fails, it preserves the files and reports their location.
 
-Hiding a panel, switching conversations, or opening settings preserves its page state. Closing a tab destroys that page. On Windows/Linux, closing the main window quits the application and closes independent panels and plugin backends. On macOS, closing the main window only hides it; use Quit to exit the application. Use **Move to window** in the tab context menu and **Move to side panel** in the window title bar to change location. The plugin saves its UI state and restores it in the destination page while backend connections continue running. If the handoff fails, the original page remains available. Each plugin has at most one home page. Opening it again shows and focuses its current sidebar or window. Other business pages share saved data and the backend while retaining their own page state. Reloading a window releases its pages; backend resources remain managed by the plugin, which determines what can be restored when reopened. Select an enabled plugin in Settings → Plugins to change the location used when a new home page is created after the previous one closes; plugins with a fixed location cannot switch. Disabling or uninstalling closes its pages and backend. Uninstalling retains saved data by default for a later installation with the same ID. Select Delete plugin data to also remove its configuration, credentials and other data; existing backups are unaffected.
+Hiding a panel, switching conversations, or opening settings preserves its page state. Closing a tab destroys that page. On Windows/Linux, closing the main window quits the application and closes independent panels and plugin backends. On macOS, closing the main window only hides it; use Quit to exit the application. Use **Move to window** in the tab context menu and **Move to side panel** in the window title bar to change location. The plugin saves its UI state and restores it in the destination page while backend connections continue running. If the handoff fails, the original page remains available. Each plugin has at most one home page. Opening it again shows and focuses its current sidebar or window. Other business pages share saved data and the backend while retaining their own page state. Reloading a window releases its pages; backend resources remain managed by the plugin, which determines what can be restored when reopened. Select a plugin in Settings → Plugins to change its home page location, even while disabled. The choice applies when a new home page is created after the previous one closes; plugins with a fixed location cannot switch. Disabling or uninstalling closes its pages and backend. Uninstalling retains saved data by default for a later installation with the same ID. Select Delete plugin data to also remove its configuration, credentials and other data; existing backups are unaffected.
 
 Application backups include plugins and their data. Backups stop plugin backends first; restoring does not restart them automatically. A plugin backend has your operating system user's permissions, so install plugins you choose to trust. Plugin errors appear individually in settings and do not require resetting application configuration.
 

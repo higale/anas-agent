@@ -34,6 +34,28 @@ afterEach(() => {
 })
 
 describe('ManagedCallService', () => {
+  it('keeps the confirmed remote result when a cancellation races with completion', async () => {
+    vi.useFakeTimers()
+    const database = AgentDatabase.open(':memory:')
+    const service = new ManagedCallService(database)
+    const { thread, run } = createRun(database, 'confirmed-after-cancel')
+    try {
+      const started = service.start({ kind: 'custom', threadId: thread.id, runId: run.id, summary: 'complete remotely',
+        uncertainWhenCancelledAfterDispatch: true,
+        execute: control => new Promise(resolve => {
+          control.markRunning()
+          control.signal.addEventListener('abort', () => {
+            control.setOutcome({ ok: true, remote_result_confirmed: true })
+            resolve('The operation completed.')
+          }, { once: true })
+        }) })
+      await vi.advanceTimersByTimeAsync(10_000)
+      const handle = JSON.parse(await started)
+      await service.cancel(handle.call_id, thread.id)
+      expect(database.getManagedCall(handle.call_id, thread.id)).toMatchObject({ status: 'completed', result: 'The operation completed.' })
+    } finally { await service.shutdown(); database.close() }
+  })
+
   it('cancels queued calls before execution and retains busy slots until real settlement', async () => {
     vi.useFakeTimers()
     const database = AgentDatabase.open(':memory:'), service = new ManagedCallService(database)

@@ -22,3 +22,21 @@ it('shows accessible status and action labels and disables actions during execut
   rerender(<PanelToolbar view={{ ...view, toolbar: undefined }} onAction={onAction} />)
   expect(screen.queryByRole('button')).not.toBeInTheDocument()
 })
+
+it('renders optional toggle state and keeps ordinary actions as buttons', () => {
+  const view: PanelState = { viewId: 'lock', name: 'Desktop', content: { kind: 'plugin', pluginId: 'example', instanceId: 'desktop' },
+    location: 'window', locations: ['sidebar', 'window'] }
+  const onAction = vi.fn()
+  const toolbar = (pressed: boolean) => requirePanelToolbar({ actions: [
+    { id: 'lock', icon: pressed ? 'lock' : 'lock-open', label: 'Local input', pressed },
+    { id: 'stop', icon: 'unplug', label: 'Disconnect' }
+  ] })
+  const { rerender } = render(<PanelToolbar view={{ ...view, toolbar: toolbar(false) }} onAction={onAction} />)
+  const button = screen.getByRole('button', { name: 'Local input', pressed: false })
+  fireEvent.click(button)
+  expect(onAction).toHaveBeenCalledWith('lock')
+  rerender(<PanelToolbar view={{ ...view, toolbar: toolbar(true) }} onAction={onAction} />)
+  expect(screen.getByRole('button', { name: 'Local input', pressed: true })).toBeEnabled()
+  expect(screen.getByRole('button', { name: 'Disconnect' })).not.toHaveAttribute('aria-pressed')
+  expect(() => requirePanelToolbar({ actions: [{ id: 'lock', icon: 'lock', label: 'Lock', pressed: 'false' }] })).toThrow()
+})

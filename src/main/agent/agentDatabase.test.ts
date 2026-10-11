@@ -539,6 +539,37 @@ describe('AgentDatabase', () => {
     }
   })
 
+  it('preserves completed tool timing when checkpoint history is reconciled repeatedly', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const database = AgentDatabase.open(':memory:')
+    try {
+      vi.setSystemTime(new Date('2026-10-11T08:50:58.000Z'))
+      const thread = database.createThread()
+      const run = database.createRun(thread.id, 'timed-input-run')
+      const call = { id: 'input-call', name: 'plugin__rdp__input', args: { actions: [{ type: 'press', key: 'PAGE_DOWN' }] } }
+      const started = database.recordToolActivity(run.id, call, 'running')
+      vi.setSystemTime(new Date('2026-10-11T08:50:58.140Z'))
+      const completed = database.recordToolActivity(run.id, call, 'completed', undefined, 'RDP_INVALID_INPUT')
+      expect(completed.completedAt).toBe('2026-10-11T08:50:58.140Z')
+      const messages = [
+        new AIMessage({ id: 'timed-answer', content: '', tool_calls: [call], additional_kwargs: { anas_run_id: run.id } }),
+        new ToolMessage({ id: 'timed-result', tool_call_id: call.id, content: 'RDP_INVALID_INPUT', status: 'error', additional_kwargs: { anas_run_id: run.id } })
+      ]
+      await putRootCheckpoint(database, thread.id, 'timed-checkpoint', { messages })
+      for (const seconds of [96, 120]) {
+        vi.setSystemTime(new Date(Date.parse(started.startedAt!) + seconds * 1000))
+        database.reconcileRootActivities(run.id, { models: [], tools: [{ call, output: 'RDP_INVALID_INPUT' }] })
+        expect(database.getRunActivity(run.id)?.tools[0]).toMatchObject({
+          startedAt: started.startedAt,
+          completedAt: completed.completedAt
+        })
+      }
+    } finally {
+      database.close()
+      vi.useRealTimers()
+    }
+  })
+
   it('does not invent completion for unfinished activities when a run fails', () => {
     const database = AgentDatabase.open(':memory:')
     try {

@@ -6,7 +6,7 @@ A skill provides instructions an Agent reads when needed, optionally with script
 
 ## Add And Manage Skills
 
-Use **Settings > Skills** to manage global sources and browse skill instructions and files. Select a group name to list its Skills on the right; use the boxed arrow to expand or collapse it. Group headings show `@alias`; external-directory names and aliases save on Enter or focus loss. Text and scripts support syntax highlighting and **Edit** with explicit saving; system Skill files remain read-only. Saving checks for external changes, and closing with unsaved edits asks before discarding. Click a source directory, Skill, or file title to locate it in your file manager. Skill locations are also clickable.
+Use **Settings > Skills** to manage global sources and browse skill instructions and files. Select a group name to list its Skills on the right; use the boxed arrow to expand or collapse it. Group headings show `@alias`; external-directory names and aliases save on Enter or focus loss. Text and scripts support syntax highlighting and **Edit** with explicit saving; system and plugin Skill files remain read-only. Saving checks for external changes, and closing with unsaved edits asks before discarding. Click a source directory, Skill, or file title to locate it in your file manager. Skill locations are also clickable.
 
 Markdown files open in rendered **Preview**, with a **Source** switch and collapsible metadata. Relative images load from the file's directory; same-page links jump to headings, and other local file links reveal their targets in your file manager.
 
@@ -18,16 +18,16 @@ Markdown files open in rendered **Preview**, with a **Source** switch and collap
 
 ## Choose Who Can Use Skills
 
-**Available to model** and **Available to user** control separate uses:
+Skill details show **Shortcut**, **Available to model**, then **Auto-approve scripts**. The first two control separate uses:
 
+- **Shortcut** allows explicit invocation with `/skill-name request` in the message input. Type `/` to see suggestions. Anas sends the complete, unchanged `SKILL.md` and its source path, with the text after the command as a separate user request; expand the skill entry in the conversation to inspect the actual submitted text.
 - **Available to model** supplies the Agent with the name, description, and absolute `SKILL.md` path so it can read the instructions when relevant.
-- **Available to user** allows explicit invocation with `/skill-name request` in the message input. Type `/` to see suggestions. Anas sends the complete, unchanged `SKILL.md` and its source path, with the text after the command as a separate user request; expand the skill entry in the conversation to inspect the actual submitted text.
 
-Global switches provide defaults. In a project's **Customize capabilities > Skills**, **Default** follows global settings; **Custom** selects each use independently, including enabling globally disabled skills. Selecting **Off** for Skills preserves selections but stops providing the skill catalog and shortcuts. Skills with loading errors remain unavailable.
+Global switches limit skill availability. In a project's **Customize capabilities > Skills**, **All** uses all globally available skills; **Custom** offers **Shortcut**, then **Model**, and cannot newly select a globally disabled use. Previously selected uses that become disabled show a warning and can be cleared; unselected disabled options show no notice. **Off** preserves selections but stops providing the skill catalog and shortcuts. Project-local skills are independent of the global switches; skills with loading errors remain unavailable. Plugin skills are selected under their own plugin group.
 
 Subagents configure model use only, may enable **Project skills**, and follow the project's **Limit subagent capabilities** setting. See [Subagents](./USER_GUIDE.en.md#subagents).
 
-Name conflicts are resolved separately for effective model and user selections: project source-folder order → User → external directory order → System. `/name` uses the preferred entry; `/name@alias` selects a source, for example `/name@user`. Edit external-source aliases on the Skills page.
+Name conflicts are resolved separately for effective shortcut and model selections: project source-folder order → User → external directory order → System → Plugins (sorted by plugin ID). `/name` uses the preferred entry; `/name@alias` selects a source, for example `/name@user` or `/proofread@plugin:writing-helper`. Edit external-source aliases on the Skills page.
 
 ## Script Auto-Approval
 

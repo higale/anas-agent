@@ -13,7 +13,7 @@ import capabilityDefaults from '../../data/config/capabilities.json'
 import { normalizeToolSettings } from '@shared/toolPackages'
 import toolsDefaults from '../../data/config/tools.json'
 import projectDefaultsDocument from '../../data/config/projects.json'
-import { parseCapabilities, parseDefaultCapabilitySettings, serializeCapabilities } from '@shared/agentCapabilities'
+import { parseCapabilities, serializeCapabilities } from '@shared/agentCapabilities'
 import { errorDetail, recoverableAuxiliaryFiles, resettableConfigFiles, type RecoveryFile, type RecoveryFileStatus, type RecoveryRepairResult } from '@shared/recovery'
 import { parseInputHistoryStore } from './inputHistoryStore'
 import { inspectAvatarRepair, repairAvatarData } from './recoveryAvatar'
@@ -30,7 +30,6 @@ type RecordValue = Record<string, unknown>
 const isObject = (value: unknown): value is RecordValue => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 const projectCapabilityDefaults = serializeCapabilities(parseCapabilities(capabilityDefaults))
 const templates: Record<string, unknown> = {
-  'capabilities.json': capabilityDefaults,
   'settings.json': settingsDefaults, 'models.json': modelDefaults, 'subagents.json': subagentDefaults,
   'mcp_servers.json': mcpDefaults, 'skills.json': skillsDefaults, 'tools.json': toolsDefaults
 }
@@ -122,11 +121,9 @@ class Repair {
 
 function validateConfig(file: string, value: RecordValue): void {
   requireDataVersion(value, 0, file)
-  if (file === 'capabilities.json') { parseDefaultCapabilitySettings(value); return }
   if (file === 'skills.json') { normalizeSkillsConfig(value); return }
   if (file === 'tools.json') { normalizeToolSettings(value); return }
   const raw: RawAppConfig = {
-    capabilities: capabilityDefaults,
     settings: structuredClone(settingsDefaults) as RawAppConfig['settings'], providers: [], subagents: structuredClone(subagentDefaults.subagents), mcp_servers: []
   }
   if (file === 'settings.json') {
@@ -183,9 +180,7 @@ export function repairDocument(file: string, input: unknown): { value: RecordVal
   } else {
     if (!templates[file]) throw new Error('Unsupported repair file.')
     repair.fill(value, templates[file] as RecordValue)
-    if (file === 'capabilities.json') {
-      repair.validated(value, capabilityDefaults, parseDefaultCapabilitySettings)
-    } else if (file === 'settings.json') {
+    if (file === 'settings.json') {
       for (const [key, choices] of Object.entries({ theme: ['system', 'light', 'dark'], chat_content_width: ['narrow', 'wide', 'adaptive'],
         diff_view_mode: ['inline', 'side_by_side'], new_thread_model_selection: ['default', 'prompt', 'current'], attachment_text_overflow: ['truncate', 'error'], log_level: ['trace', 'debug', 'info', 'warn', 'error', 'off'] })) {
         repair.choice(value, key, choices, (settingsDefaults as RecordValue)[key] as string, 'settings')
@@ -304,7 +299,6 @@ export async function inspectRecoveryRepair(dataDir: string): Promise<RecoveryRe
   if (['settings.json', 'models.json', 'subagents.json', 'mcp_servers.json', 'tools.json'].every((file) => documents.has(file))) {
     try {
       normalizeAppConfigSnapshot({
-        capabilities: documents.get('capabilities.json') ?? capabilityDefaults,
         settings: documents.get('settings.json') as RawAppConfig['settings'],
         providers: documents.get('models.json')!.providers as RawAppConfig['providers'],
         subagents: documents.get('subagents.json')!.subagents as RawAppConfig['subagents'],

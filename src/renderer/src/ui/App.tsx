@@ -12,7 +12,7 @@ import {
   type AgentThreadCleanupResult
 } from '@shared/agentTypes'
 import { applyModelParameterPreset, findProviderModelConfig, isSelectableModelConfig } from '@shared/modelConfig'
-import { defaultCapabilitySettings, effectiveProjectCapabilities, projectSkillSnapshot } from '@shared/agentCapabilities'
+import { defaultCapabilities, effectiveProjectCapabilities, projectSkillSnapshot, resolvePluginCapabilities } from '@shared/agentCapabilities'
 import { SIDEBAR_WIDTH_DEFAULT } from '@shared/uiPreferences'
 import { compareProjects, DEFAULT_WORKSPACE_PROJECT_ID, isDefaultWorkspaceProject, type AppBuildInfo, type AppConfigSnapshot, type LanguagePackSummary, type Project, type ProjectCreateRequest, type ProjectStateUpdate, type RuntimeToolStatus, type SidebarCollapsedSections, type SidebarSectionId } from '@shared/types'
 import { NoticeHost, notice } from './notice'
@@ -102,7 +102,6 @@ export function App() {
     saveLanguage,
     saveProfile,
     saveSettings,
-    saveDefaultCapabilities,
     saveSpeechReply,
     setSettingsOpen,
     setSettingsTab,
@@ -150,16 +149,11 @@ export function App() {
   } = agent
   const activeProjectId = agent.activeThread?.projectId ?? agent.draftProjectId
 
-  const openPlugin = (plugin: PluginSummary, location?: 'sidebar') => {
-    if (!plugin.manifest || !plugin.enabled || plugin.error) return
-    if (!plugin.manifest.ui) {
-      void window.gale.plugins.startBackend(plugin.id).catch(() => setAppError(t('plugins.operation_failed')))
-      return
-    }
-    void window.gale.plugins.invoke(plugin.id, location ? 'host.openView' : 'host.openHome',
-      location ? { instanceId: 'main', location } : undefined).catch(reason => {
-        if (!isPanelClosed(reason)) setAppError(t('panels.operation_failed'))
-      })
+  const openPlugin = (plugin: PluginSummary) => {
+    if (!plugin.manifest?.ui || !plugin.enabled || plugin.error) return
+    void window.gale.plugins.invoke(plugin.id, 'host.openHome').catch(reason => {
+      if (!isPanelClosed(reason)) setAppError(t('panels.operation_failed'))
+    })
   }
   const activeProject = projects.find((project) => project.id === activeProjectId)
   const draftProject = projects.find((project) => project.id === agentDraftProjectId)
@@ -282,7 +276,7 @@ export function App() {
     }
   }, [])
   useEffect(() => {
-    if (!settingsOpen || (settingsTab !== 'tools' && settingsTab !== 'subagents' && settingsTab !== 'capabilities')) return
+    if (!settingsOpen || (settingsTab !== 'tools' && settingsTab !== 'subagents')) return
     void window.gale.app.getRuntimeTools()
       .then((status) => {
         setRuntimeToolStatus(status)
@@ -626,7 +620,10 @@ export function App() {
     input,
     inputHistory,
     setInput,
-    skills: activeProject?.kind === 'workspace' ? projectSkillSnapshot(projectSkills, effectiveProjectCapabilities(activeProject, config?.defaultCapabilities ?? defaultCapabilitySettings).skills) : projectSkills,
+    skills: (() => {
+      const capabilities = resolvePluginCapabilities(activeProject?.kind === 'workspace' ? effectiveProjectCapabilities(activeProject) : defaultCapabilities, pluginRegistry.plugins)
+      return projectSkillSnapshot(projectSkills, capabilities.skills, capabilities.pluginTools)
+    })(),
     skillShortcutsEnabled: agentCapabilitiesEnabled,
     t
   })
@@ -827,6 +824,7 @@ export function App() {
             if (!invocation.handled) {
               throw new Error(t('settings.skill_not_found', { name }))
             }
+            if (invocation.errorCode === 'tools_unavailable') throw new Error(t('plugins.missing_tools_detail', { tools: invocation.missingTools?.join(', ') }))
             if (invocation.errorCode === 'user_unavailable') {
               throw new Error(t('chat.skill_user_unavailable', {
                 name: invocation.errorName ?? name
@@ -1062,6 +1060,10 @@ export function App() {
           slashSkill.args
         )
         if (invocation.handled) {
+          if (invocation.errorCode === 'tools_unavailable') {
+            agent.setThreadError(threadId, t('plugins.missing_tools_detail', { tools: invocation.missingTools?.join(', ') }))
+            return
+          }
           if (invocation.errorCode === 'user_unavailable') {
             agent.setThreadError(threadId, t('chat.skill_user_unavailable', { name: invocation.errorName ?? slashSkill.name }))
             return
@@ -1223,7 +1225,6 @@ export function App() {
           plugins={pluginRegistry.plugins}
           pluginError={pluginRegistry.error}
           onRefreshPlugins={pluginRegistry.refresh}
-          onOpenPlugin={plugin => openPlugin(plugin, 'sidebar')}
           onConfigChange={setConfig}
           activeTab={settingsTab}
           avatar={avatar}
@@ -1301,7 +1302,6 @@ export function App() {
           onSaveLanguage={saveLanguage}
           onSaveProfile={saveProfile}
           onSaveSettings={saveSettings}
-          onSaveDefaultCapabilities={saveDefaultCapabilities}
           onDeveloperHttpTraceEnabledChange={updateDeveloperHttpTraceEnabled}
           onSaveSpeechReply={saveSpeechReply}
           onMoveSkillDirectory={moveSkillDirectory}

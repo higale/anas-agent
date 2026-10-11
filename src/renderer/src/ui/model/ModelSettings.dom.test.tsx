@@ -1,4 +1,3 @@
-import { defaultCapabilitySettings } from '@shared/agentCapabilities'
 import { diffViewSettingsFixture } from '../../../../test/diffViewSettingsFixture'
 import { environmentContextFixture } from '../../../../test/environmentContextFixture'
 import { createRef } from 'react'
@@ -13,7 +12,6 @@ vi.mock('react-i18next', () => ({
 }))
 
 const emptyConfig = { customTools: [],
-  defaultCapabilities: structuredClone(defaultCapabilitySettings),
   providers: [],
   subagents: [],
   mcpServers: [],

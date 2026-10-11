@@ -2,7 +2,7 @@ import type { PackageFilePreview } from './packageFiles'
 import type { HelpDocumentId } from './helpDocuments'
 import type { ProjectOperationResult } from './projectOperation'
 import type { AgentAccessMode, AgentApi } from './agentTypes'
-import type { AgentCapabilities, DefaultCapabilitySettings } from './agentCapabilities'
+import type { AgentCapabilities } from './agentCapabilities'
 import type { ProjectIconColor, ProjectIconName } from './projectAppearance'
 
 export type { ProjectIconColor, ProjectIconName } from './projectAppearance'
@@ -619,7 +619,6 @@ export interface AppProfileUpdate {
 
 export interface AppConfigSnapshot {
   customTools: import('./toolPackages').ToolPackage[]
-  defaultCapabilities: DefaultCapabilitySettings
   providers: ModelProviderConfigDetail[]
   subagents: SubagentConfig[]
   mcpServers: McpServerConfigDetail[]
@@ -672,7 +671,7 @@ export interface MemorySaveRequest {
   importance: number
 }
 
-export type SkillRootKind = 'system' | 'user' | 'project' | 'external'
+export type SkillRootKind = 'system' | 'user' | 'project' | 'external' | 'plugin'
 
 export const SKILL_ROOT_DISPLAY_NAME_MAX_LENGTH = 80
 export const SKILL_SHORTCUT_ALIAS_MAX_LENGTH = 64
@@ -710,6 +709,7 @@ export interface SkillSummary {
   modelShadowedBy?: string
   userShadowedBy?: string
   loadError?: SkillLoadIssue
+  requiredTools?: string[]
 }
 
 export type SkillLoadIssueCode =
@@ -771,7 +771,7 @@ export type ToolImportResult =
   | { status: 'imported'; ids: string[]; names: string[]; config: AppConfigSnapshot }
   | { status: 'error'; error: import('./toolPackages').ToolImportError }
 
-export type SkillInvocationErrorCode = 'user_unavailable' | 'source_not_found' | 'source_skill_not_found'
+export type SkillInvocationErrorCode = 'user_unavailable' | 'source_not_found' | 'source_skill_not_found' | 'tools_unavailable'
 
 export interface SkillInvocationResult {
   handled: boolean
@@ -779,6 +779,7 @@ export interface SkillInvocationResult {
   displayText: string
   errorCode?: SkillInvocationErrorCode
   errorName?: string
+  missingTools?: string[]
 }
 
 export interface GaleApi {
@@ -817,7 +818,6 @@ export interface GaleApi {
     restoreSubagent(index: number): Promise<AppConfigSnapshot>
     getCachedModels(request: ModelListRequest): Promise<ModelListResponse | null>
     fetchModels(request: ModelListRequest): Promise<ModelListResponse>
-    saveDefaultCapabilities(value: DefaultCapabilitySettings): Promise<AppConfigSnapshot>
     updateSettings(settings: AppSettingsUpdate): Promise<AppConfigSnapshot>
     updateProfile(profile: AppProfileUpdate): Promise<AppConfigSnapshot>
     onChanged(listener: (config: AppConfigSnapshot) => void): () => void
@@ -834,6 +834,7 @@ export interface GaleApi {
     clear(): Promise<number>
   }
   tools: {
+    setEnabled(id: string, enabled: boolean): Promise<void>
     validateSchema(schema: unknown): Promise<void>
     get(projectId?: string, sourceFolders?: string[]): Promise<import('./toolPackages').ToolSnapshot>
     refresh(): Promise<AppConfigSnapshot>

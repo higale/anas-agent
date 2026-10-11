@@ -1,4 +1,6 @@
 import { matchLanguageCode } from './languages'
+import { parsePluginTools, pluginToolName, type PluginToolDefinition } from './pluginTools'
+import { parsePluginSettings, type PluginSetting } from './pluginSettings'
 
 export const PLUGIN_API_VERSION = 2
 export const PLUGIN_SCHEME = 'anas-plugin'
@@ -112,6 +114,36 @@ export interface PluginManifest {
   lang?: string
   home?: PluginHomePolicy
   icon?: PluginIcon
+  tools: PluginToolDefinition[]
+  skills?: PluginSkillDefinition[]
+  prompts?: PluginPromptDefinition[]
+  settings?: PluginSetting[]
+}
+
+export interface PluginSkillDefinition { id: string; path: string; tools: string[] }
+export interface PluginPromptDefinition extends PluginSkillDefinition {
+  description: string
+  scope: 'all' | 'main' | 'subagent'
+}
+
+function parseContributions(value: unknown, kind: 'skill' | 'prompt', toolIds: Set<string>): PluginSkillDefinition[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value) || value.length > 128) throw new Error(`Invalid plugin ${kind} declarations.`)
+  const items = value.map(raw => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || typeof raw.id !== 'string'
+      || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(raw.id) || raw.id.length > 64) throw new Error(`Invalid plugin ${kind} ID.`)
+    const path = requirePluginPath(raw.path)
+    if (kind === 'skill' ? !path.endsWith('/SKILL.md') : !path.endsWith('.md')) throw new Error(`Invalid plugin ${kind} path.`)
+    const dependencies = raw.tools ?? []
+    if (!Array.isArray(dependencies) || dependencies.some(id => !toolIds.has(id)) || new Set(dependencies).size !== dependencies.length) throw new Error(`Invalid plugin ${kind} tool dependencies.`)
+    const item = { id: raw.id, path, tools: dependencies }
+    if (kind === 'skill') return item
+    const scope = raw.scope ?? 'all'
+    if (!['all', 'main', 'subagent'].includes(scope) || typeof raw.description !== 'string' || !raw.description.trim() || raw.description.length > 1024) throw new Error('Invalid plugin prompt description or scope.')
+    return { ...item, description: raw.description.trim(), scope } as PluginPromptDefinition
+  })
+  if (new Set(items.map(item => item.id)).size !== items.length || new Set(items.map(item => item.path)).size !== items.length) throw new Error(`Duplicate plugin ${kind} declaration.`)
+  return items
 }
 
 export interface PluginSummary {
@@ -123,7 +155,12 @@ export interface PluginSummary {
   backendError?: string
   languages?: PluginLanguage[]
   languageErrors?: string[]
+  skillSummaries?: PluginSkillSummary[]
 }
+
+export interface PluginSkillSummary { id: string; name: string; description: string }
+export type PluginContributionKind = 'skill' | 'prompt'
+export interface PluginContributionPreview { content: string; resolvedPath: string }
 
 export interface PluginInstallPreview {
   token: string
@@ -135,6 +172,7 @@ export type PluginInstallResult = PluginSummary | { replacement: PluginInstallPr
 
 export interface PluginsApi {
   list(): Promise<PluginSummary[]>
+  readContribution(id: string, kind: PluginContributionKind, contributionId: string): Promise<PluginContributionPreview>
   install(): Promise<PluginInstallResult | null>
   confirmInstall(token: string, deleteData?: boolean): Promise<PluginSummary>
   cancelInstall(token: string): Promise<void>
@@ -173,7 +211,14 @@ export function parsePluginManifest(value: unknown): PluginManifest {
   if (raw.description !== undefined && (typeof raw.description !== 'string' || raw.description.length > 2000)) throw new Error('Invalid plugin description.')
   const ui = raw.ui === undefined ? undefined : requirePluginPath(raw.ui)
   const backend = raw.backend === undefined ? undefined : requirePluginPath(raw.backend)
-  if (!ui && !backend) throw new Error('A plugin must provide a UI or backend entry.')
+  const tools = parsePluginTools(raw.tools, Boolean(backend))
+  if (tools.some(tool => pluginToolName(id, tool.id).length > 64)) {
+    throw new Error('Plugin model tool names must be at most 64 characters. Shorten the plugin ID or tool ID.')
+  }
+  const toolIds = new Set(tools.map(tool => tool.id))
+  const skills = parseContributions(raw.skills, 'skill', toolIds)
+  const prompts = parseContributions(raw.prompts, 'prompt', toolIds) as PluginPromptDefinition[]
+  if (!ui && !backend && !skills.length && !prompts.length) throw new Error('A plugin must provide an entry, skill or prompt.')
   if (ui && !/\.html$/i.test(ui)) throw new Error('Plugin UI entry must be HTML.')
   if (backend && !backend.endsWith('.cjs')) throw new Error('Plugin backend entry must be .cjs.')
   const platforms = raw.platforms
@@ -182,7 +227,9 @@ export function parsePluginManifest(value: unknown): PluginManifest {
   return { id, name: raw.name.trim(), pluginVersion: raw.plugin_version, apiVersion: raw.api_version,
     description: raw.description as string ?? '', ui, backend, platforms: platforms as string[] | undefined,
     lang: raw.lang === undefined ? undefined : requirePluginPath(raw.lang), home: parsePluginHome(raw.home),
-    icon: raw.icon === undefined ? undefined : requirePluginIcon(raw.icon) }
+    icon: raw.icon === undefined ? undefined : requirePluginIcon(raw.icon),
+    tools, ...(skills.length ? { skills } : {}), ...(prompts.length ? { prompts } : {}),
+    ...(raw.settings === undefined ? {} : { settings: parsePluginSettings(raw.settings) }) }
 }
 
 export function pluginPageUrl(manifest: PluginManifest, instanceId?: string): string {

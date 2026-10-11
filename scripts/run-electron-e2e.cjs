@@ -1,3 +1,4 @@
+const { verifyPluginTools } = require('./electron-plugin-tools.cjs')
 const { verifyUnifiedPanels } = require('./electron-panels.cjs')
 const assert = require('node:assert/strict')
 const { execFile } = require('node:child_process')
@@ -20,7 +21,7 @@ const { verifyProjectModelPicker } = require('./electron-project-model-picker.cj
 const { verifyHelpDocuments } = require('./electron-help-documents.cjs')
 const { verifyWorkspaceTabs } = require('./electron-workspace-tabs.cjs')
 const { verifyMainWindowLifecycle } = require('./electron-main-window-lifecycle.cjs')
-const { verifyDefaultCapabilities } = require('./electron-default-capabilities.cjs')
+const { verifyCapabilities } = require('./electron-capabilities.cjs')
 const { verifyGlobalSettings } = require('./electron-global-settings.cjs')
 const { verifyControlLayout } = require('./electron-control-layout.cjs')
 const { verifySkillApproval } = require('./electron-skill-approval.cjs')
@@ -1105,6 +1106,10 @@ async function main() {
     await verifyAttachmentPreviews(launchApplication)
     return
   }
+  if (process.argv.includes('--plugin-tools-only')) {
+    await verifyPluginTools(launchApplication)
+    return
+  }
   if (process.argv.includes('--model-selection-only')) {
     await verifyModelSelection(launchApplication)
     return
@@ -1118,7 +1123,7 @@ async function main() {
     return
   }
   if (process.argv.includes('--capabilities-only')) {
-    await verifyDefaultCapabilities(launchApplication)
+    await verifyCapabilities(launchApplication)
     return
   }
   if (process.argv.includes('--project-model-picker-only')) {
@@ -1174,7 +1179,7 @@ async function main() {
   if (!process.argv.includes('--changes-only') && !process.argv.includes('--workspace-only')) {
     await verifyCurrentData(launchApplication)
     await verifySpeechReply(launchApplication)
-    await verifyDefaultCapabilities(launchApplication)
+    await verifyCapabilities(launchApplication)
     await verifyGlobalSettings(launchApplication)
     await verifyControlLayout(launchApplication)
     await verifyCustomTools(launchApplication)

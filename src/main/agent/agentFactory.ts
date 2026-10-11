@@ -1,9 +1,12 @@
+import { resolvePluginTools, buildPluginPrompts, pluginRuntime } from '../plugins/pluginRuntime'
+import { createPluginTools } from './pluginToolRuntime'
 import { listToolSnapshot } from '../toolsStore'
 import { resolveToolSelection } from '@shared/toolPackages'
 import { createCustomTools } from './customToolRuntime'
 import { defaultSubagentSelection, selectedSubagents } from '@shared/subagentSelection'
 import { mkdir } from 'node:fs/promises'
 import { currentToolExecution } from './toolExecutionContext'
+import { withPluginToolResources } from './pluginPackageResources'
 import { withManagedToolExecution } from './managedToolExecution'
 import { basename } from 'node:path'
 import { AIMessage, BaseMessage, HumanMessage, SystemMessage } from '@langchain/core/messages'
@@ -28,7 +31,7 @@ import type { AgentContextStatus } from '@shared/agentTypes'
 import { contextCompressionTriggerTokens, projectRuleInputBudget } from '@shared/contextWindow'
 import { modelContextKey } from '@shared/modelConfig'
 import { builtinToolCatalog, enabledBuiltinFileToolNames, sortToolDefinitions } from '@shared/toolRegistry'
-import { assertResolvedCapabilities, capabilityFeatures, defaultCapabilities, effectiveProjectCapabilities, effectiveProjectCapabilitySettings, intersectCapabilities, mcpToolAllowed, resolveSkillSelection, toolAllowed, type AgentCapabilities, type ResolvedAgentCapabilities, type RunConfiguration } from '@shared/agentCapabilities'
+import { assertResolvedCapabilities, capabilityFeatures, defaultCapabilities, effectiveProjectCapabilities, effectiveProjectCapabilitySettings, intersectCapabilities, mcpToolAllowed, resolvePluginCapabilities, resolveSkillSelection, toolAllowed, type AgentCapabilities, type ResolvedAgentCapabilities, type RunConfiguration } from '@shared/agentCapabilities'
 import { processEnvironment } from '../config/apiKeys'
 import { DEFAULT_WORKSPACE_PROJECT_ID, type AppConfigSnapshot, type AppSettings, type Project, type ResolvedModelConfig, type WorkspaceProject } from '@shared/types'
 import { commandShellCapabilityId, commandShellToolName, isCommandShellMetadata } from '@shared/commandShell'
@@ -360,14 +363,15 @@ export async function prepareAgentSystemPrompt(
   capabilities?: AgentCapabilities,
   codingMode?: boolean,
   toolsEnabled = true,
-  projectDraft?: Project
+  projectDraft?: Project,
+  agent: 'main' | 'subagent' = 'main'
 ): Promise<{
   workspace: WorkspaceContext
   systemPrompt: ReturnType<typeof buildAgentSystemPrompt>
   simpleChatPrompt?: string
 }> {
   const project = projectDraft ?? await getProject(thread.projectId)
-  const effective = capabilities ?? (project.kind === 'workspace' ? effectiveProjectCapabilities(project, config.defaultCapabilities) : defaultCapabilities)
+  const effective = capabilities ?? resolvePluginCapabilities(project.kind === 'workspace' ? effectiveProjectCapabilities(project) : defaultCapabilities, await pluginRuntime().store.list(), agent === 'subagent')
   const features = capabilityFeatures(effective)
   if (project.kind === 'simple_chat') {
     const defaultWorkspace = await getProject(DEFAULT_WORKSPACE_PROJECT_ID)
@@ -386,12 +390,13 @@ export async function prepareAgentSystemPrompt(
   }
   if (project.sourceFolders.length === 0) throw new Error(`Project ${project.id} has no source folders.`)
   const workspace = workspaceContext(project)
-  const [memory, skills, commandShell] = await Promise.all([
+  const [memory, skills, commandShell, pluginPrompts] = await Promise.all([
     memoryPrompt(features.memory),
-    features.skills ? buildSkillsPrompt(project.id, effective.skills, project.sourceFolders) : Promise.resolve(''),
+    features.skills ? buildSkillsPrompt(project.id, effective.skills, project.sourceFolders, effective.pluginTools) : Promise.resolve(''),
     shouldIncludeCommandShell(process.platform, config.settings, features)
       ? getCommandShell().then(describeCommandShell)
-      : Promise.resolve(undefined)
+      : Promise.resolve(undefined),
+    toolsEnabled ? buildPluginPrompts(effective.pluginPrompts, effective.pluginTools, agent) : Promise.resolve('')
   ])
   return {
     workspace,
@@ -399,6 +404,7 @@ export async function prepareAgentSystemPrompt(
       workspace: features.workspaceContext ? workspace.description : '',
       memory,
       skills,
+      pluginPrompts,
       projectPrompt: project.advancedSettings ? project.prompt : '',
       codingMode: codingMode ?? project.codingMode,
       toolsEnabled,
@@ -492,17 +498,17 @@ async function prepareAgentInstanceFromConfig(
   let runConfiguration = context.configuration
   if (!runConfiguration) {
     const project = options.project ?? await getProject(thread.projectId)
-    const projectPolicy = project.kind === 'workspace' ? effectiveProjectCapabilitySettings(project, config.defaultCapabilities) : undefined
-    const ownCapabilities = activeSubagent?.capabilities ?? projectPolicy?.capabilities ?? defaultCapabilities
+    const projectPolicy = project.kind === 'workspace' ? effectiveProjectCapabilitySettings(project) : undefined
+    const ownCapabilities = resolvePluginCapabilities(activeSubagent ? activeSubagent.capabilities : projectPolicy?.capabilities ?? defaultCapabilities, await pluginRuntime().store.list(), Boolean(activeSubagent))
     const parentLimit = activeSubagent ? context.parentConfiguration?.subagentLimit : undefined
-    const catalog = project.kind === 'workspace' && ownCapabilities.skills.mode !== 'off' && (!parentLimit || parentLimit.skills.mode !== 'off')
+    const catalog = project.kind === 'workspace' && capabilityFeatures(ownCapabilities).skills && (!parentLimit || capabilityFeatures(parentLimit).skills)
       ? await listSkillSnapshot(thread.projectId, project.sourceFolders)
       : { skills: [] }
     const toolCatalog = project.kind === 'workspace' ? await listToolSnapshot(project.sourceFolders) : { tools: [] }
-    const resolve = (value: AgentCapabilities): ResolvedAgentCapabilities => ({ ...value,
+    const resolve = (value: AgentCapabilities): ResolvedAgentCapabilities => ({ ...value, pluginMode: 'custom',
       subagents: { mode: value.subagents.mode === 'off' ? 'off' : 'custom', names: selectedSubagents(config.subagents, value.subagents).map((subagent) => subagent.name) },
       customTools: resolveToolSelection(value.customTools, toolCatalog.tools.filter(tool => !tool.definition?.interactive || value.backgroundTools), Boolean(activeSubagent), false),
-      skills: resolveSkillSelection(value.skills, catalog.skills, true, Boolean(activeSubagent)) })
+      skills: resolveSkillSelection(value.skills, catalog.skills, true, Boolean(activeSubagent), value.pluginTools) })
     let capabilities = resolve(ownCapabilities)
     if (activeSubagent && parentLimit) {
       assertResolvedCapabilities(parentLimit)
@@ -536,7 +542,7 @@ async function prepareAgentInstanceFromConfig(
   const capabilities = runConfiguration.capabilities
   const features = capabilityFeatures(capabilities)
   const { workspace, systemPrompt: rootSystemPrompt, simpleChatPrompt } = await prepareAgentSystemPrompt(
-    thread, config, capabilities, !activeSubagent && runConfiguration.codingMode, true, options.project
+    thread, config, capabilities, !activeSubagent && runConfiguration.codingMode, true, options.project, activeSubagent ? 'subagent' : 'main'
   )
   const simpleChat = simpleChatPrompt !== undefined
   const toolsEnabled = !simpleChat
@@ -582,7 +588,7 @@ async function prepareAgentInstanceFromConfig(
     shell: commandShell, env: shellEnvironment.env, rgExecutable: shellEnvironment.executable,
     primaryFolder: workspace.primaryFolder, trustedFolders: workspace.trustedFolders,
     skills: { projectId: thread.projectId, sourceFolders: options.project?.kind === 'workspace' ? options.project.sourceFolders : undefined,
-      selection: capabilities.skills, allowUserInvocation: !activeSubagent },
+      selection: capabilities.skills, allowUserInvocation: !activeSubagent, pluginTools: capabilities.pluginTools },
     accessMode: createAgentAccessModeResolver(database, thread.id, context.subagentCall), signal: context.signal
   }) : undefined
   const activeToolNames = capabilities.toolMode !== 'all'
@@ -690,6 +696,7 @@ async function prepareAgentInstanceFromConfig(
       })
     : []
   const manage = (tool: StructuredToolInterface) => withManagedToolExecution(tool, {
+    withResources: (args, operation) => withPluginToolResources(tool, args, workspace.primaryFolder, operation),
     database,
     service: context.managedCalls,
     threadId: thread.id,
@@ -702,6 +709,11 @@ async function prepareAgentInstanceFromConfig(
     backgroundTools: capabilities.backgroundTools,
     signal: context.signal, preview: !options.persistCheckpoints
   }) : []
+  const pluginDefinitions = toolsEnabled ? await resolvePluginTools(capabilities.pluginTools) : []
+  const pluginTools = toolsEnabled ? createPluginTools(pluginDefinitions, {
+    preview: !options.persistCheckpoints
+  }) : []
+  const managedPluginTools = pluginTools.map(manage)
   const managedCustomTools = customTools.map(manage)
   const managedRuntimeTools = runtimeTools.map(manage)
   const managedFileTools = fileTools.map(manage)
@@ -712,11 +724,12 @@ async function prepareAgentInstanceFromConfig(
   const availableToolNames = [
     ...runtimeTools.map((tool) => tool.name),
     ...customTools.map((tool) => tool.name),
+    ...pluginTools.map(tool => tool.name),
     ...fileTools.map((tool) => tool.name),
     ...subagentTools.map((tool) => tool.name)
   ]
-  const extensionToolOrder = [...customTools, ...activeMcpTools].map((tool) => tool.name)
-  const allTools = sortToolDefinitions([...managedRuntimeTools, ...managedFileTools, ...subagentTools, ...managedCustomTools], toolOrderId, extensionToolOrder)
+  const extensionToolOrder = [...customTools, ...pluginTools, ...activeMcpTools].map((tool) => tool.name)
+  const allTools = sortToolDefinitions([...managedRuntimeTools, ...managedFileTools, ...subagentTools, ...managedCustomTools, ...managedPluginTools], toolOrderId, extensionToolOrder)
   const todoMiddleware = createPlanningMiddleware(toolsEnabled && features.planning)
   const requestSystemPrompt = (model: ResolvedModelConfig): AgentSystemPrompt => {
     const provider = model.protocol === 'anthropic_messages' ? 'anthropic' : 'openai'
@@ -950,7 +963,7 @@ async function prepareAgentInstanceFromConfig(
       name: 'anas',
       model: requestChatModel(initialModel),
       ...(reviewFormat ? { responseFormat: reviewFormat } : {}),
-      tools: [...managedRuntimeTools, ...managedCustomTools, ...subagentTools],
+      tools: [...managedRuntimeTools, ...managedCustomTools, ...managedPluginTools, ...subagentTools],
       systemPrompt: { base: systemPrompt.text },
       checkpointer: options.persistCheckpoints ? database.checkpointer : undefined,
       store: activeMemory ? database.memoryStore : undefined,

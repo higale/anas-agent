@@ -1,3 +1,4 @@
+import { pluginToolMetadata } from '@shared/pluginTools'
 import { isCustomToolMetadata } from '@shared/customTools'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import type { builtinToolCatalog } from '@shared/toolRegistry'
@@ -109,6 +110,8 @@ export function classifyAgentToolEffect(
   if (isCommandShellMetadata(toolMetadata(tool)) || isCustomToolMetadata(toolMetadata(tool))) {
     return { recoveryMode: 'confirm' }
   }
+  const plugin = pluginToolMetadata(toolMetadata(tool))
+  if (plugin) return plugin.effect === 'read' ? undefined : { recoveryMode: plugin.effect }
   const annotations = mcpAnnotations(toolName, tool)
   if (annotations) {
     if (annotations.readOnlyHint === true) return undefined

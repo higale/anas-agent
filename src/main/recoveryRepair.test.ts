@@ -215,33 +215,35 @@ describe('field-level recovery', () => {
     expect(project.compression_prompt).toBe(compressionPrompt)
   })
 
-  it.each(['capabilities.json', 'subagents.json', 'projects.json'])('preserves valid off choices and repairs only invalid capability fields in %s', (file) => {
+  it.each(['subagents.json', 'projects.json'])('preserves valid off choices and repairs only invalid capability fields in %s', (file) => {
     const selection = { ...structuredClone(capabilities),
       skills: { mode: 'off', project: true, entries: [{ id: 'user:kept', shortcut: false, model: true }] },
       subagents: { mode: 'off', names: ['web-researcher'] }, workspace: false }
     const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep project', pinned: false, collapsed: true,
       createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z', sourceFolders: ['/keep/path'],
       prompt: 'Keep prompt', coding_mode: true, advanced_settings: true, restrict_subagents: true, capabilities: selection }
-    const raw: any = file === 'capabilities.json' ? selection
-      : file === 'subagents.json' ? { ...structuredClone(subagents), subagents: [{ ...subagents.subagents[0], capabilities: selection }] }
+    const raw: any = file === 'subagents.json' ? { ...structuredClone(subagents), subagents: [{ ...subagents.subagents[0], capabilities: selection }] }
         : { version: 0, projects: [project] }
     expect(repairDocument(file, raw)).toEqual({ value: raw, fields: [] })
     const broken = structuredClone(raw)
-    const target = file === 'capabilities.json' ? broken
-      : file === 'subagents.json' ? broken.subagents[0].capabilities : broken.projects[0].capabilities
+    const target = file === 'subagents.json' ? broken.subagents[0].capabilities : broken.projects[0].capabilities
     target.mcp.default_mode = 'unknown'
     target.tool_mode = 'unknown'
     target.skills.project = 'invalid'
     const repaired = repairDocument(file, broken)
     const expected = structuredClone(raw)
-    const expectedSelection = file === 'capabilities.json' ? expected
-      : file === 'subagents.json' ? expected.subagents[0].capabilities : expected.projects[0].capabilities
+    const expectedSelection = file === 'subagents.json' ? expected.subagents[0].capabilities : expected.projects[0].capabilities
     expectedSelection.skills.project = false
     expect(repaired.value).toEqual(expected)
     expect(repaired.fields).toHaveLength(3)
     expect(repaired.fields.some((field) => field.endsWith('skills.mode'))).toBe(false)
     expect(repairDocument(file, repaired.value)).toEqual({ value: repaired.value, fields: [] })
   })
+
+  function repairScope(capabilities: unknown) {
+    const result = repairDocument('subagents.json', { ...structuredClone(subagents), subagents: [{ ...subagents.subagents[0], capabilities }] })
+    return { ...result, value: (result.value as any).subagents[0].capabilities }
+  }
 
   it('repairs rejected values with current defaults without converting old choices or discarding sibling settings', () => {
     const raw: any = structuredClone(capabilities)
@@ -252,10 +254,10 @@ describe('field-level recovery', () => {
     raw.tools = ['read_file']
     raw.tool_mode = 'selected'
     raw.environment = false
-    const repaired = repairDocument('capabilities.json', raw)
+    const repaired = repairScope(raw)
     expect(repaired.value).toEqual({ ...raw, subagents: capabilities.subagents,
       skills: { mode: 'off', project: false, entries: raw.skills.entries } })
-    expect(repaired.fields).toEqual(expect.arrayContaining(['capabilities.json: subagents', 'capabilities.json: skills.enabled']))
+    expect(repaired.fields).toEqual(expect.arrayContaining(['subagents.json: subagents[0].capabilities.subagents', 'subagents.json: subagents[0].capabilities.skills.enabled']))
     expect(raw.subagents).toBe(false)
     expect(raw.skills.enabled).toBe(false)
   })
@@ -264,10 +266,10 @@ describe('field-level recovery', () => {
     const raw: any = structuredClone(capabilities)
     raw.skills = { mode: 'off', project: true, entries: [{ id: 'broken', shortcut: false }] }
     raw.subagents = { mode: 'custom', names: [42] }
-    raw.custom_tools = { project: true, entries: ['user:keep'] }
+    raw.custom_tools = { mode: 'custom', project: true, entries: ['user:keep'] }
     raw.tool_mode = 'selected'
     raw.tools = [null]
-    const repaired = repairDocument('capabilities.json', raw)
+    const repaired = repairScope(raw)
     expect(repaired.value).toEqual({ ...raw, tools: [],
       skills: { ...raw.skills, entries: capabilities.skills.entries },
       subagents: { ...raw.subagents, names: capabilities.subagents.names } })
@@ -277,7 +279,7 @@ describe('field-level recovery', () => {
   it('keeps recovery list limits without resetting oversized selections', () => {
     const raw = { ...structuredClone(capabilities), skills: { ...capabilities.skills,
       entries: Array.from({ length: 10_001 }, (_, index) => ({ id: `skill-${index}`, shortcut: false, model: false })) } }
-    expect(() => repairDocument('capabilities.json', raw)).toThrow('too many selection items')
+    expect(() => repairScope(raw)).toThrow('too many selection items')
     expect(raw.skills.entries).toHaveLength(10_001)
   })
 

@@ -63,7 +63,7 @@ describe('restored data validation', () => {
     await expect(lstat(join(root, 'assets'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it.each(['settings', 'models', 'capabilities', 'subagents', 'mcp_servers', 'skills', 'tools'])('requires an explicit v0 in %s and never rewrites rejected data', async name => {
+  it.each(['settings', 'models', 'subagents', 'mcp_servers', 'skills', 'tools'])('requires an explicit v0 in %s and never rewrites rejected data', async name => {
     const root = await fixture()
     const path = join(root, 'config', `${name}.json`)
     const document = JSON.parse(await readFile(path, 'utf8'))

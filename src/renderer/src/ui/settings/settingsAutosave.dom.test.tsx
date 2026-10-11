@@ -101,7 +101,7 @@ describe('autosave page boundaries', () => {
     let confirmation: ConfirmDialogRequest | undefined
     const updateAvailability = vi.fn().mockRejectedValue(new Error('write failed'))
     const updateScriptApproval = vi.fn().mockResolvedValue({ ...removed, scriptAutoApprove: true })
-    vi.stubGlobal('gale', { skills: {
+    vi.stubGlobal('gale', { plugins: { onChanged: vi.fn(() => () => {}) }, skills: {
       get: vi.fn().mockResolvedValue(initial), updateAvailability, updateScriptApproval,
       removeDirectory: vi.fn().mockResolvedValue(removed)
     } })
@@ -190,7 +190,7 @@ describe('autosave page boundaries', () => {
       persisted = { ...persisted, skills: persisted.skills.map((skill) => skill.id === id ? { ...skill, ...patch } : skill) }
       return persisted
     })
-    vi.stubGlobal('gale', { skills: { get: vi.fn().mockResolvedValueOnce(snapshot).mockReturnValue(reload.promise), updateAvailability } })
+    vi.stubGlobal('gale', { plugins: { onChanged: vi.fn(() => () => {}) }, skills: { get: vi.fn().mockResolvedValueOnce(snapshot).mockReturnValue(reload.promise), updateAvailability } })
     const { result } = renderHook(() => useSkillsSettingsState({ openConfirmDialog: vi.fn(), settingsOpen: false, settingsTab: 'skills', t }))
     await waitFor(() => expect(result.current.skills).toBeDefined())
     act(() => { void result.current.updateAvailability('skill', { modelAvailable: false }) })

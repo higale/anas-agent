@@ -6,7 +6,7 @@
 
 在系统环境变量中设置 `BAIDU_SEARCH_API_KEY`，或在 Anas“设置 → 环境”的应用 `.env` 中设置它；使用后者时，需要开启当前 Agent 的 `.env` 能力。密钥通过环境变量读取，不写入工具定义、脚本或参数。
 
-通过“设置 → 工具 → 导入工具”导入本目录，再在默认、项目或子 Agent 的“自定义工具”能力中选中 `baidu_search`。导入保留 ID `baidu-search`，已有同名或同 ID 工具时不会覆盖。
+通过“设置 → 工具 → 导入工具”导入本目录。项目或子 Agent 的“自定义工具”选“全部”时会纳入 `baidu_search`；选“定制”时需手动勾选。未定制项目使用所有已启用工具。导入保留 ID `baidu-search`，已有同名或同 ID 工具时不会覆盖。
 
 参数示例：`{"query":"上海今天的天气","timeout":30}`。
 
@@ -21,7 +21,7 @@ Requires Python 3 (standard library only), internet access, and a `BAIDU_SEARCH_
 
 Set `BAIDU_SEARCH_API_KEY` in the system environment or in the application `.env` under Anas **Settings → Environment**. The latter requires the active Agent's **.env** capability. Supply credentials through the environment, not the tool definition, script, or arguments.
 
-Import this directory through **Settings → Tools → Import tools**, then select `baidu_search` under **Custom tools** in default, project, or subagent capabilities. Import preserves the `baidu-search` ID and does not overwrite an existing tool with the same name or ID.
+Import this directory through **Settings → Tools → Import tools**. In project or subagent **Custom tools**, All includes `baidu_search`; Custom requires selecting it. Projects without capability customization use all enabled tools. Import preserves the `baidu-search` ID and does not overwrite an existing tool with the same name or ID.
 
 Example arguments: `{"query":"Shanghai weather today","timeout":30}`.
 

@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Box, ChevronRight, File, FileCode2, Folder, FolderInput, Link2, Pencil, RefreshCw, SquareChevronDown, SquareChevronRight, UserRound } from 'lucide-react'
+import { ArrowDown, ArrowUp, Box, ChevronRight, File, FileCode2, Folder, FolderInput, Link2, Pencil, Puzzle, RefreshCw, SquareChevronDown, SquareChevronRight, UserRound } from 'lucide-react'
 import { useRef, useState, type ReactNode } from 'react'
 import type { PackageFileNode, PackageFilePreview, PackageFileUpdate } from '@shared/packageFiles'
 import { CodeFileEditor } from '../CodeFileEditor'
@@ -31,9 +31,9 @@ export function PackageList({ items, label, emptyLabel, onSelect }: {
 
 export function PackageTreeRoot({ name, count, expanded, selected, onSelect, onExpand, expandLabel, children, icon, source }: {
   name: string; count: number; expanded: boolean; selected: boolean; onSelect(): void; onExpand(): void; expandLabel: string; children?: ReactNode; icon?: ReactNode
-  source?: 'system' | 'user' | 'project' | 'external'
+  source?: 'system' | 'user' | 'project' | 'external' | 'plugin'
 }) {
-  const SourceIcon = source === 'system' ? Box : source === 'user' ? UserRound : Folder
+  const SourceIcon = source === 'system' ? Box : source === 'user' ? UserRound : source === 'plugin' ? Puzzle : Folder
   return <div>
     <div className={`settings-skill-tree-row settings-skill-tree-split settings-skill-tree-root${selected ? ' active' : ''}`}>
       <button className="settings-skill-tree-toggle" type="button" aria-expanded={expanded} aria-label={expandLabel} onClick={onExpand}>
@@ -110,7 +110,7 @@ export function PackageFileViewer({ preview, file, onOpen, t, onSave }: {
   </>
 }
 
-function PackageMarkdownPreview({ preview, t }: { preview: PackageFilePreview; t(key: string): string }) {
+export function PackageMarkdownPreview({ preview, t }: { preview: Pick<PackageFilePreview, 'content' | 'resolvedPath'>; t(key: string): string }) {
   const root = useRef<HTMLDivElement>(null)
   const text = preview.content ?? ''
   const metadata = /^\uFEFF?---[ \t]*\r?\n((?:[^\n]*\n)*?)(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/.exec(text)

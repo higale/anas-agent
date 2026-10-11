@@ -5,7 +5,6 @@ import { join } from 'node:path'
 import type { RuntimeLogLevel } from '@shared/types'
 import {
   configFileNames,
-  capabilitiesConfigFileName,
   getBundledConfigFile,
   getConfigDir,
   getConfigFile,
@@ -117,7 +116,6 @@ export interface RawAppSettings {
 }
 
 export interface RawAppConfig {
-  capabilities?: unknown
   settings?: RawAppSettings
   providers?: RawModelProviderConfig[]
   subagents?: RawSubagentConfig[]
@@ -158,7 +156,6 @@ interface RawMcpServersConfigFile {
 type RawSkillsConfigFile = Record<string, unknown>
 
 interface RawConfigFiles {
-  capabilities: unknown
   settings: RawSettingsConfigFile
   models: RawModelsConfigFile
   subagents: RawSubagentsConfigFile
@@ -208,15 +205,14 @@ async function readJsonFile<T>(path: string): Promise<T> {
 }
 
 async function readConfigFilesFrom(path: (fileName: typeof configFileNames[number]) => string): Promise<RawConfigFiles> {
-  const [settings, models, subagents, mcpServers, skills, capabilities] = await Promise.all([
+  const [settings, models, subagents, mcpServers, skills] = await Promise.all([
     readJsonFile<RawSettingsConfigFile>(path(settingsConfigFileName)),
     readJsonFile<RawModelsConfigFile>(path(modelsConfigFileName)),
     readJsonFile<RawSubagentsConfigFile>(path(subagentsConfigFileName)),
     readJsonFile<RawMcpServersConfigFile>(path(mcpServersConfigFileName)),
-    readJsonFile<RawSkillsConfigFile>(path(skillsConfigFileName)),
-    readJsonFile<unknown>(path(capabilitiesConfigFileName))
+    readJsonFile<RawSkillsConfigFile>(path(skillsConfigFileName))
   ])
-  return { settings, models, subagents, mcpServers, skills, capabilities }
+  return { settings, models, subagents, mcpServers, skills }
 }
 
 async function readConfigFiles(bundled: boolean): Promise<RawConfigFiles> {
@@ -252,7 +248,6 @@ function mergeRawConfig(bundled: RawConfigFiles, parsed: RawConfigFiles): RawApp
   } as RawAppConfig['settings']
   return {
     settings,
-    capabilities: parsed.capabilities,
     providers: Array.isArray(parsed.models.providers) ? parsed.models.providers : bundled.models.providers,
     subagents: Array.isArray(parsed.subagents.subagents)
       ? parsed.subagents.subagents
@@ -311,8 +306,4 @@ export async function writeRawMcpServersConfig(config: RawAppConfig): Promise<vo
     version: 0,
     mcp_servers: config.mcp_servers ?? []
   } satisfies RawMcpServersConfigFile)
-}
-
-export async function writeRawCapabilitiesConfig(config: RawAppConfig): Promise<void> {
-  await writeJsonFileAtomic(getConfigFile(capabilitiesConfigFileName), { ...asRecord(config.capabilities), version: 0 })
 }

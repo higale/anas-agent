@@ -1,0 +1,100 @@
+{
+  "version": 0,
+  "id": "example-text-tools",
+  "name": "Text tools",
+  "plugin_version": "0.1.0",
+  "api_version": 2,
+  "description": "No-UI tools returning text, JSON and standard image blocks, with cooperative cancellation.",
+  "backend": "backend.cjs",
+  "tools": [
+    {
+      "id": "echo",
+      "description": "Return text using the configured prefix, case, repetition and separator. With default settings, text is unchanged.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "handler": "echo",
+      "effect": "read"
+    },
+    {
+      "id": "wait",
+      "description": "Wait for the requested number of seconds. This operation supports cancellation.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "seconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 60
+          }
+        },
+        "required": [
+          "seconds"
+        ],
+        "additionalProperties": false
+      },
+      "handler": "wait",
+      "effect": "read",
+      "timeout_seconds": 65
+    },
+    {
+      "id": "image",
+      "description": "Return a one-pixel PNG test image as standard image content.",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "handler": "image",
+      "effect": "read"
+    }
+  ],
+  "settings": [
+    {
+      "key": "prefix",
+      "label": "Prefix / 前缀",
+      "type": "text",
+      "default": "",
+      "max_length": 100
+    },
+    {
+      "key": "uppercase",
+      "label": "Uppercase / 大写",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "key": "repeat",
+      "label": "Repeat / 重复次数",
+      "type": "number",
+      "default": 1,
+      "minimum": 1,
+      "maximum": 5
+    },
+    {
+      "key": "separator",
+      "label": "Separator / 分隔符",
+      "type": "enum",
+      "default": "space",
+      "choices": [
+        {
+          "value": "space",
+          "label": "Space / 空格"
+        },
+        {
+          "value": "newline",
+          "label": "New line / 换行"
+        }
+      ]
+    }
+  ]
+}

@@ -217,6 +217,16 @@ async function scan(root: ToolRoot, config: ToolSettings): Promise<ToolPackage[]
   } catch (reason) { root.error = toToolLoadError(reason, root.path, 'read_failed'); return [] }
 }
 
+export function setToolEnabled(id: string, enabled: boolean): Promise<void> {
+  return mutate(async config => {
+    if (typeof id !== 'string' || typeof enabled !== 'boolean') throw new Error('Invalid tool availability.')
+    const tool = (await readToolSnapshot()).tools.find(tool => tool.id === id)
+    if (!tool) throw new Error('Tool package was not found.')
+    config.disabledTools = [...(config.disabledTools ?? []).filter(value => value !== id), ...(enabled ? [] : [id])]
+    await saveSettings(config)
+  })
+}
+
 export function listToolSnapshot(sourceFolders: readonly string[] = []): Promise<ToolSnapshot> {
   return serialize(() => readToolSnapshot(sourceFolders))
 }
@@ -234,7 +244,7 @@ async function readToolSnapshot(sourceFolders: readonly string[] = []): Promise<
     { id: 'system', name: 'System', path: getSystemToolsDir(), source: 'system' }
   ]
   const tools = (await Promise.all(roots.map(root => scan(root, config)))).flat()
-  return { roots, tools }
+  return { roots, tools: tools.map(tool => ({ ...tool, enabled: !config.disabledTools?.includes(tool.id) })) }
 }
 
 /** Pin resources for the process lifetime; saved runs keep their definition but follow the user's package ID. */
@@ -243,7 +253,7 @@ export async function withToolPackageDirectory<T>(definition: CustomToolDefiniti
     let current = definition.directory
     // Catalog IDs resolve current global sources; project and standalone definitions use their supplied directory.
     if (definition.id.includes(':') && !definition.id.startsWith('project-')) {
-      current = (await readToolSnapshot()).tools.find(tool => tool.id === definition.id)?.definition?.directory
+      current = (await readToolSnapshot()).tools.find(tool => tool.id === definition.id && tool.enabled !== false)?.definition?.directory
     }
     if (!current) throw new Error(`Tool package is unavailable: ${definition.id}`)
     current = await realpath(current)

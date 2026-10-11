@@ -1,52 +1,32 @@
-import { app, BrowserWindow, ipcMain, nativeTheme, net, protocol } from 'electron'
+import { app, ipcMain, nativeTheme, net, protocol } from 'electron'
 import { pathToFileURL } from 'node:url'
 import { PLUGIN_API_VERSION, PLUGIN_ICON_PATH, PLUGIN_SCHEME, requirePluginJson, requirePluginView, type PluginSummary, type PluginViewOptions, type PluginInstallResult } from '@shared/plugins'
-import { getDataDir } from '../config/dataDir'
 import { getAppConfigSnapshot } from '../config/appConfig'
-import { resolveConfiguredLanguage } from '../languageStore'
-import { handleMainIpc, isMainRendererWindow } from '../ipcSecurity'
+import { getConfiguredTranslator, resolveConfiguredLanguage } from '../languageStore'
+import { handleMainIpc } from '../ipcSecurity'
 import { runApplicationDataOperation } from '../applicationDataLifecycle'
 import { dialogParentFromEvent, showModalOpenDialog } from '../modalDialog'
 import { openExternalUrl } from '../appShell'
-import { PluginStore } from './pluginStore'
-import { PluginBackends } from './pluginBackend'
 import { pluginSdk } from './pluginSdk'
 import type { PanelState, PanelLocation } from '@shared/panels'
 import { panelPages as views } from '../panels/panelRegistry'
 import { refreshPanelAppearance } from '../panels/panelHost'
 import { pluginPanel, pluginBackendContext, pluginMoveTarget } from './pluginPanel'
+import { pluginRuntime as runtime, changed, stopPluginBackends, setPluginBackendViews, setPluginBackendViewAction } from './pluginRuntime'
 
-let store: PluginStore | undefined
-let backends: PluginBackends | undefined
 let installWatcher: { token: string; dispose(): void } | undefined
 function clearInstallWatcher(token?: string): void {
   if (!installWatcher || (token !== undefined && installWatcher.token !== token)) return
   installWatcher.dispose()
   installWatcher = undefined
 }
-function changed(): void {
-  for (const window of BrowserWindow.getAllWindows()) {
-    if (isMainRendererWindow(window)) window.webContents.send('plugins:changed')
-  }
-}
-
-function runtime(): { store: PluginStore; backends: PluginBackends } {
-  if (!store) {
-    store = new PluginStore(getDataDir())
-    backends = new PluginBackends(store, changed)
-  }
-  return { store, backends: backends! }
-}
-
-export async function stopPluginBackends(): Promise<void> {
-  await backends?.stopAll()
-}
 
 export async function closePluginHost(): Promise<void> {
   views.closeWhere(content => content.kind === 'plugin')
   await stopPluginBackends()
   clearInstallWatcher()
-  await store?.exclusive(() => store!.cancelInstall())
+  const { store } = runtime()
+  await store.exclusive(() => store.cancelInstall())
   changed()
 }
 
@@ -80,18 +60,21 @@ export function registerPluginProtocol(): void {
   })
 }
 
-async function invoke(id: string, method: unknown, params: unknown, caller?: PanelState): Promise<unknown> {
+async function invoke(id: string, method: unknown, params: unknown, caller?: PanelState, assertAvailable = () => {}): Promise<unknown> {
   if (method === 'host.openHome' || method === 'host.openView') {
     const prepared = await runApplicationDataOperation(async () => {
       requirePluginJson(params ?? null)
       const { store } = runtime()
       await refreshPanelAppearance()
       return store.exclusive(async () => {
+        assertAvailable()
         const options: PluginViewOptions = method === 'host.openHome'
           ? { instanceId: 'main', location: (await store.home(id)).location } : requirePluginView(params)
         const manifest = await store.requireEnabled(id)
         if (!manifest.ui) throw new Error('Plugin has no UI entry.')
-        return { ready: views.open(pluginPanel(await store.read(id), options)) }
+        const summary = await store.read(id)
+        assertAvailable()
+        return { ready: views.open(pluginPanel(summary, options)) }
       })
     })
     await prepared.ready
@@ -102,6 +85,7 @@ async function invoke(id: string, method: unknown, params: unknown, caller?: Pan
       requirePluginJson(params ?? null)
       const input = params as { location?: unknown; instanceId?: unknown } | undefined
       await runtime().store.requireEnabled(id)
+      assertAvailable()
       const panel = pluginMoveTarget(id, views.list(), caller, input?.location, input?.instanceId)
       return { viewId: panel.viewId, location: input!.location as PanelLocation }
     })
@@ -134,6 +118,12 @@ async function invokeData(id: string, method: unknown, params: unknown, caller?:
       return openExternalUrl(input.url)
     case 'data.get': return store.exclusive(() => store.data(id, input.key))
     case 'data.set': return store.exclusive(() => store.data(id, input.key, true, input.value))
+    case 'settings.get': return store.exclusive(() => store.settings(id))
+    case 'settings.set': {
+      const result = await store.exclusive(() => store.settings(id, { revision: input.revision, values: input.values }))
+      changed()
+      return result
+    }
     case 'backend.call': {
       const prepared = await store.exclusive(() => backends.prepare(id))
       await prepared.ready
@@ -144,14 +134,26 @@ async function invokeData(id: string, method: unknown, params: unknown, caller?:
 }
 
 export function registerPluginIpc(): void {
+  setPluginBackendViews(id => pluginBackendContext(id, views.list()).views)
+  setPluginBackendViewAction((id, method, params, assertAvailable) => invoke(id, 'host.' + method, params, undefined, assertAvailable))
   handleMainIpc('plugins:list', async (): Promise<PluginSummary[]> => {
     const { store, backends } = runtime()
     return (await store.list()).map(item => ({ ...item, ...backends.status(item.id) }))
   })
+  handleMainIpc('plugins:readContribution', async (_event, id, kind, contributionId) => {
+    if (typeof id !== 'string' || typeof contributionId !== 'string' || (kind !== 'skill' && kind !== 'prompt')) throw new Error('Invalid plugin contribution request.')
+    const { store } = runtime()
+    return store.exclusive(() => store.readContribution(id, kind, contributionId))
+  })
   handleMainIpc('plugins:install', async (event): Promise<PluginInstallResult | null> => {
+    const config = await getAppConfigSnapshot()
+    const t = await getConfiguredTranslator(config.settings.language)
     const result = await showModalOpenDialog(dialogParentFromEvent(event), {
-      properties: ['openFile'], title: 'Install plugin / 安装插件',
-      filters: [{ name: 'Plugin ZIP or PLUGIN.json / 插件 ZIP 或 PLUGIN.json', extensions: ['zip', 'json'] }]
+      properties: ['openFile'], title: t('plugins.install'),
+      filters: [
+        { name: t('plugins.install_zip_filter'), extensions: ['zip'] },
+        { name: t('plugins.install_manifest_filter'), extensions: ['json'] }
+      ]
     })
     if (result.canceled || !result.filePaths[0]) return null
     const { store } = runtime()
@@ -200,6 +202,7 @@ export function registerPluginIpc(): void {
     if (typeof deleteData !== 'boolean') throw new Error('Invalid plugin data deletion option.')
     const { store, backends } = runtime()
     await store.exclusive(async () => {
+      await store.assertPackageIdle(id)
       views.closeWhere(content => content.kind === 'plugin' && content.pluginId === id)
       await backends.stop(id)
       await store.uninstall(id, deleteData)

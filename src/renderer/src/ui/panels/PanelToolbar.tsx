@@ -1,8 +1,9 @@
-import { List, Pause, Play, RefreshCw, Save, Settings, Square, Unplug, X } from 'lucide-react'
+import { List, Lock, LockOpen, Pause, Play, RefreshCw, Save, Settings, Square, Unplug, X } from 'lucide-react'
 import type { PanelState } from '@shared/panels'
 import { NoFocusButton } from '../NoFocusButton'
+import { SelectableIconButton } from '../SelectableIconButton'
 
-const icons = { unplug: Unplug, x: X, 'refresh-cw': RefreshCw, play: Play, pause: Pause, square: Square, settings: Settings, save: Save, list: List }
+const icons = { unplug: Unplug, x: X, 'refresh-cw': RefreshCw, play: Play, pause: Pause, square: Square, settings: Settings, save: Save, list: List, lock: Lock, 'lock-open': LockOpen }
 
 export function PanelToolbar({ view, onAction }: { view: PanelState; onAction(id: string): void }) {
   const toolbar = view.toolbar
@@ -13,9 +14,13 @@ export function PanelToolbar({ view, onAction }: { view: PanelState; onAction(id
     {toolbar.actions.length > 0 && <div className="panel-toolbar-actions" aria-busy={!!view.pendingActionId}>
       {toolbar.actions.map(action => {
         const Icon = icons[action.icon]
+        const disabled = action.disabled || !!view.pendingActionId || !!view.pendingLocation || !!view.loading
+        if (action.pressed !== undefined) return <SelectableIconButton key={action.id} Icon={Icon} iconSize={16}
+          label={action.label} pressed={action.pressed} preserveFocus variant="toolbar" className="ui-tool-button-small"
+          disabled={disabled} onClick={() => onAction(action.id)} />
         return <NoFocusButton key={action.id} type="button" className="ui-tool-button ui-tool-button-small"
           aria-label={action.label} data-tooltip={action.label}
-          disabled={action.disabled || !!view.pendingActionId || !!view.pendingLocation || !!view.loading}
+          disabled={disabled}
           onClick={() => onAction(action.id)}><Icon size={16} aria-hidden="true" /></NoFocusButton>
       })}
     </div>}

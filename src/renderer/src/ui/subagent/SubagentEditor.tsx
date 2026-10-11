@@ -56,7 +56,7 @@ export function SubagentEditor({
       <div className="ui-toolbar ui-toolbar-between">
         <CheckboxField
           checked={draft.enabled}
-          label={t('settings.subagent_default_enabled')}
+          label={t('settings.enabled')}
           onChange={(enabled) => onUpdate({ enabled })}
         />
         {draft.builtIn && (

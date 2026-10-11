@@ -1,14 +1,13 @@
-import { addExternalToolDirectory, updateExternalToolDirectory, removeExternalToolDirectory, moveExternalToolDirectory, listToolFiles, readToolFile, saveToolFile, createToolFile, toolFileExists, importToolDirectories, initializeToolsStore, listToolSnapshot, toToolImportError } from './toolsStore'
+import { setToolEnabled, addExternalToolDirectory, updateExternalToolDirectory, removeExternalToolDirectory, moveExternalToolDirectory, listToolFiles, readToolFile, saveToolFile, createToolFile, toolFileExists, importToolDirectories, initializeToolsStore, listToolSnapshot, toToolImportError } from './toolsStore'
 import { updateSkillScriptApproval } from './config/appConfig'
 import type { ToolImportResult } from '@shared/types'
-import type { DefaultCapabilitySettings } from '@shared/agentCapabilities'
 import { projectOperation } from './projectOperation'
 import { ProjectOperationFailure } from '@shared/projectOperation'
 import { BrowserWindow, shell } from 'electron'
 import { stat } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import type { AppAvatarImage, AppConfigSnapshot, AppProfileUpdate, AppSettingsUpdate, AttachmentPreview, AttachmentPreviewOptions, AvatarCropSource, AvatarCropSourceReadResult, FileIconImage, FileIconSize, InputHistorySnapshot, McpMaintenanceResult, McpServerConfigSave, McpServerUpdate, McpToolStatus, ModelListRequest, ModelListResponse, ModelProviderConfigSave, Project, ProjectCreateRequest, ProjectStateUpdate, ProjectUpdateRequest, ProviderModelConfigSave, SelectedAttachment, SkillAvailabilityUpdate, SkillDirectoryAddResult, SkillFileNode, SkillFilePreview, SkillImportResult, SkillInvocationResult, SkillRootUpdate, SkillSnapshot, SpeechReplyConfig, SubagentConfigSave } from '@shared/types'
-import { saveCustomTool, deleteCustomTool, moveCustomTool, saveDefaultCapabilities, addProviderModels, deleteMcpServer, deleteModelProvider, deleteProviderModel, deleteSubagent, getAppConfigSnapshot, moveMcpServer, moveModelProvider, moveProviderModel, moveSubagent, onAppConfigChanged, restoreSubagent, saveMcpServer, saveModelProvider, saveProviderModel, saveSubagent, selectDefaultModel, updateMcpServer, updateProfile, updateSettings, updateSpeechReply } from './config/appConfig'
+import { saveCustomTool, deleteCustomTool, moveCustomTool, addProviderModels, deleteMcpServer, deleteModelProvider, deleteProviderModel, deleteSubagent, getAppConfigSnapshot, moveMcpServer, moveModelProvider, moveProviderModel, moveSubagent, onAppConfigChanged, restoreSubagent, saveMcpServer, saveModelProvider, saveProviderModel, saveSubagent, selectDefaultModel, updateMcpServer, updateProfile, updateSettings, updateSpeechReply } from './config/appConfig'
 import { validateCustomToolSchema } from '@shared/customTools'
 import { addExternalSkillDirectory, buildUserSkillInvocation, importSkillDirectories, listSkillFiles, listSkillSnapshot, moveExternalSkillDirectory, readSkillFile, saveSkillFile, removeExternalSkillDirectory, toSkillImportError, updateExternalSkillDirectory, updateSkillAvailability } from './skillsStore'
 import { getSkillExamplesDir, getToolExamplesDir } from './config/dataDir'
@@ -141,6 +140,7 @@ export function registerWorkspaceIpcHandlers(): void {
     const project = sourceFolders === undefined && projectId ? await getProject(projectId) : undefined
     return listToolSnapshot(sourceFolders ?? (project?.kind === 'workspace' ? project.sourceFolders : []))
   })
+  handleMainIpc('tools:setEnabled', async (_event, id: string, enabled: boolean) => setToolEnabled(id, enabled))
   handleMainIpc('tools:refresh', async () => getAppConfigSnapshot())
   handleMainIpc('tools:addDirectory', async event => {
     const result = await showModalOpenDialog(dialogParentFromEvent(event), { properties: ['openDirectory'] })
@@ -179,7 +179,6 @@ export function registerWorkspaceIpcHandlers(): void {
   handleMainIpc('config:restoreSubagent', async (_event, index: number): Promise<AppConfigSnapshot> => restoreSubagent(index))
   handleMainIpc('config:getCachedModels', async (_event, request: ModelListRequest): Promise<ModelListResponse | null> => getCachedAvailableModels(request))
   handleMainIpc('config:fetchModels', async (_event, request: ModelListRequest): Promise<ModelListResponse> => fetchAvailableModels(request))
-  handleMainIpc('config:saveDefaultCapabilities', async (_event, value: DefaultCapabilitySettings): Promise<AppConfigSnapshot> => saveDefaultCapabilities(value))
   handleMainIpc('config:updateSettings', async (_event, settings: AppSettingsUpdate): Promise<AppConfigSnapshot> => {
     const snapshot = await updateSettings(settings)
     if (settings.language !== undefined) {

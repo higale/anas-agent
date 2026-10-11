@@ -12,7 +12,8 @@ export function parseSlashSkillInput(value: string): { name: string; sourceAlias
   const name = separator < 0 ? command : command.slice(0, separator)
   const sourceAlias = separator < 0 ? undefined : command.slice(separator + 1)
   if (!isValidSkillShortcutName(name)) return undefined
-  if (sourceAlias !== undefined && !isValidSkillShortcutName(sourceAlias)) return undefined
+  if (sourceAlias !== undefined && !isValidSkillShortcutName(sourceAlias)
+    && !/^plugin:[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(sourceAlias)) return undefined
   return {
     name,
     ...(sourceAlias ? { sourceAlias } : {}),

@@ -1592,6 +1592,11 @@ fieldset.ui-form-section {
   box-shadow: 0 0 0 2px var(--control-field-focus-ring);
 }
 
+.ui-status-warning,
+.ui-field-hint.ui-status-warning {
+  color: var(--warning);
+}
+
 .ui-status-danger {
   color: var(--danger);
 }

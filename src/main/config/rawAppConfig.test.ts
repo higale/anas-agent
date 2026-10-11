@@ -1,4 +1,3 @@
-import capabilityDefaults from '../../../data/config/capabilities.json'
 import nativeFs from 'node:fs'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -38,7 +37,6 @@ async function loadRawConfig() {
   const configDir = join(root, 'user')
   tempDirs.push(root)
   const fileNames = {
-    capabilities: 'capabilities.json',
     settings: 'settings.json',
     models: 'models.json',
     subagents: 'subagents.json',
@@ -47,7 +45,6 @@ async function loadRawConfig() {
     skills: 'skills.json'
   } as const
   vi.doMock('./dataDir', () => ({
-    capabilitiesConfigFileName: fileNames.capabilities,
     settingsConfigFileName: fileNames.settings,
     modelsConfigFileName: fileNames.models,
     subagentsConfigFileName: fileNames.subagents,
@@ -60,7 +57,6 @@ async function loadRawConfig() {
     getConfigFile: (fileName = fileNames.settings) => join(configDir, fileName)
   }))
   await writeJson(join(bundledDir, fileNames.customTools), { tools: [] })
-  await writeJson(join(bundledDir, fileNames.capabilities), capabilityDefaults)
   return {
     bundledDir,
     configDir,
@@ -225,11 +221,7 @@ describe('domain config storage', () => {
     expect(result.providers).toEqual([{ id: 'first', name: 'First' }, { id: 'selected', name: 'Selected' }])
     expect(result.subagents).toEqual([{ name: 'general-purpose' }])
     await expect(readFile(join(configDir, fileNames.subagents), 'utf8')).resolves.toContain('general-purpose')
-    expect((await rawConfig.readRawConfig()).capabilities).toEqual(capabilityDefaults)
-    const capabilities = { ...capabilityDefaults, profile: false, restrict_subagents: true }
-    await rawConfig.writeRawCapabilitiesConfig({ capabilities })
-    expect((await rawConfig.readRawConfig()).capabilities).toEqual(capabilities)
-    expect(JSON.parse(await readFile(join(configDir, fileNames.capabilities), 'utf8'))).toEqual(capabilities)
+    expect(await rawConfig.readRawConfig()).not.toHaveProperty('capabilities')
   })
 
   it('writes only the requested domain file', async () => {

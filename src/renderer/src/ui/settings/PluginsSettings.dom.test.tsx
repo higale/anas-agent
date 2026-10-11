@@ -6,13 +6,14 @@ import { PluginsSettings } from './PluginsSettings'
 import { notice } from '../notice'
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'en' } }) }))
-vi.mock('../notice', () => ({ notice: { error: vi.fn() } }))
-const invoke = vi.fn(), uninstall = vi.fn(), install = vi.fn(), confirmInstall = vi.fn(), cancelInstall = vi.fn()
-const plugin: PluginSummary = { id: 'example', enabled: true, backendStatus: 'stopped', manifest: {
+vi.mock('../notice', () => ({ notice: { error: vi.fn(), success: vi.fn() } }))
+const invoke = vi.fn(), uninstall = vi.fn(), install = vi.fn(), confirmInstall = vi.fn(), cancelInstall = vi.fn(), readContribution = vi.fn(), setEnabled = vi.fn()
+const startBackend = vi.fn(), stopBackend = vi.fn()
+const plugin: PluginSummary = { id: 'example', enabled: true, backendStatus: 'stopped', manifest: { tools: [],
   id: 'example', name: 'Example', pluginVersion: '1.0.0', apiVersion: 2, description: '', ui: 'index.html',
   home: { defaultLocation: 'window', locations: ['window', 'sidebar'] }
 } }
-const renderSettings = (plugins = [plugin]) => render(<PluginsSettings plugins={plugins} onRefresh={vi.fn(async () => {})} onOpen={vi.fn()} />)
+const renderSettings = (plugins = [plugin]) => render(<PluginsSettings plugins={plugins} onRefresh={vi.fn(async () => {})} />)
 beforeEach(() => {
   vi.clearAllMocks()
   invoke.mockReset().mockImplementation(async (_id, method) => method === 'host.home' ? { location: 'window', locations: ['window', 'sidebar'] } : null)
@@ -20,21 +21,94 @@ beforeEach(() => {
   install.mockReset()
   confirmInstall.mockReset().mockResolvedValue(plugin)
   cancelInstall.mockReset().mockResolvedValue(undefined)
-  Object.defineProperty(window, 'gale', { configurable: true, value: { plugins: { invoke, uninstall, install, confirmInstall, cancelInstall } } })
+  setEnabled.mockReset().mockResolvedValue(undefined)
+  startBackend.mockReset().mockResolvedValue(undefined)
+  stopBackend.mockReset().mockResolvedValue(undefined)
+  readContribution.mockReset().mockResolvedValue({ content: '# Guide body', resolvedPath: 'C:/plugins/guide/SKILL.md' })
+  Object.defineProperty(window, 'gale', { configurable: true, value: { plugins: { invoke, uninstall, install, confirmInstall, cancelInstall, readContribution, setEnabled, startBackend, stopBackend } } })
 })
 
 describe('plugin settings', () => {
-  it('displays disabled plugin icons and reports decode errors without blocking controls', () => {
+  const previewPlugin: PluginSummary = { ...plugin, enabled: false,
+    skillSummaries: [{ id: 'guide', name: 'actual-skill-name', description: 'Skill summary' }],
+    manifest: { ...plugin.manifest!, ui: undefined, backend: 'backend.cjs',
+      skills: [{ id: 'guide', path: 'skills/actual-skill-name/SKILL.md', tools: ['echo'] }],
+      prompts: [{ id: 'tone', path: 'tone.md', description: 'Prompt summary', scope: 'all', tools: [] }],
+      tools: [{ id: 'echo', description: 'Echo text', handler: 'echo', effect: 'read', timeoutSeconds: 60,
+        inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } }]
+    }
+  }
+  it('previews disabled plugin declarations on demand without executing plugin code', async () => {
+    const user = userEvent.setup()
+    renderSettings([previewPlugin])
+    expect(readContribution).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'actual-skill-name' })).toHaveAttribute('data-tooltip', 'Skill summary')
+    expect(screen.getByRole('button', { name: 'tone' })).toHaveAttribute('data-tooltip', 'Prompt summary')
+    await user.click(screen.getByRole('button', { name: 'actual-skill-name' }))
+    expect(readContribution).toHaveBeenCalledWith('example', 'skill', 'guide')
+    expect(await screen.findByRole('heading', { name: 'Guide body' })).toBeVisible()
+    let dialog = within(screen.getByRole('dialog'))
+    expect(dialog.getByText('plugin__example__echo')).toBeVisible()
+    await user.click(dialog.getByRole('button', { name: 'common.copy' }))
+    expect(await navigator.clipboard.readText()).toBe('# Guide body')
+    await user.click(dialog.getByRole('button', { name: 'common.close' }))
+    await user.click(screen.getByRole('button', { name: 'plugin__example__echo' }))
+    dialog = within(screen.getByRole('dialog'))
+    expect(dialog.getByText('60')).toBeVisible()
+    const code = screen.getByRole('dialog').querySelector('pre')!.textContent!
+    expect(JSON.parse(code)).toEqual({ name: 'plugin__example__echo', description: 'Echo text', parameters: previewPlugin.manifest!.tools[0].inputSchema })
+    expect(readContribution).toHaveBeenCalledTimes(1)
+    await user.click(dialog.getByRole('button', { name: 'common.close' }))
+    await user.click(screen.getByRole('button', { name: 'tone' }))
+    expect(await screen.findByRole('heading', { name: 'Guide body' })).toBeVisible()
+    expect(readContribution).toHaveBeenLastCalledWith('example', 'prompt', 'tone')
+    expect(screen.getByText('plugins.scope_all')).toBeVisible()
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it('reports preview read failures and permits retry while keeping copy unavailable', async () => {
+    readContribution.mockRejectedValueOnce(new Error('File removed'))
+    renderSettings([previewPlugin])
+    await userEvent.click(screen.getByRole('button', { name: 'tone' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('File removed')
+    expect(screen.getByRole('button', { name: 'common.copy' })).toBeDisabled()
+    await userEvent.click(screen.getByRole('button', { name: 'common.retry' }))
+    expect(await screen.findByRole('heading', { name: 'Guide body' })).toBeVisible()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('ignores a closed preview response after opening another contribution', async () => {
+    let finish!: (value: unknown) => void
+    readContribution.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    renderSettings([previewPlugin])
+    await userEvent.click(screen.getByRole('button', { name: 'tone' }))
+    expect(screen.getByRole('status')).toHaveTextContent('common.loading')
+    await userEvent.click(screen.getByRole('button', { name: 'common.close' }))
+    await userEvent.click(screen.getByRole('button', { name: 'actual-skill-name' }))
+    expect(await screen.findByRole('heading', { name: 'Guide body' })).toBeVisible()
+    await act(async () => finish({ content: '# Old prompt', resolvedPath: 'C:/plugins/tone.md' }))
+    expect(screen.queryByText('Old prompt')).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Guide body' })).toBeVisible()
+  })
+  it('keeps plugin management separate from capability selection', () => {
+    renderSettings([{ ...plugin, manifest: { ...plugin.manifest!, tools: [{ id: 'echo', description: 'Echo', handler: 'echo', effect: 'read', timeoutSeconds: 30, inputSchema: { type: 'object' } }] } }])
+    expect(screen.queryByRole('radio', { name: 'plugins.capabilities' })).toBeNull()
+    expect(screen.queryByRole('checkbox', { name: 'plugin__example__echo' })).toBeNull()
+    expect(screen.getByRole('checkbox', { name: 'settings.enabled' })).toBeEnabled()
+    expect(screen.getByText('plugins.contributions_count')).toBeVisible()
+  })
+  it('displays disabled plugin icons and reports decode errors without blocking controls', async () => {
     const { container } = renderSettings([{ ...plugin, enabled: false, manifest: { ...plugin.manifest!, icon: 'icon.svg' } }])
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'plugins.home_window' })).toBeChecked())
     expect(container.querySelector('.ui-list-pane img')).toHaveAttribute('src', 'anas-plugin://example/_anas/icon/icon.svg')
     fireEvent.error(container.querySelector('.settings-detail-heading img')!)
     expect(screen.getByRole('alert')).toHaveTextContent('plugins.icon_failed')
     expect(screen.getByRole('checkbox', { name: 'settings.enabled' })).toBeEnabled()
-    expect(invoke).not.toHaveBeenCalled()
+    expect(invoke).toHaveBeenCalledWith('example', 'host.home')
   })
 
-  it('edits home location in the selected plugin configuration without opening a page', async () => {
-    renderSettings()
+  it.each([true, false])('edits home location without opening a page when enabled=%s', async enabled => {
+    renderSettings([{ ...plugin, enabled }])
     await waitFor(() => expect(screen.getByRole('radio', { name: 'plugins.home_window' })).toBeChecked())
     await userEvent.click(screen.getByRole('radio', { name: 'plugins.home_sidebar' }))
     await waitFor(() => expect(screen.getByRole('radio', { name: 'plugins.home_sidebar' })).toBeChecked())
@@ -52,6 +126,64 @@ describe('plugin settings', () => {
     await userEvent.click(screen.getByRole('radio', { name: 'plugins.home_sidebar' }))
     await waitFor(() => expect(notice.error).toHaveBeenCalled())
     expect(screen.getByRole('radio', { name: 'plugins.home_window' })).toBeChecked()
+  })
+
+  it('saves home location without disabling unrelated controls or refreshing the catalog', async () => {
+    let finish!: () => void
+    const refresh = vi.fn(async () => {})
+    render(<PluginsSettings plugins={[plugin]} onRefresh={refresh} />)
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'plugins.home_window' })).toBeChecked())
+    invoke.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve }))
+    await userEvent.click(screen.getByRole('radio', { name: 'plugins.home_sidebar' }))
+    expect(screen.getByRole('radio', { name: 'plugins.home_sidebar' })).toBeDisabled()
+    expect(screen.getByRole('checkbox', { name: 'settings.enabled' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'plugins.install' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'common.refresh' })).toBeEnabled()
+    await act(async () => finish())
+    expect(screen.getByRole('radio', { name: 'plugins.home_sidebar' })).toBeChecked()
+    expect(screen.getByRole('radio', { name: 'plugins.home_sidebar' })).toBeEnabled()
+    expect(refresh).not.toHaveBeenCalled()
+    expect(invoke.mock.calls.filter(([, method]) => method === 'host.home')).toHaveLength(1)
+  })
+
+  it('keeps other settings usable while changing availability and restores its control after failure', async () => {
+    let fail!: (error: Error) => void
+    setEnabled.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject }))
+    renderSettings()
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'plugins.home_window' })).toBeChecked())
+    await userEvent.click(screen.getByRole('checkbox', { name: 'settings.enabled' }))
+    expect(setEnabled).toHaveBeenCalledWith('example', false)
+    expect(screen.getByRole('checkbox', { name: 'settings.enabled' })).toBeDisabled()
+    expect(screen.getByRole('radio', { name: 'plugins.home_sidebar' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'plugins.install' })).toBeEnabled()
+    await act(async () => fail(new Error('disk failure')))
+    expect(notice.error).toHaveBeenCalledWith('plugins.operation_failed', { description: 'disk failure' })
+    expect(screen.getByRole('checkbox', { name: 'settings.enabled' })).toBeEnabled()
+    expect(screen.getByRole('checkbox', { name: 'settings.enabled' })).toBeChecked()
+  })
+
+  it('keeps settings usable during backend startup and allows stopping without unlocking a pending stop', async () => {
+    let finishStart!: () => void, finishStop!: () => void
+    startBackend.mockImplementationOnce(() => new Promise<void>(resolve => { finishStart = resolve }))
+    stopBackend.mockImplementationOnce(() => new Promise<void>(resolve => { finishStop = resolve }))
+    const backendPlugin = { ...plugin, manifest: { ...plugin.manifest!, backend: 'backend.cjs' } }
+    const refresh = vi.fn(async () => {})
+    const view = render(<PluginsSettings plugins={[backendPlugin]} onRefresh={refresh} />)
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'plugins.home_window' })).toBeChecked())
+    await userEvent.click(screen.getByRole('button', { name: 'plugins.start_backend' }))
+    expect(startBackend).toHaveBeenCalledExactlyOnceWith('example')
+    expect(screen.getByRole('button', { name: 'plugins.start_backend' })).toBeDisabled()
+    expect(screen.getByRole('radio', { name: 'plugins.home_sidebar' })).toBeEnabled()
+    expect(screen.getByRole('checkbox', { name: 'settings.enabled' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'plugins.install' })).toBeEnabled()
+    view.rerender(<PluginsSettings plugins={[{ ...backendPlugin, backendStatus: 'starting' }]} onRefresh={refresh} />)
+    await userEvent.click(screen.getByRole('button', { name: 'plugins.stop_backend' }))
+    expect(stopBackend).toHaveBeenCalledExactlyOnceWith('example')
+    await act(async () => finishStart())
+    expect(screen.getByRole('button', { name: 'plugins.stop_backend' })).toBeDisabled()
+    expect(screen.getByRole('radio', { name: 'plugins.home_sidebar' })).toBeEnabled()
+    await act(async () => finishStop())
+    expect(screen.getByRole('button', { name: 'plugins.stop_backend' })).toBeEnabled()
   })
 
   it('ignores a previous plugin read after selecting another plugin', async () => {
@@ -125,7 +257,7 @@ describe('plugin replacement confirmation', () => {
   it('keeps the preview across rerenders and discards it when leaving settings', async () => {
     const view = renderSettings()
     await open()
-    view.rerender(<PluginsSettings plugins={[{ ...plugin }]} onRefresh={vi.fn(async () => {})} onOpen={vi.fn()} />)
+    view.rerender(<PluginsSettings plugins={[{ ...plugin }]} onRefresh={vi.fn(async () => {})} />)
     expect(screen.getByRole('alertdialog')).toBeVisible()
     expect(cancelInstall).not.toHaveBeenCalled()
     view.unmount()

@@ -28,6 +28,45 @@ async function zipExample(directory, archive, prefix = '') {
   })
 }
 
+async function checkInstallDialogLanguages(application, page) {
+  await application.evaluate(({ dialog }) => {
+    globalThis.__originalInstallDialog = dialog.showOpenDialog
+    dialog.showOpenDialog = async (...args) => {
+      globalThis.__pluginInstallDialog = args.at(-1)
+      return { canceled: true, filePaths: [] }
+    }
+  })
+  try {
+    const systemLocale = await application.evaluate(({ app }) => app.getLocale())
+    const english = ['Install plugin', 'Plugin ZIP', 'Plugin manifest (PLUGIN.json)']
+    const chinese = ['安装插件', '插件 ZIP', '插件清单（PLUGIN.json）']
+    const french = ['Installer un plugin', english[1], english[2]]
+    const systemTexts = { zh: chinese, fr: french }[systemLocale.toLowerCase().split('-')[0]] ?? english
+    for (const [language, [title, zip, manifest]] of [
+      ['zh-CN', chinese],
+      ['fr', french],
+      ['system', systemTexts],
+      ['en', english]
+    ]) {
+      await page.evaluate(language => globalThis.gale.config.updateSettings({ language }), language)
+      assert.equal(await page.evaluate(() => globalThis.gale.plugins.install()), null)
+      const options = await application.evaluate(() => globalThis.__pluginInstallDialog)
+      assert.equal(options.title, title)
+      assert.deepEqual(options.properties, ['openFile'])
+      assert.deepEqual(options.filters, [
+        { name: zip, extensions: ['zip'] },
+        { name: manifest, extensions: ['json'] }
+      ])
+    }
+  } finally {
+    await application.evaluate(({ dialog }) => {
+      dialog.showOpenDialog = globalThis.__originalInstallDialog
+      delete globalThis.__originalInstallDialog
+    })
+    await page.evaluate(() => globalThis.gale.config.updateSettings({ language: 'en' }))
+  }
+}
+
 async function checkNotepadLanguages(application, page, sidebar, popup) {
   const shell = await pluginWindow(application, popup)
   await popup.locator('#draft').fill('Window language draft')
@@ -182,7 +221,8 @@ async function checkLifecycle(application, page, directory) {
     await expect.poll(() => readFile(log, 'utf8').catch(() => '')).toBe('1\n')
     await page.evaluate(() => { globalThis.pluginStop = globalThis.gale.plugins.stopBackend('lifecycle-test') })
     await expect.poll(() => page.evaluate(() => globalThis.pluginCallResults.length), { timeout: 2000 }).toBe(2)
-    assert.equal(await readFile(log, 'utf8'), '1\n')
+    // Cleanup starts before accepted calls settle; queued calls must never execute.
+    await expect.poll(() => readFile(log, 'utf8')).toBe('1\ndeactivate\n')
     await writeFile(join(directory, 'plugins_data/lifecycle-test/release'), '')
     await page.evaluate(() => Promise.all([globalThis.pluginStop, globalThis.pluginCalls]))
     assert.equal(await readFile(log, 'utf8'), '1\ndeactivate\n')
@@ -199,6 +239,16 @@ async function checkLifecycle(application, page, directory) {
     server.closeAllConnections()
     await new Promise(resolve => server.close(resolve))
   }
+}
+
+async function openPluginHome(page, name) {
+  const back = page.getByRole('button', { name: 'Back to app', exact: true })
+  if (await back.isVisible()) await back.click()
+  if (await page.locator('.workspace-panels-drawer').isVisible()) {
+    await page.getByRole('button', { name: 'Hide right workspace', exact: true }).click()
+  }
+  await page.getByRole('button', { name: 'Plugins', exact: true }).click()
+  await page.getByRole('menuitem', { name, exact: true }).click()
 }
 
 async function checkForms(application, page, directory, settings) {
@@ -220,7 +270,7 @@ async function checkForms(application, page, directory, settings) {
   await page.evaluate(() => globalThis.gale.plugins.install())
   await settings()
   await page.getByRole('button', { name: 'Form test', exact: true }).click()
-  await page.getByRole('button', { name: 'Open in side panel', exact: true }).click()
+  await openPluginHome(page, 'Form test')
   let frame = await pluginPage(application, 'form-test')
   await frame.locator('#submit').click()
   await expect(frame.locator('#count')).toHaveText('0')
@@ -423,7 +473,7 @@ async function main() {
     // Partial translations exercise missing and empty text fallback in the real example.
     await writeFile(join(notepadSource, 'lang/fr.json'), JSON.stringify({ version: 0, _meta: { name: 'Français' }, plugin: { name: 'Bloc-notes' }, actions: { save: '' } }))
     await mkdir(join(directory, 'lang'))
-    await writeFile(join(directory, 'lang/fr.json'), JSON.stringify({ version: 0, _meta: { name: 'Français' } }))
+    await writeFile(join(directory, 'lang/fr.json'), JSON.stringify({ version: 0, _meta: { name: 'Français' }, plugins: { install: 'Installer un plugin', install_zip_filter: '' } }))
     await zipExample(join(repository, 'examples/plugins/backend-demo'), backendZip, 'backend-demo/')
     await zipExample(join(repository, 'examples/plugins/notepad'), notepadZip)
     application = await electron.launch({ args: [repository, '--data-dir', directory], cwd: repository, env: environment, executablePath: require('electron'), timeout: 45000 })
@@ -434,6 +484,7 @@ async function main() {
     await page.evaluate(() => globalThis.gale.config.updateSettings({ language: 'en', theme: 'dark' }))
     await page.reload()
     await page.locator('[data-agent-composer-input]').waitFor()
+    await checkInstallDialogLanguages(application, page)
     await application.evaluate(({ dialog, BrowserWindow }, paths) => {
       globalThis.__pluginTestErrors = []
       dialog.showErrorBox = (title, content) => globalThis.__pluginTestErrors.push(`${title}: ${content}`)
@@ -459,7 +510,8 @@ async function main() {
     }
     await settings()
     await page.getByRole('button', { name: 'Install plugin', exact: true }).click()
-    await expect(page.getByRole('button', { name: 'Open in side panel', exact: true })).toBeEnabled()
+    await expect(page.locator('.settings-detail-heading')).toContainText('Notepad')
+    await expect(page.getByRole('button', { name: /^(Open in side panel|Open window)$/ })).toHaveCount(0)
     const settingsIcon = page.locator('.settings-detail-heading .plugin-icon img:visible')
     await expect(settingsIcon).toHaveAttribute('src', /assets\/dark.svg$/)
     await expect.poll(() => settingsIcon.evaluate(image => image.naturalWidth)).toBeGreaterThan(0)
@@ -468,8 +520,8 @@ async function main() {
     await page.evaluate(() => globalThis.gale.config.updateSettings({ theme: 'dark' }))
     const installDialog = await application.evaluate(() => globalThis.__pluginInstallDialog)
     assert.deepEqual(installDialog.properties, ['openFile'])
-    assert.deepEqual(installDialog.filters.flatMap(filter => filter.extensions), ['zip', 'json'])
-    await page.getByRole('button', { name: 'Open in side panel', exact: true }).click()
+    assert.deepEqual(installDialog.filters.map(filter => filter.extensions), [['zip'], ['json']])
+    await openPluginHome(page, 'Notepad')
     let frame = await pluginPage(application, 'example-notepad')
     await expect(frame.locator('#draft')).toBeEnabled({ timeout: 10000 })
     assert.equal(await frame.locator('body').evaluate(() => typeof globalThis.gale), 'undefined')
@@ -499,10 +551,13 @@ async function main() {
     await settings()
     await expect.poll(async () => (await pluginGeometry(application, frame))?.visible).toBe(false)
     await page.screenshot({ path: join(tmpdir(), 'anas-plugin-settings.png') })
-    await page.getByRole('button', { name: 'Open window', exact: true }).click()
+    await page.getByText('Window', { exact: true }).click()
+    await expect(page.getByRole('radio', { name: 'Window', exact: true })).toBeChecked()
+    await openPluginHome(page, 'Notepad')
     await expect(frame.locator('#draft')).toHaveValue('Unsaved page state')
     assert.equal(await windowCount(application), 1, 'Opening a home again must reuse its current sidebar placement.')
     assert.equal((await page.evaluate(() => globalThis.gale.panels.list())).filter(view => view.content.pluginId === 'example-notepad' && view.content.instanceId === 'main').length, 1)
+    await page.evaluate(() => globalThis.gale.plugins.invoke('example-notepad', 'data.set', { key: 'home_open_location', value: 'sidebar' }))
     // A separate business page still has its own placement and unsaved draft.
     await frame.evaluate(() => globalThis.anas.openView({ instanceId: 'language-window', location: 'window' }))
     await expect.poll(() => windowCount(application)).toBe(2)
@@ -560,7 +615,13 @@ async function main() {
     await expect(page.getByRole('checkbox', { name: 'Enabled', exact: true })).toBeChecked()
     await page.getByRole('button', { name: 'Install plugin', exact: true }).click()
     await expect(page.getByText('Backend stopped; starts on the first call.', { exact: true })).toBeVisible()
-    await page.getByRole('button', { name: 'Open in side panel', exact: true }).click()
+    const backendStatusBounds = await page.getByText('Backend stopped; starts on the first call.', { exact: true }).boundingBox()
+    const startBackendBounds = await page.getByRole('button', { name: 'Start backend', exact: true }).boundingBox()
+    assert.ok(backendStatusBounds.x + backendStatusBounds.width <= startBackendBounds.x
+      && backendStatusBounds.y >= startBackendBounds.y
+      && backendStatusBounds.y + backendStatusBounds.height <= startBackendBounds.y + startBackendBounds.height,
+    'Backend status must be left of the control in the same row.')
+    await openPluginHome(page, 'Backend demo')
     const backend = await pluginPage(application, 'example-backend')
     await backend.locator('#call').waitFor()
     await expect(backend.getByRole('heading')).toHaveText('Optional backend')
@@ -584,7 +645,7 @@ async function main() {
     await expect(page.getByRole('button', { name: 'Notepad', exact: true })).toHaveCount(0)
     assert.equal(JSON.parse(await readFile(join(directory, 'plugins_data/example-notepad/state.json'), 'utf8')).values.draft, 'Plugin saved draft')
     await page.getByRole('button', { name: 'Install plugin', exact: true }).click()
-    await page.getByRole('button', { name: 'Open in side panel', exact: true }).click()
+    await openPluginHome(page, 'Notepad')
     frame = await pluginPage(application, 'example-notepad')
     await expect(frame.locator('#draft')).toHaveValue('Plugin saved draft')
     await page.evaluate(() => globalThis.gale.config.updateSettings({ language: 'fr' }))

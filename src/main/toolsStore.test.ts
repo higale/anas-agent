@@ -35,6 +35,27 @@ beforeEach(async () => {
 afterEach(async () => { vi.doUnmock('./config/dataDir'); vi.doUnmock('node:fs/promises'); await rm(root, { recursive: true, force: true }) })
 
 describe('tool directory imports', () => {
+  it('persists global enabled state and enforces it for all, explicit and saved-run tool calls', async () => {
+    await packageAt(join(root, 'tools/read'), 'read', 'read_complete')
+    const id = 'user:read'
+    const selected = { mode: 'custom' as const, project: false, entries: [id] }
+    const all = { ...selected, mode: 'all' as const }
+    const first = await store.listToolSnapshot()
+    const definition = first.tools.find(tool => tool.id === id)!.definition!
+    expect(resolveToolSelection(all, first.tools).entries).toContain(id)
+    await store.setToolEnabled(id, false)
+    const disabled = await store.listToolSnapshot()
+    expect(disabled.tools.find(tool => tool.id === id)?.enabled).toBe(false)
+    expect(resolveToolSelection(selected, disabled.tools).entries).not.toContain(id)
+    expect(resolveToolSelection(all, disabled.tools).entries).not.toContain(id)
+    expect(JSON.parse(await readFile(join(root, 'config/tools.json'), 'utf8')).disabled_tools).toEqual([id])
+    const execute = vi.fn(async () => 'executed')
+    await expect(store.withToolPackageDirectory(definition, execute)).rejects.toThrow('unavailable')
+    expect(execute).not.toHaveBeenCalled()
+    await store.setToolEnabled(id, true)
+    expect(resolveToolSelection(selected, (await store.listToolSnapshot()).tools).entries).toContain(id)
+    await expect(store.withToolPackageDirectory(definition, execute)).resolves.toBe('executed')
+  })
   it('loads the tool-manager template as an independent user package', async () => {
     const result = await store.importToolDirectories([resolve('data/skills_system/tool-manager/assets/python-tool')])
     expect(result.ids).toEqual(['user:normalize-text-example'])

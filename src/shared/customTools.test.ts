@@ -41,7 +41,7 @@ describe('custom tool definitions', () => {
     }
   })
   it('requires explicit selection and intersects the child against its parent limit', () => {
-    expect(defaultCapabilities.customTools).toEqual({ project: false, entries: [] })
+    expect(defaultCapabilities.customTools).toEqual({ mode: 'custom', project: false, entries: [] })
     const resolved = { ...defaultCapabilities, skills: resolveSkillSelection(defaultCapabilities.skills, []) }
     expect(intersectCapabilities({ ...resolved, customTools: selectedTools(['a', 'b']) }, { ...resolved, customTools: selectedTools(['b', 'c']) }).customTools).toEqual(selectedTools(['b']))
   })

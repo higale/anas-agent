@@ -80,6 +80,7 @@ export function useSkillsSettingsState({ openConfirmDialog, settingsOpen, settin
 
   useEffect(() => {
     void refreshSkills()
+    return window.gale.plugins.onChanged(() => { void refreshSkills() })
   }, [refreshSkills])
 
   useEffect(() => {

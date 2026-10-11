@@ -2,12 +2,13 @@ import { requireDataVersion } from '@shared/dataVersion'
 import { listPackageFiles, readPackageFile, savePackageFile } from './packageFiles'
 import { writeJsonFileAtomic } from './atomicJson'
 import { mirrorBundledDirectories } from './bundledDirectories'
-import { getAppConfigSnapshot } from './config/appConfig'
 import { createHash, randomUUID } from 'node:crypto'
 import { copyFile, cp, lstat, mkdir, open, readFile, readdir, readlink, realpath, rename, rm, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
-import { parse as parseYaml } from 'yaml'
+import { inspectSkillText } from './skillDefinition'
+import { pluginRuntime, pluginToolMapping } from './plugins/pluginRuntime'
+import { pluginToolId } from '@shared/pluginTools'
 import { SKILL_ROOT_DISPLAY_NAME_MAX_LENGTH, SKILL_SHORTCUT_ALIAS_MAX_LENGTH, SKILL_SHORTCUT_ALIAS_PATTERN } from '@shared/types'
 import type {
   SkillAvailabilityUpdate,
@@ -32,15 +33,9 @@ import {
   skillsConfigFileName
 } from './config/dataDir'
 import { getProject } from './projectStore'
-import { defaultCapabilities, effectiveProjectCapabilities, type SkillSelection } from '@shared/agentCapabilities'
+import { resolveSkillSelection, skillSelectionEnabled, defaultCapabilities, effectiveProjectCapabilities, resolvePluginCapabilities, type SkillSelection } from '@shared/agentCapabilities'
 import { isSameOrInsideDirectory, samePath } from './pathContainment'
 
-interface ParsedSkill {
-  name: string
-  description: string
-  compatibility?: string
-  body: string
-}
 
 interface ExternalSkillDirectory {
   id: string
@@ -72,6 +67,8 @@ interface RootScan {
 }
 
 interface SkillDirectory {
+  id?: string
+  requiredTools?: string[]
   name: string
   path: string
   linked: boolean
@@ -218,36 +215,6 @@ function mutateSkillsConfig<T>(mutation: (config: SkillsConfigFile) => Promise<T
   return result
 }
 
-function inspectSkillText(content: string, expectedName: string): ParsedSkill | SkillLoadIssue {
-  const lines = content.replace(/\r\n?/g, '\n').split('\n')
-  if (lines[0]?.trim() !== '---') return { code: 'missing_frontmatter' }
-  const end = lines.findIndex((line, index) => index > 0 && line.trim() === '---')
-  if (end < 0) return { code: 'missing_frontmatter', detail: 'The closing front matter delimiter is missing.' }
-  let frontmatter: unknown
-  try {
-    frontmatter = parseYaml(lines.slice(1, end).join('\n'))
-  } catch (reason) {
-    return { code: 'yaml_parse_failed', detail: reason instanceof Error ? reason.message : String(reason) }
-  }
-  if (!isRecord(frontmatter)) return { code: 'missing_frontmatter' }
-  const name = typeof frontmatter.name === 'string' ? frontmatter.name.trim() : ''
-  const description = typeof frontmatter.description === 'string' ? frontmatter.description.trim() : ''
-  if (!name) return { code: 'missing_name' }
-  if (!skillNamePattern.test(name) || name.length > 64) return { code: 'invalid_name', name }
-  if (name !== expectedName) return { code: 'name_mismatch', name, expected: expectedName }
-  if (!description) return { code: 'missing_description' }
-  if (description.length > 1024) return { code: 'description_too_long' }
-  const compatibility = frontmatter.compatibility
-  if (compatibility !== undefined && (typeof compatibility !== 'string' || !compatibility.trim() || compatibility.length > 500)) {
-    return { code: 'invalid_frontmatter_field', name: 'compatibility' }
-  }
-  return {
-    name,
-    description,
-    ...(typeof compatibility === 'string' ? { compatibility: compatibility.trim() } : {}),
-    body: lines.slice(end + 1).join('\n').replace(/^\n+|\n+$/g, '')
-  }
-}
 
 export function toSkillImportError(reason: unknown): SkillImportError {
   if (reason instanceof SkillImportFailure) {
@@ -360,7 +327,7 @@ async function resolveSkillRoots(projectId?: string, sourceFolders?: string[]): 
 
 function invalidSkill(root: SkillRootSummary, directory: SkillDirectory, issue: SkillLoadIssue, config: SkillsConfigFile): LoadedSkill {
   const name = directory.name
-  const id = `${root.id}:${name}`
+  const id = directory.id ?? `${root.id}:${name}`
   const availability = config.availability[id]
   return {
     summary: {
@@ -407,12 +374,12 @@ async function skillDirectories(rootPath: string): Promise<SkillDirectory[]> {
   return result
 }
 
-async function scanRoot(root: SkillRootSummary, config: SkillsConfigFile): Promise<RootScan> {
-  let directories
+async function scanRoot(root: SkillRootSummary, config: SkillsConfigFile, declaredDirectories?: SkillDirectory[]): Promise<RootScan> {
+  let directories = declaredDirectories
   try {
     const info = await stat(root.path)
     if (!info.isDirectory()) return { root: { ...root, available: false, issue: 'not_directory' }, skills: [] }
-    directories = await skillDirectories(root.path)
+    directories ??= await skillDirectories(root.path)
   } catch (reason) {
     const code = (reason as NodeJS.ErrnoException).code
     return { root: { ...root, available: false, issue: code === 'ENOENT' ? 'not_found' : 'unreadable' }, skills: [] }
@@ -442,8 +409,8 @@ async function scanRoot(root: SkillRootSummary, config: SkillsConfigFile): Promi
       skills.push(invalidSkill(root, directory, parsed, config))
       continue
     }
-    const id = `${root.id}:${directory.name}`
-    const availability = config.availability[id]
+    const id = directory.id ?? `${root.id}:${directory.name}`
+    const availability = root.kind === 'project' ? undefined : config.availability[id]
     skills.push({
       summary: {
         id,
@@ -461,7 +428,8 @@ async function scanRoot(root: SkillRootSummary, config: SkillsConfigFile): Promi
         relativePath: directory.name,
         source: root.kind,
         rootName: root.name,
-        shortcutAlias: root.shortcutAlias
+        shortcutAlias: root.shortcutAlias,
+        ...(directory.requiredTools?.length ? { requiredTools: directory.requiredTools } : {})
       }
     })
   }
@@ -469,7 +437,25 @@ async function scanRoot(root: SkillRootSummary, config: SkillsConfigFile): Promi
 }
 
 function precedence(kind: SkillRootKind): number {
-  return kind === 'project' ? 0 : kind === 'user' ? 1 : kind === 'external' ? 2 : 3
+  return kind === 'project' ? 0 : kind === 'user' ? 1 : kind === 'external' ? 2 : kind === 'system' ? 3 : 4
+}
+
+async function loadPluginSkills(config: SkillsConfigFile): Promise<RootScan[]> {
+  const { store } = pluginRuntime()
+  return store.exclusive(async () => {
+    const scans: RootScan[] = []
+    for (const plugin of await store.list()) {
+      if (!plugin.enabled || plugin.error || !plugin.manifest?.skills?.length) continue
+      const path = await store.packageDirectory(plugin.id)
+      const root: SkillRootSummary = { id: `plugin:${plugin.id}`, kind: 'plugin', name: plugin.manifest.name,
+        shortcutAlias: `plugin:${plugin.id}`, path, removable: false, available: true }
+      scans.push(await scanRoot(root, config, plugin.manifest.skills.map(skill => ({
+        id: `${plugin.id}:skill:${skill.id}`, name: basename(dirname(skill.path)), path: join(path, dirname(skill.path)), linked: false,
+        requiredTools: skill.tools.map(id => pluginToolId(plugin.id, id))
+      }))))
+    }
+    return scans
+  })
 }
 
 function resolveConflicts(scans: RootScan[]): LoadedSkill[] {
@@ -505,14 +491,16 @@ function resolveConflicts(scans: RootScan[]): LoadedSkill[] {
   })
 }
 
-async function loadCatalog(projectId?: string, selection?: SkillSelection, sourceFolders?: string[]): Promise<{ roots: SkillRootSummary[]; skills: LoadedSkill[]; scriptAutoApprove: boolean }> {
+async function loadCatalog(projectId?: string, selection?: SkillSelection, sourceFolders?: string[], pluginTools?: readonly string[]): Promise<{ roots: SkillRootSummary[]; skills: LoadedSkill[]; scriptAutoApprove: boolean }> {
   const [roots, config] = await Promise.all([resolveSkillRoots(projectId, sourceFolders), readSkillsConfig()])
   const scans = await Promise.all(roots.map((root) => scanRoot(root, config)))
+  scans.push(...await loadPluginSkills(config))
   if (selection) {
+    const resolved = resolveSkillSelection(selection, scans.flatMap(scan => scan.skills.map(skill => skill.summary)), false, false, pluginTools)
+    const entries = new Map(resolved.entries.map(entry => [entry.id, entry]))
     for (const scan of scans) for (const skill of scan.skills) {
-      const entry = selection.entries.find((entry) => entry.id === skill.summary.id)
-      skill.summary.modelAvailable = selection.mode !== 'off' && (selection.mode === 'default' ? skill.summary.modelAvailable : Boolean(entry?.model))
-      skill.summary.userAvailable = selection.mode !== 'off' && (selection.mode === 'default' ? skill.summary.userAvailable : Boolean(entry?.shortcut))
+      skill.summary.modelAvailable = entries.get(skill.summary.id)?.model ?? false
+      skill.summary.userAvailable = entries.get(skill.summary.id)?.shortcut ?? false
     }
   }
   return { roots: scans.map((scan) => scan.root), skills: resolveConflicts(scans), scriptAutoApprove: config.script_auto_approve }
@@ -545,14 +533,15 @@ export interface SkillScriptScope {
   sourceFolders?: string[]
   selection: SkillSelection
   allowUserInvocation: boolean
+  pluginTools?: readonly string[]
 }
 
 export interface SkillScriptInvocation { name: string; sourceAlias?: string }
 
 /** A current exemption, not execution permission or a persisted capability. */
 export async function findSkillScriptExemption(scriptPath: string, scope: SkillScriptScope, invocation?: SkillScriptInvocation) {
-  if (scope.selection.mode === 'off' || !isAbsolute(scriptPath)) return undefined
-  const catalog = await loadCatalog(scope.projectId, scope.selection, scope.sourceFolders)
+  if (!skillSelectionEnabled(scope.selection) || !isAbsolute(scriptPath)) return undefined
+  const catalog = await loadCatalog(scope.projectId, scope.selection, scope.sourceFolders, scope.pluginTools ?? [])
   const skills = catalog.skills.map(item => item.summary).filter(skill => !skill.loadError)
   const explicit = scope.allowUserInvocation && invocation ? skills.find(skill => skill.userAvailable
     && skill.name.toLowerCase() === invocation.name.toLowerCase()
@@ -595,7 +584,7 @@ export async function listSkillFiles(projectId: string | undefined, skillId: str
 
 export async function readSkillFile(projectId: string | undefined, skillId: string, relativePath: string): Promise<SkillFilePreview> {
   const { summary } = await findSkill(projectId, skillId)
-  return { ...await readPackageFile(summary.dirPath, relativePath), skillId, editable: summary.source !== 'system' }
+  return { ...await readPackageFile(summary.dirPath, relativePath), skillId, editable: summary.source !== 'system' && summary.source !== 'plugin' }
 }
 
 export async function updateSkillAvailability(projectId: string | undefined, skillId: string, update: SkillAvailabilityUpdate): Promise<SkillSnapshot> {
@@ -605,6 +594,7 @@ export async function updateSkillAvailability(projectId: string | undefined, ski
   if (update.modelAvailable !== undefined && !hasModelAvailable) throw new Error('Skill model availability is invalid.')
   if (update.userAvailable !== undefined && !hasUserAvailable) throw new Error('Skill user availability is invalid.')
   const currentSkill = await findSkill(projectId, skillId)
+  if (currentSkill.summary.source === 'project') throw new Error('Select project skills in project capability settings.')
   return mutateSkillsConfig(async (config) => {
     const current = config.availability[skillId] ?? {
       model_available: currentSkill.summary.modelAvailable,
@@ -807,8 +797,8 @@ export async function moveExternalSkillDirectory(rootId: string, direction: -1 |
 
 export async function buildUserSkillInvocation(projectId: string | undefined, name: string, sourceAlias: string | undefined, args: string): Promise<SkillInvocationResult> {
   const project = projectId ? await getProject(projectId) : undefined
-  const selection = project?.kind === 'workspace' ? effectiveProjectCapabilities(project, (await getAppConfigSnapshot()).defaultCapabilities).skills : defaultCapabilities.skills
-  const catalog = await loadCatalog(projectId, selection)
+  const capabilities = resolvePluginCapabilities(project?.kind === 'workspace' ? effectiveProjectCapabilities(project) : defaultCapabilities, await pluginRuntime().store.list())
+  const catalog = await loadCatalog(projectId, capabilities.skills)
   const named = catalog.skills.filter((skill) => !skill.summary.loadError && skill.summary.name.toLowerCase() === name.trim().toLowerCase())
   if (!named.length) return { handled: false, promptText: '', displayText: '' }
   const command = `/${name}${sourceAlias ? `@${sourceAlias}` : ''}`
@@ -821,6 +811,8 @@ export async function buildUserSkillInvocation(projectId: string | undefined, na
   }
   const skill = candidates.find((candidate) => candidate.summary.userAvailable)
   if (!skill) return { handled: true, promptText: '', displayText: command, errorCode: 'user_unavailable', errorName: name }
+  const missingTools = skill.summary.requiredTools?.filter(id => !capabilities.pluginTools.includes(id))
+  if (missingTools?.length) return { handled: true, promptText: '', displayText: command, errorCode: 'tools_unavailable', errorName: name, missingTools }
   const trimmedArgs = args.trim()
   const displayText = `${command}${trimmedArgs ? ` ${trimmedArgs}` : ''}`
   const skillPath = join(skill.summary.dirPath, 'SKILL.md')
@@ -838,7 +830,8 @@ export async function buildUserSkillInvocation(projectId: string | undefined, na
       `<name>${skill.summary.name}</name>`,
       `<path>${skillPath}</path>`,
       contents,
-      '</skill>'
+      '</skill>',
+      ...(skill.summary.requiredTools?.length ? [await pluginToolMapping(skill.summary.requiredTools)] : [])
     ].join('\n')
   }
 }
@@ -847,14 +840,14 @@ export async function buildUserSkillInvocation(projectId: string | undefined, na
 const skillsIntro = "A skill is a set of local instructions to follow that is stored in a `SKILL.md` file. Below is the list of skills that can be used. Each entry includes a name, description, and the absolute path to its `SKILL.md` file."
 const skillsUsage = "- Discovery: The list above is the skills available in this session (name + description + absolute path). Skill bodies live on disk at the listed paths.\n- Trigger rules: If the user names a skill (with `$SkillName` or plain text) OR the task clearly matches a skill's description shown above, you must use that skill for that turn. Multiple mentions mean use them all. Do not carry skills across turns unless re-mentioned.\n- Missing/blocked: If a named skill isn't in the list or the path can't be read, say so briefly and continue with the best fallback.\n- How to use a skill (progressive disclosure):\n  1) After deciding to use a skill, the main agent must open the listed absolute path and read its `SKILL.md` completely before taking task actions. If a read is truncated or paginated, continue until EOF.\n  2) When `SKILL.md` references relative paths (e.g., `scripts/foo.py`), resolve them relative to the directory containing that `SKILL.md` first, and only consider other paths if needed.\n  3) If `SKILL.md` points to extra folders such as `references/`, use its routing instructions to identify the files required for the task. The main agent must read each required instruction or reference file itself before acting on it. Do not delegate reading, summarizing, or interpreting skill instructions to a subagent. Subagents may still perform task work when the selected skill allows it.\n  4) If `scripts/` exist, prefer running or patching them instead of retyping large code blocks.\n  5) If `assets/` or templates exist, reuse them instead of recreating from scratch.\n- Coordination and sequencing:\n  - If multiple skills apply, choose the minimal set that covers the request and state the order you'll use them.\n  - Announce which skill(s) you're using and why (one short line). If you skip an obvious skill, say why.\n- Context hygiene:\n  - Progressive disclosure applies to selecting relevant files, not partially reading a selected instruction file. Do not load unrelated references, scripts, or assets.\n  - Avoid deep reference-chasing: prefer opening only files directly linked from `SKILL.md` unless you're blocked.\n  - When variants exist (frameworks, providers, domains), pick only the relevant reference file(s) and note that choice.\n- Safety and fallback: If a skill can't be applied cleanly (missing files, unclear instructions), state the issue, pick the next-best approach, and continue."
 
-export async function buildSkillsPrompt(projectId?: string, selection: SkillSelection = defaultCapabilities.skills, sourceFolders?: string[]): Promise<string> {
-  const catalog = await loadCatalog(projectId, selection, sourceFolders)
+export async function buildSkillsPrompt(projectId?: string, selection: SkillSelection = defaultCapabilities.skills, sourceFolders?: string[], pluginTools: readonly string[] = []): Promise<string> {
+  const catalog = await loadCatalog(projectId, selection, sourceFolders, pluginTools)
   const winners = catalog.skills.filter((skill) => (
         !skill.summary.loadError
         && skill.summary.modelAvailable
         && !skill.summary.modelShadowedBy
       ))
-  if (selection.mode === 'off' || !catalog.skills.some((skill) => !skill.summary.loadError && (skill.summary.modelAvailable || skill.summary.userAvailable))) return ''
+  if (!catalog.skills.some((skill) => !skill.summary.loadError && (skill.summary.modelAvailable || skill.summary.userAvailable))) return ''
   return [
     '<skills_instructions>',
     '',
@@ -862,6 +855,8 @@ export async function buildSkillsPrompt(projectId?: string, selection: SkillSele
     skillsIntro,
     '### Available skills',
     ...winners.map(({ summary: skill }) => `- ${skill.name}: ${skill.description} (file: ${join(skill.dirPath, 'SKILL.md')})`),
+    ...(winners.some(skill => skill.summary.requiredTools?.length)
+      ? ['### Tool names', await pluginToolMapping(winners.flatMap(skill => skill.summary.requiredTools ?? []))] : []),
     '### How to use skills',
     skillsUsage,
     '',
@@ -871,7 +866,7 @@ export async function buildSkillsPrompt(projectId?: string, selection: SkillSele
 
 export async function saveSkillFile(projectId: string | undefined, skillId: string, relativePath: string, update: import('@shared/packageFiles').PackageFileUpdate): Promise<SkillFilePreview> {
   const { summary } = await findSkill(projectId, skillId)
-  if (summary.source === 'system') throw new Error('System skill files are read-only.')
+  if (summary.source === 'system' || summary.source === 'plugin') throw new Error(`${summary.source === 'system' ? 'System' : 'Plugin'} skill files are read-only.`)
   const definitionPath = await realpath(join(summary.dirPath, 'SKILL.md')).catch(reason => {
     if ((reason as NodeJS.ErrnoException).code === 'ENOENT') return undefined
     throw reason

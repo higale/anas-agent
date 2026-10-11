@@ -2,10 +2,11 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { McpToolStatus, RuntimeToolStatus } from '@shared/types'
+import type { PluginSummary } from '@shared/plugins'
 import { ToolsSettings } from './ToolsSettings'
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => key })
+  useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'en' } })
 }))
 
 const runtimeToolStatus: RuntimeToolStatus = {
@@ -14,7 +15,20 @@ const runtimeToolStatus: RuntimeToolStatus = {
   toolNames: ['read_call']
 }
 
-const props = { customTools: [], onConfigChange: vi.fn(), mcpServers: [], mcpStatus: undefined, runtimeToolStatus }
+const props = { plugins: [], customTools: [], onConfigChange: vi.fn(), mcpServers: [], mcpStatus: undefined, runtimeToolStatus }
+
+const inputSchema = {
+  type: 'object', properties: { query: { type: 'string' }, limit: { type: 'integer', minimum: 1 } },
+  required: ['query'], additionalProperties: false
+}
+function plugin(id: string, enabled = true): PluginSummary {
+  return {
+    id, enabled, backendStatus: 'stopped',
+    languages: [{ code: 'en', name: 'English', pluginName: `${id} tools` }],
+    manifest: { id, name: id, pluginVersion: '1.0.0', apiVersion: 2, description: '', backend: 'backend.cjs',
+      tools: [{ id: 'lookup', description: `Look up with ${id}.`, inputSchema, handler: 'lookup', effect: 'read', timeoutSeconds: 30 }] }
+  }
+}
 
 beforeEach(() => { vi.stubGlobal('gale', { tools: { get: vi.fn(async () => ({ roots: [], tools: [] })) } }) })
 
@@ -85,6 +99,57 @@ describe('tool catalog', () => {
     await user.click(screen.getByRole('button', { name: 'read_call: settings.tools_view_details' }))
     view.rerender(<ToolsSettings {...props} />)
     expect(screen.getByRole('dialog')).toHaveTextContent('Read background call status.')
+  })
+
+  it('groups plugin declarations by source and copies the complete model definition even when disabled', async () => {
+    const user = userEvent.setup()
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText')
+    const onConfigChange = vi.fn()
+    render(<ToolsSettings {...props} onConfigChange={onConfigChange} plugins={[plugin('first'), plugin('second', false)]} />)
+    await user.click(screen.getByRole('button', { name: /^plugins\.title\s*2$/ }))
+    const first = screen.getByRole('region', { name: 'first tools' })
+    const second = screen.getByRole('region', { name: 'second tools' })
+    expect(within(first).getByRole('button', { name: /^plugin__first__lookup:/ })).toBeEnabled()
+    expect(within(second).getByText('settings.disabled')).toBeVisible()
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'custom_tools.import' })).not.toBeInTheDocument()
+    await user.click(within(second).getByRole('button', { name: /^plugin__second__lookup:/ }))
+    const dialog = screen.getByRole('dialog')
+    const expected = { name: 'plugin__second__lookup', description: 'Look up with second.', parameters: inputSchema }
+    expect(JSON.parse(dialog.querySelector('pre')!.textContent!)).toEqual(expected)
+    await user.click(within(dialog).getByRole('button', { name: 'common.copy' }))
+    expect(JSON.parse(writeText.mock.calls[0][0])).toEqual(expected)
+    expect(onConfigChange).not.toHaveBeenCalled()
+  })
+
+  it('refreshes open plugin definitions and closes details after uninstall', async () => {
+    const user = userEvent.setup()
+    const source = plugin('source')
+    const view = render(<ToolsSettings {...props} plugins={[source]} />)
+    await user.click(screen.getByRole('button', { name: /^plugins\.title\s*1$/ }))
+    await user.click(screen.getByRole('button', { name: /^plugin__source__lookup:/ }))
+    view.rerender(<ToolsSettings {...props} plugins={[{ ...source, backendStatus: 'failed', backendError: 'Backend exited',
+      manifest: { ...source.manifest!, tools: [{ ...source.manifest!.tools[0], description: 'Updated lookup.' }] }
+    }]} />)
+    expect(screen.getByRole('dialog')).toHaveTextContent('Updated lookup.')
+    view.rerender(<ToolsSettings {...props} plugins={[]} />)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByText('plugins.tools_catalog_empty')).toBeVisible()
+  })
+
+  it('distinguishes unavailable plugin declarations from an empty catalog', async () => {
+    const user = userEvent.setup()
+    const source = plugin('ui-only')
+    const view = render(<ToolsSettings {...props} plugins={[{ ...source, manifest: { ...source.manifest!, tools: [] } }]} />)
+    await user.click(screen.getByRole('button', { name: /^plugins\.title\s*0$/ }))
+    expect(screen.getByText('plugins.tools_catalog_empty')).toBeVisible()
+    expect(screen.queryByRole('region', { name: 'ui-only tools' })).not.toBeInTheDocument()
+    view.rerender(<ToolsSettings {...props} pluginError="Could not read the plugin directory." />)
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not read the plugin directory.')
+    expect(screen.queryByText('plugins.tools_catalog_empty')).not.toBeInTheDocument()
+    view.rerender(<ToolsSettings {...props} plugins={[{ id: 'broken', enabled: false, backendStatus: 'stopped', error: 'Invalid PLUGIN.json.' }]} />)
+    expect(within(screen.getByRole('region', { name: 'broken' })).getByRole('alert')).toHaveTextContent('Invalid PLUGIN.json.')
+    expect(screen.queryByText('plugins.tools_catalog_empty')).not.toBeInTheDocument()
   })
 
   it.each(['stopped', 'failed', 'recovering', 'ready'] as const)('keeps MCP definitions inspectable when the source is %s', async (state) => {

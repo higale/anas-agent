@@ -1,5 +1,3 @@
-import type { DefaultCapabilitySettings } from '@shared/agentCapabilities'
-import { CapabilitySettings } from './CapabilitySettings'
 import type { DragEvent, FormEvent, RefObject } from 'react'
 import { PanelLeftOpen } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -46,7 +44,6 @@ interface SettingsScreenProps {
   plugins: PluginSummary[]
   pluginError?: string
   onRefreshPlugins(): Promise<void>
-  onOpenPlugin(plugin: PluginSummary): void
   onConfigChange(config: AppConfigSnapshot): void
   activeTab: SettingsTab
   avatar: AppAvatarImage | null
@@ -123,7 +120,6 @@ interface SettingsScreenProps {
   onRestoreSubagent: () => void
   onSaveLanguage: (language: string) => void | Promise<void>
   onSaveProfile: (profile: AppProfileUpdate) => void | Promise<void>
-  onSaveDefaultCapabilities: (value: DefaultCapabilitySettings) => void | Promise<void>
   onSaveSettings: (settings: Partial<AppSettings>) => void | Promise<void>
   onDeveloperHttpTraceEnabledChange: (enabled: boolean) => void | Promise<void>
   onSaveSpeechReply: (settings: Partial<SpeechReplyConfig>) => void | Promise<void>
@@ -146,7 +142,7 @@ function settingsSectionClass(activeTab: SettingsTab, tab: SettingsTab, extra = 
 }
 
 export function SettingsScreen({
-  plugins, pluginError, onRefreshPlugins, onOpenPlugin,
+  plugins, pluginError, onRefreshPlugins,
   onConfigChange,
   activeTab,
   avatar,
@@ -224,7 +220,6 @@ export function SettingsScreen({
   onSaveLanguage,
   onSaveProfile,
   onSaveSettings,
-  onSaveDefaultCapabilities,
   onDeveloperHttpTraceEnabledChange,
   onSaveSpeechReply,
   onMoveSkillDirectory,
@@ -244,9 +239,7 @@ export function SettingsScreen({
   const sectionClass = (tab: SettingsTab, extra = ''): string => settingsSectionClass(activeTab, tab, extra)
   const sidebarLabel = t('chat.show_sidebar')
   const activeTabDefinition = settingsTabs.find((tab) => tab.id === activeTab)
-  const pageDescription = activeTab === 'capabilities' && config
-    ? t('settings.default_capabilities_hint')
-    : activeTab === 'mcp' && mcpStatus
+  const pageDescription = activeTab === 'mcp' && mcpStatus
       ? t('settings.mcp_status_summary', { servers: mcpStatus.servers.length, tools: mcpStatus.toolNames.length, checkedAt: formatDateTime(mcpStatus.checkedAt) })
       : undefined
 
@@ -314,12 +307,6 @@ export function SettingsScreen({
                 onChange={onSaveSettings}
                 onSpeechReplyChange={onSaveSpeechReply}
               />
-            </section>
-          )}
-          {activeTab === 'capabilities' && config && (
-            <section className={sectionClass('capabilities')}>
-              <CapabilitySettings config={config} skills={skills} mcpStatus={mcpStatus}
-                runtimeToolStatus={runtimeToolStatus} onSave={onSaveDefaultCapabilities} />
             </section>
           )}
           {activeTab === 'environment' && (
@@ -449,11 +436,13 @@ export function SettingsScreen({
           )}
 
           {activeTab === 'plugins' && <section className={sectionClass('plugins', 'settings-workbench ui-workbench ui-grid-sidebar')}>
-            <PluginsSettings plugins={plugins} error={pluginError} onRefresh={onRefreshPlugins} onOpen={onOpenPlugin} />
+            <PluginsSettings plugins={plugins} error={pluginError} onRefresh={onRefreshPlugins} />
           </section>}
           {activeTab === 'tools' && (
             <section className={sectionClass('tools', 'settings-workbench ui-workbench ui-grid-sidebar')}>
               <ToolsSettings
+                plugins={plugins}
+                pluginError={pluginError}
                 customTools={config?.customTools ?? []}
                 onConfigChange={onConfigChange}
                 mcpServers={config?.mcpServers ?? []}

@@ -1,5 +1,3 @@
-import * as Dialog from '@radix-ui/react-dialog'
-import { Braces, ClipboardCopy, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -10,13 +8,16 @@ import {
   runtimeToolSelectionId
 } from '@shared/toolRegistry'
 import type { McpServerConfigDetail, McpToolStatus, RuntimeToolDefinition, RuntimeToolStatus } from '@shared/types'
-import { notice } from '../notice'
-import { UI_ICON_SIZE_SMALL } from '../uiConstants'
+import { ContentPreviewDialog } from './ContentPreviewDialog'
 import { CustomToolsGroup } from './CustomToolsGroup'
 import type { AppConfigSnapshot } from '@shared/types'
 import type { ToolPackage } from '@shared/toolPackages'
+import { pluginDisplayText, type PluginSummary } from '@shared/plugins'
+import { pluginToolName } from '@shared/pluginTools'
 
 interface ToolsSettingsProps {
+  plugins: PluginSummary[]
+  pluginError?: string
   customTools: ToolPackage[]
   onConfigChange(config: AppConfigSnapshot): void
   mcpServers: McpServerConfigDetail[]
@@ -24,16 +25,18 @@ interface ToolsSettingsProps {
   runtimeToolStatus: RuntimeToolStatus | undefined
 }
 
-interface McpToolDisplayGroup {
+interface ToolDisplayGroup {
   id: string
   name: string
   tools: RuntimeToolDefinition[]
+  disabled?: boolean
+  error?: string
 }
 
 export function mcpToolDisplayGroups(
   status: McpToolStatus | undefined,
   configuredServers: McpServerConfigDetail[]
-): McpToolDisplayGroup[] {
+): ToolDisplayGroup[] {
   const definitions = new Map<string, RuntimeToolDefinition[]>()
   for (const tool of status?.tools ?? []) {
     definitions.set(tool.name, [...(definitions.get(tool.name) ?? []), tool])
@@ -41,7 +44,7 @@ export function mcpToolDisplayGroups(
   const refs = configuredServers.length > 0
     ? configuredServers
     : (status?.servers ?? [])
-  const groups: McpToolDisplayGroup[] = refs.map((server) => {
+  const groups: ToolDisplayGroup[] = refs.map((server) => {
     const loaded = status?.loaded.find((item) =>
       item.id === server.id && item.index === server.index
     )
@@ -91,9 +94,9 @@ export function toolDefinitionText(tool: RuntimeToolDefinition): string {
   }, null, 2)
 }
 
-export function ToolsSettings({ customTools, onConfigChange, mcpServers, mcpStatus, runtimeToolStatus }: ToolsSettingsProps) {
-  const { t } = useTranslation()
-  const [selectedGroup, setSelectedGroup] = useState<'builtin' | 'mcp' | 'customTools'>('builtin')
+export function ToolsSettings({ plugins, pluginError, customTools, onConfigChange, mcpServers, mcpStatus, runtimeToolStatus }: ToolsSettingsProps) {
+  const { t, i18n } = useTranslation()
+  const [selectedGroup, setSelectedGroup] = useState<'builtin' | 'mcp' | 'plugins' | 'customTools'>('builtin')
   const [selectedToolKey, setSelectedToolKey] = useState<string>()
   const renderGroupTitle = (label: string) => (
     <strong className="settings-tool-group-title">{label}</strong>
@@ -106,6 +109,22 @@ export function ToolsSettings({ customTools, onConfigChange, mcpServers, mcpStat
     () => mcpToolDisplayGroups(mcpStatus, mcpServers),
     [mcpServers, mcpStatus]
   )
+  const pluginGroups = useMemo<ToolDisplayGroup[]>(() => plugins
+    .filter(plugin => plugin.manifest?.tools.length || plugin.error)
+    .map(plugin => ({
+      id: plugin.id,
+      name: pluginDisplayText(plugin, i18n.language),
+      disabled: !plugin.enabled,
+      error: plugin.error,
+      tools: (plugin.manifest?.tools ?? []).map(tool => ({
+        name: pluginToolName(plugin.id, tool.id),
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        parameters: []
+      }))
+    })), [plugins, i18n.language])
+  const catalogGroups = { mcp: mcpGroups, plugins: pluginGroups }
+  const catalogLabels = { builtin: 'custom_tools.builtin', mcp: 'settings.mcp', plugins: 'plugins.title' }
   const toolDefinitions = useMemo(() => new Map([
     ...builtinToolCatalog.map((tool): [string, RuntimeToolDefinition] => [
       `runtime:${tool.id}`, runtimeToolByName.get(tool.id) ?? emptyToolDefinition(tool.id)
@@ -115,8 +134,11 @@ export function ToolsSettings({ customTools, onConfigChange, mcpServers, mcpStat
     ]),
     ...mcpGroups.flatMap((group) => group.tools.map((tool, index): [string, RuntimeToolDefinition] => [
       `mcp:${group.id}:${tool.name}:${index}`, tool
+    ])),
+    ...pluginGroups.flatMap((group) => group.tools.map((tool, index): [string, RuntimeToolDefinition] => [
+      `plugins:${group.id}:${tool.name}:${index}`, tool
     ]))
-  ]), [runtimeToolByName, mcpGroups, t])
+  ]), [runtimeToolByName, mcpGroups, pluginGroups, t])
   const selectedTool = selectedToolKey ? toolDefinitions.get(selectedToolKey) : undefined
   const selectedToolText = selectedTool ? toolDefinitionText(selectedTool) : ''
   function renderToolRow(key: string) {
@@ -134,36 +156,37 @@ export function ToolsSettings({ customTools, onConfigChange, mcpServers, mcpStat
     )
   }
 
-  async function copyToolDefinition(): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(selectedToolText)
-      notice.success(t('chat.message_copied'))
-    } catch {
-      notice.error(t('chat.failed_copy_message'))
-    }
-  }
-
   return (
     <>
       <CustomToolsGroup tools={customTools} onConfigChange={onConfigChange} onSelectCustom={() => setSelectedGroup('customTools')}
-        catalogNavigation={<>{(['builtin', 'mcp'] as const).map(group => <button key={group} type="button"
+        catalogNavigation={<>{(['builtin', 'mcp', 'plugins'] as const).map(group => <button key={group} type="button"
           className={`ui-list-item ui-list-item-split${selectedGroup === group ? ' active' : ''}`} aria-pressed={selectedGroup === group}
           onClick={() => { setSelectedGroup(group); setSelectedToolKey(undefined) }}>
-          <strong>{t(group === 'builtin' ? 'custom_tools.builtin' : 'settings.mcp')}</strong>
-          <em>{group === 'builtin' ? orderedToolCatalog.length : mcpGroups.reduce((total, server) => total + server.tools.length, 0)}</em>
+          <strong>{t(catalogLabels[group])}</strong>
+          <em>{group === 'builtin' ? orderedToolCatalog.length : catalogGroups[group].reduce((total, source) => total + source.tools.length, 0)}</em>
         </button>)}</>}
-        catalogView={selectedGroup === 'customTools' ? undefined : selectedGroup === 'mcp' ? <div className="ui-form-section settings-tool-group">
-          {renderGroupTitle(t('settings.mcp'))}
-          <div className="settings-mcp-tool-groups">
-            {mcpGroups.map(group => <section className="settings-mcp-tool-group" key={group.id}>
-              <div className="settings-mcp-tool-group-header ui-row"><strong>{group.id === 'other' ? t('settings.tools_mcp_other') : group.name}</strong>
-                <small>{t('settings.tools_count', { count: group.tools.length })}</small></div>
+        catalogView={selectedGroup === 'customTools' ? undefined : selectedGroup === 'mcp' || selectedGroup === 'plugins' ? <div className="ui-form-section settings-tool-group">
+          {renderGroupTitle(t(catalogLabels[selectedGroup]))}
+          {selectedGroup === 'plugins' && <>
+            <small className="ui-field-hint">{t('plugins.tools_catalog_hint')}</small>
+            {pluginError && <div className="ui-note ui-note-danger" role="alert">{t('plugins.load_failed')} {pluginError}</div>}
+          </>}
+          <div className="settings-tool-source-groups">
+            {catalogGroups[selectedGroup].map(group => <section className="settings-tool-source-group" key={group.id}
+              aria-label={group.name || t('settings.tools_mcp_other')}>
+              <div className="settings-tool-source-group-header ui-row"><strong>{group.name || t('settings.tools_mcp_other')}</strong>
+                <small>{t('settings.tools_count', { count: group.tools.length })}</small>
+                {group.disabled && <small>{t('settings.disabled')}</small>}
+              </div>
+              {group.error && <div className="ui-note ui-note-danger" role="alert">{group.error}</div>}
               <div className="settings-tool-catalog">
-                {group.tools.map((tool, index) => renderToolRow(`mcp:${group.id}:${tool.name}:${index}`))}
-                {!group.tools.length && <div className="ui-field-hint">{t('settings.tools_mcp_server_empty')}</div>}
+                {group.tools.map((tool, index) => renderToolRow(`${selectedGroup}:${group.id}:${tool.name}:${index}`))}
+                {!group.tools.length && !group.error && <div className="ui-field-hint">{t('settings.tools_mcp_server_empty')}</div>}
               </div>
             </section>)}
-            {!mcpGroups.length && <div className="ui-field-hint">{t('settings.tools_mcp_empty')}</div>}
+            {!catalogGroups[selectedGroup].length && !(selectedGroup === 'plugins' && pluginError) && <div className="ui-field-hint">
+              {t(selectedGroup === 'mcp' ? 'settings.tools_mcp_empty' : 'plugins.tools_catalog_empty')}
+            </div>}
           </div>
         </div> : <div className="ui-form-section">
           {renderGroupTitle(t('custom_tools.builtin'))}
@@ -176,48 +199,10 @@ export function ToolsSettings({ customTools, onConfigChange, mcpServers, mcpStat
         </div>}
       />
 
-      <Dialog.Root open={selectedTool !== undefined} onOpenChange={(open) => { if (!open) setSelectedToolKey(undefined) }}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="ui-backdrop" />
-          <Dialog.Content className="ui-dialog ui-dialog-wide ui-dialog-centered ui-popover settings-code-preview-dialog">
-            <header className="ui-dialog-header">
-              <div className="ui-dialog-icon">
-                <Braces size={18} />
-              </div>
-              <div>
-                <Dialog.Title asChild>
-                  <h2 className="ui-dialog-title">{selectedTool?.name ?? ''}</h2>
-                </Dialog.Title>
-                <Dialog.Description asChild>
-                  <p className="ui-dialog-description">{t('settings.tool_definition_hint')}</p>
-                </Dialog.Description>
-              </div>
-            </header>
-
-            <div className="settings-code-preview-content">
-              <pre className="ui-code-block settings-code-preview-code">{selectedToolText}</pre>
-            </div>
-
-            <footer className="ui-dialog-footer">
-              <button
-                className="ui-icon-button"
-                type="button"
-                aria-label={t('common.copy')}
-                data-tooltip={t('common.copy')}
-                disabled={!selectedToolText}
-                onClick={() => void copyToolDefinition()}
-              >
-                <ClipboardCopy size={UI_ICON_SIZE_SMALL} />
-              </button>
-              <Dialog.Close asChild>
-                <button className="ui-icon-button" type="button" aria-label={t('common.close')} data-tooltip={t('common.close')}>
-                  <X size={UI_ICON_SIZE_SMALL} />
-                </button>
-              </Dialog.Close>
-            </footer>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
+      {selectedTool && <ContentPreviewDialog title={selectedTool.name} description={t('settings.tool_definition_hint')}
+        copyText={selectedToolText} onClose={() => setSelectedToolKey(undefined)}>
+        <pre className="ui-code-block settings-code-preview-code">{selectedToolText}</pre>
+      </ContentPreviewDialog>}
     </>
   )
 }

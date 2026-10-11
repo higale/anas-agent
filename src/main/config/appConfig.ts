@@ -1,6 +1,5 @@
 // Skill settings keep their domain store and serialized mutation queue.
 export { updateSkillScriptApproval } from '../skillsStore'
-import { parseDefaultCapabilitySettings, serializeDefaultCapabilitySettings, type DefaultCapabilitySettings } from '@shared/agentCapabilities'
 import { createHash, randomUUID } from 'node:crypto'
 import type { CustomToolSave } from '@shared/customTools'
 import { listToolSnapshot, saveToolPackage, deleteToolPackage, moveToolPackage } from '../toolsStore'
@@ -17,7 +16,6 @@ import {
   writeRawMcpServersConfig,
   writeRawModelsConfig,
   writeRawSettingsConfig,
-  writeRawCapabilitiesConfig,
   writeRawSubagentsConfig,
   type RawAppConfig,
   type RawAppSettings,
@@ -293,7 +291,7 @@ export function normalizeAppConfigSnapshot(raw: RawAppConfig): AppConfigSnapshot
   if (defaultModelId && !defaultModel) {
     throw new Error(`Default model configuration ID "${defaultModelId}" is not configured.`)
   }
-  return { defaultCapabilities: parseDefaultCapabilitySettings(raw.capabilities), customTools: [], providers: providerDetails, subagents, mcpServers, settings, defaultModelId, defaultModel }
+  return { customTools: [], providers: providerDetails, subagents, mcpServers, settings, defaultModelId, defaultModel }
 }
 
 const maxConfigValueBytes = 256 * 1024
@@ -1070,16 +1068,6 @@ export async function moveMcpServer(index: number, direction: -1 | 1): Promise<A
     servers.splice(nextIndex, 0, server)
     raw.mcp_servers = servers
     await writeRawMcpServersConfig(raw)
-    return getAppConfigSnapshot()
-  })
-}
-
-export async function saveDefaultCapabilities(value: DefaultCapabilitySettings): Promise<AppConfigSnapshot> {
-  const capabilities = serializeDefaultCapabilitySettings(value)
-  return serializeConfigMutation(async () => {
-    const raw = await readRawConfig()
-    raw.capabilities = capabilities
-    await writeRawCapabilitiesConfig(raw)
     return getAppConfigSnapshot()
   })
 }

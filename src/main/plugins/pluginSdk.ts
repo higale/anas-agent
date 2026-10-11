@@ -81,6 +81,7 @@ export const pluginSdk = `(() => {
     getLanguageResources: () => invoke('host.languages'),
     openExternal: url => invoke('host.openExternal', { url }),
     data: Object.freeze({ get: key => invoke('data.get', { key }), set: (key, value) => invoke('data.set', { key, value }) }),
+    settings: Object.freeze({ get: () => invoke('settings.get'), set: (values, revision) => invoke('settings.set', { values, revision }) }),
     backend: Object.freeze({ call: (method, params) => invoke('backend.call', { method, params }) })
   });
 })();`

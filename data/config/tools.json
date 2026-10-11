@@ -1,6 +1,7 @@
 {
   "version": 0,
   "order": [],
+  "disabled_tools": [],
   "defaults": {
     "command": "scripts/run.py {{args}}",
     "timeout_seconds": 0,

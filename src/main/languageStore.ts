@@ -1,5 +1,6 @@
 import { requireDataVersion } from '@shared/dataVersion'
 import { app } from 'electron'
+import { createInstance, type Resource, type TFunction } from 'i18next'
 import { copyFile, mkdir, readFile, readdir } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
 import { getBundledLangDir, getLangDir } from './config/dataDir'
@@ -169,6 +170,21 @@ export async function resolveDefaultProfile(preference: string): Promise<AppProf
   const snapshot = latestSnapshot ?? await getLanguageResources()
   const language = resolveLanguagePack(preference, app.getLocale(), snapshot.languages)
   return profileDefaultsFromResources(language.code, snapshot.resources)
+}
+
+export async function getConfiguredTranslator(preference: string): Promise<TFunction> {
+  const snapshot = latestSnapshot ?? await getLanguageResources()
+  const language = resolveLanguagePack(preference, app.getLocale(), snapshot.languages)
+  const i18n = createInstance()
+  return i18n.init({
+    resources: Object.fromEntries(
+      Object.entries(snapshot.resources).map(([code, translation]) => [code, { translation }])
+    ) as Resource,
+    lng: language.code,
+    fallbackLng: 'en',
+    interpolation: { escapeValue: false },
+    returnEmptyString: false
+  })
 }
 
 export function resolveLanguagePack(
