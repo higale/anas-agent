@@ -26,7 +26,7 @@ interface ManagedToolOptions {
 }
 
 export function supportsManagedTool(tool: StructuredToolInterface): boolean {
-  if (tool.name === 'request_user_input') return false
+  if (tool.name === 'request_user_input' || tool.name === 'sleep') return false
   return !managementTools.has(tool.name) && (
     builtinTools.has(tool.name) || Boolean(pluginToolMetadata((tool as { metadata?: unknown }).metadata)) || isCustomToolMetadata((tool as { metadata?: unknown }).metadata) || isCommandShellMetadata((tool as { metadata?: unknown }).metadata) || tool.name.startsWith('mcp_')
   )

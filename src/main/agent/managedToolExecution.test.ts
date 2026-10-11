@@ -41,6 +41,26 @@ function invoke(tool: ReturnType<typeof withManagedToolExecution>, id: string) {
 afterEach(() => vi.useRealTimers())
 
 describe('unified tool execution', () => {
+  it.each([false, true])('keeps sleep inline without occupying a managed call (background: %s)', async (background) => {
+    vi.useFakeTimers()
+    const h = harness(background)
+    const start = vi.spyOn(h.service, 'start')
+    try {
+      const native = (await createRuntimeTools({ enabled: true, primaryFolder: process.cwd(), memory: false,
+        network: false, shell: false, mcp: false, backgroundTools: background, toolNames: ['sleep'] }))[0]
+      const sleep = withManagedToolExecution(native, h)
+      let completed = false
+      const pending = sleep.invoke({ type: 'tool_call', id: 'sleep-call', name: 'sleep', args: { seconds: 15 } })
+        .then(result => { completed = true; return result as ToolMessage })
+      await vi.advanceTimersByTimeAsync(10_001)
+      expect(completed).toBe(false)
+      expect(start).not.toHaveBeenCalled()
+      expect(h.service.unresolvedForThread(h.threadId)).toEqual([])
+      await vi.advanceTimersByTimeAsync(4999)
+      expect(JSON.parse(String((await pending).content))).toEqual({ status: 'completed', elapsed_seconds: 15 })
+    } finally { await h.service.shutdown(); h.database.close() }
+  })
+
   it.each([
     { kind: 'builtin', name: 'read_file', metadata: {} },
     { kind: 'shell', name: 'pwsh', metadata: commandShellMetadata() },

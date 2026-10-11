@@ -2905,6 +2905,7 @@ describe('captureAgentModelRequest', () => {
         expect(normalizedNames).toEqual(orderedToolCatalog.map((entry) => entry.id).filter((id) => normalizedNames.includes(id)))
         expect(toolNames).toEqual(expect.arrayContaining([
           'write_todos',
+          'sleep',
           'start_subagent',
           'read_subagent',
           'wait_subagent',

@@ -50,6 +50,13 @@ describe('framework tool status', () => {
       'write_call'
     ]))
     expect(status.toolNames).toContain('update_config')
+    expect(status.tools.find((tool) => tool.name === 'sleep')).toMatchObject({
+      parameters: expect.arrayContaining([expect.objectContaining({ name: 'seconds' })]),
+      inputSchema: expect.objectContaining({
+        required: ['seconds'],
+        properties: expect.objectContaining({ seconds: expect.objectContaining({ type: 'integer', minimum: 1, maximum: 300 }) })
+      })
+    })
     expect(status.toolNames).not.toContain('update_assistant_profile')
     expect(status.toolNames).not.toContain('update_user_profile')
     const commandShell = status.tools.find((tool) => tool.capabilityId === 'run_shell')

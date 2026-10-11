@@ -7,6 +7,7 @@ import {
   ChevronRight,
   ChevronUp,
   CircleCheck,
+  Clock,
   Copy,
   FileText,
   FileDiff,
@@ -543,6 +544,13 @@ function specialToolPresentation(call: AgentToolCall): ToolPresentation | undefi
     }
   }
   switch (call.name.toLowerCase()) {
+    case 'sleep':
+      return {
+        icon: <Clock size={13} />,
+        title: call.name,
+        codeTitle: true,
+        showArgumentSummary: true
+      }
     case 'http_request':
       return {
         icon: <Globe size={13} />,
@@ -618,18 +626,53 @@ function ToolResultDisclosure({ tool }: { tool: AgentRunActivity['tools'][number
   )
 }
 
+function sleepDeadline(tool: AgentRunActivity['tools'][number]): number | undefined {
+  if (tool.call.name !== 'sleep' || !tool.startedAt || tool.completedAt) return undefined
+  const args = tool.call.args
+  if (!args || typeof args !== 'object' || !('seconds' in args)) return undefined
+  const seconds = args.seconds
+  const startedAt = Date.parse(tool.startedAt)
+  if (typeof seconds !== 'number' || !Number.isInteger(seconds) || seconds < 1 || seconds > 300 || !Number.isFinite(startedAt)) return undefined
+  return startedAt + seconds * 1000
+}
+
+function SleepCountdown({ deadline }: { deadline: number }) {
+  const { t } = useTranslation()
+  const [remaining, setRemaining] = useState(() => Math.max(0, Math.ceil((deadline - Date.now()) / 1000)))
+  useEffect(() => {
+    const update = () => {
+      const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
+      setRemaining(seconds)
+      if (seconds === 0) window.clearInterval(timer)
+    }
+    const timer = window.setInterval(update, 1000)
+    update()
+    return () => window.clearInterval(timer)
+  }, [deadline])
+  return <small className="agent-sleep-countdown" role="timer" aria-live="off">
+    {remaining > 0 ? t('agent.sleep_remaining', { seconds: remaining }) : t('agent.sleep_finishing')}
+  </small>
+}
+
 function ToolActivityDisclosure({
   tool,
-  progress
+  progress,
+  active
 }: {
   tool: AgentRunActivity['tools'][number]
   progress?: import('@shared/agentTypes').AgentToolCallProgress
+  active: boolean
 }) {
   const { t } = useTranslation()
   const presentation = toolPresentation(tool.call)
   const summary = toolArgumentSummary(tool.call.args)
   const duration = activityDuration(tool.startedAt, tool.completedAt)
   const waitingForApproval = tool.approval?.status === 'pending_approval'
+  const executing = active && tool.status === 'running' && !tool.completedAt && !progress && !waitingForApproval
+  const shimmer = executing && tool.call.name !== 'request_user_input' ? 'agent-tool-running-text' : undefined
+  const showSummary = Boolean(presentation.showArgumentSummary && summary)
+  const titleClassName = showSummary ? undefined : shimmer
+  const deadline = executing ? sleepDeadline(tool) : undefined
   return (
     <ActivityDisclosure
       stateKey={`tool:${tool.call.id}`}
@@ -639,16 +682,16 @@ function ToolActivityDisclosure({
       icon={presentation.icon}
       statusIndicator={waitingForApproval
         ? <ShieldAlert size={13} />
-        : tool.status === 'running'
-          ? <LoaderCircle className="agent-spin" size={13} />
+        : active && tool.status === 'running'
+          ? deadline !== undefined ? <SleepCountdown key={`${tool.call.id}:${deadline}`} deadline={deadline} /> : <LoaderCircle className="agent-spin" size={13} />
           : undefined}
       label={(
         <>
-          {!presentation.title ? <span>{t('agent.tool_call')}</span> : presentation.codeTitle
-            ? <code>{presentation.title}</code>
-            : <span>{presentation.title}</span>}
-          {presentation.showArgumentSummary && summary && (
-            <span className="agent-activity-argument">{summary}</span>
+          {!presentation.title ? <span className={titleClassName}>{t('agent.tool_call')}</span> : presentation.codeTitle
+            ? <code className={titleClassName}>{presentation.title}</code>
+            : <span className={titleClassName}>{presentation.title}</span>}
+          {showSummary && (
+            <span className={`agent-activity-argument${shimmer ? ` ${shimmer}` : ''}`}>{summary}</span>
           )}
           {duration && <small>· {duration}</small>}
           {progress && <small>· {t(progress.complete ? 'agent.tool_arguments_ready' : 'agent.tool_arguments_generating', { count: progress.characterCount })}</small>}
@@ -766,6 +809,8 @@ function ActivityTimelineItems({
               key={item.key}
               tool={item.tool}
               progress={item.progress}
+              active={(run.status === 'running' || run.status === 'interrupted') && (!item.tool.subagentId || run.subagents.some(subagent =>
+                subagent.id === item.tool.subagentId && (subagent.status === 'running' || subagent.status === 'interrupted')))}
             />
           )
         }
@@ -944,7 +989,7 @@ export function AgentSubagentPanel({
               <div ref={contentRef}>
                 <EarlierActivitiesButton activity={run} threadId={threadId} panelRef={panelRef}
                   onLoad={onLoadEarlierActivities} onError={onLoadEarlierError} />
-                {delegationTool && <ToolActivityDisclosure tool={delegationTool} />}
+                {delegationTool && <ToolActivityDisclosure tool={delegationTool} active={run.status === 'running' || run.status === 'interrupted'} />}
                 <ActivityTimelineItems
                   run={run}
                   items={items}

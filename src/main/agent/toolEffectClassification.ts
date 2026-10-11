@@ -15,6 +15,7 @@ type BuiltinEffectPolicy = 'read' | 'confirm' | 'idempotent' | 'conditional'
 
 export const builtinToolEffectPolicies = {
   request_user_input: 'read',
+  sleep: 'read',
   http_request: 'conditional',
   read_call: 'read',
   read_call_output: 'read',

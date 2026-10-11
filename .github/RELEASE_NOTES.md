@@ -1,20 +1,12 @@
-## Anas v3.3.9
+## Anas v3.3.10
 
-- 插件可声明模型工具、技能、静态提示词和通用设置；新增无页面工具及纯声明插件示例，工具支持文本、JSON 和图片结果。
-- 简化能力设置：移除全局默认能力页，项目与子 Agent 使用“全部／定制／关闭”，插件贡献集中按插件选择；完善停用条目编辑和技能可用性冲突提示。
-- 插件业务状态与对话生命周期解耦，取消或超时不再终止共享后台；改进停止收尾和执行中插件包的覆盖／卸载保护。
-- 后台支持查询、打开和移动插件页面；独立窗口标题栏支持锁图标及选中状态。
-- 设置页增加插件提示词、技能和工具预览，工具目录显示实际模型名称；预览和配置不启动后台，减少保存及后台操作时的页面闪烁。
-- 插件安装窗口跟随应用语言，ZIP 与 JSON 分开筛选并默认 ZIP；首页启动菜单只显示有页面的插件，停用时仍可设置首页位置。
-- 修复历史活动刷新覆盖已完成时间的问题，同步中英文手册与插件开发文档。
+- 优化自动朗读：工具执行、审批和子 Agent 活动不再打断已经开始的朗读；尚未开始的朗读会取消，出现新的主模型正文回复时再切换。
+- 新增独立的 `sleep` 等待工具，支持 1–300 秒整数等待与取消，可在项目和子 Agent 能力中单独选择；超过 10 秒仍直接等待，不转为后台任务。
+- 等待工具显示时钟图标和紧随文本的倒计时；运行中的工具显示流光效果，适配浅色、深色及减少动态效果设置，同步中英文说明。
 
-- Plugins can declare model tools, skills, static instructions, and shared settings. New examples cover tools without a page and static contributions; tools support text, JSON, and image results.
-- Simplify capability settings: remove global default capabilities, use All / Custom / Off in projects and subagents, and group contributions by plugin. Improve editing of disabled sources and warnings for unavailable skill selections.
-- Decouple plugin business state from conversation lifecycles. Cancellation and timeouts no longer terminate shared backends; improve shutdown cleanup and protect plugin packages used by active tools from replacement or removal.
-- Let backends query, open, and move plugin pages; add lock icons and pressed states to separate-window toolbar actions.
-- Preview plugin instructions, skills, and tools in settings and show actual model-facing tool names in the catalog. Previews and configuration do not start backends; reduce flicker during saves and backend operations.
-- Localize the plugin file picker, split ZIP and JSON filters with ZIP selected by default, and list only plugins with pages in the launch menu. Home page location remains editable while a plugin is disabled.
-- Fix activity refreshes overwriting completion times, and update bilingual guides and plugin development documentation.
+- Improve automatic narration: tools, approvals, and subagent activity no longer interrupt speech that has started. Cancel pending speech that has not started, and switch when a new main-model reply begins.
+- Add an independent `sleep` tool with cancellable waits of 1–300 whole seconds, selectable in project and subagent capabilities. Waits longer than 10 seconds remain inline instead of becoming background tasks.
+- Show a clock icon and an inline countdown for waits, plus shimmer for running tools. Support light and dark themes and reduced-motion preferences, with updated bilingual guides.
 
 ## 下载与安装 / Downloads & installation
 

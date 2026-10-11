@@ -45,6 +45,9 @@ async function verifyCapabilities(launchApplication) {
     await expect(page.locator('[data-settings-tab="capabilities"]')).toHaveCount(0)
     await page.getByRole('button', { name: 'Back to app', exact: true }).click()
     let dialog = await openCapabilityProject(page, 'Capability fixture')
+    await expect(dialog.getByRole('checkbox', { name: 'Wait', exact: true })).toBeChecked()
+    await dialog.getByRole('checkbox', { name: 'Wait', exact: true }).uncheck()
+    await expect(dialog.getByRole('checkbox', { name: 'Background tools', exact: true })).toBeChecked()
     for (const name of ['Skills', 'Subagents', 'Custom tools']) {
       const section = dialog.getByRole('region', { name, exact: true })
       const picker = section.getByRole('radiogroup', { name, exact: true })
@@ -79,6 +82,7 @@ async function verifyCapabilities(launchApplication) {
     assert.equal(previews.all, true)
     assert.equal(previews.project.capabilities.skills.mode, 'custom')
     dialog = await openCapabilityProject(page, 'Capability fixture')
+    await expect(dialog.getByRole('checkbox', { name: 'Wait', exact: true })).not.toBeChecked()
     const skills = dialog.getByRole('region', { name: 'Skills', exact: true })
     await expect(skills.getByRole('checkbox')).toHaveCount(0)
     await skills.getByRole('button', { name: 'Skills', exact: true }).click()

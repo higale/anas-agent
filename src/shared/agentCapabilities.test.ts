@@ -20,6 +20,20 @@ describe('compression configuration compatibility', () => {
 })
 
 describe('scoped Agent capabilities', () => {
+  it('persists sleep through existing tool selections and applies the parent limit', () => {
+    const capabilities = { ...structuredClone(defaultCapabilities), backgroundTools: false,
+      skills: { mode: 'custom' as const, project: false as const, entries: [] }, customTools: selectedTools() }
+    expect(toolAllowed(parseCapabilities(serializeCapabilities(capabilities)), 'sleep')).toBe(true)
+    const disabled = setToolSelection(capabilities, ['sleep'], false)
+    assertResolvedCapabilities(disabled)
+    expect(toolAllowed(parseCapabilities(serializeCapabilities(disabled)), 'sleep')).toBe(false)
+    const selected = { ...capabilities, toolMode: 'selected' as const, tools: ['sleep'] }
+    expect(toolAllowed(parseCapabilities(serializeCapabilities(selected)), 'sleep')).toBe(true)
+    expect(toolAllowed({ ...selected, tools: [] }, 'sleep')).toBe(false)
+    expect(toolAllowed(intersectCapabilities(selected, disabled), 'sleep')).toBe(false)
+    expect(toolAllowed(intersectCapabilities(selected, capabilities), 'sleep')).toBe(true)
+  })
+
   it('defaults optional prompt selections and limits them with the existing parent capability policy', () => {
     const raw = serializeCapabilities(defaultCapabilities)
     const { plugin_prompts: _prompts, ...withoutPrompts } = raw

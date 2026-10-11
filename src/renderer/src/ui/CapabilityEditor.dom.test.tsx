@@ -18,6 +18,24 @@ async function selectSkills(mode: 'default' | 'custom' | 'off') {
     .getByRole('radio', { name: `capabilities.${mode === 'default' ? 'all' : mode}` }))
 }
 describe('shared capability editor', () => {
+  it.each([false, true])('controls sleep separately from background and command tools in subagent mode %s', async (subagent) => {
+    const onChange = vi.fn()
+    render(<Harness subagent={subagent} onChange={onChange} />)
+    const toggle = screen.getByRole('checkbox', { name: 'settings.capability_sleep' })
+    expect(toggle).toBeChecked()
+    await userEvent.click(toggle)
+    expect(toolAllowed(onChange.mock.lastCall![0], 'sleep')).toBe(false)
+    expect(onChange.mock.lastCall![0].backgroundTools).toBe(true)
+    await userEvent.click(screen.getByRole('button', { name: 'settings.capabilities_disable_all' }))
+    await userEvent.click(toggle)
+    expect(onChange.mock.lastCall![0].tools).toEqual(['sleep'])
+    expect(toolAllowed(onChange.mock.lastCall![0], 'sleep')).toBe(true)
+    expect(toolAllowed(onChange.mock.lastCall![0], 'run_shell')).toBe(false)
+    expect(onChange.mock.lastCall![0].backgroundTools).toBe(false)
+    await userEvent.click(screen.getByRole('checkbox', { name: 'settings.capability_backgroundTools' }))
+    expect(toggle).toBeChecked()
+  })
+
   it.each([false, true])('removes stale skill selections regardless of checked state in subagent mode %s', async (subagent) => {
     const retained = { id: skills.skills[0].id, shortcut: true, model: false }
     const entries = [retained, { id: 'deleted:off', shortcut: false, model: false }, { id: 'deleted:on', shortcut: true, model: true }]

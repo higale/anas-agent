@@ -14,6 +14,8 @@ Choose Help from the lower-left menu to read this guide in the right workspace. 
 2. Select a model in the toolbar at the bottom of the message input box.
 3. Type and send a message. Add attachments or select a project as needed.
 
+During tool execution, a shimmer moves across the description, or the tool name when no description is available. It stops when awaiting user approval or an answer, or when the call ends. The system's reduced-motion setting keeps the text static.
+
 ## Projects And Capabilities
 
 Enable **Customize capabilities** in the project editor to choose prompts, context, tools, skills, and subagents. Turning it off uses all enabled capabilities and retains custom choices. Settings manages source availability; there is no global default-capability page. Coding mode controls the development workflow without increasing access permissions.
@@ -111,6 +113,14 @@ It does not require **File write**. Each call requires approval in **Allow read-
 Provides `request_user_input` so the Agent can present questions with choices or a text answer. Useful for missing information, clarification, and decisions. You can cancel; ordinary questions may also time out.
 
 It does not require **Background tools**. When disabled, the Agent can still ask in chat but cannot open this question dialog. Execution approval dialogs are controlled separately.
+
+### Wait
+
+Provides `sleep` so the Agent can pause before continuing, for example before checking a webpage or chat reply again. The required `seconds` parameter accepts integers from 1 through 300; the optional `summary` describes the reason. Completion returns the actual elapsed seconds; observing changes still requires the appropriate tool afterward.
+
+This capability has its own switch in project and subagent settings, independent of **Command execution** and **Background tools**. It waits inline without switching to a background call after 10 seconds. Stopping the run cancels the wait.
+
+The chat entry shows a clock icon and remaining seconds. When the countdown reaches zero it waits for the actual result, then shows the elapsed time.
 
 ### File Read
 
@@ -267,6 +277,8 @@ Text extraction supports text files, PDFs, and docx files. Images require a mode
 The microphone button invokes Windows voice typing or macOS Dictation. The system controls starting, stopping, and recognition language. On macOS, enable Dictation in System Settings > Keyboard > Dictation first. Confirm that system dictation has started, then review the recognized text before sending. Anas does not record or save audio.
 
 Spoken replies connect directly to Microsoft Edge online speech services and require internet access. Text to be read is sent to Microsoft. Choose the voice and speed in settings. Audio is buffered only in memory; stopping playback or switching conversations cancels unfinished synthesis and releases queued audio.
+
+Automatic speech reads the main model's reply in chunks. If a subsequent tool call, approval wait, or subagent task appears before playback begins, pending narration is cancelled. Once playback has begun, the reply continues, including during synthesis gaps between chunks. A new main-model reply's body text stops the old audio and switches to the new reply; reasoning and tool-only calls do not interrupt speech that has already begun. Final messages do not replay text already read or cancelled.
 
 ## Conversations And Context
 

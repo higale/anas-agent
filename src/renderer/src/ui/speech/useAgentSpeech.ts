@@ -58,11 +58,14 @@ export function useAgentSpeech(
   const activeMessageIdRef = useRef<string | undefined>(undefined)
   const stoppedRunIdRef = useRef<string | undefined>(undefined)
   const candidateStateRef = useRef<AgentReplyCandidateState>(idleAgentReplyCandidate)
+  const candidateMessageIdRef = useRef<string | undefined>(undefined)
+  const spokenReplyRef = useRef<{ displayId: string; messageId?: string } | undefined>(undefined)
   const candidateTextRef = useRef('')
   const candidateBufferRef = useRef('')
   const candidateBufferStartsLineRef = useRef(true)
   const candidateStartedAtRef = useRef(0)
   const candidateChunkSequenceRef = useRef(0)
+  const candidateSuppressedRef = useRef(false)
   const tokenRef = useRef(0)
   const queuedChunkSequenceRef = useRef(0)
   const nextPlaySequenceRef = useRef(1)
@@ -72,6 +75,8 @@ export function useAgentSpeech(
   const activeRequestRef = useRef<string | undefined>(undefined)
   const capacityWaitRef = useRef<(() => void) | undefined>(undefined)
   const playingRef = useRef(false)
+  const playbackStartedRef = useRef(false)
+  const automaticSpeechRef = useRef(false)
   const audioRef = useRef<HTMLAudioElement | undefined>(undefined)
   const speechErrorRef = useRef<string | undefined>(undefined)
   const playNextRef = useRef<(token: number) => void>(() => undefined)
@@ -92,6 +97,8 @@ export function useAgentSpeech(
 
   const resetSpeechWork = useCallback((): void => {
     tokenRef.current += 1
+    playbackStartedRef.current = false
+    automaticSpeechRef.current = false
     const requestId = activeRequestRef.current
     activeRequestRef.current = undefined
     if (requestId) void window.gale.speech.cancel(requestId).catch(() => undefined)
@@ -109,11 +116,13 @@ export function useAgentSpeech(
   }, [])
 
   const resetCandidate = useCallback((): void => {
+    candidateMessageIdRef.current = undefined
     candidateTextRef.current = ''
     candidateBufferRef.current = ''
     candidateBufferStartsLineRef.current = true
     candidateStartedAtRef.current = 0
     candidateChunkSequenceRef.current = 0
+    candidateSuppressedRef.current = false
   }, [])
 
   const refreshState = useCallback((): void => {
@@ -144,6 +153,7 @@ export function useAgentSpeech(
     activeRunIdRef.current = undefined
     activeMessageIdRef.current = undefined
     candidateStateRef.current = idleAgentReplyCandidate
+    spokenReplyRef.current = undefined
     if (showIdle) setState({ status: 'idle' })
   }, [resetCandidate, resetSpeechWork, stopAudio])
 
@@ -192,10 +202,14 @@ export function useAgentSpeech(
       finish()
     }
 
+    const markStarted = (): void => {
+      if (audioRef.current === audio && isCurrentToken(token)) playbackStartedRef.current = true
+    }
+    audio.addEventListener('playing', markStarted, { once: true })
     audio.addEventListener('ended', finish, { once: true })
     audio.addEventListener('error', fail, { once: true })
     audio.load()
-    void audio.play().catch(() => {
+    void audio.play().then(markStarted).catch(() => {
       if (audioRef.current !== audio) return
       if (isCurrentToken(token)) {
         const detail = t('speech.playback_failed')
@@ -302,14 +316,8 @@ export function useAgentSpeech(
     }
   }, [queueSpeechChunk, refreshState])
 
-  const queueDoneText = useCallback((text: string): void => {
-    resetSpeechWork()
-    const token = tokenRef.current
-    queueSpeechText(text, token)
-    refreshState()
-  }, [queueSpeechText, refreshState, resetSpeechWork])
-
   const queueCandidateBuffer = useCallback((final: boolean): void => {
+    if (candidateSuppressedRef.current) return
     const token = tokenRef.current
     while (candidateBufferRef.current) {
       const cutPosition = findSpeechCutPosition(candidateBufferRef.current, {
@@ -321,6 +329,7 @@ export function useAgentSpeech(
       const chunk = candidateBufferRef.current.slice(0, cutPosition)
       candidateBufferRef.current = candidateBufferRef.current.slice(cutPosition)
       candidateChunkSequenceRef.current += 1
+      activeMessageIdRef.current = candidateMessageIdRef.current
       queueSpeechText(chunk, token, { startsAtLineBoundary: candidateBufferStartsLineRef.current })
       const lastLineBreak = Math.max(chunk.lastIndexOf('\n'), chunk.lastIndexOf('\r'))
       candidateBufferStartsLineRef.current = (lastLineBreak >= 0 || candidateBufferStartsLineRef.current)
@@ -332,10 +341,23 @@ export function useAgentSpeech(
 
   const appendCandidateText = useCallback((text: string): void => {
     if (!text) return
+    // A model request may only think or call tools. Replace speech only when
+    // its first non-empty body arrives, preserving the old reply until then.
+    if (!candidateTextRef.current.trim() && text.trim()) {
+      resetSpeechWork()
+      stopAudio()
+      automaticSpeechRef.current = true
+      spokenReplyRef.current = candidateMessageIdRef.current
+        ? { displayId: candidateMessageIdRef.current } : undefined
+      setState({ status: 'idle' })
+    }
     candidateTextRef.current += text
+    if (candidateSuppressedRef.current) return
     candidateBufferRef.current += text
+    if (!candidateTextRef.current.trim()) return
+    activeMessageIdRef.current = candidateMessageIdRef.current
     queueCandidateBuffer(false)
-  }, [queueCandidateBuffer])
+  }, [queueCandidateBuffer, resetSpeechWork, stopAudio])
 
   const reconcileCandidateText = useCallback((completeText: string): void => {
     if (!completeText) return
@@ -347,16 +369,20 @@ export function useAgentSpeech(
     }
   }, [appendCandidateText])
 
-  const discardCandidate = useCallback((): void => {
-    const keepPlaying = playingRef.current
-    resetSpeechWork()
-    resetCandidate()
-    if (!keepPlaying) {
-      stopAudio()
-      activeMessageIdRef.current = undefined
-      setState({ status: 'idle' })
+  const cancelUnstartedReply = useCallback((): void => {
+    // Keep the whole reply once any chunk has actually played, including gaps
+    // between chunks. A previous reply may still be playing for a tool-only model.
+    if (!automaticSpeechRef.current || spokenReplyRef.current?.displayId !== candidateMessageIdRef.current
+      || !playbackStartedRef.current) {
+      candidateSuppressedRef.current = true
+      candidateBufferRef.current = ''
     }
-  }, [resetCandidate, resetSpeechWork, stopAudio])
+    if (!automaticSpeechRef.current || playbackStartedRef.current) return
+    resetSpeechWork()
+    stopAudio()
+    activeMessageIdRef.current = undefined
+    setState({ status: 'idle' })
+  }, [resetSpeechWork, stopAudio])
 
   const playText = useCallback((
     messageId: string,
@@ -391,22 +417,15 @@ export function useAgentSpeech(
     candidateStateRef.current = transition.state
     for (const action of transition.actions) {
       if (action.type === 'run_started') {
-        resetSpeechWork()
-        resetCandidate()
-        stopAudio()
+        if (action.newUserTurn || activeRunIdRef.current !== action.runId) resetCandidate()
         activeRunIdRef.current = action.runId
-        activeMessageIdRef.current = undefined
-        stoppedRunIdRef.current = undefined
-        setState({ status: 'idle' })
+        if (action.newUserTurn || stoppedRunIdRef.current !== action.runId) stoppedRunIdRef.current = undefined
         continue
       }
       if (stoppedRunIdRef.current === activeRunIdRef.current) continue
       if (action.type === 'candidate_started') {
-        const preservePlayback = playingRef.current
-        resetSpeechWork()
         resetCandidate()
-        if (!preservePlayback) stopAudio()
-        activeMessageIdRef.current = `${action.runId}:model:${action.model.id}`
+        candidateMessageIdRef.current = `${action.runId}:model:${action.model.id}`
         const parsedStartedAt = action.model.startedAt
           ? Date.parse(action.model.startedAt)
           : Number.NaN
@@ -421,11 +440,16 @@ export function useAgentSpeech(
       }
       if (action.type === 'candidate_completed') {
         reconcileCandidateText(action.model.text)
-        queueCandidateBuffer(true)
+        if (candidateTextRef.current.trim()) {
+          queueCandidateBuffer(true)
+          if (spokenReplyRef.current && spokenReplyRef.current.displayId === candidateMessageIdRef.current) {
+            spokenReplyRef.current.messageId = action.model.messageId
+          }
+        }
         continue
       }
-      if (action.type === 'candidate_intermediate') {
-        discardCandidate()
+      if (action.type === 'followup_work') {
+        cancelUnstartedReply()
         continue
       }
       if (action.type === 'stopped') {
@@ -434,14 +458,27 @@ export function useAgentSpeech(
       }
       if (action.type === 'candidate_final') {
         const finalText = action.message ? messageText(action.message) : ''
-        if (action.message && candidateTextRef.current) {
-          reconcileCandidateText(finalText)
-          queueCandidateBuffer(true)
-          activeMessageIdRef.current = action.message.id
-          refreshState()
-        } else if (action.message) {
-          activeMessageIdRef.current = action.message.id
-          queueDoneText(finalText)
+        if (action.message && finalText.trim()) {
+          const spoken = spokenReplyRef.current
+          const sameCandidate = spoken?.displayId === candidateMessageIdRef.current
+          const alreadySpoken = spoken?.messageId === action.message.id
+            || (sameCandidate && !spoken?.messageId && Boolean(candidateTextRef.current)
+              && finalText.startsWith(candidateTextRef.current))
+          if (!alreadySpoken) {
+            resetCandidate()
+            candidateMessageIdRef.current = action.message.id
+            appendCandidateText(finalText)
+            queueCandidateBuffer(true)
+          } else if (sameCandidate) {
+            reconcileCandidateText(finalText)
+            queueCandidateBuffer(true)
+          }
+          if (activeMessageIdRef.current === spokenReplyRef.current?.displayId) {
+            activeMessageIdRef.current = action.message.id
+            if (playingRef.current) setState({ messageId: action.message.id, status: 'playing' })
+            else refreshState()
+          }
+          if (spokenReplyRef.current) spokenReplyRef.current.messageId = action.message.id
         }
         activeRunIdRef.current = undefined
       }
@@ -449,14 +486,11 @@ export function useAgentSpeech(
   }, [
     appendCandidateText,
     cancelAll,
-    discardCandidate,
+    cancelUnstartedReply,
     queueCandidateBuffer,
-    queueDoneText,
     reconcileCandidateText,
     refreshState,
-    resetCandidate,
-    resetSpeechWork,
-    stopAudio
+    resetCandidate
   ])
 
   useEffect(() => {

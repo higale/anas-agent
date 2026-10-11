@@ -14,11 +14,11 @@ export interface AgentReplyCandidateState {
 }
 
 export type AgentReplyCandidateAction =
-  | { type: 'run_started'; runId: string }
+  | { type: 'run_started'; runId: string; newUserTurn: boolean }
   | { type: 'candidate_started'; runId: string; model: AgentModelActivity }
   | { type: 'candidate_delta'; runId: string; modelId: string; text: string }
   | { type: 'candidate_completed'; runId: string; model: AgentModelActivity }
-  | { type: 'candidate_intermediate'; runId: string; modelId: string }
+  | { type: 'followup_work'; runId: string }
   | { type: 'candidate_final'; runId: string; message?: AgentMessage }
   | { type: 'stopped'; runId: string }
 
@@ -42,14 +42,6 @@ function finalMessageForRun(
   )
 }
 
-function abandonCurrentCandidate(
-  state: AgentReplyCandidateState
-): AgentReplyCandidateAction[] {
-  return state.runId && state.modelId
-    ? [{ type: 'candidate_intermediate', runId: state.runId, modelId: state.modelId }]
-    : []
-}
-
 export function transitionAgentReplyCandidate(
   state: AgentReplyCandidateState,
   event: AgentRuntimeEvent
@@ -57,8 +49,9 @@ export function transitionAgentReplyCandidate(
   if (event.type === 'run_started') {
     if (event.run.operation !== 'agent') return { state, actions: [] }
     return {
-      state: { runId: event.run.id, phase: 'idle' },
-      actions: [{ type: 'run_started', runId: event.run.id }]
+      state: !event.newUserTurn && state.runId === event.run.id
+        ? state : { runId: event.run.id, phase: 'idle' },
+      actions: [{ type: 'run_started', runId: event.run.id, newUserTurn: event.newUserTurn }]
     }
   }
 
@@ -68,14 +61,10 @@ export function transitionAgentReplyCandidate(
   if (
     event.type === 'run_failed'
     || event.type === 'run_cancelled'
-    || event.type === 'run_interrupted'
   ) {
     return {
       state: idleAgentReplyCandidate,
-      actions: [
-        ...abandonCurrentCandidate(state),
-        { type: 'stopped', runId: eventRunId }
-      ]
+      actions: [{ type: 'stopped', runId: eventRunId }]
     }
   }
 
@@ -86,10 +75,7 @@ export function transitionAgentReplyCandidate(
         modelId: event.model.id,
         phase: 'streaming'
       },
-      actions: [
-        ...abandonCurrentCandidate(state),
-        { type: 'candidate_started', runId: eventRunId, model: event.model }
-      ]
+      actions: [{ type: 'candidate_started', runId: eventRunId, model: event.model }]
     }
   }
 
@@ -115,39 +101,24 @@ export function transitionAgentReplyCandidate(
     && !event.model.subagentId
     && event.model.id === state.modelId
   ) {
-    if (event.model.toolCallIds.length > 0) {
-      return {
-        state: { runId: eventRunId, phase: 'idle' },
-        actions: [{
-          type: 'candidate_intermediate',
-          runId: eventRunId,
-          modelId: event.model.id
-        }]
-      }
-    }
     return {
       state: { ...state, phase: 'complete' },
-      actions: [{ type: 'candidate_completed', runId: eventRunId, model: event.model }]
+      actions: [
+        { type: 'candidate_completed', runId: eventRunId, model: event.model },
+        ...(event.model.toolCallIds.length > 0
+          ? [{ type: 'followup_work' as const, runId: eventRunId }] : [])
+      ]
     }
   }
 
-  const laterRootWork = (
-    (event.type === 'tool_started' || event.type === 'tool_approval_requested')
-    && !event.subagentId
-  ) || (
-    event.type === 'subagent_updated'
-    && event.subagent.status === 'running'
-    && !event.subagent.parentSubagentId
-  )
-  if (laterRootWork && state.modelId) {
-    return {
-      state: { runId: eventRunId, phase: 'idle' },
-      actions: [{
-        type: 'candidate_intermediate',
-        runId: eventRunId,
-        modelId: state.modelId
-      }]
-    }
+  if (
+    (event.type === 'model_tool_calls' && !event.subagentId
+      && event.modelId === state.modelId && event.progress.length > 0)
+    || ((event.type === 'tool_started' || event.type === 'tool_approval_requested') && !event.subagentId)
+    || (event.type === 'subagent_updated' && !event.subagent.parentSubagentId && event.subagent.status === 'running')
+    || event.type === 'run_interrupted'
+  ) {
+    return { state, actions: [{ type: 'followup_work', runId: eventRunId }] }
   }
 
   if (event.type === 'run_completed') {

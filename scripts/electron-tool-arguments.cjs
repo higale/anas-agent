@@ -11,6 +11,7 @@ async function verifyToolArguments(launchApplication) {
   try {
     app = await launchApplication(home)
     const page = await app.firstWindow()
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
     await page.locator('[data-agent-composer-input]').waitFor()
     await app.evaluate(({ ipcMain, BrowserWindow }) => {
       const now = new Date().toISOString()
@@ -57,6 +58,7 @@ async function verifyToolArguments(launchApplication) {
     const card = page.locator('.agent-activity-tool')
     const summary = card.locator(':scope > summary')
     await expect(summary).toHaveAttribute('aria-disabled', 'true')
+    await expect(card.locator('.agent-tool-running-text')).toHaveCount(0)
     // Native details activation is tested in Chromium for both mouse and keyboard.
     await summary.click({ force: true })
     for (const key of ['Enter', 'Space']) {
@@ -83,6 +85,8 @@ async function verifyToolArguments(launchApplication) {
     await send({ ...common, type: 'tool_started', call, sequence: 1, startedAt: now })
     await expect(summary).not.toHaveAttribute('aria-disabled')
     await expect(card).toHaveCount(1)
+    await expect(card.locator('.agent-tool-running-text')).toHaveText('apply_patch')
+    assert.equal(await card.locator('.agent-tool-running-text').evaluate(element => element.getAnimations().length), 1)
     assert.equal(await card.evaluate((element) => element.open), false)
     await expect(card.locator('pre')).toHaveCount(0)
     const nextModel = { ...model, id: 'model-next', sequence: 2 }
@@ -152,7 +156,58 @@ async function verifyToolArguments(launchApplication) {
     await expect(card.locator('.agent-activity-result')).toBeVisible()
     await expect(args.locator('pre')).toHaveText(JSON.stringify(call.args, null, 2))
     await expect(card.locator('.agent-activity-result pre')).toHaveCount(0)
+    await expect(card.locator('.agent-tool-running-text')).toHaveCount(0)
+    await page.evaluate(() => globalThis.gale.config.updateSettings({ language: 'zh-CN', theme: 'dark' }))
+    const sleepStarted = new Date(Date.now() - 5000).toISOString()
+    const sleepCall = { id: 'sleep', name: 'sleep', args: { seconds: 15, summary: '等待新回复' } }
+    await send({ ...common, type: 'tool_started', call: sleepCall, sequence: 5, startedAt: sleepStarted })
+    const sleepCard = page.locator('.agent-activity-tool').filter({ has: page.locator('code').filter({ hasText: /^sleep$/ }) })
+    const countdown = sleepCard.getByRole('timer')
+    await sleepCard.scrollIntoViewIfNeeded()
+    await expect(sleepCard.locator(':scope > summary .lucide-clock')).toBeVisible()
+    await expect(countdown).toHaveText('剩余 10 秒')
+    const firstBounds = await countdown.boundingBox()
+    const labelBounds = await sleepCard.locator(':scope > summary .agent-activity-summary-label').boundingBox()
+    const gap = firstBounds.x - labelBounds.x - labelBounds.width
+    assert.ok(gap >= 4 && gap <= 8, 'Countdown follows the tool text with a small gap.')
+    await expect(countdown).toHaveText('剩余 9 秒')
+    const nextBounds = await countdown.boundingBox()
+    assert.ok(Math.abs(firstBounds.x - nextBounds.x) < 1, 'Countdown stays beside the text as digits change.')
+    const shimmer = sleepCard.locator('.agent-tool-running-text')
+    await expect(shimmer).toHaveText('等待新回复')
+    assert.equal(await countdown.evaluate(element => element.getAnimations().length), 0)
+    const freezeShimmer = async () => {
+      const positions = await shimmer.evaluate(element => {
+        const animation = element.getAnimations()[0]
+        animation.pause()
+        animation.currentTime = 0
+        const start = globalThis.getComputedStyle(element).backgroundPosition
+        animation.currentTime = Number(animation.effect.getTiming().duration) / 2
+        return [start, globalThis.getComputedStyle(element).backgroundPosition]
+      })
+      assert.notEqual(positions[0], positions[1], 'The gradient moves across the text.')
+    }
+    await freezeShimmer()
+    await sleepCard.screenshot({ path: join(tmpdir(), 'anas-sleep-dark.png') })
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    const reduced = await shimmer.evaluate(element => ({ animations: element.getAnimations().length,
+      color: globalThis.getComputedStyle(element).color, background: globalThis.getComputedStyle(element).backgroundImage }))
+    assert.deepEqual({ animations: reduced.animations, background: reduced.background }, { animations: 0, background: 'none' })
+    assert.notEqual(reduced.color, 'rgba(0, 0, 0, 0)', 'Reduced motion keeps the text readable.')
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    await page.evaluate(() => globalThis.gale.config.updateSettings({ language: 'en', theme: 'light' }))
+    await expect(countdown).toHaveText(/^\d+ s remaining$/)
+    await freezeShimmer()
+    await sleepCard.screenshot({ path: join(tmpdir(), 'anas-sleep-light.png') })
+    const completedAt = new Date().toISOString()
+    await send({ ...common, type: 'tool_completed', call: sleepCall, sequence: 5, startedAt: sleepStarted, completedAt,
+      output: { status: 'completed', elapsed_seconds: (Date.parse(completedAt) - Date.parse(sleepStarted)) / 1000 } })
+    await expect(countdown).toHaveCount(0)
+    await expect(shimmer).toHaveCount(0)
+    await expect(sleepCard.locator(':scope > summary')).toContainText(/· \d+(\.\d+)? s/)
     console.log('Tool arguments E2E passed: reception, expansion lock, late IDs, lazy details, automatic collapse and user-controlled output following.')
+    console.log('Sleep UI E2E passed: clock icon, countdown alignment, both themes and languages, completed duration.')
+    console.log('Tool shimmer E2E passed: running names and summaries, moving gradient, reduced motion and completion cleanup.')
   } finally {
     await app?.close()
     await rm(home, { recursive: true, force: true })

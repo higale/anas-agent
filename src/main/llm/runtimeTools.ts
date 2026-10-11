@@ -164,6 +164,31 @@ export async function createRuntimeTools(options: RuntimeToolOptions): Promise<S
     description: 'Ask the user to choose options or enter an Other answer in a dialog. Returns answered, cancelled, or timed_out. This tool waits inline and never becomes a background call. Default answer timeout is 60 seconds; timeout_seconds allows 30–600 seconds. User interaction cancels the timeout so they can finish answering. Use require_response=true cautiously, only when an answer is essential to continue. After timeout or cancellation, continue from known information or explain what is missing; do not immediately repeat the same question.',
     schema: userInputSchema
   }))
+  if (includesTool('sleep')) tools.push(tool(async (input, config) => {
+    const signals = [options.signal, config?.signal].filter((signal): signal is AbortSignal => Boolean(signal))
+    const signal = signals.length ? AbortSignal.any(signals) : undefined
+    signal?.throwIfAborted()
+    const startedAt = performance.now()
+    await new Promise<void>((resolve, reject) => {
+      const abort = (): void => {
+        clearTimeout(timer)
+        reject(signal?.reason)
+      }
+      const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', abort)
+        resolve()
+      }, input.seconds * 1000)
+      signal?.addEventListener('abort', abort, { once: true })
+    })
+    return JSON.stringify({ status: 'completed', elapsed_seconds: Math.round(performance.now() - startedAt) / 1000 })
+  }, {
+    name: 'sleep',
+    description: 'Wait for a specified number of seconds before continuing. Use this instead of a Shell sleep command for a pure time delay. Waits inline until the duration elapses or the run is cancelled; never becomes a background call. Waiting does not check external state: use the appropriate tool afterward to observe changes. To wait for an existing background call to finish, use wait_call instead.',
+    schema: z.object({
+      seconds: z.number().int().min(1).max(300).describe('Required wait duration in whole seconds, from 1 through 300.'),
+      summary: toolSummarySchema
+    })
+  }))
   const terminalEnabled = options.shell && includesTool(commandShellCapabilityId) && options.backgroundTools
 
   if (options.shell && includesTool(commandShellCapabilityId)) {

@@ -20,7 +20,7 @@ import { UI_ICON_SIZE_MEDIUM, UI_ICON_SIZE_SMALL } from './uiConstants'
 const capabilityGroupOrder = [
   'profile', 'environment', 'workspace', 'applicationEnvironment',
   'backgroundTools', 'planning', 'commandExecution', 'networkAccess',
-  'configuration', 'request_user_input', 'fileRead', 'fileWrite', 'memory', 'customTools', 'subagents'
+  'configuration', 'request_user_input', 'sleep', 'fileRead', 'fileWrite', 'memory', 'customTools', 'subagents'
 ]
 
 interface Props {

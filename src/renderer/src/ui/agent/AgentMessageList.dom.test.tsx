@@ -1,12 +1,13 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentMessage, AgentRunActivity } from '@shared/agentTypes'
 import { AgentMessageList, AgentSubagentPanel, type EarlierActivityRequest } from './AgentMessageList'
 import { AgentSubagentActivityTrigger } from './AgentSubagentActivityDock'
 import { backgroundCleanupCompleted, backgroundCleanupStarted, backgroundTasksPendingError } from '@shared/backgroundCleanup'
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string, options?: { summary?: string; index?: number }) => options?.index
+  useTranslation: () => ({ t: (key: string, options?: { summary?: string; index?: number; seconds?: number }) => options?.seconds !== undefined
+    ? `${key}: ${options.seconds}` : options?.index
     ? `${key} ${options.index}` : options?.summary
     ? `${key}: ${options.summary}`
     : key })
@@ -36,6 +37,122 @@ function activity(status: 'running' | 'completed'): AgentRunActivity {
     subagents: []
   }
 }
+
+describe('sleep countdown', () => {
+  const props = { title: 'Thread', messages, panelRef: { current: null }, followOutputRef: { current: true },
+    speech: { status: 'idle' as const }, onSpeak: vi.fn() }
+  function sleeping(): AgentRunActivity {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-11T12:00:05Z'))
+    const run = activity('running')
+    run.tools[0] = { ...run.tools[0], startedAt: '2026-10-11T12:00:00Z',
+      call: { id: 'sleep-call', name: 'sleep', args: { seconds: 15, summary: 'Wait for a reply' } } }
+    return run
+  }
+  afterEach(() => vi.useRealTimers())
+
+  it('counts from the recorded start and resumes correctly after leaving the conversation', () => {
+    const run = sleeping()
+    const view = render(<AgentMessageList {...props} activities={[run]} />)
+    expect(screen.getByRole('timer')).toHaveTextContent('agent.sleep_remaining: 10')
+    expect(view.container.querySelector('.agent-activity-tool > summary .lucide-clock')).not.toBeNull()
+    expect(screen.getByRole('timer').closest('summary')).toHaveTextContent('Wait for a reply')
+    act(() => vi.advanceTimersByTime(1000))
+    expect(screen.getByRole('timer')).toHaveTextContent('agent.sleep_remaining: 9')
+    view.unmount()
+    expect(vi.getTimerCount()).toBe(0)
+    act(() => vi.advanceTimersByTime(3000))
+    const reopened = render(<AgentMessageList {...props} activities={[run]} />)
+    expect(screen.getByRole('timer')).toHaveTextContent('agent.sleep_remaining: 6')
+    reopened.unmount()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('waits for the actual result at zero, then shows the completed duration', () => {
+    const run = sleeping()
+    const view = render(<AgentMessageList {...props} activities={[run]} />)
+    act(() => vi.advanceTimersByTime(10_000))
+    expect(screen.getByRole('timer')).toHaveTextContent('agent.sleep_finishing')
+    expect(view.container.querySelector('.agent-activity-result')).toBeNull()
+    expect(vi.getTimerCount()).toBe(0)
+    const completed = { ...run, tools: [{ ...run.tools[0], status: 'completed' as const,
+      completedAt: '2026-10-11T12:00:15Z', output: { status: 'completed', elapsed_seconds: 15 } }] }
+    view.rerender(<AgentMessageList {...props} activities={[completed]} />)
+    expect(screen.queryByRole('timer')).toBeNull()
+    expect(view.container.querySelector('.agent-activity-tool > summary')).toHaveTextContent('15 s')
+  })
+
+  it.each(['cancelled', 'failed', 'completed'] as const)('stops on a %s run even if tool activity has not settled', (status) => {
+    const run = sleeping()
+    const view = render(<AgentMessageList {...props} activities={[run]} />)
+    expect(screen.getByRole('timer')).toBeInTheDocument()
+    view.rerender(<AgentMessageList {...props} activities={[{ ...run, status }]} />)
+    expect(screen.queryByRole('timer')).toBeNull()
+    act(() => vi.runOnlyPendingTimers())
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('ends a cancelled subagent countdown while the parent keeps running', () => {
+    const run = sleeping()
+    run.tools[0].subagentId = 'child'
+    run.subagents = [{ id: 'child', name: 'Child', sequence: 0, status: 'running' }]
+    const view = render(<AgentSubagentPanel run={run} subagentId="child" />)
+    expect(screen.getByRole('timer')).toHaveTextContent('agent.sleep_remaining: 10')
+    view.rerender(<AgentSubagentPanel run={{ ...run, subagents: [{ ...run.subagents[0], status: 'cancelled' }] }} subagentId="child" />)
+    expect(screen.queryByRole('timer')).toBeNull()
+  })
+
+  it.each(['arguments', 'timestamp', 'other-tool'] as const)('does not invent a countdown for invalid %s', (invalid) => {
+    const run = sleeping()
+    if (invalid === 'arguments') run.tools[0].call.args = { seconds: '15' }
+    if (invalid === 'timestamp') run.tools[0].startedAt = 'invalid'
+    if (invalid === 'other-tool') run.tools[0].call.name = 'other-tool'
+    render(<AgentMessageList {...props} activities={[run]} />)
+    expect(screen.queryByRole('timer')).toBeNull()
+  })
+})
+
+describe('running tool shimmer', () => {
+  const props = { title: 'Thread', messages, panelRef: { current: null }, followOutputRef: { current: true },
+    speech: { status: 'idle' as const }, onSpeak: vi.fn() }
+
+  it.each(['read_file', 'pwsh', 'mcp__server__lookup', 'plugin__rdp__input', 'custom_probe', 'sleep'])(
+    'animates the summary for %s and falls back to its name without a summary', (name) => {
+      const run = activity('running')
+      run.tools[0].call = { id: 'tool-1', name, args: { summary: 'Working on the request' } }
+      const view = render(<AgentMessageList {...props} activities={[run]} />)
+      expect(view.container.querySelectorAll('.agent-tool-running-text')).toHaveLength(1)
+      expect(view.container.querySelector('.agent-tool-running-text')).toHaveTextContent('Working on the request')
+      view.rerender(<AgentMessageList {...props} activities={[{ ...run, tools: [{ ...run.tools[0], call: { ...run.tools[0].call, args: {} } }] }]} />)
+      expect(view.container.querySelectorAll('.agent-tool-running-text')).toHaveLength(1)
+      expect(view.container.querySelector('.agent-tool-running-text')).toHaveTextContent(name)
+    }
+  )
+
+  it.each(['completed', 'failed', 'cancelled', 'approval', 'user-input', 'tool-completed'] as const)(
+    'stops the shimmer when execution changes to %s', (state) => {
+      const run = activity('running')
+      const view = render(<AgentMessageList {...props} activities={[run]} />)
+      expect(view.container.querySelector('.agent-tool-running-text')).not.toBeNull()
+      if (state === 'approval') run.tools[0].approval = { status: 'pending_approval', interruptId: 'approval', actionIndex: 0 }
+      else if (state === 'user-input') run.tools[0].call.name = 'request_user_input'
+      else if (state === 'tool-completed') run.tools[0].status = 'completed'
+      else run.status = state
+      view.rerender(<AgentMessageList {...props} activities={[{ ...run }]} />)
+      expect(view.container.querySelector('.agent-tool-running-text')).toBeNull()
+    }
+  )
+
+  it('does not animate tool names while arguments are still being received', () => {
+    const run = activity('running')
+    run.tools = []
+    run.models = [{ id: 'model', sequence: 0, status: 'running', text: '', reasoning: '', toolCallIds: [],
+      toolCallProgress: [{ index: 0, name: 'read_file', characterCount: 20, complete: false }] }]
+    const view = render(<AgentMessageList {...props} activities={[run]} />)
+    expect(view.container.querySelector('.agent-activity-tool')).toHaveTextContent('read_file')
+    expect(view.container.querySelector('.agent-tool-running-text')).toBeNull()
+  })
+})
 
 describe('AgentMessageList tool disclosure', () => {
   function expand(details: HTMLDetailsElement): void {

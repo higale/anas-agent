@@ -7,7 +7,7 @@ export interface BuiltinToolCatalogEntry {
 
 /** Tool catalog and model request order; capability controls have their own layout. */
 export const toolGroupOrder = [
-  'planning', 'request_user_input', 'subagents', 'backgroundTools',
+  'planning', 'request_user_input', 'sleep', 'subagents', 'backgroundTools',
   'fileRead', 'fileWrite', 'commandExecution', 'networkAccess',
   'memory', 'configuration', 'customTools', 'mcp'
 ] as const
@@ -22,6 +22,7 @@ export const frameworkToolCatalog = [
 
 export const builtinToolCatalog = [
   { id: 'request_user_input', feature: undefined },
+  { id: 'sleep', feature: undefined },
   { id: 'run_shell', feature: 'commandExecution' },
   { id: 'http_request', feature: 'networkAccess' },
   { id: 'read_call', feature: 'backgroundTools' },

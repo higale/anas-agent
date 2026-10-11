@@ -99,7 +99,7 @@ describe('transitionAgentReplyCandidate', () => {
     expect(result.state).toEqual(idleAgentReplyCandidate)
   })
 
-  it('marks a tool-calling reply as intermediate and ignores subagent deltas', () => {
+  it('completes tool-calling reply text and ignores subagent deltas', () => {
     const result = apply([{
       type: 'run_started', run, newUserTurn: true, userMessage
     }, {
@@ -115,11 +115,12 @@ describe('transitionAgentReplyCandidate', () => {
     expect(result.actions.map((action) => action.type)).toEqual([
       'run_started',
       'candidate_started',
-      'candidate_intermediate'
+      'candidate_completed',
+      'followup_work'
     ])
   })
 
-  it('abandons an apparently complete candidate when later root work starts', () => {
+  it('retains the reply when a tool starts', () => {
     const result = apply([{
       type: 'run_started', run, newUserTurn: true, userMessage
     }, {
@@ -132,11 +133,11 @@ describe('transitionAgentReplyCandidate', () => {
       call: { id: 'tool-1', name: 'search', args: {} }, sequence: 2
     }])
 
-    expect(result.actions.at(-1)).toMatchObject({ type: 'candidate_intermediate' })
-    expect(result.state).toEqual({ runId: 'run-1', phase: 'idle' })
+    expect(result.actions.at(-1)).toMatchObject({ type: 'followup_work' })
+    expect(result.state).toEqual({ runId: 'run-1', modelId: model.id, phase: 'complete' })
   })
 
-  it('treats a newly running root subagent as later root work', () => {
+  it('retains the reply when a root subagent starts', () => {
     const result = apply([{
       type: 'run_started', run, newUserTurn: true, userMessage
     }, {
@@ -156,7 +157,19 @@ describe('transitionAgentReplyCandidate', () => {
       }
     }])
 
-    expect(result.actions.at(-1)).toMatchObject({ type: 'candidate_intermediate' })
-    expect(result.state).toEqual({ runId: 'run-1', phase: 'idle' })
+    expect(result.actions.at(-1)).toMatchObject({ type: 'followup_work' })
+    expect(result.state).toEqual({ runId: 'run-1', modelId: model.id, phase: 'complete' })
+  })
+
+  it('preserves the current reply across approval pause and continuation', () => {
+    const result = apply([
+      { type: 'run_started', run, newUserTurn: true, userMessage },
+      { type: 'model_started', runId: run.id, threadId: run.threadId, model },
+      { type: 'run_interrupted', run: { ...run, status: 'interrupted' }, interrupts: [] },
+      { type: 'run_started', run, newUserTurn: false },
+      { type: 'model_completed', runId: run.id, threadId: run.threadId, model: { ...model, status: 'completed', text: 'Continued reply', toolCallIds: ['tool'] } }
+    ])
+    expect(result.actions.map(action => action.type)).toEqual(['run_started', 'candidate_started', 'followup_work', 'run_started', 'candidate_completed', 'followup_work'])
+    expect(result.state).toEqual({ runId: run.id, modelId: model.id, phase: 'complete' })
   })
 })
