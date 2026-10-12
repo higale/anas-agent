@@ -4,7 +4,9 @@ import { WebSocket, type RawData } from 'ws'
 // Edge Read Aloud wire protocol, also implemented by SchneeHertz/node-edge-tts.
 const clientToken = '6A5AA1D4EAFF4E9FB37E23D68491D6F4'
 const browserVersion = '143.0.3650.75'
-const endpoint = 'wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1'
+// Synthesis moved to this endpoint; the voice list still uses speech.platform.bing.com.
+// https://github.com/rany2/edge-tts/pull/491
+const endpoint = 'wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1'
 const maxAudioBytes = 8 * 1024 * 1024
 
 export interface EdgeSpeechRequest {
@@ -27,7 +29,7 @@ function requestUrl(): string {
   const roundedTicks = ticks - ticks % 3000000000n
   const hash = createHash('sha256').update(`${roundedTicks}${clientToken}`).digest('hex').toUpperCase()
   const params = new URLSearchParams({
-    TrustedClientToken: clientToken,
+    'Ocp-Apim-Subscription-Key': clientToken,
     ConnectionId: randomUUID().replaceAll('-', ''),
     'Sec-MS-GEC': hash,
     'Sec-MS-GEC-Version': `1-${browserVersion}`

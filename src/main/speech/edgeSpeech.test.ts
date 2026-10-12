@@ -38,7 +38,13 @@ describe('Edge speech transport', () => {
   it('escapes SSML, maps speed, and returns only audio bytes after turn.end', async () => {
     const { socket, result } = start()
     socket.emit('open')
-    expect(socket.url).toMatch(/Sec-MS-GEC=[A-F0-9]{64}/)
+    const url = new URL(socket.url)
+    expect(url.origin).toBe('wss://api.msedgeservices.com')
+    expect(url.pathname).toBe('/tts/cognitiveservices/websocket/v1')
+    expect(url.searchParams.get('Ocp-Apim-Subscription-Key')).toBe('6A5AA1D4EAFF4E9FB37E23D68491D6F4')
+    expect(url.searchParams.has('TrustedClientToken')).toBe(false)
+    expect(url.searchParams.get('Sec-MS-GEC')).toMatch(/^[A-F0-9]{64}$/)
+    expect(url.searchParams.get('Sec-MS-GEC-Version')).toMatch(/^1-/)
     const ssml = socket.send.mock.calls[1][0]
     expect(ssml).toContain('rate="+50%"')
     expect(ssml).toContain('你好 &lt;world&gt; &amp; goodbye')
