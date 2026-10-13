@@ -101,6 +101,8 @@ export async function invokePluginTool(tool: ResolvedPluginTool, params: unknown
   return result
 }
 
+export function notifyPluginViewsChanged(): void { backends?.viewsChanged() }
+
 export async function stopPluginBackends(): Promise<void> {
   await backends?.stopAll()
 }

@@ -13,7 +13,9 @@ export type BuiltinPanel =
   | { kind: 'subagent'; projectId: string; threadId: string; runId: string; subagentId: string; name: string }
 export type PanelContent = BuiltinPanel | { kind: 'plugin'; pluginId: string; instanceId: string }
 export type FilesPanelContext = Pick<Extract<BuiltinPanel, { kind: 'files' }>, 'projectId' | 'threadId' | 'draft'>
+export interface PanelActivity { visible: boolean; active: boolean }
 export interface PanelState {
+  activity?: PanelActivity
   viewId: string
   content: PanelContent
   name: string

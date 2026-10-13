@@ -3,10 +3,10 @@ import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest'
 import type { IpcMainInvokeEvent } from 'electron'
 import type { PanelPageCommand, PanelJson } from '@shared/panelLifecycle'
 import type { LanguageResourcesSnapshot } from '@shared/types'
-const mock = vi.hoisted(() => ({ window: vi.fn(), windows: vi.fn(), from: vi.fn() }))
+const mock = vi.hoisted(() => ({ window: vi.fn(), windows: vi.fn(), from: vi.fn(), display: vi.fn() }))
 vi.mock('electron', () => ({
   app: { isPackaged: true }, BrowserWindow: Object.assign(mock.window, { getAllWindows: mock.windows, fromWebContents: mock.from }),
-  screen: { getCursorScreenPoint: () => ({ x: 500, y: 300 }), getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 1200, height: 800 } }) }
+  screen: { getCursorScreenPoint: () => ({ x: 500, y: 300 }), getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 1200, height: 800 } }), getDisplayMatching: mock.display }
 }))
 vi.mock('../ipcSecurity', () => ({ assertTrustedIpcEvent: vi.fn(),
   isMainRendererWindow: (window: Window) => window.main && !window.destroyed,
@@ -20,6 +20,7 @@ import { PanelPages } from './panelPages'
 class Contents extends EventEmitter {
   mainFrame = { url: 'file:///panel-window.html' }
   setWindowOpenHandler = vi.fn()
+  getZoomFactor = vi.fn(() => 1)
   send = (channel: string, value: unknown) => {
     const owner = windows.find(window => window.webContents === this)!
     if (channel === 'panels:open') queueMicrotask(() => manager.acknowledge(event(owner), (value as { requestId: string }).requestId))
@@ -45,12 +46,23 @@ class Window extends EventEmitter {
   main = false
   destroyed = false
   webContents = new Contents()
+  isVisible = vi.fn(() => true)
+  isMinimized = vi.fn(() => false)
+  isFocused = vi.fn(() => true)
   isDestroyed = () => this.destroyed
   show = vi.fn()
   focus = vi.fn()
   setTitle = vi.fn()
   setMenuBarVisibility = vi.fn()
   loadURL = vi.fn(async () => undefined)
+  isMaximized = vi.fn(() => false)
+  isFullScreen = vi.fn(() => false)
+  setFullScreen = vi.fn((_value: boolean) => { this.isFullScreen.mockReturnValue(false); this.emit('leave-full-screen') })
+  unmaximize = vi.fn(() => { this.isMaximized.mockReturnValue(false); this.emit('unmaximize') })
+  getBounds = vi.fn(() => ({ x: 100, y: 50, width: 960, height: 680 }))
+  getContentBounds = vi.fn(() => ({ x: 104, y: 54, width: 952, height: 672 }))
+  getMinimumSize = vi.fn(() => [400, 300])
+  setBounds = vi.fn()
   destroy() { if (!this.destroyed) { this.destroyed = true; this.emit('closed'); this.webContents.emit('destroyed') } }
 }
 function event(window: Window): IpcMainInvokeEvent { return { sender: window.webContents, senderFrame: window.webContents.mainFrame } as unknown as IpcMainInvokeEvent }
@@ -64,6 +76,7 @@ beforeEach(() => {
   main = new Window(); main.main = true; windows.push(main)
   mock.windows.mockImplementation(() => windows.filter(window => !window.destroyed))
   mock.from.mockImplementation(contents => windows.find(window => window.webContents === contents))
+  mock.display.mockReturnValue({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } })
   mock.window.mockImplementation(function () { const window = new Window(); windows.push(window); return window })
   manager = new PanelPages(async () => ({ languages: [], resources: {} }) as unknown as LanguageResourcesSnapshot)
   ready = (owner, id) => manager.pageReady(event(owner), id)
@@ -72,6 +85,68 @@ beforeEach(() => {
 afterEach(() => { manager.closeAll(); vi.useRealTimers() })
 
 describe('page handoff', () => {
+  it('fits CSS content with application zoom and native window chrome', async () => {
+    await open()
+    await manager.move(manager.list()[0].viewId, 'window')
+    const window = windows[1], page = manager.ownedPages(event(window))[0]
+    window.webContents.getZoomFactor.mockReturnValue(1.25)
+    await manager.resizeWindow(event(window), page.pageId, { width: 824, height: 658 })
+    expect(window.setBounds).toHaveBeenCalledWith({ x: 100, y: 50, width: 1038, height: 831 })
+  })
+  it('keeps oversized content windows within the current monitor, including negative coordinates', async () => {
+    await open()
+    await manager.move(manager.list()[0].viewId, 'window')
+    const window = windows[1], page = manager.ownedPages(event(window))[0]
+    mock.display.mockReturnValue({ workArea: { x: -1280, y: 24, width: 1280, height: 1000 } })
+    await manager.resizeWindow(event(window), page.pageId, { width: 2560, height: 1440 })
+    expect(window.setBounds).toHaveBeenCalledWith({ x: -1280, y: 24, width: 1280, height: 1000 })
+    window.isMaximized.mockReturnValue(true)
+    window.setBounds.mockClear()
+    await manager.resizeWindow(event(window), page.pageId, { width: 800, height: 600 })
+    expect(window.setBounds).not.toHaveBeenCalled()
+  })
+  it('rejects sidebar, foreign, retired and invalid resize requests', async () => {
+    await open()
+    const sidebar = manager.ownedPages(event(main))[0]
+    const size = { width: 1024, height: 768 }
+    await expect(manager.resizeWindow(event(main), sidebar.pageId, size)).rejects.toThrow('PANEL_ACTION_UNAVAILABLE')
+    await manager.move(sidebar.panelId, 'window')
+    const window = windows[1], page = manager.ownedPages(event(window))[0]
+    await expect(manager.resizeWindow(event(main), page.pageId, size)).rejects.toThrow('PANEL_CLOSED')
+    await expect(manager.resizeWindow(event(main), sidebar.pageId, size)).rejects.toThrow('PANEL_CLOSED')
+    for (const width of [0, -1, Infinity, NaN, 32769, '1024']) {
+      await expect(manager.resizeWindow(event(window), page.pageId, { ...size, width })).rejects.toThrow('Invalid panel size')
+    }
+    await expect(manager.resizeWindow(event(window), page.pageId, { ...size, restore: 'true' })).rejects.toThrow('Invalid panel size')
+    expect(window.setBounds).not.toHaveBeenCalled()
+  })
+  it('restores fullscreen and maximized windows only for an explicit resize request', async () => {
+    await open()
+    await manager.move(manager.list()[0].viewId, 'window')
+    const window = windows[1], page = manager.ownedPages(event(window))[0]
+    window.isFullScreen.mockReturnValue(true)
+    window.isMaximized.mockReturnValue(true)
+    await manager.resizeWindow(event(window), page.pageId, { width: 800, height: 600 })
+    expect(window.setFullScreen).not.toHaveBeenCalled()
+    await manager.resizeWindow(event(window), page.pageId, { width: 800, height: 600, restore: true })
+    expect(window.setFullScreen).toHaveBeenCalledWith(false)
+    expect(window.unmaximize).toHaveBeenCalledOnce()
+    expect(window.setBounds).toHaveBeenCalledWith({ x: 100, y: 50, width: 808, height: 608 })
+    expect(window.listenerCount('leave-full-screen')).toBe(0)
+    expect(window.listenerCount('unmaximize')).toBe(0)
+  })
+  it('stops a pending restore when the window closes and releases its listeners', async () => {
+    await open()
+    await manager.move(manager.list()[0].viewId, 'window')
+    const window = windows[1], page = manager.ownedPages(event(window))[0]
+    window.isFullScreen.mockReturnValue(true)
+    window.setFullScreen.mockImplementation(() => {})
+    const resizing = manager.resizeWindow(event(window), page.pageId, { width: 800, height: 600, restore: true })
+    window.destroy()
+    await expect(resizing).rejects.toThrow('PANEL_CLOSED')
+    expect(window.setBounds).not.toHaveBeenCalled()
+    expect(window.listenerCount('leave-full-screen')).toBe(0)
+  })
   it('preserves page icons across handoffs and replaces them when reopening with a new definition', async () => {
     const icon = { light: 'anas-plugin://example/_anas/icon/light.svg', dark: 'anas-plugin://example/_anas/icon/dark.svg' }
     await open()
@@ -178,4 +253,25 @@ describe('page handoff', () => {
     expect(manager.ownedPages(event(main))[0].phase).toBe('active')
     expect(windows[1].destroyed).toBe(true)
   })
+})
+
+it('combines native focus with sidebar selection and interaction without conflating lifecycle phase', async () => {
+  await open()
+  const id = manager.list()[0].viewId
+  expect(manager.list()[0].activity).toEqual({ visible: false, active: false })
+  manager.setActivity(event(main), id, id)
+  expect(manager.list()[0].activity).toEqual({ visible: true, active: true })
+  manager.setActivity(event(main), id, null)
+  expect(manager.list()[0].activity).toEqual({ visible: true, active: false })
+  manager.setActivity(event(main), id, id)
+  main.isFocused.mockReturnValue(false); main.emit('blur')
+  expect(manager.list()[0].activity?.active).toBe(false)
+  main.isFocused.mockReturnValue(true); main.emit('focus')
+  expect(manager.list()[0].activity?.active).toBe(true)
+  manager.setActivity(event(main), null, null)
+  expect(manager.list()[0].activity?.visible).toBe(false)
+  await manager.move(id, 'window')
+  expect(manager.list()[0].activity?.active).toBe(true)
+  windows[1].isMinimized.mockReturnValue(true); windows[1].emit('minimize')
+  expect(manager.list()[0].activity).toEqual({ visible: false, active: false })
 })

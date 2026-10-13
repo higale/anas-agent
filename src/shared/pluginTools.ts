@@ -26,6 +26,7 @@ export interface PluginBackendHost {
   openView(options: PluginViewOptions): Promise<void>
   moveView(options: { instanceId: string; location: 'sidebar' | 'window' }): Promise<void>
   getViews(): Promise<PluginBackendCallContext['views']>
+  onViewsChanged(listener: (views: PluginBackendCallContext['views']) => void): () => void
   getSettings(): Promise<import('./pluginSettings').PluginSettingValues>
 }
 

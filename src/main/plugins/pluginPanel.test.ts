@@ -12,7 +12,7 @@ it('backend context includes only the plugin’s live stable panels, including p
   const other: PanelState = { ...home, viewId: 'other', content: { kind: 'plugin', pluginId: 'other', instanceId: 'main' } }
   const context = pluginBackendContext('test', [home, loading, other], home)
   expect(context).toEqual({ caller: { panelId: 'home', instanceId: 'main' }, views: [
-    { panelId: 'home', instanceId: 'main', location: 'sidebar' }, { panelId: 'connection', instanceId: 'server', location: 'window' }
+    { panelId: 'home', instanceId: 'main', location: 'sidebar', activity: { visible: false, active: false } }, { panelId: 'connection', instanceId: 'server', location: 'window', activity: { visible: false, active: false } }
   ] })
   expect(pluginBackendContext('test', [loading]).caller).toBeNull()
   expect(() => pluginBackendContext('test', [loading], home)).toThrow('closed')

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { app, BrowserWindow, screen, type IpcMainInvokeEvent, type Point, type WebContents } from 'electron'
 import { panelIdentity, type PanelContent, type PanelLocation, type PanelMoveOptions, type PanelState, type PanelWindowState, type PanelPreferences } from '@shared/panels'
-import { requirePanelJson, type PanelJson, type PanelPageContext, type PanelPageCommand, type PanelPagePhase } from '@shared/panelLifecycle'
+import { requirePanelJson, requirePanelSize, type PanelJson, type PanelPageContext, type PanelPageCommand, type PanelPagePhase } from '@shared/panelLifecycle'
 import { requirePanelToolbar, type PanelToolbar } from '@shared/panelToolbar'
 import type { LanguageResourcesSnapshot, Project } from '@shared/types'
 import { assertTrustedIpcEvent, isMainRendererWindow, rendererLocationMatches, resolveRendererLocation, registerContentRenderer, type RendererLocation } from '../ipcSecurity'
@@ -61,13 +61,38 @@ export class PanelPages {
   private shells = new Map<WebContents, Shell>()
   private requests = new Map<string, SidebarRequest>()
   private pending = new Map<string, Pending>()
+  private activity = new WeakMap<BrowserWindow, { visibleId: string | null; interactionId: string | null }>()
+  private listeners = new Set<() => void>()
+  onChanged(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
   private watched = new WeakSet<BrowserWindow>()
   private appearance = { language: 'en', theme: 'light' as 'light' | 'dark', fontSize: 14 }
   private preferences: PanelPreferences = { diffViewMode: 'inline', diffFoldUnchanged: true, diffWordWrap: true }
 
   constructor(private readonly loadLanguages: () => Promise<LanguageResourcesSnapshot>) {}
-  list(): PanelState[] { return [...this.entries.values()].map(entry => ({ ...entry.state })) }
-  state(id: string): PanelState { return { ...this.require(id).state } }
+  private view(entry: Entry): PanelState {
+    const page = entry.source
+    const selected = page && this.activity.get(page.owner)
+    const visible = !!page && page.phase === 'active' && !page.owner.isDestroyed()
+      && page.owner.isVisible() && !page.owner.isMinimized()
+      && (page.location === 'window' || selected?.visibleId === entry.state.viewId)
+    const active = visible && page!.owner.isFocused()
+      && (page!.location === 'window' || selected?.interactionId === entry.state.viewId)
+    return { ...entry.state, activity: { visible, active } }
+  }
+  setActivity(event: IpcMainInvokeEvent, visibleId: unknown, interactionId: unknown): void {
+    const owner = this.assertHost(event)
+    if ((visibleId !== null && typeof visibleId !== 'string') || (interactionId !== null && typeof interactionId !== 'string')) throw new Error('Invalid panel activity.')
+    // A selection can arrive while its page is still loading. It must belong to this window once created.
+    const entry = visibleId ? this.entries.get(visibleId) : undefined
+    if (entry?.source && entry.source.owner !== owner && entry.candidate?.owner !== owner && !entry.transfer) throw new Error('PANEL_TARGET_UNAVAILABLE')
+    if (interactionId !== null && interactionId !== visibleId) interactionId = null
+    const next = { visibleId: visibleId as string | null, interactionId: interactionId as string | null }
+    const previous = this.activity.get(owner)
+    if (previous?.visibleId === next.visibleId && previous?.interactionId === next.interactionId) return
+    this.activity.set(owner, next); this.watch(owner); this.changed()
+  }
+  list(): PanelState[] { return [...this.entries.values()].map(entry => this.view(entry)) }
+  state(id: string): PanelState { return this.view(this.require(id)) }
   configure(appearance: typeof this.appearance, preferences?: PanelPreferences): void {
     this.appearance = appearance
     if (preferences) this.preferences = preferences
@@ -106,7 +131,7 @@ export class PanelPages {
   pageState(event: IpcMainInvokeEvent, pageId: unknown): PanelWindowState { return { view: this.fromPage(event, pageId), ...this.appearance } }
   pageContent(pageId: string): PanelContent | undefined { return this.pages.get(pageId)?.entry.state.content }
   private context(page: Page): PanelPageContext {
-    return { panelId: page.entry.state.viewId, pageId: page.id, view: { ...page.entry.state },
+    return { panelId: page.entry.state.viewId, pageId: page.id, view: this.view(page.entry),
       location: page.location, phase: page.phase, transferId: page.transferId, restoreState: page.restoreState,
       pluginUrl: page.entry.definition.pluginUrl, project: page.entry.definition.project,
       preferences: this.preferences, ...this.appearance }
@@ -291,6 +316,42 @@ export class PanelPages {
     if (page.entry.source === page) page.entry.state.toolbar = page.toolbar
     this.changed()
   }
+  async resizeWindow(event: IpcMainInvokeEvent, pageId: unknown, input: unknown): Promise<void> {
+    const page = this.page(event, pageId), size = requirePanelSize(input)
+    const requireActive = () => {
+      if (this.page(event, pageId) !== page || page.location !== 'window' || page.phase !== 'active' || page.entry.source !== page
+        || page.entry.state.pendingLocation || page.entry.closing) throw new Error('PANEL_ACTION_UNAVAILABLE')
+    }
+    requireActive()
+    const window = page.owner
+    // Automatic fits preserve window state; a deliberate fit may restore it.
+    if (!size.restore && (window.isMaximized() || window.isFullScreen())) return
+    const transition = (eventName: 'leave-full-screen' | 'unmaximize', change: () => void) => new Promise<void>((resolve, reject) => {
+      const events: NodeJS.EventEmitter = window
+      const cleanup = () => {
+        clearTimeout(timer)
+        events.removeListener(eventName, done)
+        events.removeListener('closed', closed)
+      }
+      const done = () => { cleanup(); resolve() }
+      const closed = () => { cleanup(); reject(new Error('PANEL_CLOSED')) }
+      const timer = setTimeout(() => { cleanup(); reject(new Error('PANEL_TARGET_UNAVAILABLE')) }, 10000)
+      events.once(eventName, done)
+      events.once('closed', closed)
+      try { change() } catch (error) { cleanup(); reject(error) }
+    })
+    if (window.isFullScreen()) { await transition('leave-full-screen', () => window.setFullScreen(false)); requireActive() }
+    if (window.isMaximized()) { await transition('unmaximize', () => window.unmaximize()); requireActive() }
+    const bounds = window.getBounds(), content = window.getContentBounds()
+    const area = screen.getDisplayMatching(bounds).workArea
+    const zoom = window.webContents.getZoomFactor()
+    const [minWidth, minHeight] = window.getMinimumSize()
+    const width = Math.min(area.width, Math.max(minWidth, Math.ceil(size.width * zoom) + bounds.width - content.width))
+    const height = Math.min(area.height, Math.max(minHeight, Math.ceil(size.height * zoom) + bounds.height - content.height))
+    window.setBounds({ width, height,
+      x: Math.max(area.x, Math.min(bounds.x, area.x + area.width - width)),
+      y: Math.max(area.y, Math.min(bounds.y, area.y + area.height - height)) })
+  }
   async invokeToolbarAction(viewId: string, actionId: unknown): Promise<void> {
     const entry = this.require(viewId), page = entry.source
     const action = entry.state.toolbar?.actions.find(value => value.id === actionId)
@@ -436,6 +497,10 @@ export class PanelPages {
   private watch(owner: BrowserWindow): void {
     if (this.watched.has(owner)) return
     this.watched.add(owner)
+    const activityChanged = () => this.changed()
+    owner.on('focus', activityChanged); owner.on('blur', activityChanged)
+    owner.on('show', activityChanged); owner.on('hide', activityChanged)
+    owner.on('minimize', activityChanged); owner.on('restore', activityChanged)
     const releasePages = () => {
       for (const request of [...this.requests.values()]) if (request.owner === owner) request.finish(new Error('PANEL_CLOSED'))
       for (const page of [...this.pages.values()]) if (page.owner === owner) {
@@ -452,6 +517,7 @@ export class PanelPages {
     })
   }
   private changed(): void {
+    for (const listener of this.listeners) listener()
     for (const window of BrowserWindow.getAllWindows()) if (isMainRendererWindow(window)) {
       window.webContents.send('panels:changed', this.list())
       window.webContents.send('panel-page:changed')

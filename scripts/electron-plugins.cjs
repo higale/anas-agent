@@ -253,7 +253,8 @@ async function openPluginHome(page, name) {
 
 async function checkForms(application, page, directory, settings) {
   const source = join(directory, 'form-fixture')
-  await mkdir(source)
+  await mkdir(join(source, 'assets'), { recursive: true })
+  await cp(join(process.cwd(), 'examples/plugins/notepad/assets/save.svg'), join(source, 'assets/save.svg'))
   await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ version: 0, id: 'form-test', name: 'Form test', plugin_version: '1.0.0', api_version: 2, ui: 'index.html' }))
   await writeFile(join(source, 'index.html'), '<html><body><script src="/_anas/sdk.js"></script><form id="form"><input id="name" required><button id="submit">Submit</button></form><output id="count">0</output><form id="navigation" action="https://example.com/blocked"><button id="navigate">Navigate</button></form><script src="app.js"></script></body></html>')
   await writeFile(join(source, 'app.js'), `(async () => {
@@ -262,8 +263,8 @@ async function checkForms(application, page, directory, settings) {
     if (state) { name.value = state.name; count.textContent = state.count; }
     document.getElementById('form').addEventListener('submit', event => { event.preventDefault(); count.textContent = String(Number(count.textContent) + 1); });
     anas.registerLifecycle({ prepare: async () => ({ name: name.value, count: count.textContent }) });
-    anas.onToolbarAction(async id => { if (id !== 'save') throw new Error('Wrong action'); count.textContent = String(Number(count.textContent) + 1); await new Promise(resolve => { globalThis.completeAction = resolve }); });
-    await anas.setToolbar({ status: { label: 'Ready', tone: 'success' }, actions: [{ id: 'save', label: 'Save fixture', icon: 'save' }] });
+    anas.onToolbarAction(async id => { if (id.startsWith('action-')) { document.body.dataset.action = id; return; } if (id !== 'save') throw new Error('Wrong action'); count.textContent = String(Number(count.textContent) + 1); await new Promise(resolve => { globalThis.completeAction = resolve }); });
+    await anas.setToolbar({ status: { label: 'Ready', tone: 'success' }, actions: [{ id: 'save', label: 'Save fixture', icon: 'assets/save.svg' }] });
     await anas.ready();
   })().catch(() => anas.failed());`)
   await application.evaluate(({ dialog }, source) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [source] }) }, join(source, 'PLUGIN.json'))
@@ -283,6 +284,17 @@ async function checkForms(application, page, directory, settings) {
   frame = await pluginPage(application, 'form-test', 'main', 'window')
   const shell = await pluginWindow(application, frame)
   await expect(shell.getByRole('status')).toHaveText('Ready')
+  const saveButton = shell.getByRole('button', { name: 'Save fixture', exact: true })
+  await expect.poll(() => saveButton.locator('img').evaluate(image => image.naturalWidth)).toBeGreaterThan(0)
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate(theme => globalThis.gale.config.updateSettings({ theme }), theme)
+    await expect(shell.locator('html')).toHaveAttribute('data-theme', theme)
+    const visible = await saveButton.screenshot({ path: join(tmpdir(), `anas-toolbar-${theme}.png`) })
+    await saveButton.locator('.plugin-icon-mask').evaluate(icon => { icon.style.opacity = '0' })
+    const hidden = await saveButton.screenshot()
+    await saveButton.locator('.plugin-icon-mask').evaluate(icon => { icon.style.opacity = '' })
+    assert.notDeepEqual(visible, hidden, 'Package icons must draw actual pixels, not only load an invisible image')
+  }
   const beforeTooltip = await pluginGeometry(application, frame)
   await shell.getByRole('button', { name: 'Save fixture', exact: true }).hover()
   const tip = await tooltipPage(application, 'Save fixture')
@@ -295,6 +307,26 @@ async function checkForms(application, page, directory, settings) {
   await expect(shell.getByRole('button', { name: 'Save fixture', exact: true })).toBeDisabled()
   await frame.evaluate(() => globalThis.completeAction())
   await expect(shell.getByRole('button', { name: 'Save fixture', exact: true })).toBeEnabled()
+  await frame.evaluate(async () => {
+    await globalThis.anas.setToolbar({ status: { label: 'Ready', tone: 'success' }, actions: Array.from({ length: 12 }, (_, index) => ({
+      id: `action-${index}`, label: `Toolbar action ${index}`, icon: 'assets/save.svg', disabled: index === 10, ...(index === 11 ? { pressed: true } : {})
+    })) })
+  })
+  const nativeWindow = await application.browserWindow(shell)
+  const originalBounds = await nativeWindow.evaluate(window => window.getBounds())
+  await nativeWindow.evaluate(window => window.setSize(400, 480))
+  await expect(shell.getByRole('button', { name: 'More', exact: true })).toBeVisible()
+  const menuGeometry = await pluginGeometry(application, frame)
+  await shell.getByRole('button', { name: 'More', exact: true }).click()
+  await expect(shell.getByRole('menuitemcheckbox', { name: 'Toolbar action 11', checked: true })).toBeVisible()
+  await expect(shell.getByRole('menuitem', { name: 'Toolbar action 10' })).toHaveAttribute('aria-disabled', 'true')
+  await expect.poll(() => shell.getByRole('menuitemcheckbox', { name: 'Toolbar action 11' }).locator('img').evaluate(image => image.naturalWidth)).toBeGreaterThan(0)
+  assert.deepEqual(await pluginGeometry(application, frame), menuGeometry, 'Overflow menus must keep plugin content visible and stable')
+  await shell.getByRole('menuitemcheckbox', { name: 'Toolbar action 11' }).click()
+  await expect(frame.locator('body')).toHaveAttribute('data-action', 'action-11')
+  await nativeWindow.evaluate((window, bounds) => window.setBounds(bounds), originalBounds)
+  await expect(shell.getByRole('button', { name: 'Toolbar action 11', pressed: true })).toBeVisible()
+  await expect(shell.getByRole('button', { name: 'More', exact: true })).toHaveCount(0)
   await shell.getByRole('button', { name: 'Move to side panel', exact: true }).hover()
   await tooltipPage(application, 'Move to side panel')
   await shell.getByRole('button', { name: 'Move to side panel', exact: true }).click()
@@ -427,12 +459,62 @@ async function checkReplacement(application, page, directory, repository, settin
     await expect(dialog.getByRole('checkbox', { name: '删除插件数据', exact: true })).not.toBeChecked()
     await page.screenshot({ path: join(tmpdir(), 'anas-plugin-replacement-chinese.png') })
     await page.evaluate(() => globalThis.gale.config.updateSettings({ language: 'en', theme: 'dark' }))
-    await dialog.getByRole('button', { name: 'Replace plugin', exact: true }).click()
+    // Read the registry while the old directory is staged and the new one is not
+    // installed yet. Backend shutdown also requests a refresh during this transaction.
+    await application.evaluate(({ app }) => {
+      const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
+      const fs = require('stubborn-fs').default
+      globalThis.__replacementRename = fs.retry.rename
+      fs.retry.rename = (...args) => {
+        const move = globalThis.__replacementRename(...args)
+        return async (from, to) => {
+          await move(from, to)
+          if (require('node:path').basename(to) === 'previous') {
+            await new Promise(resolve => { globalThis.__resumeReplacement = resolve })
+          }
+        }
+      }
+    })
+    try {
+      await dialog.getByRole('button', { name: 'Replace plugin', exact: true }).click()
+      await expect.poll(() => application.evaluate(() => Boolean(globalThis.__resumeReplacement))).toBe(true)
+      let readFinished = false
+      const duringReplacement = page.evaluate(() => globalThis.gale.plugins.list()).then(value => { readFinished = true; return value })
+      await new Promise(resolve => setTimeout(resolve, 100))
+      const publishedIncompleteSnapshot = readFinished
+      await application.evaluate(() => globalThis.__resumeReplacement())
+      const refreshed = (await duringReplacement).find(item => item.id === 'replacement-test')
+      assert.equal(publishedIncompleteSnapshot, false, 'Registry refresh must wait for replacement to finish')
+      assert.equal(refreshed?.manifest?.pluginVersion, '2.0.0')
+      assert.equal(refreshed?.error, undefined)
+    } finally {
+      await application.evaluate(({ app }) => {
+        const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json')
+        globalThis.__resumeReplacement?.()
+        require('stubborn-fs').default.retry.rename = globalThis.__replacementRename
+        delete globalThis.__replacementRename
+        delete globalThis.__resumeReplacement
+      })
+    }
     await expect.poll(async () => (await summary()).manifest.pluginVersion).toBe('2.0.0')
     await expect.poll(() => windowCount(application)).toBe(1)
     assert.equal((await summary()).backendStatus, 'stopped')
     assert.equal(await page.evaluate(() => globalThis.gale.plugins.invoke('replacement-test', 'data.get', { key: 'draft' })), 'keep me')
     assert.equal((await page.evaluate(() => globalThis.gale.panels.list())).filter(view => view.content.pluginId === 'replacement-test').length, 0)
+    // A real shutdown failure must remain visible after the install refresh.
+    const backendPath = join(directory, 'plugins/replacement-test/package', manifest.backend)
+    await writeFile(backendPath, `${await readFile(backendPath, 'utf8')}\nmodule.exports.deactivate = async () => { throw new Error('Replacement cleanup failed') }\n`)
+    await page.evaluate(() => globalThis.gale.plugins.startBackend('replacement-test'))
+    await page.getByRole('button', { name: 'Install plugin', exact: true }).click()
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Replace plugin', exact: true }).click()
+    const failure = page.locator('.ui-editor [role="alert"]').filter({ hasText: 'Replacement cleanup failed' })
+    await expect(failure).toBeVisible()
+    await expect(page.locator('[data-sonner-toast]')).toContainText('Replacement cleanup failed')
+    await page.locator('.ui-list-pane-header').getByRole('button', { name: 'Refresh', exact: true }).click()
+    await expect.poll(async () => (await summary()).backendError).toContain('Replacement cleanup failed')
+    await expect(failure).toBeVisible()
+    assert.equal((await summary()).manifest.pluginVersion, '2.0.0')
+    assert.equal(await page.evaluate(() => globalThis.gale.plugins.invoke('replacement-test', 'data.get', { key: 'draft' })), 'keep me')
     await page.evaluate(() => globalThis.gale.plugins.setEnabled('replacement-test', false))
     await page.getByRole('button', { name: 'Install plugin', exact: true }).click()
     dialog = page.getByRole('alertdialog')
@@ -443,7 +525,7 @@ async function checkReplacement(application, page, directory, repository, settin
     assert.equal((await summary()).enabled, false)
     await assert.rejects(readFile(join(directory, 'plugins_data/replacement-test/state.json')), { code: 'ENOENT' })
     await page.evaluate(() => globalThis.gale.plugins.uninstall('replacement-test', true))
-    console.log('Plugin replacement passed: versions, cancel with live page/backend, ZIP update, default data retention, explicit data removal, and enabled-state preservation.')
+    console.log('Plugin replacement passed: versions, cancel with live page/backend, atomic registry refresh, visible cleanup failures, ZIP update, default data retention, explicit data removal, and enabled-state preservation.')
   } finally {
     await application.evaluate(({ dialog }) => {
       dialog.showOpenDialog = globalThis.__replacementOriginalDialog
@@ -570,14 +652,14 @@ async function main() {
     let second = await pluginPage(application, 'example-notepad', 'second', 'window')
     await expect(second.locator('#draft')).toBeEnabled()
     const secondShell = await pluginWindow(application, second)
-    await expect(secondShell.locator('.panel-window-titlebar img')).toHaveAttribute('src', /assets\/page.svg$/)
-    await expect.poll(() => secondShell.locator('.panel-window-titlebar img').evaluate(image => image.naturalWidth)).toBeGreaterThan(0)
+    await expect(secondShell.locator('.panel-window-titlebar > .plugin-icon img')).toHaveAttribute('src', /assets\/page.svg$/)
+    await expect.poll(() => secondShell.locator('.panel-window-titlebar > .plugin-icon img').evaluate(image => image.naturalWidth)).toBeGreaterThan(0)
     await second.evaluate(() => { void globalThis.anas.moveView('sidebar') })
     second = await pluginPage(application, 'example-notepad', 'second')
     await expect(page.getByRole('tab', { name: 'Second notepad', exact: true }).locator('img')).toHaveAttribute('src', /assets\/page.svg$/)
     await second.evaluate(() => { void globalThis.anas.moveView('window') })
     second = await pluginPage(application, 'example-notepad', 'second', 'window')
-    await expect((await pluginWindow(application, second)).locator('.panel-window-titlebar img')).toHaveAttribute('src', /assets\/page.svg$/)
+    await expect((await pluginWindow(application, second)).locator('.panel-window-titlebar > .plugin-icon img')).toHaveAttribute('src', /assets\/page.svg$/)
     assert.deepEqual(await second.evaluate(async () => (await globalThis.anas.getInfo()).view), { instanceId: 'second', location: 'window' })
     await second.locator('#draft').fill('Second window state')
     await popup.evaluate(() => globalThis.anas.openView({ instanceId: 'second', location: 'window' }))

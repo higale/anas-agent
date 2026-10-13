@@ -25,6 +25,7 @@ interface BackendInstance {
   ready: Promise<void>
   exited: Promise<void>
   stopping: boolean
+  viewsSnapshot?: string
   activeId?: number
   stopError?: Error
   pending: Map<number, PendingCall>
@@ -41,6 +42,17 @@ export class PluginBackends {
 
   status(id: string): Pick<PluginSummary, 'backendStatus' | 'backendError'> {
     return this.statuses.get(id) ?? { backendStatus: 'stopped' }
+  }
+
+  viewsChanged(): void {
+    if (!this.readViews) return
+    for (const [id, instance] of this.instances) {
+      if (instance.stopping) continue
+      const views = this.readViews(id), snapshot = JSON.stringify(views)
+      if (snapshot === instance.viewsSnapshot) continue
+      instance.viewsSnapshot = snapshot
+      try { instance.process.postMessage({ viewsChanged: views }) } catch { /* The process exit handler retires a closed transport. */ }
+    }
   }
 
   async start(id: string): Promise<void> {

@@ -91,3 +91,20 @@ it('waits for activation before cleanup and reports cleanup errors', async () =>
   expect(child.sent.some(item => String(item.stopError).includes('cleanup failed'))).toBe(true)
   expect(child.exit).toHaveBeenCalledWith(0)
 })
+
+it('delivers view changes to backend subscribers and releases listeners on unsubscribe and stop', async () => {
+  let unsubscribe!: () => void
+  const listener = vi.fn()
+  const child = worker({ activate: ({ host }: { host: { onViewsChanged: (listener: (views: unknown) => void) => () => void } }) => {
+    unsubscribe = host.onViewsChanged(listener)
+  } })
+  await tick()
+  child.send({ viewsChanged: [{ panelId: 'one', activity: { visible: true, active: true } }] })
+  expect(listener).toHaveBeenCalledOnce()
+  unsubscribe()
+  child.send({ viewsChanged: [] })
+  expect(listener).toHaveBeenCalledOnce()
+  child.send({ stop: true })
+  await tick()
+  expect(child.exit).toHaveBeenCalledWith(0)
+})

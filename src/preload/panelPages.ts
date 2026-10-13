@@ -2,6 +2,7 @@ import { ipcRenderer } from 'electron'
 import type { PanelPageApi, PanelPageCommand } from '@shared/panelLifecycle'
 
 export const panelPagesApi: PanelPageApi = {
+  setActivity: (visibleId, interactionId) => ipcRenderer.invoke('panel-page:activity', visibleId, interactionId),
   list: () => ipcRenderer.invoke('panel-page:list'),
   context: pageId => ipcRenderer.invoke('panel-page:context', pageId),
   escape: pageId => ipcRenderer.invoke('panel-page:escape', pageId),
@@ -9,6 +10,7 @@ export const panelPagesApi: PanelPageApi = {
   failed: pageId => ipcRenderer.invoke('panel-page:failed', pageId),
   complete: (pageId, requestId, result, failed) => ipcRenderer.invoke('panel-page:complete', pageId, requestId, result, failed),
   setToolbar: (pageId, toolbar) => ipcRenderer.invoke('panel-page:toolbar', pageId, toolbar),
+  resizeWindow: (pageId, size) => ipcRenderer.invoke('panel-page:resizeWindow', pageId, size),
   pluginInvoke: (pageId, method, params) => ipcRenderer.invoke('panel-page:plugin', pageId, method, params),
   onChanged: listener => {
     ipcRenderer.on('panel-page:changed', listener)

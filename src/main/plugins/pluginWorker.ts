@@ -23,12 +23,14 @@ interface Request {
   stop?: boolean
   cancel?: number
   reason?: string
+  viewsChanged?: PluginBackendCallContext['views']
 }
 let backend: PluginBackend
 const running = new Map<number, { controller: AbortController; done: Promise<void> }>()
 const hostRequests = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>()
 let hostSequence = 0
 let stopping = false
+const viewListeners = new Set<(views: PluginBackendCallContext['views']) => void>()
 
 function host(signal?: AbortSignal): PluginBackendHost {
   const request = <T>(method: string, params?: unknown, mutation = false): Promise<T> => new Promise((resolve, reject) => {
@@ -45,7 +47,7 @@ function host(signal?: AbortSignal): PluginBackendHost {
     if (!mutation) signal?.addEventListener('abort', abort, { once: true })
     try { port.postMessage({ hostRequest: id, method, params }) } catch (error) { fail(error as Error) }
   })
-  return { getViews: () => request('getViews'), getSettings: () => request('getSettings'),
+  return { onViewsChanged: listener => { viewListeners.add(listener); return () => { viewListeners.delete(listener) } }, getViews: () => request('getViews'), getSettings: () => request('getSettings'),
     openView: options => request('openView', options, true), moveView: options => request('moveView', options, true) }
 }
 
@@ -59,6 +61,10 @@ async function start(): Promise<void> {
     || Object.values(backend.tools).some(handler => typeof handler !== 'function'))) throw new Error('Invalid backend tools.')
   const activation = Promise.resolve().then(() => backend.activate?.({ ...JSON.parse(process.argv[3]), host: host() }))
   port.on('message', ({ data }: { data: Request }) => {
+    if (data.viewsChanged) {
+      if (!stopping) for (const listener of viewListeners) listener(data.viewsChanged)
+      return
+    }
     if (typeof data.hostResponse === 'number') {
       const pending = hostRequests.get(data.hostResponse)
       if (pending) {
@@ -74,6 +80,7 @@ async function start(): Promise<void> {
     if (data.stop) {
       if (stopping) return
       stopping = true
+      viewListeners.clear()
       for (const item of running.values()) item.controller.abort(new Error('Plugin backend stopped.'))
       // Closing resources can be what settles an accepted call. Start cleanup
       // after activation, concurrently with those calls, then retain their receipts.

@@ -41,6 +41,7 @@
 .panel-window-shell { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100vh; background: var(--bg-panel); }
 .panel-window-titlebar {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 12px;
   height: calc(max(36px, calc(env(titlebar-area-y, 0px) + env(titlebar-area-height, 36px))) + 1px);
@@ -50,13 +51,15 @@
   background: var(--bg-titlebar);
   -webkit-app-region: drag;
 }
-.panel-window-titlebar > strong { flex: 1; min-width: 0; }
+.panel-window-titlebar > strong { flex: 1; min-width: 3em; }
 .panel-window-titlebar > button { flex-shrink: 0; -webkit-app-region: no-drag; }
 .panel-toolbar-status { min-width: 0; max-width: 30%; color: var(--text-muted); font-size: 0.9em; }
 .panel-toolbar-status[data-tone="success"] { color: var(--success); }
 .panel-toolbar-status[data-tone="warning"] { color: var(--warning); }
 .panel-toolbar-status[data-tone="danger"] { color: var(--danger); }
-.panel-toolbar-actions { display: flex; flex-shrink: 0; gap: 4px; -webkit-app-region: no-drag; }
+.panel-toolbar-actions { display: flex; position: relative; flex-shrink: 1; min-width: 24px; gap: 4px; -webkit-app-region: no-drag; }
+.panel-toolbar-actions > button { flex-shrink: 0; }
+.panel-toolbar-measure { position: absolute; visibility: hidden; pointer-events: none; }
 .panel-window-slot { min-height: 0; min-width: 0; }
 
 .workspace-panels {

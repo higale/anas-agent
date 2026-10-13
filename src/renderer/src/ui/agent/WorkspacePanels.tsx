@@ -98,7 +98,7 @@ export function WorkspacePanels({ controller, scope, activities, narrow, width, 
     if (!group.expanded) return
     for (const tab of group.tabs) if (tab.requestId) void window.gale.panels.acknowledge(tab.requestId).catch(reason => notice.error(panelError(reason, t)))
   }, [group.expanded, group.tabs, t])
-  const content = <Tabs.Root ref={rootRef} className="ui-tab-workspace" value={group.activeId}
+  const content = <Tabs.Root ref={rootRef} className="ui-tab-workspace" data-panel-interaction={group.activeId} value={group.activeId}
     onValueChange={(id) => controller.select(scope, id)}>
     <div className="ui-tab-workspace-header workspace-panels-titlebar">
       <div className="ui-tab-workspace-tabs">
@@ -113,7 +113,7 @@ export function WorkspacePanels({ controller, scope, activities, narrow, width, 
               : undefined
             const label = panel.kind === 'document' ? helpDocuments[panel.documentId]
               : subagent?.name ?? tab.name
-            return <ContextMenuShell key={tab.id} className="ui-menu ui-menu-list" trigger={<div className="ui-tab-item" data-active={group.activeId === tab.id}
+            return <ContextMenuShell key={tab.id} panelId={tab.id} className="ui-menu ui-menu-list" trigger={<div className="ui-tab-item" data-panel-interaction={tab.id} data-active={group.activeId === tab.id}
               data-dragging={drag.preview?.viewId === tab.id} data-app-context-menu
               onMouseDownCapture={(event) => { if (event.button === 1) event.preventDefault() }}
               onAuxClick={(event) => {

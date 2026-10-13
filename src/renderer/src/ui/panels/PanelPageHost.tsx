@@ -1,3 +1,4 @@
+import { usePanelActivation } from './usePanelActivation'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { panelIdentity, workspacePanelScope } from '@shared/panels'
@@ -56,6 +57,7 @@ function BuiltinPage({ context, api }: { context: PanelPageContext; api: PanelPa
 /** Mounted once per window. Tab/scope switches only change visibility, never iframe ancestry. */
 export function PanelPageHost({ activeId, visible = true }: { activeId?: string; visible?: boolean }) {
   const api = panelApi().pages
+  usePanelActivation(api, activeId, visible)
   const { t } = useTranslation()
   const [pages, setPages] = useState<PanelPageContext[]>([])
   useEffect(() => {
@@ -74,7 +76,7 @@ export function PanelPageHost({ activeId, visible = true }: { activeId?: string;
     return () => { active = false; stop() }
   }, [api, t])
   return <div className="panel-pages">
-    {pages.map(page => <section key={page.pageId} className="panel-page" data-panel-view={page.panelId}
+    {pages.map(page => <section key={page.pageId} className="panel-page" data-panel-interaction={page.panelId} data-panel-view={page.panelId}
       data-panel-page={page.pageId} data-panel-kind={page.view.content.kind}
       data-plugin-panel={page.view.content.kind === 'plugin' ? page.view.content.pluginId : undefined}
       data-plugin-instance={page.view.content.kind === 'plugin' ? page.view.content.instanceId : undefined}

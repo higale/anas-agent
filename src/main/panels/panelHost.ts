@@ -102,6 +102,7 @@ export function registerPanelIpc(): void {
   handleMainIpc('panels:acknowledge', (event, requestId: unknown) => panelPages.acknowledge(event, id.parse(requestId)))
   handleMainIpc('panels:cancel', (event, requestId: string) => panelPages.cancelRequest(BrowserWindow.fromWebContents(event.sender)!, requestId))
   handleMainIpc('panels:hasRequest', (event, requestId: string) => panelPages.hasRequest(BrowserWindow.fromWebContents(event.sender)!, requestId))
+  ipcMain.handle('panel-page:activity', (event, visibleId: unknown, interactionId: unknown) => panelPages.setActivity(event, visibleId, interactionId))
   ipcMain.handle('panel-page:list', event => panelPages.ownedPages(event))
   ipcMain.handle('panel-page:context', (event, pageId: unknown) => panelPages.pageContext(event, pageId))
   ipcMain.handle('panel-page:escape', (event, pageId: unknown) => {
@@ -113,6 +114,7 @@ export function registerPanelIpc(): void {
   ipcMain.handle('panel-page:complete', (event, pageId: unknown, requestId: unknown, result: unknown, failed: unknown) =>
     panelPages.complete(event, pageId, requestId, result, failed))
   ipcMain.handle('panel-page:toolbar', (event, pageId: unknown, toolbar: unknown) => panelPages.setToolbar(event, pageId, toolbar))
+  ipcMain.handle('panel-page:resizeWindow', (event, pageId: unknown, size: unknown) => panelPages.resizeWindow(event, pageId, size))
   ipcMain.handle('panel-window:state', event => panelPages.fromShell(event))
   ipcMain.handle('panel-window:languages', event => panelPages.shellLanguages(event))
   ipcMain.handle('panel-window:action', (event, actionId: unknown) => panelPages.invokeToolbarAction(panelPages.fromShell(event).view.viewId, actionId))

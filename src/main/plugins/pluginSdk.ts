@@ -65,6 +65,7 @@ export const pluginSdk = `(() => {
     if (event.key === 'Escape' && !event.defaultPrevented && !event.isComposing && !event.repeat
       && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) void request('escape').catch(() => {});
   });
+  for (const name of ['pointerdown', 'focusin', 'focus']) window.addEventListener(name, () => { void request('interact').catch(() => {}) }, true);
   window.addEventListener('pagehide', () => { for (const controller of controllers.values()) controller.abort(); port?.close(); });
   window.anas = Object.freeze({
     getContext: () => request('context'),
@@ -75,6 +76,7 @@ export const pluginSdk = `(() => {
     moveView: target => invoke('host.moveView', typeof target === 'string' ? { location: target } : target),
     onViewChanged: listener => { listeners.add(listener); return () => listeners.delete(listener); },
     setToolbar: toolbar => request('toolbar', toolbar),
+    resizeWindow: size => request('resizeWindow', size),
     onToolbarAction: listener => { if (action) throw new Error('Toolbar handler already registered.'); action = listener;
       return () => { if (action === listener) action = undefined; }; },
     getHome: () => invoke('host.home'), openHome: () => invoke('host.openHome'),

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { PanelPageApi, PanelPageContext, PanelJson } from '@shared/panelLifecycle'
+import { requirePanelSize, type PanelPageApi, type PanelPageContext, type PanelJson } from '@shared/panelLifecycle'
 
 /** One isolated iframe and one private channel per presentation, never a preload in plugin code. */
 export function PluginPage({ context, api }: { context: PanelPageContext; api: PanelPageApi }) {
@@ -17,11 +17,23 @@ export function PluginPage({ context, api }: { context: PanelPageContext; api: P
       if (!message || typeof message !== 'object' || typeof message.id !== 'string') return
       const run = async () => {
         switch (message.method) {
+          case 'interact': window.dispatchEvent(new CustomEvent('panel-interaction', { detail: context.panelId })); return null
           case 'context': return api.context(context.pageId)
           case 'escape': return api.escape(context.pageId)
           case 'ready': return api.ready(context.pageId)
           case 'failed': return api.failed(context.pageId)
           case 'toolbar': return api.setToolbar(context.pageId, message.params)
+          case 'resizeWindow': {
+            const size = requirePanelSize(message.params)
+            const bounds = frame.current?.getBoundingClientRect()
+            if (!bounds || bounds.width <= 0 || bounds.height <= 0) throw new Error('PANEL_TARGET_UNAVAILABLE')
+            // The plugin requests its own viewport; shell chrome belongs to the host.
+            return api.resizeWindow(context.pageId, {
+              ...size,
+              width: size.width + window.innerWidth - bounds.width,
+              height: size.height + window.innerHeight - bounds.height
+            })
+          }
           case 'complete': return api.complete(context.pageId, message.params.requestId, message.params.result ?? null, message.params.failed === true)
           case 'invoke':
             if (typeof message.params?.method !== 'string') throw new Error('Invalid plugin method.')

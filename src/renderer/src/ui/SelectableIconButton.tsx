@@ -1,20 +1,19 @@
-import type { ButtonHTMLAttributes } from 'react'
+import type { ButtonHTMLAttributes, ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { NoFocusButton } from './NoFocusButton'
 
-interface SelectableIconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'tabIndex' | 'type'> {
-  Icon: LucideIcon
+type SelectableIconButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'tabIndex' | 'type'> & {
   iconSize: number
   label: string
   pressed: boolean
-  PressedIcon?: LucideIcon
   preserveFocus?: boolean
   variant?: 'default' | 'toolbar'
-}
+} & ({ Icon: LucideIcon; PressedIcon?: LucideIcon; icon?: never } | { icon: ReactNode; Icon?: never; PressedIcon?: never })
 
 export function SelectableIconButton({
   className,
   Icon,
+  icon,
   iconSize,
   label,
   pressed,
@@ -40,7 +39,7 @@ export function SelectableIconButton({
       data-tooltip={label}
       type="button"
     >
-      <DisplayIcon size={iconSize} />
+      {icon ?? (DisplayIcon && <DisplayIcon size={iconSize} />)}
     </Button>
   )
 }

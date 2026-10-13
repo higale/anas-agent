@@ -5,6 +5,17 @@ import { PluginIcon } from './PluginIcon'
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 
 describe('plugin icon rendering', () => {
+  it('uses the same asset as a monochrome mask and reports missing images', () => {
+    const failed = vi.fn(), source = 'anas-plugin://example/_anas/icon/assets/custom.svg'
+    const { container } = render(<PluginIcon icon={{ light: source, dark: source }} monochrome onError={failed} />)
+    const image = container.querySelector('img')!
+    expect(image.parentElement!.style.maskImage).toContain(source)
+    expect(image).toHaveAttribute('width', '16')
+    fireEvent.error(image)
+    expect(failed).toHaveBeenCalledOnce()
+    expect(container.querySelector('img')).toBeNull()
+    expect(container.querySelector('svg')).not.toBeNull()
+  })
   it('keeps an icon-sized, non-draggable image and falls back after decode failure', () => {
     const failed = vi.fn()
     const source = 'anas-plugin://example/_anas/icon/icon.svg'

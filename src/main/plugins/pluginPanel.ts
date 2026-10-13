@@ -4,7 +4,7 @@ import type { PanelDefinition } from '../panels/panelPages'
 
 export function pluginBackendContext(id: string, panels: PanelState[], caller?: PanelState): PluginBackendCallContext {
   const views = panels.flatMap(panel => panel.content.kind === 'plugin' && panel.content.pluginId === id
-    ? [{ panelId: panel.viewId, instanceId: panel.content.instanceId, location: panel.location }] : [])
+    ? [{ panelId: panel.viewId, instanceId: panel.content.instanceId, location: panel.location, activity: panel.activity ?? { visible: false, active: false } }] : [])
   // The snapshot includes loading/moving panels and uses their stable identity.
   const source = caller && views.find(view => view.panelId === caller.viewId)
   if (caller && !source) throw new Error('Plugin caller page closed before its request started.')

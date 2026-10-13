@@ -3,6 +3,15 @@ import type { PanelToolbar } from './panelToolbar'
 
 export type PanelJson = null | boolean | number | string | PanelJson[] | { [key: string]: PanelJson }
 export type PanelPagePhase = 'preparing' | 'active' | 'suspended'
+export interface PanelSize { width: number; height: number; restore?: boolean }
+export function requirePanelSize(input: unknown): PanelSize {
+  const size = input as Partial<PanelSize> | null
+  if (!size || typeof size.width !== 'number' || typeof size.height !== 'number'
+    || !Number.isFinite(size.width) || !Number.isFinite(size.height)
+    || size.width <= 0 || size.height <= 0 || size.width > 32768 || size.height > 32768
+    || (size.restore !== undefined && typeof size.restore !== 'boolean')) throw new Error('Invalid panel size.')
+  return { width: size.width, height: size.height, ...(size.restore !== undefined ? { restore: size.restore } : {}) }
+}
 export interface PanelPageContext extends PanelContentState {
   /** Stable panel identity and unique identity of this particular presentation. */
   panelId: string
@@ -23,12 +32,15 @@ export interface PanelPageCommand {
 }
 export interface PanelPageApi {
   list(): Promise<PanelPageContext[]>
+  setActivity(visibleId: string | null, interactionId: string | null): Promise<void>
   context(pageId: string): Promise<PanelPageContext>
   escape(pageId: string): Promise<void>
   ready(pageId: string): Promise<void>
   failed(pageId: string): Promise<void>
   complete(pageId: string, requestId: string, result: PanelJson, failed: boolean): Promise<void>
   setToolbar(pageId: string, toolbar: PanelToolbar | null): Promise<void>
+  /** Size of the shell content in CSS pixels, including its title bar. */
+  resizeWindow(pageId: string, size: PanelSize): Promise<void>
   pluginInvoke(pageId: string, method: string, params?: PanelJson): Promise<unknown>
   onChanged(listener: () => void): () => void
   onCommand(listener: (command: PanelPageCommand) => void): () => void

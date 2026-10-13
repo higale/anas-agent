@@ -8,6 +8,7 @@ let language = 'en'
 let statusKey = ''
 let refreshing = false
 let saving = Promise.resolve()
+let toolbarSnapshot = ''
 
 // Static text only. Use i18next for interpolation, plurals, or richer messages.
 function t(key) {
@@ -19,6 +20,24 @@ function t(key) {
 }
 function setStatus(key) { statusKey = key; status.textContent = t(key) }
 function showError(error) { statusKey = ''; status.textContent = error.message }
+async function syncToolbar() {
+  const toolbar = { actions: [{ id: 'save', label: t('actions.save'), icon: 'assets/save.svg', disabled: save.disabled }] }
+  const snapshot = JSON.stringify(toolbar)
+  if (snapshot === toolbarSnapshot) return
+  await anas.setToolbar(toolbar)
+  toolbarSnapshot = snapshot
+}
+async function saveDraft() {
+  if (save.disabled) return
+  const value = draft.value
+  save.disabled = true
+  saving = (async () => {
+    await syncToolbar()
+    await anas.data.set('draft', value)
+    setStatus(draft.value === value ? 'status.saved' : 'status.unsaved')
+  })().catch(showError).finally(async () => { save.disabled = false; await syncToolbar().catch(showError) })
+  await saving
+}
 async function syncInfo() {
   if (refreshing) return
   refreshing = true
@@ -33,9 +52,10 @@ async function syncInfo() {
     document.documentElement.style.fontSize = `${info.fontSize}px`
     document.title = t('plugin.name')
     document.querySelector('label').textContent = t('plugin.name')
-    save.textContent = t('actions.save')
+    save.querySelector('span:last-child').textContent = t('actions.save')
     warning.textContent = t('errors.languages')
     if (statusKey) status.textContent = t(statusKey)
+    await syncToolbar()
   } finally { refreshing = false }
 }
 async function start() {
@@ -57,16 +77,9 @@ async function start() {
   draft.disabled = false
   save.disabled = false
   draft.addEventListener('input', () => setStatus('status.unsaved'))
-  save.addEventListener('click', async () => {
-    const value = draft.value
-    save.disabled = true
-    try {
-      saving = anas.data.set('draft', value)
-      await saving
-      setStatus(draft.value === value ? 'status.saved' : 'status.unsaved')
-    } catch (error) { showError(error) }
-    finally { saving = Promise.resolve(); save.disabled = false }
-  })
+  save.addEventListener('click', () => { void saveDraft() })
+  anas.onToolbarAction(async id => { if (id === 'save') await saveDraft() })
+  await syncToolbar()
   await anas.ready()
   // Refresh presentation without reloading the page or replacing the draft.
   const refresh = () => { if (!document.hidden) void syncInfo().catch(showError) }

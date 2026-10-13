@@ -1,7 +1,8 @@
-export const panelActionIcons = ['unplug', 'x', 'refresh-cw', 'play', 'pause', 'square', 'settings', 'save', 'list', 'lock', 'lock-open'] as const
+import { requirePluginIconPath } from './plugins'
+
 export interface PanelToolbar {
   status?: { label: string; tone?: 'neutral' | 'success' | 'warning' | 'danger' }
-  actions: { id: string; label: string; icon: typeof panelActionIcons[number]; disabled?: boolean; pressed?: boolean }[]
+  actions: { id: string; label: string; icon: string; disabled?: boolean; pressed?: boolean }[]
 }
 export function requirePanelToolbar(input: unknown): PanelToolbar | undefined {
   if (input === null) return undefined
@@ -9,15 +10,15 @@ export function requirePanelToolbar(input: unknown): PanelToolbar | undefined {
   if (!input || typeof input !== 'object') return invalid()
   const value = input as PanelToolbar
   const label = (text: unknown) => typeof text === 'string' && text.trim().length > 0 && text.length <= 120
-  if (!Array.isArray(value.actions) || value.actions.length > 4) return invalid()
+  if (!Array.isArray(value.actions)) return invalid()
   const ids = new Set<string>()
   const actions = value.actions.map(action => {
     if (!action || typeof action.id !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(action.id)
-      || ids.has(action.id) || !label(action.label) || !panelActionIcons.includes(action.icon)
+      || ids.has(action.id) || !label(action.label)
       || (action.disabled !== undefined && typeof action.disabled !== 'boolean')
       || (action.pressed !== undefined && typeof action.pressed !== 'boolean')) return invalid()
     ids.add(action.id)
-    return { id: action.id, label: action.label, icon: action.icon, disabled: action.disabled ?? false,
+    return { id: action.id, label: action.label, icon: requirePluginIconPath(action.icon), disabled: action.disabled ?? false,
       ...(action.pressed !== undefined ? { pressed: action.pressed } : {}) }
   })
   if (value.status !== undefined && (!value.status || !label(value.status.label)

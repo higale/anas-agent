@@ -11,7 +11,7 @@ export const PLUGIN_ICON_PATH = '_anas/icon/'
 export type PluginIcon = string | { light: string; dark: string }
 export interface PluginBackendCallContext {
   caller: { panelId: string; instanceId: string } | null
-  views: { panelId: string; instanceId: string; location: 'sidebar' | 'window' }[]
+  views: { panelId: string; instanceId: string; location: 'sidebar' | 'window'; activity?: import('./panels').PanelActivity }[]
 }
 export interface PluginIconSources { light: string; dark: string }
 

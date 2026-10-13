@@ -2332,6 +2332,8 @@ html.ui-resizing * {
 
 .plugin-icon { display: inline-flex; flex: none; align-items: center; justify-content: center; }
 .plugin-icon img, .plugin-icon svg { display: block; object-fit: contain; }
+.plugin-icon-mask { display: inline-flex; background: currentColor; mask-position: center; mask-size: contain; mask-repeat: no-repeat; mask-mode: alpha; }
+.plugin-icon-mask img { opacity: 0; }
 .plugin-icon-dark { display: none; }
 :root[data-theme="dark"] .plugin-icon-light { display: none; }
 :root[data-theme="dark"] .plugin-icon-dark { display: inline; }

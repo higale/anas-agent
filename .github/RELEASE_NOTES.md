@@ -1,8 +1,12 @@
-## Anas v3.3.11
+## Anas v3.3.12
 
-- 更新语音合成接口，修复在线朗读返回 403、无法生成语音的问题。
+- 插件支持按内容适配独立窗口，工具栏使用包内图标，操作过多时自动收进菜单。
+- 向插件后台提供面板活动状态订阅，支持按当前操作页面调度资源。
+- 修复插件覆盖安装期间错误提示被刷新覆盖的问题。
 
-- Update the speech synthesis endpoint to fix HTTP 403 errors that prevented online narration.
+- Let plugins fit separate windows to content, use packaged toolbar icons, and move overflow actions into a menu.
+- Expose panel activity subscriptions so plugin backends can schedule resources for the active page.
+- Keep plugin replacement errors visible instead of overwriting them during refresh.
 
 ## 下载与安装 / Downloads & installation
 

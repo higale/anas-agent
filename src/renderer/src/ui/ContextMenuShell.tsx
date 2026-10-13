@@ -4,6 +4,7 @@ import { UI_POPOVER_COLLISION_PADDING } from './uiConstants'
 import { useFloatingCollisionPadding } from './floatingViewport'
 
 interface ContextMenuShellProps {
+  panelId?: string
   children: ReactNode
   className: string
   sidebarFloating?: boolean
@@ -16,6 +17,7 @@ function ContextMenuContent(props: ComponentProps<typeof ContextMenu.Content>) {
 }
 
 export function ContextMenuShell({
+  panelId,
   children,
   className,
   sidebarFloating = false,
@@ -26,6 +28,7 @@ export function ContextMenuShell({
       <ContextMenu.Trigger asChild data-app-context-menu>{trigger}</ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenuContent
+          data-panel-interaction={panelId}
           className={className}
           data-sidebar-floating={sidebarFloating ? true : undefined}
           onCloseAutoFocus={(event) => event.preventDefault()}

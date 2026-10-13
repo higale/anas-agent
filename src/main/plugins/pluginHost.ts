@@ -12,7 +12,7 @@ import type { PanelState, PanelLocation } from '@shared/panels'
 import { panelPages as views } from '../panels/panelRegistry'
 import { refreshPanelAppearance } from '../panels/panelHost'
 import { pluginPanel, pluginBackendContext, pluginMoveTarget } from './pluginPanel'
-import { pluginRuntime as runtime, changed, stopPluginBackends, setPluginBackendViews, setPluginBackendViewAction } from './pluginRuntime'
+import { pluginRuntime as runtime, changed, stopPluginBackends, setPluginBackendViews, setPluginBackendViewAction, notifyPluginViewsChanged } from './pluginRuntime'
 
 let installWatcher: { token: string; dispose(): void } | undefined
 function clearInstallWatcher(token?: string): void {
@@ -31,7 +31,8 @@ export async function closePluginHost(): Promise<void> {
 }
 
 export function registerPluginScheme(): void {
-  protocol.registerSchemesAsPrivileged([{ scheme: PLUGIN_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }])
+  // CSS image masks use CORS requests; only the bounded icon endpoint grants cross-origin reads.
+  protocol.registerSchemesAsPrivileged([{ scheme: PLUGIN_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } }])
 }
 
 export function registerPluginProtocol(): void {
@@ -43,7 +44,7 @@ export function registerPluginProtocol(): void {
       const relativePath = decodeURIComponent(url.pathname.slice(1))
       if (relativePath.startsWith(PLUGIN_ICON_PATH)) {
         const { bytes, mime } = await store.iconResource(url.hostname, relativePath.slice(PLUGIN_ICON_PATH.length))
-        return new Response(new Uint8Array(bytes), { headers: { 'Content-Type': mime, 'Cache-Control': 'no-store',
+        return new Response(new Uint8Array(bytes), { headers: { 'Content-Type': mime, 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*',
           'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox" } })
       }
       await store.requireEnabled(url.hostname)
@@ -134,11 +135,12 @@ async function invokeData(id: string, method: unknown, params: unknown, caller?:
 }
 
 export function registerPluginIpc(): void {
+  views.onChanged(notifyPluginViewsChanged)
   setPluginBackendViews(id => pluginBackendContext(id, views.list()).views)
   setPluginBackendViewAction((id, method, params, assertAvailable) => invoke(id, 'host.' + method, params, undefined, assertAvailable))
   handleMainIpc('plugins:list', async (): Promise<PluginSummary[]> => {
     const { store, backends } = runtime()
-    return (await store.list()).map(item => ({ ...item, ...backends.status(item.id) }))
+    return store.exclusive(async () => (await store.list()).map(item => ({ ...item, ...backends.status(item.id) })))
   })
   handleMainIpc('plugins:readContribution', async (_event, id, kind, contributionId) => {
     if (typeof id !== 'string' || typeof contributionId !== 'string' || (kind !== 'skill' && kind !== 'prompt')) throw new Error('Invalid plugin contribution request.')
