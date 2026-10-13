@@ -48,7 +48,7 @@ export function PluginPage({ context, api }: { context: PanelPageContext; api: P
     const stopCancel = api.onCancel(requestId => port.postMessage({ type: 'cancel', requestId }))
     port.postMessage({ type: 'context', context: current.current })
     return () => { alive = false; stopCommand(); stopCancel(); port.close() }
-  }, [api, context.pageId, port])
+  }, [api, context.pageId, context.panelId, port])
   useEffect(() => { port?.postMessage({ type: 'context', context }) }, [context, port])
   useLayoutEffect(() => {
     const url = new URL(context.pluginUrl!)
