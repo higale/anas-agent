@@ -33,3 +33,8 @@ export function pluginPanel(summary: PluginSummary, options: PluginViewOptions):
     name: language => options.title ?? pluginDisplayText(summary, language)
   }
 }
+
+export function pluginCloseTarget(id: string, panels: PanelState[], instanceId: unknown): PanelState | undefined {
+  if (typeof instanceId !== 'string' || !/^[a-zA-Z0-9_-]{1,80}$/.test(instanceId)) throw new Error('Invalid plugin instance to close.')
+  return panels.find(panel => panel.content.kind === 'plugin' && panel.content.pluginId === id && panel.content.instanceId === instanceId)
+}

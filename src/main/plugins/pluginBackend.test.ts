@@ -16,7 +16,7 @@ beforeEach(() => {
   mocks.fork.mockReturnValue(child)
   backend = new PluginBackends({
     requireEnabled: async () => ({ backend: 'backend.cjs' }), packageFile: async () => '/plugin/backend.cjs',
-    packageDirectory: async () => '/plugin', directory: async () => '/data'
+    packageDirectory: async () => '/plugin', directory: async (group: string, id: string) => `/data/${group}/${group === 'tmp' ? `anas-plugin-${id}` : id}`
   } as unknown as PluginStore, vi.fn(), 1000, 100)
 })
 afterEach(() => vi.useRealTimers())
@@ -29,6 +29,14 @@ async function started() {
 }
 
 describe('optional plugin backend', () => {
+  it('passes persistent and temporary directories separately to the worker', async () => {
+    await started()
+    const [, args] = mocks.fork.mock.calls.at(-1)!
+    expect(JSON.parse(args[1])).toEqual({ pluginId: 'test-plugin', packageDirectory: '/plugin',
+      dataDirectory: '/data/plugins_data/test-plugin', tempDirectory: '/data/tmp/anas-plugin-test-plugin' })
+    await backend.stopAll()
+  })
+
   it('captures host context when a queued call is dispatched, not when enqueued', async () => {
     await started()
     let views = [{ panelId: 'home', instanceId: 'main', location: 'sidebar' as const }]
@@ -239,7 +247,7 @@ describe('no-page plugin tool calls', () => {
     await backend.stopAll()
   })
 
-  it('scopes view actions to their originating backend and rechecks delayed actions after stop', async () => {
+  it.each(['openView', 'moveView', 'closeView'])('scopes %s to its originating backend and rechecks delayed actions after stop', async method => {
     const store = { requireEnabled: async () => ({ backend: 'backend.cjs' }), packageFile: async () => '/plugin/backend.cjs',
       packageDirectory: async () => '/plugin', directory: async () => '/data' } as unknown as PluginStore
     let resume!: () => void
@@ -250,8 +258,8 @@ describe('no-page plugin tool calls', () => {
     })
     backend = new PluginBackends(store, vi.fn(), 1000, 100, undefined, action)
     await started()
-    child.emit('message', { hostRequest: 1, method: 'openView', params: { instanceId: 'server', location: 'sidebar' } })
-    expect(action).toHaveBeenCalledWith('test-plugin', 'openView', { instanceId: 'server', location: 'sidebar' }, expect.any(Function))
+    child.emit('message', { hostRequest: 1, method, params: { instanceId: 'server', location: 'sidebar' } })
+    expect(action).toHaveBeenCalledWith('test-plugin', method, { instanceId: 'server', location: 'sidebar' }, expect.any(Function))
     await backend.stopAll()
     resume()
     await vi.waitFor(() => expect(child.postMessage).toHaveBeenCalledWith(expect.objectContaining({hostResponse:1,error:expect.stringContaining('unavailable')})))
@@ -385,4 +393,19 @@ describe('no-page plugin tool calls', () => {
     expect(await other).toBe(false)
     await backend.stopAll()
   })
+})
+
+it('opt-in concurrent RPC permits lifecycle calls without changing default RPC ordering', async () => {
+  await started()
+  const operation = backend.call('test-plugin', 'orchestrate', null, undefined, undefined, { concurrent: true })
+  const disposal = backend.call('test-plugin', 'dispose', null)
+  const next = backend.call('test-plugin', 'after', null)
+  const sent = child.postMessage.mock.calls.map(([message]) => message as { id: number; method: string })
+  expect(sent.map(message => message.method)).toEqual(['orchestrate', 'dispose'])
+  child.emit('message', { id: sent[1].id, result: null }); await disposal
+  expect(child.postMessage).toHaveBeenLastCalledWith(expect.objectContaining({ method: 'after' }))
+  const last = child.postMessage.mock.calls.at(-1)![0] as { id: number }
+  child.emit('message', { id: last.id, result: null }); await next
+  child.emit('message', { id: sent[0].id, result: null }); await operation
+  await backend.stopAll()
 })

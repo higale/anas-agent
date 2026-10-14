@@ -1,13 +1,5 @@
 # 待办
 
-## 工具结果
+当前无待实施条目。已完成事项移入对应功能文档；当前无法验证、缺少复现条件及尚无采用方案的项目不再作为实施待办。
 
-- [ ] 参考 dsh，超长工具结果落盘，返回文件引用和必要摘要，替代当前直接截断；复用现有工具结果与存储机制。
-
-## 插件面板框架
-
-接口及资源边界见[插件文档](PLUGINS.md)和[能力契约](PLUGIN_CAPABILITIES_CONTRACT.md)。
-
-- [ ] 定位偶发页面加载和交接失败；目前复测未稳定重现，不视为修复。复现记录见相邻 RDP 仓库 `docs/TESTING.md`。
-
-RDP 专用实现与实机验收统一维护在相邻 `anas-plugin-rdp/TODO.md`，不在宿主重复列项。Finder 按需粘贴已延期，原要求保留在插件待办中。
+工具结果处理见[存储设计](CURRENT_STATE_STORAGE.md)；面板接口与平台限制见[面板框架](PANEL_FRAMEWORK.md)和[插件文档](PLUGINS.md)。RDP 的功能及未验证范围见相邻 `anas-plugin-rdp/docs/TESTING.md`，未验证不等于已修复。

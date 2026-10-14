@@ -1,10 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { parsePluginManifest, requirePluginView, type PluginSummary } from '@shared/plugins'
-import { pluginPanel, pluginBackendContext, pluginMoveTarget } from './pluginPanel'
+import { pluginPanel, pluginBackendContext, pluginMoveTarget, pluginCloseTarget } from './pluginPanel'
 import type { PanelState } from '@shared/panels'
 
 const raw = { version: 0, id: 'test', name: 'Test', plugin_version: '1.0.0', api_version: 2, ui: 'index.html' }
 const summary = (icon?: unknown): PluginSummary => ({ id: raw.id, enabled: true, backendStatus: 'stopped', manifest: parsePluginManifest({ ...raw, icon }) })
+
+it('close resolves only the named instance of this plugin and allows an absent view', () => {
+  const panel: PanelState = { viewId: 'desktop', content: { kind: 'plugin', pluginId: 'test', instanceId: 'server' }, location: 'window', locations: ['sidebar', 'window'], name: 'Desktop', loading: false }
+  expect(pluginCloseTarget('test', [panel], 'server')).toBe(panel)
+  expect(pluginCloseTarget('other', [panel], 'server')).toBeUndefined()
+  expect(pluginCloseTarget('test', [], 'server')).toBeUndefined()
+  for (const value of [undefined, null, '', 3, '../server']) expect(() => pluginCloseTarget('test', [panel], value)).toThrow()
+})
 
 it('backend context includes only the plugin’s live stable panels, including pending pages', () => {
   const home: PanelState = { viewId: 'home', content: { kind: 'plugin', pluginId: 'test', instanceId: 'main' }, location: 'sidebar', locations: ['sidebar', 'window'], name: 'Home', loading: false }

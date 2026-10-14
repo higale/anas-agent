@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { app, BrowserWindow, screen, type IpcMainInvokeEvent, type Point, type WebContents } from 'electron'
-import { panelIdentity, type PanelContent, type PanelLocation, type PanelMoveOptions, type PanelState, type PanelWindowState, type PanelPreferences } from '@shared/panels'
+import { panelIdentity, type PanelContent, type PanelLocation, type PanelMoveOptions, type PanelState, type PanelWindowState, type PanelWindowShellState, type PanelPreferences } from '@shared/panels'
 import { requirePanelJson, requirePanelSize, type PanelJson, type PanelPageContext, type PanelPageCommand, type PanelPagePhase } from '@shared/panelLifecycle'
-import { requirePanelToolbar, type PanelToolbar } from '@shared/panelToolbar'
+import { findPanelToolbarAction, requirePanelToolbar, type PanelToolbar } from '@shared/panelToolbar'
 import type { LanguageResourcesSnapshot, Project } from '@shared/types'
 import { assertTrustedIpcEvent, isMainRendererWindow, rendererLocationMatches, resolveRendererLocation, registerContentRenderer, type RendererLocation } from '../ipcSecurity'
 import { titleBarColors, titleBarOptions } from '../windowAppearance'
 import { registerWindowZoomShortcuts } from '../zoomService'
+import { registerMacWindowMoveSizeGuard } from '../macWindowMoveSize'
 import { registerNativeContextMenu } from '../appShell'
 import { builtinPanelCanInvoke } from './builtinPanelAccess'
 import { runtimeLog } from '../runtimeLogger'
@@ -48,9 +49,9 @@ interface Entry {
   candidate?: Page
   operation: Promise<void>
   transfer?: AbortController
-  closing?: boolean
+  closing?: Promise<void>
 }
-interface Shell { entry: Entry; window: BrowserWindow; source: RendererLocation; resources: LanguageResourcesSnapshot }
+interface Shell { entry: Entry; window: BrowserWindow; source: RendererLocation; resources: LanguageResourcesSnapshot; atCursor: boolean; resizeRevision: number; fitting: number }
 interface SidebarRequest { entry: Entry; owner: BrowserWindow; finish(error?: Error): void }
 interface Pending { page: Page; finish(value: PanelJson, error?: Error): void }
 
@@ -131,8 +132,14 @@ export class PanelPages {
   pageState(event: IpcMainInvokeEvent, pageId: unknown): PanelWindowState { return { view: this.fromPage(event, pageId), ...this.appearance } }
   pageContent(pageId: string): PanelContent | undefined { return this.pages.get(pageId)?.entry.state.content }
   private context(page: Page): PanelPageContext {
+    const bounds = page.location === 'window' ? page.owner.getNormalBounds() : undefined
+    // Locate oversized windows by their title bar, not by the largest screen overlap.
+    const display = bounds ? screen.getDisplayNearestPoint({ x: bounds.x + Math.min(80, bounds.width / 2), y: bounds.y + 16 }) : undefined
     return { panelId: page.entry.state.viewId, pageId: page.id, view: this.view(page.entry),
       location: page.location, phase: page.phase, transferId: page.transferId, restoreState: page.restoreState,
+      windowMode: page.location === 'window' ? page.owner.isFullScreen() ? 'fullscreen' : page.owner.isMaximized() ? 'maximized' : 'normal' : undefined,
+      windowResizeRevision: page.location === 'window' ? this.shells.get(page.owner.webContents)?.resizeRevision : undefined,
+      windowPlacement: bounds && display ? { displayId: display.id, x: bounds.x - display.workArea.x, y: bounds.y - display.workArea.y } : undefined,
       pluginUrl: page.entry.definition.pluginUrl, project: page.entry.definition.project,
       preferences: this.preferences, ...this.appearance }
   }
@@ -147,14 +154,20 @@ export class PanelPages {
     page.ready.reject(new Error('PANEL_LOAD_FAILED'))
     if (page.entry.candidate === page) page.entry.transfer?.abort()
   }
-  private shellState(shell: Shell): PanelWindowState {
-    return { view: { ...shell.entry.state, loading: !!shell.entry.state.loading || shell.entry.source?.owner !== shell.window }, ...this.appearance }
+  private shellState(shell: Shell): PanelWindowShellState {
+    return { view: { ...shell.entry.state, loading: !!shell.entry.state.loading || shell.entry.source?.owner !== shell.window },
+      ...this.appearance, fullScreen: shell.window.isFullScreen() }
   }
-  fromShell(event: IpcMainInvokeEvent): PanelWindowState {
+  fromShell(event: IpcMainInvokeEvent): PanelWindowShellState {
     this.assertHost(event)
     const shell = this.shells.get(event.sender)
     if (!shell) throw new Error('Unregistered panel window.')
     return this.shellState(shell)
+  }
+  setShellFullScreen(event: IpcMainInvokeEvent, fullScreen: unknown): void {
+    this.fromShell(event)
+    if (typeof fullScreen !== 'boolean') throw new Error('Invalid fullscreen state.')
+    this.shells.get(event.sender)!.window.setFullScreen(fullScreen)
   }
   shellLanguages(event: IpcMainInvokeEvent): LanguageResourcesSnapshot {
     this.fromShell(event)
@@ -163,6 +176,10 @@ export class PanelPages {
   async open(definition: PanelDefinition): Promise<void> {
     if (!definition.locations.includes(definition.location)) throw new Error('PANEL_TARGET_UNAVAILABLE')
     const existing = [...this.entries.values()].find(entry => panelIdentity(entry.state.content) === panelIdentity(definition.content))
+    if (existing?.closing) {
+      await existing.closing
+      return this.open(definition)
+    }
     if (existing) {
       this.updateContent(existing.state.viewId, definition.content, definition)
       if (existing.source?.location === 'window') { existing.source.owner.show(); existing.source.owner.focus() }
@@ -273,22 +290,25 @@ export class PanelPages {
     const entry = this.entries.get(viewId)
     if (!entry) return
     if (force) { entry.transfer?.abort(); this.removeEntry(entry); return }
-    if (entry.closing) return
-    entry.closing = true; entry.transfer?.abort()
-    try {
-      await entry.operation.catch(() => undefined)
-      if (!this.entries.has(viewId)) return
-      if (entry.source) {
-        entry.source.phase = 'suspended'; this.changed()
-        try { await this.command(entry.source, 'dispose', { reason: 'closed' }, undefined, 15000) }
-        catch (error) {
-          await this.command(entry.source, 'resume', null, undefined, 15000)
-          entry.source.phase = 'active'; this.changed()
-          throw error
+    if (entry.closing) return entry.closing
+    entry.transfer?.abort()
+    entry.closing = (async () => {
+      try {
+        await entry.operation.catch(() => undefined)
+        if (!this.entries.has(viewId)) return
+        if (entry.source) {
+          entry.source.phase = 'suspended'; this.changed()
+          try { await this.command(entry.source, 'dispose', { reason: 'closed' }, undefined, 15000) }
+          catch (error) {
+            await this.command(entry.source, 'resume', null, undefined, 15000)
+            entry.source.phase = 'active'; this.changed()
+            throw error
+          }
         }
-      }
-      this.removeEntry(entry)
-    } finally { delete entry.closing }
+        this.removeEntry(entry)
+      } finally { delete entry.closing }
+    })()
+    return entry.closing
   }
   closeWhere(predicate: (content: PanelContent) => boolean): void {
     for (const entry of [...this.entries.values()]) if (predicate(entry.state.content)) { entry.transfer?.abort(); this.removeEntry(entry) }
@@ -318,48 +338,75 @@ export class PanelPages {
   }
   async resizeWindow(event: IpcMainInvokeEvent, pageId: unknown, input: unknown): Promise<void> {
     const page = this.page(event, pageId), size = requirePanelSize(input)
-    const requireActive = () => {
-      if (this.page(event, pageId) !== page || page.location !== 'window' || page.phase !== 'active' || page.entry.source !== page
-        || page.entry.state.pendingLocation || page.entry.closing) throw new Error('PANEL_ACTION_UNAVAILABLE')
+    const requireResizable = () => {
+      const active = page.phase === 'active' && page.entry.source === page && !page.entry.state.pendingLocation
+      const preparing = page.phase === 'preparing' && page.entry.candidate === page
+      if (this.page(event, pageId) !== page || page.location !== 'window' || (!active && !preparing)
+        || page.entry.closing) throw new Error('PANEL_ACTION_UNAVAILABLE')
     }
-    requireActive()
+    requireResizable()
     const window = page.owner
     // Automatic fits preserve window state; a deliberate fit may restore it.
     if (!size.restore && (window.isMaximized() || window.isFullScreen())) return
-    const transition = (eventName: 'leave-full-screen' | 'unmaximize', change: () => void) => new Promise<void>((resolve, reject) => {
-      const events: NodeJS.EventEmitter = window
-      const cleanup = () => {
-        clearTimeout(timer)
-        events.removeListener(eventName, done)
-        events.removeListener('closed', closed)
+    const shell = this.shells.get(window.webContents)!
+    shell.fitting++
+    try {
+      const transition = (eventName: 'leave-full-screen' | 'unmaximize', change: () => void) => new Promise<void>((resolve, reject) => {
+        const events: NodeJS.EventEmitter = window
+        const cleanup = () => {
+          clearTimeout(timer)
+          events.removeListener(eventName, done)
+          events.removeListener('closed', closed)
+        }
+        const done = () => { cleanup(); resolve() }
+        const closed = () => { cleanup(); reject(new Error('PANEL_CLOSED')) }
+        const timer = setTimeout(() => { cleanup(); reject(new Error('PANEL_TARGET_UNAVAILABLE')) }, 10000)
+        events.once(eventName, done)
+        events.once('closed', closed)
+        try { change() } catch (error) { cleanup(); reject(error) }
+      })
+      if (window.isFullScreen()) { await transition('leave-full-screen', () => window.setFullScreen(false)); requireResizable() }
+      if (window.isMaximized()) { await transition('unmaximize', () => window.unmaximize()); requireResizable() }
+      const bounds = window.getBounds()
+      const placement = this.shells.get(window.webContents)?.atCursor ? undefined : size.restorePlacement
+      const display = (placement && screen.getAllDisplays().find(value => value.id === placement.displayId))
+        || screen.getDisplayNearestPoint({ x: bounds.x + Math.min(80, bounds.width / 2), y: bounds.y + 16 })
+      const area = display.workArea
+      const zoom = window.webContents.getZoomFactor()
+      const [minWidth, minHeight] = window.getMinimumSize()
+      // Electron owns the native frame. Inferring it by subtracting rounded DIP
+      // rectangles accumulates errors at fractional display scales.
+      const contentWidth = Math.round(size.width * zoom), contentHeight = Math.round(size.height * zoom)
+      window.setContentSize(contentWidth, contentHeight)
+      const { width, height } = window.getBounds()
+      // Keep ordinary windows in view. Oversized windows only need their minimum
+      // usable region and title bar in view; full-window clamping loses their position.
+      const visibleWidth = width > area.width ? Math.min(minWidth, area.width) : width
+      const visibleHeight = height > area.height ? Math.min(minHeight, area.height) : height
+      const x = placement ? area.x + placement.x : bounds.x, y = placement ? area.y + placement.y : bounds.y
+      const nextX = Math.round(Math.max(area.x, Math.min(x, area.x + area.width - visibleWidth)))
+      const nextY = Math.round(Math.max(area.y, Math.min(y, area.y + area.height - visibleHeight)))
+      if (nextX !== bounds.x || nextY !== bounds.y) {
+        window.setPosition(nextX, nextY)
+        // Moving can change DPI and round the native frame again. The final
+        // operation sizes the content on the destination display.
+        window.setContentSize(contentWidth, contentHeight)
       }
-      const done = () => { cleanup(); resolve() }
-      const closed = () => { cleanup(); reject(new Error('PANEL_CLOSED')) }
-      const timer = setTimeout(() => { cleanup(); reject(new Error('PANEL_TARGET_UNAVAILABLE')) }, 10000)
-      events.once(eventName, done)
-      events.once('closed', closed)
-      try { change() } catch (error) { cleanup(); reject(error) }
-    })
-    if (window.isFullScreen()) { await transition('leave-full-screen', () => window.setFullScreen(false)); requireActive() }
-    if (window.isMaximized()) { await transition('unmaximize', () => window.unmaximize()); requireActive() }
-    const bounds = window.getBounds(), content = window.getContentBounds()
-    const area = screen.getDisplayMatching(bounds).workArea
-    const zoom = window.webContents.getZoomFactor()
-    const [minWidth, minHeight] = window.getMinimumSize()
-    const width = Math.min(area.width, Math.max(minWidth, Math.ceil(size.width * zoom) + bounds.width - content.width))
-    const height = Math.min(area.height, Math.max(minHeight, Math.ceil(size.height * zoom) + bounds.height - content.height))
-    window.setBounds({ width, height,
-      x: Math.max(area.x, Math.min(bounds.x, area.x + area.width - width)),
-      y: Math.max(area.y, Math.min(bounds.y, area.y + area.height - height)) })
+    } finally { shell.fitting-- }
   }
   async invokeToolbarAction(viewId: string, actionId: unknown): Promise<void> {
     const entry = this.require(viewId), page = entry.source
-    const action = entry.state.toolbar?.actions.find(value => value.id === actionId)
+    const action = findPanelToolbarAction(entry.state.toolbar, actionId)
     if (!page || !action || action.disabled || entry.state.pendingActionId || entry.state.pendingLocation || entry.closing) throw new Error('PANEL_ACTION_UNAVAILABLE')
     entry.state.pendingActionId = action.id; this.changed()
     return this.command(page, 'action', { actionId: action.id }, undefined, 30000, () => {
       delete entry.state.pendingActionId; this.changed()
-    }).then(() => undefined)
+    }).then(() => undefined).catch(error => {
+      // The action's page can disappear after its own successful close/move.
+      // Treat teardown as cancellation of its UI receipt, not an action failure.
+      if (error instanceof Error && error.message === 'PANEL_CLOSED' && !this.pages.has(page.id)) return
+      throw error
+    })
   }
   complete(event: IpcMainInvokeEvent, pageId: unknown, requestId: unknown, result: unknown, failed: unknown): void {
     const page = this.page(event, pageId)
@@ -458,15 +505,34 @@ export class PanelPages {
     const resources = await this.loadLanguages(); this.check(entry, signal)
     const source = resolveRendererLocation({ isPackaged: app.isPackaged, rendererFile: join(__dirname, '../renderer/panel-window.html'),
       rendererUrl: !app.isPackaged && process.env.ELECTRON_RENDERER_URL ? new URL('panel-window.html', process.env.ELECTRON_RENDERER_URL).toString() : undefined })
-    const area = position ? screen.getDisplayNearestPoint(position).workArea : undefined
-    const width = area ? Math.min(960, area.width) : 960, height = area ? Math.min(680, area.height) : 680
-    const placement = position && area ? { x: Math.round(Math.max(area.x, Math.min(position.x - 120, area.x + area.width - width))),
-      y: Math.round(Math.max(area.y, Math.min(position.y - 18, area.y + area.height - height))) } : {}
+    const sourceWindow = entry.source?.owner ?? BrowserWindow.getAllWindows().find(isMainRendererWindow)
+    const area = (position ? screen.getDisplayNearestPoint(position)
+      : sourceWindow ? screen.getDisplayMatching(sourceWindow.getBounds()) : screen.getPrimaryDisplay()).workArea
+    const width = Math.min(960, area.width), height = Math.min(680, area.height)
+    const placement = { x: Math.round(position ? Math.max(area.x, Math.min(position.x - 120, area.x + area.width - width)) : area.x + (area.width - width) / 2),
+      y: Math.round(position ? Math.max(area.y, Math.min(position.y - 18, area.y + area.height - height)) : area.y + (area.height - height) / 2) }
     const window = new BrowserWindow({ title: entry.state.name, width, height, ...placement, minWidth: Math.min(400, width), minHeight: Math.min(300, height),
-      show: false, backgroundColor: titleBarColors().backgroundColor, ...titleBarOptions({ compact: true }),
+      show: false, enableLargerThanScreen: true, backgroundColor: titleBarColors().backgroundColor, ...titleBarOptions({ compact: true }),
       webPreferences: { preload: join(__dirname, '../preload/panelWindow.js'), sandbox: true, contextIsolation: true, nodeIntegration: false } })
     const contents = window.webContents
-    this.shells.set(contents, { entry, window, source, resources })
+    const shell = { entry, window, source, resources, atCursor: !!position, resizeRevision: 0, fitting: 0 }
+    this.shells.set(contents, shell)
+    const windowModeChanged = () => {
+      if (!shell.fitting) shell.resizeRevision++
+      if (!window.isDestroyed()) this.changed()
+    }
+    // Unlike `resize`, `resized` reports completion of a native user resize
+    // (Windows/macOS), not each programmatic size or DPI/layout notification.
+    const windowResized = () => {
+      if (!shell.fitting && !window.isDestroyed()) { shell.resizeRevision++; contents.send('panel-page:changed') }
+    }
+    window.on('resized', windowResized)
+    window.on('enter-full-screen', windowModeChanged)
+    window.on('leave-full-screen', windowModeChanged)
+    window.on('maximize', windowModeChanged)
+    window.on('unmaximize', windowModeChanged)
+    const windowMoved = () => { if (!window.isDestroyed()) contents.send('panel-page:changed') }
+    window.on('moved', windowMoved)
     registerContentRenderer(window.webContents, { location: source, allows: (channel, args) => entry.state.content.kind !== 'plugin' && builtinPanelCanInvoke(entry.state.content, channel, args) })
     registerNativeContextMenu(window)
     registerWindowZoomShortcuts(window)
@@ -480,17 +546,26 @@ export class PanelPages {
       void this.close(entry.state.viewId).catch(() => { if (!window.isDestroyed()) contents.send('panel-window:closeFailed') })
     })
     window.once('closed', () => {
+      window.removeListener('enter-full-screen', windowModeChanged)
+      window.removeListener('leave-full-screen', windowModeChanged)
+      window.removeListener('maximize', windowModeChanged)
+      window.removeListener('unmaximize', windowModeChanged)
+      window.removeListener('moved', windowMoved)
+      window.removeListener('resized', windowResized)
       this.shells.delete(contents)
       if (entry.candidate?.owner === window) { entry.transfer?.abort(); entry.candidate.ready.reject(new Error('PANEL_CLOSED')) }
     })
     const cancel = () => { if (!window.isDestroyed()) window.destroy() }
     signal.addEventListener('abort', cancel, { once: true })
     try {
+      registerMacWindowMoveSizeGuard(window)
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => { cancel(); reject(new Error('PANEL_LOAD_FAILED')) }, 30000)
         void window.loadURL(source.url).then(() => { clearTimeout(timer); resolve() }, () => { clearTimeout(timer); reject(new Error('PANEL_LOAD_FAILED')) })
       })
-      this.check(entry, signal); window.show(); return window
+      // The candidate may restore its layout during activation. Show only after
+      // that succeeds, so the default shell size is never presented first.
+      this.check(entry, signal); return window
     } catch (error) { cancel(); throw error }
     finally { signal.removeEventListener('abort', cancel) }
   }

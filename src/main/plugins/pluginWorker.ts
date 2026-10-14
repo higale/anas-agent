@@ -6,8 +6,8 @@ import { validatePluginToolResult } from './pluginToolResult'
 const port = process.parentPort!
 const load = createRequire(__filename)
 interface PluginBackend {
-  activate?(context: { pluginId: string; packageDirectory: string; dataDirectory: string; host: PluginBackendHost }): unknown
-  call?(method: string, params: unknown, context: PluginBackendCallContext & { signal: AbortSignal }): unknown
+  activate?(context: { pluginId: string; packageDirectory: string; dataDirectory: string; tempDirectory: string; host: PluginBackendHost }): unknown
+  call?(method: string, params: unknown, context: PluginBackendCallContext & { signal: AbortSignal; host: PluginBackendHost }): unknown
   tools?: Record<string, (params: unknown, context: PluginToolContext) => unknown>
   deactivate?(): unknown
 }
@@ -48,7 +48,7 @@ function host(signal?: AbortSignal): PluginBackendHost {
     try { port.postMessage({ hostRequest: id, method, params }) } catch (error) { fail(error as Error) }
   })
   return { onViewsChanged: listener => { viewListeners.add(listener); return () => { viewListeners.delete(listener) } }, getViews: () => request('getViews'), getSettings: () => request('getSettings'),
-    openView: options => request('openView', options, true), moveView: options => request('moveView', options, true) }
+    openView: options => request('openView', options, true), moveView: options => request('moveView', options, true), closeView: options => request('closeView', options, true) }
 }
 
 async function start(): Promise<void> {
@@ -103,7 +103,7 @@ async function start(): Promise<void> {
         controller.signal.throwIfAborted()
         const result = (data.tool
           ? await handler!(data.params, context as PluginToolContext)
-          : await backend.call!(data.method, data.params, context as PluginBackendCallContext & { signal: AbortSignal })) ?? null
+          : await backend.call!(data.method, data.params, context as PluginBackendCallContext & { signal: AbortSignal; host: PluginBackendHost })) ?? null
         completed = true
         const validated = data.tool ? validatePluginToolResult(result) : (requirePluginJson(result), result)
         port.postMessage({ id: data.id, result: validated })

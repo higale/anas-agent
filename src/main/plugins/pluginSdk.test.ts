@@ -36,3 +36,85 @@ describe('plugin lifecycle scheduling', () => {
     expect(f.document.body.inert).toBe(false)
   })
 })
+
+it('toolbar actions can await their own close while lifecycle disposal runs', async () => {
+  vi.useFakeTimers()
+  const listeners = new Map<string, (value: unknown) => unknown>()
+  let disposeCount = 0, actionDone = false, closeRequested = false, closeId = ''
+  const port = { onmessage: (_: any) => {}, start() {}, close() {}, postMessage(m: any) {
+    if (m.method === 'invoke' && m.params.method === 'host.closeView') {
+      closeRequested = true; closeId = m.id
+      queueMicrotask(() => port.onmessage({ data: { type:'command', command: { kind:'dispose', requestId:'dispose', payload:{ reason:'closed' } } } }))
+      // The real close waits for dispose before replying to this invoke request.
+      return
+    }
+    if (m.method === 'complete' && m.params.requestId === 'dispose') queueMicrotask(() => port.onmessage({ data: { type:'reply', id:closeId, result:null } }))
+    queueMicrotask(() => port.onmessage({ data: { type:'reply', id:m.id, result:null } }))
+  } }
+  const window: any = { parent: { postMessage() {} }, addEventListener: (key: string, handler: any) => listeners.set(key,handler) }
+  runInNewContext(pluginSdk, { window, document:{body:{inert:false}}, AbortController, setTimeout, clearTimeout })
+  listeners.get('message')!({ source:window.parent, data:{type:'anas:connect'}, ports:[port] })
+  window.anas.registerLifecycle({ dispose: async () => { disposeCount++ } })
+  window.anas.onToolbarAction(async () => { await window.anas.closeView({ instanceId:'server' }); actionDone = true })
+  port.onmessage({ data: {type:'command', command:{kind:'action',requestId:'action',payload:{actionId:'close'}}} })
+  for(let n=0;n<25;n++) await Promise.resolve()
+  expect(closeRequested).toBe(true)
+  expect(disposeCount).toBe(1)
+  expect(actionDone).toBe(true)
+  vi.clearAllTimers(); vi.useRealTimers()
+})
+
+it('notifies visibility changes without recreating the page or repeating unchanged activity', () => {
+  const f = fixture(), changes: unknown[] = []
+  ;(f.window.anas as unknown as { onViewChanged(listener: (view: unknown) => void): void }).onViewChanged(view => changes.push(view))
+  const update = (visible: boolean, active = visible) => f.port.onmessage({ data: { type: 'context', context: {
+    phase: 'active', location: 'sidebar', view: { content: { instanceId: 'desktop' }, activity: { visible, active } }
+  } } })
+  update(true); update(true); update(false); update(false); update(true, false)
+  expect(changes).toEqual([
+    { instanceId: 'desktop', location: 'sidebar', activity: { visible: true, active: true } },
+    { instanceId: 'desktop', location: 'sidebar', activity: { visible: false, active: false } },
+    { instanceId: 'desktop', location: 'sidebar', activity: { visible: true, active: false } }
+  ])
+})
+
+
+it('notifies native window mode changes while preserving the same page', () => {
+  const f = fixture(), changes: any[] = []
+  ;(f.window.anas as any).onViewChanged((view: unknown) => changes.push(view))
+  const update = (windowMode: string) => f.port.onmessage({ data: { type: 'context', context: {
+    phase: 'active', location: 'window', windowMode, view: { content: { instanceId: 'desktop' } }
+  } } })
+  update('normal'); update('normal'); update('maximized'); update('fullscreen'); update('normal')
+  expect(changes.map(view => view.windowMode)).toEqual(['normal', 'maximized', 'fullscreen', 'normal'])
+})
+
+it('reports placement changes once even when the native window size is unchanged', () => {
+  const f = fixture(), placements: unknown[] = []
+  ;(f.window.anas as any).onViewChanged((view: any) => placements.push(view.windowPlacement))
+  const update = (x: number, displayId = 1) => f.port.onmessage({ data: { type: 'context', context: {
+    phase: 'active', location: 'window', windowMode: 'normal', windowPlacement: { displayId, x, y: 50 }, view: { content: { instanceId: 'desktop' } }
+  } } })
+  update(100); update(100); update(120); update(120, 9)
+  expect(placements).toEqual([{ displayId: 1, x: 100, y: 50 }, { displayId: 1, x: 120, y: 50 }, { displayId: 9, x: 120, y: 50 }])
+})
+
+it('notifies a completed user resize even when the final viewport returns to the same size', () => {
+  const f = fixture(), revisions: unknown[] = []
+  ;(f.window.anas as any).onViewChanged((view: any) => revisions.push(view.windowResizeRevision))
+  const update = (windowResizeRevision: number) => f.port.onmessage({ data: { type: 'context', context: {
+    phase: 'active', location: 'window', windowResizeRevision, viewport: { width: 1600, height: 900 }, view: { content: { instanceId: 'desktop' } }
+  } } })
+  update(0); update(0); update(1)
+  expect(revisions).toEqual([0, 1])
+})
+
+it('reports assigned viewport changes without repeating unchanged dimensions', () => {
+  const f = fixture(), sizes: unknown[] = []
+  ;(f.window.anas as any).onViewChanged((view: any) => sizes.push(view.viewport))
+  const update = (width: number) => f.port.onmessage({ data: { type: 'context', context: {
+    phase: 'active', location: 'window', viewport: { width, height: 800 }, view: { content: { instanceId: 'desktop' } }
+  } } })
+  update(1200); update(1200); update(1400)
+  expect(sizes).toEqual([{ width: 1200, height: 800 }, { width: 1400, height: 800 }])
+})

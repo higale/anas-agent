@@ -288,6 +288,8 @@ Right-click a Help, File changes, subagent, or plugin tab and choose **Move to w
 
 Drag right-side tabs to reorder them; the strip scrolls automatically near its edges. Drag clearly outside the titlebar and release to open a separate window, or press Esc to cancel. Order is retained across conversation changes, collapsing and expanding panels, and moving out and back. Sidebar-only plugins cannot be dragged out.
 
+Fullscreen panels keep their actions in a draggable floating toolbar. Plugins can also provide grouped toolbar menus. Moving between displays and programmatic window fitting are distinguished from user resizing to avoid unintended changes to plugin content dimensions.
+
 In **File changes**, choose a comparison scope and file to view a read-only diff. The top toolbar switches inline/side-by-side views and folds unchanged regions. Git comparisons support the working tree, staging area, branches, tags, and commits. Missing history, binary files, and files over 1 MB show why their diff is unavailable.
 
 **Run changes** shows recorded file edits in the current conversation, including subagent edits, and also works outside Git repositories. By default, each file compares its contents before the turn's first edit with its last recorded result. **Compare with current file** uses current disk content instead, which may include later edits. The message's **Run changes** shortcut opens that turn directly.
@@ -297,6 +299,8 @@ Choose **Review selected scope** to have the Agent review the diff. The submitte
 Conversations are saved automatically. The sidebar counts user turns, and earlier messages can be loaded as needed. Task progress shows tool calls, approval requests, failure reasons, and elapsed time. New output scrolls into view automatically. Scroll up or expand details to pause; scroll back down or click Scroll to bottom to resume.
 
 Long conversations are compressed automatically. You can also compress manually using the context indicator beside the input. It shows estimated usage by category; reserved output space is displayed separately and is not counted as used context.
+
+When context exceeds its limit, oversized tool results can be shortened to a preview with a path to the complete result; the original chat history is preserved. Files are stored in `cache/tool-results/` under the data directory and included in application backups. They are currently retained when a conversation is deleted.
 
 Preview request in the project editor shows the context and tools that would be supplied for the current project.
 
@@ -310,7 +314,7 @@ Select plugin tools, skills and prompts together under each plugin in project an
 
 Plugin tools selected for a project or subagent run without opening plugin pages, with text, JSON, or image results handled like other tool results. Disabled plugins cannot run tools. After an update, current tool definitions are used without requiring a new conversation solely because the version changed. Cancellation or timeout asks the backend to stop that call without terminating the entire backend. Sending cancellation does not confirm that the operation has stopped; the backend's response determines the outcome.
 
-Anas 3.3.8 requires plugin API 2. Update older plugins before use; use RDP plugin 0.1.7 or later.
+Anas 3.3.8 requires plugin API 2. Update older plugins before use. Anas 3.3.13 and RDP plugin 0.1.9 are released together: update the host before the plugin.
 
 In **Settings > Plugins**, click **Install plugin**. The file picker defaults to ZIP files; switch to the plugin manifest filter to select `PLUGIN.json` in a prebuilt plugin folder. ZIPs are extracted automatically; the manifest must be at the archive root or inside its sole top-level folder. Selecting `PLUGIN.json` installs its entire folder. The chat toolbar's plugin menu only lists enabled plugins with a home page and is hidden when none are available. The home page location determines whether a plugin opens in the right workspace or a separate window. Manage plugins without a home page in settings; their tools, skills, and instructions follow capability selections and need no manual launch. UI-only plugins create no backend process. An optional backend starts automatically on its first call and can also be started or stopped in settings.
 

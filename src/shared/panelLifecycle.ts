@@ -3,20 +3,35 @@ import type { PanelToolbar } from './panelToolbar'
 
 export type PanelJson = null | boolean | number | string | PanelJson[] | { [key: string]: PanelJson }
 export type PanelPagePhase = 'preparing' | 'active' | 'suspended'
-export interface PanelSize { width: number; height: number; restore?: boolean }
+export type PanelWindowMode = 'normal' | 'maximized' | 'fullscreen'
+/** DIP offsets from the display work-area origin, independent of application zoom. */
+export interface PanelWindowPlacement { displayId: number; x: number; y: number }
+export interface PanelSize { width: number; height: number; restore?: boolean; restorePlacement?: PanelWindowPlacement }
 export function requirePanelSize(input: unknown): PanelSize {
   const size = input as Partial<PanelSize> | null
   if (!size || typeof size.width !== 'number' || typeof size.height !== 'number'
     || !Number.isFinite(size.width) || !Number.isFinite(size.height)
     || size.width <= 0 || size.height <= 0 || size.width > 32768 || size.height > 32768
     || (size.restore !== undefined && typeof size.restore !== 'boolean')) throw new Error('Invalid panel size.')
-  return { width: size.width, height: size.height, ...(size.restore !== undefined ? { restore: size.restore } : {}) }
+  const placement = size.restorePlacement
+  if (placement !== undefined && (!placement || !Number.isSafeInteger(placement.displayId)
+    || ![placement.x, placement.y].every(value => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 1_000_000))) throw new Error('Invalid panel placement.')
+  return { width: size.width, height: size.height, ...(size.restore !== undefined ? { restore: size.restore } : {}),
+    ...(placement ? { restorePlacement: { displayId: placement.displayId, x: placement.x, y: placement.y } } : {}) }
 }
 export interface PanelPageContext extends PanelContentState {
   /** Stable panel identity and unique identity of this particular presentation. */
   panelId: string
   pageId: string
   location: PanelLocation
+  /** Native mode of this page's separate window; absent in the sidebar. */
+  windowMode?: PanelWindowMode
+  /** Increments after a user resize or window-mode change, never for a move or plugin fit. */
+  windowResizeRevision?: number
+  /** Normal-window placement; absent in the sidebar. The host does not persist it. */
+  windowPlacement?: PanelWindowPlacement
+  /** Plugin viewport assigned by the owning document, in CSS pixels. */
+  viewport?: { width: number; height: number }
   phase: PanelPagePhase
   transferId?: string
   restoreState: PanelJson

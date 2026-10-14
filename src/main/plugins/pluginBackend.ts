@@ -8,6 +8,7 @@ interface PendingCall {
   params: unknown
   context?: () => PluginBackendCallContext
   tool?: { deadline: number }
+  concurrent?: boolean
   dispatched: boolean
   cancellation?: Error
   dispose(): void
@@ -31,7 +32,7 @@ interface BackendInstance {
   pending: Map<number, PendingCall>
 }
 
-export type PluginViewAction = (id: string, method: 'openView' | 'moveView', params: unknown, assertAvailable: () => void) => Promise<unknown>
+export type PluginViewAction = (id: string, method: 'openView' | 'moveView' | 'closeView', params: unknown, assertAvailable: () => void) => Promise<unknown>
 
 export class PluginBackends {
   private instances = new Map<string, BackendInstance>()
@@ -67,8 +68,9 @@ export class PluginBackends {
     }
     const manifest = await this.store.requireEnabled(id)
     if (!manifest.backend) throw new Error('Plugin has no backend entry.')
-    const [entry, packageDirectory, dataDirectory] = await Promise.all([
-      this.store.packageFile(id, manifest.backend), this.store.packageDirectory(id), this.store.directory('plugins_data', id, true)
+    const [entry, packageDirectory, dataDirectory, tempDirectory] = await Promise.all([
+      this.store.packageFile(id, manifest.backend), this.store.packageDirectory(id), this.store.directory('plugins_data', id, true),
+      this.store.directory('tmp', id, true)
     ])
     // Another caller can finish the asynchronous package checks first.
     const concurrent = this.instances.get(id)
@@ -76,7 +78,7 @@ export class PluginBackends {
       if (concurrent.stopping) throw new Error('Plugin backend is stopping.')
       return concurrent
     }
-    const child = utilityProcess.fork(join(app.getAppPath(), 'out/main/pluginWorker.js'), [entry, JSON.stringify({ pluginId: id, packageDirectory, dataDirectory })], {
+    const child = utilityProcess.fork(join(app.getAppPath(), 'out/main/pluginWorker.js'), [entry, JSON.stringify({ pluginId: id, packageDirectory, dataDirectory, tempDirectory })], {
       cwd: packageDirectory, stdio: 'pipe', serviceName: `Anas plugin: ${id}`
     })
     child.stdout?.resume()
@@ -113,7 +115,7 @@ export class PluginBackends {
             : message.method === 'getSettings' ? await this.store.exclusive(async () => {
               if (instance.stopping || this.instances.get(id) !== instance) throw new Error('Plugin backend is unavailable.')
               return (await this.store.settings(id)).values
-            }) : (message.method === 'openView' || message.method === 'moveView') && this.viewAction
+            }) : (message.method === 'openView' || message.method === 'moveView' || message.method === 'closeView') && this.viewAction
               ? await this.viewAction(id, message.method, message.params, assertAvailable) : undefined
           if (result === undefined || instance.stopping) throw new Error('Plugin host service is unavailable.')
           requirePluginJson(result)
@@ -162,8 +164,8 @@ export class PluginBackends {
     return instance
   }
 
-  async call(id: string, method: unknown, params: unknown, prepared?: BackendInstance, context?: () => PluginBackendCallContext): Promise<unknown> {
-    return this.request(id, method, params, prepared, { context })
+  async call(id: string, method: unknown, params: unknown, prepared?: BackendInstance, context?: () => PluginBackendCallContext, options?: { concurrent?: boolean }): Promise<unknown> {
+    return this.request(id, method, params, prepared, { context, concurrent: options?.concurrent })
   }
 
   async tool(id: string, handler: string, params: unknown, prepared: BackendInstance, options: {
@@ -173,7 +175,7 @@ export class PluginBackends {
   }
 
   private request(id: string, method: unknown, params: unknown, prepared: BackendInstance | undefined, options: {
-    context?: () => PluginBackendCallContext; tool?: boolean; timeoutMs?: number; signal?: AbortSignal; onDispatch?(): void
+    context?: () => PluginBackendCallContext; concurrent?: boolean; tool?: boolean; timeoutMs?: number; signal?: AbortSignal; onDispatch?(): void
   }): Promise<unknown> {
     if (typeof method !== 'string' || !method || method.length > 120) return Promise.reject(new Error('Invalid plugin backend method.'))
     requirePluginJson(params ?? null)
@@ -208,11 +210,11 @@ export class PluginBackends {
       const onAbort = () => cancel('cancelled')
       const pending: PendingCall = { method, params: params ?? null, context: options.context,
         tool: options.tool ? { deadline: Date.now() + timeout } : undefined,
-        dispatched: false, resolve, reject, dispose: () => options.signal?.removeEventListener('abort', onAbort) }
+        concurrent: options.concurrent, dispatched: false, resolve, reject, dispose: () => options.signal?.removeEventListener('abort', onAbort) }
       instance.pending.set(requestId, pending)
       options.signal?.addEventListener('abort', onAbort, { once: true })
       pending.timer = setTimeout(() => cancel('timeout'), timeout)
-      if (pending.tool) this.send(instance, requestId, pending, options.onDispatch)
+      if (pending.tool || pending.concurrent) this.send(instance, requestId, pending, options.onDispatch)
       else this.dispatch(instance)
     })
   }
@@ -237,7 +239,7 @@ export class PluginBackends {
 
   private dispatch(instance: BackendInstance): void {
     if (instance.stopping || instance.activeId !== undefined) return
-    const next = [...instance.pending].find(([, pending]) => !pending.tool && !pending.dispatched)
+    const next = [...instance.pending].find(([, pending]) => !pending.tool && !pending.concurrent && !pending.dispatched)
     if (!next) return
     instance.activeId = next[0]
     this.send(instance, next[0], next[1])

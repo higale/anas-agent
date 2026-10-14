@@ -38,7 +38,8 @@
 .agent-chat-body > .composer-area { flex: 0 0 auto; }
 
 .panel-slot { width: 100%; height: 100%; min-height: 120px; }
-.panel-window-shell { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100vh; background: var(--bg-panel); }
+.panel-window-shell { position: relative; display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100vh; background: var(--bg-panel); }
+.panel-window-shell[data-fullscreen="true"] { grid-template-rows: minmax(0, 1fr); }
 .panel-window-titlebar {
   display: flex;
   min-width: 0;
@@ -53,6 +54,25 @@
 }
 .panel-window-titlebar > strong { flex: 1; min-width: 3em; }
 .panel-window-titlebar > button { flex-shrink: 0; -webkit-app-region: no-drag; }
+.panel-window-titlebar[data-floating="true"] {
+  position: absolute;
+  z-index: 30;
+  top: 0;
+  width: max-content;
+  max-width: calc(100% - 24px);
+  gap: 8px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px var(--shadow-drawer);
+  -webkit-app-region: no-drag;
+}
+.panel-window-titlebar[data-floating="true"] > strong { flex: 0 1 auto; min-width: 0; max-width: min(24ch, 30vw); }
+.panel-window-titlebar .panel-toolbar-grip { cursor: grab; touch-action: none; }
+.panel-window-titlebar[data-dragging="true"] .panel-toolbar-grip { cursor: grabbing; }
+.panel-window-shell:has(> .panel-window-titlebar[data-dragging="true"]) { cursor: grabbing; user-select: none; }
+/* Keep captured pointer events in the host document when crossing an isolated iframe. */
+.panel-window-titlebar[data-dragging="true"] ~ .panel-window-slot { pointer-events: none; }
 .panel-toolbar-status { min-width: 0; max-width: 30%; color: var(--text-muted); font-size: 0.9em; }
 .panel-toolbar-status[data-tone="success"] { color: var(--success); }
 .panel-toolbar-status[data-tone="warning"] { color: var(--warning); }
@@ -60,6 +80,9 @@
 .panel-toolbar-actions { display: flex; position: relative; flex-shrink: 1; min-width: 24px; gap: 4px; -webkit-app-region: no-drag; }
 .panel-toolbar-actions > button { flex-shrink: 0; }
 .panel-toolbar-measure { position: absolute; visibility: hidden; pointer-events: none; }
+.panel-toolbar-menu-trigger { position: relative; }
+.panel-toolbar-menu-chevron { position: absolute; right: 0; bottom: 0; }
+.panel-toolbar-menu-description { max-width: 260px; padding: 6px 8px; color: var(--text-muted); font-size: 0.85em; white-space: normal; }
 .panel-window-slot { min-height: 0; min-width: 0; }
 
 .workspace-panels {

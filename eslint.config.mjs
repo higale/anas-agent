@@ -10,6 +10,7 @@ export default tseslint.config(
       'coverage/**',
       'node_modules/**',
       'out/**',
+      'tmp/**',
       'release-build/**',
       'release-macos/**',
       'release-portable/**'

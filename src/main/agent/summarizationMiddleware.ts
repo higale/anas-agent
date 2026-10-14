@@ -26,6 +26,7 @@ import { currentContextWindowTokens } from './serverTokenUsage'
 import { ModelSelectionError } from './modelSelection'
 import { projectRulesRequestBudget } from './projectRules'
 import { hasToolImages, pendingToolImageStart, projectToolImages } from './toolImageProjection'
+import { saveToolResultFile } from './toolResultFile'
 
 type FrameworkSummaryOptions = Parameters<typeof createSummarizationMiddleware>[0]
 
@@ -134,24 +135,28 @@ function isContextOverflow(error: unknown): boolean {
   return false
 }
 
-function compactedToolContent(content: ToolMessage['content'], maxChars: number): string {
+async function compactedToolContent(content: ToolMessage['content'], maxChars: number, save: typeof saveToolResultFile): Promise<string> {
   const text = typeof content === 'string' ? content : JSON.stringify(content)
   if (text.length <= maxChars) return text
-  const marker = `\n\n[Tool result compacted for model context; ${text.length - maxChars} characters omitted.]\n\n`
+  const path = await save(text)
+  const marker = `\n\n[Tool result compacted for model context. Full result (${text.length} characters): ${JSON.stringify(path)}. Read this file for omitted details; do not rerun the operation.]\n\n`
   const retainedChars = Math.max(0, maxChars - marker.length)
-  const headChars = Math.ceil(retainedChars * 0.75)
-  const tailChars = retainedChars - headChars
+  let headChars = Math.ceil(retainedChars * 0.75)
+  let tailChars = retainedChars - headChars
+  if (headChars > 0 && /[\uD800-\uDBFF]/.test(text[headChars - 1])) headChars--
+  if (tailChars > 0 && /[\uDC00-\uDFFF]/.test(text[text.length - tailChars])) tailChars--
   return text.slice(0, headChars) + marker + (tailChars > 0 ? text.slice(-tailChars) : '')
 }
 
-function compactLatestToolResults(
+async function compactLatestToolResults(
   messages: BaseMessage[],
   inputCapacityTokens: number,
   systemMessage: unknown,
   tools: unknown,
   protocol: ModelProtocol,
-  parameters: Record<string, unknown> | undefined
-): BaseMessage[] | undefined {
+  parameters: Record<string, unknown> | undefined,
+  save: typeof saveToolResultFile
+): Promise<BaseMessage[] | undefined> {
   const latestUnit = causalUnits(messages, 0, protocol).at(-1)
   if (!latestUnit) return undefined
   const toolIndices: number[] = []
@@ -188,9 +193,9 @@ function compactLatestToolResults(
     Math.floor(resultTokenBudget * 4 / toolIndices.length)
   )
   let modified = false
-  const compacted = messages.map((message, index) => {
+  const compacted = await Promise.all(messages.map(async (message, index) => {
     if (!toolIndices.includes(index) || !ToolMessage.isInstance(message)) return message
-    const content = compactedToolContent(message.content, maxCharsPerResult)
+    const content = await compactedToolContent(message.content, maxCharsPerResult, save)
     const original = typeof message.content === 'string'
       ? message.content
       : JSON.stringify(message.content)
@@ -200,7 +205,7 @@ function compactLatestToolResults(
       ...(message as unknown as ToolMessageFields),
       content
     })
-  })
+  }))
   return modified ? compacted : undefined
 }
 
@@ -370,6 +375,7 @@ export function selectCompressionRetention(
 }
 
 export function createAnasSummarizationMiddleware(options: {
+  saveToolResult?: typeof saveToolResultFile
   codingMode?: boolean
   compressionPrompt?: string
   responseTools?: Record<string, unknown>[]
@@ -458,13 +464,14 @@ export function createAnasSummarizationMiddleware(options: {
             if (ruleBudget === undefined && (!isContextOverflow(error) || !hasGeneratedCompressionSummary())) {
               throw error
             }
-            const compactedMessages = compactLatestToolResults(
+            const compactedMessages = await compactLatestToolResults(
               nextRequest.messages,
               ruleBudget ?? configuration.inputCapacityTokens,
               nextRequest.systemMessage,
               [...nextRequest.tools, ...(options.responseTools ?? [])],
               configuration.protocol,
-              configuration.parameters
+              configuration.parameters,
+              options.saveToolResult ?? saveToolResultFile
             )
             if (!compactedMessages) throw ruleBudget === undefined ? new PreservedContextOverflowError() : error
             try {

@@ -20,7 +20,11 @@ import {
 import { StateBackend, type BackendRuntime } from 'deepagents'
 import { countTokensApproximately, createAgent, createMiddleware, FakeToolCallingModel } from 'langchain'
 import { MemorySaver } from '@langchain/langgraph'
-import { describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { saveToolResultFile } from './toolResultFile'
 import {
   invokeWithCompressionTracking,
   type CompressionTrackingCallbacks
@@ -34,6 +38,10 @@ import type { ModelProtocol, ResolvedModelConfig } from '@shared/types'
 import { assertModelInputFits } from './modelRequestValidation'
 import { createMemoryRecallMiddleware, createMemoryRecallProjector } from './memoryPrompt'
 import type { SqliteMemoryStore } from './memoryStore'
+
+let resultDirectory: string
+beforeAll(async () => { resultDirectory = await mkdtemp(join(tmpdir(), 'anas-tool-results-')) })
+afterAll(async () => { await rm(resultDirectory, { recursive: true, force: true }) })
 
 function contextRequestKey(options: Omit<Parameters<typeof requestKey>[0], 'messages' | 'protocol'> & Partial<Pick<Parameters<typeof requestKey>[0], 'messages' | 'protocol'>>) {
   return requestKey({ messages: [], protocol: 'openai_chat_completions', ...options })
@@ -50,7 +58,7 @@ function createAnasSummarizationMiddleware(options: Omit<Parameters<typeof creat
   protocol?: ModelProtocol
 }) {
   const { model, inputCapacityTokens, threshold, protocol = 'openai_chat_completions', ...rest } = options
-  return createAnasSummarizationMiddlewareBase({ ...rest,
+  return createAnasSummarizationMiddlewareBase({ saveToolResult: text => saveToolResultFile(text, resultDirectory), ...rest,
     resolveRequest: () => ({ model, inputCapacityTokens, threshold, protocol, enabled: true, modelContextKey: 'test-model' }) })
 }
 
@@ -291,6 +299,8 @@ describe('Anas summarization middleware', () => {
     expect(AIMessage.isInstance(result.messages.at(-1))).toBe(true)
     expect(sent).toHaveLength(1)
     expect(sent[0].at(-1)?.text).toContain('Tool result compacted')
+    const reference = sent[0].at(-1)!.text.match(/Full result \(\d+ characters\): ("(?:\\.|[^"\\])*")/)!
+    expect(await readFile(JSON.parse(reference[1]), 'utf8')).toBe(latest[1].text)
     expect(completed.mock.calls[0][2].inputTokensAfter).toBe(countMessagesApproximately(sent[0], null, { protocol: selected.protocol }))
     expect(latest[1].text).toBe('TOOL_RESULT '.repeat(2000))
   })

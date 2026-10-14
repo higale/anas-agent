@@ -1,6 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { requirePanelSize, type PanelPageApi, type PanelPageContext, type PanelJson } from '@shared/panelLifecycle'
 
+function withViewport(context: PanelPageContext, frame: HTMLIFrameElement | null): PanelPageContext {
+  // The owning document is authoritative: an out-of-process iframe can briefly
+  // report its old physical size with the new device scale during a screen move.
+  const bounds = frame?.getBoundingClientRect()
+  return { ...context, viewport: { width: bounds?.width ?? 0, height: bounds?.height ?? 0 } }
+}
+
 /** One isolated iframe and one private channel per presentation, never a preload in plugin code. */
 export function PluginPage({ context, api }: { context: PanelPageContext; api: PanelPageApi }) {
   const frame = useRef<HTMLIFrameElement>(null)
@@ -18,7 +25,7 @@ export function PluginPage({ context, api }: { context: PanelPageContext; api: P
       const run = async () => {
         switch (message.method) {
           case 'interact': window.dispatchEvent(new CustomEvent('panel-interaction', { detail: context.panelId })); return null
-          case 'context': return api.context(context.pageId)
+          case 'context': return withViewport(await api.context(context.pageId), frame.current)
           case 'escape': return api.escape(context.pageId)
           case 'ready': return api.ready(context.pageId)
           case 'failed': return api.failed(context.pageId)
@@ -28,10 +35,14 @@ export function PluginPage({ context, api }: { context: PanelPageContext; api: P
             const bounds = frame.current?.getBoundingClientRect()
             if (!bounds || bounds.width <= 0 || bounds.height <= 0) throw new Error('PANEL_TARGET_UNAVAILABLE')
             // The plugin requests its own viewport; shell chrome belongs to the host.
+            // A restored window needs its regular titlebar, even when it currently floats over fullscreen content.
+            const titlebar = frame.current?.closest('.panel-window-shell')?.querySelector('.panel-window-titlebar')
+            const viewport = document.documentElement.getBoundingClientRect()
+            const chromeHeight = Math.max(viewport.height - bounds.height, titlebar?.getBoundingClientRect().height ?? 0)
             return api.resizeWindow(context.pageId, {
               ...size,
-              width: size.width + window.innerWidth - bounds.width,
-              height: size.height + window.innerHeight - bounds.height
+              width: size.width + (viewport.width - bounds.width),
+              height: size.height + chromeHeight
             })
           }
           case 'complete': return api.complete(context.pageId, message.params.requestId, message.params.result ?? null, message.params.failed === true)
@@ -46,10 +57,12 @@ export function PluginPage({ context, api }: { context: PanelPageContext; api: P
     port.start()
     const stopCommand = api.onCommand(command => { if (command.pageId === context.pageId) port.postMessage({ type: 'command', command }) })
     const stopCancel = api.onCancel(requestId => port.postMessage({ type: 'cancel', requestId }))
-    port.postMessage({ type: 'context', context: current.current })
-    return () => { alive = false; stopCommand(); stopCancel(); port.close() }
+    const publishViewport = () => { if (alive) port.postMessage({ type: 'context', context: withViewport(current.current, frame.current) }) }
+    const observer = new ResizeObserver(publishViewport)
+    if (frame.current) observer.observe(frame.current)
+    return () => { alive = false; observer.disconnect(); stopCommand(); stopCancel(); port.close() }
   }, [api, context.pageId, context.panelId, port])
-  useEffect(() => { port?.postMessage({ type: 'context', context }) }, [context, port])
+  useEffect(() => { port?.postMessage({ type: 'context', context: withViewport(context, frame.current) }) }, [context, port])
   useLayoutEffect(() => {
     const url = new URL(context.pluginUrl!)
     const origin = url.protocol + '//' + url.host

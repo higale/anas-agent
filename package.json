@@ -1,6 +1,6 @@
 {
     "name": "anas",
-    "version": "3.3.12",
+    "version": "3.3.13",
     "productName": "Anas",
     "description": "Anas, short for Ananas: a local desktop agent with project-scoped context, tools, and skills customization.",
     "main": "out/main/index.js",

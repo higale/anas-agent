@@ -36,18 +36,22 @@ export interface PanelWindowState {
   theme: 'light' | 'dark'
   fontSize: number
 }
+export interface PanelWindowShellState extends PanelWindowState {
+  fullScreen: boolean
+}
 export interface PanelWindowApi {
   pages: PanelPageApi
   services: ContentServices
-  getState(): Promise<PanelWindowState>
+  getState(): Promise<PanelWindowShellState>
   getLanguageResources(): Promise<LanguageResourcesSnapshot>
   moveToSidebar(): Promise<void>
+  setFullScreen(fullScreen: boolean): Promise<void>
   invokeToolbarAction(id: string): Promise<void>
   open(panel: BuiltinPanel): Promise<void>
   updatePreferences(preferences: Partial<PanelPreferences>): Promise<void>
   review(pageId: string, request: CodeReviewRequest, navigationId: string): Promise<void>
   onCloseFailed(listener: () => void): () => void
-  onChanged(listener: (state: PanelWindowState) => void): () => void
+  onChanged(listener: (state: PanelWindowShellState) => void): () => void
 }
 export interface PanelsApi {
   pages: PanelPageApi

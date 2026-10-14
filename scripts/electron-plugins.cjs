@@ -290,9 +290,9 @@ async function checkForms(application, page, directory, settings) {
     await page.evaluate(theme => globalThis.gale.config.updateSettings({ theme }), theme)
     await expect(shell.locator('html')).toHaveAttribute('data-theme', theme)
     const visible = await saveButton.screenshot({ path: join(tmpdir(), `anas-toolbar-${theme}.png`) })
-    await saveButton.locator('.plugin-icon-mask').evaluate(icon => { icon.style.opacity = '0' })
+    await saveButton.locator('img').evaluate(icon => { icon.style.opacity = '0' })
     const hidden = await saveButton.screenshot()
-    await saveButton.locator('.plugin-icon-mask').evaluate(icon => { icon.style.opacity = '' })
+    await saveButton.locator('img').evaluate(icon => { icon.style.opacity = '' })
     assert.notDeepEqual(visible, hidden, 'Package icons must draw actual pixels, not only load an invisible image')
   }
   const beforeTooltip = await pluginGeometry(application, frame)

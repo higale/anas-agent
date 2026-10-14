@@ -108,3 +108,18 @@ it('delivers view changes to backend subscribers and releases listeners on unsub
   await tick()
   expect(child.exit).toHaveBeenCalledWith(0)
 })
+
+
+it('waits for the host close receipt even if the tool is cancelled after dispatch', async () => {
+  const child = worker({ tools: { close: async (_: unknown, context: { host: { closeView: (options: object) => Promise<void> } }) => {
+    await context.host.closeView({ instanceId: 'server' }); return { closed: true }
+  } } })
+  await tick()
+  child.send({ id: 1, method: 'close', tool: true, context: {} }); await tick()
+  const request = child.sent.find(item => item.method === 'closeView')!
+  expect(request.params).toEqual({ instanceId: 'server' })
+  child.send({ cancel: 1, reason: 'cancelled' }); await tick()
+  expect(child.sent.some(item => item.id === 1)).toBe(false)
+  child.send({ hostResponse: request.hostRequest, result: null }); await tick()
+  expect(child.sent).toContainEqual({ id: 1, result: { closed: true } })
+})

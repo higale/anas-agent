@@ -51,7 +51,7 @@ Shell commands preserve the model's command text, arguments, and search behavior
 
 The overview in **Settings > Plugins** previews a plugin's instructions, skills, and tools. Hover over a name for its description, or click to inspect and copy its content or tool parameters. Previews also work for disabled plugins and never start a backend.
 
-Anas 3.3.8 introduces plugin API 2; API 1 plugins must be updated. RDP users should upgrade to plugin 0.1.7.
+Anas 3.3.8 introduces plugin API 2; API 1 plugins must be updated. Anas 3.3.13 and RDP plugin 0.1.9 are released together: update the host before the plugin.
 
 Install optional plugins in **Settings > Plugins** from a ZIP file or `PLUGIN.json`. Plugins can provide side panels, separate windows, optional backends, tools, skills, and static instructions. UI-only or declarative plugins need no backend process. Projects and subagents group contributions by plugin with **All / Custom / Off**; uncustomized projects use all available contributions from enabled plugins. Plugin management controls overall availability. See the [plugin API](docs/PLUGINS.md) and [examples](examples/plugins).
 

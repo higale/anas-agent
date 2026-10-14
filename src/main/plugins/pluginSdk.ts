@@ -25,14 +25,20 @@ export const pluginSdk = `(() => {
     } else if (message.type === 'context') {
       const previous = context; context = message.context;
       freeze(context.phase !== 'active');
-      if (!previous || previous.location !== context.location || previous.phase !== context.phase)
-        for (const listener of listeners) listener({ instanceId: context.view.content.instanceId, location: context.location });
+      if (!previous || previous.location !== context.location || previous.phase !== context.phase
+        || previous.windowMode !== context.windowMode
+        || previous.windowResizeRevision !== context.windowResizeRevision
+        || previous.windowPlacement?.displayId !== context.windowPlacement?.displayId
+        || previous.windowPlacement?.x !== context.windowPlacement?.x || previous.windowPlacement?.y !== context.windowPlacement?.y
+        || previous.viewport?.width !== context.viewport?.width || previous.viewport?.height !== context.viewport?.height
+        || previous.view.activity?.visible !== context.view.activity?.visible || previous.view.activity?.active !== context.view.activity?.active)
+        for (const listener of listeners) listener({ instanceId: context.view.content.instanceId, location: context.location, activity: context.view.activity, windowMode: context.windowMode, windowResizeRevision: context.windowResizeRevision, windowPlacement: context.windowPlacement, viewport: context.viewport });
     } else if (message.type === 'cancel') {
       controllers.get(message.requestId)?.abort();
     } else if (message.type === 'command') {
       const command = message.command, controller = new AbortController();
       controllers.set(command.requestId, controller);
-      commands = commands.then(async () => {
+      const execute = async () => {
       try {
         controller.signal.throwIfAborted();
         let result = null;
@@ -52,7 +58,10 @@ export const pluginSdk = `(() => {
       } catch {
         if (!controller.signal.aborted) await request('complete', { requestId: command.requestId, result: null, failed: true });
       } finally { controllers.delete(command.requestId); }
-      }).catch(() => {});
+      };
+      // Actions may await closing their own page; disposal must be able to run.
+      if (command.kind === 'action') void execute().catch(() => {});
+      else commands = commands.then(execute).catch(() => {});
     }
   };
   window.addEventListener('message', event => {
@@ -74,6 +83,7 @@ export const pluginSdk = `(() => {
     getInfo: () => invoke('host.info'),
     openView: options => invoke('host.openView', options),
     moveView: target => invoke('host.moveView', typeof target === 'string' ? { location: target } : target),
+    closeView: options => invoke('host.closeView', options),
     onViewChanged: listener => { listeners.add(listener); return () => listeners.delete(listener); },
     setToolbar: toolbar => request('toolbar', toolbar),
     resizeWindow: size => request('resizeWindow', size),
@@ -84,6 +94,6 @@ export const pluginSdk = `(() => {
     openExternal: url => invoke('host.openExternal', { url }),
     data: Object.freeze({ get: key => invoke('data.get', { key }), set: (key, value) => invoke('data.set', { key, value }) }),
     settings: Object.freeze({ get: () => invoke('settings.get'), set: (values, revision) => invoke('settings.set', { values, revision }) }),
-    backend: Object.freeze({ call: (method, params) => invoke('backend.call', { method, params }) })
+    backend: Object.freeze({ call: (method, params, options) => invoke('backend.call', { method, params, ...(options?.concurrent === undefined ? {} : { concurrent: options.concurrent }) }) })
   });
 })();`

@@ -6,6 +6,7 @@ label { font-weight: 600; }
 textarea { flex: 1; resize: none; font: inherit; padding: 10px; border: 1px solid light-dark(#d4d4d4, #484848); border-radius: 6px; background: transparent; color: inherit; }
 button { font: inherit; min-height: max(30px, calc(1rem + 18px)); padding: 0 12px; border: 1px solid light-dark(#d4d4d4, #484848); border-radius: 6px; cursor: pointer; }
 button { display: inline-flex; align-items: center; gap: 6px; color: inherit; }
-.save-icon { width: 16px; height: 16px; background: currentColor; mask: url('assets/save.svg') center / contain no-repeat; mask-mode: alpha; }
+.save-icon { width: 16px; height: 16px; object-fit: contain; }
+button:disabled .save-icon { filter: grayscale(1); opacity: .48; }
 main > div { display: flex; align-items: center; gap: 12px; }
 #status { font-size: .9rem; }

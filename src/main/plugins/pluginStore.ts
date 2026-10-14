@@ -83,7 +83,7 @@ export class PluginStore {
   async directory(group: 'plugins' | 'plugins_data' | 'tmp', id?: string, create = false): Promise<string> {
     if (id) requirePluginId(id)
     let target = await realpath(this.dataDirectory)
-    for (const part of [group, ...(id ? [id] : [])]) {
+    for (const part of [group, ...(id ? [group === 'tmp' ? `anas-plugin-${id}` : id] : [])]) {
       target = join(target, part)
       if (create) await mkdir(target).catch(error => { if (error.code !== 'EEXIST') throw error })
       const info = await lstat(target)

@@ -1,13 +1,14 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useLayoutEffect, useRef, useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { Check, MoreHorizontal } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, MoreHorizontal } from 'lucide-react'
+import type { PanelToolbarAction } from '@shared/panelToolbar'
 import { useTranslation } from 'react-i18next'
 import type { PanelState } from '@shared/panels'
 import { pluginIconSources } from '@shared/plugins'
 import { NoFocusButton } from '../NoFocusButton'
 import { SelectableIconButton } from '../SelectableIconButton'
 import { PluginIcon } from '../plugins/PluginIcon'
-import { DropdownMenuContent, DropdownMenuRoot, DropdownMenuTrigger } from '../DropdownMenuShell'
+import { DropdownMenuContent, DropdownMenuRoot, DropdownMenuTrigger, DropdownMenuSubContent } from '../DropdownMenuShell'
 
 export function PanelToolbar({ view, onAction }: { view: PanelState; onAction(id: string): void }) {
   const { t } = useTranslation()
@@ -36,8 +37,21 @@ export function PanelToolbar({ view, onAction }: { view: PanelState; onAction(id
   }, [actionCount])
   if (!toolbar || view.content.kind !== 'plugin') return null
   const pluginId = view.content.pluginId
-  const icon = (path: string) => <PluginIcon icon={pluginIconSources(pluginId, path)} monochrome />
+  const icon = (path: string) => <PluginIcon icon={pluginIconSources(pluginId, path)} />
   const disabled = (action: typeof toolbar.actions[number]) => action.disabled || !!view.pendingActionId || !!view.pendingLocation || !!view.loading
+  const menuItems = (action: PanelToolbarAction) => <>
+    {action.description && <DropdownMenu.Label className="panel-toolbar-menu-description">{action.description}</DropdownMenu.Label>}
+    {action.items!.map(item => {
+      const props = { className: 'ui-menu-item ui-menu-item-row', disabled: disabled(action) || item.disabled, onSelect: () => onAction(item.id) }
+      return <Fragment key={item.id}>
+        {item.separatorBefore && <DropdownMenu.Separator className="ui-menu-separator" />}
+        {item.checked === undefined ? <DropdownMenu.Item {...props}>{item.label}</DropdownMenu.Item>
+        : <DropdownMenu.CheckboxItem {...props} checked={item.checked}>
+          <span>{item.label}</span><DropdownMenu.ItemIndicator><Check size={14} aria-hidden="true" /></DropdownMenu.ItemIndicator>
+        </DropdownMenu.CheckboxItem>}
+      </Fragment>
+    })}
+  </>
   const overflow = toolbar.actions.slice(layout.count)
   return <>
     {toolbar.status && <span className="panel-toolbar-status ui-truncate" data-tone={toolbar.status.tone}
@@ -45,6 +59,13 @@ export function PanelToolbar({ view, onAction }: { view: PanelState; onAction(id
     {toolbar.actions.length > 0 && <div ref={container} className="panel-toolbar-actions" style={{ width: layout.width }} aria-busy={!!view.pendingActionId}>
       <span ref={measure} className="panel-toolbar-measure ui-tool-button-small" aria-hidden="true" />
       {toolbar.actions.slice(0, layout.count).map(action => {
+        if (action.items) return <DropdownMenuRoot key={action.id}>
+          <DropdownMenuTrigger asChild><NoFocusButton type="button" className="ui-tool-button ui-tool-button-small panel-toolbar-menu-trigger"
+            aria-label={action.label} data-tooltip={action.label} disabled={disabled(action)}>
+            {icon(action.icon)}<ChevronDown size={9} className="panel-toolbar-menu-chevron" aria-hidden="true" />
+          </NoFocusButton></DropdownMenuTrigger>
+          <DropdownMenu.Portal><DropdownMenuContent className="ui-menu ui-menu-list" align="end">{menuItems(action)}</DropdownMenuContent></DropdownMenu.Portal>
+        </DropdownMenuRoot>
         if (action.pressed !== undefined) return <SelectableIconButton key={action.id} icon={icon(action.icon)} iconSize={16}
           label={action.label} pressed={action.pressed} preserveFocus variant="toolbar" className="ui-tool-button-small"
           disabled={disabled(action)} onClick={() => onAction(action.id)} />
@@ -60,6 +81,10 @@ export function PanelToolbar({ view, onAction }: { view: PanelState; onAction(id
           {overflow.map(action => {
             const props = { className: 'ui-menu-item ui-menu-item-row', disabled: disabled(action), onSelect: () => onAction(action.id) }
             const content = <>{icon(action.icon)}<span>{action.label}</span></>
+            if (action.items) return <DropdownMenu.Sub key={action.id}>
+              <DropdownMenu.SubTrigger className="ui-menu-item ui-menu-item-row" disabled={disabled(action)}>{content}<ChevronRight size={14} /></DropdownMenu.SubTrigger>
+              <DropdownMenu.Portal><DropdownMenuSubContent className="ui-menu ui-menu-list">{menuItems(action)}</DropdownMenuSubContent></DropdownMenu.Portal>
+            </DropdownMenu.Sub>
             return action.pressed === undefined
               ? <DropdownMenu.Item key={action.id} {...props}>{content}</DropdownMenu.Item>
               : <DropdownMenu.CheckboxItem key={action.id} {...props} checked={action.pressed}>{content}

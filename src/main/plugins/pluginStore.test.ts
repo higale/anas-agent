@@ -24,6 +24,20 @@ beforeEach(async () => {
 afterEach(async () => { vi.restoreAllMocks(); await rm(root, { recursive: true, force: true }) })
 
 describe('plugin installation and data', () => {
+  it('scopes temporary directories under the configured data root and recreates them after cleanup', async () => {
+    const temp = await store.directory('tmp', manifest.id, true)
+    expect(temp).toBe(join(root, 'data', 'tmp', 'anas-plugin-test-plugin'))
+    expect(await store.directory('tmp', 'a'.repeat(64), true)).not.toBe(temp)
+    expect(await store.directory('plugins_data', manifest.id, true)).toBe(join(root, 'data', 'plugins_data', manifest.id))
+    await writeFile(join(temp, 'disposable'), 'test')
+    await rm(join(root, 'data', 'tmp'), { recursive: true })
+    expect(await store.directory('tmp', manifest.id, true)).toBe(temp)
+    expect(await readdir(temp)).toEqual([])
+    await rm(temp, { recursive: true })
+    await symlink(source, temp, process.platform === 'win32' ? 'junction' : 'dir')
+    await expect(store.directory('tmp', manifest.id, true)).rejects.toThrow('managed directory')
+  })
+
   it('persists ordinary settings, detects concurrent edits and form changes, and preserves existing data', async () => {
     const settings = [{ key: 'enabled', label: 'Enabled', type: 'boolean', default: true }, { key: 'count', label: 'Count', type: 'number', default: 4, minimum: 0 }]
     await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ ...manifest, settings }))

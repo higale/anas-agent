@@ -11,7 +11,7 @@ import { pluginSdk } from './pluginSdk'
 import type { PanelState, PanelLocation } from '@shared/panels'
 import { panelPages as views } from '../panels/panelRegistry'
 import { refreshPanelAppearance } from '../panels/panelHost'
-import { pluginPanel, pluginBackendContext, pluginMoveTarget } from './pluginPanel'
+import { pluginPanel, pluginBackendContext, pluginMoveTarget, pluginCloseTarget } from './pluginPanel'
 import { pluginRuntime as runtime, changed, stopPluginBackends, setPluginBackendViews, setPluginBackendViewAction, notifyPluginViewsChanged } from './pluginRuntime'
 
 let installWatcher: { token: string; dispose(): void } | undefined
@@ -93,6 +93,17 @@ async function invoke(id: string, method: unknown, params: unknown, caller?: Pan
     await views.move(target.viewId, target.location)
     return null
   }
+  if (method === 'host.closeView') {
+    const target = await runApplicationDataOperation(async () => {
+      requirePluginJson(params ?? null)
+      await runtime().store.requireEnabled(id)
+      assertAvailable()
+      return pluginCloseTarget(id, views.list(), (params as { instanceId?: unknown } | null)?.instanceId)
+    })
+    // Disposal may call the plugin backend. Do not hold application/store locks.
+    if (target) await views.close(target.viewId)
+    return null
+  }
   return runApplicationDataOperation(() => invokeData(id, method, params, caller))
 }
 
@@ -126,9 +137,10 @@ async function invokeData(id: string, method: unknown, params: unknown, caller?:
       return result
     }
     case 'backend.call': {
+      if (input.concurrent !== undefined && typeof input.concurrent !== 'boolean') throw new Error('Invalid backend call options.')
       const prepared = await store.exclusive(() => backends.prepare(id))
       await prepared.ready
-      return backends.call(id, input.method, input.params, prepared, () => pluginBackendContext(id, views.list(), caller))
+      return backends.call(id, input.method, input.params, prepared, () => pluginBackendContext(id, views.list(), caller), { concurrent: input.concurrent as boolean | undefined })
     }
     default: throw new Error('Unknown plugin host method.')
   }

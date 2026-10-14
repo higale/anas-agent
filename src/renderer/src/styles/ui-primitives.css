@@ -1763,14 +1763,13 @@ button.ui-avatar:has(> img):focus-visible,
 }
 
 .ui-selectable-icon-button.ui-selectable-icon-button-active {
-  border-color: var(--accent-border);
-  background: var(--accent-soft);
+  border-color: var(--accent);
+  background: var(--accent-bg);
   color: var(--accent-hover);
 }
 
-.ui-selectable-icon-button-active:hover:not(:disabled) {
-  border-color: var(--accent-border);
-  background: var(--accent-bg);
+.ui-selectable-icon-button.ui-selectable-icon-button-active:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 12%, var(--accent-bg));
   color: var(--accent-hover);
 }
 
@@ -1840,7 +1839,8 @@ button.ui-avatar:has(> img):focus-visible,
 .ui-tool-button {
   display: inline-grid;
   place-items: center;
-  border: 0;
+  padding: 0;
+  border: 1px solid transparent;
   border-radius: 7px;
   background: transparent;
 }
@@ -2332,8 +2332,8 @@ html.ui-resizing * {
 
 .plugin-icon { display: inline-flex; flex: none; align-items: center; justify-content: center; }
 .plugin-icon img, .plugin-icon svg { display: block; object-fit: contain; }
-.plugin-icon-mask { display: inline-flex; background: currentColor; mask-position: center; mask-size: contain; mask-repeat: no-repeat; mask-mode: alpha; }
-.plugin-icon-mask img { opacity: 0; }
+.ui-tool-button:disabled .plugin-icon,
+.ui-menu-item:is(:disabled, [data-disabled]) .plugin-icon { filter: grayscale(1); }
 .plugin-icon-dark { display: none; }
 :root[data-theme="dark"] .plugin-icon-light { display: none; }
 :root[data-theme="dark"] .plugin-icon-dark { display: inline; }

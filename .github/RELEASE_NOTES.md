@@ -1,12 +1,14 @@
-## Anas v3.3.12
+## Anas v3.3.13
 
-- 插件支持按内容适配独立窗口，工具栏使用包内图标，操作过多时自动收进菜单。
-- 向插件后台提供面板活动状态订阅，支持按当前操作页面调度资源。
-- 修复插件覆盖安装期间错误提示被刷新覆盖的问题。
+- 完善插件页面关闭、重开及并发调用生命周期；独立窗口完成准备后再显示，减少首次展示跳动。
+- 独立面板支持可拖动的全屏工具栏、分组菜单及原色图标；修复跨屏位置恢复和窗口尺寸取整，区分用户缩放与程序适配。
+- 上下文超限时，将过长工具结果的完整内容保留为本地文件，并在预览中提供路径；原始聊天记录保留，结果文件随备份保存，目前不随对话删除。
+- 为插件提供临时目录，并更新插件接口和用户文档。RDP 0.1.9 请配套使用本版或更新的宿主。
 
-- Let plugins fit separate windows to content, use packaged toolbar icons, and move overflow actions into a menu.
-- Expose panel activity subscriptions so plugin backends can schedule resources for the active page.
-- Keep plugin replacement errors visible instead of overwriting them during refresh.
+- Improve plugin page closure, reopening and concurrent calls. Separate windows become visible after preparation to reduce initial layout jumps.
+- Add draggable fullscreen toolbars, grouped menus and full-color icons. Fix cross-display placement and window-size rounding, and distinguish user resizing from programmatic fitting.
+- When context exceeds its limit, preserve complete oversized tool results in local files and link them from previews. Original history is retained; result files are backed up and currently remain after conversation deletion.
+- Expose a temporary directory to plugins and update API and user documentation. RDP 0.1.9 requires this host version or later.
 
 ## 下载与安装 / Downloads & installation
 

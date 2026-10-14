@@ -116,6 +116,7 @@ export function registerPanelIpc(): void {
   ipcMain.handle('panel-page:toolbar', (event, pageId: unknown, toolbar: unknown) => panelPages.setToolbar(event, pageId, toolbar))
   ipcMain.handle('panel-page:resizeWindow', (event, pageId: unknown, size: unknown) => panelPages.resizeWindow(event, pageId, size))
   ipcMain.handle('panel-window:state', event => panelPages.fromShell(event))
+  ipcMain.handle('panel-window:setFullScreen', (event, fullScreen: unknown) => panelPages.setShellFullScreen(event, fullScreen))
   ipcMain.handle('panel-window:languages', event => panelPages.shellLanguages(event))
   ipcMain.handle('panel-window:action', (event, actionId: unknown) => panelPages.invokeToolbarAction(panelPages.fromShell(event).view.viewId, actionId))
   ipcMain.handle('panel-window:move', event => panelPages.move(panelPages.fromShell(event).view.viewId, 'sidebar'))

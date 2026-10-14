@@ -87,3 +87,46 @@ it('accepts more than four actions and moves only overflow into an operable menu
   expect(screen.queryByRole('button', { name: 'common.more' })).not.toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Action 5', pressed: true })).toBeEnabled()
 })
+
+it('opens a plugin menu, shows its actual selection and dispatches only the chosen leaf', async () => {
+  const toolbar = requirePanelToolbar({ actions: [{ id: 'sizes', label: 'Window size', icon: 'assets/scan.svg',
+    description: 'Choosing a size restores the window.', items: [
+      { id: 'small', label: '1024 × 768', checked: true }, { id: 'medium', label: '1280 × 800', checked: false },
+      { id: 'large', label: '2560 × 1440', disabled: true },
+      { id: 'adaptive', label: 'Adaptive', checked: true, separatorBefore: true }
+    ] }] })
+  const view: PanelState = { viewId: 'sizes', name: 'Desktop', content: { kind: 'plugin', pluginId: 'example', instanceId: 'desktop' },
+    location: 'window', locations: ['window'], toolbar }
+  const onAction = vi.fn(), user = userEvent.setup()
+  const { rerender } = render(<PanelToolbar view={view} onAction={onAction} />)
+  await user.click(screen.getByRole('button', { name: 'Window size' }))
+  expect(onAction).not.toHaveBeenCalled()
+  expect(screen.getByText('Choosing a size restores the window.')).toBeVisible()
+  expect(screen.getByRole('menuitemcheckbox', { name: '1024 × 768', checked: true })).toBeVisible()
+  expect(screen.getByRole('separator')).toBeVisible()
+  expect(screen.getByRole('menuitemcheckbox', { name: 'Adaptive', checked: true })).toBeVisible()
+  expect(screen.getByRole('menuitem', { name: '2560 × 1440' })).toHaveAttribute('aria-disabled', 'true')
+  await user.click(screen.getByRole('menuitemcheckbox', { name: '1280 × 800' }))
+  expect(onAction).toHaveBeenCalledExactlyOnceWith('medium')
+  rerender(<PanelToolbar view={{ ...view, pendingActionId: 'medium' }} onAction={onAction} />)
+  expect(screen.getByRole('button', { name: 'Window size' })).toBeDisabled()
+})
+
+it('preserves plugin menus inside overflow when the titlebar is narrow', async () => {
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(24)
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    return { x:0, y:0, left:0, top:0, right:24, bottom:24, width:24, height:24, toJSON() {} }
+  })
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  const view: PanelState = { viewId:'overflow-menu', name:'Desktop', location:'window', locations:['window'],
+    content:{kind:'plugin',pluginId:'example',instanceId:'desktop'}, toolbar: requirePanelToolbar({actions:[
+      {id:'other',label:'Other action',icon:'assets/scan.svg'},
+      {id:'sizes',label:'Window size',icon:'assets/scan.svg',items:[{id:'small',label:'1024 × 768',checked:true}]}
+    ]}) }
+  const user=userEvent.setup(), onAction=vi.fn()
+  render(<PanelToolbar view={view} onAction={onAction} />)
+  await user.click(screen.getByRole('button',{name:'common.more'}))
+  await user.hover(screen.getByRole('menuitem',{name:'Window size'}))
+  await user.click(await screen.findByRole('menuitemcheckbox',{name:'1024 × 768'}))
+  expect(onAction).toHaveBeenCalledExactlyOnceWith('small')
+})
