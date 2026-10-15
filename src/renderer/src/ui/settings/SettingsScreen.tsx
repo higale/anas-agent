@@ -435,9 +435,8 @@ export function SettingsScreen({
             />
           )}
 
-          {activeTab === 'plugins' && <section className={sectionClass('plugins', 'settings-workbench ui-workbench ui-grid-sidebar')}>
-            <PluginsSettings plugins={plugins} error={pluginError} onRefresh={onRefreshPlugins} />
-          </section>}
+          {activeTab === 'plugins' && <PluginsSettings className={sectionClass('plugins', 'settings-workbench ui-workbench ui-grid-sidebar')}
+            plugins={plugins} error={pluginError} onRefresh={onRefreshPlugins} />}
           {activeTab === 'tools' && (
             <section className={sectionClass('tools', 'settings-workbench ui-workbench ui-grid-sidebar')}>
               <ToolsSettings

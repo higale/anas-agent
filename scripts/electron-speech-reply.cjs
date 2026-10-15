@@ -146,6 +146,25 @@ async function verifySpeechReply(launchApplication) {
     assert.equal(await application.evaluate(() => globalThis.__speechRequests.length), 4, 'Run completion must not replay the final reply.')
     assert.equal(requestCount, 4)
 
+    const playingButton = page.locator('.message-actions button[data-speech-status="playing"]')
+    await expect(playingButton).toHaveCount(1)
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate(theme => globalThis.gale.config.updateSettings({ theme }), theme)
+      await playingButton.hover()
+      await expect.poll(() => playingButton.locator('svg').evaluate(icon => {
+        const expected = globalThis.document.createElement('span')
+        expected.style.color = 'var(--success)'
+        icon.parentElement.append(expected)
+        const matches = globalThis.getComputedStyle(icon).color === globalThis.getComputedStyle(expected).color
+        expected.remove()
+        return matches
+      })).toBe(true)
+      await playingButton.screenshot({ path: join(tmpdir(), `anas-speech-playing-${theme}.png`) })
+    }
+    await playingButton.click()
+    await expect(page.locator('.message-actions button[data-speech-status="playing"]')).toHaveCount(0)
+    assert.equal(await page.evaluate(() => globalThis.__speechPlayers[3].paused), true, 'The colored playback button still stops audio.')
+
     finishToolReply = undefined
     await page.getByRole('button', { name: 'New Session', exact: true }).click()
     await page.locator('[data-agent-composer-input]').fill('Read the speech fixture again.')

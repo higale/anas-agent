@@ -1,5 +1,5 @@
-import { useEffect, useEffectEvent, useRef, useState } from 'react'
-import { Play, RefreshCw, Square } from 'lucide-react'
+import { useEffect, useEffectEvent, useRef, useState, type DragEvent } from 'react'
+import { Download, Play, RefreshCw, Square } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { pluginDisplayText, pluginHomePolicy, pluginIconSources, type PluginSummary, type PluginViewOptions, type PluginInstallPreview } from '@shared/plugins'
 import { errorDetail } from '@shared/recovery'
@@ -12,6 +12,7 @@ import { SettingsListActions } from './SettingsListActions'
 import { PluginIcon } from '../plugins/PluginIcon'
 import { PluginPreferences } from './PluginPreferences'
 import { PluginContributions } from './PluginContributions'
+import { dataTransferHasFiles } from '../dragDrop'
 
 function PluginHomeLocation({ plugin, busy }: {
   plugin: PluginSummary; busy: boolean
@@ -97,8 +98,8 @@ function PluginBackendStatus({ plugin, busy, onRefresh }: {
   </div>
 }
 
-export function PluginsSettings({ plugins, error, onRefresh }: {
-  plugins: PluginSummary[]; error?: string; onRefresh(): Promise<void>
+export function PluginsSettings({ plugins, error, onRefresh, className = 'settings-workbench ui-workbench ui-grid-sidebar' }: {
+  plugins: PluginSummary[]; error?: string; onRefresh(): Promise<void>; className?: string
 }) {
   const { t, i18n } = useTranslation()
   const [selectedId, setSelectedId] = useState<string>()
@@ -107,6 +108,9 @@ export function PluginsSettings({ plugins, error, onRefresh }: {
   const [deleteData, setDeleteData] = useState(false)
   const [replacing, setReplacing] = useState<PluginInstallPreview>()
   const [section, setSection] = useState({ id: '', tab: 'overview' })
+  const [dragActive, setDragActive] = useState(false)
+  const dragDepth = useRef(0)
+  const installing = useRef(false)
   const pendingInstall = useRef<string | undefined>(undefined)
   const mounted = useRef(true)
   const cancelPendingInstall = useEffectEvent(() => {
@@ -130,23 +134,67 @@ export function PluginsSettings({ plugins, error, onRefresh }: {
     try { await operation(); await onRefresh() } catch (reason) { notice.error(t('plugins.operation_failed'), { description: errorDetail(reason) }) }
     finally { setBusy(false) }
   }
-  return <>
+  function canInstall() { return !busy && !removing && !replacing && !installing.current && !pendingInstall.current }
+  async function installPlugin(file?: File) {
+    if (!canInstall()) return
+    installing.current = true
+    try {
+      await act(async () => {
+        const item = await window.gale.plugins.install(file)
+        if (!item) return
+        if ('replacement' in item) {
+          if (!mounted.current) { await window.gale.plugins.cancelInstall(item.replacement.token); return }
+          pendingInstall.current = item.replacement.token
+          setDeleteData(false)
+          setReplacing(item.replacement)
+        } else if (mounted.current) setSelectedId(item.id)
+      })
+    } finally { installing.current = false }
+  }
+  function dragOver(event: DragEvent<HTMLElement>) {
+    if (!dataTransferHasFiles(event.dataTransfer)) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = canInstall() ? 'copy' : 'none'
+    setDragActive(Boolean(canInstall()))
+  }
+  function drop(event: DragEvent<HTMLElement>) {
+    if (!dataTransferHasFiles(event.dataTransfer)) return
+    event.preventDefault()
+    event.stopPropagation()
+    dragDepth.current = 0
+    setDragActive(false)
+    if (!canInstall()) return
+    const files = Array.from(event.dataTransfer.files)
+    if (files.length !== 1) {
+      notice.error(t('plugins.operation_failed'), { description: t('plugins.drop_one') })
+      return
+    }
+    void installPlugin(files[0])
+  }
+  return <section className={`${className} plugin-settings`} aria-label={t('plugins.title')}
+    onDragEnter={event => {
+      if (!dataTransferHasFiles(event.dataTransfer)) return
+      dragOver(event)
+      dragDepth.current++
+    }}
+    onDragOver={dragOver}
+    onDragLeave={event => {
+      if (!dataTransferHasFiles(event.dataTransfer)) return
+      event.preventDefault()
+      event.stopPropagation()
+      dragDepth.current = Math.max(0, dragDepth.current - 1)
+      if (!dragDepth.current) setDragActive(false)
+    }}
+    onDrop={drop}>
+    {dragActive && <div className="plugin-install-drop-hint" role="status"><span><Download size={UI_ICON_SIZE_LARGE} />{t('plugins.drop_hint')}</span></div>}
     <aside className="ui-list-pane">
       <div className="ui-list-pane-header">
         <SettingsListActions addLabel={t('plugins.install')} deleteLabel={t('plugins.uninstall')}
           canDelete={Boolean(selected)} canMoveDown={false} canMoveUp={false} disabled={busy}
           leading={<button type="button" className="ui-icon-button" aria-label={t('common.refresh')} data-tooltip={t('common.refresh')} disabled={busy}
             onClick={() => void onRefresh()}><RefreshCw size={UI_ICON_SIZE_LARGE} /></button>}
-          onAdd={() => act(async () => {
-            const item = await window.gale.plugins.install()
-            if (!item) return
-            if ('replacement' in item) {
-              if (!mounted.current) { await window.gale.plugins.cancelInstall(item.replacement.token); return }
-              pendingInstall.current = item.replacement.token
-              setDeleteData(false)
-              setReplacing(item.replacement)
-            } else setSelectedId(item.id)
-          })}
+          onAdd={() => installPlugin()}
           onDelete={() => { if (selected) { setDeleteData(false); setRemoving(selected) } }} />
       </div>
       <div className="ui-scroll-list ui-list" aria-label={t('plugins.title')}>
@@ -204,5 +252,5 @@ export function PluginsSettings({ plugins, error, onRefresh }: {
         <small className="ui-field-hint">{t('plugins.delete_data_hint')}</small>
       </div>
     </ConfirmDialog>
-  </>
+  </section>
 }

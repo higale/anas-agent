@@ -113,19 +113,23 @@ describe('sleep countdown', () => {
 })
 
 describe('running tool shimmer', () => {
+  const runningContent = '.agent-tool-running > summary'
   const props = { title: 'Thread', messages, panelRef: { current: null }, followOutputRef: { current: true },
     speech: { status: 'idle' as const }, onSpeak: vi.fn() }
 
   it.each(['read_file', 'pwsh', 'mcp__server__lookup', 'plugin__rdp__input', 'custom_probe', 'sleep'])(
-    'animates the summary for %s and falls back to its name without a summary', (name) => {
+    'animates the full summary row for %s, including when the argument summary is absent', (name) => {
       const run = activity('running')
       run.tools[0].call = { id: 'tool-1', name, args: { summary: 'Working on the request' } }
       const view = render(<AgentMessageList {...props} activities={[run]} />)
-      expect(view.container.querySelectorAll('.agent-tool-running-text')).toHaveLength(1)
-      expect(view.container.querySelector('.agent-tool-running-text')).toHaveTextContent('Working on the request')
+      expect(view.container.querySelectorAll(runningContent)).toHaveLength(1)
+      expect(view.container.querySelector(runningContent)).toHaveTextContent(name)
+      expect(view.container.querySelector(runningContent)).toHaveTextContent('Working on the request')
+      expect(view.container.querySelector(runningContent)?.querySelector('.agent-activity-summary-icon')).not.toBeNull()
+      expect(view.container.querySelector(runningContent)?.querySelector('.agent-activity-summary-status')).not.toBeNull()
       view.rerender(<AgentMessageList {...props} activities={[{ ...run, tools: [{ ...run.tools[0], call: { ...run.tools[0].call, args: {} } }] }]} />)
-      expect(view.container.querySelectorAll('.agent-tool-running-text')).toHaveLength(1)
-      expect(view.container.querySelector('.agent-tool-running-text')).toHaveTextContent(name)
+      expect(view.container.querySelectorAll(runningContent)).toHaveLength(1)
+      expect(view.container.querySelector(runningContent)).toHaveTextContent(name)
     }
   )
 
@@ -133,13 +137,13 @@ describe('running tool shimmer', () => {
     'stops the shimmer when execution changes to %s', (state) => {
       const run = activity('running')
       const view = render(<AgentMessageList {...props} activities={[run]} />)
-      expect(view.container.querySelector('.agent-tool-running-text')).not.toBeNull()
+      expect(view.container.querySelector(runningContent)).not.toBeNull()
       if (state === 'approval') run.tools[0].approval = { status: 'pending_approval', interruptId: 'approval', actionIndex: 0 }
       else if (state === 'user-input') run.tools[0].call.name = 'request_user_input'
       else if (state === 'tool-completed') run.tools[0].status = 'completed'
       else run.status = state
       view.rerender(<AgentMessageList {...props} activities={[{ ...run }]} />)
-      expect(view.container.querySelector('.agent-tool-running-text')).toBeNull()
+      expect(view.container.querySelector(runningContent)).toBeNull()
     }
   )
 
@@ -150,7 +154,7 @@ describe('running tool shimmer', () => {
       toolCallProgress: [{ index: 0, name: 'read_file', characterCount: 20, complete: false }] }]
     const view = render(<AgentMessageList {...props} activities={[run]} />)
     expect(view.container.querySelector('.agent-activity-tool')).toHaveTextContent('read_file')
-    expect(view.container.querySelector('.agent-tool-running-text')).toBeNull()
+    expect(view.container.querySelector(runningContent)).toBeNull()
   })
 })
 

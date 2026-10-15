@@ -387,22 +387,20 @@
 }
 
 @media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
-  .agent-activity-tool > summary:has(.agent-tool-running-text) {
+  .agent-tool-running > summary {
     opacity: 1;
-  }
-
-  .agent-activity-summary-label > .agent-tool-running-text {
-    background-image: linear-gradient(100deg, var(--text-muted) 40%, var(--text-strong) 48%, var(--text-strong) 52%, var(--text-muted) 60%);
-    background-size: 300% 100%;
-    background-clip: text;
-    color: transparent;
+    color: var(--text-strong);
+    mask-image: linear-gradient(100deg, rgb(0 0 0 / 55%) 40%, #000 48%, #000 52%, rgb(0 0 0 / 55%) 60%);
+    mask-size: 300% 100%;
     animation: agent-tool-shimmer 1.4s linear infinite;
   }
+
+  .agent-tool-running > summary .agent-activity-argument { color: inherit; }
 }
 
 @keyframes agent-tool-shimmer {
-  from { background-position: 100% 0; }
-  to { background-position: 0% 0; }
+  from { mask-position: 100% 0; }
+  to { mask-position: 0% 0; }
 }
 
 .agent-activity-disclosure pre {

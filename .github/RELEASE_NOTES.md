@@ -1,14 +1,12 @@
-## Anas v3.3.13
+## Anas v3.3.14
 
-- 完善插件页面关闭、重开及并发调用生命周期；独立窗口完成准备后再显示，减少首次展示跳动。
-- 独立面板支持可拖动的全屏工具栏、分组菜单及原色图标；修复跨屏位置恢复和窗口尺寸取整，区分用户缩放与程序适配。
-- 上下文超限时，将过长工具结果的完整内容保留为本地文件，并在预览中提供路径；原始聊天记录保留，结果文件随备份保存，目前不随对话删除。
-- 为插件提供临时目录，并更新插件接口和用户文档。RDP 0.1.9 请配套使用本版或更新的宿主。
+- 插件设置页支持拖入 ZIP、PLUGIN.json 或插件根目录安装，提供拖放提示，并沿用已有的覆盖确认与安装校验。
+- 工具执行时，图标、工具名、说明和状态共用整行流光，点击与展开保持可用；等待确认或执行结束后停止，并遵循系统“减少动态效果”设置。
+- 语音按钮按状态显示颜色：加载时蓝色闪烁、播放时绿色闪烁、失败时红色，停止后恢复普通样式。
 
-- Improve plugin page closure, reopening and concurrent calls. Separate windows become visible after preparation to reduce initial layout jumps.
-- Add draggable fullscreen toolbars, grouped menus and full-color icons. Fix cross-display placement and window-size rounding, and distinguish user resizing from programmatic fitting.
-- When context exceeds its limit, preserve complete oversized tool results in local files and link them from previews. Original history is retained; result files are backed up and currently remain after conversation deletion.
-- Expose a temporary directory to plugins and update API and user documentation. RDP 0.1.9 requires this host version or later.
+- Install plugins by dropping a ZIP, PLUGIN.json or plugin root directory onto the plugin settings page, with drop feedback and existing replacement confirmation and validation.
+- Apply one continuous shimmer across running tool headers, including icons, names, descriptions and status indicators, while keeping clicks and expansion available. It stops on approval waits or completion and respects reduced-motion preferences.
+- Distinguish speech states by color: pulsing blue while generating, pulsing green while playing, red on failure, and the normal appearance after stopping.
 
 ## 下载与安装 / Downloads & installation
 

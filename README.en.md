@@ -53,7 +53,7 @@ The overview in **Settings > Plugins** previews a plugin's instructions, skills,
 
 Anas 3.3.8 introduces plugin API 2; API 1 plugins must be updated. Anas 3.3.13 and RDP plugin 0.1.9 are released together: update the host before the plugin.
 
-Install optional plugins in **Settings > Plugins** from a ZIP file or `PLUGIN.json`. Plugins can provide side panels, separate windows, optional backends, tools, skills, and static instructions. UI-only or declarative plugins need no backend process. Projects and subagents group contributions by plugin with **All / Custom / Off**; uncustomized projects use all available contributions from enabled plugins. Plugin management controls overall availability. See the [plugin API](docs/PLUGINS.md) and [examples](examples/plugins).
+Install optional plugins in **Settings > Plugins** from a ZIP file or `PLUGIN.json`, or drag in one ZIP, manifest, or plugin folder containing `PLUGIN.json` at its root. Plugins can provide side panels, separate windows, optional backends, tools, skills, and static instructions. UI-only or declarative plugins need no backend process. Projects and subagents group contributions by plugin with **All / Custom / Off**; uncustomized projects use all available contributions from enabled plugins. Plugin management controls overall availability. See the [plugin API](docs/PLUGINS.md) and [examples](examples/plugins).
 
 ## Development
 

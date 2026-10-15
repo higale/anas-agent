@@ -56,6 +56,18 @@
   animation: speechIconPulse 1.05s ease-in-out infinite;
 }
 
+.message-actions button[data-speech-status='generating'] svg {
+  color: var(--accent);
+}
+
+.message-actions button[data-speech-status='playing'] svg {
+  color: var(--success);
+}
+
+.message-actions button[data-speech-status='error'] svg {
+  color: var(--danger);
+}
+
 .message-actions button[aria-expanded="true"]::after {
   display: none;
 }

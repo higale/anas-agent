@@ -345,6 +345,7 @@ function MessageItem({
                       type="button"
                       aria-label={speechLabel}
                       data-tooltip={speechLabel}
+                      data-speech-status={speech.messageId === message.id ? speech.status : 'idle'}
                       onClick={() => void onSpeak(message.id, text)}
                     >
                       <AudioLines size={16} />
@@ -669,14 +670,13 @@ function ToolActivityDisclosure({
   const duration = activityDuration(tool.startedAt, tool.completedAt)
   const waitingForApproval = tool.approval?.status === 'pending_approval'
   const executing = active && tool.status === 'running' && !tool.completedAt && !progress && !waitingForApproval
-  const shimmer = executing && tool.call.name !== 'request_user_input' ? 'agent-tool-running-text' : undefined
+  const shimmer = executing && tool.call.name !== 'request_user_input'
   const showSummary = Boolean(presentation.showArgumentSummary && summary)
-  const titleClassName = showSummary ? undefined : shimmer
   const deadline = executing ? sleepDeadline(tool) : undefined
   return (
     <ActivityDisclosure
       stateKey={`tool:${tool.call.id}`}
-      className="agent-activity-tool"
+      className={`agent-activity-tool${shimmer ? ' agent-tool-running' : ''}`}
       bodyClassName="agent-activity-tool-body"
       disabled={Boolean(progress)}
       icon={presentation.icon}
@@ -687,12 +687,10 @@ function ToolActivityDisclosure({
           : undefined}
       label={(
         <>
-          {!presentation.title ? <span className={titleClassName}>{t('agent.tool_call')}</span> : presentation.codeTitle
-            ? <code className={titleClassName}>{presentation.title}</code>
-            : <span className={titleClassName}>{presentation.title}</span>}
-          {showSummary && (
-            <span className={`agent-activity-argument${shimmer ? ` ${shimmer}` : ''}`}>{summary}</span>
-          )}
+          {!presentation.title ? <span>{t('agent.tool_call')}</span> : presentation.codeTitle
+            ? <code>{presentation.title}</code>
+            : <span>{presentation.title}</span>}
+          {showSummary && <span className="agent-activity-argument">{summary}</span>}
           {duration && <small>· {duration}</small>}
           {progress && <small>· {t(progress.complete ? 'agent.tool_arguments_ready' : 'agent.tool_arguments_generating', { count: progress.characterCount })}</small>}
         </>

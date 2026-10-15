@@ -909,3 +909,25 @@
 .ui-grid-auto > .ui-capability-section {
   grid-column: 1 / -1;
 }
+
+.plugin-settings { position: relative; }
+.plugin-install-drop-hint {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  border: 1px dashed var(--control-field-focus-border);
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--bg-surface) 80%, transparent);
+  box-shadow: inset 0 0 0 2px var(--control-field-focus-ring);
+  pointer-events: none;
+}
+.plugin-install-drop-hint > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+}
+.plugin-install-drop-hint svg { flex-shrink: 0; }

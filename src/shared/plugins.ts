@@ -173,7 +173,7 @@ export type PluginInstallResult = PluginSummary | { replacement: PluginInstallPr
 export interface PluginsApi {
   list(): Promise<PluginSummary[]>
   readContribution(id: string, kind: PluginContributionKind, contributionId: string): Promise<PluginContributionPreview>
-  install(): Promise<PluginInstallResult | null>
+  install(file?: File): Promise<PluginInstallResult | null>
   confirmInstall(token: string, deleteData?: boolean): Promise<PluginSummary>
   cancelInstall(token: string): Promise<void>
   setEnabled(id: string, enabled: boolean): Promise<void>

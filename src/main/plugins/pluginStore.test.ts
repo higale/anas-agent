@@ -448,15 +448,25 @@ async function expectNoStagedInstallation(): Promise<void> {
 }
 
 describe('plugin package selection', () => {
-  it('requires PLUGIN.json or a ZIP, and copies the whole directory when selecting the manifest', async () => {
-    await expect(store.install(source)).rejects.toThrow('ZIP file or PLUGIN.json')
+  it.each(['directory', 'manifest'])('copies the complete plugin from its %s without modifying the source', async kind => {
     const other = join(source, 'other.json')
     await writeFile(other, JSON.stringify(manifest))
-    await expect(store.install(other)).rejects.toThrow('ZIP file or PLUGIN.json')
-    await store.install(join(source, 'PLUGIN.json'))
+    await expect(store.install(other)).rejects.toThrow('ZIP file, directory or PLUGIN.json')
+    await store.install(kind === 'directory' ? source : join(source, 'PLUGIN.json'))
     expect(await readFile(await store.packageFile(manifest.id, 'index.html'), 'utf8')).toBe('<p>Hello</p>')
     await writeFile(join(source, 'index.html'), 'Source edited later')
     expect(await readFile(await store.packageFile(manifest.id, 'index.html'), 'utf8')).toBe('<p>Hello</p>')
+  })
+
+  it('requires a root manifest when dropping a directory and preserves the existing package on invalid replacement', async () => {
+    await store.install(source)
+    await store.data(manifest.id, 'draft', true, 'keep')
+    await expect(store.prepareInstall(root)).rejects.toThrow('at its root')
+    await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ ...manifest, ui: 'missing.html' }))
+    await expect(store.prepareInstall(source)).rejects.toThrow()
+    expect(await readFile(await store.packageFile(manifest.id, 'index.html'), 'utf8')).toBe('<p>Hello</p>')
+    expect(await store.data(manifest.id, 'draft')).toBe('keep')
+    expect(await readdir(join(root, 'data/tmp'))).toEqual([])
   })
 
   it.each(['', 'my-plugin/'])('installs a ZIP with manifest prefix "%s" without dropping runtime-named resources', async prefix => {

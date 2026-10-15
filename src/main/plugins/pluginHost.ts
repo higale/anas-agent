@@ -1,5 +1,6 @@
 import { app, ipcMain, nativeTheme, net, protocol } from 'electron'
 import { pathToFileURL } from 'node:url'
+import { isAbsolute } from 'node:path'
 import { PLUGIN_API_VERSION, PLUGIN_ICON_PATH, PLUGIN_SCHEME, requirePluginJson, requirePluginView, type PluginSummary, type PluginViewOptions, type PluginInstallResult } from '@shared/plugins'
 import { getAppConfigSnapshot } from '../config/appConfig'
 import { getConfiguredTranslator, resolveConfiguredLanguage } from '../languageStore'
@@ -159,21 +160,26 @@ export function registerPluginIpc(): void {
     const { store } = runtime()
     return store.exclusive(() => store.readContribution(id, kind, contributionId))
   })
-  handleMainIpc('plugins:install', async (event): Promise<PluginInstallResult | null> => {
-    const config = await getAppConfigSnapshot()
-    const t = await getConfiguredTranslator(config.settings.language)
-    const result = await showModalOpenDialog(dialogParentFromEvent(event), {
-      properties: ['openFile'], title: t('plugins.install'),
-      filters: [
-        { name: t('plugins.install_zip_filter'), extensions: ['zip'] },
-        { name: t('plugins.install_manifest_filter'), extensions: ['json'] }
-      ]
-    })
-    if (result.canceled || !result.filePaths[0]) return null
+  handleMainIpc('plugins:install', async (event, sourcePath?: unknown): Promise<PluginInstallResult | null> => {
+    if (sourcePath === undefined) {
+      const config = await getAppConfigSnapshot()
+      const t = await getConfiguredTranslator(config.settings.language)
+      const result = await showModalOpenDialog(dialogParentFromEvent(event), {
+        properties: ['openFile'], title: t('plugins.install'),
+        filters: [
+          { name: t('plugins.install_zip_filter'), extensions: ['zip'] },
+          { name: t('plugins.install_manifest_filter'), extensions: ['json'] }
+        ]
+      })
+      if (result.canceled || !result.filePaths[0]) return null
+      sourcePath = result.filePaths[0]
+    }
+    if (typeof sourcePath !== 'string' || !isAbsolute(sourcePath)) throw new Error('Select a local plugin ZIP file, directory or PLUGIN.json.')
+    const source = sourcePath
     const { store } = runtime()
     const item = await store.exclusive(async () => {
       clearInstallWatcher()
-      const preview = await store.prepareInstall(result.filePaths[0])
+      const preview = await store.prepareInstall(source)
       if (event.sender.isDestroyed()) { await store.cancelInstall(preview.token); return null }
       if (!preview.installed) return store.finishInstall(preview.token)
       const cleanup = () => {

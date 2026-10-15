@@ -245,9 +245,11 @@ export class PluginStore {
   async prepareInstall(sourcePath: string): Promise<PluginInstallPreview> {
     await this.cancelInstall()
     const source = await realpath(sourcePath)
-    if (!(await stat(source)).isFile()) throw new Error('Select a plugin ZIP file or PLUGIN.json.')
+    const info = await stat(source)
+    if (info.isDirectory()) return this.installDirectory(source)
+    if (!info.isFile()) throw new Error('Select a plugin ZIP file, directory or PLUGIN.json.')
     if (basename(source) === 'PLUGIN.json') return this.installDirectory(dirname(source))
-    if (extname(source).toLowerCase() !== '.zip') throw new Error('Select a plugin ZIP file or PLUGIN.json.')
+    if (extname(source).toLowerCase() !== '.zip') throw new Error('Select a plugin ZIP file, directory or PLUGIN.json.')
 
     const tempRoot = await this.directory('tmp', undefined, true)
     const stage = await mkdtemp(join(tempRoot, 'plugin-extract-'))
@@ -274,7 +276,9 @@ export class PluginStore {
   private async installDirectory(sourceDirectory: string): Promise<PluginInstallPreview> {
     const source = await realpath(sourceDirectory)
     if (!(await stat(source)).isDirectory()) throw new Error('Select a plugin directory.')
-    const manifest = parsePluginManifest(await optionalJson(join(source, 'PLUGIN.json'), 64 * 1024))
+    const definition = await optionalJson(join(source, 'PLUGIN.json'), 64 * 1024)
+    if (definition === undefined) throw new Error('Plugin directory must contain PLUGIN.json at its root.')
+    const manifest = parsePluginManifest(definition)
     const root = await this.directory('plugins', undefined, true)
     if (isSameOrInsideDirectory(source, this.dataDirectory) || isSameOrInsideDirectory(root, source)) throw new Error('Plugin source must be outside the managed installation directory.')
     const identity = await this.installationIdentity(manifest.id)

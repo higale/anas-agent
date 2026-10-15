@@ -295,3 +295,68 @@ describe('plugin replacement confirmation', () => {
     expect(confirmInstall).not.toHaveBeenCalled()
   })
 })
+
+describe('plugin drag installation', () => {
+  const data = (files: File[]) => ({ types: ['Files'], files, dropEffect: 'none' })
+  const region = () => screen.getByRole('region', { name: 'plugins.title' })
+
+  it.each(['package.zip', 'PLUGIN.json', 'plugin-folder'])('installs a dropped %s using the common installer', async name => {
+    install.mockResolvedValue(plugin)
+    renderSettings()
+    const file = new File([], name)
+    fireEvent.dragEnter(region(), { dataTransfer: data([file]) })
+    expect(screen.getByRole('status')).toHaveTextContent('plugins.drop_hint')
+    fireEvent.dragEnter(screen.getByRole('button', { name: 'Example' }), { dataTransfer: data([file]) })
+    fireEvent.dragLeave(screen.getByRole('button', { name: 'Example' }), { dataTransfer: data([file]) })
+    expect(screen.getByRole('status')).toBeVisible()
+    fireEvent.drop(region(), { dataTransfer: data([file]) })
+    await waitFor(() => expect(install).toHaveBeenCalledExactlyOnceWith(file))
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'plugins.install' })).toBeEnabled())
+  })
+
+  it('clears the highlight on exit and rejects multiple files without installing any', () => {
+    renderSettings([])
+    const files = [new File([], 'a.zip'), new File([], 'b.zip')]
+    fireEvent.dragEnter(region(), { dataTransfer: data(files) })
+    fireEvent.dragLeave(region(), { dataTransfer: data(files) })
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    fireEvent.drop(region(), { dataTransfer: data(files) })
+    expect(install).not.toHaveBeenCalled()
+    expect(notice.error).toHaveBeenCalledWith('plugins.operation_failed', { description: 'plugins.drop_one' })
+    expect(fireEvent.drop(region(), { dataTransfer: { types: ['text/plain'], files: [] } })).toBe(true)
+  })
+
+  it('blocks repeat drops while installing and waiting for replacement confirmation', async () => {
+    let finish!: (value: unknown) => void
+    install.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    renderSettings()
+    const file = new File([], 'package.zip')
+    const event = { dataTransfer: data([file]) }
+    fireEvent.drop(region(), event)
+    fireEvent.drop(region(), event)
+    expect(install).toHaveBeenCalledTimes(1)
+    const transfer = data([file])
+    fireEvent.dragOver(region(), { dataTransfer: transfer })
+    expect(transfer.dropEffect).toBe('none')
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    await act(async () => finish({ replacement: { token: 'dropped-token', installed: plugin, incoming: plugin.manifest } }))
+    const dialog = within(await screen.findByRole('alertdialog'))
+    // Modal content is portalled but its drag events still bubble through the React tree.
+    fireEvent.drop(screen.getByRole('alertdialog'), event)
+    expect(install).toHaveBeenCalledTimes(1)
+    expect(confirmInstall).not.toHaveBeenCalled()
+    await userEvent.click(dialog.getByRole('button', { name: 'plugins.replace' }))
+    await waitFor(() => expect(confirmInstall).toHaveBeenCalledExactlyOnceWith('dropped-token', false))
+  })
+
+  it('reports a rejected source without leaving the drop area busy', async () => {
+    install.mockRejectedValueOnce(new Error('No root manifest')).mockResolvedValueOnce(plugin)
+    renderSettings()
+    fireEvent.drop(region(), { dataTransfer: data([new File([], 'invalid-folder')]) })
+    await waitFor(() => expect(notice.error).toHaveBeenCalledWith('plugins.operation_failed', { description: 'No root manifest' }))
+    const file = new File([], 'valid-folder')
+    fireEvent.drop(region(), { dataTransfer: data([file]) })
+    await waitFor(() => expect(install).toHaveBeenLastCalledWith(file))
+  })
+})

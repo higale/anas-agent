@@ -58,7 +58,7 @@ async function verifyToolArguments(launchApplication) {
     const card = page.locator('.agent-activity-tool')
     const summary = card.locator(':scope > summary')
     await expect(summary).toHaveAttribute('aria-disabled', 'true')
-    await expect(card.locator('.agent-tool-running-text')).toHaveCount(0)
+    await expect(card.locator(':scope.agent-tool-running > summary')).toHaveCount(0)
     // Native details activation is tested in Chromium for both mouse and keyboard.
     await summary.click({ force: true })
     for (const key of ['Enter', 'Space']) {
@@ -85,8 +85,8 @@ async function verifyToolArguments(launchApplication) {
     await send({ ...common, type: 'tool_started', call, sequence: 1, startedAt: now })
     await expect(summary).not.toHaveAttribute('aria-disabled')
     await expect(card).toHaveCount(1)
-    await expect(card.locator('.agent-tool-running-text')).toHaveText('apply_patch')
-    assert.equal(await card.locator('.agent-tool-running-text').evaluate(element => element.getAnimations().length), 1)
+    await expect(card.locator(':scope.agent-tool-running > summary')).toHaveText('apply_patch')
+    assert.equal(await card.locator(':scope.agent-tool-running > summary').evaluate(element => element.getAnimations().filter(animation => animation.animationName === 'agent-tool-shimmer').length), 1)
     assert.equal(await card.evaluate((element) => element.open), false)
     await expect(card.locator('pre')).toHaveCount(0)
     const nextModel = { ...model, id: 'model-next', sequence: 2 }
@@ -156,7 +156,7 @@ async function verifyToolArguments(launchApplication) {
     await expect(card.locator('.agent-activity-result')).toBeVisible()
     await expect(args.locator('pre')).toHaveText(JSON.stringify(call.args, null, 2))
     await expect(card.locator('.agent-activity-result pre')).toHaveCount(0)
-    await expect(card.locator('.agent-tool-running-text')).toHaveCount(0)
+    await expect(card.locator(':scope.agent-tool-running > summary')).toHaveCount(0)
     await page.evaluate(() => globalThis.gale.config.updateSettings({ language: 'zh-CN', theme: 'dark' }))
     const sleepStarted = new Date(Date.now() - 5000).toISOString()
     const sleepCall = { id: 'sleep', name: 'sleep', args: { seconds: 15, summary: '等待新回复' } }
@@ -173,27 +173,32 @@ async function verifyToolArguments(launchApplication) {
     await expect(countdown).toHaveText('剩余 9 秒')
     const nextBounds = await countdown.boundingBox()
     assert.ok(Math.abs(firstBounds.x - nextBounds.x) < 1, 'Countdown stays beside the text as digits change.')
-    const shimmer = sleepCard.locator('.agent-tool-running-text')
-    await expect(shimmer).toHaveText('等待新回复')
+    const shimmer = sleepCard.locator(':scope.agent-tool-running > summary')
+    await expect(shimmer).toContainText('sleep')
+    await expect(shimmer).toContainText('等待新回复')
+    await expect(shimmer.locator('.agent-activity-summary-icon svg')).toBeVisible()
+    await expect(shimmer.getByRole('timer')).toBeVisible()
     assert.equal(await countdown.evaluate(element => element.getAnimations().length), 0)
     const freezeShimmer = async () => {
       const positions = await shimmer.evaluate(element => {
-        const animation = element.getAnimations()[0]
+        const animation = element.getAnimations().find(animation => animation.animationName === 'agent-tool-shimmer')
         animation.pause()
         animation.currentTime = 0
-        const start = globalThis.getComputedStyle(element).backgroundPosition
+        const start = globalThis.getComputedStyle(element).maskPosition
         animation.currentTime = Number(animation.effect.getTiming().duration) / 2
-        return [start, globalThis.getComputedStyle(element).backgroundPosition]
+        return [start, globalThis.getComputedStyle(element).maskPosition]
       })
       assert.notEqual(positions[0], positions[1], 'The gradient moves across the text.')
     }
     await freezeShimmer()
     await sleepCard.screenshot({ path: join(tmpdir(), 'anas-sleep-dark.png') })
     await page.emulateMedia({ reducedMotion: 'reduce' })
-    const reduced = await shimmer.evaluate(element => ({ animations: element.getAnimations().length,
-      color: globalThis.getComputedStyle(element).color, background: globalThis.getComputedStyle(element).backgroundImage }))
-    assert.deepEqual({ animations: reduced.animations, background: reduced.background }, { animations: 0, background: 'none' })
+    const reduced = await shimmer.evaluate(element => ({ animations: element.getAnimations().filter(animation => animation.animationName === 'agent-tool-shimmer').length,
+      color: globalThis.getComputedStyle(element).color, mask: globalThis.getComputedStyle(element).maskImage }))
+    assert.deepEqual({ animations: reduced.animations, mask: reduced.mask }, { animations: 0, mask: 'none' })
     assert.notEqual(reduced.color, 'rgba(0, 0, 0, 0)', 'Reduced motion keeps the text readable.')
+    assert.ok((await shimmer.locator('.agent-activity-summary-label > *').evaluateAll(elements => elements.map(element => globalThis.getComputedStyle(element).color)))
+      .every(color => color !== 'rgba(0, 0, 0, 0)'), 'Both name and summary remain readable with reduced motion.')
     await page.emulateMedia({ reducedMotion: 'no-preference' })
     await page.evaluate(() => globalThis.gale.config.updateSettings({ language: 'en', theme: 'light' }))
     await expect(countdown).toHaveText(/^\d+ s remaining$/)
@@ -207,7 +212,7 @@ async function verifyToolArguments(launchApplication) {
     await expect(sleepCard.locator(':scope > summary')).toContainText(/· \d+(\.\d+)? s/)
     console.log('Tool arguments E2E passed: reception, expansion lock, late IDs, lazy details, automatic collapse and user-controlled output following.')
     console.log('Sleep UI E2E passed: clock icon, countdown alignment, both themes and languages, completed duration.')
-    console.log('Tool shimmer E2E passed: running names and summaries, moving gradient, reduced motion and completion cleanup.')
+    console.log('Tool shimmer E2E passed: names, summaries, icons and countdown in one moving mask, reduced motion and completion cleanup.')
   } finally {
     await app?.close()
     await rm(home, { recursive: true, force: true })

@@ -46,7 +46,7 @@ const api: GaleApi = {
   plugins: {
     list: () => ipcRenderer.invoke('plugins:list'),
     readContribution: (id, kind, contributionId) => ipcRenderer.invoke('plugins:readContribution', id, kind, contributionId),
-    install: () => ipcRenderer.invoke('plugins:install'),
+    install: file => ipcRenderer.invoke('plugins:install', file === undefined ? undefined : webUtils.getPathForFile(file)),
     confirmInstall: (token, deleteData) => ipcRenderer.invoke('plugins:confirmInstall', token, deleteData),
     cancelInstall: token => ipcRenderer.invoke('plugins:cancelInstall', token),
     setEnabled: (id, enabled) => ipcRenderer.invoke('plugins:setEnabled', id, enabled),
