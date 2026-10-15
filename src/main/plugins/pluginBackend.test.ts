@@ -29,6 +29,19 @@ async function started() {
 }
 
 describe('optional plugin backend', () => {
+  it('does not automatically restart stopped plugins or start new plugins after a data shutdown', async () => {
+    expect(backend.canStartAutomatically('test-plugin')).toBe(true)
+    await backend.stop('test-plugin')
+    expect(backend.canStartAutomatically('test-plugin')).toBe(false)
+    backend.resumeAutomatic('test-plugin')
+    expect(backend.canStartAutomatically('test-plugin')).toBe(true)
+    await backend.stopAll()
+    expect(backend.canStartAutomatically('test-plugin')).toBe(false)
+    expect(backend.canStartAutomatically('another-plugin')).toBe(false)
+    backend.resumeAutomatic('test-plugin')
+    expect(backend.canStartAutomatically('test-plugin')).toBe(true)
+    expect(backend.canStartAutomatically('another-plugin')).toBe(false)
+  })
   it('passes persistent and temporary directories separately to the worker', async () => {
     await started()
     const [, args] = mocks.fork.mock.calls.at(-1)!

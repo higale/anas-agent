@@ -6,6 +6,26 @@ const tooltipOffset = 7
 const tooltipShowDelayMs = 450
 const viewportPadding = 12
 
+type TooltipInput = { target: EventTarget | null; relatedTarget: EventTarget | null }
+const shadowTooltipEvent = 'anas:shadow-tooltip'
+
+/** Shadow DOM retargets pointer/focus events, including transitions inside a root. */
+export function connectShadowTooltips(root: ShadowRoot): () => void {
+  const forward = (event: Event) => document.dispatchEvent(new CustomEvent(shadowTooltipEvent, {
+    detail: { root, type: event.type, target: event.target, relatedTarget: (event as FocusEvent).relatedTarget }
+  }))
+  const events = ['pointerover', 'pointerout', 'focusin', 'focusout']
+  for (const type of events) root.addEventListener(type, forward, true)
+  return () => {
+    for (const type of events) root.removeEventListener(type, forward, true)
+    document.dispatchEvent(new CustomEvent(shadowTooltipEvent, { detail: { root, type: 'disconnect' } }))
+  }
+}
+
+function retargetedShadowEvent(event: TooltipInput): boolean {
+  return event instanceof Event && event.composedPath().some(target => target instanceof ShadowRoot)
+}
+
 type TooltipPlacement = 'top' | 'right'
 
 interface TooltipRect {
@@ -148,12 +168,14 @@ export function GlobalTooltip() {
       })
     }
 
-    function handlePointerOver(event: PointerEvent): void {
+    function handlePointerOver(event: TooltipInput): void {
+      if (retargetedShadowEvent(event)) return
       const target = tooltipTargetFromEventTarget(event.target)
       if (target) scheduleTooltip(target)
     }
 
-    function handlePointerOut(event: PointerEvent): void {
+    function handlePointerOut(event: TooltipInput): void {
+      if (retargetedShadowEvent(event)) return
       const pendingTarget = pendingTargetRef.current
       if (pendingTarget) {
         const movingInsidePendingTarget = event.relatedTarget instanceof Node && pendingTarget.contains(event.relatedTarget)
@@ -165,12 +187,14 @@ export function GlobalTooltip() {
       hideTooltip(activeTarget)
     }
 
-    function handleFocusIn(event: FocusEvent): void {
+    function handleFocusIn(event: TooltipInput): void {
+      if (retargetedShadowEvent(event)) return
       const target = tooltipTargetFromEventTarget(event.target)
       if (target) showTooltip(target)
     }
 
-    function handleFocusOut(event: FocusEvent): void {
+    function handleFocusOut(event: TooltipInput): void {
+      if (retargetedShadowEvent(event)) return
       const activeTarget = activeTargetRef.current
       if (!activeTarget) return
       if (event.relatedTarget instanceof Node && activeTarget.contains(event.relatedTarget)) return
@@ -181,7 +205,16 @@ export function GlobalTooltip() {
       if (event.key === 'Escape' || event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) hideTooltip()
     }
     const dismiss = () => hideTooltip()
+    const shadowInput = (event: Event) => {
+      const input = (event as CustomEvent<TooltipInput & { root: ShadowRoot; type: string }>).detail
+      if (input.type === 'pointerover') handlePointerOver(input)
+      else if (input.type === 'pointerout') handlePointerOut(input)
+      else if (input.type === 'focusin') handleFocusIn(input)
+      else if (input.type === 'focusout') handleFocusOut(input)
+      else if (input.type === 'disconnect' && (activeTargetRef.current?.getRootNode() === input.root || pendingTargetRef.current?.getRootNode() === input.root)) hideTooltip()
+    }
 
+    document.addEventListener(shadowTooltipEvent, shadowInput)
     document.addEventListener('pointerover', handlePointerOver, true)
     document.addEventListener('pointerout', handlePointerOut, true)
     document.addEventListener('focusin', handleFocusIn, true)
@@ -196,6 +229,7 @@ export function GlobalTooltip() {
     overlay?.addEventListener('geometrychange', refreshTooltip)
     return () => {
       clearShowTimer()
+      document.removeEventListener(shadowTooltipEvent, shadowInput)
       document.removeEventListener('pointerover', handlePointerOver, true)
       document.removeEventListener('pointerout', handlePointerOut, true)
       document.removeEventListener('focusin', handleFocusIn, true)

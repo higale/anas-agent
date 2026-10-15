@@ -45,6 +45,7 @@ import { AppSidebar } from './AppSidebar'
 import { useWorkspacePanels, workspacePanelScope } from './agent/useWorkspacePanels'
 import { isPanelClosed } from './panels/panelError'
 import { usePlugins } from './plugins/usePlugins'
+import { PluginWidgets } from './plugins/PluginWidgets'
 import { panelScope } from '@shared/panels'
 import { type PluginSummary } from '@shared/plugins'
 import { sidebarWidthCssValue } from './SidebarResizeHandle'
@@ -1175,6 +1176,8 @@ export function App() {
         footer={settingsOpen ? (
           <SettingsSidebarFooter onBack={() => closeSettings(ensureModelDraftCanLeave)} />
         ) : (
+          <>
+          <PluginWidgets plugins={pluginRegistry.plugins} model={selectedModel} active={sidebarVisible && initialAppReady} />
           <ThreadSidebarFooter
             appMenuOpen={appMenuOpen}
             buildInfo={appBuildInfo}
@@ -1184,6 +1187,7 @@ export function App() {
             onShowAbout={showAboutFromMenu}
             onAppMenuOpenChange={setAppMenuOpen}
           />
+          </>
         )}
         onAvatarClick={settingsOpen
           ? () => switchSettingsTab('general', ensureModelDraftCanLeave)

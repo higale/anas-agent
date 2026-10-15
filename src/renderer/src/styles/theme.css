@@ -111,10 +111,10 @@
   --shadow-drawer: rgba(0, 0, 0, 0.16);
   --shadow-dialog: rgba(0, 0, 0, 0.24);
   --backdrop: rgba(0, 0, 0, 0.24);
-  --tooltip-bg: #262626;
-  --tooltip-text: #f5f5f5;
-  --tooltip-border: rgba(255, 255, 255, 0.2);
-  --tooltip-shadow: rgba(0, 0, 0, 0.24);
+  --tooltip-bg: var(--bg-surface);
+  --tooltip-text: var(--text);
+  --tooltip-border: var(--border);
+  --tooltip-shadow: var(--shadow-popover);
   background: var(--bg-app);
   color: var(--text);
 }
@@ -199,10 +199,6 @@
   --shadow-drawer: rgba(0, 0, 0, 0.38);
   --shadow-dialog: rgba(0, 0, 0, 0.44);
   --backdrop: rgba(0, 0, 0, 0.42);
-  --tooltip-bg: #e6e6e6;
-  --tooltip-text: #151515;
-  --tooltip-border: rgba(255, 255, 255, 0.18);
-  --tooltip-shadow: rgba(0, 0, 0, 0.46);
 }
 
 :root[data-platform="win32"] {

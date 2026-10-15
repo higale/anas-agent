@@ -1,8 +1,9 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
-import { GlobalTooltip } from './GlobalTooltip'
+import { connectShadowTooltips, GlobalTooltip } from './GlobalTooltip'
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.restoreAllMocks()
   Reflect.deleteProperty(navigator, 'windowControlsOverlay')
 })
@@ -54,4 +55,43 @@ it.each(['pointer', 'ContextMenu', 'Shift+F10'])('dismisses the shared tooltip w
   if (method === 'pointer') fireEvent.contextMenu(button)
   else fireEvent.keyDown(button, { key: method === 'ContextMenu' ? method : 'F10', shiftKey: method === 'Shift+F10' })
   expect(screen.queryByRole('tooltip', { hidden: true })).not.toBeInTheDocument()
+})
+
+it('shows shadow content on hover and focus, follows internal transitions, and dismisses on disconnect', () => {
+  vi.useFakeTimers()
+  const { unmount } = render(<GlobalTooltip />)
+  const host = document.createElement('div')
+  document.body.append(host)
+  const root = host.attachShadow({ mode: 'open' })
+  root.innerHTML = '<span data-tooltip="Quota detail" tabindex="0"><b>68%</b></span><button data-tooltip="Refresh now">Refresh</button>'
+  const disconnect = connectShadowTooltips(root)
+  const summary = root.querySelector('span')!
+  const child = root.querySelector('b')!
+  const refresh = root.querySelector('button')!
+  const pointer = (target: Element, type: string, relatedTarget: EventTarget | null) => {
+    act(() => { target.dispatchEvent(new MouseEvent(type, { bubbles: true, composed: true, relatedTarget })) })
+  }
+  try {
+    pointer(summary, 'pointerover', document.body)
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    act(() => { vi.advanceTimersByTime(450) })
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Quota detail')
+    pointer(summary, 'pointerout', child)
+    pointer(child, 'pointerover', summary)
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Quota detail')
+    pointer(child, 'pointerout', refresh)
+    pointer(refresh, 'pointerover', child)
+    act(() => { vi.advanceTimersByTime(450) })
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Refresh now')
+    pointer(refresh, 'pointerout', document.body)
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    act(() => { summary.focus() })
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Quota detail')
+    act(() => { disconnect() })
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  } finally {
+    unmount()
+    disconnect()
+    host.remove()
+  }
 })

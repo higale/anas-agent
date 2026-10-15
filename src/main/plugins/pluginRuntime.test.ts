@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 const state = vi.hoisted(() => ({ root: '', fork: vi.fn() }))
-vi.mock('../config/dataDir', () => ({ getDataDir: () => state.root }))
+vi.mock('../config/dataDir', () => ({ getDataDir: () => state.root, getBundledDataDir: () => resolve('data') }))
 vi.mock('../ipcSecurity', () => ({ isMainRendererWindow: () => false }))
 vi.mock('electron', () => ({ app: { getAppPath: () => '/app' }, BrowserWindow: { getAllWindows: () => [] }, utilityProcess: { fork: state.fork } }))
 class Child extends EventEmitter {

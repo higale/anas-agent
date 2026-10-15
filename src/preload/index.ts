@@ -44,6 +44,7 @@ const api: GaleApi = {
     },
   },
   plugins: {
+    readWidget: (id, widgetId, modelConfigId, action) => ipcRenderer.invoke('plugins:readWidget', id, widgetId, modelConfigId, action),
     list: () => ipcRenderer.invoke('plugins:list'),
     readContribution: (id, kind, contributionId) => ipcRenderer.invoke('plugins:readContribution', id, kind, contributionId),
     install: file => ipcRenderer.invoke('plugins:install', file === undefined ? undefined : webUtils.getPathForFile(file)),

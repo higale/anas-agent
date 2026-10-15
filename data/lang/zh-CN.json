@@ -1272,6 +1272,9 @@
     "collapse": "收起工具“{{name}}”"
   },
   "plugins": {
+    "builtin_hint": "内置插件，随 Anas 更新，可停用。",
+    "widget_failed": "插件信息更新失败，请检查设置 → 插件。",
+    "widget_invalid_html": "插件 HTML 不符合展示规范，请使用宿主样式和已声明的按钮操作。",
     "preview_hint": "只读预览已安装的插件包，不会启动后台。",
     "preview_failed": "无法读取插件内容。",
     "declaration_id": "声明标识",

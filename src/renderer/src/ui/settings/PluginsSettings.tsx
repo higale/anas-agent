@@ -191,7 +191,7 @@ export function PluginsSettings({ plugins, error, onRefresh, className = 'settin
     <aside className="ui-list-pane">
       <div className="ui-list-pane-header">
         <SettingsListActions addLabel={t('plugins.install')} deleteLabel={t('plugins.uninstall')}
-          canDelete={Boolean(selected)} canMoveDown={false} canMoveUp={false} disabled={busy}
+          canDelete={Boolean(selected && !selected.builtin)} canMoveDown={false} canMoveUp={false} disabled={busy}
           leading={<button type="button" className="ui-icon-button" aria-label={t('common.refresh')} data-tooltip={t('common.refresh')} disabled={busy}
             onClick={() => void onRefresh()}><RefreshCw size={UI_ICON_SIZE_LARGE} /></button>}
           onAdd={() => installPlugin()}
@@ -219,7 +219,8 @@ export function PluginsSettings({ plugins, error, onRefresh, className = 'settin
         {tabs.length > 1 && <SegmentedControl ariaLabel={t('plugins.details')} value={tab}
           options={tabs.map(value => ({ value, label: t(`plugins.${value}`) }))} onChange={tab => setSection({ id: selected.id, tab })} />}
         {tab === 'overview' && <div className="ui-form-section">
-        {pluginDisplayText(selected, i18n.language, 'description') && <div className="ui-field-hint">{pluginDisplayText(selected, i18n.language, 'description')}</div>}
+        {selected.builtin && <small className="ui-field-hint">{t('plugins.builtin_hint')}</small>}
+        {pluginDisplayText(selected, i18n.language, 'description') && <div className="ui-field-hint">{pluginDisplayText(selected, i18n.language, 'description').split('\n').map((line, index) => <div key={index}>{line || <br />}</div>)}</div>}
         {hasCapabilities && <small className="ui-field-hint">{t('plugins.contributions_count', { tools: selected.manifest?.tools.length ?? 0,
           skills: selected.manifest?.skills?.length ?? 0, prompts: selected.manifest?.prompts?.length ?? 0 })}</small>}
         {Boolean(selected.languageErrors?.length) && <div className="ui-note ui-note-danger" role="alert"><p>{t('plugins.language_failed')}</p>{selected.languageErrors?.map((message, index) => <p key={index}>{message}</p>)}</div>}

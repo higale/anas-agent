@@ -2,7 +2,8 @@ import { BrowserWindow } from 'electron'
 import type { ResolvedPluginTool } from '@shared/pluginTools'
 import type { PluginBackendCallContext } from '@shared/plugins'
 import { pluginToolId } from '@shared/pluginTools'
-import { getDataDir } from '../config/dataDir'
+import { getDataDir, getBundledDataDir } from '../config/dataDir'
+import { join } from 'node:path'
 import { isMainRendererWindow } from '../ipcSecurity'
 import { runApplicationDataOperation } from '../applicationDataLifecycle'
 import { PluginStore } from './pluginStore'
@@ -25,7 +26,7 @@ export function changed(): void {
 
 export function pluginRuntime(): { store: PluginStore; backends: PluginBackends } {
   if (!store) {
-    store = new PluginStore(getDataDir())
+    store = new PluginStore(getDataDir(), { 'usage-meter': join(getBundledDataDir(), 'plugins', 'usage-meter') })
     backends = new PluginBackends(store, changed, undefined, undefined, id => {
       if (!readViews) throw new Error('Plugin host services are not ready.')
       return readViews(id)

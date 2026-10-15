@@ -57,8 +57,8 @@ const applicationDataIpcChannels = new Set([
 ])
 
 export function ipcUsesApplicationData(channel: string): boolean {
-  // Plugin opening performs data preparation inside the host, then awaits UI placement without a data lock.
-  if (channel === 'plugins:invoke' || channel === 'plugins:openWindow') return false
+  // Plugin hosts gate preparation/dispatch themselves; UI and background work must not hold data locks.
+  if (channel === 'plugins:invoke' || channel === 'plugins:openWindow' || channel === 'plugins:readWidget') return false
   return applicationDataIpcChannels.has(channel)
     || applicationDataIpcPrefixes.some((prefix) => channel.startsWith(prefix))
 }

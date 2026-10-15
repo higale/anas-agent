@@ -1278,6 +1278,9 @@
     "collapse": "Collapse tool “{{name}}”"
   },
   "plugins": {
+    "builtin_hint": "Built-in plugin. Updated with Anas; can be disabled.",
+    "widget_failed": "Plugin display could not be updated. Check Settings → Plugins.",
+    "widget_invalid_html": "Plugin HTML is invalid. Widgets must use host styles and declared actions.",
     "preview_hint": "Read-only preview of the installed plugin package. No backend is started.",
     "preview_failed": "Could not read the plugin content.",
     "declaration_id": "Declaration ID",

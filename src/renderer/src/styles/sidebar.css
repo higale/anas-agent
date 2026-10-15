@@ -154,6 +154,18 @@
   flex: 0 0 auto;
 }
 
+.plugin-widget {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 4px 9px 10px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: var(--font-size-small);
+}
+
+.plugin-widget-error { color: var(--text-secondary); overflow-wrap: anywhere; }
+
 .sidebar-settings {
   font-size: var(--font-size-ui);
 }

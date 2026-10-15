@@ -1,0 +1,48 @@
+/* Host-owned defaults for HTML widget fragments. Shared ui-* classes are loaded alongside these. */
+:host {
+  display: block;
+  min-width: 0;
+  max-height: 50vh;
+  overflow: auto;
+  contain: layout paint style;
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--font-size-small);
+  line-height: var(--font-line-height-ui);
+  -webkit-app-region: no-drag;
+}
+:where(p, h1, h2, h3, h4, h5, h6, figure, dl) { margin: 0; }
+:where(h1, h2, h3, h4, h5, h6) { font-size: var(--font-size-ui); }
+:where(img) { max-width: 100%; height: auto; }
+:where(button img) { width: 16px; height: 16px; display: block; }
+:where(table) { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+:where(th, td) { text-align: start; padding: 4px; border-bottom: 1px solid var(--border-soft); }
+:where(progress) {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 4px;
+  margin-block: 4px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 2px;
+  background: var(--bg-soft);
+}
+progress::-webkit-progress-bar { background: var(--bg-soft); }
+progress::-webkit-progress-value { background: var(--accent); }
+.ui-numeric { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ui-adaptive-text { display: inline-grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.ui-adaptive-text > [data-full-text],
+.ui-adaptive-text > [data-short-text] {
+  grid-area: 1 / 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-adaptive-text > [data-short-text],
+.ui-adaptive-text[data-condensed] > [data-full-text] { visibility: hidden; }
+.ui-adaptive-text[data-condensed] > [data-short-text] { visibility: visible; }
+:host([aria-busy="true"]) .ui-busy-icon { animation: widget-spin 1s linear infinite; }
+@keyframes widget-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { :host([aria-busy="true"]) .ui-busy-icon { animation: none; } }

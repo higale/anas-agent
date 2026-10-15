@@ -1,12 +1,14 @@
-## Anas v3.3.14
+## Anas v3.3.15
 
-- 插件设置页支持拖入 ZIP、PLUGIN.json 或插件根目录安装，提供拖放提示，并沿用已有的覆盖确认与安装校验。
-- 工具执行时，图标、工具名、说明和状态共用整行流光，点击与展开保持可用；等待确认或执行结束后停止，并遵循系统“减少动态效果”设置。
-- 语音按钮按状态显示颜色：加载时蓝色闪烁、播放时绿色闪烁、失败时红色，停止后恢复普通样式。
+- 新增内置“用量仪表”，按当前模型 API 地址显示 MiniMax、智谱 / Z.ai Coding Plan 额度，智谱国内普通 API、DeepSeek、Moonshot/Kimi 余额，以及 OpenRouter 密钥额度与消费。
+- 百炼 / Qwen 中国站通过本机 `bl` 核对账户和密钥，显示 Token Plan 额度及套餐详情，或普通密钥的免费额度与近期用量；仪表内支持登录、切换账户和取消登录。
+- 仪表支持紧凑／详细显示、分组悬停详情、重置倒计时、缓存与立即刷新；匹配模型后立即显示加载状态，切换模型或凭据时清除旧读数，窄侧栏优先显示额度数值。
+- 插件框架新增侧栏底部 HTML 展示接口，复用宿主样式、主题和声明式按钮操作；完善停用、停止和备份时的生命周期处理，并统一明暗主题提示框。
 
-- Install plugins by dropping a ZIP, PLUGIN.json or plugin root directory onto the plugin settings page, with drop feedback and existing replacement confirmation and validation.
-- Apply one continuous shimmer across running tool headers, including icons, names, descriptions and status indicators, while keeping clicks and expansion available. It stops on approval waits or completion and respects reduced-motion preferences.
-- Distinguish speech states by color: pulsing blue while generating, pulsing green while playing, red on failure, and the normal appearance after stopping.
+- Add the built-in Usage Meter for MiniMax and GLM / Z.ai Coding Plan quotas; China GLM ordinary API, DeepSeek and Moonshot/Kimi balances; and OpenRouter key credits and spend, selected by the current model's API URL.
+- Integrate Bailian / Qwen China through the local `bl` CLI to verify accounts and keys, show Token Plan quotas and subscription details or ordinary-key free quota and recent usage, and offer sign-in, account switching and cancellation inside the meter.
+- Support compact/detailed views, grouped hover details, reset countdowns, caching and manual refresh. Show loading immediately for matching models, clear old readings when models or credentials change, and prioritize quota values in narrow sidebars.
+- Extend plugins with sidebar footer HTML widgets using shared host styles, themes and declared button actions; handle disabling, stopping and backups consistently, and align tooltips with light and dark themes.
 
 ## 下载与安装 / Downloads & installation
 

@@ -9,6 +9,7 @@ import { runApplicationDataOperation } from '../applicationDataLifecycle'
 import { dialogParentFromEvent, showModalOpenDialog } from '../modalDialog'
 import { openExternalUrl } from '../appShell'
 import { pluginSdk } from './pluginSdk'
+import { readPluginWidget } from './pluginWidgets'
 import type { PanelState, PanelLocation } from '@shared/panels'
 import { panelPages as views } from '../panels/panelRegistry'
 import { refreshPanelAppearance } from '../panels/panelHost'
@@ -148,6 +149,10 @@ async function invokeData(id: string, method: unknown, params: unknown, caller?:
 }
 
 export function registerPluginIpc(): void {
+  handleMainIpc('plugins:readWidget', (_event, id: string, widgetId: unknown, modelConfigId: unknown, action: unknown) => {
+    const { store, backends } = runtime()
+    return readPluginWidget(store, backends, id, widgetId, modelConfigId, action)
+  })
   views.onChanged(notifyPluginViewsChanged)
   setPluginBackendViews(id => pluginBackendContext(id, views.list()).views)
   setPluginBackendViewAction((id, method, params, assertAvailable) => invoke(id, 'host.' + method, params, undefined, assertAvailable))
@@ -214,6 +219,7 @@ export function registerPluginIpc(): void {
     const { store, backends } = runtime()
     await store.exclusive(async () => {
       await store.setEnabled(id, enabled)
+      if (enabled) backends.resumeAutomatic(id)
       if (!enabled) { views.closeWhere(content => content.kind === 'plugin' && content.pluginId === id); await backends.stop(id) }
     })
     changed()
@@ -221,6 +227,7 @@ export function registerPluginIpc(): void {
   handleMainIpc('plugins:uninstall', async (_event, id: string, deleteData = false) => {
     if (typeof deleteData !== 'boolean') throw new Error('Invalid plugin data deletion option.')
     const { store, backends } = runtime()
+    if (store.isBuiltin(id)) throw new Error('Built-in plugins can be disabled, but cannot be uninstalled.')
     await store.exclusive(async () => {
       await store.assertPackageIdle(id)
       views.closeWhere(content => content.kind === 'plugin' && content.pluginId === id)
@@ -233,6 +240,7 @@ export function registerPluginIpc(): void {
     await invoke(id, 'host.openView', { instanceId: 'main', location: 'window' })
   })
   handleMainIpc('plugins:startBackend', async (_event, id: string) => {
+    runtime().backends.resumeAutomatic(id)
     await (await runtime().store.exclusive(() => runtime().backends.prepare(id))).ready
   })
   handleMainIpc('plugins:stopBackend', (_event, id: string) => runtime().store.exclusive(() => runtime().backends.stop(id)))

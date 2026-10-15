@@ -246,6 +246,7 @@ describe('IPC sender security', () => {
       'panels:reorder',
       'plugins:invoke',
       'plugins:openWindow',
+      'plugins:readWidget',
       'speech:logWarning'
     ]) {
       expect(ipcUsesApplicationData(channel), channel).toBe(false)
@@ -290,6 +291,7 @@ describe('IPC sender security', () => {
       'panels:reorder',
       'plugins:invoke',
       'plugins:openWindow',
+      'plugins:readWidget',
       'speech:logWarning'
     ])
   })

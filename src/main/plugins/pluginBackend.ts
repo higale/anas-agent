@@ -35,6 +35,13 @@ interface BackendInstance {
 export type PluginViewAction = (id: string, method: 'openView' | 'moveView' | 'closeView', params: unknown, assertAvailable: () => void) => Promise<unknown>
 
 export class PluginBackends {
+  private automaticSuspended = false
+  private automaticStopped = new Set<string>()
+  private automaticResumed = new Set<string>()
+  canStartAutomatically(id: string): boolean {
+    return !this.automaticStopped.has(id) && (!this.automaticSuspended || this.automaticResumed.has(id))
+  }
+  resumeAutomatic(id: string): void { this.automaticStopped.delete(id); this.automaticResumed.add(id) }
   private instances = new Map<string, BackendInstance>()
   private statuses = new Map<string, Pick<PluginSummary, 'backendStatus' | 'backendError'>>()
   private sequence = 0
@@ -57,6 +64,7 @@ export class PluginBackends {
   }
 
   async start(id: string): Promise<void> {
+    this.resumeAutomatic(id)
     await (await this.prepare(id)).ready
   }
 
@@ -94,6 +102,7 @@ export class PluginBackends {
     this.statuses.set(id, { backendStatus: 'starting' })
     this.changed()
     const fail = (error: Error) => {
+      this.automaticStopped.add(id)
       rejectReady(error)
       for (const pending of instance.pending.values()) { clearTimeout(pending.timer); pending.dispose(); pending.reject(new PluginCallError(pending.cancellation?.message ?? error.message, pending.dispatched ? 'unknown_effect' : 'unavailable', pending.dispatched)) }
       instance.pending.clear()
@@ -157,7 +166,10 @@ export class PluginBackends {
       for (const pending of instance.pending.values()) { clearTimeout(pending.timer); pending.dispose(); pending.reject(new PluginCallError(pending.cancellation?.message ?? error.message, pending.dispatched ? 'unknown_effect' : 'unavailable', pending.dispatched)) }
       instance.pending.clear()
       this.instances.delete(id)
-      if (!instance.stopping) this.statuses.set(id, { backendStatus: 'failed', backendError: error.message })
+      if (!instance.stopping) {
+        this.automaticStopped.add(id)
+        this.statuses.set(id, { backendStatus: 'failed', backendError: error.message })
+      }
       resolveExit()
       this.changed()
     })
@@ -247,6 +259,7 @@ export class PluginBackends {
 
   async stop(id: string): Promise<void> {
     requirePluginId(id)
+    this.automaticStopped.add(id)
     const instance = this.instances.get(id)
     if (instance) {
       instance.stopping = true
@@ -274,6 +287,8 @@ export class PluginBackends {
   }
 
   async stopAll(): Promise<void> {
+    this.automaticSuspended = true
+    this.automaticResumed.clear()
     const results = await Promise.allSettled([...this.instances.keys()].map(id => this.stop(id)))
     const failures = results.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
     if (failures.length) throw new AggregateError(failures, 'Could not cleanly stop all plugin backends.')

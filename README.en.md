@@ -49,9 +49,11 @@ Shell commands preserve the model's command text, arguments, and search behavior
 
 ## Plugins
 
+The built-in Usage Meter displays the selected model provider's quota, balance, or spend above Settings, with compact/detailed modes, hover details, and a refresh button. It recognizes MiniMax and GLM / Z.ai Coding Plan quotas, DeepSeek and Moonshot/Kimi balances, and OpenRouter key credits and spend by API URL, reusing the provider's API key. Bailian / Qwen China uses `bl` to verify the key and console account, then shows Token Plan quotas and subscription details or ordinary-key free quota and recent usage, with in-widget login. GLM / Z.ai Coding-specific and official Anthropic paths query plan quotas; the China GLM ordinary API shows the CNY account balance with top-up and spend details. The global ordinary API is not supported. Unsupported URLs are hidden; disable it in **Settings > Plugins**.
+
 The overview in **Settings > Plugins** previews a plugin's instructions, skills, and tools. Hover over a name for its description, or click to inspect and copy its content or tool parameters. Previews also work for disabled plugins and never start a backend.
 
-Anas 3.3.8 introduces plugin API 2; API 1 plugins must be updated. Anas 3.3.13 and RDP plugin 0.1.9 are released together: update the host before the plugin.
+Anas 3.3.8 introduces plugin API 2; API 1 plugins must be updated. RDP plugin 0.1.9 requires Anas 3.3.13 or later: update the host before installing the plugin.
 
 Install optional plugins in **Settings > Plugins** from a ZIP file or `PLUGIN.json`, or drag in one ZIP, manifest, or plugin folder containing `PLUGIN.json` at its root. Plugins can provide side panels, separate windows, optional backends, tools, skills, and static instructions. UI-only or declarative plugins need no backend process. Projects and subagents group contributions by plugin with **All / Custom / Off**; uncustomized projects use all available contributions from enabled plugins. Plugin management controls overall availability. See the [plugin API](docs/PLUGINS.md) and [examples](examples/plugins).
 

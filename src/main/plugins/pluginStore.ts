@@ -42,7 +42,9 @@ export class PluginStore {
   private resourceUses = new Map<string, number>()
   private tail: Promise<unknown> = Promise.resolve()
   private pending?: { stage: string; preview: PluginInstallPreview; identity?: string }
-  constructor(readonly dataDirectory: string) {}
+  constructor(readonly dataDirectory: string, private bundled: Readonly<Record<string, string>> = {}) {}
+
+  isBuiltin(id: string): boolean { return Object.hasOwn(this.bundled, id) }
 
   exclusive<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.tail.then(operation, operation)
@@ -93,6 +95,8 @@ export class PluginStore {
   }
 
   async packageDirectory(id: string): Promise<string> {
+    requirePluginId(id)
+    if (this.isBuiltin(id)) return realpath(this.bundled[id])
     const path = join(await this.directory('plugins', id), 'package')
     const info = await lstat(path)
     if (!info.isDirectory() || info.isSymbolicLink() || !samePath(await realpath(path), path)) throw new Error('Invalid plugin package directory.')
@@ -112,17 +116,26 @@ export class PluginStore {
   async read(id: string, includeLanguages = true): Promise<PluginSummary> {
     requirePluginId(id)
     try {
-      const root = await this.directory('plugins', id)
-      const raw = await optionalJson(join(root, 'installation.json')) as { version?: unknown; enabled?: unknown } | undefined
+      const builtin = this.isBuiltin(id)
+      if (builtin) {
+        const collision = await lstat(join(this.dataDirectory, 'plugins', id)).catch(error => {
+          if (error.code === 'ENOENT') return undefined
+          throw error
+        })
+        if (collision) throw new Error(`A user-installed plugin already uses the built-in ID "${id}". Its files are preserved in plugins/${id}; move that installation out before using the built-in plugin.`)
+      }
+      const root = await this.directory(builtin ? 'plugins_data' : 'plugins', id, builtin)
+      const saved = await optionalJson(join(root, builtin ? 'anas-installation.json' : 'installation.json'))
+      const raw = (saved === undefined && builtin ? { version: 0, enabled: true } : saved) as { version?: unknown; enabled?: unknown } | undefined
       if (!raw || raw.version !== 0 || (raw.enabled !== undefined && typeof raw.enabled !== 'boolean')) throw new Error('Invalid plugin installation state.')
       const manifest = await this.readManifest(id)
       for (const entry of [manifest.ui, manifest.backend]) if (entry) await this.packageFile(id, entry)
       const skillSummaries = await this.validateContributions(manifest, entry => this.packageFile(id, entry))
       const error = manifest.platforms && !manifest.platforms.includes(process.platform) ? 'Plugin does not support this platform.' : undefined
       const language = includeLanguages ? await loadPluginLanguages(await this.packageDirectory(id), manifest) : undefined
-      return { id, manifest, skillSummaries, enabled: raw.enabled ?? true, error, backendStatus: 'stopped', languages: language?.languages, languageErrors: language?.errors }
+      return { id, ...(builtin ? { builtin: true } : {}), manifest, skillSummaries, enabled: raw.enabled ?? true, error, backendStatus: 'stopped', languages: language?.languages, languageErrors: language?.errors }
     } catch (error) {
-      return { id, enabled: false, error: error instanceof Error ? error.message : String(error), backendStatus: 'stopped' }
+      return { id, ...(this.isBuiltin(id) ? { builtin: true } : {}), enabled: false, error: error instanceof Error ? error.message : String(error), backendStatus: 'stopped' }
     }
   }
 
@@ -228,12 +241,12 @@ export class PluginStore {
   }
 
   async list(): Promise<PluginSummary[]> {
-    let root: string
+    let root: string | undefined
     try { root = await this.directory('plugins') } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
-      throw error
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
-    const names = (await readdir(root)).filter(name => { try { requirePluginId(name); return true } catch { return false } })
+    const names = [...new Set([...Object.keys(this.bundled), ...(root ? await readdir(root) : [])])]
+      .filter(name => { try { requirePluginId(name); return true } catch { return false } })
     return Promise.all(names.sort().map(name => this.read(name)))
   }
 
@@ -279,6 +292,7 @@ export class PluginStore {
     const definition = await optionalJson(join(source, 'PLUGIN.json'), 64 * 1024)
     if (definition === undefined) throw new Error('Plugin directory must contain PLUGIN.json at its root.')
     const manifest = parsePluginManifest(definition)
+    if (this.isBuiltin(manifest.id)) throw new Error('Built-in plugins are updated with the application and cannot be replaced.')
     const root = await this.directory('plugins', undefined, true)
     if (isSameOrInsideDirectory(source, this.dataDirectory) || isSameOrInsideDirectory(root, source)) throw new Error('Plugin source must be outside the managed installation directory.')
     const identity = await this.installationIdentity(manifest.id)
@@ -413,11 +427,13 @@ export class PluginStore {
     if (typeof enabled !== 'boolean') throw new Error('Invalid plugin enabled state.')
     const item = await this.read(id)
     if (enabled && item.error) throw new Error(item.error)
-    const root = await this.directory('plugins', id)
-    await writeJsonFileAtomic(join(root, 'installation.json'), { version: 0, enabled })
+    const builtin = this.isBuiltin(id)
+    const root = await this.directory(builtin ? 'plugins_data' : 'plugins', id, builtin)
+    await writeJsonFileAtomic(join(root, builtin ? 'anas-installation.json' : 'installation.json'), { version: 0, enabled })
   }
 
   async uninstall(id: string, deleteData = false): Promise<void> {
+    if (this.isBuiltin(id)) throw new Error('Built-in plugins can be disabled, but cannot be uninstalled.')
     if (typeof deleteData !== 'boolean') throw new Error('Invalid plugin data deletion option.')
     await this.assertPackageIdle(id)
     const root = await this.directory('plugins', id)

@@ -49,6 +49,82 @@ ZIP 原文件最多 512 MiB，解包同时执行上述文件数量、单文件�
 
 ## 界面 API
 
+### 内置插件与侧栏展示
+
+内置插件从随应用分发的 `data/plugins/` 加载，使用同一后台和展示协议；默认启用，可在设置中停用，不可卸载或被同 ID 外部包覆盖。代码随应用升级，启停状态独立保存为 `plugins_data/<id>/anas-installation.json`（`version: 0`，`enabled` 缺省为 `true`），随用户数据备份；不复制包到用户安装目录，不覆盖插件设置。现有外部插件无需修改。
+
+清单可声明最多 8 个 `widgets`，当前位置为 `sidebar.footer`（设置入口上方）。展示项需有后台，例：
+
+```json
+"widgets": [{
+  "id": "quota", "location": "sidebar.footer", "handler": "quota",
+  "actions": ["refresh"], "model_hosts": ["api.minimaxi.com"]
+}]
+```
+
+`model_hosts` 可省略；填写时按当前输入框所选模型 API URL 的完整 hostname 匹配，无通配符或后缀猜测，不匹配则隐藏且不启动后台。它是适用性声明，不是网络权限限制。供应商协议解析和业务语义由插件负责。`actions` 声明可调用的操作 ID（最多 8 个），默认空。
+
+宿主调用后台 `call(handler, { language, action, model }, context)`。自动读取的 `action` 为 `null`，按钮点击传对应 ID。`model` 为 `null` 或 `{ id, model, providerId, providerName, baseUrl, apiKey }`；主进程依据已配置模型 ID 解析连接信息，不接受渲染进程提供的凭据。此上下文只用于展示查询，不增加工具的对话身份。插件不得把凭据写入返回内容、错误或日志。
+
+返回 `null` 隐藏，或返回 HTML 展示快照。插件决定内容和布局，宿主提供公共 CSS、主题、字号及操作桥接：
+
+```js
+return {
+  title: 'MiniMax Token Plan', // 展示区域的无障碍名称
+  html: `<div class="ui-stack ui-stack-tight">
+    <header class="ui-row-between">
+      <span>MiniMax Token Plan</span>
+      <button class="ui-tool-button ui-tool-button-small"
+        data-action="refresh" aria-label="立即刷新" title="立即刷新">
+        <img class="ui-busy-icon" src="assets/refresh.svg" alt="">
+      </button>
+    </header>
+    <section title="重置时间：2026/10/15 20:00">
+      <div class="ui-row-between"><span>5 小时额度剩余</span><span class="ui-numeric">68%</span></div>
+      <progress aria-label="5 小时额度剩余" max="1" value="0.68"></progress>
+      <small class="ui-field-hint">约 1 小时后重置</small>
+    </section>
+  </div>`
+};
+```
+
+- `title` 必填，最多 160 字符；`html` 为非空 HTML 片段，最多 64 KiB、1000 个元素。数据中的文字和属性值由插件按 HTML 上下文转义，不直接拼入接口返回的原始字符串。
+- 宿主在 Shadow DOM 中加载共享 `base.css`、`ui-primitives.css` 与锚点基础样式，继承主题变量和字号。内容可使用分组、列表、表格、`details`、`progress` 等标准 HTML 自由组合；不再使用固定的 `lines` / `actions` 展示数据结构。外部 CSS 不影响片段内部，片段不影响宿主其他区域。区域最高为窗口高度的 50%，超出可滚动。
+- HTML 仅描述静态展示和原生交互。自定义 CSS（`style` 属性、`style` / `link` 元素、旧式颜色属性）、脚本、事件属性、自定义元素、嵌入页面和表单导航不属于锚点协议；不符合规范时明确报错并保留上一份有效展示，不静默剥除内容。需要独立脚本的完整页面继续使用插件 `ui` 入口。
+- 常用布局类为 `ui-stack` / `ui-stack-tight`、`ui-row` / `ui-row-between`、`ui-grid-2` / `ui-grid-3`；文字类为 `ui-truncate`、`ui-muted`、`ui-field-hint`、`ui-numeric`。按钮复用 `ui-button`、`ui-icon-button`、`ui-tool-button`，普通按钮默认补上 `ui-button`，遵循 `--control-height`。内嵌图标操作可用 `ui-tool-button-small`。原生 `progress` 和表格由宿主统一着色和排版。
+- 按钮用 `data-action="操作 ID"`，必须在清单 `actions` 中声明；点击或键盘激活后仍调用原 handler，并传 `action`。宿主在请求期间禁用操作，保留插件声明的 `disabled`；可给图标加 `ui-busy-icon` 显示加载旋转，遵循减少动画设置。按钮没有额外参数，业务状态仍由后台校验。
+- 紧凑文字可使用 `ui-adaptive-text` 容器，直接子元素分别标记 `data-full-text` 和 `data-short-text`，提供完整与简短文本。宿主按实际溢出、容器尺寸和字号变化选择版本；可见版本同步无障碍状态。插件决定哪些信息可缩短，例如用量仪表只省略套餐周期标签，保留余额币种。
+- `img src` 使用包内 SVG / PNG / WebP 相对路径，宿主复用插件图标资源路由解析。文字提示使用 `title` 或 `data-tooltip`，宿主统一转换为支持多行的共享悬停提示，也支持键盘聚焦。`a href` 支持 HTTP、HTTPS、mailto，点击通过已有宿主外部链接接口打开，不导航主界面。
+- 业务错误、更新时间、套餐信息等均由插件写入 HTML，自由选择位置和结构；宿主只显示调用失败或 HTML 规范错误。模板自行标注标题、进度、按钮名称等无障碍语义。停用、切换上下文或关闭展示后，旧回执不再挂载。
+
+可见展示项匹配当前 URL 后立即显示插件名称和加载状态，首次读取时按需启动后台；同一上下文刷新保留原内容，切换模型或凭据时清除旧内容并显示加载状态。后台明确返回 null 后隐藏，后续轮询不反复显示占位。每分钟读取一次，恢复窗口可见性或焦点时再读取；插件决定缓存期限、请求去重和失败退避。操作也返回新快照。隐藏、进入设置或切换上下文后不再应用旧回执，插件在途工作仍须有界并响应取消。展示调用允许并发，不能依赖普通页面 RPC 的顺序。停用、手动停止、后台崩溃及数据关闭后不会被展示轮询重新拉起；可在插件设置中重新启动后台或重新启用。应用重启后按启用状态重新按需加载。
+
+内置 `usage-meter` 识别 MiniMax 官方 API 主机，查询相应地区的 Token Plan 额度，缓存 5 分钟；立即刷新绕过缓存，同一供应商与凭据的在途请求合并，切换模型复用缓存。优先使用接口明确返回的剩余百分比；仅有旧计数字段时按剩余数量处理，零总量不伪造百分比。显示套餐的 `general` 通用额度，兼容旧套餐以 `MiniMax-M*` 命名的共享额度；不按当前模型匹配，不以 `video` 等独立分组代替通用额度。分别显示“5 小时额度剩余”和“每周额度剩余”，对应两个独立额度；接口本次起止区间即使较短，也不改变类别名称。重置时间与倒计时仍按接口返回的结束时间计算。默认紧凑显示，一行显示额度、刷新和展开按钮，悬停查看供应商、重置时间及更新时间；点击仪表内的箭头切换详细显示，展示进度条和可见倒计时。样式选择由插件自行原子保存到其数据目录的 `display.json`（`version: 0`、`display_mode: compact | detailed`），缺省为 `compact`；不在设置页声明显示样式字段。切换样式读取同一额度缓存，不额外请求接口；每次读取缓存也重算倒计时，已结束的窗口标记待刷新，不假定额度已恢复。当前接口未提供套餐到期日，不能将额度重置时间当作套餐到期时间。查询限时 15 秒、响应上限 1 MiB；错误保留成功读数并退避，凭据变化使用新缓存。MiniMax 普通按量密钥或没有对应额度的套餐可能返回错误；MiniMax 适配不提供账户余额查询。
+
+智谱 / Z.ai 适配同时核对官方域名（`open.bigmodel.cn` / `api.z.ai`）与路径（`/api/coding/paas/v4` / `/api/anthropic`，允许末尾斜线），再查询套餐状态；普通 `/api/paas/v4` 不发出套餐查询；国内智谱转为账户余额查询，国际普通 API 与其他路径隐藏，即使同一 Key 已有缓存套餐额度也不展示。[官方接入说明](https://zcode.z.ai/en/docs/configuration)区分套餐与普通 API 的调用路径；Anthropic 路径仍需服务端确认套餐，不能仅凭 Key 格式或账户有套餐推断当前调用的计费方式。遵循[官方查询脚本](https://github.com/zai-org/zai-coding-plugins/blob/main/plugins/glm-plan-usage/skills/usage-query-skill/scripts/query-usage.mjs)，向对应站点的 `GET /api/monitor/usage/quota/limit` 发送原始 API Key（`Authorization` 不加 `Bearer`）。按[官方用量页面](https://bigmodel.cn/coding-plan/personal/usage)的字段含义解析：`percentage` 是已用百分比，显示时换算为剩余；`CREDIT_LIMIT` 为积分套餐，`TOKENS_LIMIT` 为旧套餐模型额度，`TIME_LIMIT` 为旧套餐独立 MCP 月额度。使用官方周期标识（`unit` 3 / 6 / 5 分别对应 5 小时 / 每周 / MCP 每月），有 `number` 时核对周期；优先采用积分套餐，避免把旧套餐额度混入。重置时间只取有效的 `nextResetTime` 毫秒时间戳，缺失时不推算。复用缓存、刷新、错误保留读数和中英文紧凑／详细显示；未开通套餐明确提示，不伪造余额或零额度。当前配置账户已实测“无套餐”响应；成功额度及国际站已用按官方字段构造的样本验证，尚无有套餐账户的成功实测。
+
+智谱国内普通 API（`open.bigmodel.cn/api/paas/v4`，允许末尾斜线）使用 `GET https://open.bigmodel.cn/api/biz/account/query-customer-account-report`，`Authorization` 为原始 API Key，无需控制台登录。该接口来自[官方控制台前端](https://static.bigmodel.cn/wd-paas-front/js/app.808381fa.js)，已用当前普通 Key 实测成功，但未查到公开接口契约；国际站未验证，不复用国内接口或假设其币种。主读数取 `availableBalance`（CNY），详情按实际返回显示 `rechargeAmount`、`totalSpendAmount`、`frozenBalance`；不四舍五入为两位小数，缺失或 null 的详情字段不伪造为零，主读数缺失或金额格式异常视为错误并保留上次成功读数。账户余额不含资源包和 Coding Plan 额度，不以零余额推断模型不可用。余额与套餐按查询 URL 分别缓存，切换路径不串用；共享刷新、限时、失败退避和本地化显示。
+
+百炼适配器位于 `data/plugins/usage-meter/bailian.cjs`，通过本机 `bl` 的 JSON 输出查询中国站账户身份、Key 和用量；浏览器登录由插件按钮显式启动，后台独立管理并支持取消。Token Plan 使用 `/tokenplan/personal/api/v2/usage` 原始结果保留月度字段，Key 首尾匹配后才展示；普通 Key 详情完整匹配后限定工作空间和 Key ID 查询统计。账户身份在读取缓存前和新查询后核对；登录后清空缓存，错误不保留百炼读数。仅返回展示字段，不输出 CLI 原始错误、会话信息或完整 Key。
+
+用量仪表同时支持以下官方接口，按 API URL 的精确主机名识别，复用所选供应商密钥。共享缓存、刷新、取消与错误保留机制；金额展示不渲染额度进度条，不跨币种相加，也不把无上限解释成账户有余额。
+
+| 厂商 | API 主机与查询路径 | 展示内容 |
+| --- | --- | --- |
+| [DeepSeek](https://api-docs.deepseek.com/api/get-user-balance/) | `api.deepseek.com/user/balance` | 各币种可用余额、未过期赠金、充值余额；保留金额字符串精度，按 `is_available` 提示不可调用。 |
+| [Moonshot/Kimi 国内](https://platform.kimi.com/docs/api/balance) / [国际](https://platform.kimi.ai/docs/api/balance) | `api.moonshot.cn` / `api.moonshot.ai` 的 `/v1/users/me/balance` | 可用、代金券、现金余额；国内 CNY、国际 USD。直接使用可用余额字段，现金为负时不自行重算。 |
+| [OpenRouter](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key) | `openrouter.ai/api/v1/key` | 当前密钥额度、累计及 UTC 日／周／月消费、额度重置周期、接口提供的密钥到期时间。仅表示密钥级数据；不调用要求管理密钥的 `/credits`。 |
+
+设置概览中的支持厂商列表复用插件已有的本地化 `plugin.description`，宿主通用描述保留换行，不添加厂商专用设置或配置字段。内置说明同时维护中文和英文。
+
+接口核验（2026-10-15）：[硅基流动公告](https://docs.siliconflow.cn/docs/release-notes/overview)说明 `/user/info` 已于 2026-08-14 停用，因此未接入该旧接口；需要独立管理凭据或未确认官方查询协议的供应商不列为已支持。
+
+接口参考：[MiniMax 官方查询说明](https://platform.minimaxi.com/subscribe/coding-plan)、[官方 CLI 额度语义](https://github.com/MiniMax-AI/cli/blob/main/src/utils/quota.ts)。
+
+验证：`npm run test:e2e -- --plugin-widgets-only` 使用临时数据目录与受控 HTTP 响应运行真实内置后台，检查展示位置、刷新、失败保留、备份及启停；截图写入忽略的 `tmp/plugin-widgets/`。该测试不代表真实账户额度核验。
+
+### 页面 SDK
+
 HTML 引入宿主 SDK，业务脚本单独保存：
 
 ```html

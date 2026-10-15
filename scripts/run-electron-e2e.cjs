@@ -1,4 +1,5 @@
 const { verifyPluginTools } = require('./electron-plugin-tools.cjs')
+const { verifyPluginWidgets } = require('./electron-plugin-widgets.cjs')
 const { verifyUnifiedPanels } = require('./electron-panels.cjs')
 const assert = require('node:assert/strict')
 const { execFile } = require('node:child_process')
@@ -1108,6 +1109,10 @@ async function main() {
   }
   if (process.argv.includes('--plugin-tools-only')) {
     await verifyPluginTools(launchApplication)
+    return
+  }
+  if (process.argv.includes('--plugin-widgets-only')) {
+    await verifyPluginWidgets(launchApplication)
     return
   }
   if (process.argv.includes('--model-selection-only')) {

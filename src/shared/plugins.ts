@@ -1,6 +1,7 @@
 import { matchLanguageCode } from './languages'
 import { parsePluginTools, pluginToolName, type PluginToolDefinition } from './pluginTools'
 import { parsePluginSettings, type PluginSetting } from './pluginSettings'
+import { parsePluginWidgets, type PluginWidgetDefinition, type PluginWidgetContent } from './pluginWidgets'
 
 export const PLUGIN_API_VERSION = 2
 export const PLUGIN_SCHEME = 'anas-plugin'
@@ -118,6 +119,7 @@ export interface PluginManifest {
   skills?: PluginSkillDefinition[]
   prompts?: PluginPromptDefinition[]
   settings?: PluginSetting[]
+  widgets?: PluginWidgetDefinition[]
 }
 
 export interface PluginSkillDefinition { id: string; path: string; tools: string[] }
@@ -148,6 +150,7 @@ function parseContributions(value: unknown, kind: 'skill' | 'prompt', toolIds: S
 
 export interface PluginSummary {
   id: string
+  builtin?: boolean
   manifest?: PluginManifest
   enabled: boolean
   error?: string
@@ -171,6 +174,7 @@ export interface PluginInstallPreview {
 export type PluginInstallResult = PluginSummary | { replacement: PluginInstallPreview }
 
 export interface PluginsApi {
+  readWidget(id: string, widgetId: string, modelConfigId?: string, action?: string): Promise<PluginWidgetContent | null>
   list(): Promise<PluginSummary[]>
   readContribution(id: string, kind: PluginContributionKind, contributionId: string): Promise<PluginContributionPreview>
   install(file?: File): Promise<PluginInstallResult | null>
@@ -212,6 +216,7 @@ export function parsePluginManifest(value: unknown): PluginManifest {
   const ui = raw.ui === undefined ? undefined : requirePluginPath(raw.ui)
   const backend = raw.backend === undefined ? undefined : requirePluginPath(raw.backend)
   const tools = parsePluginTools(raw.tools, Boolean(backend))
+  const widgets = parsePluginWidgets(raw.widgets, Boolean(backend))
   if (tools.some(tool => pluginToolName(id, tool.id).length > 64)) {
     throw new Error('Plugin model tool names must be at most 64 characters. Shorten the plugin ID or tool ID.')
   }
@@ -228,7 +233,7 @@ export function parsePluginManifest(value: unknown): PluginManifest {
     description: raw.description as string ?? '', ui, backend, platforms: platforms as string[] | undefined,
     lang: raw.lang === undefined ? undefined : requirePluginPath(raw.lang), home: parsePluginHome(raw.home),
     icon: raw.icon === undefined ? undefined : requirePluginIcon(raw.icon),
-    tools, ...(skills.length ? { skills } : {}), ...(prompts.length ? { prompts } : {}),
+    tools, ...(widgets.length ? { widgets } : {}), ...(skills.length ? { skills } : {}), ...(prompts.length ? { prompts } : {}),
     ...(raw.settings === undefined ? {} : { settings: parsePluginSettings(raw.settings) }) }
 }
 

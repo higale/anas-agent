@@ -29,6 +29,17 @@ beforeEach(() => {
 })
 
 describe('plugin settings', () => {
+  it('shows localized multiline plugin descriptions in the overview without adding preferences', () => {
+    renderSettings([{ ...plugin, manifest: { ...plugin.manifest!, ui: undefined, description: 'Fallback' }, languages: [
+      { code: 'en', name: 'English', pluginDescription: 'Supported providers:\nMiniMax: Plan quota\nDeepSeek: Balance' },
+      { code: 'zh-CN', name: '简体中文', pluginDescription: '已支持厂商：\nMiniMax：套餐额度\nDeepSeek：余额' }
+    ] }])
+    expect(screen.getByText('Supported providers:')).toBeVisible()
+    expect(screen.getByText('DeepSeek: Balance')).toBeVisible()
+    expect(screen.queryByText('已支持厂商：')).not.toBeInTheDocument()
+    expect(screen.queryByRole('radio', { name: 'plugins.settings' })).not.toBeInTheDocument()
+  })
+
   const previewPlugin: PluginSummary = { ...plugin, enabled: false,
     skillSummaries: [{ id: 'guide', name: 'actual-skill-name', description: 'Skill summary' }],
     manifest: { ...plugin.manifest!, ui: undefined, backend: 'backend.cjs',

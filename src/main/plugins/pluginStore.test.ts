@@ -24,6 +24,31 @@ beforeEach(async () => {
 afterEach(async () => { vi.restoreAllMocks(); await rm(root, { recursive: true, force: true }) })
 
 describe('plugin installation and data', () => {
+  it('loads bundled code without installation, persists disabling, and preserves preferences across bundled updates', async () => {
+    store = new PluginStore(join(root, 'data'), { [manifest.id]: source })
+    expect(await store.list()).toEqual([expect.objectContaining({ id: manifest.id, builtin: true, enabled: true })])
+    await store.data(manifest.id, 'choice', true, 'kept')
+    await store.setEnabled(manifest.id, false)
+    await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ ...manifest, plugin_version: '1.0.1' }))
+    store = new PluginStore(join(root, 'data'), { [manifest.id]: source })
+    expect(await store.read(manifest.id)).toMatchObject({ enabled: false, manifest: { pluginVersion: '1.0.1' } })
+    await expect(store.uninstall(manifest.id, true)).rejects.toThrow('cannot be uninstalled')
+    await expect(store.install(source)).rejects.toThrow('cannot be replaced')
+    await store.setEnabled(manifest.id, true)
+    expect(await store.data(manifest.id, 'choice')).toBe('kept')
+    await writeFile(join(root, 'data/plugins_data', manifest.id, 'anas-installation.json'), 'null')
+    expect(await store.read(manifest.id)).toMatchObject({ enabled: false, error: expect.any(String) })
+    await writeFile(join(root, 'data/plugins_data', manifest.id, 'anas-installation.json'), '{broken')
+    expect(await store.read(manifest.id)).toMatchObject({ enabled: false, builtin: true, error: expect.any(String) })
+  })
+  it('reports a bundled ID collision without replacing the existing installed plugin or its data', async () => {
+    await store.install(source)
+    await store.data(manifest.id, 'choice', true, 'existing')
+    const bundled = new PluginStore(join(root, 'data'), { [manifest.id]: source })
+    expect(await bundled.read(manifest.id)).toMatchObject({ enabled: false, error: expect.stringContaining('already uses') })
+    expect(await store.read(manifest.id)).toMatchObject({ enabled: true })
+    expect(await store.data(manifest.id, 'choice')).toBe('existing')
+  })
   it('scopes temporary directories under the configured data root and recreates them after cleanup', async () => {
     const temp = await store.directory('tmp', manifest.id, true)
     expect(temp).toBe(join(root, 'data', 'tmp', 'anas-plugin-test-plugin'))
