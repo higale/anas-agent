@@ -30,6 +30,7 @@ const call = async (changes: Record<string, unknown> = {}) => {
         ...(section.getAttribute('title') ? { detail: section.getAttribute('title') } : {}) }
     }),
     error: dom.querySelector('[role="status"]')?.textContent,
+    details: dom.querySelector('[data-details]')?.getAttribute('data-details'),
     updatedAt: dom.querySelector('time')?.getAttribute('datetime')
   }
 }
@@ -66,6 +67,63 @@ it('shows legacy remaining counts and authoritative percentages, including zero-
   expect(current?.error).toBeUndefined()
 })
 
+it('shows boosted remaining quota in both modes and moves totals and usage into details', async () => {
+  fetcher.mockResolvedValueOnce(Response.json(payload({ current_interval_remaining_percent: 90,
+    current_weekly_remaining_percent: 99, weekly_boost_permille: 1500 })))
+  const result = await call()
+  expect(result?.lines).toMatchObject([{ label: '5h 限额', value: '90%', progress: .9 }, { label: '周限额', value: '148.5%', progress: .99 }])
+  expect(result?.dom.textContent).not.toContain('总额度')
+  expect(result?.dom.textContent).not.toContain('已用')
+  expect(result?.details).toContain('总额度: 100%\n已用: 10%')
+  expect(result?.details).toContain('总额度: 150%\n已用: 1.5%')
+  expect(result?.details).toContain('套餐加成')
+  expect(result?.details).not.toContain('重置时间')
+  const chineseCompact = await call({ action: 'show_compact' })
+  expect(chineseCompact?.dom.querySelector('[data-full-text]')?.textContent).toBe('5h 90% · 周 148.5%')
+  const compact = await call({ action: 'show_compact', language: 'en' })
+  expect(compact?.dom.querySelector('[data-full-text]')?.textContent).toBe('5h 90% · 1w 148.5%')
+  expect(compact?.dom.querySelector('[tabindex="0"]')?.getAttribute('title')).toContain('Weekly limit\nTotal quota: 150%\nUsed: 1.5%')
+  fetcher.mockResolvedValueOnce(Response.json(payload({ current_interval_remaining_percent: 0,
+    current_weekly_remaining_percent: 0, weekly_boost_permille: 1500 })))
+  const exhausted = await call({ action: 'show_detailed' })
+  // Layout changes reuse the previous snapshot; an explicit refresh gets new data.
+  expect(exhausted?.lines[1].value).toBe('148.5%')
+  const refreshed = await call({ action: 'refresh' })
+  expect(refreshed?.lines).toMatchObject([{ value: '0%', progress: 0 }, { value: '0%', progress: 0 }])
+  expect(refreshed?.details).toContain('总额度: 150%\n已用: 150%')
+})
+
+it('retains the last reading on invalid weekly boosts and treats missing or null boosts as the base quota', async () => {
+  fetcher.mockResolvedValueOnce(Response.json(payload({ current_weekly_remaining_percent: 99 })))
+  const initial = await call()
+  expect(initial?.details).toContain('总额度: 100%')
+  expect(initial?.lines[1].value).toBe('99%')
+  for (const weekly_boost_permille of [0, -1, '1500']) {
+    fetcher.mockResolvedValueOnce(Response.json(payload({ current_weekly_remaining_percent: 99, weekly_boost_permille })))
+    const invalid = await call({ action: 'refresh' })
+    expect(invalid?.error).toBeTruthy()
+    expect(invalid?.lines).toEqual(initial?.lines)
+  }
+  fetcher.mockResolvedValueOnce(Response.json(payload({ current_weekly_remaining_percent: 99, weekly_boost_permille: null })))
+  const recovered = await call({ action: 'refresh' })
+  expect(recovered?.error).toBeUndefined()
+  expect(recovered?.lines).toEqual(initial?.lines)
+})
+
+it('shows unlimited quota without fabricating consumption and rejects a non-entitled general bucket', async () => {
+  fetcher.mockResolvedValueOnce(Response.json(payload({ current_weekly_status: 3, current_weekly_remaining_percent: 100 })))
+  const unlimited = await call()
+  expect(unlimited?.lines).toHaveLength(1)
+  expect(unlimited?.dom.querySelectorAll('section')[1].textContent).toContain('不限')
+  const compact = await call({ action: 'show_compact', language: 'en' })
+  expect(compact?.dom.textContent).toContain('1w Unlimited')
+  fetcher.mockResolvedValueOnce(Response.json(payload({ current_interval_status: 3, current_weekly_status: 3,
+    current_interval_total_count: 0, current_weekly_total_count: 0 })))
+  const notEntitled = await call({ model: { ...model, apiKey: 'no-plan' }, action: 'show_detailed' })
+  expect(notEntitled?.lines).toEqual([])
+  expect(notEntitled?.error).toContain('通用额度')
+})
+
 it('reads the account general bucket regardless of the selected model and reuses its cache across models', async () => {
   fetcher.mockResolvedValueOnce(Response.json({ base_resp: { status_code: 0 }, model_remains: [
     { ...row, model_name: 'video', current_interval_remaining_percent: 20, current_weekly_remaining_percent: 30 },
@@ -90,14 +148,16 @@ it('shows plan quota categories and recomputes reset countdowns from cached data
   const initial = await call({ model: { ...model, providerName: 'MiniMax' } })
   expect(initial?.title).toBe('MiniMax Token Plan')
   expect(initial?.lines).toMatchObject([
-    { label: '5 小时额度剩余', value: '80%', description: '约 1 小时后重置', detail: expect.stringContaining('重置时间') },
-    { label: '每周额度剩余', value: '99%', description: '约 3 天后重置' }
+    { label: '5h 限额', value: '80%', description: '约 1 小时后重置', detail: expect.stringContaining('重置时间') },
+    { label: '周限额', value: '99%', description: '约 3 天后重置' }
   ])
+  expect(initial?.details).toContain('总额度: 100%')
+  expect(initial?.details).not.toContain('重置时间')
   vi.setSystemTime(now + 60000)
   const cached = await call({ language: 'en' })
   expect(cached?.lines).toMatchObject([
-    { label: '5-hour quota remaining', description: 'Resets in 59m' },
-    { label: 'Weekly quota remaining', description: 'Resets in 2d 23h' }
+    { label: '5h limit', description: 'Resets in 59m' },
+    { label: 'Weekly limit', description: 'Resets in 2d 23h' }
   ])
   expect(cached?.updatedAt).toBe(initial?.updatedAt)
   expect(fetcher).toHaveBeenCalledTimes(1)
@@ -109,12 +169,12 @@ it('keeps the five-hour category when the API returns a shorter current interval
   vi.setSystemTime(now)
   fetcher.mockResolvedValueOnce(Response.json(payload({ model_name: 'general', start_time: now, end_time: now + 4 * 3600000 })))
   const detailed = await call()
-  expect(detailed?.lines[0]).toMatchObject({ label: '5 小时额度剩余', description: '约 4 小时后重置' })
+  expect(detailed?.lines[0]).toMatchObject({ label: '5h 限额', description: '约 4 小时后重置' })
   expect(detailed?.lines[0].detail).toContain(new Date(now + 4 * 3600000).toLocaleString('zh-CN'))
   const compact = await call({ action: 'show_compact' })
   expect(compact?.dom.textContent).toContain('5h 80%')
   const english = await call({ action: 'show_detailed', language: 'en' })
-  expect(english?.lines[0]).toMatchObject({ label: '5-hour quota remaining', description: 'Resets in 4h' })
+  expect(english?.lines[0]).toMatchObject({ label: '5h limit', description: 'Resets in 4h' })
   expect(fetcher).toHaveBeenCalledTimes(1)
 })
 
@@ -123,13 +183,13 @@ it('does not invent missing reset times or plan expiry, and marks elapsed window
   const now = Date.parse('2026-10-15T08:00:00Z')
   vi.setSystemTime(now)
   fetcher.mockResolvedValueOnce(Response.json(payload({ start_time: now - 86370000, end_time: now + 30000 })))
-  expect((await call())?.lines[0]).toMatchObject({ label: '5 小时额度剩余', description: '不到 1 分钟后重置' })
+  expect((await call())?.lines[0]).toMatchObject({ label: '5h 限额', description: '不到 1 分钟后重置' })
   vi.setSystemTime(now + 60000)
   const elapsed = await call()
   expect(elapsed?.lines[0]).toMatchObject({ value: '80%', description: '周期已结束，待刷新' })
   fetcher.mockResolvedValueOnce(Response.json(payload({ end_time: null })))
   const missing = await call({ action: 'refresh' })
-  expect(missing?.lines).toEqual([{ label: '5 小时额度剩余', value: '80%', progress: .8 }])
+  expect(missing?.lines).toEqual([{ label: '5h 限额', value: '80%', progress: .8 }])
   fetcher.mockResolvedValueOnce(Response.json(payload({ end_time: 'invalid', weekly_end_time: -1 })))
   expect((await call({ action: 'refresh' }))?.lines).toEqual(missing?.lines)
 })
@@ -273,8 +333,10 @@ it('recognizes DeepSeek URLs and displays exact balances and breakdowns without 
     expect(result?.title).toBe('DeepSeek 余额')
     expect(result?.dom.textContent).toContain('CNY 可用余额')
     expect(result?.dom.textContent).toContain('110.00001')
-    expect(result?.dom.textContent).toContain('赠金余额')
-    expect(result?.dom.textContent).toContain('100.00001')
+    expect(result?.dom.textContent).not.toContain('赠金余额')
+    expect(result?.details).toBe('赠金余额: 10.00\n充值余额: 100.00001')
+    expect(result?.dom.querySelector('footer [data-details]')).not.toBeNull()
+    expect(result?.dom.querySelector('footer time')).not.toBeNull()
     expect(result?.dom.querySelector('progress')).toBeNull()
     expect(result?.dom.textContent).not.toMatch(/重置|%/)
     expect(result?.error).toBeUndefined()
@@ -295,6 +357,9 @@ it('keeps currencies separate and reports zero or negative unavailable balances'
   const multi = await call({ model: deepseek, action: 'show_compact', language: 'en' })
   expect(multi?.dom.textContent).toContain('CNY 110.00001 · USD 0.000001')
   expect(multi?.dom.querySelector('[tabindex="0"]')?.getAttribute('title')).toContain('Granted balance')
+  const detailed = await call({ model: deepseek, action: 'show_detailed', language: 'en' })
+  expect(detailed?.details).toBe('CNY\nGranted balance: 10.00\nTopped-up balance: 100.00001\n\nUSD\nGranted balance: 10.00\nTopped-up balance: 100.00001')
+  await call({ model: deepseek, action: 'show_compact' })
   fetcher.mockResolvedValueOnce(Response.json(balancePayload({ is_available: false, balance_infos: [{ ...balance, total_balance: '0.00', granted_balance: '0.00', topped_up_balance: '0.00' }] })))
   const empty = await call({ model: deepseek, action: 'refresh' })
   expect(empty?.dom.textContent).toContain('CNY 0.00')
@@ -332,7 +397,9 @@ it('queries Moonshot regional balances without summing negative cash and voucher
     expect(fetcher).toHaveBeenLastCalledWith(`https://${host}/v1/users/me/balance`, expect.anything())
     expect(result?.dom.textContent).toContain(`${currency} 可用余额`)
     expect(result?.dom.textContent).toContain('46.58893')
-    expect(result?.dom.textContent).toContain('-3.00001')
+    expect(result?.dom.textContent).not.toContain('-3.00001')
+    expect(result?.details).toContain('现金余额: -3.00001')
+    expect(result?.details).not.toMatch(/CNY|USD|可用余额/)
     expect(result?.dom.querySelector('progress')).toBeNull()
     const compact = await call({ model: provider, action: 'show_compact', language: 'en' })
     expect(compact?.dom.textContent).toContain(`${currency} 46.58893`)
@@ -356,11 +423,12 @@ it('shows OpenRouter key limits and spend without presenting them as account bal
   const result = await call({ model: provider })
   expect(fetcher).toHaveBeenCalledWith('https://openrouter.ai/api/v1/key', expect.anything())
   expect(result?.dom.textContent).toContain('USD 74.5')
-  expect(result?.dom.textContent).toContain('今日消费（UTC）')
-  expect(result?.dom.textContent).toContain('额度重置周期')
-  expect(result?.dom.textContent).toContain('每月')
-  expect(result?.dom.textContent).toContain('密钥到期时间')
-  expect(result?.dom.textContent).toContain('不代表账户余额')
+  expect(result?.dom.textContent).toContain('密钥剩余额度')
+  expect(result?.dom.textContent).not.toMatch(/消费|重置周期|密钥到期/)
+  expect(result?.details).toContain('今日消费（UTC）: USD 0')
+  expect(result?.details).toContain('额度重置周期: 每月')
+  expect(result?.details).toContain('密钥到期时间')
+  expect(result?.details).toContain('不代表账户余额')
   expect(result?.dom.querySelector('progress')).toBeNull()
   await call({ model: provider, action: 'show_compact' })
   expect(fetcher).toHaveBeenCalledTimes(1)
@@ -399,6 +467,7 @@ it.each(['open.bigmodel.cn', 'api.z.ai'])('reads GLM quotas from %s with raw-key
       { label: 'MCP 每月额度剩余', value: '60%', progress: .6 }
     ])
     expect(result?.dom.textContent).not.toMatch(/余额|重置/)
+    expect(result?.dom.querySelector('[data-details]')).toBeNull()
   }
   for (const baseUrl of [`https://${host}.example/api/anthropic`, `https://proxy.example/${host}`]) {
     expect(await call({ model: { ...glm, baseUrl } })).toBeNull()
@@ -442,9 +511,10 @@ it('queries the domestic GLM wallet with a raw key and preserves small balances 
     expect(result?.title).toBe('GLM 余额')
     expect(result?.dom.textContent).toContain('CNY 可用余额')
     expect(result?.dom.textContent).toContain('0.123456789')
-    expect(result?.dom.textContent).toContain('累计充值CNY 20')
-    expect(result?.dom.textContent).toContain('累计消费CNY 18.5')
-    expect(result?.dom.textContent).toContain('冻结余额CNY 0.25')
+    expect(result?.dom.textContent).not.toMatch(/累计充值|累计消费|冻结余额/)
+    expect(result?.details).toContain('累计充值: CNY 20')
+    expect(result?.details).toContain('累计消费: CNY 18.5')
+    expect(result?.details).toContain('冻结余额: CNY 0.25')
     expect(result?.dom.querySelector('progress')).toBeNull()
     expect(result?.error).toBeUndefined()
   }
@@ -459,8 +529,9 @@ it('queries the domestic GLM wallet with a raw key and preserves small balances 
 it('keeps zero and negative GLM balances without inferring model availability or inventing missing breakdowns', async () => {
   fetcher.mockResolvedValueOnce(Response.json(glmBalancePayload({ availableBalance: 0, rechargeAmount: null, totalSpendAmount: undefined, frozenBalance: 0 })))
   const result = await call({ model: glmOrdinary })
-  expect(result?.dom.textContent).toContain('冻结余额CNY 0')
-  expect(result?.dom.textContent).not.toMatch(/累计充值|累计消费|余额不足/)
+  expect(result?.details).toContain('冻结余额: CNY 0')
+  expect(result?.details).not.toMatch(/累计充值|累计消费/)
+  expect(result?.dom.textContent).not.toContain('余额不足')
   expect(result?.error).toBeUndefined()
   fetcher.mockResolvedValueOnce(Response.json(glmBalancePayload({ availableBalance: -0.001 })))
   const negative = await call({ model: glmOrdinary, action: 'refresh' })
@@ -515,9 +586,11 @@ it('uses GLM reset timestamps independently and recomputes countdowns from the c
   ])))
   const initial = await call({ model: glm })
   expect(initial?.lines).toMatchObject([
-    { value: '87.7%', description: '约 1 小时后重置', detail: expect.stringContaining(new Date(now + 3600000).toLocaleString('zh-CN')) },
+    { value: '87.7%', description: '约 1 小时后重置' },
     { value: '58%', description: '约 1 天后重置' }
   ])
+  expect(initial?.details).toContain(new Date(now + 3600000).toLocaleString('zh-CN'))
+  expect(initial?.details).toContain(new Date(now + 86400000).toLocaleString('zh-CN'))
   vi.setSystemTime(now + 60000)
   const cached = await call({ model: glm, language: 'en' })
   expect(cached?.lines).toMatchObject([{ description: 'Resets in 59m' }, { description: 'Resets in 23h 59m' }])

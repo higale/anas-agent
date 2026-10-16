@@ -72,15 +72,22 @@ function parseQuota(payload, language, now = Date.now()) {
   const row = rows.find(row => row.model_name.toLowerCase() === 'general')
     ?? rows.find(row => row.model_name.toLowerCase() === 'minimax-m*')
   if (!row) throw new Error('quota')
+  if (row.current_interval_status === 3 && row.current_weekly_status === 3
+    && row.current_interval_total_count === 0 && row.current_weekly_total_count === 0) throw new Error('quota')
   const zh = language.startsWith('zh')
-  const lines = []
+  const lines = [], detailGroups = []
+  const formatPercent = value => `${Number(value.toFixed(2))}%`
   // These are plan quota categories. A response can describe a shorter current
   // interval (for example 20:00–00:00); its bounds only determine reset timing.
   for (const [period, endKey, label, compactLabel] of [
-    ['interval', 'end_time', zh ? '5 小时额度剩余' : '5-hour quota remaining', '5h'],
-    ['weekly', 'weekly_end_time', zh ? '每周额度剩余' : 'Weekly quota remaining', zh ? '周' : '1w']
+    ['interval', 'end_time', zh ? '5h 限额' : '5h limit', '5h'],
+    ['weekly', 'weekly_end_time', zh ? '周限额' : 'Weekly limit', zh ? '周' : '1w']
   ]) {
     const prefix = `current_${period}_`
+    if (row[prefix + 'status'] === 3) {
+      lines.push({ label, compactLabel, value: zh ? '不限' : 'Unlimited' })
+      continue
+    }
     const explicit = row[prefix + 'remaining_percent']
     const total = row[prefix + 'total_count'], reported = row[prefix + 'usage_count']
     let percent
@@ -99,10 +106,22 @@ function parseQuota(payload, language, now = Date.now()) {
       description: resetDescription(end, zh, now),
       detail: `${zh ? '重置时间' : 'Resets'}: ${new Date(end).toLocaleString(language)}`
     } : {}
-    lines.push({ label, compactLabel, value: `${Number(percent.toFixed(1))}%`, progress: percent / 100, ...timing })
+    const boost = period === 'weekly' ? (row.weekly_boost_permille ?? 1000) : 1000
+    if (typeof boost !== 'number' || !Number.isFinite(boost) || boost <= 0) throw new Error('response')
+    // Show remaining quota in base-plan units, including weekly boosts.
+    // The progress bar expresses remaining / total, so it never exceeds 100%.
+    const remaining = percent * (boost / 1000)
+    const used = (100 - percent) * (boost / 1000)
+    if (!Number.isFinite(remaining) || !Number.isFinite(used)) throw new Error('response')
+    lines.push({ label, compactLabel, value: formatPercent(remaining), progress: percent / 100, ...timing })
+    detailGroups.push({ summary: label, text: [
+      `${zh ? '总额度' : 'Total quota'}: ${formatPercent(boost / 10)}`,
+      `${zh ? '已用' : 'Used'}: ${formatPercent(used)}`,
+      ...(boost !== 1000 ? [zh ? '含套餐加成，基础额度为 100%。' : 'Includes a plan boost.\nBase quota = 100%.'] : [])
+    ].join('\n') })
   }
   if (!lines.length) throw new Error('response')
-  return { lines }
+  return { lines, detailGroups }
 }
 
 function parseGlmQuota(payload, language, now = Date.now()) {
@@ -114,7 +133,7 @@ function parseGlmQuota(payload, language, now = Date.now()) {
   }
   const limits = payload.data?.limits
   if (!Array.isArray(limits)) throw new Error('response')
-  const zh = language.startsWith('zh'), lines = []
+  const zh = language.startsWith('zh'), lines = [], detailGroups = []
   // Match the official console: credit plans use CREDIT_LIMIT, older plans use
   // TOKENS_LIMIT and a separate monthly MCP allowance. Percentage means used.
   const creditPlan = limits.some(row => row?.type === 'CREDIT_LIMIT')
@@ -132,10 +151,11 @@ function parseGlmQuota(payload, language, now = Date.now()) {
     const remaining = 100 - row.percentage
     const end = timestamp(row.nextResetTime)
     lines.push({ label, compactLabel, value: `${Number(remaining.toFixed(1))}%`, progress: remaining / 100,
-      ...(end ? { description: resetDescription(end, zh, now), detail: `${zh ? '重置时间' : 'Resets'}: ${new Date(end).toLocaleString(language)}` } : {}) })
+      ...(end ? { description: resetDescription(end, zh, now) } : {}) })
+    if (end) detailGroups.push({ summary: label, text: `${zh ? '重置时间' : 'Resets'}: ${new Date(end).toLocaleString(language)}` })
   }
   if (!lines.length) throw new Error('glm_quota')
-  return { lines }
+  return { lines, detailGroups }
 }
 
 function parseBalance(payload, language) {
@@ -180,7 +200,7 @@ function parseGlmBalance(payload, language) {
   // Wallet balance does not include resource packages or Coding Plan allowances;
   // zero or negative cash alone cannot establish whether model calls are available.
   return { lines: [{ label: zh ? 'CNY 可用余额' : 'CNY available', compactLabel: 'CNY', value: available, breakdown,
-    description: zh ? '账户余额，不包含资源包与 Coding Plan 额度。' : 'Account balance; excludes resource packages and Coding Plan quotas.' }] }
+    explanation: zh ? '账户余额，不包含资源包与 Coding Plan 额度。' : 'Account balance; excludes resource packages and Coding Plan quotas.' }] }
 }
 
 function parseMoonshot(payload, language, currency) {
@@ -220,7 +240,7 @@ function parseOpenRouter(payload, language) {
     breakdown.push({ label: zh ? '密钥到期时间' : 'Key expires', value: new Date(expires).toLocaleString(language) })
   }
   return { lines: [{ label: zh ? '密钥剩余额度' : 'Key remaining credits', compactLabel: zh ? '密钥' : 'Key', value: remaining,
-    description: zh ? '仅当前 API Key 的额度，不代表账户余额。' : 'Current API key cap; not the account balance.', breakdown }] }
+    explanation: zh ? '仅当前 API Key 的额度，不代表账户余额。' : 'Current API key cap; not the account balance.', breakdown }] }
 }
 
 function escapeHtml(value) {
@@ -243,9 +263,16 @@ function renderWidget(content, language, displayMode) {
   const extraActions = (content.actions ?? []).map(action => `<button class="ui-button" data-action="${escapeHtml(action.id)}">${escapeHtml(action.label)}</button>`).join('')
   const controls = extraActions || content.installLink ? `<div class="ui-row ui-row-tight${extraActions ? ' ui-row-center' : ''}">${extraActions}${content.installLink ? `<a href="https://github.com/modelstudioai/cli#installation">${zh ? '安装说明' : 'Installation guide'}</a>` : ''}</div>` : ''
   const notes = (content.notes ?? []).map(note => `<small class="ui-field-hint">${escapeHtml(note)}</small>`).join('')
+  const detailGroups = content.detailGroups ?? []
+  const groupTexts = detailGroups.map(group => [group.summary, group.text].filter(Boolean).join('\n')).filter(Boolean)
+  const lineExtras = line => [line.explanation, ...(line.breakdown ?? []).map(item => `${item.label}: ${item.value}`)].filter(Boolean).join('\n')
+  const detailsText = [...groupTexts, ...content.lines.filter(line => lineExtras(line))
+    .map(line => [content.lines.length > 1 ? line.compactLabel : '', lineExtras(line)].filter(Boolean).join('\n'))].join('\n\n')
+  const detailsButton = detailsText ? `<button class="ui-tool-button ui-tool-button-small" aria-label="${zh ? '详情' : 'Details'}" data-details="${escapeHtml(detailsText)}"><img src="assets/info.svg" alt=""></button>` : ''
+  const updated = content.updatedAt !== undefined ? `<small class="ui-field-hint">${zh ? '更新于' : 'Updated'} <time datetime="${new Date(content.updatedAt).toISOString()}">${escapeHtml(new Date(content.updatedAt).toLocaleTimeString(language))}</time></small>` : ''
   if (displayMode === 'compact') {
-    const details = [content.title, ...(content.notes ?? []), ...content.lines.map(line => [line.label + ' ' + line.value, line.description, line.detail?.replace(': ', ':\n'), ...(line.breakdown ?? []).map(item => `${item.label}: ${item.value}`)].filter(Boolean).join('\n')),
-      content.updatedAt !== undefined ? `${zh ? '更新于' : 'Updated'}\n${new Date(content.updatedAt).toLocaleString(language)}` : '', status].filter(Boolean).join('\n\n')
+    const details = [content.title, ...(content.notes ?? []), ...groupTexts, ...content.lines.map(line => [line.label + ' ' + line.value, line.description, line.detail, lineExtras(line)].filter(Boolean).join('\n')),
+      content.updatedAt !== undefined ? `${zh ? '更新于' : 'Updated'}: ${new Date(content.updatedAt).toLocaleString(language)}` : '', status].filter(Boolean).join('\n\n')
     const summary = content.lines.map(line => `${line.compactLabel} ${line.value}`).join(' · ') || content.emptyLabel
     const summaryHtml = content.lines.length && content.lines.every(line => line.progress !== undefined)
       ? `<span class="ui-numeric ui-adaptive-text"><span data-full-text>${escapeHtml(summary)}</span><span data-short-text>${escapeHtml(content.lines.map(line => line.value).join(' · '))}</span></span>`
@@ -265,7 +292,6 @@ function renderWidget(content, language, displayMode) {
   const rows = content.lines.map(line => `<section${line.detail ? ` title="${escapeHtml(line.detail)}"` : ''}>
     <div class="ui-row-between ui-muted"><span>${escapeHtml(line.label)}</span><span class="ui-numeric">${escapeHtml(line.value)}</span></div>
     ${line.progress !== undefined ? `<progress aria-label="${escapeHtml(line.label)}" max="1" value="${line.progress}"></progress>` : ''}
-    ${(line.breakdown ?? []).map(item => `<div class="ui-row-between ui-field-hint"><span>${escapeHtml(item.label)}</span><span class="ui-numeric">${escapeHtml(item.value)}</span></div>`).join('')}
     ${line.description ? `<small class="ui-field-hint">${escapeHtml(line.description)}</small>` : ''}
   </section>`).join('')
   return { title: content.title, html: `<div class="ui-stack ui-stack-tight">
@@ -275,7 +301,7 @@ function renderWidget(content, language, displayMode) {
     ${rows}${!content.lines.length && !content.error ? `<p class="ui-field-hint">${escapeHtml(content.emptyLabel ?? '')}</p>` : ''}
     ${notes}${controls}
     ${status ? `<p class="ui-field-hint" role="status">${escapeHtml(status)}</p>` : ''}
-    ${content.updatedAt !== undefined ? `<small class="ui-field-hint">${zh ? '更新于' : 'Updated'} <time datetime="${new Date(content.updatedAt).toISOString()}">${escapeHtml(new Date(content.updatedAt).toLocaleTimeString(language))}</time></small>` : ''}
+    ${detailsButton ? `<footer class="ui-row-between">${updated || '<span></span>'}${detailsButton}</footer>` : updated}
   </div>` }
 }
 

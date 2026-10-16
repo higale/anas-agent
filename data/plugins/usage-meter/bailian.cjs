@@ -22,7 +22,7 @@ const copy = {
     key_type: 'API Key 类型与 API URL 不匹配，请检查模型配置。', login_failed: '浏览器登录未完成，请重试。', waiting: '等待浏览器登录，完成后刷新。',
     loginButton: '登录百炼', switchButton: '切换账户登录', cancelButton: '取消登录', install: '安装说明', account: '控制台账户', workspace: '工作空间',
     plan: 'Token Plan 剩余额度', ordinary: '密钥用量', expires: '套餐到期', reset: '重置时间', remaining: '剩余', noQuota: '套餐未返回额度数据。',
-    free: '当前模型免费额度', calls: '此 Key 近 7 天在线调用', failed: '失败调用', noCalls: '此 Key 近 7 天暂无在线调用记录。',
+    free: '当前模型免费额度', calls: '此 Key 近 7 天在线调用', failed: '失败调用',
     stats: '此 Key 近 7 天在线用量', noFree: '当前模型暂无免费额度。', querying: '正在查询', loginHint: '请在浏览器选择正确账户；登录会更新 bl 的当前配置。'
   },
   en: {
@@ -33,7 +33,7 @@ const copy = {
     key_type: 'The API key type does not match the API URL. Check the model configuration.', login_failed: 'Browser login did not complete. Try again.', waiting: 'Waiting for browser login. Refresh after signing in.',
     loginButton: 'Sign in to Bailian', switchButton: 'Switch account', cancelButton: 'Cancel login', install: 'Installation guide', account: 'Console account', workspace: 'Workspace',
     plan: 'Token Plan remaining quota', ordinary: 'Key usage', expires: 'Plan expires', reset: 'Resets at', remaining: 'remaining', noQuota: 'No quota data returned for this plan.',
-    free: 'Current model free quota', calls: 'This key: online calls over 7 days', failed: 'Failed calls', noCalls: 'No online calls for this key in the past 7 days.',
+    free: 'Current model free quota', calls: 'This key: online calls over 7 days', failed: 'Failed calls',
     stats: 'This key: online usage over 7 days', noFree: 'No free quota for the current model.', querying: 'Querying', loginHint: 'Choose the correct account in your browser. Signing in updates the current bl profile.'
   }
 }
@@ -191,9 +191,10 @@ function createBailian() {
     return { plan, keyInfo, free, stats }
   }
   function render(data, language, user, model) {
-    const t = words(language), zh = language.startsWith('zh'), lines = [], notes = []
-    notes.push(`${t.account}: ${accountLabel(user)}`)
+    const t = words(language), zh = language.startsWith('zh'), lines = [], notes = [], detailGroups = []
+    detailGroups.push({ text: `${t.account}: ${accountLabel(user)}` })
     const title = `${t.title} · ${data.plan ? 'Token Plan' : t.ordinary}`
+    let notice
     if (data.plan) {
       for (const [prefix, label, short] of [['per5Hour', zh ? '5 小时' : '5-hour', '5h'], ['per1Week', zh ? '周' : 'Weekly', zh ? '周' : 'Week'], ['per1Month', zh ? '月' : 'Monthly', zh ? '月' : 'Month']]) {
         const used = data.usage[prefix + 'Percentage']
@@ -205,32 +206,36 @@ function createBailian() {
           ...(reset ? { description: `${t.reset}: ${reset}` } : {}) })
       }
       const sub = data.subscription
-      if (typeof sub.specCode === 'string') notes.push(`${zh ? '套餐' : 'Plan'}: ${sub.specCode}`)
+      const summary = typeof sub.specCode === 'string' && sub.specCode ? `${zh ? '套餐' : 'Plan'}: ${sub.specCode}` : (zh ? '套餐' : 'Plan')
+      const details = []
       if (typeof sub.status === 'string') {
         const statuses = zh ? { VALID: '有效', EXPIRED: '已到期', INVALID: '无效' } : { VALID: 'Active', EXPIRED: 'Expired', INVALID: 'Inactive' }
-        notes.push(`${zh ? '状态' : 'Status'}: ${statuses[sub.status] ?? sub.status}`)
+        details.push(`${zh ? '状态' : 'Status'}: ${statuses[sub.status] ?? sub.status}`)
+        if (['EXPIRED', 'INVALID'].includes(sub.status)) notice = `${zh ? '套餐状态' : 'Plan status'}: ${statuses[sub.status]}`
       }
-      if (typeof sub.autoRenewFlag === 'boolean') notes.push(`${zh ? '自动续费' : 'Auto-renew'}: ${sub.autoRenewFlag ? (zh ? '开启' : 'On') : (zh ? '关闭' : 'Off')}`)
+      if (typeof sub.autoRenewFlag === 'boolean') details.push(`${zh ? '自动续费' : 'Auto-renew'}: ${sub.autoRenewFlag ? (zh ? '开启' : 'On') : (zh ? '关闭' : 'Off')}`)
       const expiry = date(sub.endTime, language)
-      if (expiry) notes.push(`${t.expires}: ${expiry}`)
+      if (expiry) details.push(`${t.expires}: ${expiry}`)
+      if (details.length || sub.specCode) detailGroups.push({ summary, text: details.join('\n') })
     } else {
-      notes.push(`${t.workspace}: ${data.keyInfo.workspaceName || data.keyInfo.workspace}`)
+      detailGroups[0].text += `\n${t.workspace}: ${data.keyInfo.workspaceName || data.keyInfo.workspace}`
       for (const quota of data.free.filter(row => row.model === model.model)) {
         if (quota.remaining === null || quota.remaining === undefined) continue
         if (!validNumber(quota.remaining)) throw fault('response')
-        lines.push({ label: `${t.free} · ${model.model}`, compactLabel: zh ? '免费' : 'Free', value: new Intl.NumberFormat(language).format(quota.remaining),
-          ...(quota.expires ? { description: `${zh ? '额度到期' : 'Quota expires'}: ${quota.expires}` } : {}) })
+        const label = `${t.free} · ${model.model}`
+        lines.push({ label, compactLabel: zh ? '免费' : 'Free', value: new Intl.NumberFormat(language).format(quota.remaining) })
+        if (quota.expires) detailGroups.push({ summary: label, text: `${zh ? '额度到期' : 'Quota expires'}: ${quota.expires}` })
       }
       if (!lines.length) notes.push(t.noFree)
-      lines.push({ label: t.calls, compactLabel: zh ? '7天调用' : '7d calls', value: new Intl.NumberFormat(language).format(data.stats.callCount),
-        breakdown: validNumber(data.stats.callFailedCount) ? [{ label: t.failed, value: String(data.stats.callFailedCount) }] : [] })
+      lines.push({ label: t.calls, compactLabel: zh ? '7天调用' : '7d calls', value: new Intl.NumberFormat(language).format(data.stats.callCount) })
+      const stats = validNumber(data.stats.callFailedCount) ? [`${t.failed}: ${data.stats.callFailedCount}`] : []
       for (const usage of data.stats.usages) {
         if (typeof usage.key !== 'string' || !validNumber(usage.value)) throw fault('response')
-        lines.push({ label: `${t.stats} · ${usage.key}`, compactLabel: usage.key, value: `${new Intl.NumberFormat(language).format(usage.value)}${usage.unit ? ` ${usage.unit}` : ''}` })
+        stats.push(`${usage.key}: ${new Intl.NumberFormat(language).format(usage.value)}${usage.unit ? ` ${usage.unit}` : ''}`)
       }
-      if (data.stats.callCount === 0) notes.push(t.noCalls)
+      if (stats.length) detailGroups.push({ summary: t.stats, text: stats.join('\n') })
     }
-    return { title, lines, notes, ...(data.plan && !lines.length ? { emptyLabel: t.noQuota } : {}), updatedAt: data.updatedAt }
+    return { title, lines, notes, detailGroups, notice, ...(data.plan && !lines.length ? { emptyLabel: t.noQuota } : {}), updatedAt: data.updatedAt }
   }
   async function read(model, language, action, signal) {
     const t = words(language), plan = new URL(model.baseUrl).hostname.startsWith('token-plan.'), controller = new AbortController()

@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { PluginSummary } from '@shared/plugins'
 import type { ResolvedModelConfig } from '@shared/types'
@@ -152,11 +153,45 @@ it('reports invalid HTML without replacing the last valid snapshot', async () =>
   expect(widget().queryByText('Override')).not.toBeInTheDocument()
 })
 
+it.each([false, true])('opens local details (icon: %s) without backend calls, even during refresh, and removes stale details', async icon => {
+  const user = userEvent.setup()
+  mocks.read.mockResolvedValueOnce({ ...content, html: content.html + (icon
+    ? '<button class="ui-tool-button" aria-label="Details" data-details="Status: Active"><img src="assets/info.svg" alt=""></button>'
+    : '<button class="ui-link-button" data-details="Status: Active">Details</button>') })
+  const { rerender } = render(<><button>Outside widget</button><PluginWidgets plugins={plugins} model={model} active /></>)
+  await ready()
+  const trigger = widget().getByRole('button', { name: 'Details' })
+  if (icon) expect(trigger.querySelector('img')?.src).toBe('anas-plugin://usage/_anas/icon/assets/info.svg')
+  await user.hover(screen.getByRole('button', { name: 'Outside widget' }))
+  await user.hover(trigger.querySelector('img') ?? trigger)
+  await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent('Status: Active'))
+  await user.click(trigger)
+  expect(screen.getByRole('dialog')).toHaveTextContent('Status: Active')
+  await user.click(trigger)
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  await user.click(trigger)
+  expect(screen.getByRole('dialog')).toHaveTextContent('Status: Active')
+  expect(mocks.read).toHaveBeenCalledTimes(1)
+  let complete!: (value: unknown) => void
+  mocks.read.mockImplementationOnce(() => new Promise(resolve => { complete = resolve }))
+  fireEvent.click(widget().getByRole('button', { name: 'Refresh now' }))
+  expect(trigger).toBeEnabled()
+  await act(async () => { complete(content) })
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(widget().queryByRole('button', { name: 'Details' })).not.toBeInTheDocument()
+  rerender(<PluginWidgets plugins={plugins} model={model} active={false} />)
+  expect(document.querySelector('.ui-details-popover')).toBeNull()
+})
+
 it('enforces host CSS and declared actions before mounting fragments', () => {
   for (const html of ['<style>body{color:red}</style>', '<script>alert(1)</script>', '<p onclick="x()">Click</p>',
     '<link rel="stylesheet" href="x.css">', '<iframe src="https://example.com"></iframe>', '<button data-action="delete">Delete</button>',
     '<p data-action="refresh">Refresh</p>', '<a href="javascript:x()">Click</a>', '<img src="../outside.svg">',
-    '<div>'.repeat(1001)]) {
+    '<div data-details="Active">Details</div>', '<button data-details="">Details</button>',
+    '<button data-details="Active" data-action="refresh">Details</button>', '<button data-details="Active" title="Another tooltip">Details</button>',
+    '<button data-details="Active"><img src="assets/info.svg"></button>',
+    '<button data-details="Active" aria-label="Details"><img src="../outside.svg"></button>',
+    '<button data-details="Active"><span>Details</span></button>', '<div>'.repeat(1001)]) {
     expect(() => parseWidgetHtml(html, 'usage', ['refresh'])).toThrow()
   }
 })

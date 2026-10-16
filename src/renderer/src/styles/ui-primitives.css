@@ -2094,6 +2094,21 @@ button.ui-avatar:has(> img):focus-visible,
   padding: var(--ui-menu-padding, 8px);
 }
 
+.ui-details-trigger { display: inline-flex; flex-shrink: 0; }
+.ui-details-popover {
+  width: max-content;
+  max-width: min(32em, var(--radix-popover-content-available-width, calc(100vw - 24px)));
+  max-height: var(--radix-popover-content-available-height, calc(100vh - 24px));
+  padding: 8px 10px;
+  overflow: auto;
+  color: var(--text);
+  font-size: var(--font-size-small);
+  line-height: var(--font-line-height-small);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
 .ui-menu-detailed {
   width: min(480px, calc(100vw - 20px));
   max-height: var(--radix-dropdown-menu-content-available-height, calc(100vh - 20px));

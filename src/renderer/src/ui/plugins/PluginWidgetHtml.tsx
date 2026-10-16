@@ -1,9 +1,11 @@
-import { useLayoutEffect, useRef } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { pluginIconSources, requirePluginIconPath } from '@shared/plugins'
 import baseStyles from '../../styles/base.css?inline'
 import sharedStyles from '../../styles/ui-primitives.css?inline'
 import widgetStyles from '../../styles/plugin-widget-content.css?inline'
 import { connectShadowTooltips } from '../GlobalTooltip'
+import { DetailsPopover } from '../DetailsPopover'
 
 /** Static fragments use host CSS and declared actions; full scripted pages use plugin UI entries. */
 export function parseWidgetHtml(html: string, pluginId: string, actions: string[]): DocumentFragment {
@@ -19,6 +21,15 @@ export function parseWidgetHtml(html: string, pluginId: string, actions: string[
     for (const { name } of element.attributes) {
       if (name === 'style' || name.startsWith('on') || ['is', 'srcdoc', 'srcset', 'form', 'formaction', 'popover', 'color', 'bgcolor', 'face'].includes(name)) {
         throw new Error('Widget HTML cannot declare scripts, styles or form navigation.')
+      }
+    }
+    if (element.hasAttribute('data-details')) {
+      const textButton = !element.children.length && !!element.textContent?.trim()
+      const iconButton = element.children.length === 1 && element.firstElementChild?.localName === 'img'
+        && !!element.firstElementChild.getAttribute('src') && !element.textContent?.trim() && !!element.getAttribute('aria-label')?.trim()
+      if (element.localName !== 'button' || !element.getAttribute('data-details')?.trim() || !(textButton || iconButton)
+        || ['data-action', 'title', 'data-tooltip'].some(name => element.hasAttribute(name))) {
+        throw new Error('Widget details require a text or labelled image button with nonempty details and no backend action or tooltip.')
       }
     }
     if (element.hasAttribute('title')) {
@@ -51,6 +62,7 @@ export function PluginWidgetHtml({ fragment, busy, onAction, onLink }: {
   fragment: DocumentFragment; busy: boolean; onAction(action: string): void; onLink(url: string): void
 }) {
   const host = useRef<HTMLDivElement>(null)
+  const [details, setDetails] = useState<Array<{ container: HTMLElement; button: HTMLButtonElement }>>([])
   const controls = useRef(new Map<HTMLButtonElement, boolean>())
   const callbacks = useRef({ busy, onAction, onLink })
   useLayoutEffect(() => { callbacks.current = { busy, onAction, onLink } })
@@ -62,6 +74,12 @@ export function PluginWidgetHtml({ fragment, busy, onAction, onLink }: {
     const style = document.createElement('style')
     style.textContent = baseStyles + sharedStyles + widgetStyles
     root.replaceChildren(style, fragment.cloneNode(true))
+    setDetails([...root.querySelectorAll<HTMLButtonElement>('button[data-details]')].map(button => {
+      const container = document.createElement('span')
+      container.className = 'ui-details-trigger'
+      button.replaceWith(container)
+      return { container, button }
+    }))
     const adaptiveText = [...root.querySelectorAll<HTMLElement>('.ui-adaptive-text')].flatMap(container => {
       const full = container.querySelector<HTMLElement>(':scope > [data-full-text]')
       const short = container.querySelector<HTMLElement>(':scope > [data-short-text]')
@@ -111,5 +129,9 @@ export function PluginWidgetHtml({ fragment, busy, onAction, onLink }: {
   useLayoutEffect(() => {
     for (const [button, disabled] of controls.current) button.disabled = busy || disabled
   }, [busy])
-  return <div ref={host} className="plugin-widget-html" aria-busy={busy} />
+  return <><div ref={host} className="plugin-widget-html" aria-busy={busy} />
+    {details.map(({ container, button }) => createPortal(<DetailsPopover label={button.textContent!}
+      text={button.dataset.details!} className={button.className} disabled={button.disabled}
+      ariaLabel={button.getAttribute('aria-label') ?? undefined} iconSrc={button.querySelector('img')?.src} />, container))}
+  </>
 }

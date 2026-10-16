@@ -2,7 +2,7 @@
   position: fixed;
   z-index: 1000;
   width: max-content;
-  max-width: min(var(--tooltip-max-width, 240px), calc(100vw - 24px));
+  max-width: min(var(--tooltip-max-width, 32em), calc(100vw - 24px));
   padding: 5px 7px;
   border: 1px solid var(--tooltip-border);
   border-radius: 6px;

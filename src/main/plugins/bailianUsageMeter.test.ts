@@ -22,7 +22,8 @@ let holdLogin: boolean, noConsole: boolean
 const text = async (action?: string, changes = {}, language = 'zh-CN') => {
   const result = await backend.call('quota', { model: { ...model, ...changes }, language, action }, { signal: new AbortController().signal })
   const template = document.createElement('template'); template.innerHTML = result.html
-  return { html: result.html, dom: template.content, text: template.content.textContent ?? '' }
+  return { html: result.html, dom: template.content, text: template.content.textContent ?? '',
+    details: template.content.querySelector('[data-details]')?.getAttribute('data-details') }
 }
 function defaultResponse(args: string[]) {
   if (args[0] === 'auth') return { config: 'token-plan', console: noConsole ? undefined : { masked: 'console-credential' } }
@@ -68,8 +69,9 @@ it('shows monthly remaining quota, account and expiry without exposing credentia
   const first = await text()
   expect(first.text).toContain('35.00%')
   expect(first.text).toContain('月 剩余')
-  expect(first.text).toContain('套餐到期')
-  expect(first.text).toContain('Readable account (account-1)')
+  expect(first.dom.querySelector('[data-details]')?.getAttribute('data-details')).toContain('套餐到期')
+  expect(first.details).toContain('Readable account (account-1)')
+  expect(first.text).not.toContain('Readable account')
   expect(first.dom.querySelector('progress')!.value).toBe(.35)
   expect(first.html).not.toContain(key)
   expect(first.html).not.toContain(mask)
@@ -78,6 +80,49 @@ it('shows monthly remaining quota, account and expiry without exposing credentia
   expect(commands.filter(args => args.includes('zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/usage'))).toHaveLength(1)
   await text('refresh')
   expect(commands.filter(args => args.includes('zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/usage'))).toHaveLength(2)
+})
+it.each(['zh-CN', 'en'])('groups subscription details locally while keeping the compact tooltip complete (%s)', async language => {
+  respond = args => args.some(x => x.endsWith('/subscription'))
+    ? wrap({ specCode: 'lite', status: 'VALID', autoRenewFlag: false, endTime: Date.now() + 86400000 }) : defaultResponse(args)
+  const zh = language === 'zh-CN'
+  const detailed = await text(undefined, {}, language)
+  expect(detailed.text).not.toContain(zh ? '套餐: lite' : 'Plan: lite')
+  expect(detailed.text).not.toContain(zh ? '自动续费' : 'Auto-renew')
+  const button = detailed.dom.querySelector('[data-details]')!
+  expect(button.getAttribute('aria-label')).toBe(zh ? '详情' : 'Details')
+  expect(button.querySelector('img')).not.toBeNull()
+  expect(button.closest('footer')?.querySelector('time')).not.toBeNull()
+  expect(detailed.dom.querySelectorAll('[data-details]')).toHaveLength(1)
+  expect(button.hasAttribute('data-action')).toBe(false)
+  const details = button.getAttribute('data-details')!
+  expect(details).toContain(zh ? '套餐: lite' : 'Plan: lite')
+  expect(details).toContain('Readable account (account-1)')
+  expect(details).toContain(zh ? '状态: 有效' : 'Status: Active')
+  expect(details).toContain(zh ? '自动续费: 关闭' : 'Auto-renew: Off')
+  expect(details).toContain(zh ? '套餐到期:' : 'Plan expires:')
+  const compact = await text('show_compact', {}, language)
+  expect(compact.dom.querySelector('[data-details]')).toBeNull()
+  expect(compact.dom.querySelector('[tabindex="0"]')!.getAttribute('title')).toContain(details)
+  expect(commands.filter(args => args.includes('zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/subscription'))).toHaveLength(1)
+})
+it('keeps account and partial subscription details without inventing missing values', async () => {
+  respond = args => args.some(x => x.endsWith('/subscription')) ? wrap({ specCode: 'lite' }) : defaultResponse(args)
+  const summary = await text()
+  expect(summary.details).toContain('套餐: lite')
+  expect(summary.details).not.toMatch(/自动续费|套餐到期|状态/)
+  respond = args => args.some(x => x.endsWith('/subscription')) ? wrap({ autoRenewFlag: false }) : defaultResponse(args)
+  const partial = await text('refresh')
+  expect(partial.details).toContain('自动续费: 关闭')
+  expect(partial.details).not.toMatch(/lite|套餐到期|状态/)
+  respond = args => args.some(x => x.endsWith('/subscription')) ? wrap({}) : defaultResponse(args)
+  const accountOnly = await text('refresh')
+  expect(accountOnly.details).toBe('控制台账户: Readable account (account-1)')
+})
+it.each(['EXPIRED', 'INVALID'])('keeps an unusable subscription visible outside the details (%s)', async status => {
+  respond = args => args.some(x => x.endsWith('/subscription')) ? wrap({ specCode: 'lite', status }) : defaultResponse(args)
+  const result = await text()
+  expect(result.dom.querySelector('[role="status"]')?.textContent).toBe(`套餐状态: ${status === 'EXPIRED' ? '已到期' : '无效'}`)
+  expect(result.details).toContain('套餐: lite')
 })
 it.each(['zh-CN', 'en'])('keeps two decimal places for quota text in detailed, compact and hover views (%s)', async language => {
   respond = args => args.some(x => x.endsWith('/usage')) ? wrap({
@@ -99,8 +144,8 @@ it.each(['zh-CN', 'en'])('keeps two decimal places for quota text in detailed, c
 })
 it('does not duplicate numeric account names and rejects account metadata from another session', async () => {
   respond = args => args.some(x => x.endsWith('.getGConfig')) ? wrap({ user: { outerKey: uid, showName: uid } }) : defaultResponse(args)
-  expect((await text()).text).toContain('控制台账户: account-1')
-  expect((await text()).text).not.toContain('account-1 (account-1)')
+  expect((await text()).details).toContain('控制台账户: account-1')
+  expect((await text()).details).not.toContain('account-1 (account-1)')
   respond = args => args.some(x => x.endsWith('.getGConfig')) ? wrap({ user: { outerKey: 'other', showName: 'Other account' } }) : defaultResponse(args)
   const result = await text()
   expect(result.text).toContain('不匹配')
@@ -165,9 +210,13 @@ it('recognizes an expired session inside a successful gateway response', async (
 it('matches ordinary keys exactly and scopes statistics to their workspace and key, preserving zero free quota', async () => {
   const result = await text(undefined, { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', apiKey: 'sk-ordinary-secret-ending' })
   expect(result.text).toContain('当前模型免费额度')
-  expect(result.text).toContain('Test workspace')
+  expect(result.text).not.toContain('Test workspace')
+  expect(result.details).toContain('Test workspace')
   expect(result.text).toContain('12')
-  expect(result.text).toContain('2,000 tokens')
+  expect(result.text).not.toContain('2,000 tokens')
+  expect(result.details).toContain('2,000 tokens')
+  expect(result.details).toContain('失败调用: 1')
+  expect(result.details).toContain('额度到期: 2026-12-01')
   expect(result.html).not.toContain('sk-ordinary-secret-ending')
   const command = commands.find(args => args[0] === 'monitor')!
   expect(command.slice(0, 8)).toEqual(['monitor', 'overview', '--api-key-id', '42', '--days', '7', '--config', 'token-plan'])
@@ -202,8 +251,8 @@ it('keeps subscription information when the plan returns no quota windows', asyn
   respond = args => args.some(x => x.endsWith('/usage')) ? wrap({}) : defaultResponse(args)
   const result = await text()
   expect(result.text).toContain('套餐未返回额度数据')
-  expect(result.text).toContain('套餐到期')
-  expect(result.text).toContain('lite')
+  expect(result.dom.querySelector('[data-details]')?.getAttribute('data-details')).toContain('套餐到期')
+  expect(result.details).toContain('lite')
   expect(result.text).not.toContain('无法识别')
   expect(result.dom.querySelector('progress')).toBeNull()
   const compact = await text('show_compact', {}, 'en')
@@ -238,7 +287,7 @@ it('handles absent keys, invalid quota payloads and English UI', async () => {
   respond = defaultResponse
   const result = await text('refresh', {}, 'en')
   expect(result.text).toContain('Monthly remaining')
-  expect(result.text).toContain('Plan expires')
+  expect(result.dom.querySelector('[data-details]')?.getAttribute('data-details')).toContain('Plan expires')
 })
 it('bounds query time and kills hung commands', async () => {
   vi.useFakeTimers()
