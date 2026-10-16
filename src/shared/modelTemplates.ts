@@ -1,9 +1,9 @@
+import { normalizeProviderIconData } from './providerIcon'
 import { requireDataVersion } from './dataVersion'
 import rawModelTemplates from '../../data/config/model-templates.json'
 import {
   defaultModelProviderConfig,
   modelReservedParameterKeys,
-  requireModelListAuth,
   requireModelProtocol
 } from './modelConfig'
 import type { ModelProtocol, ModelProviderConfigSave } from './types'
@@ -34,10 +34,10 @@ export type ModelTemplateTreeNode = ModelTemplateGroupNode | ModelTemplateLeafNo
 
 const modelTemplateConfigKeys = new Set([
   'name',
+  'icon_data',
   'protocol',
   'base_url',
   'model_list_url',
-  'model_list_auth',
   'parameters'
 ])
 
@@ -88,10 +88,10 @@ function parseTemplateConfig(
     templateId,
     label,
     name: requireString(config.name, `${path}.name`),
+    iconData: normalizeProviderIconData(config.icon_data, `${path}.icon_data`),
     protocol: requireModelProtocol(config.protocol, `${path}.protocol`),
     baseUrl: requireString(config.base_url, `${path}.base_url`),
     modelListUrl: requireString(config.model_list_url, `${path}.model_list_url`),
-    modelListAuth: requireModelListAuth(config.model_list_auth, `${path}.model_list_auth`),
     apiKey: '',
     parameters
   }
@@ -158,6 +158,14 @@ export function getModelTemplate(templateId: string): ModelProviderTemplate | un
 
 function normalizeTemplateBaseUrl(baseUrl: string): string {
   return baseUrl.trim().replace(/\/+$/, '')
+}
+
+export function findModelTemplateIcon(baseUrl: string): string | undefined {
+  const normalizedBaseUrl = normalizeTemplateBaseUrl(baseUrl)
+  if (!normalizedBaseUrl) return undefined
+  return modelTemplates.find((template) => (
+    normalizeTemplateBaseUrl(template.baseUrl) === normalizedBaseUrl
+  ))?.iconData || undefined
 }
 
 export function findModelTemplate(protocol: ModelProtocol, baseUrl: string): ModelProviderTemplate | undefined {

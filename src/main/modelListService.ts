@@ -1,13 +1,13 @@
 import { getModelProviderConfig } from './config/appConfig'
 import { resolveModelApiKey } from './config/apiKeys'
 import { readModelListCache, writeModelListCache } from './modelListCache'
-import { requireModelListAuth, requireModelProtocol } from '@shared/modelConfig'
+import { requireModelProtocol } from '@shared/modelConfig'
 import { resolveModelListEndpoint } from '@shared/modelListEndpoint'
-import type { ModelListAuth, ModelListRequest, ModelListResponse, ModelProviderConfig } from '@shared/types'
+import type { ModelListRequest, ModelListResponse, ModelProviderConfig } from '@shared/types'
 
-function modelListHeaders(auth: ModelListAuth, apiKey: string | undefined): Record<string, string> {
+function modelListHeaders(endpoint: string, apiKey: string | undefined): Record<string, string> {
   if (!apiKey) return {}
-  if (auth === 'anthropic') {
+  if (new URL(endpoint).hostname === 'api.anthropic.com') {
     return {
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01'
@@ -21,7 +21,6 @@ function modelListHeaders(auth: ModelListAuth, apiKey: string | undefined): Reco
 interface ModelListRequestRuntime {
   endpoint: string
   apiKey: string | undefined
-  auth: ModelListAuth
 }
 
 async function modelListRequestRuntime(request: ModelListRequest): Promise<ModelListRequestRuntime> {
@@ -34,7 +33,6 @@ async function modelListRequestRuntime(request: ModelListRequest): Promise<Model
     modelListUrl: request.modelListUrl === undefined
       ? existing?.modelListUrl ?? ''
       : request.modelListUrl.trim(),
-    modelListAuth: requireModelListAuth(request.modelListAuth, 'modelList.modelListAuth'),
     apiKey: request.apiKey?.trim() || existing?.apiKey,
     parameters: existing?.parameters ?? {},
     models: existing?.models ?? []
@@ -42,7 +40,7 @@ async function modelListRequestRuntime(request: ModelListRequest): Promise<Model
   if (!provider.baseUrl) throw new Error('Base URL is required.')
   const endpoint = resolveModelListEndpoint(provider.baseUrl, provider.modelListUrl)
   const apiKey = resolveModelApiKey(provider)
-  return { endpoint, apiKey, auth: provider.modelListAuth }
+  return { endpoint, apiKey }
 }
 
 function modelListItems(value: unknown): unknown[] {
@@ -70,11 +68,11 @@ export async function getCachedAvailableModels(request: ModelListRequest): Promi
 }
 
 export async function fetchAvailableModels(request: ModelListRequest): Promise<ModelListResponse> {
-  const { endpoint, apiKey, auth } = await modelListRequestRuntime(request)
+  const { endpoint, apiKey } = await modelListRequestRuntime(request)
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 10000)
   try {
-    const headers = modelListHeaders(auth, apiKey)
+    const headers = modelListHeaders(endpoint, apiKey)
     const response = await fetch(endpoint, { headers, signal: controller.signal })
     const text = await response.text()
     if (!response.ok) throw new Error(`HTTP ${response.status}: ${text.slice(0, 240)}`)

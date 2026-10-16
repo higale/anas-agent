@@ -241,7 +241,7 @@ function renderWidget(content, language, displayMode) {
     <img class="ui-busy-icon" src="assets/refresh.svg" alt="">
   </button>`
   const extraActions = (content.actions ?? []).map(action => `<button class="ui-button" data-action="${escapeHtml(action.id)}">${escapeHtml(action.label)}</button>`).join('')
-  const controls = extraActions || content.installLink ? `<div class="ui-row ui-row-tight">${extraActions}${content.installLink ? `<a href="https://github.com/modelstudioai/cli#installation">${zh ? '安装说明' : 'Installation guide'}</a>` : ''}</div>` : ''
+  const controls = extraActions || content.installLink ? `<div class="ui-row ui-row-tight${extraActions ? ' ui-row-center' : ''}">${extraActions}${content.installLink ? `<a href="https://github.com/modelstudioai/cli#installation">${zh ? '安装说明' : 'Installation guide'}</a>` : ''}</div>` : ''
   const notes = (content.notes ?? []).map(note => `<small class="ui-field-hint">${escapeHtml(note)}</small>`).join('')
   if (displayMode === 'compact') {
     const details = [content.title, ...(content.notes ?? []), ...content.lines.map(line => [line.label + ' ' + line.value, line.description, line.detail?.replace(': ', ':\n'), ...(line.breakdown ?? []).map(item => `${item.label}: ${item.value}`)].filter(Boolean).join('\n')),

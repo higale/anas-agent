@@ -20,7 +20,7 @@ const model = {
 describe('draft model selection', () => {
   const providers: ModelProviderConfig[] = [{
     id: 'provider', name: 'Provider', protocol: 'openai_chat_completions',
-    baseUrl: 'https://example.com/v1', modelListUrl: '', modelListAuth: 'bearer', parameters: {},
+    baseUrl: 'https://example.com/v1', modelListUrl: '', parameters: {},
     models: [{
       ...defaultModelConfig, ...model, id: 'project-model', index: 0,
       displayName: 'Project Model', parameterPresetMode: 'custom'

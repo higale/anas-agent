@@ -25,12 +25,22 @@ async function verifyProjectModelPicker(launchApplication) {
       const api = globalThis.gale.config
       await api.updateSettings({ language: 'en' })
       const config = await api.saveModelProvider({ name: 'Scroll test', protocol: 'openai_chat_completions',
-        baseUrl: 'https://model-test.invalid/v1', apiKey: '', parameters: {}, modelListAuth: 'bearer' })
+        baseUrl: 'https://model-test.invalid/v1', apiKey: '', parameters: {} })
       const providerId = config.providers.find((provider) => provider.name === 'Scroll test').id
       for (let index = 0; index < 40; index++) {
         await api.saveProviderModel({ providerId, displayName: `Model ${index}`, model: `model-${index}`, parameters: {},
           parameterPresetMode: 'custom', parameterPresets: Array.from({ length: 40 }, (_, i) => ({ id: `preset-${i}`, name: `Preset ${i}`, parameters: { temperature: 1 } })),
           capabilities: { vision: true, toolUse: true }, stream: true, maxContextTokens: 128000, maxOutputTokens: 16000,
+          contextCompressionThreshold: 0.8, contextCompressionEnabled: true })
+      }
+      for (let index = 0; index < 9; index++) {
+        const name = `Provider ${index}`
+        const saved = await api.saveModelProvider({ name, protocol: 'openai_chat_completions',
+          baseUrl: 'https://model-test.invalid/v1', apiKey: '', parameters: {} })
+        const providerId = saved.providers.find((provider) => provider.name === name).id
+        await api.saveProviderModel({ providerId, displayName: name, model: `provider-model-${index}`, parameters: {},
+          parameterPresetMode: 'none', parameterPresets: [], capabilities: { vision: true, toolUse: true },
+          stream: true, maxContextTokens: 128000, maxOutputTokens: 16000,
           contextCompressionThreshold: 0.8, contextCompressionEnabled: true })
       }
     })
@@ -66,10 +76,25 @@ async function verifyProjectModelPicker(launchApplication) {
     await page.locator('.project-thread-group[data-default-workspace] .project-thread-more').click()
     await page.locator('.project-details-action').filter({ hasText: 'Edit' }).click()
     await dialog.getByRole('button', { name: 'Select model', exact: true }).click()
-    const list = page.locator('.composer-model-options')
+    const list = page.locator('.composer-model-models')
+    const providers = page.locator('.composer-model-providers')
     await expect(list).toBeVisible()
     const menu = page.locator('.composer-model-menu')
     await expectInsideWindow(menu)
+    async function expectProviderLayout() {
+      await expect.poll(() => providers.evaluate((element) => Array.from(element.children).every((item) => {
+        const row = item.getBoundingClientRect()
+        const content = item.querySelector('.model-list-item-main').getBoundingClientRect()
+        return content.top >= row.top && content.bottom <= row.bottom
+      })), { message: 'Two-line provider content must fit inside each row instead of being compressed' }).toBe(true)
+      await expect.poll(() => providers.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+    }
+    await expectProviderLayout()
+    const modelsScroll = await list.evaluate((element) => element.scrollTop)
+    await providers.hover()
+    await page.mouse.wheel(0, 400)
+    await expect.poll(() => providers.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+    await expect(list).toHaveJSProperty('scrollTop', modelsScroll)
     const body = dialog.locator('.ui-dialog-body')
     const bodyScroll = await body.evaluate((element) => element.scrollTop)
     await expect.poll(() => list.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
@@ -123,6 +148,7 @@ async function verifyProjectModelPicker(launchApplication) {
     await page.locator('.project-details-action').filter({ hasText: 'Edit' }).click()
     await dialog.getByRole('button', { name: 'Select model', exact: true }).click()
     await expectInsideWindow(menu)
+    await expectProviderLayout()
     await page.getByRole('menuitem', { name: 'Scroll test', exact: true }).click()
     await expectInsideWindow(menu)
     await page.getByRole('menuitem', { name: 'Scroll test', exact: true }).click()

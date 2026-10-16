@@ -63,7 +63,7 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
       const api = globalThis.gale
       await api.config.updateSettings({ language: 'en', theme: 'dark' })
       await api.plugins.install()
-      const saved = await api.config.saveModelProvider({ name: 'Plugin test', protocol: 'openai_chat_completions', baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: '', parameters: {}, modelListAuth: 'bearer' })
+      const saved = await api.config.saveModelProvider({ name: 'Plugin test', protocol: 'openai_chat_completions', baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: '', parameters: {} })
       const providerId = saved.providers.find(provider => provider.name === 'Plugin test').id
       const configured = await api.config.saveProviderModel({ providerId, displayName: 'Plugin test', model: 'plugin-test', parameters: {}, parameterPresetMode: 'none', parameterPresets: [],
         capabilities: { vision: true, toolUse: true }, stream: false, maxContextTokens: 128000, maxOutputTokens: 1000,

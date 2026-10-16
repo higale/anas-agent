@@ -15,7 +15,6 @@ describe('model list URL popover', () => {
     render(
       <ModelListUrlPopover
         baseUrl="https://example.com/v1"
-        modelListAuth="bearer"
         modelListUrl=""
         onChange={vi.fn()}
         protocol="openai_chat_completions"
@@ -28,13 +27,12 @@ describe('model list URL popover', () => {
       .toBeInTheDocument()
   })
 
-  it('changes the authentication used to fetch model lists', async () => {
+  it('commits a custom model list URL', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()
     render(
       <ModelListUrlPopover
         baseUrl="https://example.com/v1"
-        modelListAuth="bearer"
         modelListUrl="{base_url}/models"
         onChange={onChange}
         protocol="openai_chat_completions"
@@ -42,23 +40,21 @@ describe('model list URL popover', () => {
     )
 
     await user.click(screen.getByRole('button', { name: 'settings.edit_model_list_settings' }))
-    expect(screen.getByText('settings.model_list_auth_hint')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'settings.model_list_auth' }))
-    await user.click(screen.getByRole('option', { name: 'settings.model_list_auth_anthropic' }))
+    const input = screen.getByRole('textbox', { name: 'settings.model_list_url' })
+    await user.clear(input)
+    await user.type(input, 'https://catalog.example.com/models{Enter}')
 
     expect(onChange).toHaveBeenCalledWith({
-      modelListAuth: 'anthropic',
-      modelListUrl: '{base_url}/models'
+      modelListUrl: 'https://catalog.example.com/models'
     })
   })
 
-  it('restores both the URL and authentication from a matching template', async () => {
+  it('restores the model list URL from a matching template', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()
     render(
       <ModelListUrlPopover
         baseUrl="https://api.anthropic.com"
-        modelListAuth="bearer"
         modelListUrl="/custom-models"
         onChange={onChange}
         protocol="anthropic_messages"
@@ -69,7 +65,6 @@ describe('model list URL popover', () => {
     await user.click(screen.getByRole('button', { name: 'settings.restore_template_model_list_settings' }))
 
     expect(onChange).toHaveBeenCalledWith({
-      modelListAuth: 'anthropic',
       modelListUrl: 'https://api.anthropic.com/v1/models'
     })
   })

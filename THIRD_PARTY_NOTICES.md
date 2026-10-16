@@ -5,6 +5,7 @@
 Anas 使用 `LICENSE` 中的 MIT 协议。第三方代码和资源保留各自的版权和协议。
 
 - OpenAI Codex：Skill 目录指导内容依据 Apache-2.0 使用，协议和署名位于 `data/licenses/codex/`。
+- 供应商品牌图标：来源、修改说明及协议见 [图标声明](data/licenses/provider-icons/README.md)。
 - node-edge-tts：内置语音代码的署名和 MIT 协议位于 `data/licenses/node-edge-tts.txt`。
 - `patches/` 中的依赖补丁会修改对应的上游包；重新分发时须保留这些包的协议声明。
 
@@ -17,6 +18,7 @@ Anas 使用 `LICENSE` 中的 MIT 协议。第三方代码和资源保留各自�
 Anas is licensed under the MIT License in `LICENSE`. Third-party code and assets retain their own copyrights and licenses.
 
 - OpenAI Codex: Skill catalog guidance is used under Apache-2.0. The license and attribution are in `data/licenses/codex/`.
+- Provider brand icons: sources, modifications, and licenses are listed in the [icon notices](data/licenses/provider-icons/README.md).
 - node-edge-tts: bundled speech code attribution and MIT license are in `data/licenses/node-edge-tts.txt`.
 - Dependency patches in `patches/` modify the corresponding upstream packages; retain those packages' license notices when redistributing them.
 

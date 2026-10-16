@@ -23,7 +23,7 @@ export const filePatchLinePrefixInstructions = [
   'Put each content line\'s patch prefix in column 1, BEFORE its original indentation. The prefix is not part of the file content.',
   'Add File: EVERY content line must start with +, including comments and blank lines. An added blank line is + alone. Never paste unprefixed source code after an Add File header.',
   'For an added source line that itself starts with +, add another +: source +value becomes patch ++value. Preserve all source indentation after the patch prefix.',
-  'Update File: use a space for unchanged context, - for removed lines, and + for added lines; blank content lines also need the corresponding prefix.',
+  'Update File: use a space for unchanged context, - for removed lines, and + for added lines. A blank context line is " ", a removed blank line is "-", and an added blank line is "+". Do not insert empty separator lines between blocks.',
   'Do not add content prefixes to patch control lines such as *** Begin Patch, *** Add File:, @@, or *** End Patch.'
 ].join('\n')
 
@@ -32,10 +32,11 @@ export const filePatchSchema = z.object({
   patch: z.string().min(1).max(maxFilePatchBatchBytes).describe([
     '*** Begin Patch / *** End Patch document with Add, Update, Delete File sections. Use @@ context blocks without numeric line ranges; copy exact, unique source context.',
     filePatchLinePrefixInstructions,
-    'Example creating three lines (text, an empty line, and text starting with a literal +):',
-    '*** Begin Patch\n*** Add File: example.txt\n+First line\n+\n++literal plus\n*** End Patch'
+    'Minimal update example (replace one complete line):',
+    '*** Begin Patch\n*** Update File: example.txt\n@@\n-old text\n+new text\n*** End Patch',
+    'The patch value contains real line breaks (JSON encodes them as \\n). Do not double-escape line breaks or wrap the patch in Markdown fences.'
   ].join('\n')),
-  dry_run: z.boolean().optional()
+  dry_run: z.boolean().optional().describe('Set true to validate and preview the diff without changing files. Omit or set false to apply.')
 }).strict()
 
 // Private transaction plan, not an alternate model-facing input format.

@@ -7,7 +7,6 @@ import {
   mergeModelParameters,
   modelContextKey,
   modelReservedParameterKeys,
-  requireModelListAuth,
   requireModelParameterPresetMode,
   requireModelProtocol,
   resolveProviderModelConfig
@@ -56,7 +55,6 @@ describe('selectable model configuration', () => {
       model: 'shadow',
       max_tokens: 99,
       maxRetries: 5,
-      model_list_auth: 'anthropic',
       parameterPresetMode: 'custom',
       stream: false
     })).toEqual([
@@ -64,7 +62,6 @@ describe('selectable model configuration', () => {
       'maxRetries',
       'max_tokens',
       'model',
-      'model_list_auth',
       'parameterPresetMode',
       'stream'
     ])
@@ -83,13 +80,6 @@ describe('selectable model configuration', () => {
       function_call: { name: 'unregistered_tool' },
       temperature: 0.2
     })).toEqual(['function_call', 'functions'])
-  })
-
-  it('strictly validates model-list authentication modes', () => {
-    expect(requireModelListAuth('bearer', 'provider.modelListAuth')).toBe('bearer')
-    expect(requireModelListAuth('anthropic', 'provider.modelListAuth')).toBe('anthropic')
-    expect(() => requireModelListAuth(undefined, 'provider.modelListAuth')).toThrow('provider.modelListAuth')
-    expect(() => requireModelListAuth('api-key', 'provider.modelListAuth')).toThrow('"bearer" or "anthropic"')
   })
 
   it('accepts only the three explicit model protocols', () => {
@@ -162,7 +152,6 @@ describe('selectable model configuration', () => {
       protocol: 'openai_chat_completions',
       baseUrl: 'https://example.com/v1',
       modelListUrl: '',
-      modelListAuth: 'bearer',
       parameters: { reasoning_split: true },
       models: []
     }, {
@@ -193,7 +182,6 @@ describe('selectable model configuration', () => {
       protocol: 'openai_chat_completions',
       baseUrl: 'https://example.com/v1',
       modelListUrl: '',
-      modelListAuth: 'bearer',
       parameters: {},
       models: []
     }, {
@@ -228,7 +216,6 @@ describe('selectable model configuration', () => {
       protocol: 'openai_chat_completions',
       baseUrl: 'https://example.com/v1',
       modelListUrl: '',
-      modelListAuth: 'bearer',
       parameters: {
         reasoning_split: true,
         thinking: { type: 'adaptive', budget: 2048 },
@@ -276,7 +263,6 @@ describe('selectable model configuration', () => {
       protocol: 'openai_responses' as const,
       baseUrl: 'https://example.com/v1',
       modelListUrl: '',
-      modelListAuth: 'bearer' as const,
       parameters: { tools: [{ type: 'web_search' }] },
       models: []
     }

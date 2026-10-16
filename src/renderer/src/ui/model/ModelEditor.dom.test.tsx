@@ -18,7 +18,6 @@ function providerForDraft(draft: ModelDraft): ModelProviderConfigDetail {
     protocol: draft.protocol,
     baseUrl: draft.baseUrl,
     modelListUrl: draft.modelListUrl,
-    modelListAuth: draft.modelListAuth,
     apiKey: draft.apiKey,
     parameters: JSON.parse(draft.providerParametersJson || '{}') as Record<string, unknown>,
     models: [{
@@ -744,7 +743,6 @@ describe('model token controls', () => {
       protocol: 'anthropic_messages' as const,
       baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic',
       modelListUrl: '',
-      modelListAuth: 'anthropic' as const
     }
     render(
       <ModelEditor
@@ -763,7 +761,6 @@ describe('model token controls', () => {
     await user.click(screen.getByText('settings.restore_template_model_list_settings'))
 
     expect(onUpdateDraft).toHaveBeenCalledWith({
-      modelListAuth: 'bearer',
       modelListUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/models'
     })
   })

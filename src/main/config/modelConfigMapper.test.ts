@@ -14,7 +14,6 @@ function providerSave(overrides: Partial<ModelProviderConfigSave> = {}): ModelPr
     protocol: 'openai_chat_completions',
     baseUrl: 'https://example.com/v1',
     modelListUrl: '{base_url}/models',
-    modelListAuth: 'bearer',
     apiKey: '',
     parameters: {},
     ...overrides
@@ -51,6 +50,19 @@ function rawProvider(overrides: Partial<RawModelProviderConfig> = {}): RawModelP
 }
 
 describe('model provider configuration mapper', () => {
+  it('round-trips icons, preserves an omitted update, and supports explicit removal', () => {
+    const iconData = `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>').toString('base64')}`
+    const saved = rawModelProviderFromSave(providerSave({ iconData }), 'provider-id')
+    expect(saved.icon_data).toBe(iconData)
+    expect(normalizeModelProvider(saved, 0).iconData).toBe(iconData)
+    expect(rawModelProviderFromSave(providerSave(), 'provider-id', saved).icon_data).toBe(iconData)
+    expect(rawModelProviderFromSave(providerSave({ iconData: '' }), 'provider-id', saved).icon_data).toBe('')
+    delete saved.icon_data
+    expect(normalizeModelProvider(saved, 0).iconData).toBe('')
+    expect(() => rawModelProviderFromSave(providerSave({ iconData: 'https://example.test/icon.svg' }), 'provider-id'))
+      .toThrow('provider.iconData')
+  })
+
   it('maps provider connection fields independently from concrete models', () => {
     expect(rawModelProviderFromSave(providerSave(), 'provider-id')).toMatchObject({
       id: 'provider-id',
@@ -58,18 +70,21 @@ describe('model provider configuration mapper', () => {
       protocol: 'openai_chat_completions',
       base_url: 'https://example.com/v1',
       model_list_url: '{base_url}/models',
-      model_list_auth: 'bearer',
       api_key: '',
       parameters: {},
       models: []
     })
   })
 
-  it('persists and restores the explicit model-list authentication mode', () => {
-    expect(rawModelProviderFromSave(providerSave({ modelListAuth: 'anthropic' }), 'provider-id'))
-      .toMatchObject({ model_list_auth: 'anthropic' })
-    expect(normalizeModelProvider(rawProvider({ model_list_auth: 'anthropic' }), 0))
-      .toMatchObject({ modelListAuth: 'anthropic' })
+  it('reads a provider with retired authentication metadata and omits it on save', () => {
+    const existing = { ...rawProvider(), model_list_auth: 'anthropic' }
+    const provider = normalizeModelProvider(existing, 0)
+    expect(provider.baseUrl).toBe(existing.base_url)
+    expect(provider.models[0].model).toBe('example-model')
+    expect(provider).not.toHaveProperty('modelListAuth')
+    const saved = rawModelProviderFromSave(providerSave(), 'provider-id', existing)
+    expect(saved).not.toHaveProperty('model_list_auth')
+    expect(saved.models).toEqual(existing.models)
   })
 
   it('persists and restores provider-level parameters', () => {
@@ -93,22 +108,6 @@ describe('model provider configuration mapper', () => {
     })
   })
 
-  it('defaults a missing model-list authentication mode to Bearer', () => {
-    const missing = rawProvider()
-    delete missing.model_list_auth
-
-    expect(normalizeModelProvider(missing, 0)).toMatchObject({ modelListAuth: 'bearer' })
-  })
-
-  it('rejects invalid model-list authentication modes on read and save', () => {
-    expect(() => normalizeModelProvider(rawProvider({ model_list_auth: 'api-key' }), 0))
-      .toThrow('"bearer" or "anthropic"')
-    expect(() => rawModelProviderFromSave(
-      providerSave({ modelListAuth: 'api-key' as never }),
-      'provider-id'
-    )).toThrow('provider.modelListAuth')
-  })
-
   it('maps model-specific fields into a provider child', () => {
     expect(rawProviderModelFromSave(modelSave({
       parameterPresetMode: 'custom',
@@ -130,7 +129,6 @@ describe('model provider configuration mapper', () => {
   it('normalizes a provider hierarchy and resolves a runtime model', () => {
     const provider = normalizeModelProvider(rawProvider(), 0)
     expect(provider.models[0]).toMatchObject({ id: 'model-id', index: 0 })
-    expect(provider.modelListAuth).toBe('bearer')
     expect(resolveModelConfig(provider, provider.models[0])).toMatchObject({
       id: 'model-id',
       providerId: 'provider-id',

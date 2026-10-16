@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { spawnSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { chmod, mkdir, mkdtemp, open, readFile, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -45,6 +45,16 @@ async function fixture(external = false) {
 
 // These integration cases fsync both forward and reverse records repeatedly.
 describe('internal batch reverse execution', { timeout: 20_000 }, () => {
+  it.skipIf(process.platform !== 'darwin')('restores a recorded edit after an xattr-only metadata change', async () => {
+    const value = await fixture(), path = join(value.workspace, 'old.txt')
+    execFileSync('/usr/bin/xattr', ['-w', 'com.anas.test', 'metadata', path])
+    const preview = await value.store.previewPatchRestore(value.operationId, value.requestId, async () => {})
+    expect(preview.status).toBe('ready')
+    const result = await value.store.restorePatch(value.operationId, value.requestId, randomUUID(), async () => {}, { operationId: randomUUID() })
+    expect(result?.transaction.state).toBe('applied')
+    expect(await readFile(path, 'utf8')).toBe('old.txt\r\n')
+  })
+
   it('restores update/create/delete/move as a separate durable operation and retains both records', async () => {
     const value = await fixture()
     const requestId = randomUUID(), operationId = randomUUID()

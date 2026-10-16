@@ -548,7 +548,7 @@ async function verifyProjectModelSelection(electronApplication) {
     await api.updateSettings({ language: 'en', theme: 'dark', newThreadModelSelection: 'prompt' })
     const snapshot = await api.saveModelProvider({
       name: 'E2E Models', protocol: 'openai_chat_completions', baseUrl: 'https://model-test.invalid/v1',
-      apiKey: '', parameters: {}, modelListAuth: 'bearer'
+      apiKey: '', parameters: {}
     })
     const providerId = snapshot.providers.find((provider) => provider.name === 'E2E Models').id
     let config

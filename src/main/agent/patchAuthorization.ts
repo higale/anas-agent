@@ -91,7 +91,7 @@ export function createPatchAuthorizationMiddleware(options: {
               locator: target.locator, kind: target.kind ?? 'file', access: target.access })) })
         } catch (error) {
           calls.push({ id: call.id!, name: call.name, inputHash: hashArgs(call.args), targets: [], requiresApproval: false, humanApproved: false,
-            error: `NOT EXECUTED: ${String(error)}. Inspect the operation and decide again.` })
+            error: `NOT EXECUTED: ${error instanceof Error ? error.message : String(error)}\nInspect the operation and decide again.` })
         }
       }
       return { anasPatchAuthorization: { runId: options.runId, calls } }
@@ -99,8 +99,11 @@ export function createPatchAuthorizationMiddleware(options: {
     wrapToolCall: async (request, handler) => {
       if (!isFileEditTool(request.toolCall.name)) return handler(request)
       const receipt = patchAuthorizationFor(request.state, request.toolCall, options.runId)
+      // Preparation already produced a complete diagnostic. Preserve it across
+      // checkpoint resume instead of throwing and wrapping it a second time.
+      if (receipt?.error) return new ToolMessage({ name: request.toolCall.name, tool_call_id: request.toolCall.id!, status: 'error', content: receipt.error })
       try {
-        if (!receipt || receipt.error) throw new Error(receipt?.error ?? 'Missing checkpointed patch authorization.')
+        if (!receipt) throw new Error('Missing checkpointed patch authorization.')
         const current = await prepareToolPathAuthorization({ toolName: request.toolCall.name, args: structuredClone(request.toolCall.args),
           primaryFolder: options.primaryFolder, trustedFolders: options.folders, accessMode: options.accessMode(),
           requestId: options.runId, fileEditStore: options.fileEditStore })
@@ -118,7 +121,7 @@ export function createPatchAuthorizationMiddleware(options: {
           index, semantics: 'entry', access: target.access })), receipt.targets)
       } catch (error) {
         return new ToolMessage({ name: request.toolCall.name, tool_call_id: request.toolCall.id!, status: 'error',
-          content: `NOT EXECUTED: ${String(error)}. Inspect current targets and decide again.` })
+          content: `NOT EXECUTED: ${error instanceof Error ? error.message : String(error)}\nInspect current targets and decide again.` })
       }
       return approvedTargets.run(receipt!.targets, () => handler(request))
     }

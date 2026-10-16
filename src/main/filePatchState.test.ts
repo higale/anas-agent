@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -19,6 +20,33 @@ afterEach(async () => {
 })
 
 describe('patch target preimages', () => {
+  it.skipIf(process.platform !== 'darwin')('accepts xattr-only metadata changes without accepting different content', async () => {
+    const root = await directory(), path = join(root, 'file.txt')
+    await writeFile(path, 'before')
+    const resolved = await resolveFilePatchTargets(asPatchInput({ operations: [{ type: 'delete', path }] }), root)
+    const preimages = await captureFilePatchPreimages(resolved.targets)
+    execFileSync('/usr/bin/xattr', ['-w', 'com.anas.test', 'metadata', path])
+    expect(String((await lstat(path, { bigint: true })).ctimeNs)).not.toBe(preimages[0].identity!.changedNs)
+    await expect(verifyFilePatchPreimages(preimages)).resolves.toBeUndefined()
+    await writeFile(path, 'AFTER!')
+    await expect(verifyFilePatchPreimages(preimages)).rejects.toThrow('changed')
+  })
+
+  it('rejects changed text even when size, inode and modification time are unchanged', async () => {
+    const root = await directory(), path = join(root, 'file.txt'), timestamp = 1_700_000_000
+    await writeFile(path, 'before')
+    await utimes(path, timestamp, timestamp)
+    const resolved = await resolveFilePatchTargets(asPatchInput({ operations: [{ type: 'delete', path }] }), root)
+    const preimages = await captureFilePatchPreimages(resolved.targets)
+    await writeFile(path, 'AFTER!')
+    await utimes(path, timestamp, timestamp)
+    const current = await lstat(path, { bigint: true })
+    expect(String(current.ino)).toBe(preimages[0].identity!.inode)
+    expect(Number(current.size)).toBe(preimages[0].identity!.size)
+    expect(String(current.mtimeNs)).toBe(preimages[0].identity!.modifiedNs)
+    await expect(verifyFilePatchPreimages(preimages)).rejects.toThrow('changed')
+  })
+
   it('captures existing/absent targets and preserves BOM, hash, permissions and file identity', async () => {
     const root = await directory()
     const text = '\ufeff中文\r\n原文\r\n'

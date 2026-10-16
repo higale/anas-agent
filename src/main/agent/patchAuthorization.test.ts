@@ -64,6 +64,40 @@ async function fixture() {
 }
 
 describe('checkpointed batch path authorization', () => {
+  it('returns one actionable syntax error without writing any file in the batch', async () => {
+    const value = await fixture(), existing = join(value.workspace, 'existing.txt'), created = join(value.workspace, 'new.txt')
+    await writeFile(existing, 'old\n')
+    const prefix = '*** Begin Patch\n*** Add File: new.txt\n+created\n*** Update File: existing.txt\n@@\n'
+    const malformed = { id: 'malformed', name: 'apply_patch', args: { patch: prefix + 'old\n+new\n*** End Patch' } }
+    const result = await value.agent([malformed]).invoke({ messages: [new HumanMessage('Update the files')] }, value.config)
+    const output = result.messages.filter(ToolMessage.isInstance).at(-1)!
+    expect(output.status).toBe('error')
+    expect(output.text.match(/NOT EXECUTED:/g)).toHaveLength(1)
+    expect(output.text).not.toContain('Error:')
+    expect(output.text).toContain('File "existing.txt": Patch line 6:')
+    expect(output.text).toContain('received "old"')
+    expect(output.text).toContain('- before removed text')
+    expect(await readFile(existing, 'utf8')).toBe('old\n')
+    expect(await pathExists(created)).toBe(false)
+    expect(await value.fileEditStore.listEditRecordsForRequest(value.run.id)).toHaveLength(0)
+  })
+
+  it('accepts a model correction after a syntax error in the same conversation', async () => {
+    const value = await fixture(), existing = join(value.workspace, 'existing.txt')
+    await writeFile(existing, 'old\n')
+    const patch = '*** Begin Patch\n*** Update File: existing.txt\n@@\nold\n+new\n*** End Patch'
+    const malformed = { id: 'malformed', name: 'apply_patch', args: { patch } }
+    const corrected = { id: 'corrected', name: 'apply_patch', args: { patch: patch.replace('\nold\n', '\n-old\n') } }
+    const completed = await value.agent([malformed], false, 'read_only_allowed', { nextCalls: [corrected] })
+      .invoke({ messages: [new HumanMessage('Update the file')] }, value.config)
+    const outputs = completed.messages.filter(ToolMessage.isInstance)
+    expect(outputs).toHaveLength(2)
+    expect(outputs[0]).toMatchObject({ tool_call_id: 'malformed', status: 'error' })
+    expect(outputs[1].text).toContain('"ok":true')
+    expect(await readFile(existing, 'utf8')).toBe('new\n')
+    expect(await value.fileEditStore.listEditRecordsForRequest(value.run.id)).toHaveLength(1)
+  })
+
   it('preserves withheld automatic and approved calls when another action is rejected after reopening SQLite', async () => {
     const value = await fixture()
     const paths = [join(value.workspace, 'inside.txt'), join(value.outside, 'first.txt'), join(value.outside, 'second.txt')]

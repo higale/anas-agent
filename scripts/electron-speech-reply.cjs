@@ -66,7 +66,7 @@ async function verifySpeechReply(launchApplication) {
     await page.evaluate(async ({ port, home }) => {
       const api = globalThis.gale.config
       const saved = await api.saveModelProvider({ name: 'Speech test', protocol: 'openai_chat_completions',
-        baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: '', parameters: {}, modelListUrl: '', modelListAuth: 'bearer' })
+        baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: '', parameters: {}, modelListUrl: '' })
       const providerId = saved.providers.find(provider => provider.name === 'Speech test').id
       const config = await api.saveProviderModel({ providerId, displayName: 'Speech test', model: 'speech-test',
         parameters: {}, parameterPresetMode: 'none', capabilities: { vision: false, toolUse: true }, stream: true,

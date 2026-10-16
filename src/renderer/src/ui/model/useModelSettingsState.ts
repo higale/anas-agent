@@ -21,11 +21,11 @@ import { useCachedModelCandidates } from './useCachedModelCandidates'
 import { useModelCandidateRefresh } from './useModelCandidateRefresh'
 
 type ProviderDraftFields = Pick<ModelDraft,
-  'name' | 'protocol' | 'baseUrl' | 'modelListUrl' | 'modelListAuth' | 'apiKey' | 'providerParametersJson'>
+  'name' | 'iconData' | 'protocol' | 'baseUrl' | 'modelListUrl' | 'apiKey' | 'providerParametersJson'>
 
 function providerDraftFields(draft: ModelDraft): ProviderDraftFields {
-  const { name, protocol, baseUrl, modelListUrl, modelListAuth, apiKey, providerParametersJson } = draft
-  return { name, protocol, baseUrl, modelListUrl, modelListAuth, apiKey, providerParametersJson }
+  const { name, iconData, protocol, baseUrl, modelListUrl, apiKey, providerParametersJson } = draft
+  return { name, iconData, protocol, baseUrl, modelListUrl, apiKey, providerParametersJson }
 }
 
 interface UseModelSettingsStateOptions {
@@ -247,7 +247,6 @@ export function useModelSettingsState({
       || update.protocol !== undefined
       || update.baseUrl !== undefined
       || update.modelListUrl !== undefined
-      || update.modelListAuth !== undefined
       || update.apiKey !== undefined
     if (modelCandidateSourceUpdate) setModelCandidates([])
     modelDraftRef.current = nextDraft

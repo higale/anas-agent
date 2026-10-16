@@ -75,7 +75,7 @@ async function verifyModelSelection(launchApplication) {
     const selection = await page.evaluate(async (port) => {
       const api = globalThis.gale.config
       const saved = await api.saveModelProvider({ name: 'Controlled model server', protocol: 'openai_chat_completions',
-        baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: '', parameters: {}, modelListUrl: '', modelListAuth: 'bearer' })
+        baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: '', parameters: {}, modelListUrl: '' })
       const providerId = saved.providers.find(provider => provider.name === 'Controlled model server').id
       let config
       for (const [index, name] of ['A', 'B'].entries()) {

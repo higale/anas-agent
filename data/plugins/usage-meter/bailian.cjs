@@ -201,7 +201,7 @@ function createBailian() {
         if (!validNumber(used)) throw fault('response')
         const remaining = Math.max(0, 1 - used)
         const reset = date(data.usage[prefix + 'ResetTime'], language)
-        lines.push({ label: `${label} ${t.remaining}`, compactLabel: short, value: `${Number((remaining * 100).toFixed(1))}%`, progress: remaining,
+        lines.push({ label: `${label} ${t.remaining}`, compactLabel: short, value: `${(remaining * 100).toFixed(2)}%`, progress: remaining,
           ...(reset ? { description: `${t.reset}: ${reset}` } : {}) })
       }
       const sub = data.subscription

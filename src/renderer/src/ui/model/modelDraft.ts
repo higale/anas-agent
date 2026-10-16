@@ -7,7 +7,6 @@ import {
 } from '@shared/modelConfig'
 import type {
   ModelCapabilities,
-  ModelListAuth,
   ModelParameterPreset,
   ModelListRequest,
   ModelParameterPresetMode,
@@ -30,10 +29,10 @@ export interface ModelDraft {
   modelConfigId?: string
   modelIndex?: number
   name: string
+  iconData: string
   protocol: ModelProtocol
   baseUrl: string
   modelListUrl: string
-  modelListAuth: ModelListAuth
   apiKey: string
   providerParametersJson: string
   displayName: string
@@ -59,10 +58,10 @@ export interface ModelParameterPresetDraft {
 export function emptyModelDraft(): ModelDraft {
   return {
     name: '',
+    iconData: '',
     protocol: 'openai_chat_completions',
     baseUrl: '',
     modelListUrl: '',
-    modelListAuth: 'bearer',
     apiKey: '',
     providerParametersJson: Object.keys(defaultModelProviderConfig.parameters).length > 0
       ? JSON.stringify(defaultModelProviderConfig.parameters, null, 2)
@@ -95,10 +94,10 @@ export function modelConfigToDraft(
     modelConfigId: model.id,
     modelIndex: model.index,
     name: provider.name,
+    iconData: provider.iconData ?? '',
     protocol: provider.protocol,
     baseUrl: provider.baseUrl,
     modelListUrl: provider.modelListUrl,
-    modelListAuth: provider.modelListAuth,
     apiKey: provider.apiKey ?? '',
     providerParametersJson: Object.keys(provider.parameters).length > 0
       ? JSON.stringify(provider.parameters, null, 2)
@@ -132,10 +131,10 @@ export function providerConfigToDraft(
     providerId: provider.id,
     providerIndex: provider.index,
     name: provider.name,
+    iconData: provider.iconData ?? '',
     protocol: provider.protocol,
     baseUrl: provider.baseUrl,
     modelListUrl: provider.modelListUrl,
-    modelListAuth: provider.modelListAuth,
     apiKey: provider.apiKey ?? '',
     providerParametersJson: Object.keys(provider.parameters).length > 0
       ? JSON.stringify(provider.parameters, null, 2)
@@ -147,10 +146,10 @@ export function modelTemplateToDraft(template: ModelProviderTemplate): ModelDraf
   return {
     ...emptyModelDraft(),
     name: template.name,
+    iconData: template.iconData ?? '',
     protocol: template.protocol,
     baseUrl: template.baseUrl,
     modelListUrl: template.modelListUrl,
-    modelListAuth: template.modelListAuth,
     apiKey: template.apiKey,
     providerParametersJson: Object.keys(template.parameters).length > 0
       ? JSON.stringify(template.parameters, null, 2)
@@ -210,10 +209,10 @@ export function buildProviderPayload(draft: ModelDraft): ModelProviderConfigSave
   return {
     id: draft.providerId,
     name: draft.name,
+    iconData: draft.iconData,
     protocol: draft.protocol,
     baseUrl: draft.baseUrl,
     modelListUrl: draft.modelListUrl,
-    modelListAuth: draft.modelListAuth,
     apiKey: draft.apiKey,
     parameters
   }
@@ -301,7 +300,6 @@ export function buildModelListRequest(draft: ModelDraft): ModelListRequest | und
     protocol: draft.protocol,
     baseUrl: draft.baseUrl,
     modelListUrl: draft.modelListUrl,
-    modelListAuth: draft.modelListAuth,
     apiKey: draft.apiKey.trim() || undefined
   }
 }

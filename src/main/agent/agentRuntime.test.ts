@@ -537,7 +537,7 @@ describe('AgentRuntime', () => {
     database = AgentDatabase.open(':memory:')
     const owner = database.createThread({ modelConfigId: 'parent-model' })
     const provider = { id: 'provider', name: 'Provider', index: 0, protocol: 'openai_chat_completions' as const,
-      baseUrl: 'https://example.com/v1', modelListUrl: '', modelListAuth: 'bearer' as const, parameters: {},
+      baseUrl: 'https://example.com/v1', modelListUrl: '', parameters: {},
       models: [{ ...structuredClone(defaultModelConfig), id: 'child-model', index: 0, model: 'child-model', displayName: 'Child model',
         parameterPresetMode: 'custom' as const, defaultParameterPresetId: 'careful',
         parameterPresets: [{ id: 'careful', name: 'Careful', parameters: { temperature: 0.1 } }] }] }

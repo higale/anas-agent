@@ -124,6 +124,31 @@ describe('context text patch', () => {
 })
 
 describe('patch operation contract and complete batch planning', () => {
+  it.each(['\n', '\r\n'])('reports absolute line numbers in a later moved file section (%j)', (newline) => {
+    const patch = ['*** Begin Patch', '*** Add File: first.txt', '+first', '*** Update File: second.txt',
+      '*** Move to: moved.txt', '@@', 'unprefixed content', '*** End Patch'].join(newline)
+    expect(() => parseFilePatch({ patch })).toThrow('File "second.txt": Patch line 7: Missing content prefix; received "unprefixed content"')
+  })
+
+  it.each([
+    ['*** Add File: file', ['plain text'], 3, 'put + before every content line'],
+    ['*** Add File: file', ['+text', ''], 4, 'an added blank line is "+"'],
+    ['*** Add File: file', [noNewline], 3, 'must follow an added content line'],
+    ['*** Update File: file', ['@@', '-old', '', '+new'], 5, 'A blank content line must be'],
+    ['*** Update File: file', ['@@', '-old', '+new', ''], 6, 'A blank content line must be'],
+    ['*** Update File: file', ['@@ -1 +1 @@', '-old', '+new'], 3, 'Do not calculate line numbers']
+  ] as const)('explains how to correct malformed content in %s %j', (header, body, line, hint) => {
+    const patch = ['*** Begin Patch', header, ...body, '*** End Patch'].join('\n')
+    expect(() => parseFilePatch({ patch })).toThrow(`Patch line ${line}:`)
+    expect(() => parseFilePatch({ patch })).toThrow(hint)
+  })
+
+  it('accepts explicitly prefixed blank lines and preserves their intended changes', () => {
+    const patch = ['*** Begin Patch', `*** Update File: ${path}`, '@@', ' heading', ' ', '-old', '+new', '+', '*** End Patch'].join('\n')
+    expect(planFilePatch(parseFilePatch({ patch }), new Map([[path, 'heading\n\nold\n']]))[0].afterText)
+      .toBe('heading\n\nnew\n\n')
+  })
+
   it.each(['', '\r'])('does not include CRLF patch framing in an unterminated added file %j', (suffix) => {
     const patch = ['*** Begin Patch', '*** Add File: file', '+new' + suffix, noNewline, '*** End Patch'].join('\r\n')
     expect(parseFilePatch({ patch }).operations).toEqual([{ type: 'create', path: 'file', content: 'new' + suffix }])

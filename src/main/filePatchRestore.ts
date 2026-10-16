@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { samePath } from './pathContainment'
 import { canonicalizeAbsolutePath } from './workspacePath'
 import { validatePatchTransaction, type FilePatchEditRecord } from './filePatchRecord'
-import { captureFilePatchPreimages, verifyFilePatchPreimages, type FilePatchPreimage } from './filePatchState'
+import { captureFilePatchPreimages, sameFilePatchIdentity, verifyFilePatchPreimages, type FilePatchPreimage } from './filePatchState'
 import type { FilePatchTarget } from './filePatch'
 import { executePreparedFilePatchTransaction, type FilePatchTransaction, type PersistFilePatchTransaction } from './filePatchTransaction'
 
@@ -74,7 +74,7 @@ async function resolveTargets(record: FilePatchEditRecord, signal?: AbortSignal)
 
 function matchesImage(current: FilePatchPreimage, expected: FilePatchPreimage): boolean {
   return current.text === expected.text && current.hash === expected.hash
-    && isDeepStrictEqual(current.identity, expected.identity) && isDeepStrictEqual(current.parent, expected.parent)
+    && sameFilePatchIdentity(current.identity, expected.identity) && isDeepStrictEqual(current.parent, expected.parent)
 }
 
 function restoreAction(entry: FilePatchTransaction['entries'][number], current: FilePatchPreimage,

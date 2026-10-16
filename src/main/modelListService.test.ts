@@ -24,7 +24,6 @@ describe('model list configuration', () => {
     await expect(getCachedAvailableModels({
       protocol: 'unknown' as never,
       baseUrl: 'https://example.com/v1',
-      modelListAuth: 'bearer'
     })).rejects.toThrow('modelList.protocol')
     expect(mocks.resolveModelApiKey).not.toHaveBeenCalled()
     expect(mocks.readModelListCache).not.toHaveBeenCalled()
@@ -43,7 +42,6 @@ describe('model list configuration', () => {
       protocol: 'openai_chat_completions',
       baseUrl: 'https://api.example.com/v1',
       modelListUrl: ' https://catalog.example.com/models ',
-      modelListAuth: 'bearer'
     })).resolves.toEqual({ models: ['example-model'] })
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -52,34 +50,33 @@ describe('model list configuration', () => {
     )
   })
 
-  it('uses Anthropic model-list authentication when the request explicitly selects it', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      text: async () => JSON.stringify({ data: [{ id: 'claude-example' }] })
-    })
-    vi.stubGlobal('fetch', fetchMock)
-    mocks.resolveModelApiKey.mockReturnValue('anthropic-secret')
-    mocks.readModelListCache.mockResolvedValue({ models: ['claude-example'] })
-
-    await fetchAvailableModels({
-      protocol: 'anthropic_messages',
-      baseUrl: 'https://api.anthropic.example',
-      modelListUrl: 'https://api.anthropic.example/v1/models',
-      modelListAuth: 'anthropic'
-    })
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://api.anthropic.example/v1/models',
-      expect.objectContaining({
-        headers: {
-          'x-api-key': 'anthropic-secret',
-          'anthropic-version': '2023-06-01'
-        }
+  it.each(['anthropic_messages', 'openai_chat_completions', 'openai_responses'] as const)(
+    'uses Anthropic headers for the official endpoint with %s', async (protocol) => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        text: async () => JSON.stringify({ data: [{ id: 'claude-example' }] })
       })
-    )
+      vi.stubGlobal('fetch', fetchMock)
+      mocks.resolveModelApiKey.mockReturnValue('anthropic-secret')
+      mocks.readModelListCache.mockResolvedValue({ models: ['claude-example'] })
+
+      await fetchAvailableModels({
+        protocol,
+        baseUrl: 'https://api.anthropic.com',
+      })
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://api.anthropic.com/v1/models',
+        expect.objectContaining({
+          headers: {
+            'x-api-key': 'anthropic-secret',
+            'anthropic-version': '2023-06-01'
+          }
+        })
+      )
   })
 
-  it('keeps Bearer authentication for an Anthropic-compatible provider that explicitly selects it', async () => {
+  it('keeps Bearer authentication for a third-party Anthropic-compatible provider', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       text: async () => JSON.stringify({ data: [{ id: 'third-party-model' }] })
@@ -92,7 +89,6 @@ describe('model list configuration', () => {
       protocol: 'anthropic_messages',
       baseUrl: 'https://api.third-party.example/anthropic',
       modelListUrl: 'https://api.third-party.example/v1/models',
-      modelListAuth: 'bearer'
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -101,18 +97,30 @@ describe('model list configuration', () => {
     )
   })
 
-  it('rejects a missing or invalid model-list authentication mode before selecting credentials', async () => {
-    await expect(getCachedAvailableModels({
-      protocol: 'openai_chat_completions',
-      baseUrl: 'https://example.com/v1',
-      modelListAuth: undefined as never
-    })).rejects.toThrow('modelList.modelListAuth')
-    await expect(getCachedAvailableModels({
-      protocol: 'openai_chat_completions',
-      baseUrl: 'https://example.com/v1',
-      modelListAuth: 'api-key' as never
-    })).rejects.toThrow('"bearer" or "anthropic"')
-    expect(mocks.resolveModelApiKey).not.toHaveBeenCalled()
+  it.each([
+    ['https://api.third-party.example/v1', 'https://api.anthropic.com/v1/models', true],
+    ['https://api.anthropic.com', 'https://catalog.example.com/models', false],
+    ['https://api.anthropic.com', 'https://api.anthropic.com.example/v1/models', false],
+    ['https://api.anthropic.com', 'https://example.com/api.anthropic.com/models', false],
+    ['https://api.anthropic.com', '{origin}/v1/models', true]
+  ] as const)('chooses headers from the resolved URL: %s → %s', async (baseUrl, modelListUrl, anthropic) => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ data: [{ id: 'example-model' }] })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    mocks.resolveModelApiKey.mockReturnValue('test-secret')
+    mocks.readModelListCache.mockResolvedValue({ models: ['example-model'] })
+
+    await fetchAvailableModels({ protocol: 'anthropic_messages', baseUrl, modelListUrl })
+
+    const endpoint = modelListUrl.replace('{origin}', new URL(baseUrl).origin)
+    expect(fetchMock).toHaveBeenCalledWith(endpoint, expect.objectContaining({
+      headers: anthropic
+        ? { 'x-api-key': 'test-secret', 'anthropic-version': '2023-06-01' }
+        : { Authorization: 'Bearer test-secret' }
+    }))
+    expect(mocks.writeModelListCache).toHaveBeenCalledWith(endpoint, 'test-secret', ['example-model'])
   })
 
   it('accepts a top-level model array while strictly ignoring entries without a non-empty string id', async () => {
@@ -133,7 +141,6 @@ describe('model list configuration', () => {
     await expect(fetchAvailableModels({
       protocol: 'openai_chat_completions',
       baseUrl: 'https://api.array.example/v1',
-      modelListAuth: 'bearer'
     })).resolves.toEqual({ models: ['first-model', 'second-model'] })
 
     expect(mocks.writeModelListCache).toHaveBeenCalledWith(
@@ -162,7 +169,6 @@ describe('model list configuration', () => {
       protocol: 'openai_chat_completions',
       baseUrl: 'https://api.x.ai/v1',
       modelListUrl: 'https://api.x.ai/v1/language-models',
-      modelListAuth: 'bearer'
     })).resolves.toEqual({ models: ['grok-example'] })
 
     expect(mocks.writeModelListCache).toHaveBeenCalledWith(

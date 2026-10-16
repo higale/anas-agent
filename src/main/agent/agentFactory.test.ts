@@ -264,7 +264,6 @@ function previewProvider(): ModelProviderConfigDetail {
     protocol: 'openai_chat_completions',
     baseUrl: 'http://127.0.0.1:1',
     modelListUrl: '',
-    modelListAuth: 'bearer',
     apiKey: 'test',
     parameters: {},
     models: [{

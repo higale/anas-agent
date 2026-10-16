@@ -1123,50 +1123,38 @@
   display: flex;
   flex-direction: column;
   gap: 0;
-  width: min(320px, calc(100vw - 24px));
+  width: min(560px, calc(100vw - 24px));
   max-height: min(440px, var(--radix-dropdown-menu-content-available-height));
+  overflow: hidden;
+}
+
+.composer-model-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: hidden;
 }
 
 .composer-model-options {
   display: grid;
-  flex: 1 1 auto;
+  grid-auto-rows: max-content;
+  align-content: start;
   gap: var(--ui-menu-gap, 3px);
+  min-width: 0;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-bottom: 2px;
 }
 
-.composer-model-provider-group {
-  display: grid;
-  gap: 1px;
+.composer-model-providers {
+  padding-right: 6px;
+  border-right: 1px solid var(--border-soft);
 }
 
-.composer-model-provider-label {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 5px 7px 2px 2px;
-  color: var(--text-secondary);
-}
-
-.composer-model-provider-chevron {
-  transition: transform 120ms ease;
-}
-
-.composer-model-provider-label[aria-expanded="true"] .composer-model-provider-chevron {
-  transform: rotate(90deg);
-}
-
-.composer-model-provider-label strong {
-  font-size: var(--font-size-small);
-}
-
-.composer-model-child {
-  padding-left: 32px;
+.composer-model-models {
+  padding-left: 6px;
 }
 
 .composer-model-menu > .ui-menu-separator {
@@ -1197,6 +1185,16 @@
   min-width: 0;
 }
 
+.composer-model-details {
+  --ui-row-gap: 6px;
+}
+
+.composer-model-capabilities {
+  --ui-row-gap: 4px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .composer-model-default-marker {
   display: inline-flex;
   flex: 0 0 auto;
@@ -1216,18 +1214,6 @@
   color: var(--text-muted);
   cursor: default;
   font-size: var(--font-size-small);
-}
-
-.composer-model-item strong {
-  display: block;
-  min-width: 0;
-  color: var(--text);
-  font-size: var(--font-size-ui);
-  font-weight: 650;
-}
-
-.composer-model-item[data-state="checked"] {
-  background: var(--list-item-active-bg);
 }
 
 .composer-access-trigger {

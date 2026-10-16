@@ -1,6 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { ModelListAuth } from '@shared/types'
 import { emptyModelDraft } from './modelDraft'
 import { useCachedModelCandidates } from './useCachedModelCandidates'
 
@@ -10,7 +9,7 @@ afterEach(() => {
 })
 
 describe('cached model candidates', () => {
-  it('clears and reloads candidates when model list authentication changes', async () => {
+  it('clears and reloads candidates when model list URL changes', async () => {
     let resolveAnthropic: ((value: { models: string[] }) => void) | undefined
     const getCachedModels = vi.fn()
       .mockResolvedValueOnce({ models: ['bearer-model'] })
@@ -23,19 +22,19 @@ describe('cached model candidates', () => {
       baseUrl: 'https://example.com/v1'
     }
     const { result, rerender } = renderHook(
-      ({ modelListAuth }: { modelListAuth: ModelListAuth }) => useCachedModelCandidates({
-        draft: { ...initialDraft, modelListAuth },
+      ({ modelListUrl }: { modelListUrl: string }) => useCachedModelCandidates({
+        draft: { ...initialDraft, modelListUrl },
         enabled: true
       }),
-      { initialProps: { modelListAuth: 'bearer' as ModelListAuth } }
+      { initialProps: { modelListUrl: 'https://example.com/v1/models' } }
     )
 
     await waitFor(() => expect(result.current[0]).toEqual(['bearer-model']))
-    rerender({ modelListAuth: 'anthropic' })
+    rerender({ modelListUrl: 'https://api.anthropic.com/v1/models' })
 
     await waitFor(() => expect(result.current[0]).toEqual([]))
     expect(getCachedModels).toHaveBeenLastCalledWith(expect.objectContaining({
-      modelListAuth: 'anthropic'
+      modelListUrl: 'https://api.anthropic.com/v1/models'
     }))
 
     await act(async () => resolveAnthropic?.({ models: ['claude-model'] }))

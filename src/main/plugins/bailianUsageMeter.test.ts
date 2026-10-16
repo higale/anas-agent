@@ -66,7 +66,7 @@ afterEach(() => { backend.deactivate(); vi.restoreAllMocks(); vi.unstubAllEnvs()
 
 it('shows monthly remaining quota, account and expiry without exposing credentials; caches and refreshes', async () => {
   const first = await text()
-  expect(first.text).toContain('35%')
+  expect(first.text).toContain('35.00%')
   expect(first.text).toContain('月 剩余')
   expect(first.text).toContain('套餐到期')
   expect(first.text).toContain('Readable account (account-1)')
@@ -79,6 +79,24 @@ it('shows monthly remaining quota, account and expiry without exposing credentia
   await text('refresh')
   expect(commands.filter(args => args.includes('zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/usage'))).toHaveLength(2)
 })
+it.each(['zh-CN', 'en'])('keeps two decimal places for quota text in detailed, compact and hover views (%s)', async language => {
+  respond = args => args.some(x => x.endsWith('/usage')) ? wrap({
+    per5HourPercentage: .23456, per1WeekPercentage: .123456, per1MonthPercentage: .64951
+  }) : defaultResponse(args)
+  const detailed = await text(undefined, {}, language)
+  for (const percentage of ['76.54%', '87.65%', '35.05%']) expect(detailed.text).toContain(percentage)
+  const progress = [...detailed.dom.querySelectorAll('progress')].map(element => element.value)
+  expect(progress[0]).toBeCloseTo(.76544, 10)
+  expect(progress[1]).toBeCloseTo(.876544, 10)
+  expect(progress[2]).toBeCloseTo(.35049, 10)
+  const compact = await text('show_compact', {}, language)
+  const hover = compact.dom.querySelector('[tabindex="0"]')!.getAttribute('title')
+  for (const percentage of ['76.54%', '87.65%', '35.05%']) {
+    expect(compact.text).toContain(percentage)
+    expect(hover).toContain(percentage)
+  }
+  expect(commands.filter(args => args.includes('zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/usage'))).toHaveLength(1)
+})
 it('does not duplicate numeric account names and rejects account metadata from another session', async () => {
   respond = args => args.some(x => x.endsWith('.getGConfig')) ? wrap({ user: { outerKey: uid, showName: uid } }) : defaultResponse(args)
   expect((await text()).text).toContain('控制台账户: account-1')
@@ -86,7 +104,7 @@ it('does not duplicate numeric account names and rejects account metadata from a
   respond = args => args.some(x => x.endsWith('.getGConfig')) ? wrap({ user: { outerKey: 'other', showName: 'Other account' } }) : defaultResponse(args)
   const result = await text()
   expect(result.text).toContain('不匹配')
-  expect(result.text).not.toContain('35%')
+  expect(result.text).not.toContain('35.00%')
   expect(result.text).not.toContain('Other account')
 })
 it('reports a missing CLI with installation help', async () => {
@@ -116,13 +134,13 @@ it('rejects mismatched and insufficiently specific masks without fetching usage'
   expect(commands.some(args => args.some(x => x.endsWith('/usage')))).toBe(false)
 })
 it('does not retain previous quota when the control-plane account changes', async () => {
-  expect((await text()).text).toContain('35%')
+  expect((await text()).text).toContain('35.00%')
   uid = 'account-2'
   respond = args => args.some(x => x.endsWith('/getKeyByUid')) ? wrap({ key_id: 'other', mask_apikey: mask.replace('abcdef', 'zzzzzz') }) : defaultResponse(args)
   const result = await text()
   expect(result.text).toContain('不匹配')
   expect(result.text).toContain('account-2')
-  expect(result.text).not.toContain('35%')
+  expect(result.text).not.toContain('35.00%')
 })
 it('discards results when the console account changes during a query', async () => {
   let reads = 0
@@ -132,7 +150,7 @@ it('discards results when the console account changes during a query', async () 
   }
   const result = await text()
   expect(result.text).toContain('不匹配')
-  expect(result.text).not.toContain('35%')
+  expect(result.text).not.toContain('35.00%')
   expect(result.dom.querySelector('[data-action="login"]')).not.toBeNull()
 })
 it('recognizes an expired session inside a successful gateway response', async () => {
@@ -170,7 +188,7 @@ it('launches login without blocking the widget, prevents duplicates, and refresh
   expect(commands[index][commands[index].indexOf('--config') + 1]).toBe('token-plan')
   processes[index].emit('close', 0); noConsole = false
   await new Promise(resolve => setTimeout(resolve, 0))
-  expect((await text()).text).toContain('35%')
+  expect((await text()).text).toContain('35.00%')
 })
 it('starts only one browser login when windows request login concurrently', async () => {
   holdLogin = true; noConsole = true

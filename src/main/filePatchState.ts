@@ -41,9 +41,13 @@ function identity(info: BigIntStats): FilePatchFileIdentity {
   }
 }
 
-function sameIdentity(left: FilePatchFileIdentity, right: FilePatchFileIdentity): boolean {
+// ctime also changes for xattrs and sync bookkeeping without a text edit.
+// Keep it in stored observations, but compare the identity/content-relevant
+// fields here. Snapshot verification separately compares the complete hash/text.
+export function sameFilePatchIdentity(left: FilePatchFileIdentity | null, right: FilePatchFileIdentity | null): boolean {
+  if (left === null || right === null) return left === right
   return left.device === right.device && left.inode === right.inode && left.size === right.size
-    && left.mode === right.mode && left.modifiedNs === right.modifiedNs && left.changedNs === right.changedNs
+    && left.mode === right.mode && left.modifiedNs === right.modifiedNs
 }
 
 async function verifyTarget(target: FilePatchTarget, signal?: AbortSignal): Promise<void> {
@@ -105,7 +109,7 @@ async function readPreimage(target: FilePatchTarget, remainingBytes: number, sig
   try {
     signal?.throwIfAborted()
     const opened = await handle.stat({ bigint: true })
-    if (!opened.isFile() || !sameIdentity(expectedIdentity, identity(opened))) throw changed(target.canonicalPath)
+    if (!opened.isFile() || !sameFilePatchIdentity(expectedIdentity, identity(opened))) throw changed(target.canonicalPath)
     const buffer = Buffer.alloc(expectedIdentity.size + 1)
     let length = 0
     while (length < buffer.length) {
@@ -116,13 +120,13 @@ async function readPreimage(target: FilePatchTarget, remainingBytes: number, sig
       length += result.bytesRead
     }
     if (length !== expectedIdentity.size
-      || !sameIdentity(expectedIdentity, identity(await handle.stat({ bigint: true })))) throw changed(target.canonicalPath)
+      || !sameFilePatchIdentity(expectedIdentity, identity(await handle.stat({ bigint: true })))) throw changed(target.canonicalPath)
     bytes = buffer.subarray(0, length)
   } finally {
     await handle.close()
   }
   const after = await lstat(target.canonicalPath, { bigint: true })
-  if (!after.isFile() || after.isSymbolicLink() || !sameIdentity(expectedIdentity, identity(after))) throw changed(target.canonicalPath)
+  if (!after.isFile() || after.isSymbolicLink() || !sameFilePatchIdentity(expectedIdentity, identity(after))) throw changed(target.canonicalPath)
   await verifyTarget(target, signal)
   await verifyParent(parent, signal)
   if (bytes.includes(0)) throw new Error('Patch cannot read binary data as UTF-8 text.')
@@ -164,8 +168,7 @@ export async function verifyFilePatchPreimages(preimages: readonly FilePatchPrei
     const current = await readPreimage(expected.target, remaining, signal)
     remaining -= current.identity?.size ?? 0
     if (current.hash !== expected.hash || current.text !== expected.text
-      || (current.identity === null) !== (expected.identity === null)
-      || (current.identity && expected.identity && !sameIdentity(current.identity, expected.identity))) {
+      || !sameFilePatchIdentity(current.identity, expected.identity)) {
       throw changed(expected.target.canonicalPath)
     }
   }

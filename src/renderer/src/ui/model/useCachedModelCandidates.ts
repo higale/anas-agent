@@ -38,7 +38,6 @@ export function useCachedModelCandidates({
   }, [
     draft.apiKey,
     draft.baseUrl,
-    draft.modelListAuth,
     draft.modelListUrl,
     draft.name,
     draft.protocol,

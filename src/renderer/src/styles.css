@@ -7,7 +7,7 @@
 @import './styles/app-shell.css';
 @import './styles/sidebar.css';
 @import './styles/topbar.css';
-@import './styles/provider-protocol.css';
+@import './styles/model-provider.css';
 @import './styles/context-meter.css';
 @import './styles/messages.css';
 @import './styles/markdown.css';

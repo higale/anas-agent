@@ -4,7 +4,6 @@ import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 import stableStringify from 'fast-json-stable-stringify'
 import type {
   ModelDefaults,
-  ModelListAuth,
   ModelParameterPreset,
   ModelParameterPresetMode,
   ModelProtocol,
@@ -28,11 +27,6 @@ export function requireModelProtocol(value: unknown, path: string): ModelProtoco
     `Config value ${path} must be "openai_responses", `
     + '"openai_chat_completions", or "anthropic_messages".'
   )
-}
-
-export function requireModelListAuth(value: unknown, path: string): ModelListAuth {
-  if (value === 'bearer' || value === 'anthropic') return value
-  throw new Error(`Config value ${path} must be "bearer" or "anthropic".`)
 }
 
 export function requireModelParameterPresetMode(value: unknown, path: string): ModelParameterPresetMode {

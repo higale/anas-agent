@@ -7,6 +7,7 @@ import { asPatchInput } from './filePatchTestFixtures'
 import { captureFilePatchPreimages, verifyFilePatchPreimages } from './filePatchState'
 import { executeFilePatchTransaction as executeTransaction, FilePatchTransactionError, type FilePatchTransaction } from './filePatchTransaction'
 import { randomUUID } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 
 function executeFilePatchTransaction(
   input: Parameters<typeof executeTransaction>[1], preimages: Parameters<typeof executeTransaction>[2],
@@ -47,6 +48,23 @@ async function prepare(root: string, operations: Parameters<typeof asPatchInput>
 const patch = '@@\n-before\n+after\n'
 
 describe('batch patch transaction execution', () => {
+  it.skipIf(process.platform !== 'darwin')('commits when only extended attributes change after recording the result', async () => {
+    const root = await directory(), path = join(root, 'old.txt')
+    await writeFile(path, 'before\n')
+    const { input, preimages } = await prepare(root, [{ type: 'update', path, patch }])
+    let updated = false
+    const result = await executeFilePatchTransaction(input, preimages, async record => {
+      if (!updated && record.entries[0].state === 'applied') {
+        updated = true
+        execFileSync('/usr/bin/xattr', ['-w', 'com.anas.test', 'metadata', path])
+      }
+    })
+    expect(updated).toBe(true)
+    expect(result.state).toBe('applied')
+    expect(result.errors).toEqual([])
+    expect(await readFile(path, 'utf8')).toBe('after\n')
+  })
+
   it('stages all targets before committing create/update/delete/move, including empty files and parents', async () => {
     const root = await directory()
     await writeFile(join(root, 'update.txt'), 'before\n')

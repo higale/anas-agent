@@ -2,21 +2,18 @@ import { PopoverContent } from '../PopoverContent'
 import * as Popover from '@radix-ui/react-popover'
 import { Link2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import type { ModelListAuth, ModelProtocol } from '@shared/types'
+import type { ModelProtocol } from '@shared/types'
 import { resolveModelListEndpoint } from '@shared/modelListEndpoint'
 import { findModelTemplate } from '@shared/modelTemplates'
 import { CommitTextInput } from '../CommitTextField'
-import { SearchableOptionPicker } from '../SearchableOptionPicker'
 import { UI_ICON_SIZE_MEDIUM } from '../uiConstants'
 
 export interface ModelListSettingsUpdate {
-  modelListAuth: ModelListAuth
   modelListUrl: string
 }
 
 interface ModelListUrlPopoverProps {
   baseUrl: string
-  modelListAuth: ModelListAuth
   modelListUrl: string
   portalContainer?: HTMLElement | null
   protocol: ModelProtocol
@@ -25,7 +22,6 @@ interface ModelListUrlPopoverProps {
 
 export function ModelListUrlPopover({
   baseUrl,
-  modelListAuth,
   modelListUrl,
   portalContainer,
   protocol,
@@ -34,11 +30,6 @@ export function ModelListUrlPopover({
   const { t } = useTranslation()
   const matchingTemplate = findModelTemplate(protocol, baseUrl)
   const resetModelListUrl = matchingTemplate?.modelListUrl ?? ''
-  const resetModelListAuth = matchingTemplate?.modelListAuth ?? 'bearer'
-  const modelListAuthOptions = [
-    { value: 'bearer', label: t('settings.model_list_auth_bearer') },
-    { value: 'anthropic', label: t('settings.model_list_auth_anthropic') }
-  ]
   let effectiveModelListUrl = ''
   let modelListUrlInvalid = false
   try {
@@ -78,7 +69,6 @@ export function ModelListUrlPopover({
             <CommitTextInput
               aria-label={t('settings.model_list_url')}
               onCommit={(nextModelListUrl) => onChange({
-                modelListAuth,
                 modelListUrl: nextModelListUrl
               })}
               placeholder="{base_url}/models"
@@ -93,28 +83,11 @@ export function ModelListUrlPopover({
                   url: effectiveModelListUrl || t('settings.model_list_url_unconfigured')
                 })}
           </small>
-          <div className="ui-field-stack">
-            <span>{t('settings.model_list_auth')}</span>
-            <SearchableOptionPicker
-              ariaLabel={t('settings.model_list_auth')}
-              emptyLabel={t('settings.no_options')}
-              options={modelListAuthOptions}
-              portalContainer={portalContainer}
-              searchable={false}
-              value={modelListAuth}
-              onChange={(nextModelListAuth) => onChange({
-                modelListAuth: nextModelListAuth as ModelListAuth,
-                modelListUrl
-              })}
-            />
-          </div>
-          <small className="ui-field-hint">{t('settings.model_list_auth_hint')}</small>
           {matchingTemplate && (
             <button
               className="ui-button"
-              disabled={modelListUrl.trim() === resetModelListUrl && modelListAuth === resetModelListAuth}
+              disabled={modelListUrl.trim() === resetModelListUrl}
               onClick={() => onChange({
-                modelListAuth: resetModelListAuth,
                 modelListUrl: resetModelListUrl
               })}
               type="button"

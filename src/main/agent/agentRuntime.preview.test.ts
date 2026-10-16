@@ -36,7 +36,6 @@ function provider(index: number, name: string): ModelProviderConfigDetail {
     protocol: 'openai_chat_completions',
     baseUrl: 'https://preview.invalid/v1',
     modelListUrl: '',
-    modelListAuth: 'bearer',
     parameters: {},
     models: [{
       index: 0,

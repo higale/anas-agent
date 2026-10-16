@@ -122,7 +122,6 @@ export async function runPackagedSmoke(): Promise<void> {
       protocol: 'openai_chat_completions',
       baseUrl: 'http://127.0.0.1:9/v1',
       modelListUrl: '{base_url}/models',
-      modelListAuth: 'bearer',
       apiKey: 'packaged-smoke-key',
       parameters: {}
     })

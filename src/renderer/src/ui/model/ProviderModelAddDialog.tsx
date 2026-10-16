@@ -2,7 +2,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { ListPlus, Plus, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { ModelListAuth, ModelProtocol } from '@shared/types'
+import type { ModelProtocol } from '@shared/types'
 import { Checkbox } from '../Checkbox'
 import { CheckboxField } from '../CheckboxField'
 import { RefreshButton } from '../RefreshButton'
@@ -14,7 +14,6 @@ interface ProviderModelAddDialogProps {
   candidates: string[]
   configuredModelIds: string[]
   listLoading: boolean
-  modelListAuth: ModelListAuth
   modelListUrl: string
   open: boolean
   protocol: ModelProtocol
@@ -30,7 +29,6 @@ export function ProviderModelAddDialog({
   candidates,
   configuredModelIds,
   listLoading,
-  modelListAuth,
   modelListUrl,
   open,
   protocol,
@@ -149,7 +147,6 @@ export function ProviderModelAddDialog({
             />
             <ModelListUrlPopover
               baseUrl={baseUrl}
-              modelListAuth={modelListAuth}
               modelListUrl={modelListUrl}
               portalContainer={portalContainer}
               protocol={protocol}

@@ -200,8 +200,7 @@ export function repairDocument(file: string, input: unknown): { value: RecordVal
     } else if (file === 'models.json') {
       for (const [index, provider] of repair.list(value.providers, 'providers').entries()) {
         const path = `providers[${index}]`
-        repair.fill(provider, { ...modelDefaults.provider_defaults, models: [], api_key: '', model_list_url: '', model_list_auth: 'bearer' }, path)
-        repair.choice(provider, 'model_list_auth', ['bearer', 'anthropic'], 'bearer', path)
+        repair.fill(provider, { ...modelDefaults.provider_defaults, models: [], api_key: '', model_list_url: '' }, path)
         for (const [modelIndex, model] of repair.list(provider.models, `${path}.models`).entries()) {
           const modelPath = `${path}.models[${modelIndex}]`
           repair.fill(model, modelDefaults.model_defaults, modelPath)

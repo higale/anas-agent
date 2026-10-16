@@ -177,7 +177,7 @@ async function verifyLifecycleAction(launchApplication, action) {
     const submission = await page.evaluate(async ({ baseUrl, workspace }) => {
       const api = globalThis.gale
       const providers = await api.config.saveModelProvider({ name: 'PTY fixture', protocol: 'openai_chat_completions',
-        baseUrl, apiKey: '', modelListAuth: 'bearer', parameters: {} })
+        baseUrl, apiKey: '', parameters: {} })
       const providerId = providers.providers.find((provider) => provider.name === 'PTY fixture').id
       const models = await api.config.saveProviderModel({ providerId, displayName: 'PTY fixture', model: 'pty-lifecycle-fixture',
         parameters: {}, parameterPresetMode: 'none', capabilities: { vision: false, toolUse: true }, stream: false,

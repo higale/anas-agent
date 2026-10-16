@@ -11,7 +11,7 @@ vi.mock('react-i18next', () => ({
 function props(overrides: Partial<ComponentProps<typeof ProviderModelAddDialog>> = {}): ComponentProps<typeof ProviderModelAddDialog> {
   return {
     baseUrl: 'https://example.com/v1', candidates: ['Qwen-A', 'Qwen-B', 'DeepSeek'], configuredModelIds: [], listLoading: false,
-    modelListAuth: 'bearer', modelListUrl: '{base_url}/models', open: true, protocol: 'openai_chat_completions',
+    modelListUrl: '{base_url}/models', open: true, protocol: 'openai_chat_completions',
     onAddBlank: vi.fn(), onAddSelected: vi.fn().mockResolvedValue(true), onModelListSettingsChange: vi.fn(),
     onOpenChange: vi.fn(), onRefreshCandidates: vi.fn(), ...overrides
   }
@@ -28,7 +28,6 @@ describe('provider model add dialog', () => {
         candidates={['model-a', 'model-b', 'model-a']}
         configuredModelIds={[]}
         listLoading={false}
-        modelListAuth="bearer"
         modelListUrl="{base_url}/models"
         open
         protocol="openai_chat_completions"
@@ -59,7 +58,6 @@ describe('provider model add dialog', () => {
         candidates={[]}
         configuredModelIds={[]}
         listLoading={false}
-        modelListAuth="bearer"
         modelListUrl="{base_url}/models"
         open
         protocol="openai_chat_completions"

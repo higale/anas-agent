@@ -28,7 +28,7 @@ async function verifyCapabilities(launchApplication) {
       const api = globalThis.gale
       await api.config.updateSettings({ language: 'en' })
       await api.config.updateProfile({ assistant: { instructions: 'CAPABILITY_PROFILE_MARKER' } })
-      const added = await api.config.saveModelProvider({ name: 'Preview', protocol: 'openai_chat_completions', baseUrl: 'https://preview.invalid/v1', apiKey: '', parameters: {}, modelListAuth: 'bearer' })
+      const added = await api.config.saveModelProvider({ name: 'Preview', protocol: 'openai_chat_completions', baseUrl: 'https://preview.invalid/v1', apiKey: '', parameters: {} })
       const provider = added.providers.find(item => item.name === 'Preview')
       const models = await api.config.saveProviderModel({ providerId: provider.id, displayName: 'Preview', model: 'preview', parameters: {}, parameterPresetMode: 'none', capabilities: { vision: true, toolUse: true }, stream: true,
         maxContextTokens: 128000, maxOutputTokens: 16000, contextCompressionThreshold: 0.8, contextCompressionEnabled: true })

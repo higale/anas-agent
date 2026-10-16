@@ -30,7 +30,7 @@ async function verifyPluginWidgets(launchApplication) {
       if (api.endsWith('.loginInfo')) out(wrap({loginStatus: 'ALIYUN_LOGINED', aliyun: {uid: 'fixture-account', parentUid: 'fixture-account', nickName: 'Fixture account'}}));
       else if (api.endsWith('.getGConfig')) out(wrap({user: {outerKey: 'fixture-account', showName: 'Fixture account'}}));
       else if (api.endsWith('/getKeyByUid')) out(wrap({key_id: 'fixture-key-id', mask_apikey: mode === 'mismatch' ? 'sk-sp-9876543210****wrong-ending-xx' : 'sk-sp-123456789-****987654321abcdef'}));
-      else if (api.endsWith('/usage')) out(wrap({per1MonthPercentage: .65, per1MonthResetTime: Date.now() + 86400000}));
+      else if (api.endsWith('/usage')) out(wrap({per1MonthPercentage: .64951, per1MonthResetTime: Date.now() + 86400000}));
       else if (api.endsWith('/subscription')) out(wrap({specCode: 'lite', status: 'VALID', autoRenewFlag: false, endTime: Date.now() + 30 * 86400000}));
       else if (api.endsWith('.listApiKeys4Agent')) out(wrap({total: 1, items: [{id: 42, key: 'sk-ord****ending', deleted: 0}]}));
       else if (api.endsWith('.getApiKey')) out(wrap({id: 42, key: 'sk-ordinary-secret-ending', workspace_id: 'ws', workspace_name: 'Fixture workspace', blocked: 0}));
@@ -99,7 +99,7 @@ async function verifyPluginWidgets(launchApplication) {
     const selected = await page.evaluate(async () => {
       const api = globalThis.gale
       await api.config.updateSettings({ language: 'zh-CN', theme: 'light' })
-      const config = await api.config.saveModelProvider({ name: 'MiniMax CN', protocol: 'anthropic_messages', modelListAuth: 'bearer', baseUrl: 'https://api.minimaxi.com/anthropic', apiKey: 'fixture-key', parameters: {} })
+      const config = await api.config.saveModelProvider({ name: 'MiniMax CN', protocol: 'anthropic_messages', baseUrl: 'https://api.minimaxi.com/anthropic', apiKey: 'fixture-key', parameters: {} })
       const providerId = config.providers.find(item => item.name === 'MiniMax CN').id
       const saved = await api.config.saveProviderModel({ providerId, displayName: 'MiniMax M2.7', model: 'MiniMax-M2.7', parameters: {}, parameterPresetMode: 'none', parameterPresets: [],
         capabilities: { vision: false, toolUse: true }, stream: true, maxContextTokens: 128000, maxOutputTokens: 4096, contextCompressionThreshold: .8, contextCompressionEnabled: false })
@@ -243,7 +243,7 @@ async function verifyPluginWidgets(launchApplication) {
     assert.equal(await page.evaluate(async () => (await globalThis.gale.plugins.list()).find(item => item.id === 'usage-meter').enabled), false)
     await page.evaluate(async ({ providerId }) => {
       const api = globalThis.gale
-      await api.config.saveModelProvider({ id: providerId, name: 'MiniMax CN', protocol: 'anthropic_messages', modelListAuth: 'bearer', baseUrl: 'https://other.example/v1', apiKey: 'fixture-key', parameters: {} })
+      await api.config.saveModelProvider({ id: providerId, name: 'MiniMax CN', protocol: 'anthropic_messages', baseUrl: 'https://other.example/v1', apiKey: 'fixture-key', parameters: {} })
       await api.plugins.setEnabled('usage-meter', true)
     }, selected)
     await page.reload()
@@ -251,7 +251,7 @@ async function verifyPluginWidgets(launchApplication) {
     await expect(page.locator('.plugin-widget')).toHaveCount(0)
     assert.equal(await page.evaluate(modelId => globalThis.gale.plugins.readWidget('usage-meter', 'quota', modelId), selected.modelId), null)
     await page.evaluate(async ({ providerId }) => {
-      await globalThis.gale.config.saveModelProvider({ id: providerId, name: 'DeepSeek', protocol: 'anthropic_messages', modelListAuth: 'bearer', baseUrl: 'https://api.deepseek.com/anthropic', apiKey: 'fixture-key', parameters: {} })
+      await globalThis.gale.config.saveModelProvider({ id: providerId, name: 'DeepSeek', protocol: 'anthropic_messages', baseUrl: 'https://api.deepseek.com/anthropic', apiKey: 'fixture-key', parameters: {} })
     }, selected)
     await page.reload()
     await expect(page.locator('.plugin-widget')).toContainText('CNY 可用余额')
@@ -270,7 +270,7 @@ async function verifyPluginWidgets(launchApplication) {
       ['OpenRouter', 'https://openrouter.ai/api/v1', '密钥 USD 74.5', '今日消费（UTC）']
     ]) {
       await page.evaluate(async ({ providerId, name, baseUrl }) => {
-        await globalThis.gale.config.saveModelProvider({ id: providerId, name, protocol: 'openai_chat_completions', modelListAuth: 'bearer', baseUrl, apiKey: 'fixture-key', parameters: {} })
+        await globalThis.gale.config.saveModelProvider({ id: providerId, name, protocol: 'openai_chat_completions', baseUrl, apiKey: 'fixture-key', parameters: {} })
       }, { ...selected, name, baseUrl })
       await page.reload()
       await expect(page.locator('.plugin-widget')).toContainText(summary)
@@ -283,7 +283,7 @@ async function verifyPluginWidgets(launchApplication) {
     for (const [name, host, language] of [['GLM', 'open.bigmodel.cn', 'zh-CN'], ['Z.ai', 'api.z.ai', 'en']]) {
       await page.evaluate(async ({ providerId, name, host, language }) => {
         await globalThis.gale.config.updateSettings({ language })
-        await globalThis.gale.config.saveModelProvider({ id: providerId, name, protocol: 'openai_chat_completions', modelListAuth: 'bearer', baseUrl: `https://${host}/api/coding/paas/v4`, apiKey: 'fixture-key', parameters: {} })
+        await globalThis.gale.config.saveModelProvider({ id: providerId, name, protocol: 'openai_chat_completions', baseUrl: `https://${host}/api/coding/paas/v4`, apiKey: 'fixture-key', parameters: {} })
       }, { ...selected, name, host, language })
       await page.reload()
       await expect(page.locator('.plugin-widget')).toContainText(language === 'en' ? '5h 75% · 1w 85%' : '5h 75% · 周 85%')
@@ -294,7 +294,7 @@ async function verifyPluginWidgets(launchApplication) {
       await page.screenshot({ path: join(output, `glm-${language}.png`) })
       await page.locator('.plugin-widget [data-action="show_compact"]').click()
       await page.evaluate(async ({ providerId, name, host }) => {
-        await globalThis.gale.config.saveModelProvider({ id: providerId, name, protocol: 'openai_chat_completions', modelListAuth: 'bearer', baseUrl: `https://${host}/api/paas/v4`, apiKey: 'fixture-key', parameters: {} })
+        await globalThis.gale.config.saveModelProvider({ id: providerId, name, protocol: 'openai_chat_completions', baseUrl: `https://${host}/api/paas/v4`, apiKey: 'fixture-key', parameters: {} })
       }, { ...selected, name, host })
       await page.reload()
       await page.locator('[data-agent-composer-input]').waitFor()
@@ -316,7 +316,7 @@ async function verifyPluginWidgets(launchApplication) {
     }
     await page.evaluate(async ({ providerId }) => {
       await globalThis.gale.config.updateSettings({ language: 'zh-CN' })
-      await globalThis.gale.config.saveModelProvider({ id: providerId, name: 'GLM', protocol: 'openai_chat_completions', modelListAuth: 'bearer', baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4', apiKey: 'no-plan-key', parameters: {} })
+      await globalThis.gale.config.saveModelProvider({ id: providerId, name: 'GLM', protocol: 'openai_chat_completions', baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4', apiKey: 'no-plan-key', parameters: {} })
     }, selected)
     await page.reload()
     await page.locator('.plugin-widget [data-action="show_detailed"]').click()
@@ -326,14 +326,14 @@ async function verifyPluginWidgets(launchApplication) {
     await setDisplayMode('compact')
     await writeFile(pending, 'wait')
     await page.evaluate(async ({ providerId }) => {
-      await globalThis.gale.config.saveModelProvider({ id: providerId, name: 'Qwen', protocol: 'openai_chat_completions', modelListAuth: 'bearer', baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', apiKey: 'sk-sp-123456789-middle-secret-987654321abcdef', parameters: {} })
+      await globalThis.gale.config.saveModelProvider({ id: providerId, name: 'Qwen', protocol: 'openai_chat_completions', baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', apiKey: 'sk-sp-123456789-middle-secret-987654321abcdef', parameters: {} })
     }, selected)
     await page.reload()
     await expect(page.locator('.plugin-widget [role="status"]')).toContainText('加载中')
     await expect(page.locator('.plugin-widget-html')).toHaveCount(0)
     await page.screenshot({ path: join(output, 'bailian-loading.png') })
     await rm(pending)
-    await expect(page.locator('.plugin-widget')).toContainText('月 35%')
+    await expect(page.locator('.plugin-widget')).toContainText('月 35.05%')
     await setDisplayMode('detailed')
     await expect(page.locator('.plugin-widget')).toContainText('套餐到期')
     await expect(page.locator('.plugin-widget')).toContainText('自动续费: 关闭')
@@ -350,10 +350,10 @@ async function verifyPluginWidgets(launchApplication) {
     await writeFile(loginDone, 'done')
     await expect(async () => {
       await page.locator('.plugin-widget [data-action="refresh"]').click()
-      await expect(page.locator('.plugin-widget')).toContainText('35%')
+      await expect(page.locator('.plugin-widget')).toContainText('35.05%')
     }).toPass()
     await page.evaluate(async ({ providerId }) => {
-      await globalThis.gale.config.saveModelProvider({ id: providerId, name: 'Qwen', protocol: 'openai_chat_completions', modelListAuth: 'bearer', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', apiKey: 'sk-ordinary-secret-ending', parameters: {} })
+      await globalThis.gale.config.saveModelProvider({ id: providerId, name: 'Qwen', protocol: 'openai_chat_completions', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', apiKey: 'sk-ordinary-secret-ending', parameters: {} })
     }, selected)
     await page.reload()
     await expect(page.locator('.plugin-widget')).toContainText('当前模型免费额度')

@@ -230,7 +230,7 @@ describe('composer draft locking', () => {
     const props = composerProps()
     const provider: ModelProviderConfig = {
       id: 'provider', name: 'Provider', protocol: 'openai_chat_completions',
-      baseUrl: 'https://example.test/v1', modelListUrl: '', modelListAuth: 'bearer', parameters: {},
+      baseUrl: 'https://example.test/v1', modelListUrl: '', parameters: {},
       models: ['one', 'two'].map((id, index) => ({ ...defaultModelConfig, id, index,
         model: id, displayName: `Model ${id}`, parameterPresetMode: 'custom',
         parameterPresets: [{ id: 'balanced', name: 'Balanced', parameters: {} }] }))

@@ -86,6 +86,23 @@ describe('domain config storage', () => {
     expect(await readdir(configDir)).toEqual([fileNames.settings])
   })
 
+  it('drops retired model-list auth metadata on write without mutating provider data', async () => {
+    const { rawConfig, configDir, fileNames } = await loadRawConfig()
+    const provider = {
+      id: 'existing', name: 'Existing', protocol: 'anthropic_messages',
+      base_url: 'https://api.anthropic.com', api_key: 'fixture-secret',
+      model_list_auth: 'anthropic', models: [{ id: 'model-id', model: 'claude-example' }]
+    }
+    await rawConfig.writeRawModelsConfig({ providers: [provider] })
+    const saved = JSON.parse(await readFile(join(configDir, fileNames.models), 'utf8'))
+    expect(saved).toEqual({ version: 0, providers: [{
+      id: 'existing', name: 'Existing', protocol: 'anthropic_messages',
+      base_url: 'https://api.anthropic.com', api_key: 'fixture-secret',
+      models: [{ id: 'model-id', model: 'claude-example' }]
+    }] })
+    expect(provider.model_list_auth).toBe('anthropic')
+  })
+
   it('bounds permanent sharing failures without replacing the original or leaving a writer', async () => {
     const { configDir, fileNames, rawConfig } = await loadRawConfig()
     const path = join(configDir, fileNames.settings)

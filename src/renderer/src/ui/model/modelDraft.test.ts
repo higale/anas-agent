@@ -19,10 +19,19 @@ const t = vi.fn((key: string, options?: Record<string, unknown>) => (
 )) as unknown as TFunction
 
 describe('model draft configuration', () => {
+  it('copies template icons into independent provider drafts and save payloads', () => {
+    const template = modelTemplates[0]
+    const draft = modelTemplateToDraft(template)
+    expect(draft.iconData).toBe(template.iconData)
+    expect(buildProviderPayload(draft)?.iconData).toBe(template.iconData)
+    draft.iconData = ''
+    expect(buildProviderPayload(draft)?.iconData).toBe('')
+    expect(template.iconData).not.toBe('')
+  })
+
   it('uses the bundled data defaults for a new model', () => {
     expect(emptyModelDraft()).toMatchObject({
       protocol: 'openai_chat_completions',
-      modelListAuth: 'bearer',
       displayName: '',
       parametersJson: '',
       parameterPresetMode: 'protocol_default',
@@ -76,7 +85,6 @@ describe('model draft configuration', () => {
       protocol: 'openai_chat_completions',
       baseUrl: 'https://example.com/v1',
       modelListUrl: '{base_url}/models',
-      modelListAuth: 'bearer',
       parameters: {},
       models: [{
         ...defaultModelConfig,
@@ -99,7 +107,6 @@ describe('model draft configuration', () => {
       protocol: 'anthropic_messages',
       baseUrl: 'https://example.com',
       modelListUrl: '{base_url}/models',
-      modelListAuth: 'anthropic',
       apiKey: 'secret',
       parameters: {},
       models: []
@@ -111,7 +118,6 @@ describe('model draft configuration', () => {
       protocol: 'anthropic_messages',
       baseUrl: 'https://example.com',
       modelListUrl: '{base_url}/models',
-      modelListAuth: 'anthropic',
       apiKey: 'secret',
       model: ''
     })
@@ -187,7 +193,6 @@ describe('model draft configuration', () => {
       protocol: template.protocol,
       baseUrl: template.baseUrl,
       modelListUrl: template.modelListUrl,
-      modelListAuth: template.modelListAuth,
       providerParametersJson: '',
       model: '',
       displayName: '',
@@ -239,19 +244,7 @@ describe('model draft configuration', () => {
     })).toMatchObject({
       baseUrl: 'https://example.com/v1',
       modelListUrl: '',
-      modelListAuth: 'bearer'
     })
   })
 
-  it('persists model list authentication and includes it in list requests', () => {
-    const draft = {
-      ...emptyModelDraft(),
-      baseUrl: 'https://api.anthropic.com',
-      modelListUrl: 'https://api.anthropic.com/v1/models',
-      modelListAuth: 'anthropic' as const
-    }
-
-    expect(buildProviderPayload(draft)).toMatchObject({ modelListAuth: 'anthropic' })
-    expect(buildModelListRequest(draft)).toMatchObject({ modelListAuth: 'anthropic' })
-  })
 })

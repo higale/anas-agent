@@ -1,8 +1,31 @@
 import { describe, expect, it } from 'vitest'
 import { resolveModelListEndpoint } from './modelListEndpoint'
-import { findModelTemplate, getModelTemplate, modelTemplateTree, modelTemplates } from './modelTemplates'
+import { findModelTemplate, findModelTemplateIcon, getModelTemplate, modelTemplateTree, modelTemplates } from './modelTemplates'
 
 describe('bundled model templates', () => {
+  it('finds default artwork by API URL independent of the selected protocol', () => {
+    const template = getModelTemplate('china/deepseek/anthropic')!
+    expect(template).toBeDefined()
+    expect(findModelTemplateIcon(` ${template.baseUrl}/// `)).toBe(template.iconData)
+    expect(findModelTemplateIcon('https://unknown-provider.example/v1')).toBeUndefined()
+    expect(findModelTemplateIcon('')).toBeUndefined()
+    expect(findModelTemplateIcon('http://localhost:8080/v1')).toBe(getModelTemplate('local/llama-cpp/openai')?.iconData)
+    expect(findModelTemplateIcon('http://localhost:8080')).toBe(getModelTemplate('local/llama-cpp/anthropic')?.iconData)
+  })
+
+  it('uses one brand icon across protocols and distinct artwork for each supported brand', () => {
+    const icons = modelTemplates.map((template) => template.iconData).filter(Boolean)
+    expect(new Set(icons).size).toBe(19)
+    for (const country of modelTemplateTree) {
+      if (country.type !== 'group') continue
+      for (const brand of country.children) {
+        if (brand.type !== 'group') continue
+        const templates = modelTemplates.filter((template) => template.templateId.startsWith(`${country.id}/${brand.id}/`))
+        expect(new Set(templates.map((template) => template.iconData)).size).toBe(1)
+      }
+    }
+  })
+
   it('provides complete, uniquely identified connection presets', () => {
     expect(modelTemplateTree).toHaveLength(4)
     expect(modelTemplates).toHaveLength(33)
@@ -12,8 +35,8 @@ describe('bundled model templates', () => {
       && template.label.trim().length > 0
       && template.baseUrl.trim().length > 0
       && template.modelListUrl.trim().length > 0
-      && (template.modelListAuth === 'bearer' || template.modelListAuth === 'anthropic')
       && template.apiKey === ''
+      && template.iconData?.startsWith('data:image/svg+xml;base64,')
       && typeof template.parameters === 'object'
     ))).toBe(true)
     expect(modelTemplates.some((template) => template.protocol === 'openai_responses')).toBe(false)
@@ -67,75 +90,57 @@ describe('bundled model templates', () => {
       protocol: 'openai_chat_completions',
       baseUrl: 'https://api.openai.com/v1',
       modelListUrl: 'https://api.openai.com/v1/models',
-      modelListAuth: 'bearer'
     },
     {
       templateId: 'united-states/anthropic/anthropic',
       protocol: 'anthropic_messages',
       baseUrl: 'https://api.anthropic.com',
       modelListUrl: 'https://api.anthropic.com/v1/models',
-      modelListAuth: 'anthropic'
     },
     {
       templateId: 'united-states/anthropic/openai',
       protocol: 'openai_chat_completions',
       baseUrl: 'https://api.anthropic.com/v1',
       modelListUrl: 'https://api.anthropic.com/v1/models',
-      modelListAuth: 'anthropic'
     },
     {
       templateId: 'united-states/gemini',
       protocol: 'openai_chat_completions',
       baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
       modelListUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/models',
-      modelListAuth: 'bearer'
     },
     {
       templateId: 'united-states/xai',
       protocol: 'openai_chat_completions',
       baseUrl: 'https://api.x.ai/v1',
       modelListUrl: 'https://api.x.ai/v1/language-models',
-      modelListAuth: 'bearer'
     },
     {
       templateId: 'france/mistral',
       protocol: 'openai_chat_completions',
       baseUrl: 'https://api.mistral.ai/v1',
       modelListUrl: 'https://api.mistral.ai/v1/models',
-      modelListAuth: 'bearer'
     },
     {
       templateId: 'united-states/groq',
       protocol: 'openai_chat_completions',
       baseUrl: 'https://api.groq.com/openai/v1',
       modelListUrl: 'https://api.groq.com/openai/v1/models',
-      modelListAuth: 'bearer'
     },
     {
       templateId: 'united-states/openrouter',
       protocol: 'openai_chat_completions',
       baseUrl: 'https://openrouter.ai/api/v1',
       modelListUrl: 'https://openrouter.ai/api/v1/models',
-      modelListAuth: 'bearer'
     },
     {
       templateId: 'united-states/together-ai',
       protocol: 'openai_chat_completions',
       baseUrl: 'https://api.together.ai/v1',
       modelListUrl: 'https://api.together.ai/v1/models',
-      modelListAuth: 'bearer'
     }
   ])('provides the official $templateId connection endpoint', ({ templateId, ...expected }) => {
     expect(getModelTemplate(templateId)).toMatchObject(expected)
-  })
-
-  it('uses Anthropic model-list authentication only for Anthropic official endpoints', () => {
-    expect(modelTemplates.filter((template) => template.modelListAuth === 'anthropic')
-      .map((template) => template.templateId)).toEqual([
-      'united-states/anthropic/anthropic',
-      'united-states/anthropic/openai'
-    ])
-    expect(modelTemplates.filter((template) => template.modelListAuth === 'bearer')).toHaveLength(31)
   })
 
   it('represents nested groups and templates with stable path IDs', () => {
@@ -170,7 +175,6 @@ describe('bundled model templates', () => {
     expect(getModelTemplate('united-states/anthropic/anthropic')).toMatchObject({
       label: 'Anthropic Messages',
       name: 'Anthropic',
-      modelListAuth: 'anthropic'
     })
     expect(getModelTemplate('china/qwen/openai')).toMatchObject({
       label: 'OpenAI',
@@ -180,7 +184,6 @@ describe('bundled model templates', () => {
     expect(getModelTemplate('china/qwen/anthropic')).toMatchObject({
       label: 'Anthropic Messages',
       name: 'Qwen',
-      modelListAuth: 'bearer'
     })
   })
 

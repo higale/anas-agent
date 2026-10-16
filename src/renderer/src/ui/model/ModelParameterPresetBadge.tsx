@@ -1,4 +1,4 @@
-import { SlidersHorizontal } from 'lucide-react'
+import { Brain } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { ModelParameterPresetMode } from '@shared/types'
 
@@ -19,7 +19,7 @@ export function ModelParameterPresetBadge({ mode, presetCount }: ModelParameterP
       data-model-status-badge
       data-tooltip={label}
     >
-      <SlidersHorizontal size={13} />
+      <Brain size={13} aria-hidden="true" />
     </span>
   )
 }

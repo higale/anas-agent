@@ -37,7 +37,6 @@ const config = { customTools: [],
     protocol: 'openai_chat_completions',
     baseUrl: 'https://example.com/v1',
     modelListUrl: '{base_url}/models',
-    modelListAuth: 'bearer',
     parameters: {},
     models: [
       { ...modelDefaults, id: 'model-1', index: 0, model: 'existing-model' },
@@ -180,10 +179,10 @@ describe('model settings state', () => {
     expect(result.current.modelDraft.modelConfigId).toBeUndefined()
   })
 
-  it('saves model list authentication as a provider change', async () => {
+  it('saves model list URL as a provider change', async () => {
     const savedConfig = {
       ...config,
-      providers: [{ ...config.providers[0], modelListAuth: 'anthropic' as const }]
+      providers: [{ ...config.providers[0], modelListUrl: 'https://api.anthropic.com/v1/models' }]
     } satisfies AppConfigSnapshot
     const saveModelProvider = vi.fn().mockResolvedValue(savedConfig)
     vi.stubGlobal('gale', { config: { saveModelProvider } })
@@ -198,13 +197,13 @@ describe('model settings state', () => {
     }))
 
     await waitFor(() => expect(result.current.editingProvider?.id).toBe('provider-1'))
-    act(() => result.current.updateModelDraft({ modelListAuth: 'anthropic' }))
+    act(() => result.current.updateModelDraft({ modelListUrl: 'https://api.anthropic.com/v1/models' }))
 
     await waitFor(() => expect(saveModelProvider).toHaveBeenCalledWith(expect.objectContaining({
       id: 'provider-1',
-      modelListAuth: 'anthropic'
+      modelListUrl: 'https://api.anthropic.com/v1/models'
     })))
-    await waitFor(() => expect(result.current.modelDraft.modelListAuth).toBe('anthropic'))
+    await waitFor(() => expect(result.current.modelDraft.modelListUrl).toBe('https://api.anthropic.com/v1/models'))
   })
 
   it('saves provider parameters independently from the selected model', async () => {

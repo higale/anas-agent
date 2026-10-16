@@ -39,12 +39,12 @@ export interface RawProviderModelConfig {
 }
 
 export interface RawModelProviderConfig {
+  icon_data?: string
   id?: string
   name?: string
   protocol?: string
   base_url?: string
   model_list_url?: string
-  model_list_auth?: string
   api_key?: string
   parameters?: Record<string, unknown>
   models?: RawProviderModelConfig[]
@@ -290,7 +290,11 @@ export async function writeRawSettingsConfig(config: RawAppConfig): Promise<void
 export async function writeRawModelsConfig(config: RawAppConfig): Promise<void> {
   await writeJsonFileAtomic(getConfigFile(modelsConfigFileName), {
     version: 0,
-    providers: config.providers ?? []
+    providers: (config.providers ?? []).map((provider) => {
+      const serialized = { ...provider } as RawModelProviderConfig & { model_list_auth?: unknown }
+      delete serialized.model_list_auth
+      return serialized
+    })
   } satisfies RawModelsConfigFile)
 }
 

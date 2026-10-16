@@ -38,7 +38,7 @@ async function installRoundChangesFixture(application, directory) {
     const modelConfigId = await page.evaluate(async port => {
       const api = globalThis.gale.config
       const added = await api.saveModelProvider({ name: 'Round review fixture', protocol: 'openai_chat_completions',
-        baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: '', parameters: {}, modelListAuth: 'bearer' })
+        baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: '', parameters: {} })
       const providerId = added.providers.find((provider) => provider.name === 'Round review fixture').id
       const configured = await api.saveProviderModel({ providerId, displayName: 'Round review model', model: 'round-review', parameters: {},
         parameterPresetMode: 'custom', parameterPresets: [], capabilities: { vision: false, toolUse: true }, stream: false,

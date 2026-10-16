@@ -8,6 +8,7 @@ import { ModelExtraParametersField } from './ModelExtraParametersField'
 import { providerConfigToDraft, type ModelDraft } from './modelDraft'
 import { providerProtocolLabels } from './providerProtocol'
 import { ProviderModelAddDialog } from './ProviderModelAddDialog'
+import { ProviderIconField } from './ProviderIconField'
 import { ProviderModelList } from './ProviderModelList'
 
 interface ModelEditorProps {
@@ -78,10 +79,18 @@ export function ModelEditor({
     <div className="ui-editor">
       <div className="ui-form-section" data-settings-group="provider">
         <div className="ui-grid-2">
-          <label className="ui-field-stack">
-            <span>{t('settings.name')}</span>
-            <CommitTextInput value={modelDraft.name} onCommit={(name) => onUpdateDraft({ name })} />
-          </label>
+          <div className="provider-name-field">
+            <ProviderIconField
+              key={modelDraft.providerId}
+              iconData={modelDraft.iconData}
+              baseUrl={modelDraft.baseUrl}
+              onChange={(iconData) => onUpdateDraft({ iconData })}
+            />
+            <label className="ui-field-stack">
+              <span>{t('settings.name')}</span>
+              <CommitTextInput value={modelDraft.name} onCommit={(name) => onUpdateDraft({ name })} />
+            </label>
+          </div>
           <div className="ui-field-stack">
             <span>{t('settings.provider')}</span>
             <SearchableOptionPicker
@@ -144,7 +153,6 @@ export function ModelEditor({
             candidates={candidates}
             configuredModelIds={provider.models.map((model) => model.model)}
             listLoading={listLoading}
-            modelListAuth={modelDraft.modelListAuth}
             modelListUrl={modelDraft.modelListUrl}
             open={modelAddOpen}
             protocol={modelDraft.protocol}

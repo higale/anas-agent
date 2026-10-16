@@ -8,7 +8,7 @@ import { createAgentModelResolver, ModelSelectionError, resolveModelSelection, r
 function configuration() {
   const provider: ModelProviderConfigDetail = {
     id: 'provider', name: 'Provider', index: 0, protocol: 'openai_chat_completions',
-    baseUrl: 'http://localhost:1234/v1', modelListUrl: '', modelListAuth: 'bearer', parameters: {},
+    baseUrl: 'http://localhost:1234/v1', modelListUrl: '', parameters: {},
     models: ['model-a', 'model-b', 'model-c'].map((id, index) => ({
       ...structuredClone(defaultModelConfig), id, index, displayName: id, model: id,
       parameterPresetMode: 'custom', parameters: { temperature: 0.5 },

@@ -1,14 +1,16 @@
-## Anas v3.3.15
+## Anas v3.3.16
 
-- 新增内置“用量仪表”，按当前模型 API 地址显示 MiniMax、智谱 / Z.ai Coding Plan 额度，智谱国内普通 API、DeepSeek、Moonshot/Kimi 余额，以及 OpenRouter 密钥额度与消费。
-- 百炼 / Qwen 中国站通过本机 `bl` 核对账户和密钥，显示 Token Plan 额度及套餐详情，或普通密钥的免费额度与近期用量；仪表内支持登录、切换账户和取消登录。
-- 仪表支持紧凑／详细显示、分组悬停详情、重置倒计时、缓存与立即刷新；匹配模型后立即显示加载状态，切换模型或凭据时清除旧读数，窄侧栏优先显示额度数值。
-- 插件框架新增侧栏底部 HTML 展示接口，复用宿主样式、主题和声明式按钮操作；完善停用、停止和备份时的生命周期处理，并统一明暗主题提示框。
+- 模型选择菜单改为供应商与模型双栏布局，优化对齐、选中背景和双行摘要；展示上下文、输出限制及能力图标，选择框提供详细模型提示。
+- 支持供应商自定义品牌图标，内置模板使用精简的 SVG；SVG 文件限制 1 MiB，支持的普通图片自动居中裁剪为正方形并缩小至不超过 512 像素，错误提示支持中英双语。空图标直接显示默认图标，点击删除时才按 API 地址恢复模板图标。
+- 简化模型列表鉴权配置，根据实际请求地址识别 Anthropic 官方接口；其他地址使用 Bearer 鉴权。
+- 优化共享多选控件的勾选样式，居中百炼登录操作，并保留百炼额度百分比的小数精度。
+- 改进文件工具调用示例、补丁行号与格式修正提示，消除重复报错；修复扩展属性引起的 ctime 变化被误判为文件冲突，统一执行、回滚和撤销检查，继续保留内容哈希、文件身份、权限与修改时间校验。
 
-- Add the built-in Usage Meter for MiniMax and GLM / Z.ai Coding Plan quotas; China GLM ordinary API, DeepSeek and Moonshot/Kimi balances; and OpenRouter key credits and spend, selected by the current model's API URL.
-- Integrate Bailian / Qwen China through the local `bl` CLI to verify accounts and keys, show Token Plan quotas and subscription details or ordinary-key free quota and recent usage, and offer sign-in, account switching and cancellation inside the meter.
-- Support compact/detailed views, grouped hover details, reset countdowns, caching and manual refresh. Show loading immediately for matching models, clear old readings when models or credentials change, and prioritize quota values in narrow sidebars.
-- Extend plugins with sidebar footer HTML widgets using shared host styles, themes and declared button actions; handle disabling, stopping and backups consistently, and align tooltips with light and dark themes.
+- Redesign model selection with side-by-side provider and model lists, improved alignment and selection highlighting, and two-line context/output summaries with capability icons; show detailed model information on the selector tooltip.
+- Add custom provider brand icons and optimized SVG icons in built-in templates. Limit SVG files to 1 MiB and automatically center-crop supported raster images to squares no larger than 512 pixels, with localized errors. Empty icons use the default immediately; deleting a custom icon restores a matching template icon by API URL.
+- Simplify model-list authentication: recognize the official Anthropic endpoint from the actual request URL and use Bearer authentication for other hosts.
+- Refine shared multiselect checkmarks, center Bailian sign-in actions, and preserve decimal precision in Bailian quota percentages.
+- Improve file-tool examples, patch line diagnostics and correction guidance, and remove duplicate error wrapping. Avoid false file conflicts caused solely by extended-attribute ctime changes across execution, rollback and undo, while retaining content hashes, file identity, permissions and modification-time checks.
 
 ## 下载与安装 / Downloads & installation
 

@@ -3,7 +3,7 @@ import { link, lstat, mkdir, open, realpath, rename, rmdir, unlink } from 'node:
 import { dirname, join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { filePatchOperationSemantics, planFilePatch, type FilePatchPlan } from './filePatch'
-import { captureFilePatchPreimages, verifyFilePatchPreimages, type FilePatchPreimage } from './filePatchState'
+import { captureFilePatchPreimages, sameFilePatchIdentity, verifyFilePatchPreimages, type FilePatchPreimage } from './filePatchState'
 import { samePath } from './pathContainment'
 import { validatePatchTransaction } from './filePatchRecord'
 
@@ -202,7 +202,7 @@ async function rollback(
         await verifyFilePatchPreimages([current])
         // A matching original permits a no-op, not adoption of an external
         // replacement. Only preserve ownership when its exact identity survived.
-        if (isDeepStrictEqual(current.identity, entry.before.identity) && isDeepStrictEqual(current.parent, entry.before.parent)) {
+        if (sameFilePatchIdentity(current.identity, entry.before.identity) && isDeepStrictEqual(current.parent, entry.before.parent)) {
           entry.compensated ??= structuredClone(current)
         }
         entry.state = 'restored'

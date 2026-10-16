@@ -35,6 +35,17 @@ function syntaxError(line: number, message: string): never {
   throw new Error(`Patch line ${line}: ${message}`)
 }
 
+function contentPrefixError(line: string, addedFile = false): string {
+  const received = line === '' ? 'an empty line' : JSON.stringify(line.length > 160 ? line.slice(0, 160) + '…' : line)
+  return [
+    `Missing content prefix; received ${received}.`,
+    addedFile
+      ? 'In Add File, put + before every content line; an added blank line is "+" alone. For a complete new file, write_file accepts ordinary content without prefixes.'
+      : 'Put a space before unchanged context, - before removed text, or + before added text, BEFORE source indentation. A blank content line must be " ", "-", or "+"; remove it if it only separates edit blocks.',
+    'Keep @@ and *** control lines unprefixed.'
+  ].join(' ')
+}
+
 /** Model-facing file envelope; the transaction layer receives typed operations,
  * never reparses a second model protocol or executes patch text as a command. */
 export function parseContextPatchDocument(text: string): ContextPatchOperation[] {
@@ -62,9 +73,10 @@ export function parseContextPatchDocument(text: string): ContextPatchOperation[]
       if (kind === 'Add') {
         let endsWithNewline = true
         if (body.at(-1) === noNewline) { body.pop(); endsWithNewline = false }
-        if (body.some((line) => !line.startsWith('+')) || (!body.length && !endsWithNewline)) {
-          throw new Error('Every added content line must start with +; only the final line may have a no-newline marker.')
-        }
+        const invalidLine = body.findIndex((line) => !line.startsWith('+'))
+        if (invalidLine !== -1) syntaxError(bodyStart + invalidLine + 1, body[invalidLine] === noNewline
+          ? 'A no-newline marker must follow the final added content line.' : contentPrefixError(body[invalidLine], true))
+        if (!body.length && !endsWithNewline) syntaxError(bodyStart + 1, 'A no-newline marker must follow an added content line.')
         // Content CRs belong to the new file; only control lines are normalized.
         const contentLines = rawLines.slice(bodyStart, bodyStart + body.length).map((line) => line.slice(1))
         if (!endsWithNewline && rawLines[0].endsWith('\r')) {
@@ -74,29 +86,32 @@ export function parseContextPatchDocument(text: string): ContextPatchOperation[]
         operations.push({ type: 'create', path, content: content + (body.length && endsWithNewline ? '\n' : '') })
       } else {
         const patch = rawLines.slice(bodyStart, bodyStart + body.length).join('\n')
-        if (body.length) parseContextHunks(patch)
-        else if (destination === undefined) throw new Error('An Update File section needs at least one @@ edit block.')
+        // Restore the section separator so an unprefixed trailing blank line is
+        // validated as content, not discarded as the patch's final newline.
+        if (body.length) parseContextHunks(patch + '\n', bodyStart)
+        else if (destination === undefined) syntaxError(headerLine, 'An Update File section needs at least one @@ edit block.')
         operations.push(destination !== undefined ? { type: 'move', path, destination, ...(body.length ? { patch } : {}) } : { type: 'update', path, patch })
       }
     } catch (error) {
-      throw new Error(`File ${JSON.stringify(path)} (section at patch line ${headerLine}): ${error instanceof Error ? error.message : String(error)}`)
+      throw new Error(`File ${JSON.stringify(path)}: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
   if (!operations.length) throw new Error('Patch must contain at least one file operation.')
   return operations
 }
 
-export function parseContextHunks(patch: string): ContextHunk[] {
+export function parseContextHunks(patch: string, lineOffset = 0): ContextHunk[] {
   const lines = patchLines(patch)
   const rawLines = patch.split('\n')
   const crlfFraming = rawLines[0].endsWith('\r')
   const hunks: ContextHunk[] = []
   let cursor = 0
+  const fail: (message: string) => never = (message) => syntaxError(lineOffset + cursor, message)
   while (cursor < lines.length) {
     const header = lines[cursor++]
-    if (/^@@ -\d/.test(header)) syntaxError(cursor, 'Do not calculate line numbers. Use @@ or @@ <exact anchor line>.')
+    if (/^@@ -\d/.test(header)) fail('Do not calculate line numbers. Use @@ or @@ <exact anchor line>.')
     const match = /^@@(?: (.+))?$/.exec(header)
-    if (!match) syntaxError(cursor, 'Expected @@ or @@ <exact anchor line>, without numeric ranges or file headers.')
+    if (!match) fail('Expected @@ or @@ <exact anchor line>, without numeric ranges or file headers. Do not put blank separator lines before or between edit blocks.')
     const hunk: ContextHunk = { anchor: match[1], lines: [], oldLines: [], oldNoNewline: false, newNoNewline: false, eof: false }
     let added = 0, removed = 0, newCount = 0
     let oldMarkerAt: number | undefined, newMarkerAt: number | undefined
@@ -110,22 +125,22 @@ export function parseContextHunks(patch: string): ContextHunk[] {
       cursor++
       if (line === '*** End of File') {
         hunk.eof = true
-        if (cursor !== lines.length) syntaxError(cursor, '*** End of File must finish the last edit block for this file.')
+        if (cursor !== lines.length) fail('*** End of File must finish the last edit block for this file.')
         break
       }
       if (line === noNewline) {
         const previous = hunk.lines.at(-1)
-        if (!previous || previous === noNewline) syntaxError(cursor, 'A no-newline marker must follow a content line.')
+        if (!previous || previous === noNewline) fail('A no-newline marker must follow a content line.')
         if (previous[0] !== '+') {
-          if (oldMarkerAt !== undefined) syntaxError(cursor, 'Duplicate old-content no-newline marker.')
+          if (oldMarkerAt !== undefined) fail('Duplicate old-content no-newline marker.')
           oldMarkerAt = hunk.oldLines.length
         }
         if (previous[0] !== '-') {
-          if (newMarkerAt !== undefined) syntaxError(cursor, 'Duplicate new-content no-newline marker.')
+          if (newMarkerAt !== undefined) fail('Duplicate new-content no-newline marker.')
           newMarkerAt = newCount
         }
       } else {
-        if (!/^[ +-]/.test(line)) syntaxError(cursor, 'Content lines must begin with a space (context), + (add), or - (remove).')
+        if (!/^[ +-]/.test(line)) fail(contentPrefixError(line))
         if (line[0] !== '+') hunk.oldLines.push(line.slice(1))
         if (line[0] !== '-') newCount++
         if (line[0] === '+') added++
@@ -133,9 +148,9 @@ export function parseContextHunks(patch: string): ContextHunk[] {
       }
       hunk.lines.push(line)
     }
-    if (!added && !removed) syntaxError(cursor, 'Edit block contains no additions or removals.')
+    if (!added && !removed) fail('Edit block contains no additions or removals.')
     if ((oldMarkerAt !== undefined && oldMarkerAt !== hunk.oldLines.length)
-      || (newMarkerAt !== undefined && newMarkerAt !== newCount)) syntaxError(cursor, 'A no-newline marker may only describe the last content line.')
+      || (newMarkerAt !== undefined && newMarkerAt !== newCount)) fail('A no-newline marker may only describe the last content line.')
     hunk.oldNoNewline = oldMarkerAt !== undefined
     hunk.newNoNewline = newMarkerAt !== undefined
     hunks.push(hunk)

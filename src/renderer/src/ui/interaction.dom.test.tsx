@@ -46,7 +46,7 @@ vi.mock('react-i18next', () => {
       }
       return key
   }
-  return { useTranslation: () => ({ t }) }
+  return { useTranslation: () => ({ t, i18n: { language: 'en', resolvedLanguage: 'en' } }) }
 })
 
 function AppMenuFixture() {
@@ -115,7 +115,6 @@ function modelPickerConfig(withReasoningOptions = false): AppConfigSnapshot {
       protocol: 'openai_chat_completions',
       baseUrl: 'https://example.com/v1',
       modelListUrl: 'https://example.com/v1/models',
-      modelListAuth: 'bearer',
       parameters: {},
       models: [model]
     }],
@@ -130,7 +129,7 @@ function modelPickerConfig(withReasoningOptions = false): AppConfigSnapshot {
   } as unknown as AppConfigSnapshot
 }
 
-function AccordionModelPickerFixture() {
+function TwoColumnModelPickerFixture({ onSelect = vi.fn() }: { onSelect?: (id: string) => void }) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const config = modelPickerConfig()
   const firstProvider = config.providers[0]
@@ -161,7 +160,7 @@ function AccordionModelPickerFixture() {
       disabled={false}
       focusRef={inputRef}
       onOpenModelSettings={vi.fn()}
-      onSelect={vi.fn()}
+      onSelect={onSelect}
       onSetDefault={vi.fn()}
     />
   )
@@ -498,9 +497,10 @@ describe('renderer interaction accessibility', () => {
     expect(trigger).toHaveFocus()
   })
 
-  it('opens the selected provider and allows every provider to be collapsed', async () => {
+  it('browses providers without changing the selected model and restores its provider on reopening', async () => {
     const user = userEvent.setup()
-    render(<AccordionModelPickerFixture />)
+    const onSelect = vi.fn()
+    render(<TwoColumnModelPickerFixture onSelect={onSelect} />)
     const trigger = screen.getByRole('button', { name: 'chat.select_model' })
 
     await user.click(trigger)
@@ -508,32 +508,48 @@ describe('renderer interaction accessibility', () => {
     const selectedProvider = screen.getByRole('menuitem', {
       name: 'Second Provider'
     })
-    expect(firstProvider).toHaveAttribute('aria-expanded', 'false')
-    expect(selectedProvider).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByRole('menuitemradio')).toHaveTextContent('Second model')
+    expect(firstProvider).not.toHaveAttribute('aria-current')
+    expect(selectedProvider).toHaveAttribute('aria-current', 'true')
+    expect(screen.getByRole('menuitemradio', { name: 'Second model' })).toBeChecked()
 
     await user.click(firstProvider)
-    expect(screen.getByRole('menuitem', { name: 'Provider' })).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByRole('menuitem', { name: 'Second Provider' })).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.getByRole('menuitemradio')).toHaveTextContent('Friendly model')
+    expect(firstProvider).toHaveAttribute('aria-current', 'true')
+    expect(selectedProvider).not.toHaveAttribute('aria-current')
+    expect(screen.getByRole('menuitemradio', { name: 'Friendly model' })).not.toBeChecked()
+    expect(screen.queryByRole('menuitemradio', { name: 'Second model' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('menuitem', { name: 'Provider' }))
-    expect(screen.getByRole('menuitem', { name: 'Provider' })).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.getByRole('menuitem', { name: 'Second Provider' })).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.queryByRole('menuitemradio')).not.toBeInTheDocument()
+    expect(firstProvider).toHaveAttribute('aria-current', 'true')
+    expect(screen.getByRole('menuitemradio', { name: 'Friendly model' })).toBeVisible()
     expect(screen.getByRole('menu')).toBeVisible()
-
-    screen.getByRole('menuitem', { name: 'Provider' }).focus()
-    await user.keyboard('{Enter}')
-    expect(screen.getByRole('menuitemradio')).toHaveTextContent('Friendly model')
-    await user.keyboard('{Enter}')
-    expect(screen.queryByRole('menuitemradio')).not.toBeInTheDocument()
+    expect(trigger).toHaveTextContent('Second model')
+    expect(onSelect).not.toHaveBeenCalled()
 
     await user.keyboard('{Escape}')
     await user.click(trigger)
     expect(await screen.findByRole('menuitem', { name: 'Second Provider' }))
-      .toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByRole('menuitemradio')).toHaveTextContent('Second model')
+      .toHaveAttribute('aria-current', 'true')
+    expect(screen.getByRole('menuitemradio', { name: 'Second model' })).toBeChecked()
+  })
+
+  it('moves keyboard focus between provider and model columns and selects only on Enter', async () => {
+    const user = userEvent.setup()
+    const onSelect = vi.fn()
+    render(<TwoColumnModelPickerFixture onSelect={onSelect} />)
+    await user.click(screen.getByRole('button', { name: 'chat.select_model' }))
+    const firstProvider = screen.getByRole('menuitem', { name: 'Provider' })
+    firstProvider.focus()
+    await user.keyboard('{ArrowRight}')
+    await waitFor(() => expect(screen.getByRole('menuitemradio', { name: 'Friendly model' })).toHaveFocus())
+    await user.keyboard('{ArrowLeft}')
+    expect(firstProvider).toHaveFocus()
+    screen.getByRole('menuitem', { name: 'Second Provider' }).focus()
+    await user.keyboard('{ArrowRight}')
+    await waitFor(() => expect(screen.getByRole('menuitemradio', { name: 'Second model' })).toHaveFocus())
+    expect(onSelect).not.toHaveBeenCalled()
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(onSelect).toHaveBeenCalledExactlyOnceWith('model-2'))
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 
   it('opens the first provider when no model is selected', async () => {
@@ -555,8 +571,33 @@ describe('renderer interaction accessibility', () => {
 
     await user.click(screen.getByRole('button', { name: 'chat.select_model' }))
     expect(await screen.findByRole('menuitem', { name: 'Provider' }))
-      .toHaveAttribute('aria-expanded', 'true')
+      .toHaveAttribute('aria-current', 'true')
     expect(screen.getByRole('menuitemradio')).toHaveTextContent('Friendly model')
+  })
+
+  it.each([
+    { stream: true, vision: false, tools: false, reasoning: false },
+    { stream: false, vision: true, tools: true, reasoning: true }
+  ])('shows only applicable model status indicators: %j', async ({ stream, vision, tools, reasoning }) => {
+    const user = userEvent.setup()
+    const config = modelPickerConfig(reasoning)
+    const model = config.providers[0].models[0]
+    model.stream = stream
+    model.capabilities = { vision, toolUse: tools }
+    render(<ModelPicker providers={config.providers} selectedId={model.id} disabled={false} onSelect={vi.fn()} />)
+    await user.click(screen.getByRole('button', { name: 'chat.select_model' }))
+    const item = screen.getByRole('menuitemradio', { name: 'Friendly model' })
+    expect(item).toHaveTextContent('128K · 16K · 80%')
+    for (const [label, visible] of [
+      ['chat.model_non_streaming', !stream],
+      ['settings.model_capability_vision: common.on', vision],
+      ['settings.model_capability_tool_use: common.on', tools],
+      ['settings.model_parameter_presets: settings.enabled', reasoning]
+    ] as const) {
+      const indicator = within(item).queryByLabelText(label)
+      if (visible) expect(indicator).toBeVisible()
+      else expect(indicator).not.toBeInTheDocument()
+    }
   })
 
   it('places model settings on the left and sets the selected model as default from the right', async () => {

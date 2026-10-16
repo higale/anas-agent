@@ -241,7 +241,7 @@ async function verifyCustomTools(launchApplication) {
     const submission = await page.evaluate(async ({ workspace, baseUrl, toolIds }) => {
       const api = globalThis.gale
       const providers = await api.config.saveModelProvider({ name: 'Custom fixture', protocol: 'openai_chat_completions',
-        baseUrl, apiKey: '', modelListAuth: 'bearer', parameters: {} })
+        baseUrl, apiKey: '', parameters: {} })
       const providerId = providers.providers.find(provider => provider.name === 'Custom fixture').id
       const models = await api.config.saveProviderModel({ providerId, displayName: 'Custom fixture', model: 'custom-fixture',
         parameters: {}, parameterPresetMode: 'none', capabilities: { vision: false, toolUse: true }, stream: false,

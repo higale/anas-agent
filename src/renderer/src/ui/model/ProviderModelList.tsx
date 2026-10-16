@@ -46,7 +46,6 @@ export function ProviderModelList({
             <strong>{t('settings.provider_models')}</strong>
             <ModelListUrlPopover
               baseUrl={provider.baseUrl}
-              modelListAuth={provider.modelListAuth}
               modelListUrl={provider.modelListUrl}
               protocol={provider.protocol}
               onChange={onModelListSettingsChange}

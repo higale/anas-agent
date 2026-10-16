@@ -105,7 +105,7 @@ return {
 
 智谱国内普通 API（`open.bigmodel.cn/api/paas/v4`，允许末尾斜线）使用 `GET https://open.bigmodel.cn/api/biz/account/query-customer-account-report`，`Authorization` 为原始 API Key，无需控制台登录。该接口来自[官方控制台前端](https://static.bigmodel.cn/wd-paas-front/js/app.808381fa.js)，已用当前普通 Key 实测成功，但未查到公开接口契约；国际站未验证，不复用国内接口或假设其币种。主读数取 `availableBalance`（CNY），详情按实际返回显示 `rechargeAmount`、`totalSpendAmount`、`frozenBalance`；不四舍五入为两位小数，缺失或 null 的详情字段不伪造为零，主读数缺失或金额格式异常视为错误并保留上次成功读数。账户余额不含资源包和 Coding Plan 额度，不以零余额推断模型不可用。余额与套餐按查询 URL 分别缓存，切换路径不串用；共享刷新、限时、失败退避和本地化显示。
 
-百炼适配器位于 `data/plugins/usage-meter/bailian.cjs`，通过本机 `bl` 的 JSON 输出查询中国站账户身份、Key 和用量；浏览器登录由插件按钮显式启动，后台独立管理并支持取消。Token Plan 使用 `/tokenplan/personal/api/v2/usage` 原始结果保留月度字段，Key 首尾匹配后才展示；普通 Key 详情完整匹配后限定工作空间和 Key ID 查询统计。账户身份在读取缓存前和新查询后核对；登录后清空缓存，错误不保留百炼读数。仅返回展示字段，不输出 CLI 原始错误、会话信息或完整 Key。
+百炼适配器位于 `data/plugins/usage-meter/bailian.cjs`，通过本机 `bl` 的 JSON 输出查询中国站账户身份、Key 和用量；浏览器登录由插件按钮显式启动，后台独立管理并支持取消。Token Plan 使用 `/tokenplan/personal/api/v2/usage` 原始结果保留月度字段，Key 首尾匹配后才展示；剩余百分比在紧凑、详细及悬停视图统一显示两位小数，进度保留原始比例。普通 Key 详情完整匹配后限定工作空间和 Key ID 查询统计。账户身份在读取缓存前和新查询后核对；登录后清空缓存，错误不保留百炼读数。仅返回展示字段，不输出 CLI 原始错误、会话信息或完整 Key。
 
 用量仪表同时支持以下官方接口，按 API URL 的精确主机名识别，复用所选供应商密钥。共享缓存、刷新、取消与错误保留机制；金额展示不渲染额度进度条，不跨币种相加，也不把无上限解释成账户有余额。
 

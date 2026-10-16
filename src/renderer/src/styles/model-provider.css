@@ -1,4 +1,4 @@
-.provider-protocol-badge {
+.provider-icon-badge {
   display: inline-grid;
   place-items: center;
   flex: 0 0 auto;
@@ -13,43 +13,33 @@
   color: var(--text-secondary);
 }
 
-.ui-list-item-split > .provider-protocol-badge {
-  display: inline-grid;
-  gap: 0;
-}
-
-.provider-protocol-icon {
+.provider-icon {
   display: block;
   flex: 0 0 auto;
-  fill: currentColor;
-  color: var(--text-muted);
-  opacity: 0.86;
+  object-fit: contain;
+  color: var(--text-secondary);
 }
 
-.provider-protocol-icon-brand {
-  opacity: 1;
+.provider-name-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
 
-.provider-protocol-icon-openai_responses.provider-protocol-icon-brand {
-  color: #10a37f;
+.provider-name-field > .ui-field-stack {
+  flex: 1;
+  min-width: 0;
 }
 
-.provider-protocol-icon-openai_chat_completions.provider-protocol-icon-brand {
-  color: #2878d0;
-}
-
-.provider-protocol-icon-anthropic_messages.provider-protocol-icon-brand {
-  color: #da7959;
+.provider-icon-field {
+  flex: 0 0 auto;
 }
 
 .model-list-item-badges {
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
-  gap: 3px;
-}
-
-.model-list-item-badges {
   gap: 5px;
 }
 

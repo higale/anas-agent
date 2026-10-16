@@ -51,7 +51,6 @@ describe('bundled configuration contract', () => {
       provider.protocol !== undefined
       && provider.baseUrl.length > 0
       && provider.modelListUrl.length > 0
-      && (provider.modelListAuth === 'bearer' || provider.modelListAuth === 'anthropic')
     ))).toBe(true)
   })
 

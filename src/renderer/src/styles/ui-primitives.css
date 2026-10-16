@@ -146,6 +146,7 @@
 }
 
 .ui-row-tight { --ui-row-gap: 2px; }
+.ui-row-center { justify-content: center; }
 
 .ui-code-file-editor {
   height: clamp(300px, 55vh, 720px);
@@ -1671,6 +1672,14 @@ button.ui-avatar {
   background: transparent;
 }
 
+.ui-avatar-contain img {
+  position: static;
+  width: calc(100% - 16px);
+  height: calc(100% - 16px);
+  border-radius: 0;
+  object-fit: contain;
+}
+
 .ui-avatar svg {
   width: var(--ui-avatar-glyph-size, 20px);
   height: var(--ui-avatar-glyph-size, 20px);
@@ -2009,9 +2018,7 @@ button.ui-avatar:has(> img):focus-visible,
 }
 
 .ui-segmented-control:not([data-selection="multiple"]) > .ui-segmented-option:has(> input:checked)::before,
-.ui-segmented-control:not([data-selection="multiple"]) > .ui-segmented-option:has(> input:checked) + .ui-segmented-option::before,
-.ui-segmented-control[data-selection="multiple"] > .ui-segmented-option:has(> input:checked) + .ui-segmented-option:has(> input:not(:checked))::before,
-.ui-segmented-control[data-selection="multiple"] > .ui-segmented-option:has(> input:not(:checked)) + .ui-segmented-option:has(> input:checked)::before {
+.ui-segmented-control:not([data-selection="multiple"]) > .ui-segmented-option:has(> input:checked) + .ui-segmented-option::before {
   content: none;
 }
 
@@ -2032,7 +2039,7 @@ button.ui-avatar:has(> img):focus-visible,
 }
 
 .ui-segmented-option > input:checked + span > .ui-segmented-check {
-  color: var(--control-mark);
+  color: var(--success);
 }
 
 .ui-segmented-option > span {
@@ -2048,18 +2055,15 @@ button.ui-avatar:has(> img):focus-visible,
   cursor: pointer;
 }
 
-.ui-segmented-option > input:not(:disabled):not(:checked) + span:hover {
+.ui-segmented-control:not([data-selection="multiple"]) > .ui-segmented-option > input:not(:disabled):not(:checked) + span:hover,
+.ui-segmented-control[data-selection="multiple"] > .ui-segmented-option > input:not(:disabled) + span:hover {
   background: var(--bg-muted);
   color: var(--text);
 }
 
-.ui-segmented-option > input:checked + span {
+.ui-segmented-control:not([data-selection="multiple"]) > .ui-segmented-option > input:checked + span {
   background: var(--control-segment-selected-bg);
   color: var(--text-strong);
-}
-
-.ui-segmented-control[data-selection="multiple"] > .ui-segmented-option > input:checked + span {
-  background: color-mix(in srgb, var(--control-segment-selected-bg) 80%, var(--accent-bg));
 }
 
 .ui-segmented-option > input:focus-visible + span {
@@ -2180,6 +2184,10 @@ button.ui-avatar:has(> img):focus-visible,
 .ui-menu-item-row:hover svg,
 .ui-menu-item-row:focus-visible svg {
   color: var(--text-subtle);
+}
+
+.ui-menu-item-row .ui-status-icon > svg {
+  color: inherit;
 }
 
 .ui-menu-item.danger {

@@ -98,7 +98,6 @@ export type ModelProtocol =
   | 'openai_responses'
   | 'openai_chat_completions'
   | 'anthropic_messages'
-export type ModelListAuth = 'bearer' | 'anthropic'
 
 export interface ModelCapabilities {
   vision: boolean
@@ -168,10 +167,10 @@ export interface ProviderModelConfigSave {
 export interface ModelProviderConfig {
   id: string
   name: string
+  iconData?: string
   protocol: ModelProtocol
   baseUrl: string
   modelListUrl: string
-  modelListAuth: ModelListAuth
   apiKey?: string
   parameters: Record<string, unknown>
   models: ProviderModelConfigDetail[]
@@ -184,10 +183,10 @@ export interface ModelProviderConfigDetail extends ModelProviderConfig {
 export interface ModelProviderConfigSave {
   id?: string
   name: string
+  iconData?: string
   protocol: ModelProtocol
   baseUrl: string
   modelListUrl?: string
-  modelListAuth: ModelListAuth
   apiKey: string
   parameters: Record<string, unknown>
 }
@@ -206,7 +205,6 @@ export interface ModelListRequest {
   protocol: ModelProtocol
   baseUrl: string
   modelListUrl?: string
-  modelListAuth: ModelListAuth
   model?: string
   apiKey?: string
 }

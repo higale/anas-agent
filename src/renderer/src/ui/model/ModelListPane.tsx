@@ -8,7 +8,7 @@ import type { AppConfigSnapshot } from '@shared/types'
 import { DropdownMenuContent, DropdownMenuRoot, DropdownMenuSubContent, DropdownMenuTrigger } from '../DropdownMenuShell'
 import { SettingsListActions } from '../settings/SettingsListActions'
 import { UI_ICON_SIZE_LARGE } from '../uiConstants'
-import { ProviderProtocolIcon } from './ProviderProtocolIcon'
+import { ProviderIcon } from './ProviderIcon'
 import { providerProtocolLabel } from './providerProtocol'
 
 interface ModelListPaneProps {
@@ -23,10 +23,17 @@ interface ModelListPaneProps {
 
 interface ModelTemplateMenuNodesProps {
   nodes: ModelTemplateTreeNode[]
+  depth?: number
   onCreateModel: (templateId: string) => void | Promise<void>
 }
 
-function ModelTemplateMenuNodes({ nodes, onCreateModel }: ModelTemplateMenuNodesProps) {
+function templateNodeIcon(node: ModelTemplateTreeNode): string | undefined {
+  if (node.type === 'template') return node.template.iconData
+  const icons = node.children.map(templateNodeIcon)
+  return icons.every((icon) => icon === icons[0]) ? icons[0] : undefined
+}
+
+function ModelTemplateMenuNodes({ nodes, depth = 0, onCreateModel }: ModelTemplateMenuNodesProps) {
   return nodes.map((node) => {
     if (node.type === 'template') {
       return (
@@ -36,13 +43,16 @@ function ModelTemplateMenuNodes({ nodes, onCreateModel }: ModelTemplateMenuNodes
           onSelect={() => void onCreateModel(node.template.templateId)}
           textValue={node.label}
         >
+          <ProviderIcon iconData={node.template.iconData} />
           <span>{node.label}</span>
         </DropdownMenu.Item>
       )
     }
+    const iconData = depth > 0 ? templateNodeIcon(node) : undefined
     return (
       <DropdownMenu.Sub key={node.id}>
         <DropdownMenu.SubTrigger className="model-template-group ui-menu-item ui-menu-item-row">
+          {iconData !== undefined && <ProviderIcon iconData={iconData} />}
           <span>{node.label}</span>
           <ChevronRight aria-hidden="true" className="model-template-chevron" size={14} />
         </DropdownMenu.SubTrigger>
@@ -53,7 +63,7 @@ function ModelTemplateMenuNodes({ nodes, onCreateModel }: ModelTemplateMenuNodes
             collisionPadding={10}
             sideOffset={4}
           >
-            <ModelTemplateMenuNodes nodes={node.children} onCreateModel={onCreateModel} />
+            <ModelTemplateMenuNodes nodes={node.children} depth={depth + 1} onCreateModel={onCreateModel} />
           </DropdownMenuSubContent>
         </DropdownMenu.Portal>
       </DropdownMenu.Sub>
@@ -122,12 +132,8 @@ export function ModelListPane({
             onClick={() => void onEditModel(provider.index)}
           >
             <span className="model-list-item-main">
-              <span className="provider-protocol-badge">
-                <ProviderProtocolIcon
-                  provider={provider.protocol}
-                  brandColor={Boolean(provider.baseUrl.trim() && provider.models.some((model) => model.model.trim()))}
-                  label={providerProtocolLabel(provider.protocol)}
-                />
+              <span className="provider-icon-badge">
+                <ProviderIcon iconData={provider.iconData} />
               </span>
               <span className="ui-copy-stack">
                 <strong>{provider.name || t('settings.provider_fallback_name', { index: provider.index })}</strong>

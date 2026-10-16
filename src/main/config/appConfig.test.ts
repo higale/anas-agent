@@ -68,7 +68,6 @@ function rawProvider(id: string, name: string) {
     name,
     protocol: 'openai_chat_completions',
     base_url: 'https://example.com/v1',
-    model_list_auth: 'bearer',
     api_key: '',
     parameters: {},
     models: [{
@@ -265,7 +264,6 @@ describe('configuration domain writes', () => {
     protocol: 'openai_chat_completions' as const,
     baseUrl: 'https://example.com/v1',
     modelListUrl: '',
-    modelListAuth: 'bearer' as const,
     apiKey: '',
     parameters: {}
   }
@@ -594,14 +592,12 @@ describe('configuration domain writes', () => {
     const raw = rawConfig()
     const existingProvider = raw.providers?.[0]
     if (!existingProvider) throw new Error('Expected fixture provider.')
-    delete existingProvider.model_list_auth
     delete existingProvider.parameters
     const { appConfig, writeRawModelsConfig } = await loadAppConfig(raw)
 
     const snapshot = await appConfig.getAppConfigSnapshot()
     const provider = snapshot.providers[0]
     if (!provider) throw new Error('Expected normalized provider.')
-    expect(provider.modelListAuth).toBe('bearer')
     expect(provider.parameters).toEqual({})
 
     await appConfig.saveModelProvider({
@@ -610,7 +606,6 @@ describe('configuration domain writes', () => {
       protocol: provider.protocol,
       baseUrl: provider.baseUrl,
       modelListUrl: provider.modelListUrl,
-      modelListAuth: provider.modelListAuth,
       apiKey: provider.apiKey ?? '',
       parameters: provider.parameters
     })
@@ -619,7 +614,6 @@ describe('configuration domain writes', () => {
       providers: expect.arrayContaining([
         expect.objectContaining({
           id: provider.id,
-          model_list_auth: 'bearer',
           parameters: {}
         })
       ])
@@ -638,7 +632,6 @@ describe('configuration domain writes', () => {
       providers: expect.arrayContaining([
         expect.objectContaining({
           id: generated,
-          model_list_auth: 'bearer'
         })
       ])
     }))

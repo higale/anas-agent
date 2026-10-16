@@ -320,11 +320,12 @@ export function createFileTools(options: FileToolOptions): StructuredToolInterfa
     ...createImageTools(options),
     tool((input) => executeEdit(false, () => resolveWriteFileTargets(input, primaryFolder)), {
       name: 'write_file',
-      description: 'Create a UTF-8 text file or replace its entire content. Prefer this tool for writing complete new files; send ordinary source text without patch prefixes. Missing parent directories are created automatically. overwrite defaults to false: fail if the file already exists. Set overwrite to true explicitly when replacing the entire existing file. Returns operationId/recoveryRequestId and a diff for get_file_edit_diff or restore_file_edit.',
+      description: 'Create a UTF-8 text file or replace its entire content. Prefer this tool for complete new files; send ordinary source text without patch prefixes or Markdown fences. For local changes to an existing file, use apply_patch. overwrite defaults to false: fail if the file already exists. To replace an existing file, first read it, then send its complete intended content with overwrite: true; omitted text will be lost. Missing parent directories are created automatically. Returns operationId/recoveryRequestId and a diff for get_file_edit_diff or restore_file_edit.',
       schema: writeFileSchema
     }),
     tool((input) => executeEdit(input.dry_run === true, () => resolveFilePatchTargets(input, primaryFolder)), { name: 'apply_patch', description: [
       'Apply one bounded UTF-8 file batch using a patch string enclosed by *** Begin Patch and *** End Patch.',
+      'For a local edit: read_file first, copy exact old lines with - prefixes, then supply replacement lines with + prefixes under @@. Include unchanged context only as needed for a unique match. Prefer write_file for complete new files.',
       'Use *** Add File: path with +content lines (an empty body creates an empty file), *** Delete File: path, or *** Update File: path.',
       filePatchLinePrefixInstructions,
       'An update may include *** Move to: destination immediately after its file header, with optional edit blocks.',
@@ -333,7 +334,7 @@ export function createFileTools(options: FileToolOptions): StructuredToolInterfa
       'Copy enough exact current context to match one unique location. Whitespace is significant; missing or ambiguous matches reject the entire batch. Re-read the file and add context before retrying.',
       'Use *** End of File after a block to require its context at the end of the file. Paths are absolute or relative to the primary folder.',
       'Existing line endings are preserved. Added lines normally end with a newline; place \\ No newline at end of file after the final old or new content line to explicitly assert or produce an unterminated final line.',
-      'Complete example: {"patch":"*** Begin Patch\\n*** Update File: src/config.ts\\n@@\\n export const config = {\\n-  enabled: false,\\n+  enabled: true,\\n };\\n*** Add File: notes.txt\\n+Enabled the feature.\\n+\\n++This line starts with a literal plus.\\n*** End Patch"}',
+      'Complete call example: {"patch":"*** Begin Patch\\n*** Update File: example.txt\\n@@\\n-old text\\n+new text\\n*** End Patch"}. Send only the tool arguments; no shell command or Markdown fences.',
       'dry_run validates the complete batch and returns its diff without writes or recovery records. A recorded edit returns operationId/recoveryRequestId for get_file_edit_diff or restore_file_edit.'
     ].join('\n'), schema: filePatchSchema }),
 

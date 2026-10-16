@@ -80,7 +80,7 @@ async function verifyAttachmentPreviews(launchApplication) {
     await page.evaluate(async port => {
       const api = globalThis.gale.config
       const config = await api.saveModelProvider({ name: 'Preview test', protocol: 'openai_chat_completions',
-        baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: '', parameters: {}, modelListUrl: '', modelListAuth: 'bearer' })
+        baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: '', parameters: {}, modelListUrl: '' })
       const providerId = config.providers.find(provider => provider.name === 'Preview test').id
       await api.saveProviderModel({ providerId, displayName: 'Photo model', model: 'photo', parameters: {},
         parameterPresetMode: 'none', capabilities: { vision: true, toolUse: false }, stream: false,

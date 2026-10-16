@@ -27,7 +27,6 @@ const provider = {
   protocol: 'openai_chat_completions',
   baseUrl: 'https://example.com/v1',
   modelListUrl: '{base_url}/models',
-  modelListAuth: 'bearer',
   parameters: {},
   models: [
     {
@@ -119,7 +118,6 @@ describe('provider model list selection', () => {
     await user.type(input, '/custom-models{Enter}')
 
     expect(onModelListSettingsChange).toHaveBeenCalledWith({
-      modelListAuth: 'bearer',
       modelListUrl: '/custom-models'
     })
   })
