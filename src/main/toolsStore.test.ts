@@ -27,6 +27,7 @@ beforeEach(async () => {
   vi.doMock('./config/dataDir', () => ({
     configDirName: 'config', customToolsConfigFileName: 'tools.json', getDataDir: () => root,
     getBundledDataDir: () => resolve('data'), getToolExamplesDir: () => join(root, 'tools_examples'),
+    getSystemPluginsDir: () => join(root, 'plugins_system'),
     getConfigFile: (name: string) => join(root, 'config', name),
     getBundledConfigFile: (name: string) => resolve('data/config', name)
   }))

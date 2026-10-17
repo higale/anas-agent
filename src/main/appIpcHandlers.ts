@@ -19,7 +19,7 @@ import { configureRuntimeLogger, openRuntimeLogDir, openRuntimeLogViewer, runtim
 import { applyNativeTheme, configureApplicationMenu, openExternalUrl } from './appShell'
 import { closeAgentRuntime, initializeAgentRuntime } from './agent/agentIpcHandlers'
 import { closePluginHost } from './plugins/pluginHost'
-import { stopPluginBackends } from './plugins/pluginRuntime'
+import { initializePluginsStore, stopPluginBackends } from './plugins/pluginRuntime'
 import { withApplicationDataSnapshot } from './applicationDataSnapshot'
 import { isDeveloperHttpTraceEnabled, setDeveloperHttpTraceEnabled } from './agent/developerHttpTraceState'
 import { dialogParentFromEvent, showModalOpenDialog, showModalSaveDialog } from './modalDialog'
@@ -240,6 +240,7 @@ export function registerAppIpcHandlers(): void {
     }
     const activate = async (): Promise<void> => {
       reloadDataEnv()
+      await initializePluginsStore()
       await Promise.all([
         initializeAgentRuntime(),
         reopenCachedMcpRuntime()

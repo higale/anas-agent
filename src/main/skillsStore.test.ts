@@ -50,6 +50,7 @@ async function loadSkillsStore(externalDirectories: unknown[] = []) {
     getSkillExamplesDir: () => examplesDir,
     getSkillsDir: () => skillsDir,
     getDataDir: () => root,
+    getSystemPluginsDir: () => join(root, 'plugins_system'),
     getSystemSkillsDir: () => systemDir
   }))
   vi.doMock('./config/appConfig', () => ({ getAppConfigSnapshot: async () => ({ customTools: [] }) }))

@@ -10,7 +10,7 @@ import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import type { PluginWidgetContent } from '@shared/pluginWidgets'
 
 const load = createRequire(import.meta.url)
-const backendPath = resolve('data/plugins/usage-meter/backend.cjs')
+const backendPath = resolve('data/plugins_system/usage-meter/backend.cjs')
 const key = 'sk-sp-123456789-middle-secret-987654321abcdef'
 const mask = key.slice(0, 15) + '****' + key.slice(-15)
 const model = { id: 'q', model: 'qwen-plus', providerId: 'p', providerName: 'Qwen', baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', apiKey: key }

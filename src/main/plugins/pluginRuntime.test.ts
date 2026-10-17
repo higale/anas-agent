@@ -1,10 +1,15 @@
 import { EventEmitter } from 'node:events'
-import { mkdtemp, rm, writeFile, readFile, mkdir } from 'node:fs/promises'
+import { cp, mkdtemp, rm, writeFile, readFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-const state = vi.hoisted(() => ({ root: '', fork: vi.fn() }))
-vi.mock('../config/dataDir', () => ({ getDataDir: () => state.root, getBundledDataDir: () => resolve('data') }))
+const state = vi.hoisted(() => ({ root: '', bundled: '', fork: vi.fn() }))
+vi.mock('../config/dataDir', () => ({
+  getDataDir: () => state.root,
+  getBundledDataDir: () => state.bundled,
+  getSystemPluginsDir: () => join(state.root, 'plugins_system'),
+  getPluginExamplesDir: () => join(state.root, 'plugins_examples')
+}))
 vi.mock('../ipcSecurity', () => ({ isMainRendererWindow: () => false }))
 vi.mock('electron', () => ({ app: { getAppPath: () => '/app' }, BrowserWindow: { getAllWindows: () => [] }, utilityProcess: { fork: state.fork } }))
 class Child extends EventEmitter {
@@ -16,16 +21,72 @@ let runtime: typeof import('./pluginRuntime')
 beforeEach(async () => {
   vi.resetModules()
   state.root = await mkdtemp(join(tmpdir(), 'anas-plugin-runtime-'))
+  state.bundled = join(state.root, 'bundled')
+  await cp(resolve('data/plugins_system'), join(state.bundled, 'plugins_system'), { recursive: true })
+  await cp(resolve('data/plugins_examples'), join(state.bundled, 'plugins_examples'), { recursive: true })
   child = new Child()
   state.fork.mockReset().mockReturnValue(child)
   runtime = await import('./pluginRuntime')
-  await runtime.pluginRuntime().store.install(resolve('examples/plugins/text-tools/PLUGIN.json'))
+  await runtime.initializePluginsStore()
+  await runtime.pluginRuntime().store.install(join(state.root, 'plugins_examples/text-tools/PLUGIN.json'))
 })
 afterEach(async () => { await runtime.stopPluginBackends(); await rm(state.root, { recursive: true, force: true }) })
 
+it('loads mirrored built-ins, keeps examples inactive and refreshes only app-owned packages', async () => {
+  const { store } = runtime.pluginRuntime()
+  expect((await store.list()).map(plugin => plugin.id).sort()).toEqual(['example-text-tools', 'usage-meter'])
+  expect(await store.packageDirectory('usage-meter')).toBe(join(state.root, 'plugins_system/usage-meter'))
+  await store.data('usage-meter', 'choice', true, 'keep')
+  await store.setEnabled('usage-meter', false)
+  const settings = await store.settings('example-text-tools')
+  await store.settings('example-text-tools', { revision: settings.revision, values: { ...settings.values, prefix: 'keep' } })
+  const installed = await store.packageFile('example-text-tools', 'backend.cjs')
+  const original = await readFile(installed, 'utf8')
+  await writeFile(join(state.root, 'plugins_system/usage-meter/stale.txt'), 'old file')
+  await writeFile(join(state.root, 'plugins_examples/text-tools/stale.txt'), 'old file')
+  await writeFile(join(state.bundled, 'plugins_system/usage-meter/backend.cjs'), 'module.exports = {}\n')
+  await writeFile(join(state.bundled, 'plugins_examples/text-tools/backend.cjs'), 'module.exports = {}\n')
+  await Promise.all([runtime.initializePluginsStore(), runtime.initializePluginsStore()])
+  expect(await readFile(await store.packageFile('usage-meter', 'backend.cjs'), 'utf8')).toBe('module.exports = {}\n')
+  expect(await readFile(installed, 'utf8')).toBe(original)
+  expect((await store.settings('example-text-tools')).values.prefix).toBe('keep')
+  expect(await store.read('usage-meter')).toMatchObject({ enabled: false, builtin: true, error: undefined })
+  await store.setEnabled('usage-meter', true)
+  expect(await store.data('usage-meter', 'choice')).toBe('keep')
+  await expect(readFile(join(state.root, 'plugins_system/usage-meter/stale.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
+  await expect(readFile(join(state.root, 'plugins_examples/text-tools/stale.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
+  expect(state.fork).not.toHaveBeenCalled()
+})
+
+it('retains the current system package on invalid bundled metadata and retries after correction', async () => {
+  const { store } = runtime.pluginRuntime()
+  const backend = await store.packageFile('usage-meter', 'backend.cjs')
+  const original = await readFile(backend, 'utf8')
+  const manifest = join(state.bundled, 'plugins_system/usage-meter/PLUGIN.json')
+  const contents = await readFile(manifest, 'utf8')
+  await writeFile(manifest, '{broken')
+  await expect(runtime.initializePluginsStore()).rejects.toThrow()
+  expect(await readFile(backend, 'utf8')).toBe(original)
+  await writeFile(manifest, contents)
+  await runtime.initializePluginsStore()
+  expect(await store.read('usage-meter')).toMatchObject({ enabled: true, error: undefined })
+})
+
+it('recreates mirrors absent from an older backup without resetting plugin state', async () => {
+  const { store } = runtime.pluginRuntime()
+  await store.setEnabled('usage-meter', false)
+  await rm(join(state.root, 'plugins_system'), { recursive: true })
+  await rm(join(state.root, 'plugins_examples'), { recursive: true })
+  await runtime.initializePluginsStore()
+  expect(await store.read('usage-meter')).toMatchObject({ enabled: false, error: undefined })
+  expect(JSON.parse(await readFile(join(state.root, 'plugins_examples/notepad/PLUGIN.json'), 'utf8')).id).toBe('example-notepad')
+  expect((await store.list()).map(plugin => plugin.id).sort()).toEqual(['example-text-tools', 'usage-meter'])
+  expect(state.fork).not.toHaveBeenCalled()
+})
+
 it('assembles selected static prompts without a backend, gates dependencies and scope, and reads replacements', async () => {
   const { store } = runtime.pluginRuntime()
-  await store.install(resolve('examples/plugins/writing-helper/PLUGIN.json'))
+  await store.install(resolve('data/plugins_examples/writing-helper/PLUGIN.json'))
   const selected = ['writing-helper:prompt:writing-tone']
   expect(await runtime.buildPluginPrompts([], [], 'main')).toBe('')
   expect(await runtime.buildPluginPrompts(selected, [], 'main')).toContain('preserve the author')

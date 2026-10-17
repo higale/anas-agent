@@ -23,6 +23,7 @@ import { initializeCustomEnvironmentInformation } from './environmentContextServ
 import { installRuntimeNetworkPolicy } from './runtimeNetworkPolicy'
 import { initializeSkillsStore } from './skillsStore'
 import { initializeToolsStore } from './toolsStore'
+import { initializePluginsStore } from './plugins/pluginRuntime'
 import { getInputHistory } from './inputHistoryStore'
 import { migrateDataDirectory } from './migrations'
 import { recoverInterruptedDataRestore } from './backupService'
@@ -85,6 +86,7 @@ function startApplication(): void {
     registerPluginProtocol()
     const recoveredInterruptedRestore = await recoverInterruptedDataRestore()
     await migrateDataDirectory(getDataDir())
+    await initializePluginsStore()
     await recoverPendingProjectDeletion()
     await initializeAgentRuntime()
     await initializeAppProfile()

@@ -55,7 +55,7 @@ Shell 命令保留模型提供的命令文本、参数及搜索行为。受支�
 
 Anas 3.3.8 起使用插件 API 2；API 1 插件需更新后使用。RDP 插件 0.1.9 需要 Anas 3.3.13 或更新版本，请先更新宿主，再安装插件。
 
-可选插件在“设置 > 插件”中选择 ZIP 文件或 `PLUGIN.json` 安装，也可一次拖入一个 ZIP、`PLUGIN.json` 或根部包含清单的插件目录。插件可提供侧边页面、独立窗口、按需后台、工具、技能及静态提示词。纯界面或声明包无需后台进程。项目和子 Agent 中按插件集中选择“全部／定制／关闭”；未定制项目使用所有已启用插件的可用能力。插件管理页负责整体启停，不重复设置贡献开关。开发接口见[插件文档](docs/PLUGINS.md)，示例位于 [examples/plugins](examples/plugins)。
+可选插件在“设置 > 插件”中选择 ZIP 文件或 `PLUGIN.json` 安装，也可一次拖入一个 ZIP、`PLUGIN.json` 或根部包含清单的插件目录。插件可提供侧边页面、独立窗口、按需后台、工具、技能及静态提示词。纯界面或声明包无需后台进程。项目和子 Agent 中按插件集中选择“全部／定制／关闭”；未定制项目使用所有已启用插件的可用能力。插件管理页负责整体启停，不重复设置贡献开关。开发接口见[插件文档](docs/PLUGINS.md)，示例位于 [data/plugins_examples](data/plugins_examples)。
 
 ## 开发
 
@@ -121,6 +121,7 @@ npm run dev -- -- --data-dir "./runtime-data/research"
 | `skills/`、`tools/` | 用户管理的包 |
 | `plugins/`、`plugins_data/` | 已安装插件及独立数据；卸载默认保留数据，可勾选删除 |
 | `skills_system/`、`skills_examples/`、`tools_system/`、`tools_examples/` | 启动时刷新的内置包；示例需先导入再使用 |
+| `plugins_system/`、`plugins_examples/` | 启动和恢复备份时刷新的内置插件与示例；内置插件从此加载，示例需先安装 |
 | `help/`、`lang/` | 帮助与语言包 |
 | `assets/`、`log/`、`cache/`、`tmp/`、`electron/` | 资源、日志、缓存、临时文件与 Electron 用户配置 |
 

@@ -272,6 +272,14 @@ export function getToolExamplesDir(): string {
   return join(getDataDir(), 'tools_examples')
 }
 
+export function getSystemPluginsDir(): string {
+  return join(getDataDir(), 'plugins_system')
+}
+
+export function getPluginExamplesDir(): string {
+  return join(getDataDir(), 'plugins_examples')
+}
+
 export function getLogDir(): string {
   return join(getDataDir(), 'log')
 }

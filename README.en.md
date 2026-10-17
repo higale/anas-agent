@@ -55,7 +55,7 @@ The overview in **Settings > Plugins** previews a plugin's instructions, skills,
 
 Anas 3.3.8 introduces plugin API 2; API 1 plugins must be updated. RDP plugin 0.1.9 requires Anas 3.3.13 or later: update the host before installing the plugin.
 
-Install optional plugins in **Settings > Plugins** from a ZIP file or `PLUGIN.json`, or drag in one ZIP, manifest, or plugin folder containing `PLUGIN.json` at its root. Plugins can provide side panels, separate windows, optional backends, tools, skills, and static instructions. UI-only or declarative plugins need no backend process. Projects and subagents group contributions by plugin with **All / Custom / Off**; uncustomized projects use all available contributions from enabled plugins. Plugin management controls overall availability. See the [plugin API](docs/PLUGINS.md) and [examples](examples/plugins).
+Install optional plugins in **Settings > Plugins** from a ZIP file or `PLUGIN.json`, or drag in one ZIP, manifest, or plugin folder containing `PLUGIN.json` at its root. Plugins can provide side panels, separate windows, optional backends, tools, skills, and static instructions. UI-only or declarative plugins need no backend process. Projects and subagents group contributions by plugin with **All / Custom / Off**; uncustomized projects use all available contributions from enabled plugins. Plugin management controls overall availability. See the [plugin API](docs/PLUGINS.md) and [examples](data/plugins_examples).
 
 ## Development
 
@@ -121,6 +121,7 @@ npm run dev -- -- --data-dir "./runtime-data/research"
 | `skills/`, `tools/` | User-managed packages |
 | `plugins/`, `plugins_data/` | Installed plugins and independent data; uninstalling retains data unless deletion is selected |
 | `skills_system/`, `skills_examples/`, `tools_system/`, `tools_examples/` | Bundled packages refreshed at startup; examples must be imported before use |
+| `plugins_system/`, `plugins_examples/` | Built-in plugins and examples refreshed at startup and after backup restore; built-ins load from here, while examples require installation |
 | `help/`, `lang/` | Help and language packs |
 | `assets/`, `log/`, `cache/`, `tmp/`, `electron/` | Assets, logs, cache, temporary files, and Electron profile |
 

@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url'
 import { isAbsolute } from 'node:path'
 import { PLUGIN_API_VERSION, PLUGIN_ICON_PATH, PLUGIN_SCHEME, requirePluginJson, requirePluginView, type PluginSummary, type PluginViewOptions, type PluginInstallResult } from '@shared/plugins'
 import { getAppConfigSnapshot } from '../config/appConfig'
+import { getPluginExamplesDir } from '../config/dataDir'
 import { getConfiguredTranslator, resolveConfiguredLanguage } from '../languageStore'
 import { handleMainIpc } from '../ipcSecurity'
 import { runApplicationDataOperation } from '../applicationDataLifecycle'
@@ -170,7 +171,7 @@ export function registerPluginIpc(): void {
       const config = await getAppConfigSnapshot()
       const t = await getConfiguredTranslator(config.settings.language)
       const result = await showModalOpenDialog(dialogParentFromEvent(event), {
-        properties: ['openFile'], title: t('plugins.install'),
+        properties: ['openFile'], title: t('plugins.install'), defaultPath: getPluginExamplesDir(),
         filters: [
           { name: t('plugins.install_zip_filter'), extensions: ['zip'] },
           { name: t('plugins.install_manifest_filter'), extensions: ['json'] }

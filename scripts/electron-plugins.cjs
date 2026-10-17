@@ -254,7 +254,7 @@ async function openPluginHome(page, name) {
 async function checkForms(application, page, directory, settings) {
   const source = join(directory, 'form-fixture')
   await mkdir(join(source, 'assets'), { recursive: true })
-  await cp(join(process.cwd(), 'examples/plugins/notepad/assets/save.svg'), join(source, 'assets/save.svg'))
+  await cp(join(process.cwd(), 'data/plugins_examples/notepad/assets/save.svg'), join(source, 'assets/save.svg'))
   await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ version: 0, id: 'form-test', name: 'Form test', plugin_version: '1.0.0', api_version: 2, ui: 'index.html' }))
   await writeFile(join(source, 'index.html'), '<html><body><script src="/_anas/sdk.js"></script><form id="form"><input id="name" required><button id="submit">Submit</button></form><output id="count">0</output><form id="navigation" action="https://example.com/blocked"><button id="navigate">Navigate</button></form><script src="app.js"></script></body></html>')
   await writeFile(join(source, 'app.js'), `(async () => {
@@ -409,7 +409,7 @@ async function checkHomePolicies(application, page, directory) {
 
 async function checkReplacement(application, page, directory, repository, settings) {
   const source = join(directory, 'replacement-source'), archive = join(directory, 'replacement.zip')
-  await cp(join(repository, 'examples/plugins/backend-demo'), source, { recursive: true })
+  await cp(join(repository, 'data/plugins_examples/backend-demo'), source, { recursive: true })
   const manifestPath = join(source, 'PLUGIN.json')
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
   manifest.id = 'replacement-test'
@@ -544,7 +544,7 @@ async function main() {
     const backendZip = join(directory, 'backend.zip')
     const notepadZip = join(directory, 'notepad.zip')
     const notepadSource = join(directory, 'notepad-source')
-    await cp(join(repository, 'examples/plugins/notepad'), notepadSource, { recursive: true })
+    await cp(join(repository, 'data/plugins_examples/notepad'), notepadSource, { recursive: true })
     const iconManifest = JSON.parse(await readFile(join(notepadSource, 'PLUGIN.json'), 'utf8'))
     iconManifest.icon = { light: 'assets/light.svg', dark: 'assets/dark.svg' }
     await writeFile(join(notepadSource, 'PLUGIN.json'), JSON.stringify(iconManifest))
@@ -556,8 +556,8 @@ async function main() {
     await writeFile(join(notepadSource, 'lang/fr.json'), JSON.stringify({ version: 0, _meta: { name: 'Français' }, plugin: { name: 'Bloc-notes' }, actions: { save: '' } }))
     await mkdir(join(directory, 'lang'))
     await writeFile(join(directory, 'lang/fr.json'), JSON.stringify({ version: 0, _meta: { name: 'Français' }, plugins: { install: 'Installer un plugin', install_zip_filter: '' } }))
-    await zipExample(join(repository, 'examples/plugins/backend-demo'), backendZip, 'backend-demo/')
-    await zipExample(join(repository, 'examples/plugins/notepad'), notepadZip)
+    await zipExample(join(repository, 'data/plugins_examples/backend-demo'), backendZip, 'backend-demo/')
+    await zipExample(join(repository, 'data/plugins_examples/notepad'), notepadZip)
     application = await electron.launch({ args: [repository, '--data-dir', directory], cwd: repository, env: environment, executablePath: require('electron'), timeout: 45000 })
     const page = await application.firstWindow({ timeout: 45000 })
     const errors = []

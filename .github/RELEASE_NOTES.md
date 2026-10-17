@@ -1,14 +1,12 @@
-## Anas v3.3.17
+## Anas v3.3.18
 
-- 用量仪表将账户、套餐和余额明细集中到更新时间右侧的详情图标；悬停预览，点击固定后可选择、复制文字，主要读数与必要的异常提示保持可见。
-- MiniMax 统一显示“5h 限额”和“周限额”的剩余额度，周读数计入套餐加成；详情补充总额度、已用额度和加成说明，重置倒计时继续直接显示。
-- 插件 HTML 展示项支持共享详情浮层，修复跨 Shadow DOM 的悬停交互，并优化提示框宽度和换行。
-- 按官网更新 DeepSeek 内置模板：OpenAI Base URL 使用根地址，两种协议的模型列表地址统一为 `/models`；已有供应商配置保持不变。
+- 内置插件与插件示例统一使用 `plugins_system/`、`plugins_examples/` 目录，启动和恢复备份时同步到应用数据目录；内置插件从同步后的目录加载。
+- 安装插件时默认打开示例目录，随包提供记事本、文本工具、写作助手和可选后台示例，并补充中英文使用说明；示例需手动安装后使用。
+- 刷新内置插件与示例时保留用户已安装的插件、独立数据和启停设置；受支持备份缺少这些目录时自动补齐。
 
-- Consolidate account, plan and balance details behind an info icon beside the update time. Hover to preview or click to keep details open for text selection and copying; primary readings and important notices remain visible.
-- Show MiniMax remaining quota under “5h limit” and “Weekly limit”, including weekly plan boosts. Add total quota, used quota and boost explanations to details while keeping reset countdowns visible.
-- Support shared details popovers in plugin HTML widgets, fix hover interactions across Shadow DOM boundaries, and improve tooltip width and wrapping.
-- Update built-in DeepSeek templates to the official endpoints: use the root OpenAI Base URL and `/models` for both protocols’ model lists. Existing provider configurations remain unchanged.
+- Standardize built-in plugins and examples under `plugins_system/` and `plugins_examples/`, refreshing them in application data at startup and after backup restore. Built-in plugins load from the refreshed directory.
+- Open the examples directory by default when installing plugins. Bundle notepad, text tools, writing helper and optional backend examples with Chinese and English instructions; examples require manual installation.
+- Preserve installed plugins, independent data and enabled states when refreshing bundled resources. Recreate missing resource directories when restoring supported backups.
 
 ## 下载与安装 / Downloads & installation
 

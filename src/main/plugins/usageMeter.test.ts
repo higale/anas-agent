@@ -7,7 +7,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { PluginWidgetContent } from '@shared/pluginWidgets'
 
 const load = createRequire(import.meta.url)
-const path = resolve('data/plugins/usage-meter/backend.cjs')
+const path = resolve('data/plugins_system/usage-meter/backend.cjs')
 let backend: { activate(context: { dataDirectory: string }): void; call(method: string, params: unknown, context: { signal: AbortSignal }): Promise<PluginWidgetContent | null>; deactivate(): void }
 let dataDirectory: string
 const model = { id: 'm1', model: 'MiniMax-M2.7', providerId: 'p1', providerName: 'MiniMax CN', baseUrl: 'https://api.minimaxi.com/anthropic', apiKey: 'test-secret' }

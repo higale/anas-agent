@@ -64,6 +64,7 @@ vi.mock('../config/dataDir', async (importOriginal) => ({
   getConfigFile: (name: string) => join(testPaths.root, 'config', name),
   getSkillsDir: () => join(testPaths.root, 'skills'),
   getSystemSkillsDir: () => join(testPaths.root, 'skills_system'),
+  getSystemPluginsDir: () => join(testPaths.root, 'plugins_system'),
   getSkillExamplesDir: () => join(testPaths.root, 'skills_examples')
 }))
 beforeAll(async () => { testPaths.root = await mkdtemp(join(tmpdir(), 'anas-agent-factory-')) })

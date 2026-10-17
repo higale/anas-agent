@@ -51,7 +51,7 @@ ZIP 原文件最多 512 MiB，解包同时执行上述文件数量、单文件�
 
 ### 内置插件与侧栏展示
 
-内置插件从随应用分发的 `data/plugins/` 加载，使用同一后台和展示协议；默认启用，可在设置中停用，不可卸载或被同 ID 外部包覆盖。代码随应用升级，启停状态独立保存为 `plugins_data/<id>/anas-installation.json`（`version: 0`，`enabled` 缺省为 `true`），随用户数据备份；不复制包到用户安装目录，不覆盖插件设置。现有外部插件无需修改。
+启动时将随应用分发的 `data/plugins_system/` 同步到应用数据目录的 `plugins_system/`，内置插件从此处加载，使用同一后台和展示协议；默认启用，可在设置中停用，不可卸载或被同 ID 外部包覆盖。该目录由应用维护，手动修改会在下次启动或恢复备份时被随包内容覆盖。启停状态独立保存为 `plugins_data/<id>/anas-installation.json`（`version: 0`，`enabled` 缺省为 `true`），不随代码刷新重置；用户安装的 `plugins/` 与独立数据 `plugins_data/` 保持原位。恢复备份时重新同步当前随包内容，缺少系统或示例目录的受支持旧备份也能正常恢复，无需配置迁移，也不启动插件后台。
 
 清单可声明最多 8 个 `widgets`，当前位置为 `sidebar.footer`（设置入口上方）。展示项需有后台，例：
 
@@ -106,7 +106,7 @@ return {
 
 智谱国内普通 API（`open.bigmodel.cn/api/paas/v4`，允许末尾斜线）使用 `GET https://open.bigmodel.cn/api/biz/account/query-customer-account-report`，`Authorization` 为原始 API Key，无需控制台登录。该接口来自[官方控制台前端](https://static.bigmodel.cn/wd-paas-front/js/app.808381fa.js)，已用当前普通 Key 实测成功，但未查到公开接口契约；国际站未验证，不复用国内接口或假设其币种。主读数取 `availableBalance`（CNY），详情按实际返回显示 `rechargeAmount`、`totalSpendAmount`、`frozenBalance`；不四舍五入为两位小数，缺失或 null 的详情字段不伪造为零，主读数缺失或金额格式异常视为错误并保留上次成功读数。账户余额不含资源包和 Coding Plan 额度，不以零余额推断模型不可用。余额与套餐按查询 URL 分别缓存，切换路径不串用；共享刷新、限时、失败退避和本地化显示。
 
-百炼适配器位于 `data/plugins/usage-meter/bailian.cjs`，通过本机 `bl` 的 JSON 输出查询中国站账户身份、Key 和用量；浏览器登录由插件按钮显式启动，后台独立管理并支持取消。Token Plan 使用 `/tokenplan/personal/api/v2/usage` 原始结果保留月度字段，Key 首尾匹配后才展示；剩余百分比在紧凑、详细及悬停视图统一显示两位小数，进度保留原始比例。普通 Key 详情完整匹配后限定工作空间和 Key ID 查询统计。账户身份在读取缓存前和新查询后核对；登录后清空缓存，错误不保留百炼读数。仅返回展示字段，不输出 CLI 原始错误、会话信息或完整 Key。
+百炼适配器位于 `data/plugins_system/usage-meter/bailian.cjs`，通过本机 `bl` 的 JSON 输出查询中国站账户身份、Key 和用量；浏览器登录由插件按钮显式启动，后台独立管理并支持取消。Token Plan 使用 `/tokenplan/personal/api/v2/usage` 原始结果保留月度字段，Key 首尾匹配后才展示；剩余百分比在紧凑、详细及悬停视图统一显示两位小数，进度保留原始比例。普通 Key 详情完整匹配后限定工作空间和 Key ID 查询统计。账户身份在读取缓存前和新查询后核对；登录后清空缓存，错误不保留百炼读数。仅返回展示字段，不输出 CLI 原始错误、会话信息或完整 Key。
 
 用量仪表展开视图优先显示主要读数，更新时间右侧的详情图标集中展示附加资料：百炼显示账户、工作空间和套餐资料，普通 API 还收纳免费额度到期及调用用量明细；余额类显示余额构成和消费明细；智谱 Coding Plan 保留重置倒计时，精确日期放入详情。MiniMax 保留剩余额度和重置倒计时，精确重置时间仍使用悬停提示；总额度、已用和加成说明放入详情。查询失败、明确的余额不足及百炼套餐已失效等异常直接显示。紧凑视图的整体提示仍保留完整资料；详情不新增请求，未返回字段不补造，无附加资料时不显示图标。
 
@@ -289,7 +289,7 @@ module.exports = {
 
 ## 验证与后续边界
 
-示例见 `examples/plugins/`：记事本验证纯 UI 和页面交接，可选后台示例验证延迟启动与 RPC，text-tools 验证模型工具与通用设置，writing-helper 验证纯静态贡献。测试覆盖不兼容清单、损坏包、路径边界、并发写入、排队取消与在途结果、慢资源加载隔离、停用／卸载、备份恢复和真实 Electron 页面通信。
+示例见 `data/plugins_examples/`，启动及恢复备份时同步到应用数据目录的 `plugins_examples/`，不直接注册或启用。安装对话框默认打开该目录，选择示例的 `PLUGIN.json` 后复制到 `plugins/`；已安装副本不随示例刷新而覆盖。记事本验证纯 UI 和页面交接，可选后台示例验证延迟启动与 RPC，text-tools 验证模型工具与通用设置，writing-helper 验证纯静态贡献。测试覆盖不兼容清单、损坏包、路径边界、并发写入、排队取消与在途结果、慢资源加载隔离、停用／卸载、备份恢复和真实 Electron 页面通信。
 
 在完成 `npm run build` 后运行 `node scripts/electron-plugins.cjs`，使用临时数据目录验证真实应用，不修改个人配置。
 
@@ -339,11 +339,11 @@ ID 和处理器名使用字母开头的小写字母、数字、下划线，最�
 
 「设置 → 工具 → 插件」按插件展示清单中的静态工具定义，复用 MCP 目录的分组和详情弹窗，支持查看和复制完整模型名称、说明和输入 schema。停用的插件仍可查看；此目录不修改能力选择，也不启动后台。
 
-最小无界面示例：[text-tools](../examples/plugins/text-tools/PLUGIN.json)。完整契约和职责边界见[插件能力契约](PLUGIN_CAPABILITIES_CONTRACT.md)。实际 Electron 验证命令：`npm run test:e2e -- --plugin-tools-only`。
+最小无界面示例：[text-tools](../data/plugins_examples/text-tools/PLUGIN.json)。完整契约和职责边界见[插件能力契约](PLUGIN_CAPABILITIES_CONTRACT.md)。实际 Electron 验证命令：`npm run test:e2e -- --plugin-tools-only`。
 
 ## 技能与静态提示词
 
-清单可声明纯静态贡献，无需 UI 或后台。示例见 [writing-helper](../examples/plugins/writing-helper/PLUGIN.json)：
+清单可声明纯静态贡献，无需 UI 或后台。示例见 [writing-helper](../data/plugins_examples/writing-helper/PLUGIN.json)：
 
 ```json
 "skills": [{ "id": "proofread", "path": "skills/proofread/SKILL.md", "tools": [] }],
@@ -380,7 +380,7 @@ ID 和处理器名使用字母开头的小写字母、数字、下划线，最�
 
 设置保存在 `plugins_data/<id>/anas-settings.json`，由宿主读写，插件不要直接修改；卸载默认保留并随普通数据备份，显式删除插件数据时一并删除。移除字段的已存值保留在磁盘，但当前接口不暴露它。若字段类型发生不兼容变化，插件发布方仍需遵守数据升级规则，不能靠默认值静默重置。
 
-通用字段不存密码或令牌；凭据继续使用插件自身的加密与备份机制。复杂业务配置沿用插件页面，本轮不增加没有实际需求的专用设置页面钩子。示例 [text-tools](../examples/plugins/text-tools/PLUGIN.json) 的回显工具在每次调用时读取通用设置，无需打开页面或重启后台。
+通用字段不存密码或令牌；凭据继续使用插件自身的加密与备份机制。复杂业务配置沿用插件页面，本轮不增加没有实际需求的专用设置页面钩子。示例 [text-tools](../data/plugins_examples/text-tools/PLUGIN.json) 的回显工具在每次调用时读取通用设置，无需打开页面或重启后台。
 
 ## 执行中的包资源
 
