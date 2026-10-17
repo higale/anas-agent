@@ -125,10 +125,12 @@ describe('application data directory', () => {
     const { dataDir, home } = await loadDataDir()
     const selected = join(home, 'profile')
 
-    expect(dataDir.getAgentCatalogFile(selected)).toBe(join(selected, 'sqlite', 'catalog.sqlite'))
-    expect(dataDir.getAgentConversationDatabaseFile('conversation-1', selected)).toBe(join(selected, 'sqlite', 'conversations', 'conversation-1.sqlite'))
+    expect(dataDir.getAgentCatalogFile(selected)).toBe(join(selected, 'db', 'catalog.sqlite'))
+    expect(dataDir.getProjectStoreFile(selected)).toBe(join(selected, 'db', 'projects.json'))
+    expect(dataDir.getInputHistoryFile(selected)).toBe(join(selected, 'db', 'input_history.json'))
+    expect(dataDir.getAgentConversationDatabaseFile('conversation-1', selected)).toBe(join(selected, 'db', 'conversations', 'conversation-1', 'conversation.sqlite'))
     for (const id of ['../outside', 'nested/thread', 'nested\\thread', 'CON', 'thread:stream', '']) {
-      expect(() => dataDir.getAgentConversationDatabaseFile(id, selected)).toThrow('not a valid database file name')
+      expect(() => dataDir.getAgentConversationDatabaseFile(id, selected)).toThrow('not a valid storage directory name')
     }
     expect(existsSync(selected)).toBe(false)
   })
@@ -140,8 +142,13 @@ describe('application data directory', () => {
 
     expect(dataDir.getDataDir()).toBe(join(home, '.galeAnas Work'))
     expect(dataDir.getConfigFile()).toBe(join(home, '.galeAnas Work', 'config', 'settings.json'))
-    expect(dataDir.getFileEditRecordsDir()).toBe(join(home, '.galeAnas Work', 'file_edits'))
-    expect(dataDir.getFileEditRecordsDir()).not.toContain(join('.galeAnas Work', 'tmp'))
+    expect(dataDir.getSystemSkillsDir()).toBe(join(home, '.galeAnas Work', 'skills', '_system'))
+    expect(dataDir.getSystemPluginsDir()).toBe(join(home, '.galeAnas Work', 'plugins', '_system'))
+    expect(dataDir.getSkillExamplesDir()).toBe(join(home, '.galeAnas Work', 'examples', 'skills'))
+    expect(dataDir.getToolExamplesDir()).toBe(join(home, '.galeAnas Work', 'examples', 'tools'))
+    expect(dataDir.getPluginExamplesDir()).toBe(join(home, '.galeAnas Work', 'examples', 'plugins'))
+    expect(dataDir.getFileEditRecordsDir('conversation-1')).toBe(join(home, '.galeAnas Work', 'db', 'conversations', 'conversation-1', 'file_edits'))
+    expect(dataDir.getFileEditRecordsDir('conversation-1')).not.toContain(join('.galeAnas Work', 'tmp'))
     expect(existsSync(dataDir.getDataDir())).toBe(false)
 
     dataDir.configureDataRuntime(['Anas'])

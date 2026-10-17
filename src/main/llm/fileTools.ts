@@ -10,7 +10,7 @@ import { authorizeCurrentPatchTargets, verifyCurrentPatchInputTargets } from '..
 import { currentToolExecution } from '../agent/toolExecutionContext'
 import { directoryTreePages, maximumTreeDepth } from '../directoryTree'
 import { createTextPatch, defaultPatchMaxChars, defaultRequestPatchMaxChars, maxPatchMaxChars, patchFormat, type TextPatchResult } from '../fileEditDiff'
-import { getDefaultFileEditStore, pathExists, type FileEditStore, type FileOperationRecord } from '../fileEditStore'
+import { pathExists, type FileEditStore, type FileOperationRecord } from '../fileEditStore'
 import { resolveWorkspacePath } from '../workspacePath'
 import { filePatchLinePrefixInstructions, filePatchSchema, planFilePatch, resolveFilePatchTargets, resolveWriteFileTargets, writeFileSchema, type FilePatchChange } from '../filePatch'
 import { captureFilePatchPreimages } from '../filePatchState'
@@ -226,6 +226,10 @@ export interface FileToolOptions {
 const workspacePathDescription = 'Path, absolute or relative to the primary/default folder.'
 
 export function createFileTools(options: FileToolOptions): StructuredToolInterface[] {
+  const fileEdits = (): FileEditStoreOperations => {
+    if (!options.fileEditStore) throw new Error('Conversation file edit storage is unavailable.')
+    return options.fileEditStore
+  }
   if (typeof options.maxReadBytes === 'number' && (!Number.isSafeInteger(options.maxReadBytes) || options.maxReadBytes <= 0)) {
     throw new Error('File read budget must be a positive safe integer.')
   }
@@ -240,7 +244,6 @@ export function createFileTools(options: FileToolOptions): StructuredToolInterfa
     primaryFolder,
     requestId,
     toolNames,
-    fileEditStore = getDefaultFileEditStore(),
     authorizePatch = authorizeCurrentPatchTargets
   } = options
   const workspacePath = (input: unknown): string => resolveWorkspacePath(input, primaryFolder)
@@ -280,7 +283,7 @@ export function createFileTools(options: FileToolOptions): StructuredToolInterfa
     reference = publishedReference?.success ? publishedReference.data : reference
     if (reference) {
       try {
-        const record = await fileEditStore.loadOperationRecord(reference.operationId, reference.requestId)
+        const record = await fileEdits().loadOperationRecord(reference.operationId, reference.requestId)
         return outcome(record, error)
       } catch (recordError) {
         const published = publishedReference?.success
@@ -298,10 +301,10 @@ export function createFileTools(options: FileToolOptions): StructuredToolInterfa
     try {
       if (!dryRun) {
         reference = recordedEffect() ?? identity('file_edit')
-        const existing = await fileEditStore.loadPatchForExecution(reference.operationId, reference.requestId, 'file_edit')
+        const existing = await fileEdits().loadPatchForExecution(reference.operationId, reference.requestId, 'file_edit')
         if (existing) {
           if (existing.transaction.restores) throw new Error('An apply call cannot resume a reverse operation.')
-          return outcome(await fileEditStore.resumePatch(existing.operationId, existing.requestId, authorizePatch, signal()))
+          return outcome(await fileEdits().resumePatch(existing.operationId, existing.requestId, authorizePatch, signal()))
         }
       }
       const resolved = await resolve()
@@ -313,7 +316,7 @@ export function createFileTools(options: FileToolOptions): StructuredToolInterfa
         return json({ ok: true, dryRun: true, files: changes.map((change) => ({ path: change.path, changed: change.beforeText !== change.afterText })),
           ...patchResultFields(patchForChanges(changes, defaultPatchMaxChars, primaryFolder)) })
       }
-      return outcome(await fileEditStore.executePatch(resolved.input, preimages, reference!.requestId, { operationId: reference!.operationId, signal: signal() }))
+      return outcome(await fileEdits().executePatch(resolved.input, preimages, reference!.requestId, { operationId: reference!.operationId, signal: signal() }))
     } catch (error) { return failed(error, reference) }
   }
   const tools = [
@@ -341,10 +344,10 @@ export function createFileTools(options: FileToolOptions): StructuredToolInterfa
     tool(async (input) => {
       let reference: { requestId: string; operationId: string } | undefined
       try {
-        const source = await fileEditStore.loadOperationRecord(input.operation_id, input.request_id ?? requestId)
+        const source = await fileEdits().loadOperationRecord(input.operation_id, input.request_id ?? requestId)
         if (source.transaction.restores) throw new Error('Restore the original apply_patch operation, not its inverse record.')
         if (input.dry_run) {
-          const plan = await fileEditStore.previewPatchRestore(source.operationId, source.requestId,
+          const plan = await fileEdits().previewPatchRestore(source.operationId, source.requestId,
             (targets) => authorizePatch(targets.map((target) => ({ ...target, access: 'read' }))), signal())
           return json({ ok: plan.status === 'ready', dryRun: true, state: plan.status,
             files: plan.entries.map(({ path, action, reason }) => ({ path, action, ...(reason ? { reason } : {}) })),
@@ -352,33 +355,33 @@ export function createFileTools(options: FileToolOptions): StructuredToolInterfa
         }
         const durable = recordedEffect()
         reference = durable ?? identity('file_restore')
-        let inverse = await fileEditStore.loadPatchForExecution(reference.operationId, reference.requestId, 'file_restore')
+        let inverse = await fileEdits().loadPatchForExecution(reference.operationId, reference.requestId, 'file_restore')
         if (inverse?.operationId === source.operationId && inverse.requestId === source.requestId) {
           inverse = undefined
           // Finalization arms the source before saving its pending marker. A
           // crash in that interval still belongs to the recorded latest inverse.
           if (!source.transaction.recovery && !source.transaction.reverseAttempt) {
-            await fileEditStore.finalizePatchRestore(source.operationId, source.requestId, authorizePatch, { signal: signal() })
+            await fileEdits().finalizePatchRestore(source.operationId, source.requestId, authorizePatch, { signal: signal() })
             return json({ ok: true, state: 'resolved', restoredOperationId: source.operationId, recoveryRequestId: source.requestId })
           }
         }
         if (!inverse && !source.transaction.recovery && source.transaction.reverseAttempt) {
-          const previous = await fileEditStore.loadOperationRecord(source.transaction.reverseAttempt.operationId, source.transaction.reverseAttempt.requestId)
+          const previous = await fileEdits().loadOperationRecord(source.transaction.reverseAttempt.operationId, source.transaction.reverseAttempt.requestId)
           if (!patchCompensationComplete(previous.transaction)) inverse = previous
         }
         if (inverse) {
           if (inverse.transaction.restores?.operationId !== source.operationId || inverse.transaction.restores.requestId !== source.requestId
             || inverse.transaction.restores.definitionHash !== source.definitionHash) throw new Error('Reverse effect does not belong to the requested source.')
           reference = { requestId: inverse.requestId, operationId: inverse.operationId }
-          inverse = await fileEditStore.resumePatch(inverse.operationId, inverse.requestId, authorizePatch, signal())
+          inverse = await fileEdits().resumePatch(inverse.operationId, inverse.requestId, authorizePatch, signal())
           if (!inverse.transaction.entries.every((entry) => entry.state === 'applied')) return outcome(inverse)
         } else if (!source.transaction.recovery) {
-          inverse = await fileEditStore.restorePatch(source.operationId, source.requestId, reference.requestId, authorizePatch,
+          inverse = await fileEdits().restorePatch(source.operationId, source.requestId, reference.requestId, authorizePatch,
             { operationId: reference.operationId, signal: signal() }) ?? undefined
         }
-        await fileEditStore.finalizePatchRestore(source.operationId, source.requestId, authorizePatch,
+        await fileEdits().finalizePatchRestore(source.operationId, source.requestId, authorizePatch,
           { ...(inverse ? { inverse: { requestId: inverse.requestId, operationId: inverse.operationId } } : {}), signal: signal() })
-        return inverse ? outcome(await fileEditStore.loadOperationRecord(inverse.operationId, inverse.requestId))
+        return inverse ? outcome(await fileEdits().loadOperationRecord(inverse.operationId, inverse.requestId))
           : json({ ok: true, state: 'resolved', restoredOperationId: source.operationId, recoveryRequestId: source.requestId })
       } catch (error) { return failed(error, reference) }
     }, { name: 'restore_file_edit', description: 'Restore an entire original apply_patch or write_file operation. Uses confirmed identities, resumes its unfinished inverse, and never overwrites conflicting external edits. Returns a separate inverse record when files changed.',
@@ -486,7 +489,7 @@ export function createFileTools(options: FileToolOptions): StructuredToolInterfa
         }
 
         if (scope === 'retained') {
-          const records = await fileEditStore.listRetainedEditRecords()
+          const records = await fileEdits().listRetainedEditRecords()
           return json({
             ok: true,
             retained: records.map((record) => record.tool === 'unavailable' ? {
@@ -512,7 +515,7 @@ export function createFileTools(options: FileToolOptions): StructuredToolInterfa
       }
     }, {
       name: 'get_file_edit_diff',
-      description: 'Query persistent recorded changes for an operation or a run and all its actual subagents, with bounded pagination and evidence-backed segments. Not Git workspace changes. History diffs do not imply recovery materials still exist. Retained scope lists actual crash-recovery handles.',
+      description: 'Query persistent recorded changes for an operation or a run and all its actual subagents, with bounded pagination and evidence-backed segments. Not Git workspace changes. History diffs do not imply recovery materials still exist. Retained scope lists actual crash-recovery handles across conversations.',
       schema: z.object({
         summary: toolSummarySchema,
         scope: z.enum(['operation', 'request', 'retained']).optional().describe('operation: one edit; request: selected run and actual descendants; retained: recovery handles. Inferred from operation_id.'),

@@ -2,7 +2,7 @@ import { isSameOrInsideDirectory, samePath } from '../pathContainment'
 import type { FilePatchRestoreTarget } from '../filePatchRestore'
 import { resolveFilePatchTargets, resolveWriteFileTargets } from '../filePatch'
 import { filePatchRestoreTargets } from '../filePatchRestore'
-import { loadOperationRecord, type FileEditStore } from '../fileEditStore'
+import type { FileEditStore } from '../fileEditStore'
 import {
   canonicalizeAbsolutePath,
   resolveCanonicalWorkspacePath,
@@ -86,7 +86,8 @@ export async function prepareToolPathAuthorization(options: {
 }): Promise<ToolPathAuthorization> {
   if (options.toolName === 'restore_file_edit') {
     const args = options.args
-    const record = await (options.fileEditStore?.loadOperationRecord.bind(options.fileEditStore) ?? loadOperationRecord)(
+    if (!options.fileEditStore) throw new Error('Conversation file edit storage is unavailable.')
+    const record = await options.fileEditStore.loadOperationRecord(
       typeof args.operation_id === 'string' ? args.operation_id.trim() : '',
       typeof args.request_id === 'string' && args.request_id.trim() ? args.request_id.trim() : options.requestId)
     return prepareFilePatchRestoreAuthorization({ ...options, targets: filePatchRestoreTargets(record).map((target) => ({

@@ -1,11 +1,11 @@
 import { existsSync } from 'node:fs'
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { defaultCapabilities } from '@shared/agentCapabilities'
 import { DEFAULT_WORKSPACE_PROJECT_ID } from '@shared/types'
-import { getAgentCatalogFile, getAgentConversationDatabaseFile, getAgentConversationsDir } from '../config/dataDir'
+import { getAgentCatalogFile, getAgentConversationDatabaseFile, getAgentConversationDir, getAgentConversationsDir } from '../config/dataDir'
 import { AgentStorage } from './agentStorage'
 
 const roots: string[] = []
@@ -33,6 +33,28 @@ afterEach(async () => {
 })
 
 describe('agent conversation storage', () => {
+  it('starts with empty conversations and memories while leaving the old layout intact', async () => {
+    const { root, storage } = await fixture()
+    const oldThread = storage.createThread({ title: 'Old conversation' })
+    await storage.memoryStore.saveMemory({ scope: 'global', kind: 'fact', content: 'Old memory', keywords: [], importance: 3 }, { origin: 'user' })
+    storage.close()
+    await rename(join(root, 'db'), join(root, 'sqlite'))
+    const rootConversation = join(root, 'conversations', 'abandoned')
+    await mkdir(rootConversation, { recursive: true })
+    await writeFile(join(rootConversation, 'conversation.sqlite'), 'obsolete conversation data')
+    const oldCatalog = await readFile(join(root, 'sqlite', 'catalog.sqlite'))
+    const current = reopen(root, storage)
+    expect(current.listThreads()).toEqual([])
+    expect((await current.memoryStore.searchMemories({ scope: 'global' })).total).toBe(0)
+    expect(current.getWorkspaceState().mode).toBe('new_thread')
+    const thread = current.createThread({ title: 'New conversation' })
+    expect(existsSync(getAgentConversationDatabaseFile(thread.id, root))).toBe(true)
+    expect(existsSync(join(root, 'sqlite', 'conversations', oldThread.id, 'conversation.sqlite'))).toBe(true)
+    expect(await readFile(join(root, 'sqlite', 'catalog.sqlite'))).toEqual(oldCatalog)
+    expect(await readFile(join(rootConversation, 'conversation.sqlite'), 'utf8')).toBe('obsolete conversation data')
+    expect(reopen(root, current).listThreads().map(item => item.title)).toEqual(['New conversation'])
+  })
+
   it('lists the catalog without opening an unreadable conversation and keeps another usable', async () => {
     const { root, storage } = await fixture()
     const first = storage.createThread({ title: 'First' })
@@ -74,7 +96,7 @@ describe('agent conversation storage', () => {
     expect(storage.conversationForRun('child-run')).toBe(database)
     expect(storage.submissionOwner('submission-1')).toBe(parent.id)
     expect(storage.queuedConversationIds()).toEqual([parent.id])
-    expect((await readdir(getAgentConversationsDir(root))).filter((file) => file.endsWith('.sqlite'))).toEqual([`${parent.id}.sqlite`])
+    expect((await readdir(getAgentConversationsDir(root)))).toEqual([parent.id])
     const current = reopen(root, storage)
     expect(current.submissionOwner('submission-1')).toBe(parent.id)
     expect(current.ownerForThread('child-thread')).toBe(parent.id)
@@ -139,6 +161,7 @@ describe('agent conversation storage', () => {
     expect(existsSync(getAgentConversationDatabaseFile(ownerId, root))).toBe(false)
     expect(storage.createThread({ title: 'Retry succeeds' }, ownerId).id).toBe(ownerId)
 
+    await mkdir(getAgentConversationDir('unregistered-existing', root), { recursive: true })
     const unrelatedFile = getAgentConversationDatabaseFile('unregistered-existing', root)
     await writeFile(unrelatedFile, 'existing file', 'utf8')
     await storage.removeConversation('unregistered-existing')
@@ -161,6 +184,19 @@ describe('agent conversation storage', () => {
     expect((await storage.memoryStore.searchMemories({ scope: 'project', projectId: 'project' })).total).toBe(0)
   })
 
+  it('reports cleanup data from unpinned conversations and actual memories rather than database overhead', async () => {
+    const { storage } = await fixture()
+    expect((await storage.getStorageUsage()).conversations.hasData).toBe(false)
+    expect((await storage.getStorageUsage()).memories.hasData).toBe(false)
+    const thread = storage.createThread({ title: 'Retained' })
+    expect((await storage.getStorageUsage()).conversations.hasData).toBe(true)
+    storage.updateThread(thread.id, { pinned: true })
+    expect((await storage.getStorageUsage()).conversations.hasData).toBe(false)
+    await storage.memoryStore.saveMemory({ scope: 'global', kind: 'fact',
+      content: 'Stored fact', keywords: ['fact'], importance: 3 }, { origin: 'user' })
+    expect((await storage.getStorageUsage()).memories.hasData).toBe(true)
+  })
+
   it('reopens shared storage after worker maintenance and accepts further writes', async () => {
     const { storage } = await fixture()
     const thread = storage.createThread({ title: 'Before maintenance' })
@@ -172,5 +208,6 @@ describe('agent conversation storage', () => {
     const usage = await storage.getStorageUsage()
     expect(usage.conversations.totalBytes).toBeGreaterThan(0)
     expect(usage.memories.totalBytes).toBe(0)
+    expect(usage.memories.hasData).toBe(false)
   })
 })

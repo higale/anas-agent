@@ -1,6 +1,6 @@
 export const resettableConfigFiles = ['settings.json', 'models.json', 'tools.json', 'mcp_servers.json', 'skills.json', 'subagents.json'] as const
 export type ResettableConfigFile = typeof resettableConfigFiles[number]
-export const recoverableAuxiliaryFiles = ['input_history.json', 'assets/avatar-transform.json'] as const
+export const recoverableAuxiliaryFiles = ['input_history.json', 'config/assets/avatar-transform.json'] as const
 export type RecoveryFile = ResettableConfigFile | 'projects.json' | typeof recoverableAuxiliaryFiles[number]
 
 export interface RecoveryFileStatus {

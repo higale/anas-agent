@@ -66,7 +66,7 @@ describe('avatar crop persistence and system icon refresh', () => {
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'anas-avatar-refresh-'))
     sourcePath = join(root, 'avatar.png')
-    await copyFile(join(process.cwd(), 'data/assets/avatar-source.png'), sourcePath)
+    await copyFile(join(process.cwd(), 'data/config/assets/avatar-source.png'), sourcePath)
     mocks.applyProfileIcon.mockReset()
     mocks.createFromBuffer.mockReset().mockReturnValue({
       getSize: () => ({ width: 1024, height: 1024 }),

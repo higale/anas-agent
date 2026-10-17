@@ -195,8 +195,7 @@ export function registerPluginIpc(): void {
       event.sender.once('destroyed', cleanup)
       installWatcher = { token: preview.token, dispose: () => { event.sender.removeListener('destroyed', cleanup) } }
       return { replacement: preview }
-    })
-    changed()
+    }).finally(changed)
     return item
   })
   handleMainIpc('plugins:confirmInstall', async (_event, token: string, deleteData = false) => {
@@ -234,8 +233,7 @@ export function registerPluginIpc(): void {
       views.closeWhere(content => content.kind === 'plugin' && content.pluginId === id)
       await backends.stop(id)
       await store.uninstall(id, deleteData)
-    })
-    changed()
+    }).finally(changed)
   })
   handleMainIpc('plugins:openWindow', async (_event, id: string) => {
     await invoke(id, 'host.openView', { instanceId: 'main', location: 'window' })

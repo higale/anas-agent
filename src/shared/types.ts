@@ -365,6 +365,8 @@ export interface DataRestoreResult {
 export interface StorageUsageValue {
   totalBytes: number
   approximate: boolean
+  /** Whether the cleanup action has data to remove; absent means not determined. */
+  hasData?: boolean
 }
 
 export type DataCleanupTarget =
@@ -373,8 +375,9 @@ export type DataCleanupTarget =
   | 'temp_folder'
   | 'log_folder'
   | 'developer_http_trace'
+  | 'unknown_files'
 
-export type DataCleanupRequest = Partial<Record<DataCleanupTarget, boolean>>
+export type DataCleanupRequest = Partial<Record<DataCleanupTarget, boolean>> & { unknown_file_paths?: string[] }
 
 export interface DataCleanupResultItem {
   target: DataCleanupTarget
@@ -392,6 +395,7 @@ export interface AppDataStorageUsageSnapshot {
   dataDirectory: StorageUsageValue
   developerHttpTrace: StorageUsageValue
   cleanup: Record<DataCleanupTarget, StorageUsageValue>
+  unknownFiles: string[]
 }
 
 export interface AppAvatarImage {

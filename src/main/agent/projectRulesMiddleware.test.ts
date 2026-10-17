@@ -11,6 +11,8 @@ import { z } from 'zod'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createProjectRulesMiddleware } from './projectRulesMiddleware'
 import { createAnasSummarizationMiddleware } from './summarizationMiddleware'
+import { FileEditStore } from '../fileEditStore'
+import { saveToolResultFile } from './toolResultFile'
 import { filePatchSchema } from '../filePatch'
 import { projectSkillMessages, toHumanMessage } from './messageMapper'
 
@@ -220,7 +222,7 @@ describe('project rules graph middleware', () => {
     await writeFile(join(root, 'child/AGENTS.md'), 'R '.repeat(6100))
     const set = rules(root, 4000)
     const summaryModel = new FakeListChatModel({ responses: ['Continue the requested edit.'] })
-    const summary = createAnasSummarizationMiddleware({ resolveRequest: () => ({ model: summaryModel, protocol: 'openai_chat_completions', inputCapacityTokens: 4000, threshold: 3000, enabled: true, modelContextKey: 'rules-test' }),
+    const summary = createAnasSummarizationMiddleware({ saveToolResult: content => saveToolResultFile(content, join(root, 'tool_results')), resolveRequest: () => ({ model: summaryModel, protocol: 'openai_chat_completions', inputCapacityTokens: 4000, threshold: 3000, enabled: true, modelContextKey: 'rules-test' }),
       backend: (runtime: BackendRuntime) => {
         const backend = new StateBackend(runtime)
         backend.write = () => ({ error: 'Conversation history offloading is disabled.' })
@@ -252,7 +254,7 @@ describe('project rules graph middleware', () => {
   })
   it.each(['restore', 'empty-path', 'blank-request-id'])('returns %s argument errors to the model without aborting the run', async (kind) => {
     const root = await fixture()
-    const set = createProjectRulesMiddleware({ runId: 'a1234567-1234-4234-8234-123456789abc', folders: [root], primaryFolder: root, getModelTokenCountingOptions: () => ({ protocol: 'openai_chat_completions' }), getInputCapacityTokens: () => 20_000, accessMode: () => 'full_access' })
+    const set = createProjectRulesMiddleware({ fileEditStore: new FileEditStore(join(root, 'file_edits')), runId: 'a1234567-1234-4234-8234-123456789abc', folders: [root], primaryFolder: root, getModelTokenCountingOptions: () => ({ protocol: 'openai_chat_completions' }), getInputCapacityTokens: () => 20_000, accessMode: () => 'full_access' })
     const writes = vi.fn(async () => 'written')
     const restores = vi.fn(async () => 'must not run')
     const badCall = kind === 'empty-path' ? writeCall('bad', '') : { id: 'bad', name: 'restore_file_edit', args: { operation_id: 'mistyped/id', ...(kind === 'blank-request-id' ? { request_id: '  ' } : {}) } }

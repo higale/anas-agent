@@ -11,7 +11,7 @@ vi.mock('electron', () => ({ app: { relaunch: mocks.relaunch, quit: mocks.quit }
 vi.mock('./ipcSecurity', () => ({ handleMainIpc: (channel: string, handler: (...args: any[]) => any) => mocks.handlers.set(channel, handler) }))
 vi.mock('./config/dataDir', () => ({
   getDataDir: () => '/test/data', getLogDir: () => '/test/data/log', getBundledConfigDir: () => '/bundled/config',
-  getAgentCatalogFile: () => '/test/data/sqlite/catalog.sqlite', getAgentConversationsDir: () => '/test/data/sqlite/conversations'
+  getAgentCatalogFile: () => '/test/data/db/catalog.sqlite', getAgentConversationsDir: () => '/test/data/db/conversations'
 }))
 vi.mock('./applicationDataLifecycle', () => ({ beginApplicationDataTransition: mocks.transition }))
 vi.mock('./agent/agentIpcHandlers', () => ({ closeAgentRuntime: mocks.closeAgent }))
@@ -47,11 +47,11 @@ beforeEach(() => {
 describe('startup recovery lifecycle', () => {
   it('presents the combined project and database inspection result', async () => {
     const recovery = await setup()
-    mocks.inspectRepair.mockResolvedValue({ candidates: [], issues: [], files: [{ name: 'projects.json', path: '/test/data/projects.json', repairableFields: ['sqlite/catalog.sqlite: user_version (1 → 0)'] }] })
+    mocks.inspectRepair.mockResolvedValue({ candidates: [], issues: [], files: [{ name: 'projects.json', path: '/test/data/db/projects.json', repairableFields: ['db/catalog.sqlite: user_version (1 → 0)'] }] })
     await recovery.showStartupRecovery(new Error('database failed'))
     const snapshot = await invoke('inspect')
-    expect(snapshot).toMatchObject({ catalogPath: '/test/data/sqlite/catalog.sqlite', conversationsPath: '/test/data/sqlite/conversations' })
-    expect(snapshot.files[0]).toMatchObject({ name: 'projects.json', repairableFields: ['sqlite/catalog.sqlite: user_version (1 → 0)'] })
+    expect(snapshot).toMatchObject({ catalogPath: '/test/data/db/catalog.sqlite', conversationsPath: '/test/data/db/conversations' })
+    expect(snapshot.files[0]).toMatchObject({ name: 'projects.json', repairableFields: ['db/catalog.sqlite: user_version (1 → 0)'] })
   })
   it('requires stopped writers for field repair and delegates preservation to the repair service', async () => {
     const recovery = await setup()

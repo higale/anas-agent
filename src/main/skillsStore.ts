@@ -231,15 +231,11 @@ export function toSkillImportError(reason: unknown): SkillImportError {
   return { code: 'failed' }
 }
 
-async function validateBundledSkill(dirPath: string, expectedName: string): Promise<void> {
+export async function validateBundledSkill(dirPath: string, expectedName: string): Promise<void> {
   const info = await lstat(dirPath)
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error(`Bundled Skill must be a regular directory: ${dirPath}`)
   const parsed = inspectSkillText(await readBoundedTextFile(join(dirPath, 'SKILL.md')), expectedName)
   if ('code' in parsed) throw new Error(`Invalid bundled Skill ${expectedName}: ${parsed.code}`)
-}
-
-async function mirrorBundledSkills(sourceName: 'skills_system' | 'skills_examples', target: string): Promise<void> {
-  await mirrorBundledDirectories(join(getBundledDataDir(), sourceName), target, validateBundledSkill)
 }
 
 export async function initializeSkillsStore(): Promise<void> {
@@ -247,8 +243,7 @@ export async function initializeSkillsStore(): Promise<void> {
     initialization = Promise.allSettled([
       ensureSkillsConfig(),
       mkdir(getSkillsDir(), { recursive: true }),
-      mirrorBundledSkills('skills_system', getSystemSkillsDir()),
-      mirrorBundledSkills('skills_examples', getSkillExamplesDir())
+      mirrorBundledDirectories(join(getBundledDataDir(), 'skills/_system'), getSystemSkillsDir(), 'SKILL.md', validateBundledSkill)
     ]).then((results) => {
       // A failed initialization must retain ownership of every started mirror
       // until it settles, so a retry cannot overwrite its staging directories.
@@ -260,12 +255,12 @@ export async function initializeSkillsStore(): Promise<void> {
   await initialization
 }
 
-export async function validateRestoredSkillsDirectory(skillsDir: string): Promise<void> {
+export async function validateRestoredSkillsDirectory(skillsDir: string, userRoot = false): Promise<void> {
   if (!(await pathExists(skillsDir))) return
   const info = await lstat(skillsDir)
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Restored Skills path must be a regular directory.')
   for (const entry of await readdir(skillsDir, { withFileTypes: true })) {
-    if (entry.name.startsWith('.')) continue
+    if (entry.name.startsWith('.') || (userRoot && entry.name.toLowerCase() === '_system')) continue
     if (!entry.isDirectory()) throw new Error(`Restored Skills contains a non-directory entry: ${entry.name}`)
     const parsed = inspectSkillText(await readFile(join(skillsDir, entry.name, 'SKILL.md'), 'utf8'), entry.name)
     if ('code' in parsed) throw new Error(`Invalid skill ${entry.name}: ${parsed.code}`)
@@ -351,8 +346,9 @@ function invalidSkill(root: SkillRootSummary, directory: SkillDirectory, issue: 
   }
 }
 
-async function skillDirectories(rootPath: string): Promise<SkillDirectory[]> {
-  const entries = await readdir(rootPath, { withFileTypes: true })
+async function skillDirectories(rootPath: string, userRoot: boolean): Promise<SkillDirectory[]> {
+  const entries = (await readdir(rootPath, { withFileTypes: true }))
+    .filter(entry => !userRoot || entry.name.toLowerCase() !== '_system')
   if (entries.length > maxSkillDirectoriesPerRoot) {
     throw new Error(`Skill root contains more than ${maxSkillDirectoriesPerRoot} entries.`)
   }
@@ -379,7 +375,7 @@ async function scanRoot(root: SkillRootSummary, config: SkillsConfigFile, declar
   try {
     const info = await stat(root.path)
     if (!info.isDirectory()) return { root: { ...root, available: false, issue: 'not_directory' }, skills: [] }
-    directories ??= await skillDirectories(root.path)
+    directories ??= await skillDirectories(root.path, root.kind === 'user')
   } catch (reason) {
     const code = (reason as NodeJS.ErrnoException).code
     return { root: { ...root, available: false, issue: code === 'ENOENT' ? 'not_found' : 'unreadable' }, skills: [] }

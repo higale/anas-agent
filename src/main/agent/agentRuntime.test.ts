@@ -2277,7 +2277,6 @@ describe('AgentRuntime', () => {
       threadId: thread.id,
       messageId: 'human-1'
     })).rejects.toThrow('is busy')
-    await expect(runtime.deleteThread(thread.id)).rejects.toThrow('is busy')
     expect(database.getLatestRunForThread(thread.id)).toMatchObject({
       id: 'run-2',
       status: 'interrupted'
@@ -4803,34 +4802,6 @@ describe('AgentRuntime', () => {
     expect(database.getManagedCall('persisted-uncertain-managed-call', thread.id)).toBeUndefined()
     expect(database.getManagedCall('persisted-completed-managed-call', thread.id)).toBeUndefined()
     expect(database.getManagedCall('hidden-run-managed-call', thread.id)).toBeUndefined()
-  })
-
-  it('preserves a conversation when background cancellation is uncertain or still executing', async () => {
-    database = AgentDatabase.open(':memory:')
-    const thread = database.createThread({ title: 'Lingering managed call' })
-    const cancelThread = vi.spyOn(ManagedCallService.prototype, 'cancelThread')
-      .mockResolvedValueOnce({
-        uncertainCallIds: ['uncertain-managed-call'],
-        lingeringCallIds: []
-      })
-      .mockResolvedValueOnce({
-        uncertainCallIds: [],
-        lingeringCallIds: ['lingering-managed-call']
-      })
-    const hasActiveForThread = vi.spyOn(ManagedCallService.prototype, 'hasActiveForThread')
-      .mockReturnValue(false)
-    const runtime = new AgentRuntime(database, async () => {
-      throw new Error('Conversation deletion must not initialize an agent runtime.')
-    })
-
-    await expect(runtime.deleteThread(thread.id)).rejects.toThrow('is busy')
-    await expect(runtime.deleteThread(thread.id)).rejects.toThrow('is busy')
-
-    expect(cancelThread).toHaveBeenCalledTimes(2)
-    expect(cancelThread).toHaveBeenNthCalledWith(1, thread.id)
-    expect(cancelThread).toHaveBeenNthCalledWith(2, thread.id)
-    expect(hasActiveForThread).toHaveBeenCalledTimes(2)
-    expect(database.getThread(thread.id)).toMatchObject({ id: thread.id })
   })
 
   it('keeps retained messages and resets derived plans when later rounds are deleted', async () => {

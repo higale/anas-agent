@@ -353,6 +353,7 @@ export function App() {
     dataCleanupOpen,
     dataCleanupSelection,
     dataCleanupUsage,
+    dataCleanupUnknownFiles,
     dataDirectoryUsage,
     developerHttpTraceEnabled,
     developerHttpTraceUsage,
@@ -1445,6 +1446,7 @@ export function App() {
         busy={dataCleanupBusy}
         storageUsageLoading={storageUsageLoading}
         usage={dataCleanupUsage}
+        unknownFiles={dataCleanupUnknownFiles}
         onToggleAll={toggleAllDataCleanupTargets}
         onToggle={toggleDataCleanupTarget}
         onClose={closeDataCleanupDialog}

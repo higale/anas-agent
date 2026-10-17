@@ -300,7 +300,7 @@ Conversations are saved automatically. The sidebar counts user turns, and earlie
 
 Long conversations are compressed automatically. You can also compress manually using the context indicator beside the input. It shows estimated usage by category; reserved output space is displayed separately and is not counted as used context.
 
-When context exceeds its limit, oversized tool results can be shortened to a preview with a path to the complete result; the original chat history is preserved. Files are stored in `cache/tool-results/` under the data directory and included in application backups. They are currently retained when a conversation is deleted.
+When context exceeds its limit, oversized tool results can be shortened to a preview with a path to the complete result; the original chat history is preserved. Files are stored in `db/conversations/<main-conversation-ID>/tool_results/` under the data directory and included in application backups. They are deleted with the entire conversation; clearing caches does not remove them.
 
 Preview request in the project editor shows the context and tools that would be supplied for the current project.
 
@@ -328,15 +328,34 @@ Bailian / Qwen China supports `dashscope.aliyuncs.com` and `token-plan.cn-beijin
 
 The expanded view keeps primary quotas, balances and reset timing visible. A details icon to the right of the update time contains account and subscription information, balance breakdowns and spending details. Bailian's ordinary API keeps current-model free quota and 7-day call counts visible, with workspace, quota expiry and usage breakdowns in details. GLM Coding Plan keeps reset countdowns visible and places exact dates in details. MiniMax keeps remaining quota and reset countdowns visible, with exact reset times on hover; total quota, usage and boost explanations appear in details. Hover over the icon to preview, or click to keep the popover open and select text for copying; click again, click outside or press Esc to close it. Viewing details does not query the service again, and the icon is omitted when no extra information is available. Query failures, confirmed insufficient balances and expired or inactive plans remain visible. The compact view's tooltip retains full information.
 
+If Anas exits during plugin replacement or removal, the next startup rolls back unfinished operations and cleans up completed operations. Clearing caches or temporary files does not delete recovery material. If a journal is damaged, paths conflict, or recovery fails, the startup recovery screen reports where the files are preserved so you can resolve the problem and retry.
+
 Application backups include plugins and their data. Backups stop plugin backends first; restoring does not restart them automatically. A plugin backend has your operating system user's permissions, so install plugins you choose to trust. Plugin errors appear individually in settings and do not require resetting application configuration.
 
 ## Local Data And Backups
+
+**4.0 data change: previous projects and their settings, and input history (including pinned inputs), disappear from the interface after upgrading but can be restored manually as described below. Previous conversations and all long-term memory, including project memory, are no longer retained.** No automatic migration or import of pre-4.0 backups is provided. Global settings, project source files and user packages remain unchanged. Independent plugin data now lives in `db/plugins/`; the old `plugins_data/` directory is not loaded automatically and can be moved manually to restore it. Old-layout files stay on disk for now, but are not read, automatically deleted or included in new backups; review and remove residues through Data cleanup → Unknown files (unchecked by default).
+
+To restore projects and input history, preferably before creating new data in 4.0, fully quit Anas, back up the original files, and move these two files from the data directory root into its `db/` subdirectory (create it if needed):
+
+- `projects.json` → `db/projects.json`: restores project definitions and settings.
+- `input_history.json` → `db/input_history.json`: restores input history and pinned inputs.
+
+Both files retain their existing v0 format and need no content changes; restart Anas to load them. If files with the same names already exist in `db/`, back them up separately first. Overwriting replaces the corresponding new data; it does not merge it. This restores only projects and input history, not previous conversations or memory.
+
+To restore plugin data, fully quit Anas, back up your data, and move the entire old `plugins_data/` directory to `db/plugins/` without changing its contents. If the destination already exists, back it up separately first; replacing the directory does not merge the two sets of data.
+
+Avatar resources now live in `config/assets/`. The old root-level `assets/` directory is no longer read, so the default avatar is used until you restore your custom avatar manually. Fully quit Anas and back up your data, then move the entire old `assets/` directory to `config/assets/` without changing its files. If the destination already exists, back it up separately first; replace the directory rather than merging it.
 
 The default data directory is `~/.gale<program-name>/`; standard Anas uses `~/.galeAnas/`. Copying and renaming the application gives it a separate data directory.
 
 You can also specify a directory at launch, for example `Anas.exe "D:\Anas Data\Research"` or `--data-dir <path>`. Relative paths use the launch directory; filesystem roots are not allowed.
 
-ZIP backups include user tools and skills. Back up project source folders and externally referenced skills separately. Backups exclude runtime logs, temporary files, developer request traces, and interface caches and sign-in state. Data cleanup in Settings > General removes completed, unpinned conversations. Pinned, running, and approval-pending conversations are kept.
+ZIP backups default to the current system user's Documents folder; a previously selected backup folder is preserved. Backups include user tools and skills. Back up project source folders and externally referenced skills separately. Backups exclude runtime logs, temporary files, developer request traces, application caches, interface caches and sign-in state, and obsolete layout residues.
+
+Data cleanup in Settings > General hides categories confirmed to have no removable data. Conversation cleanup keeps pinned, running, and approval-pending conversations. Unknown files is unchecked by default and shows a preview of paths outside the allowlist; directory paths end in `/`. This includes obsolete layout residues and backup files inside the data root. Before cleaning up old projects, input history, plugin data or avatars that you want to restore manually, move them to their new locations or back them up separately. Cache cleanup owns `cache/`; conversation deletion owns `db/conversations/`.
+
+Deleting an entire conversation from its menu does not require repairing a missing, damaged or unsupported-version conversation database first. Deletion also removes its attachments, file-edit recovery material, long tool results and temporary drafts. If the operating system refuses to delete files, deletion progress is retained so you can retry after resolving file locks or permissions.
 
 ## Troubleshooting
 
@@ -352,7 +371,7 @@ Settings > Dev provides developer tools, logs, and Start in console. Console sta
 If startup data cannot load, the recovery page lists affected files. View error details, open logs, and choose:
 
 - **Repair**: restores invalid settings to their defaults while keeping valid settings. Capability selections are checked field by field against the current configuration format. Unrecognized values use the corresponding defaults without translating old formats or resetting the whole file, projects, or conversations. Invalid selection lists without item defaults use the list default. Unparseable files or projects whose identity cannot be determined still require manual repair. Changed fields are listed in the error details.
-- **Reset**: restores the selected configuration to defaults. **Resetting `projects.json` also deletes every project's conversations, messages, execution records, task recovery information, and memory**. Other settings, skills, project source files, and attachment files are kept.
+- **Reset**: restores the selected configuration to defaults. **Resetting `db/projects.json` also deletes every project's conversations, messages, execution records, task recovery information, and memory**. Conversation attachments, long tool results and file-edit recovery material are also cleared. Input history, other settings, skills and project source files are kept.
 
 Before changes, original data is saved beside the data directory under `Anas-Recovery/timestamp-random-suffix/`. If that fails, no changes are made. Restart after recovery.
 

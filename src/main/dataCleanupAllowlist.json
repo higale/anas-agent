@@ -1,0 +1,61 @@
+{
+  "version": 0,
+  "description": "未知文件清理白名单。路径相对于运行时数据根目录；* 仅匹配一个路径段内的字符；file 保留文件，directory 仅保留目录本身并继续检查内部，tree 保留完整目录树。备份不在白名单内。",
+  "rules": [
+    {
+      "type": "directory",
+      "paths": ["config", "db", "dev"],
+      "reason": "保留容器目录本身，继续检查其内部文件。"
+    },
+    {
+      "type": "file",
+      "paths": [
+        ".env",
+        "config/settings.json", "config/models.json", "config/subagents.json",
+        "config/mcp_servers.json", "config/tools.json", "config/skills.json",
+        "db/projects.json", "db/input_history.json",
+        "db/project-deletion.json", "db/project-deletion.stage.json"
+      ],
+      "reason": "当前配置、项目定义、输入历史及项目删除事务。内容损坏或版本不匹配不改变保留结论。"
+    },
+    {
+      "type": "file",
+      "paths": [
+        "db/catalog.sqlite", "db/catalog.sqlite-wal", "db/catalog.sqlite-shm", "db/catalog.sqlite-journal"
+      ],
+      "reason": "当前数据库及 SQLite 工作文件；不得根据运行时是否打开、文件大小或登记状态删库。"
+    },
+    {
+      "type": "tree",
+      "paths": [
+        "config/assets", "db/plugins", "db/conversations"
+      ],
+      "reason": "完整保留头像、插件独立数据和会话目录。会话资源由对话删除流程统一清理；插件数据不要求对应插件仍已安装。"
+    },
+    {
+      "type": "tree",
+      "paths": ["skills", "tools", "plugins", "examples", "lang", "help"],
+      "reason": "允许包内自由组织文件；包含 _system、用户包、插件事务 .replace-* / .remove-* 及各模块暂存。示例由自身刷新机制维护。"
+    },
+    {
+      "type": "tree",
+      "paths": ["electron", "tmp", "log", "cache", "dev/model-http"],
+      "reason": "当前运行资源；通过现有专用清理项处理，不归入未知文件。cache 整体保留，包括由缓存清理项处理的旧内容。"
+    },
+    {
+      "type": "tree",
+      "paths": ["config/.avatar-assets-stage-*", ".examples.mirror.tmp", ".examples.mirror.previous"],
+      "reason": "头像事务及整份示例替换材料，由所属模块完成恢复或清理。"
+    },
+    {
+      "type": "file",
+      "paths": [
+        "config/.settings.json.*.tmp", "config/.models.json.*.tmp", "config/.subagents.json.*.tmp",
+        "config/.mcp_servers.json.*.tmp", "config/.tools.json.*.tmp", "config/.skills.json.*.tmp",
+        "db/projects.json.*.tmp", "db/input_history.json.*.tmp", "db/project-deletion.json.*.tmp",
+        "db/.projects.json.*.tmp", "db/.input_history.json.*.tmp"
+      ],
+      "reason": "当前配置与数据的原子写入暂存文件；通用清理不能与正在提交的文件写入竞争。"
+    }
+  ]
+}

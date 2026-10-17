@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it } from 'vitest'
@@ -9,14 +9,24 @@ let root: string
 beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'anas-tool-result-file-')) })
 afterEach(async () => { await rm(root, { recursive: true, force: true }) })
 
-it('preserves Unicode and whitespace, reuses identical content and repairs a modified cache', async () => {
+it('preserves Unicode and whitespace across concurrent saves and repairs a modified result copy', async () => {
   const content = '头部\r\n\t🐟'.repeat(10000) + '\n结尾 '
-  const paths = await Promise.all([saveToolResultFile(content, root), saveToolResultFile(content, root)])
-  expect(paths[0]).toBe(paths[1])
+  const paths = await Promise.all(Array.from({ length: 16 }, () => saveToolResultFile(content, root)))
+  expect(new Set(paths).size).toBe(1)
   expect(await readFile(paths[0], 'utf8')).toBe(content)
   await writeFile(paths[0], 'changed')
   expect(await saveToolResultFile(content, root)).toBe(paths[0])
   expect(await readFile(paths[0], 'utf8')).toBe(content)
+  expect(await readdir(root)).toHaveLength(1)
+})
+
+it('preserves a conflicting destination and removes only the failed write staging file', async () => {
+  const path = await saveToolResultFile('complete result', root)
+  await rm(path)
+  await mkdir(path)
+  await writeFile(join(path, 'retained.txt'), 'preserve')
+  await expect(saveToolResultFile('complete result', root)).rejects.toThrow()
+  expect(await readFile(join(path, 'retained.txt'), 'utf8')).toBe('preserve')
   expect(await readdir(root)).toHaveLength(1)
 })
 

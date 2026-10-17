@@ -1,7 +1,9 @@
 import { mkdir, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { getCacheDir, getDeveloperHttpTraceDir, getLogDir, getTempDir } from './config/dataDir'
+import { getCacheDir, getDataDir, getDeveloperHttpTraceDir, getLogDir, getTempDir } from './config/dataDir'
 import { clearInputHistory } from './inputHistoryStore'
+import { cleanupUnknownData } from './unknownDataCleanup'
+import { withApplicationDataSnapshot } from './applicationDataSnapshot'
 import type { DataCleanupRequest, DataCleanupResult, DataCleanupResultItem, DataCleanupTarget } from '@shared/types'
 
 type CleanupAction = () => Promise<{ path?: string }>
@@ -19,7 +21,8 @@ const cleanupTargets: DataCleanupTarget[] = [
   'cache_folder',
   'temp_folder',
   'log_folder',
-  'developer_http_trace'
+  'developer_http_trace',
+  'unknown_files'
 ]
 
 function cleanupDirectory(path: string): Promise<{ path: string }> {
@@ -35,7 +38,7 @@ async function cleanupDirectoryContents(path: string): Promise<{ path: string }>
 }
 
 function cleanupAction(
-  target: DataCleanupTarget,
+  target: Exclude<DataCleanupTarget, 'unknown_files'>,
   dependencies: DataCleanupDependencies
 ): CleanupAction {
   if (target === 'input_history') return async () => {
@@ -57,14 +60,16 @@ function selectedTargets(request: DataCleanupRequest): DataCleanupTarget[] {
   return cleanupTargets.filter((target) => request[target] === true)
 }
 
-export async function cleanupData(
+async function cleanupSelectedData(
   request: DataCleanupRequest,
-  dependencies: DataCleanupDependencies = defaultDependencies
+  dependencies: DataCleanupDependencies
 ): Promise<DataCleanupResult> {
   const items: DataCleanupResultItem[] = []
   for (const target of selectedTargets(request)) {
     try {
-      const result = await cleanupAction(target, dependencies)()
+      const result = target === 'unknown_files'
+        ? await cleanupUnknownData(getDataDir(), request.unknown_file_paths).then(() => ({ path: getDataDir() }))
+        : await cleanupAction(target, dependencies)()
       items.push({
         target,
         path: result.path,
@@ -80,4 +85,11 @@ export async function cleanupData(
     }
   }
   return { items }
+}
+
+export function cleanupData(
+  request: DataCleanupRequest,
+  dependencies: DataCleanupDependencies = defaultDependencies
+): Promise<DataCleanupResult> {
+  return withApplicationDataSnapshot(() => cleanupSelectedData(request, dependencies))
 }

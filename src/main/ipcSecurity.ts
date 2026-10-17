@@ -158,7 +158,7 @@ export function handleMainIpc<Args extends unknown[], Result>(
     assertApplicationIpcEvent(event, channel, args)
     const invoke = () => listener(event, ...args as Args)
     return ipcUsesApplicationData(channel)
-      ? runApplicationDataOperation(invoke, { snapshot: channel === 'app:backupData' })
+      ? runApplicationDataOperation(invoke, { snapshot: channel === 'app:backupData' || channel === 'app:cleanupData' })
       : invoke()
   })
 }

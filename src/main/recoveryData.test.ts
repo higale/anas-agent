@@ -24,7 +24,9 @@ describe('raw recovery data', () => {
     const { root, data } = await fixture()
     const files = {
       'config/settings.json': '{broken',
-      'projects.json': 'not JSON',
+      'db/projects.json': 'not JSON',
+      'db/input_history.json': 'input history',
+      'projects.json': 'legacy data kept for manual rescue',
       'sqlite/agent.sqlite': 'not a database\u0000',
       'sqlite/agent.sqlite-wal': 'uncheckpointed data',
       'sqlite/agent.sqlite-shm': 'shared memory',
@@ -39,7 +41,7 @@ describe('raw recovery data', () => {
       expect(await readFile(join(output, 'data', name), 'utf8')).toBe(value)
       expect(await readFile(join(data, name), 'utf8')).toBe(value)
     }
-    expect((await readdir(join(output, 'data'))).sort()).toEqual(['config', 'log', 'projects.json', 'skills', 'sqlite'])
+    expect((await readdir(join(output, 'data'))).sort()).toEqual(['config', 'db', 'log', 'projects.json', 'skills', 'sqlite'])
     expect(JSON.parse(await readFile(join(output, 'recovery.json'), 'utf8')).source).toBe(data)
   })
 

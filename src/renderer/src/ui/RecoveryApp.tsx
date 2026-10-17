@@ -62,7 +62,7 @@ export function RecoveryApp() {
 
   function confirmRepair(file: RecoveryFileStatus): void {
     setConfirmation({
-      title: t('recovery.repair_file', { file: file.name === 'assets/avatar-transform.json' ? t('recovery.avatar_files') : file.name }), confirmText: t('recovery.repair'),
+      title: t('recovery.repair_file', { file: file.name === 'config/assets/avatar-transform.json' ? t('recovery.avatar_files') : file.name }), confirmText: t('recovery.repair'),
       description: t('recovery.repair_confirm', { path: file.path, count: file.repairableFields.length }),
       onConfirm: () => perform(async () => {
         const result = await window.gale.recovery.repair(file.name)
@@ -107,8 +107,8 @@ export function RecoveryApp() {
                 ? completed[file.name] : !file.error && !file.repairableFields.length ? completed[file.name] : undefined
               return <div className="initial-app-failure" key={file.name} role="group" aria-label={file.name}>
                 <span>
-                  <b>{file.name === 'assets/avatar-transform.json' ? t('recovery.avatar_files') : file.name}</b>
-                  {file.name === 'assets/avatar-transform.json' && <small>{file.path}</small>}
+                  <b>{file.name === 'config/assets/avatar-transform.json' ? t('recovery.avatar_files') : file.name}</b>
+                  {file.name === 'config/assets/avatar-transform.json' && <small>{file.path}</small>}
                   {file.name === 'projects.json' && <>
                     <small>{snapshot.catalogPath}</small>
                     <small>{snapshot.conversationsPath}</small>

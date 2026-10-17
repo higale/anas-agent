@@ -36,7 +36,7 @@ describe('custom command tools', () => {
     if (!await runtimeDiscovery.discoverPython3()) return skip()
     const { directory } = await fixture('')
     const packageDirectory = join(directory, '百度 search tool')
-    await cp(resolve('data/tools_examples/baidu-search'), packageDirectory, { recursive: true })
+    await cp(resolve('data/examples/tools/baidu-search'), packageDirectory, { recursive: true })
     const [definition] = parseCustomTools([JSON.parse(await readFile(join(packageDirectory, 'TOOL.json'), 'utf8'))])
     const [tool] = createCustomTools([{ ...definition, directory: packageDirectory }], {
       env: { ...process.env, BAIDU_SEARCH_API_KEY: '' }, backgroundTools: false
@@ -54,7 +54,7 @@ describe('custom command tools', () => {
     if (!await runtimeDiscovery.discoverPython3()) return skip()
     const { directory } = await fixture('')
     const packageDirectory = join(directory, 'tool with spaces')
-    await cp(resolve('data/skills_system/tool-manager/assets/python-tool'), packageDirectory, { recursive: true })
+    await cp(resolve('data/skills/_system/tool-manager/assets/python-tool'), packageDirectory, { recursive: true })
     const [definition] = parseCustomTools([JSON.parse(await readFile(join(packageDirectory, 'TOOL.json'), 'utf8'))])
     const [tool] = createCustomTools([{ ...definition, directory: packageDirectory }], { env: process.env, backgroundTools: false })
     const text = '中文🙂 "quote"\n$() & {{tool_dir}}'
@@ -101,7 +101,7 @@ describe('custom command tools', () => {
     if (!await runtimeDiscovery.discoverPython3()) return skip()
     const { directory } = await fixture('')
     const definitions = await Promise.all([
-      ['tools_examples', 'read_text_raw'], ['tools_system', 'file_sha256'], ['tools_system', 'json_format']
+      ['examples/tools', 'read_text_raw'], ['tools/_system', 'file_sha256'], ['tools/_system', 'json_format']
     ].map(async ([source, name]) => {
       const packageDirectory = resolve('data', source, name)
       return { ...parseCustomTools([JSON.parse(await readFile(join(packageDirectory, 'TOOL.json'), 'utf8'))])[0], directory: packageDirectory }

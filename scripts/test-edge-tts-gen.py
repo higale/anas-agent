@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch
 
 
-SCRIPT = Path(__file__).resolve().parents[1] / "data/skills_examples/edge-tts-gen/scripts/generate.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "data/examples/skills/edge-tts-gen/scripts/generate.py"
 spec = importlib.util.spec_from_file_location("edge_skill", SCRIPT)
 skill = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(skill)

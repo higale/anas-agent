@@ -19,7 +19,7 @@ let root = ''
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'anas-project-lifecycle-'))
-  paths.projectFile = join(root, 'projects.json')
+  paths.projectFile = join(root, 'db/projects.json')
 })
 
 afterEach(async () => {

@@ -19,6 +19,7 @@ const storePaths = vi.hoisted(() => ({
 }))
 
 vi.mock('./config/dataDir', () => ({
+  getAgentCatalogFile: () => join(tempDir, 'db', 'catalog.sqlite'),
   getProjectStoreFile: () => storePaths.projectFile,
   getDefaultWorkspaceDir: () => join(tempDir, 'default-workspace')
 }))
@@ -27,7 +28,8 @@ let tempDir = ''
 
 beforeEach(async () => {
   tempDir = await mkdtemp(join(tmpdir(), 'anas-project-store-'))
-  storePaths.projectFile = join(tempDir, 'projects.json')
+  storePaths.projectFile = join(tempDir, 'db/projects.json')
+  await mkdir(join(tempDir, 'db'))
 })
 
 afterEach(async () => {
@@ -221,7 +223,7 @@ describe('project store', () => {
     expect(await store.getProject(preferred.id)).toEqual(preferred)
     const previous = JSON.parse(await readFile(storePaths.projectFile, 'utf8'))
     const next = { ...previous, projects: previous.projects.filter((item: Project) => item.id !== preferred.id) }
-    await writeFile(`${storePaths.projectFile}.delete-journal`, JSON.stringify({
+    await writeFile(join(tempDir, 'db/project-deletion.json'), JSON.stringify({
       version: 0, projectId: preferred.id, threadIds: ['thread'], previous, next
     }), 'utf8')
     await writeFile(storePaths.projectFile, JSON.stringify(next), 'utf8')
@@ -493,7 +495,7 @@ describe('project store', () => {
       previous,
       next
     }
-    await writeFile(`${storePaths.projectFile}.delete-journal`, storedProjectJson(journal), 'utf8')
+    await writeFile(join(tempDir, 'db/project-deletion.json'), storedProjectJson(journal), 'utf8')
     await writeFile(storePaths.projectFile, storedProjectJson(next), 'utf8')
 
     const completeDatabaseCommit = vi.fn()
@@ -504,7 +506,7 @@ describe('project store', () => {
     expect(await store.listProjects()).toEqual(previous.projects)
     expect(completeDatabaseCommit).not.toHaveBeenCalled()
 
-    await writeFile(`${storePaths.projectFile}.delete-journal`, storedProjectJson(journal), 'utf8')
+    await writeFile(join(tempDir, 'db/project-deletion.json'), storedProjectJson(journal), 'utf8')
     await writeFile(storePaths.projectFile, storedProjectJson(previous), 'utf8')
     await expect(store.recoverProjectDeletion(
       () => false,
@@ -533,7 +535,7 @@ describe('project store', () => {
       previous,
       next
     }
-    await writeFile(`${storePaths.projectFile}.delete-journal`, storedProjectJson(journal), 'utf8')
+    await writeFile(join(tempDir, 'db/project-deletion.json'), storedProjectJson(journal), 'utf8')
     await writeFile(storePaths.projectFile, storedProjectJson(next), 'utf8')
     const completeDatabaseCommit = vi.fn()
 

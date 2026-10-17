@@ -1,9 +1,9 @@
 import Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
-import { existsSync, lstatSync, mkdirSync, unlinkSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, rmSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { Worker } from 'node:worker_threads'
 import type {
   AgentAccessMode, AgentStorageUsageSnapshot, AgentThread, AgentThreadCreate,
@@ -11,15 +11,16 @@ import type {
 } from '@shared/agentTypes'
 import { DEFAULT_WORKSPACE_PROJECT_ID } from '@shared/types'
 import {
-  getAgentCatalogFile, getAgentConversationDatabaseFile, getAgentConversationsDir, getDataDir
+  getAgentCatalogFile, getAgentConversationDatabaseFile, getAgentConversationDir, getAgentConversationsDir, getAgentAttachmentsDir, getAgentConversationTempDir, getFileEditRecordsDir, getDataDir
 } from '../config/dataDir'
 import { measureDirectorySize } from '../dataStorageUsage'
 import { runtimeLog } from '../runtimeLogger'
 import { AgentDatabase } from './agentDatabase'
 import { SqliteMemoryStore } from './memoryStore'
+import { FileEditStore, managedDirectChildPath } from '../fileEditStore'
+import { AgentThreadLockedError } from './agentErrors'
 
 const catalogVersion = 0
-const sqliteSuffixes = ['', '-wal', '-shm', '-journal']
 const nativeDependency = createRequire(import.meta.url)
 const requiredCatalogColumns: Record<string, string[]> = {
   agent_conversations: ['id', 'title', 'project_id', 'model_config_id', 'model_parameter_preset_id', 'pinned', 'access_mode', 'status', 'user_turn_count', 'has_queued_inputs', 'created_at', 'updated_at'],
@@ -95,11 +96,9 @@ export class AgentStorage {
   private sharedMemoryStore: SqliteMemoryStore
   private catalog: Database.Database
   readonly dataDir: string
-  readonly attachmentRoot: string
 
   private constructor(dataDir: string, private readonly onFileChanges?: (ownerThreadId: string, runId: string) => void) {
     this.dataDir = resolve(dataDir)
-    this.attachmentRoot = join(this.dataDir, 'attachments')
     mkdirSync(dirname(getAgentCatalogFile(this.dataDir)), { recursive: true })
     this.catalog = new Database(getAgentCatalogFile(this.dataDir))
     try {
@@ -242,6 +241,31 @@ export class AgentStorage {
     return (this.catalog.prepare('SELECT id FROM agent_conversations WHERE has_queued_inputs = 1 ORDER BY updated_at, id').all() as Array<{ id: string }>).map(({ id }) => id)
   }
 
+  private fileEditStore(ownerThreadId: string): FileEditStore {
+    const root = getFileEditRecordsDir(ownerThreadId, this.dataDir)
+    const roots = () => this.listThreads().filter(thread => !this.isConversationDeleting(thread.id))
+      .map(thread => getFileEditRecordsDir(thread.id, this.dataDir))
+    return new FileEditStore(root, {
+      roots,
+      requestRoot: (requestId) => {
+        this.requireOpen()
+        const location = this.catalog.prepare('SELECT owner_thread_id FROM agent_run_locations WHERE run_id = ?')
+          .get(requestId) as { owner_thread_id: string } | undefined
+        if (location) {
+          if (location.owner_thread_id !== ownerThreadId && this.isConversationDeleting(location.owner_thread_id)) {
+            throw new Error('File edit conversation is being deleted.')
+          }
+          return getFileEditRecordsDir(location.owner_thread_id, this.dataDir)
+        }
+        // Truncating a run may retain recovery material after removing its catalog locator.
+        // Search only registered current-layout conversations, never abandoned legacy data.
+        const candidates = [...new Set([root, ...roots()])].filter(directory => existsSync(managedDirectChildPath(directory, requestId)))
+        if (candidates.length > 1) throw new Error(`File edit request belongs to multiple conversations: ${requestId}`)
+        return candidates[0] ?? root
+      }
+    })
+  }
+
   openConversation(ownerThreadId: string, options: { create?: boolean; deleting?: boolean } = {}): AgentDatabase {
     this.requireOpen()
     const deleting = this.isConversationDeleting(ownerThreadId)
@@ -251,11 +275,15 @@ export class AgentStorage {
     if (existing) return existing
     const thread = this.getThread(ownerThreadId)
     if (!thread && !options.create) throw new Error(`Conversation ${ownerThreadId} was not found.`)
-    if (!thread && existsSync(file)) throw new Error(`Conversation database already exists: ${ownerThreadId}`)
+    const directory = getAgentConversationDir(ownerThreadId, this.dataDir)
+    if (!thread && existsSync(directory)) throw new Error(`Conversation directory already exists: ${ownerThreadId}`)
+    if (existsSync(directory) && !lstatSync(directory).isDirectory()) throw new Error(`Conversation storage is not a directory: ${ownerThreadId}`)
     if (thread && !existsSync(file)) throw new Error(`Conversation database is missing: ${ownerThreadId}`)
     if (existsSync(file) && !lstatSync(file).isFile()) throw new Error(`Conversation database is not a regular file: ${ownerThreadId}`)
-    const database = AgentDatabase.open(file, this.attachmentRoot, (runId) => this.onFileChanges?.(ownerThreadId, runId), {
+    const database = AgentDatabase.open(file, getAgentAttachmentsDir(ownerThreadId, this.dataDir), (runId) => this.onFileChanges?.(ownerThreadId, runId), {
       memoryStore: this.sharedMemoryStore,
+      temporaryRoot: getAgentConversationTempDir(ownerThreadId, this.dataDir),
+      fileEditStore: this.fileEditStore(ownerThreadId),
       onChanged: (current) => {
         if (this.closed || this.conversations.get(ownerThreadId) !== current) return
         try { this.refreshConversation(ownerThreadId) } catch (error) {
@@ -286,10 +314,7 @@ export class AgentStorage {
       return thread
     } catch (error) {
       this.closeConversation(threadId)
-      for (const suffix of sqliteSuffixes) {
-        const file = `${getAgentConversationDatabaseFile(threadId, this.dataDir)}${suffix}`
-        if (existsSync(file)) unlinkSync(file)
-      }
+      rmSync(getAgentConversationDir(threadId, this.dataDir), { recursive: true, force: true })
       this.unregisteredCreations.delete(threadId)
       throw error
     }
@@ -400,12 +425,17 @@ export class AgentStorage {
 
   previewDatabase(): AgentDatabase {
     this.requireOpen()
-    return this.preview ??= AgentDatabase.open(':memory:', this.attachmentRoot, undefined, { memoryStore: this.sharedMemoryStore })
+    return this.preview ??= AgentDatabase.open(':memory:', undefined, undefined, { memoryStore: this.sharedMemoryStore })
   }
 
   openedConversations(): Array<{ ownerId: string; database: AgentDatabase }> {
     this.requireOpen()
     return [...this.conversations].map(([ownerId, database]) => ({ ownerId, database }))
+  }
+
+  openedConversation(ownerThreadId: string): AgentDatabase | undefined {
+    this.requireOpen()
+    return this.conversations.get(ownerThreadId)
   }
 
   closeConversation(ownerThreadId: string): void {
@@ -424,13 +454,22 @@ export class AgentStorage {
 
   beginConversationDeletion(ownerThreadId: string): void {
     this.requireOpen()
+    if (FileEditStore.isRootBusy(getFileEditRecordsDir(ownerThreadId, this.dataDir))) {
+      throw new AgentThreadLockedError(ownerThreadId, 'be deleted while its file recovery material is in use')
+    }
     this.catalog.prepare('INSERT OR IGNORE INTO agent_conversation_deletions VALUES (?)').run(ownerThreadId)
   }
 
-  conversationForDeletion(ownerThreadId: string): AgentDatabase | undefined {
+  conversationForCleanup(ownerThreadId: string): AgentDatabase | undefined {
     this.requireOpen()
-    if (this.isConversationDeleting(ownerThreadId) && !existsSync(getAgentConversationDatabaseFile(ownerThreadId, this.dataDir))) {
-      return undefined
+    // A live handle still owns its work even if its file has disappeared.
+    const existing = this.conversations.get(ownerThreadId)
+    if (existing) return existing
+    try {
+      lstatSync(getAgentConversationDatabaseFile(ownerThreadId, this.dataDir))
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+      throw error
     }
     return this.openConversation(ownerThreadId, { deleting: true })
   }
@@ -445,8 +484,12 @@ export class AgentStorage {
     } else {
       this.beginConversationDeletion(ownerThreadId)
     }
-    this.closeConversation(ownerThreadId)
-    for (const suffix of sqliteSuffixes) await rm(`${file}${suffix}`, { force: true })
+    // The entire database is being discarded; do not read or project damaged data.
+    const database = this.conversations.get(ownerThreadId)
+    database?.close()
+    this.conversations.delete(ownerThreadId)
+    await rm(getAgentConversationTempDir(ownerThreadId, this.dataDir), { recursive: true, force: true })
+    await rm(dirname(file), { recursive: true, force: true })
     this.catalog.prepare('DELETE FROM agent_conversations WHERE id = ?').run(ownerThreadId)
     this.unregisteredCreations.delete(ownerThreadId)
   }
@@ -467,9 +510,8 @@ export class AgentStorage {
   }
 
   async getStorageUsage(): Promise<AgentStorageUsageSnapshot> {
-    const [conversationBytes, attachmentBytes, memoryBytes] = await Promise.all([
+    const [conversationBytes, memoryBytes] = await Promise.all([
       measureDirectorySize(getAgentConversationsDir(this.dataDir)),
-      measureDirectorySize(this.attachmentRoot),
       runStorageWorker<number>(`
         const database = new Database(workerData.file, { readonly: true, fileMustExist: true });
         try {
@@ -484,8 +526,8 @@ export class AgentStorage {
       `, { file: getAgentCatalogFile(this.dataDir) })
     ])
     return {
-      conversations: { totalBytes: conversationBytes + attachmentBytes, approximate: true },
-      memories: { totalBytes: memoryBytes, approximate: true }
+      conversations: { totalBytes: conversationBytes, approximate: true, hasData: this.listThreads().some(thread => !thread.pinned) },
+      memories: { totalBytes: memoryBytes, approximate: true, hasData: memoryBytes > 0 }
     }
   }
 

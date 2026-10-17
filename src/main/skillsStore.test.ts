@@ -29,15 +29,15 @@ async function loadSkillsStore(externalDirectories: unknown[] = []) {
   const bundledDataDir = join(root, 'bundled-data')
   const bundledConfigDir = join(root, 'bundled-config')
   const configDir = join(root, 'config')
-  const skillsDir = join(root, 'user-skills')
-  const systemDir = join(root, 'skills_system')
-  const examplesDir = join(root, 'skills_examples')
+  const skillsDir = join(root, 'skills')
+  const systemDir = join(root, 'skills/_system')
+  const examplesDir = join(root, 'examples/skills')
   const workspace = join(root, 'workspace')
   const projectCapabilities = structuredClone(defaultCapabilities)
   const projectSettings = { advancedSettings: true }
   await Promise.all([
-    mkdir(join(bundledDataDir, 'skills_system'), { recursive: true }),
-    mkdir(join(bundledDataDir, 'skills_examples'), { recursive: true }),
+    mkdir(join(bundledDataDir, 'skills/_system'), { recursive: true }),
+    mkdir(join(bundledDataDir, 'examples/skills'), { recursive: true }),
     mkdir(skillsDir, { recursive: true }),
     mkdir(workspace, { recursive: true }),
     writeText(join(bundledConfigDir, 'skills.json'), `${JSON.stringify({ version: 0, external_directories: externalDirectories, availability: {} }, null, 2)}\n`)
@@ -50,7 +50,7 @@ async function loadSkillsStore(externalDirectories: unknown[] = []) {
     getSkillExamplesDir: () => examplesDir,
     getSkillsDir: () => skillsDir,
     getDataDir: () => root,
-    getSystemPluginsDir: () => join(root, 'plugins_system'),
+    getSystemPluginsDir: () => join(root, 'plugins/_system'),
     getSystemSkillsDir: () => systemDir
   }))
   vi.doMock('./config/appConfig', () => ({ getAppConfigSnapshot: async () => ({ customTools: [] }) }))
@@ -62,8 +62,8 @@ async function loadSkillsStore(externalDirectories: unknown[] = []) {
     projectCapabilities,
     projectSettings,
     root,
-    bundledSystemDir: join(bundledDataDir, 'skills_system'),
-    bundledExamplesDir: join(bundledDataDir, 'skills_examples'),
+    bundledSystemDir: join(bundledDataDir, 'skills/_system'),
+    bundledExamplesDir: join(bundledDataDir, 'examples/skills'),
     configFile: join(configDir, 'skills.json'),
     examplesDir,
     skillsDir,
@@ -83,6 +83,20 @@ afterEach(async () => {
 })
 
 describe('skillsStore', () => {
+  it('keeps nested system skills separate from user packages and excludes the reserved directory on restore', async () => {
+    const h = await loadSkillsStore()
+    await writeSkill(h.bundledSystemDir, 'system-guide')
+    await writeSkill(h.skillsDir, 'personal-guide')
+    await writeText(join(h.systemDir, 'stale/SKILL.md'), skillText('stale'))
+    const snapshot = await h.store.listSkillSnapshot()
+    expect(snapshot.skills.map(skill => skill.id).sort()).toEqual(['system:system-guide', 'user:personal-guide'])
+    expect(snapshot.skills.every(skill => !skill.loadError)).toBe(true)
+    await expect(readFile(join(h.systemDir, 'stale/SKILL.md'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(h.store.validateRestoredSkillsDirectory(h.skillsDir, true)).resolves.toBeUndefined()
+    await expect(h.store.importSkillDirectories([h.systemDir])).rejects.toThrow('Invalid Skill directory name')
+    expect(await readFile(join(h.skillsDir, 'personal-guide/SKILL.md'), 'utf8')).toContain('personal-guide')
+  })
+
   it('uses plugin files in place, preserves ordinary skill precedence and checks tool dependencies for explicit calls', async () => {
     const h = await loadSkillsStore()
     const source = join(h.root, 'plugin-source')
@@ -397,8 +411,9 @@ describe('skillsStore', () => {
       ['external-one', 'external'],
       ['shared', 'system']
     ])
-    await expect(readFile(join(fixture.examplesDir, 'sample', 'SKILL.md'), 'utf8')).resolves.toContain('sample description')
-    await expect(readFile(join(fixture.examplesDir, 'stale', 'SKILL.md'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    // Example refresh belongs to the application lifecycle, not Skill discovery.
+    await expect(readFile(join(fixture.examplesDir, 'sample', 'SKILL.md'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(join(fixture.examplesDir, 'stale', 'SKILL.md'), 'utf8')).resolves.toContain('stale description')
     await expect(readFile(join(fixture.systemDir, 'stale-system', 'SKILL.md'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
@@ -668,6 +683,7 @@ Body
     const fixture = await loadSkillsStore()
     const projectSkills = join(fixture.workspace, '.agents', 'skills')
     await writeSkill(projectSkills, 'project-skill')
+    await mkdir(fixture.examplesDir, { recursive: true })
     await fixture.store.initializeSkillsStore()
 
     await expect(fixture.store.addExternalSkillDirectory(fixture.skillsDir, 'project-id')).rejects.toThrow('already managed')

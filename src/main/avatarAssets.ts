@@ -1,8 +1,8 @@
 import { requireDataVersion } from '@shared/dataVersion'
 import { createHash } from 'node:crypto'
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, extname, join, resolve } from 'node:path'
-import { getBundledDataDir, getDataDir } from './config/dataDir'
+import { basename, dirname, extname, join, resolve } from 'node:path'
+import { configDirName, getBundledDataDir, getDataDir } from './config/dataDir'
 import { runtimeLog } from './runtimeLogger'
 import { assertAvatarImageReadable, createAvatarWindowsIco, writeAvatarDisplayPng, writeAvatarDockPng, writeAvatarMacIcns } from './avatarIconGenerator'
 import { avatarTransformsEqual, defaultAvatarTransform, requireAvatarTransform } from '@shared/avatar'
@@ -50,7 +50,7 @@ async function pathExists(path: string): Promise<boolean> {
 }
 
 export function avatarAssetDir(dataDir = getDataDir()): string {
-  return join(dataDir, 'assets')
+  return join(dataDir, configDirName, 'assets')
 }
 
 export function avatarDisplayImagePath(dataDir = getDataDir()): string {
@@ -205,11 +205,12 @@ async function copyExistingWindowsIconsToStage(stagingDataDir: string, dataDir: 
 }
 
 async function recoverInterruptedAvatarAssetSwap(dataDir: string): Promise<void> {
-  await mkdir(dataDir, { recursive: true })
-  const entries = await readdir(dataDir, { withFileTypes: true })
+  const configDir = dirname(avatarAssetDir(dataDir))
+  await mkdir(configDir, { recursive: true })
+  const entries = await readdir(configDir, { withFileTypes: true })
   const stagingDirs = entries
     .filter((entry) => entry.isDirectory() && entry.name.startsWith(avatarStagingDirPrefix))
-    .map((entry) => join(dataDir, entry.name))
+    .map((entry) => join(configDir, entry.name))
 
   for (const stagingDir of stagingDirs) {
     const liveDir = avatarAssetDir(dataDir)
@@ -298,8 +299,9 @@ async function replaceAvatarAssets(
 // All callers prepare a complete asset directory before the existing atomic
 // swap. Failed generation never replaces the live assets.
 export async function withAvatarAssetTransaction(dataDir: string, prepare: (stagedDataDir: string) => Promise<void>): Promise<void> {
-  await mkdir(dataDir, { recursive: true })
-  const stagingDataDir = await mkdtemp(join(dataDir, avatarStagingDirPrefix))
+  const configDir = dirname(avatarAssetDir(dataDir))
+  await mkdir(configDir, { recursive: true })
+  const stagingDataDir = await mkdtemp(join(configDir, avatarStagingDirPrefix))
   try {
     await mkdir(avatarAssetDir(stagingDataDir), { recursive: true })
     await prepare(stagingDataDir)

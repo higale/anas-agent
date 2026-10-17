@@ -6,8 +6,8 @@ import { AgentStorage } from './agent/agentStorage'
 import { avatarTransformPath, readAvatarTransform } from './avatarAssets'
 import { normalizeAppConfigSnapshot } from './config/appConfig'
 import {
-  configDirName, getAgentCatalogFile, getAgentConversationDatabaseFile,
-  getAgentConversationsDir, skillsConfigFileName
+  configDirName, getAgentAttachmentsDir, getAgentCatalogFile, getAgentConversationDatabaseFile,
+  getAgentConversationsDir, getInputHistoryFile, getProjectStoreFile, skillsConfigFileName
 } from './config/dataDir'
 import { readRawConfigFromDirectory } from './config/rawAppConfig'
 import { readInputHistoryStoreFile } from './inputHistoryStore'
@@ -29,25 +29,25 @@ export async function validateRestoredDataDirectory(root: string): Promise<void>
   const configRoot = join(root, configDirName)
   normalizeAppConfigSnapshot(await readRawConfigFromDirectory(configRoot))
   await validateSkillsConfigFile(join(configRoot, skillsConfigFileName))
-  const projects = join(root, 'projects.json')
+  const projects = getProjectStoreFile(root)
   const projectIds = new Set([DEFAULT_WORKSPACE_PROJECT_ID])
   if (await exists(projects)) {
     const store = await readProjectStoreFile(projects)
     for (const project of store.projects) projectIds.add(project.id)
   }
-  const inputHistory = join(root, 'input_history.json')
+  const inputHistory = getInputHistoryFile(root)
   if (await exists(inputHistory)) await readInputHistoryStoreFile(inputHistory)
   if (await exists(avatarTransformPath(root))) await readAvatarTransform(root)
-  await validateRestoredSkillsDirectory(join(root, 'skills'))
+  await validateRestoredSkillsDirectory(join(root, 'skills'), true)
   await validateRestoredTools(root)
   const catalog = getAgentCatalogFile(root)
   const conversationIds = AgentStorage.validateCatalogBackup(catalog, projectIds)
   const conversationsDir = getAgentConversationsDir(root)
   if (await exists(conversationsDir)) {
     if (!(await lstat(conversationsDir)).isDirectory()) throw new Error('Conversation storage is not a directory.')
-    const expected = new Set(conversationIds.map((id) => `${id}.sqlite`))
+    const expected = new Set(conversationIds)
     for (const entry of await readdir(conversationsDir, { withFileTypes: true })) {
-      if (!entry.isFile() || !expected.has(entry.name)) {
+      if (!entry.isDirectory() || !expected.has(entry.name)) {
         throw new Error(`Unexpected conversation storage entry: ${entry.name}`)
       }
     }
@@ -55,6 +55,6 @@ export async function validateRestoredDataDirectory(root: string): Promise<void>
   for (const id of conversationIds) {
     const file = getAgentConversationDatabaseFile(id, root)
     if (!(await lstat(file)).isFile()) throw new Error(`Conversation database is not a regular file: ${id}`)
-    AgentDatabase.validateBackup(file, join(root, 'attachments'), projectIds, id)
+    AgentDatabase.validateBackup(file, getAgentAttachmentsDir(id, root), projectIds, id)
   }
 }

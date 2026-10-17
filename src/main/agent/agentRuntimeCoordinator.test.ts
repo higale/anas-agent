@@ -91,11 +91,11 @@ describe('conversation runtime routing', () => {
     let entered!: () => void
     const enteredDeletion = new Promise<void>((resolve) => { entered = resolve })
     const gate = new Promise<void>((resolve) => { release = resolve })
-    const remove = runtime.deleteThread.bind(runtime)
-    vi.spyOn(runtime, 'deleteThread').mockImplementation(async (id) => {
+    const shutdown = runtime.shutdown.bind(runtime)
+    vi.spyOn(runtime, 'shutdown').mockImplementation(async () => {
       entered()
       await gate
-      await remove(id)
+      return shutdown()
     })
     const deletion = coordinator.deleteProjectThreads('project-a')
     await enteredDeletion

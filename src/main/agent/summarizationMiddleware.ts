@@ -26,7 +26,6 @@ import { currentContextWindowTokens } from './serverTokenUsage'
 import { ModelSelectionError } from './modelSelection'
 import { projectRulesRequestBudget } from './projectRules'
 import { hasToolImages, pendingToolImageStart, projectToolImages } from './toolImageProjection'
-import { saveToolResultFile } from './toolResultFile'
 
 type FrameworkSummaryOptions = Parameters<typeof createSummarizationMiddleware>[0]
 
@@ -135,7 +134,7 @@ function isContextOverflow(error: unknown): boolean {
   return false
 }
 
-async function compactedToolContent(content: ToolMessage['content'], maxChars: number, save: typeof saveToolResultFile): Promise<string> {
+async function compactedToolContent(content: ToolMessage['content'], maxChars: number, save: (content: string) => Promise<string>): Promise<string> {
   const text = typeof content === 'string' ? content : JSON.stringify(content)
   if (text.length <= maxChars) return text
   const path = await save(text)
@@ -155,7 +154,7 @@ async function compactLatestToolResults(
   tools: unknown,
   protocol: ModelProtocol,
   parameters: Record<string, unknown> | undefined,
-  save: typeof saveToolResultFile
+  save: (content: string) => Promise<string>
 ): Promise<BaseMessage[] | undefined> {
   const latestUnit = causalUnits(messages, 0, protocol).at(-1)
   if (!latestUnit) return undefined
@@ -375,7 +374,7 @@ export function selectCompressionRetention(
 }
 
 export function createAnasSummarizationMiddleware(options: {
-  saveToolResult?: typeof saveToolResultFile
+  saveToolResult?: (content: string) => Promise<string>
   codingMode?: boolean
   compressionPrompt?: string
   responseTools?: Record<string, unknown>[]
@@ -471,7 +470,7 @@ export function createAnasSummarizationMiddleware(options: {
               [...nextRequest.tools, ...(options.responseTools ?? [])],
               configuration.protocol,
               configuration.parameters,
-              options.saveToolResult ?? saveToolResultFile
+              options.saveToolResult ?? (async () => { throw new Error('Conversation tool result storage is unavailable.') })
             )
             if (!compactedMessages) throw ruleBudget === undefined ? new PreservedContextOverflowError() : error
             try {

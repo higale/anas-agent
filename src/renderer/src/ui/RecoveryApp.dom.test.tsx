@@ -13,13 +13,13 @@ vi.mock('react-i18next', () => ({
 
 const snapshot: RecoverySnapshot = {
   dataDir: '/test/data', logDir: '/test/data/log', preservationParent: '/test',
-  catalogPath: '/test/data/sqlite/catalog.sqlite', conversationsPath: '/test/data/sqlite/conversations',
+  catalogPath: '/test/data/db/catalog.sqlite', conversationsPath: '/test/data/db/conversations',
   startupError: 'Malformed /test/data/config/settings.json', canModify: true,
   files: [
     { name: 'settings.json', path: '/test/data/config/settings.json', error: 'Unexpected token', repairableFields: [] },
     { name: 'subagents.json', path: '/test/data/config/subagents.json', repairableFields: ['subagents.json: subagents[0].capabilities.skills'] },
     { name: 'models.json', path: '/test/data/config/models.json', repairableFields: [] },
-    { name: 'projects.json', path: '/test/data/projects.json', error: 'Invalid project', repairableFields: [] }
+    { name: 'projects.json', path: '/test/data/db/projects.json', error: 'Invalid project', repairableFields: [] }
   ]
 }
 const api = { inspect: vi.fn(), reset: vi.fn(), enter: vi.fn(), restart: vi.fn(), openDirectory: vi.fn(), resetProjects: vi.fn(), repair: vi.fn() }
@@ -32,7 +32,7 @@ beforeEach(() => {
 describe('RecoveryApp', () => {
   it('keeps a partial recovery report visible after the repaired live file passes validation', async () => {
     const user = userEvent.setup()
-    const history = { name: 'input_history.json', path: '/test/data/input_history.json', repairableFields: ['items'], error: 'One unreadable entry' }
+    const history = { name: 'input_history.json', path: '/test/data/db/input_history.json', repairableFields: ['items'], error: 'One unreadable entry' }
     api.inspect.mockResolvedValue({ ...snapshot, files: [history] })
     api.repair.mockImplementation(async () => {
       api.inspect.mockResolvedValue({ ...snapshot, files: [{ ...history, repairableFields: [], error: undefined }], lastPreservationPath: '/test/originals' })
@@ -52,14 +52,14 @@ describe('RecoveryApp', () => {
   it('repairs auxiliary data in the unified recovery page without offering a config reset', async () => {
     const user = userEvent.setup()
     api.inspect.mockResolvedValue({ ...snapshot, files: [
-      { name: 'input_history.json', path: '/test/data/input_history.json', repairableFields: ['input_history.json: version'] },
-      { name: 'assets/avatar-transform.json', path: '/test/data/assets/avatar-transform.json', repairableFields: ['assets/avatar-transform.json: version'] }
+      { name: 'input_history.json', path: '/test/data/db/input_history.json', repairableFields: ['input_history.json: version'] },
+      { name: 'config/assets/avatar-transform.json', path: '/test/data/config/assets/avatar-transform.json', repairableFields: ['config/assets/avatar-transform.json: version'] }
     ] })
     api.repair.mockResolvedValue({ repaired: ['input_history.json: version'], unresolved: [] })
     render(<RecoveryApp />)
     const row = within(await screen.findByRole('group', { name: 'input_history.json' }))
     expect(row.queryByRole('button', { name: 'recovery.reset' })).not.toBeInTheDocument()
-    expect(within(screen.getByRole('group', { name: 'assets/avatar-transform.json' })).getByRole('button', { name: 'recovery.repair' })).toBeEnabled()
+    expect(within(screen.getByRole('group', { name: 'config/assets/avatar-transform.json' })).getByRole('button', { name: 'recovery.repair' })).toBeEnabled()
     await user.click(row.getByRole('button', { name: 'recovery.repair' }))
     await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'recovery.repair' }))
     await waitFor(() => expect(api.repair).toHaveBeenCalledExactlyOnceWith('input_history.json'))
@@ -120,9 +120,9 @@ describe('RecoveryApp', () => {
     const row = within(await screen.findByRole('group', { name: 'projects.json' }))
     await user.click(row.getByRole('button', { name: 'recovery.reset' }))
     const dialog = screen.getByRole('alertdialog')
-    expect(dialog).toHaveTextContent('/test/data/projects.json')
-    expect(dialog).toHaveTextContent('/test/data/sqlite/catalog.sqlite')
-    expect(dialog).toHaveTextContent('/test/data/sqlite/conversations')
+    expect(dialog).toHaveTextContent('/test/data/db/projects.json')
+    expect(dialog).toHaveTextContent('/test/data/db/catalog.sqlite')
+    expect(dialog).toHaveTextContent('/test/data/db/conversations')
     await user.click(within(dialog).getByRole('button', { name: 'recovery.reset_projects_confirm_button' }))
     await waitFor(() => expect(api.resetProjects).toHaveBeenCalledOnce())
     expect(row.queryByRole('button')).not.toBeInTheDocument()

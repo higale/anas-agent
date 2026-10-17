@@ -1,13 +1,46 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { DataCleanupDialog } from './DataCleanupDialog'
-import { defaultDataCleanupSelection } from './dialogTypes'
+import { dataCleanupTargets, defaultDataCleanupSelection } from './dialogTypes'
+import type { DataCleanupUsage } from './dialogTypes'
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key })
 }))
 
 describe('DataCleanupDialog', () => {
+  const emptyUsage = () => Object.fromEntries(dataCleanupTargets.map(target => [target, {
+    totalBytes: 100, approximate: false, hasData: false
+  }])) as DataCleanupUsage
+  const baseProps = { open: true, selection: defaultDataCleanupSelection(), busy: false, storageUsageLoading: false,
+    onToggle: vi.fn(), onToggleAll: vi.fn(), onClose: vi.fn(), onRun: vi.fn() }
+
+  it('hides confirmed empty items regardless of storage overhead and ignores their prior selection', () => {
+    render(<DataCleanupDialog {...baseProps} usage={emptyUsage()} />)
+    expect(screen.getByText('settings.cleanup_empty')).toBeVisible()
+    expect(screen.queryByText('settings.cleanup_input_history')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'settings.cleanup_selected' })).toBeDisabled()
+    expect(screen.getByRole('checkbox', { name: 'menu.select_all' })).toBeDisabled()
+  })
+
+  it('shows zero-byte unknown entries, leaves them unchecked and exposes the actual preview', () => {
+    render(<DataCleanupDialog {...baseProps} usage={{ ...emptyUsage(), unknown_files: { totalBytes: 0, approximate: false, hasData: true } }} unknownFiles={['old-empty', 'backup.zip']} />)
+    const checkboxes = screen.getAllByRole('checkbox')
+    expect(checkboxes[0]).not.toBeChecked()
+    expect(checkboxes[0]).not.toBeDisabled()
+    fireEvent.click(screen.getByText('settings.cleanup_unknown_files_preview'))
+    expect(screen.getByText(/old-empty/)).toBeVisible()
+    expect(screen.getByText(/backup.zip/)).toBeVisible()
+    expect(screen.getByRole('button', { name: 'settings.cleanup_selected' })).toBeDisabled()
+  })
+
+  it('keeps unmeasured items visible while preventing unknown-file cleanup without a preview', () => {
+    render(<DataCleanupDialog {...baseProps} usage={{}} />)
+    expect(screen.getByText('settings.cleanup_cache_folder')).toBeVisible()
+    const unknown = screen.getByText('settings.cleanup_unknown_files').closest('label')!
+    expect(unknown.querySelector('[role="checkbox"],input')).toBeDisabled()
+  })
+
   it('shows total storage usage for every measurable cleanup item', async () => {
     render(
       <DataCleanupDialog

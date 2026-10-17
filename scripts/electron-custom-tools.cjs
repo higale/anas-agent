@@ -113,7 +113,7 @@ async function verifyCustomTools(launchApplication) {
     await expect(page.getByRole('button', { name: 'Edit information', exact: true })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Edit parameters', exact: true })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Delete custom tool', exact: true })).toHaveCount(0)
-    await expect(page.getByText(join(await realpath(profile), 'tools_system/file_sha256'), { exact: true })).toBeVisible()
+    await expect(page.getByText(join(await realpath(profile), 'tools/_system/file_sha256'), { exact: true })).toBeVisible()
     await page.getByRole('button', { name: /^System\s*2$/ }).click()
     await page.locator('.settings-skill-tree-root').filter({ hasText: /^System/ }).locator('.settings-skill-tree-toggle').click()
     if (process.env.ANAS_E2E_CUSTOM_TOOL_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_CUSTOM_TOOL_SCREENSHOT + '.system.png' })
@@ -268,7 +268,7 @@ async function verifyCustomTools(launchApplication) {
     }).toPass({ timeout: 45_000 })
     assert.deepEqual(JSON.parse(await readFile(join(projectToolDir, 'arguments.json'), 'utf8')), { title: '中文 "quote"' })
     await assert.rejects(readFile(join(workspace, 'arguments.json')), { code: 'ENOENT' })
-    const exampleRoot = join(await realpath(profile), 'tools_examples')
+    const exampleRoot = join(await realpath(profile), 'examples/tools')
     await application.evaluate(({ dialog }, paths) => {
       globalThis.__toolImportDialogs = []
       dialog.showOpenDialog = async (...args) => {

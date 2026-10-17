@@ -2,6 +2,19 @@
 
 [简体中文](README.md) · [English](README.en.md)
 
+**4.0 data change: previous projects and their settings, and input history (including pinned inputs), disappear from the interface after upgrading but can be restored manually as described below. Previous conversations and all long-term memory, including project memory, are no longer retained.** No automatic migration or import of pre-4.0 backups is provided. Global settings, project source files and user packages remain unchanged. Independent plugin data now lives in `db/plugins/`; the old `plugins_data/` directory is not loaded automatically and can be moved manually to restore it. Old-layout files stay on disk for now, but are not read, automatically deleted or included in new backups; review and remove residues through Data cleanup → Unknown files (unchecked by default).
+
+To restore projects and input history, preferably before creating new data in 4.0, fully quit Anas, back up the original files, and move these two files from the data directory root into its `db/` subdirectory (create it if needed):
+
+- `projects.json` → `db/projects.json`: restores project definitions and settings.
+- `input_history.json` → `db/input_history.json`: restores input history and pinned inputs.
+
+Both files retain their existing v0 format and need no content changes; restart Anas to load them. If files with the same names already exist in `db/`, back them up separately first. Overwriting replaces the corresponding new data; it does not merge it. This restores only projects and input history, not previous conversations or memory.
+
+To restore plugin data, fully quit Anas, back up your data, and move the entire old `plugins_data/` directory to `db/plugins/` without changing its contents. If the destination already exists, back it up separately first; replacing the directory does not merge the two sets of data.
+
+Avatar resources now live in `config/assets/`. The old root-level `assets/` directory is no longer read, so the default avatar is used until you restore your custom avatar manually. Fully quit Anas and back up your data, then move the entire old `assets/` directory to `config/assets/` without changing its files. If the destination already exists, back it up separately first; replace the directory rather than merging it.
+
 Anas is a local desktop AI agent built with Electron, React, and TypeScript, powered by LangGraph and Deep Agents. Each project can choose its context, tools, skills, and subagents. Configuration and conversations stay locally; requests send the required task content to the selected model provider.
 
 [GitHub](https://github.com/higale/anas-agent) · [MIT License](LICENSE) · [Contributing](CONTRIBUTING.md)
@@ -55,7 +68,7 @@ The overview in **Settings > Plugins** previews a plugin's instructions, skills,
 
 Anas 3.3.8 introduces plugin API 2; API 1 plugins must be updated. RDP plugin 0.1.9 requires Anas 3.3.13 or later: update the host before installing the plugin.
 
-Install optional plugins in **Settings > Plugins** from a ZIP file or `PLUGIN.json`, or drag in one ZIP, manifest, or plugin folder containing `PLUGIN.json` at its root. Plugins can provide side panels, separate windows, optional backends, tools, skills, and static instructions. UI-only or declarative plugins need no backend process. Projects and subagents group contributions by plugin with **All / Custom / Off**; uncustomized projects use all available contributions from enabled plugins. Plugin management controls overall availability. See the [plugin API](docs/PLUGINS.md) and [examples](data/plugins_examples).
+Install optional plugins in **Settings > Plugins** from a ZIP file or `PLUGIN.json`, or drag in one ZIP, manifest, or plugin folder containing `PLUGIN.json` at its root. Plugins can provide side panels, separate windows, optional backends, tools, skills, and static instructions. UI-only or declarative plugins need no backend process. Projects and subagents group contributions by plugin with **All / Custom / Off**; uncustomized projects use all available contributions from enabled plugins. Plugin management controls overall availability. See the [plugin API](docs/PLUGINS.md) and [examples](data/examples/plugins).
 
 ## Development
 
@@ -113,19 +126,23 @@ npm run dev -- -- --data-dir "./runtime-data/research"
 | Path under the data directory | Contents |
 | --- | --- |
 | `config/` | Settings, providers/models, subagents, MCP, Skill sources/availability, and custom-tool sources/ordering |
-| `sqlite/catalog.sqlite` | Main conversation directory and shared memory |
-| `sqlite/conversations/<threadId>.sqlite` | One main conversation and its subagents |
-| `projects.json` | Project definitions and source folders |
+| `db/catalog.sqlite` | Main conversation directory and shared memory |
+| `db/conversations/<threadId>/conversation.sqlite` | One main conversation and its subagents |
+| `db/projects.json` | Project definitions and source folders |
+| `db/input_history.json` | Global input history and pinned inputs |
 | `.env` | Application environment variables |
-| `attachments/`, `file_edits/` | Saved attachments and file-edit recovery material |
+| `attachments/`, `file_edits/`, `tool_results/` under `db/conversations/<threadId>/` | Attachments, file-edit recovery material and long tool results inside the main conversation directory; removed with that conversation |
 | `skills/`, `tools/` | User-managed packages |
-| `plugins/`, `plugins_data/` | Installed plugins and independent data; uninstalling retains data unless deletion is selected |
-| `skills_system/`, `skills_examples/`, `tools_system/`, `tools_examples/` | Bundled packages refreshed at startup; examples must be imported before use |
-| `plugins_system/`, `plugins_examples/` | Built-in plugins and examples refreshed at startup and after backup restore; built-ins load from here, while examples require installation |
+| `plugins/`, `db/plugins/` | Installed plugins and independent data; uninstalling retains data unless deletion is selected |
+| `skills/_system/`, `tools/_system/`, `plugins/_system/` | Built-in packages refreshed by the app |
+| `examples/skills/`, `examples/tools/`, `examples/plugins/` | Examples refreshed by the app; import or install them before use |
 | `help/`, `lang/` | Help and language packs |
-| `assets/`, `log/`, `cache/`, `tmp/`, `electron/` | Assets, logs, cache, temporary files, and Electron profile |
+| `config/assets/` | Avatar source, crop settings, and generated icons |
+| `log/`, `cache/`, `tmp/`, `electron/` | Logs, cache, temporary files, and Electron profile |
 
-Project source folders are separate from application data. Backups include user tool/Skill packages and use SQLite snapshots, but do not back up project source folders or external Skill roots. They exclude `dev/`, `electron/`, `log/`, and `tmp/`. Restore validates and stages the archive, creates a pre-restore backup, replaces application data, and reloads the app.
+The `_system/` directory under `skills/`, `tools/` and `plugins/` is reserved for built-in packages refreshed by the app. User packages live alongside it and are not overwritten by these refreshes.
+
+Project source folders are separate from application data. Backups include user tool/Skill packages and use SQLite snapshots, but do not back up project source folders or external Skill roots. They exclude `dev/`, `electron/`, `log/`, `cache/`, `tmp/`, and obsolete layout residues. Restore validates and stages the archive, creates a pre-restore backup, replaces application data, and reloads the app.
 
 Bundled help, system Skills, examples, and built-in language packs are refreshed by the app; edit user packages or add a separate language file instead. See [Language packs](data/lang/README.md).
 

@@ -164,7 +164,7 @@ describe('AgentMessageList', () => {
       /agent-activity-skill-input"><summary[^>]*>([\s\S]*?)<\/summary>/
     )?.[1] ?? ''
     const toolSummary = html.match(
-      /agent-activity-tool"[^>]*><summary[^>]*>([\s\S]*?)<\/summary>/
+      /agent-activity-tool(?: [^"]*)?"[^>]*><summary[^>]*>([\s\S]*?)<\/summary>/
     )?.[1] ?? ''
     expect(skillInputSummary).toContain('lucide-file-text')
     expect(skillInputSummary).not.toContain('lucide-wrench')

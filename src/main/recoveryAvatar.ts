@@ -60,7 +60,7 @@ async function planAvatarRepair(root: string): Promise<AvatarPlan> {
   plan.sources = avatarImageExtensions.map(extension => join(avatarAssetDir(root), `avatar-source${extension}`))
     .filter(path => names.includes(basename(path)))
   if (!plan.sources.length && !names.some(name => name.startsWith('avatar'))) return plan
-  const add = (field: string) => plan.fields.push(`assets/${field}`)
+  const add = (field: string) => plan.fields.push(`config/assets/${field}`)
   let transformValid = false
   try {
     if (!(await regularFile(avatarTransformPath(root)))) throw new Error('Avatar transform is missing or not a regular file.')

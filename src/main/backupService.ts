@@ -1,4 +1,5 @@
 import { createWriteStream } from 'node:fs'
+import { app } from 'electron'
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import fs from 'stubborn-fs'
 import { hostname } from 'node:os'
@@ -11,7 +12,7 @@ import { readRawConfig } from './config/rawAppConfig'
 import { normalizeAppProfile } from './config/profileConfig'
 import { snapshotAgentStorage } from './agent/agentDatabaseBackup'
 import {
-  extractBackupArchive,
+  backupManifest, backupManifestFileName, extractBackupArchive,
   shouldSkipBackupRelativePath
 } from './backupArchive'
 import { validateRestoredDataDirectory } from './dataRestoreValidation'
@@ -23,9 +24,9 @@ const requiredRestoreFiles = new Set(configFileNames.map((fileName) => `${config
 const windowsReservedNames = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i
 const maxBackupNameBytes = 96
 const projectResetEntries = [
-  'projects.json', 'projects.json.delete-journal', 'projects.json.delete-stage',
-  'sqlite/catalog.sqlite', 'sqlite/catalog.sqlite-wal', 'sqlite/catalog.sqlite-shm', 'sqlite/catalog.sqlite-journal',
-  'sqlite/conversations'
+  'db/projects.json', 'db/project-deletion.json', 'db/project-deletion.stage.json',
+  'db/catalog.sqlite', 'db/catalog.sqlite-wal', 'db/catalog.sqlite-shm', 'db/catalog.sqlite-journal',
+  'db/conversations'
 ] as const
 let restoreTail: Promise<void> = Promise.resolve()
 // Windows can retain a directory handle briefly after plugin processes exit.
@@ -95,7 +96,7 @@ function isInsideDirectory(parent: string, child: string): boolean {
 
 type BackupSourceEntry = { absPath: string; relPath: string; size: number; kind?: 'directory'; linkTarget?: string }
 
-async function collectFiles(root: string, excludePath: string, current = root, excludedAttachmentThreads: ReadonlySet<string> = new Set()): Promise<BackupSourceEntry[]> {
+async function collectFiles(root: string, excludePath: string, current = root, includedConversations: ReadonlySet<string> = new Set()): Promise<BackupSourceEntry[]> {
   const entries = await readdir(current, { withFileTypes: true })
   const files: BackupSourceEntry[] = []
   for (const entry of entries) {
@@ -104,12 +105,14 @@ async function collectFiles(root: string, excludePath: string, current = root, e
     const relPath = relative(root, absPath)
     if (!relPath || shouldSkipRelativePath(relPath)) continue
     const normalizedRelPath = relPath.split(sep).join('/')
-    if (normalizedRelPath.toLowerCase() === 'sqlite') continue
-    const [directory, threadId] = normalizedRelPath.split('/')
-    if (directory.toLowerCase() === 'attachments' && excludedAttachmentThreads.has(threadId)) continue
+    if (normalizedRelPath === backupManifestFileName) continue
+    if (/^db\/catalog\.sqlite(?:-(?:wal|shm|journal))?$/i.test(normalizedRelPath)
+      || /^db\/conversations\/[^/]+\/conversation\.sqlite(?:-(?:wal|shm|journal))?$/i.test(normalizedRelPath)) continue
+    const [directory, collection, ownerId] = normalizedRelPath.split('/')
+    if (directory.toLowerCase() === 'db' && collection?.toLowerCase() === 'conversations' && ownerId && !includedConversations.has(ownerId)) continue
     if (entry.isDirectory()) {
       files.push({ absPath, relPath: normalizedRelPath, size: 0, kind: 'directory' })
-      files.push(...await collectFiles(root, excludePath, absPath, excludedAttachmentThreads))
+      files.push(...await collectFiles(root, excludePath, absPath, includedConversations))
     } else if (entry.isSymbolicLink()) {
       // Store self-contained links without traversing them or copying external
       // resources. Resolve chains so restored links do not depend on aliases.
@@ -144,14 +147,15 @@ async function createDataBackupSnapshot(targetPath: string): Promise<DataBackupR
   const snapshotDir = await mkdtemp(join(tmpdir(), 'anas-backup-'))
   try {
     const databaseSnapshots = await snapshotAgentStorage(dataDir, snapshotDir)
-    const excludedAttachmentThreads = new Set(databaseSnapshots.flatMap(file => file.excludedAttachmentThreadIds ?? []))
-    const entries: BackupSourceEntry[] = [...await collectFiles(dataDir, resolvedZipPath, dataDir, excludedAttachmentThreads), ...databaseSnapshots]
+    const includedConversations = new Set(databaseSnapshots.flatMap(file => file.conversationIds ?? []))
+    const entries: BackupSourceEntry[] = [...await collectFiles(dataDir, resolvedZipPath, dataDir, includedConversations), ...databaseSnapshots]
     const includedTargets = new Set(entries.filter(entry => entry.linkTarget === undefined).map(entry => entry.relPath))
     const files = entries.filter(entry => entry.linkTarget === undefined || includedTargets.has(entry.linkTarget))
 
     await mkdir(dirname(resolvedZipPath), { recursive: true })
     await new Promise<void>((resolvePromise, reject) => {
       const zip = new ZipFile()
+      zip.addBuffer(Buffer.from(`${JSON.stringify(backupManifest)}\n`), backupManifestFileName)
       const output = createWriteStream(resolvedZipPath)
       output.on('close', resolvePromise)
       output.on('error', reject)
@@ -295,7 +299,7 @@ async function swapRestoredData(transactionRoot: string, journal: RestoreJournal
 async function recoverInterruptedDataRestoreExcept(ignoredRoot?: string, dataRoot = getDataDir()): Promise<boolean> {
   const dataDir = resolve(dataRoot)
   const parent = dirname(dataDir)
-  const prefix = `.anas-restore-${basename(dataDir)}-`
+  const prefix = `.anas-restore-v4-${basename(dataDir)}-`
   if (!(await pathExists(parent))) return false
   let recovered = false
   for (const entry of await readdir(parent, { withFileTypes: true })) {
@@ -331,7 +335,7 @@ async function restoreDataBackupZipExclusive(
   const resolvedSourcePath = resolve(sourcePath)
   const sourceInfo = await stat(resolvedSourcePath)
   await mkdir(dirname(dataDir), { recursive: true })
-  const tempRoot = await mkdtemp(join(dirname(dataDir), `.anas-restore-${basename(dataDir)}-`))
+  const tempRoot = await mkdtemp(join(dirname(dataDir), `.anas-restore-v4-${basename(dataDir)}-`))
   const restoreDir = join(tempRoot, 'staged')
   const journal: RestoreJournal = {
     version: 0,
@@ -352,6 +356,12 @@ async function restoreDataBackupZipExclusive(
         throw new Error(`Backup archive is missing ${fileName}.`)
       }
     }
+    if (!extracted.entryNames.has(backupManifestFileName)) throw new Error('Unsupported backup storage layout; Anas 4.0 or later backup required.')
+    const manifest = JSON.parse(await readFile(join(restoreDir, backupManifestFileName), 'utf8'))
+    if (!manifest || typeof manifest !== 'object' || manifest.version !== backupManifest.version || manifest.storage_layout !== backupManifest.storage_layout) {
+      throw new Error('Unsupported backup storage layout.')
+    }
+    await rm(join(restoreDir, backupManifestFileName))
     await migrateDataDirectory(restoreDir)
     await validateRestoredDataDirectory(restoreDir)
     await writeRestoreJournal(join(tempRoot, 'transaction.json'), journal)
@@ -389,7 +399,7 @@ async function restoreDataBackupZipExclusive(
     return {
       path: resolvedSourcePath,
       preRestoreBackupPath,
-      fileCount: extracted.fileCount,
+      fileCount: extracted.fileCount - 1,
       size: sourceInfo.size
     }
   } catch (reason) {
@@ -469,16 +479,16 @@ export function resetProjectData(preserveCurrentData: () => Promise<string>): Pr
   return enqueueDataReplacement(async () => {
     await recoverInterruptedDataRestore()
     const dataDir = resolve(getDataDir())
-    const sqliteDir = await lstat(join(dataDir, 'sqlite')).catch((error: NodeJS.ErrnoException) => {
+    const databaseDir = await lstat(join(dataDir, 'db')).catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return undefined
       throw error
     })
-    if (sqliteDir && !sqliteDir.isDirectory()) throw new Error('Cannot reset project data through a linked or invalid SQLite directory.')
+    if (databaseDir && !databaseDir.isDirectory()) throw new Error('Cannot reset project data through a linked or invalid database directory.')
     const previousEntries: string[] = []
     for (const target of projectResetEntries) {
       try {
         const info = await lstat(join(dataDir, target))
-        if (target === 'sqlite/conversations' ? !info.isDirectory() : !info.isFile()) {
+        if (target === 'db/conversations' ? !info.isDirectory() : !info.isFile()) {
           throw new Error(`Cannot reset a linked or invalid project data entry: ${join(dataDir, target)}`)
         }
         previousEntries.push(target)
@@ -487,12 +497,12 @@ export function resetProjectData(preserveCurrentData: () => Promise<string>): Pr
       }
     }
     const preservationPath = await preserveCurrentData()
-    const transactionRoot = await mkdtemp(join(dirname(dataDir), `.anas-restore-${basename(dataDir)}-`))
+    const transactionRoot = await mkdtemp(join(dirname(dataDir), `.anas-restore-v4-${basename(dataDir)}-`))
     const journalPath = join(transactionRoot, 'transaction.json')
     const journal: RestoreJournal = { version: 0, dataDir, phase: 'staged', previousEntries, installedEntries: [] }
     let cleanup = true
     try {
-      await mkdir(join(transactionRoot, 'previous', 'sqlite'), { recursive: true })
+      await mkdir(join(transactionRoot, 'previous', 'db'), { recursive: true })
       await writeRestoreJournal(journalPath, journal)
       journal.phase = 'swapping'
       await writeRestoreJournal(journalPath, journal)
@@ -534,7 +544,7 @@ export function replaceProjectData(
   return enqueueDataReplacement(async () => {
     const dataDir = resolve(root)
     await recoverInterruptedDataRestoreExcept(undefined, dataDir)
-    const transactionRoot = await mkdtemp(join(dirname(dataDir), `.anas-restore-${basename(dataDir)}-`))
+    const transactionRoot = await mkdtemp(join(dirname(dataDir), `.anas-restore-v4-${basename(dataDir)}-`))
     const staged = join(transactionRoot, 'staged'), previous = join(transactionRoot, 'previous')
     const journalPath = join(transactionRoot, 'transaction.json')
     const journal: RestoreJournal = { version: 0, dataDir, phase: 'staged', previousEntries: [], installedEntries: [] }
@@ -546,7 +556,7 @@ export function replaceProjectData(
       const verifyUnchanged = await prepare(staged)
       const preservationPath = await preserve()
       await verifyUnchanged()
-      const entries = ['projects.json', 'sqlite']
+      const entries = ['db']
       for (const name of entries) if (await pathExists(join(dataDir, name))) journal.previousEntries.push(name)
       journal.phase = 'swapping'
       await writeRestoreJournal(journalPath, journal)
@@ -575,7 +585,7 @@ export function replaceProjectData(
 }
 
 export function defaultBackupDirectory(): string {
-  return getDataDir()
+  return app.getPath('documents')
 }
 
 export async function backupDialogDefaultPath(backupDirectory?: string): Promise<string> {

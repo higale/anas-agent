@@ -8,7 +8,7 @@ export interface AgentDatabaseSnapshotFile {
   absPath: string
   relPath: string
   size: number
-  excludedAttachmentThreadIds?: string[]
+  conversationIds?: string[]
 }
 
 async function fileExists(path: string): Promise<boolean> {
@@ -52,11 +52,8 @@ async function copyAgentStorage(sourceDataDir: string, destinationDataDir: strin
   }
   const catalog = new Database(catalogPath, { fileMustExist: true })
   let conversationIds: string[]
-  let excludedAttachmentThreadIds: string[]
   try {
     catalog.pragma('foreign_keys = ON')
-    excludedAttachmentThreadIds = (catalog.prepare(`SELECT thread_id FROM agent_thread_locations
-      WHERE owner_thread_id IN (SELECT owner_thread_id FROM agent_conversation_deletions)`).all() as Array<{ thread_id: string }>).map(row => row.thread_id)
     catalog.prepare(`DELETE FROM agent_conversations
       WHERE id IN (SELECT owner_thread_id FROM agent_conversation_deletions)`).run()
     conversationIds = (catalog.prepare('SELECT id FROM agent_conversations ORDER BY id').all() as Array<{ id: string }>)
@@ -80,6 +77,6 @@ async function copyAgentStorage(sourceDataDir: string, destinationDataDir: strin
     absPath: path,
     relPath: relative(destinationDataDir, path).split(sep).join('/'),
     size: (await stat(path)).size,
-    ...(path === catalogPath && excludedAttachmentThreadIds.length > 0 ? { excludedAttachmentThreadIds } : {})
+    ...(path === catalogPath ? { conversationIds } : {})
   })))
 }

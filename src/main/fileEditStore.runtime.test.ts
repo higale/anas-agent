@@ -2,21 +2,12 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { configureDataRuntime, getDataDir } from './config/dataDir'
-import {
-  deleteFileEditRecordsForRequest,
-  editRecordDir,
-  editRecordsDir,
-  FileEditStore,
-  getDefaultFileEditStore,
-  listEditRecordsForRequest,
-  listRetainedEditRecords,
-  loadOperationRecord,
-  pathExists
-} from './fileEditStore'
+import { configureDataRuntime, getDataDir, getFileEditRecordsDir } from './config/dataDir'
+import { FileEditStore, pathExists } from './fileEditStore'
 import { createFileTools } from './llm/fileTools'
 import { runWithCurrentAgentToolEffect } from './agent/toolEffectScope'
 import { withApplicationDataSnapshot } from './applicationDataSnapshot'
+import { AgentStorage } from './agent/agentStorage'
 
 // Static imports run before profile configuration, as they do in the main entry.
 // Even a regression must never write to the developer's real home directory.
@@ -55,15 +46,67 @@ async function write(tool: ReturnType<typeof writeTool>, requestId: string, name
 }
 
 describe('file edit store profile binding', () => {
+  it('restores another conversation and keeps retained requests discoverable after their run locator is removed', async () => {
+    const profile = selectProfile('cross-conversation')
+    const workspace = join(home, 'cross-conversation-workspace')
+    await mkdir(workspace)
+    const storage = AgentStorage.open(profile)
+    try {
+      const source = storage.createThread(), target = storage.createThread()
+      const sourceDatabase = storage.conversationForThread(source.id)
+      const targetDatabase = storage.conversationForThread(target.id)
+      const sourceRun = randomUUID(), targetRun = randomUUID()
+      sourceDatabase.createRun(source.id, sourceRun, 'agent', [])
+      targetDatabase.createRun(target.id, targetRun, 'agent', [])
+      storage.refreshConversation(source.id)
+      storage.refreshConversation(target.id)
+      const sourceStore = sourceDatabase.fileEditStore, targetStore = targetDatabase.fileEditStore
+      const operation = await write(writeTool(workspace, sourceRun, sourceStore), sourceRun, 'cross.txt')
+      await sourceStore.deleteFileEditRecordsForRequest(sourceRun, [operation])
+      expect((await targetStore.listRetainedEditRecords()).map(record => record.operationId)).toEqual([operation])
+      expect(targetStore.editRecordDir(sourceRun, operation)).toBe(sourceStore.editRecordDir(sourceRun, operation))
+      let blockedDeletion = false
+      const inverse = await runWithCurrentAgentToolEffect({
+        effectKey: { runId: targetRun, checkpointId: 'restore-checkpoint', checkpointNs: 'tools:restore',
+          taskId: 'restore', callKey: randomUUID(), inputHash: 'b'.repeat(64) },
+        isUnarmed: () => true,
+        persistFileChange: (record, observed) => targetDatabase.fileChanges.persist(record, observed || record.requestId !== targetRun),
+        arm: () => {
+          expect(() => storage.beginConversationDeletion(source.id)).toThrow('file recovery material is in use')
+          blockedDeletion = true
+        }
+      }, () => targetStore.restorePatch(operation, sourceRun, targetRun, async () => {}, { operationId: randomUUID() }))
+      expect(blockedDeletion).toBe(true)
+      expect(inverse?.requestId).toBe(targetRun)
+      expect(await pathExists(join(workspace, 'cross.txt'))).toBe(false)
+      expect(await pathExists(targetStore.editRecordDir(targetRun, inverse!.operationId))).toBe(true)
+      await targetStore.finalizePatchRestore(operation, sourceRun, async () => {}, {
+        inverse: { requestId: targetRun, operationId: inverse!.operationId }
+      })
+      expect((await sourceStore.loadOperationRecord(operation, sourceRun)).transaction.recovery?.state).toBe('complete')
+
+      // A retained request with no run locator remains owned by its physical conversation.
+      const truncatedRun = randomUUID()
+      const retainedOperation = await write(writeTool(workspace, truncatedRun, sourceStore), truncatedRun, 'retained.txt')
+      await sourceStore.deleteFileEditRecordsForRequest(truncatedRun, [retainedOperation])
+      expect(storage.conversationForRun(truncatedRun)).toBeUndefined()
+      expect((await targetStore.loadOperationRecord(retainedOperation, truncatedRun)).operationId).toBe(retainedOperation)
+      expect((await targetStore.listRetainedEditRecords()).map(record => record.operationId)).toContain(retainedOperation)
+      await storage.removeConversation(source.id)
+      await expect(targetStore.loadOperationRecord(retainedOperation, truncatedRun)).rejects.toThrow('not found')
+    } finally { storage.close() }
+  })
+
   it('uses configuration applied after imports and binds each created tool group to its profile', async () => {
     const workspace = join(home, 'workspace')
     await mkdir(workspace)
     const requestId = randomUUID()
     const first = selectProfile('first')
-    const firstStore = getDefaultFileEditStore()
-    const firstTool = writeTool(workspace, requestId)
+    const firstStore = new FileEditStore(getFileEditRecordsDir('conversation'))
+    const firstTool = writeTool(workspace, requestId, firstStore)
     const second = selectProfile('second')
-    const secondTool = writeTool(workspace, requestId)
+    const secondStore = new FileEditStore(getFileEditRecordsDir('conversation'))
+    const secondTool = writeTool(workspace, requestId, secondStore)
 
     const firstOperation = await write(firstTool, requestId, 'first.txt')
     const secondOperation = await write(secondTool, requestId, 'second.txt')
@@ -71,21 +114,21 @@ describe('file edit store profile binding', () => {
     expect(await readFile(join(workspace, 'second.txt'), 'utf8')).toBe('second.txt')
     expect((await firstStore.loadOperationRecord(firstOperation, requestId)).operationId).toBe(firstOperation)
     expect(await firstStore.listEditRecordsForRequest(requestId)).toHaveLength(1)
-    expect(editRecordsDir(requestId)).toBe(join(second, 'file_edits', requestId))
-    expect(editRecordDir(requestId, secondOperation)).toBe(join(second, 'file_edits', requestId, secondOperation))
-    expect((await listEditRecordsForRequest(requestId)).map(record => record.operationId)).toEqual([secondOperation])
-    expect(await pathExists(join(first, 'file_edits', requestId, secondOperation))).toBe(false)
+    expect(secondStore.editRecordsDir(requestId)).toBe(join(second, 'db', 'conversations', 'conversation', 'file_edits', requestId))
+    expect(secondStore.editRecordDir(requestId, secondOperation)).toBe(join(second, 'db', 'conversations', 'conversation', 'file_edits', requestId, secondOperation))
+    expect((await secondStore.listEditRecordsForRequest(requestId)).map(record => record.operationId)).toEqual([secondOperation])
+    expect(await pathExists(join(first, 'db', 'conversations', 'conversation', 'file_edits', requestId, secondOperation))).toBe(false)
 
-    const secondRead = loadOperationRecord(secondOperation, requestId)
+    const secondRead = secondStore.loadOperationRecord(secondOperation, requestId)
     selectProfile('first')
     expect((await secondRead).operationId).toBe(secondOperation)
-    expect((await loadOperationRecord(firstOperation, requestId)).operationId).toBe(firstOperation)
-    await deleteFileEditRecordsForRequest(requestId, [firstOperation])
-    expect((await listRetainedEditRecords()).map(record => record.operationId)).toEqual([firstOperation])
+    expect((await firstStore.loadOperationRecord(firstOperation, requestId)).operationId).toBe(firstOperation)
+    await firstStore.deleteFileEditRecordsForRequest(requestId, [firstOperation])
+    expect((await firstStore.listRetainedEditRecords()).map(record => record.operationId)).toEqual([firstOperation])
     selectProfile('second')
-    expect(await listRetainedEditRecords()).toEqual([])
-    await deleteFileEditRecordsForRequest(requestId)
-    expect(await listEditRecordsForRequest(requestId)).toEqual([])
+    expect(await secondStore.listRetainedEditRecords()).toEqual([])
+    await secondStore.deleteFileEditRecordsForRequest(requestId)
+    expect(await secondStore.listEditRecordsForRequest(requestId)).toEqual([])
     expect((await firstStore.listEditRecordsForRequest(requestId)).map(record => record.operationId)).toEqual([firstOperation])
     expect(await pathExists(join(home, '.galeAnas', 'file_edits'))).toBe(false)
   })
@@ -95,8 +138,8 @@ describe('file edit store profile binding', () => {
     await mkdir(workspace)
     const requestId = randomUUID()
     selectProfile('cleanup-owner')
-    const ownerStore = getDefaultFileEditStore()
-    const ownerTool = writeTool(workspace, requestId)
+    const ownerStore = new FileEditStore(getFileEditRecordsDir('conversation'))
+    const ownerTool = writeTool(workspace, requestId, ownerStore)
     const explicitStore = new FileEditStore(join(home, 'explicit-records'))
     const explicitTool = writeTool(workspace, requestId, explicitStore)
     const ownerOperation = await write(ownerTool, requestId, 'owner.txt')
@@ -107,7 +150,7 @@ describe('file edit store profile binding', () => {
     const entered = new Promise<void>(resolve => { started = resolve })
     const snapshot = withApplicationDataSnapshot(async () => { started(); await gate })
     await entered
-    const cleanup = deleteFileEditRecordsForRequest(requestId)
+    const cleanup = ownerStore.deleteFileEditRecordsForRequest(requestId)
     selectProfile('cleanup-other')
     release()
     await snapshot
@@ -118,6 +161,6 @@ describe('file edit store profile binding', () => {
 
     const explicitOperation = await write(explicitTool, requestId, 'explicit.txt')
     expect((await explicitStore.loadOperationRecord(explicitOperation, requestId)).operationId).toBe(explicitOperation)
-    expect(await listEditRecordsForRequest(requestId)).toEqual([])
+    expect(await new FileEditStore(getFileEditRecordsDir('conversation')).listEditRecordsForRequest(requestId)).toEqual([])
   })
 })

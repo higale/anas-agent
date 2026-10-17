@@ -20,6 +20,7 @@ import { applyNativeTheme, configureApplicationMenu, openExternalUrl } from './a
 import { closeAgentRuntime, initializeAgentRuntime } from './agent/agentIpcHandlers'
 import { closePluginHost } from './plugins/pluginHost'
 import { initializePluginsStore, stopPluginBackends } from './plugins/pluginRuntime'
+import { initializeBundledExamples } from './bundledExamples'
 import { withApplicationDataSnapshot } from './applicationDataSnapshot'
 import { isDeveloperHttpTraceEnabled, setDeveloperHttpTraceEnabled } from './agent/developerHttpTraceState'
 import { dialogParentFromEvent, showModalOpenDialog, showModalSaveDialog } from './modalDialog'
@@ -240,6 +241,7 @@ export function registerAppIpcHandlers(): void {
     }
     const activate = async (): Promise<void> => {
       reloadDataEnv()
+      await initializeBundledExamples()
       await initializePluginsStore()
       await Promise.all([
         initializeAgentRuntime(),

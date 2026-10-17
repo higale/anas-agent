@@ -50,6 +50,24 @@ beforeEach(() => {
 })
 
 describe('Windows avatar icon assets', () => {
+  it('initializes config assets from the bundled default without reading or changing old root assets', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'anas-avatar-layout-'))
+    try {
+      await mkdir(join(dataDir, 'assets'))
+      await writeFile(join(dataDir, 'assets', 'avatar-source.png'), 'obsolete avatar')
+      await writeFile(join(dataDir, 'assets', 'avatar-transform.json'), '{invalid old metadata}')
+      const oldStage = join(dataDir, '.avatar-assets-stage-old', 'previous-assets')
+      await mkdir(oldStage, { recursive: true })
+      await writeFile(join(oldStage, 'avatar-source.png'), 'obsolete staged avatar')
+      const assets = await initializeAvatarAssets(dataDir)
+      expect(assets?.sourcePath).toBe(join(dataDir, 'config', 'assets', 'avatar-source.png'))
+      expect(await readFile(assets!.sourcePath)).toEqual(await readFile(join(process.cwd(), 'data/config/assets/avatar-source.png')))
+      expect(await readFile(join(dataDir, 'assets', 'avatar-source.png'), 'utf8')).toBe('obsolete avatar')
+      expect(await readFile(join(dataDir, 'assets', 'avatar-transform.json'), 'utf8')).toBe('{invalid old metadata}')
+      expect(await readFile(join(oldStage, 'avatar-source.png'), 'utf8')).toBe('obsolete staged avatar')
+    } finally { await rm(dataDir, { recursive: true, force: true }) }
+  })
+
   it('preserves original, crop cache, and transform metadata in one transactional asset set', async () => {
     Object.defineProperty(process, 'platform', { configurable: true, value: 'linux' })
     const dataDir = await mkdtemp(join(tmpdir(), 'anas-original-avatar-'))
@@ -140,17 +158,17 @@ describe('Windows avatar icon assets', () => {
       const sourcePath = join(dataDir, 'selected-avatar.png')
       await writeFile(sourcePath, originalSource)
       await setAvatarCrop(sourcePath, Buffer.from('first crop'), transform, dataDir)
-      const previousSource = await readFile(join(dataDir, 'assets', 'avatar-source.png'))
-      const previousCrop = await readFile(join(dataDir, 'assets', 'avatar-crop.png'))
-      const previousDisplay = await readFile(join(dataDir, 'assets', 'avatar.png'))
+      const previousSource = await readFile(join(dataDir, 'config', 'assets', 'avatar-source.png'))
+      const previousCrop = await readFile(join(dataDir, 'config', 'assets', 'avatar-crop.png'))
+      const previousDisplay = await readFile(join(dataDir, 'config', 'assets', 'avatar.png'))
       mocks.writeAvatarDockPng.mockRejectedValueOnce(new Error('dock generation failed'))
 
       await expect(setAvatarCrop(sourcePath, Buffer.from('second crop'), transform, dataDir))
         .rejects.toThrow('dock generation failed')
 
-      expect(await readFile(join(dataDir, 'assets', 'avatar-source.png'))).toEqual(previousSource)
-      expect(await readFile(join(dataDir, 'assets', 'avatar-crop.png'))).toEqual(previousCrop)
-      expect(await readFile(join(dataDir, 'assets', 'avatar.png'))).toEqual(previousDisplay)
+      expect(await readFile(join(dataDir, 'config', 'assets', 'avatar-source.png'))).toEqual(previousSource)
+      expect(await readFile(join(dataDir, 'config', 'assets', 'avatar-crop.png'))).toEqual(previousCrop)
+      expect(await readFile(join(dataDir, 'config', 'assets', 'avatar.png'))).toEqual(previousDisplay)
       expect(await findAvatarWindowsIconPath(dataDir)).toBeDefined()
     } finally {
       await rm(dataDir, { recursive: true, force: true })
@@ -162,7 +180,7 @@ describe('avatar asset transaction recovery', () => {
   it('restores the previous complete asset directory after an interrupted rollback', async () => {
     Object.defineProperty(process, 'platform', { configurable: true, value: 'linux' })
     const dataDir = await mkdtemp(join(tmpdir(), 'anas-avatar-recovery-'))
-    const stagingDir = join(dataDir, '.avatar-assets-stage-interrupted')
+    const stagingDir = join(dataDir, 'config', '.avatar-assets-stage-interrupted')
     const previousDir = join(stagingDir, 'previous-assets')
 
     try {
@@ -175,9 +193,9 @@ describe('avatar asset transaction recovery', () => {
 
       const assets = await initializeAvatarAssets(dataDir)
 
-      expect(await readFile(join(dataDir, 'assets', 'avatar-source.png'), 'utf8')).toBe('previous source')
-      expect(await readFile(join(dataDir, 'assets', 'avatar.png'), 'utf8')).toBe('previous display')
-      expect(assets?.sourcePath).toBe(join(dataDir, 'assets', 'avatar-source.png'))
+      expect(await readFile(join(dataDir, 'config', 'assets', 'avatar-source.png'), 'utf8')).toBe('previous source')
+      expect(await readFile(join(dataDir, 'config', 'assets', 'avatar.png'), 'utf8')).toBe('previous display')
+      expect(assets?.sourcePath).toBe(join(dataDir, 'config', 'assets', 'avatar-source.png'))
       expect(existsSync(stagingDir)).toBe(false)
     } finally {
       await rm(dataDir, { recursive: true, force: true })
@@ -187,8 +205,8 @@ describe('avatar asset transaction recovery', () => {
   it('discards an uncommitted first-install stage instead of installing partial assets', async () => {
     Object.defineProperty(process, 'platform', { configurable: true, value: 'linux' })
     const dataDir = await mkdtemp(join(tmpdir(), 'anas-avatar-partial-stage-'))
-    const stagingDir = join(dataDir, '.avatar-assets-stage-partial')
-    const stagedAssetDir = join(stagingDir, 'assets')
+    const stagingDir = join(dataDir, 'config', '.avatar-assets-stage-partial')
+    const stagedAssetDir = join(stagingDir, 'config', 'assets')
 
     try {
       await mkdir(stagedAssetDir, { recursive: true })
@@ -196,7 +214,7 @@ describe('avatar asset transaction recovery', () => {
 
       await initializeAvatarAssets(dataDir)
 
-      expect(await readFile(join(dataDir, 'assets', 'avatar-source.png'), 'utf8')).not.toBe('partial source')
+      expect(await readFile(join(dataDir, 'config', 'assets', 'avatar-source.png'), 'utf8')).not.toBe('partial source')
       expect(existsSync(stagingDir)).toBe(false)
     } finally {
       await rm(dataDir, { recursive: true, force: true })

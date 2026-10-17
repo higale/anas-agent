@@ -87,7 +87,7 @@ async function verifyPluginWidgets(launchApplication) {
         current_weekly_remaining_percent: 99, weekly_boost_permille: 1500, start_time: now - 4 * 3600000, end_time: now + 3600000,
         weekly_start_time: now - 6 * 86400000, weekly_end_time: now + 86400000}]});
     };
-    const backend = require(${JSON.stringify(join(home, 'plugins_system/usage-meter/backend.cjs'))});
+    const backend = require(${JSON.stringify(join(home, 'plugins/_system/usage-meter/backend.cjs'))});
     module.exports = { ...backend, async call(...args) {
       while (fs.existsSync(${JSON.stringify(pending)})) await new Promise(resolve => setTimeout(resolve, 25));
       if (fs.existsSync(${JSON.stringify(layout)})) return {title: 'HTML fixture', html: fs.readFileSync(${JSON.stringify(layout)}, 'utf8')};

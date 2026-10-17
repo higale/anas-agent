@@ -2,6 +2,19 @@
 
 [简体中文](README.md) · [English](README.en.md)
 
+**4.0 数据变更：升级后，旧项目及其设置、输入历史（含置顶输入）会从界面中消失，可按下述方法手动恢复；旧对话记录及全部长期记忆（含项目记忆）不再保留。** 程序不提供自动迁移，也不支持导入 4.0 之前的备份。全局设置、项目源文件和用户包不变；插件独立数据改放 `db/plugins/`，旧 `plugins_data/` 不自动读取，可手动移动恢复。旧布局文件暂留磁盘，但新版不读取、不自动删除，也不纳入新备份；可通过“数据清理 → 未知文件”查看并清理残留（默认不选中）。
+
+恢复项目和输入历史：建议在开始使用 4.0 创建新数据前，完全退出 Anas，备份原文件，再将数据根目录中的两个文件移入同一数据目录的 `db/`（没有则创建）：
+
+- `projects.json` → `db/projects.json`：恢复项目定义和项目设置。
+- `input_history.json` → `db/input_history.json`：恢复输入历史和置顶输入。
+
+这两份文件沿用现有 v0 格式，无须修改内容；重新启动后即可读取。如果 `db/` 中已有同名文件，先另行备份；覆盖会替换新版中的对应数据，不会自动合并。此操作仅恢复项目和输入历史，不恢复旧对话或记忆。
+
+恢复插件数据：完全退出 Anas 并备份后，将原 `plugins_data/` 整体移动为 `db/plugins/`，目录内部结构不变。如果目标目录已存在，先另行备份；整体替换不会合并两边的数据。
+
+头像资源改放 `config/assets/`，旧根目录的 `assets/` 不再读取；未手动恢复时使用默认头像。需要保留自定义头像时，完全退出 Anas 并备份后，将原 `assets/` 整体移动到 `config/assets/`，内部文件无须修改；目标已存在时先另行备份，整体替换，不合并。
+
 Anas 是基于 Electron、React 和 TypeScript 构建的本地桌面 AI Agent，使用 LangGraph 和 Deep Agents 运行时。每个项目可以选择自己的上下文、工具、技能和子 Agent。配置与会话保存在本地；请求模型时，会将任务所需的内容发送给所选模型供应商。
 
 [GitHub](https://github.com/higale/anas-agent) · [MIT 协议](LICENSE) · [参与贡献](CONTRIBUTING.md)
@@ -55,7 +68,7 @@ Shell 命令保留模型提供的命令文本、参数及搜索行为。受支�
 
 Anas 3.3.8 起使用插件 API 2；API 1 插件需更新后使用。RDP 插件 0.1.9 需要 Anas 3.3.13 或更新版本，请先更新宿主，再安装插件。
 
-可选插件在“设置 > 插件”中选择 ZIP 文件或 `PLUGIN.json` 安装，也可一次拖入一个 ZIP、`PLUGIN.json` 或根部包含清单的插件目录。插件可提供侧边页面、独立窗口、按需后台、工具、技能及静态提示词。纯界面或声明包无需后台进程。项目和子 Agent 中按插件集中选择“全部／定制／关闭”；未定制项目使用所有已启用插件的可用能力。插件管理页负责整体启停，不重复设置贡献开关。开发接口见[插件文档](docs/PLUGINS.md)，示例位于 [data/plugins_examples](data/plugins_examples)。
+可选插件在“设置 > 插件”中选择 ZIP 文件或 `PLUGIN.json` 安装，也可一次拖入一个 ZIP、`PLUGIN.json` 或根部包含清单的插件目录。插件可提供侧边页面、独立窗口、按需后台、工具、技能及静态提示词。纯界面或声明包无需后台进程。项目和子 Agent 中按插件集中选择“全部／定制／关闭”；未定制项目使用所有已启用插件的可用能力。插件管理页负责整体启停，不重复设置贡献开关。开发接口见[插件文档](docs/PLUGINS.md)，示例位于 [data/examples/plugins](data/examples/plugins)。
 
 ## 开发
 
@@ -113,19 +126,23 @@ npm run dev -- -- --data-dir "./runtime-data/research"
 | 数据目录内的路径 | 内容 |
 | --- | --- |
 | `config/` | 设置、供应商与模型、子 Agent、MCP、Skill 来源与可用性、自定义工具来源与排序 |
-| `sqlite/catalog.sqlite` | 主会话目录与共享记忆 |
-| `sqlite/conversations/<threadId>.sqlite` | 一个主会话及其子 Agent |
-| `projects.json` | 项目定义与源码目录 |
+| `db/catalog.sqlite` | 主会话目录与共享记忆 |
+| `db/conversations/<threadId>/conversation.sqlite` | 一个主会话及其子 Agent |
+| `db/projects.json` | 项目定义与源码目录 |
+| `db/input_history.json` | 全局输入历史及置顶输入 |
 | `.env` | 应用环境变量 |
-| `attachments/`、`file_edits/` | 已保存的附件与文件修改恢复材料 |
+| `db/conversations/<threadId>/` 下的 `attachments/`、`file_edits/`、`tool_results/` | 该主对话及其子 Agent 的附件、文件修改恢复材料和长工具结果；随对话删除 |
 | `skills/`、`tools/` | 用户管理的包 |
-| `plugins/`、`plugins_data/` | 已安装插件及独立数据；卸载默认保留数据，可勾选删除 |
-| `skills_system/`、`skills_examples/`、`tools_system/`、`tools_examples/` | 启动时刷新的内置包；示例需先导入再使用 |
-| `plugins_system/`、`plugins_examples/` | 启动和恢复备份时刷新的内置插件与示例；内置插件从此加载，示例需先安装 |
+| `plugins/`、`db/plugins/` | 已安装插件及独立数据；卸载默认保留数据，可勾选删除 |
+| `skills/_system/`、`tools/_system/`、`plugins/_system/` | 由应用刷新的内置包 |
+| `examples/skills/`、`examples/tools/`、`examples/plugins/` | 由应用刷新的示例；需先导入或安装再使用 |
 | `help/`、`lang/` | 帮助与语言包 |
-| `assets/`、`log/`、`cache/`、`tmp/`、`electron/` | 资源、日志、缓存、临时文件与 Electron 用户配置 |
+| `config/assets/` | 头像原图、裁剪参数及生成图标 |
+| `log/`、`cache/`、`tmp/`、`electron/` | 日志、缓存、临时文件与 Electron 用户配置 |
 
-项目源码目录与应用数据相互独立。备份包含用户工具和 Skill 包，并使用 SQLite 快照；不备份项目源码目录或外部 Skill 根目录，也不包含 `dev/`、`electron/`、`log/` 和 `tmp/`。恢复时会校验并暂存归档，创建恢复前备份，替换应用数据，然后重新加载应用。
+`skills/`、`tools/`、`plugins/` 下的 `_system/` 是内置包保留目录，由应用刷新；用户包与它并列存放，不会随内置包刷新而覆盖。
+
+项目源码目录与应用数据相互独立。备份包含用户工具和 Skill 包，并使用 SQLite 快照；不备份项目源码目录或外部 Skill 根目录，也不包含 `dev/`、`electron/`、`log/`、`cache/`、`tmp/` 及旧布局残留。恢复时会校验并暂存归档，创建恢复前备份，替换应用数据，然后重新加载应用。
 
 内置帮助、系统 Skills、示例和内置语言包会由应用刷新。需要定制时，请修改用户包或添加独立的语言文件。详见[语言包](data/lang/README.md)。
 

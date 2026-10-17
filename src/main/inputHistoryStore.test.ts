@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -15,7 +15,8 @@ let tempDir = ''
 
 beforeEach(async () => {
   tempDir = await mkdtemp(join(tmpdir(), 'anas-input-history-'))
-  storePaths.inputHistoryFile = join(tempDir, 'input_history.json')
+  storePaths.inputHistoryFile = join(tempDir, 'db/input_history.json')
+  await mkdir(join(tempDir, 'db'))
 })
 
 afterEach(async () => {
@@ -25,11 +26,13 @@ afterEach(async () => {
 describe('input history store', () => {
   it('treats a missing file as an empty first-run store', async () => {
     const { getInputHistory } = await import('./inputHistoryStore')
+    await writeFile(join(tempDir, 'input_history.json'), 'legacy history is not parsed')
 
     await expect(getInputHistory()).resolves.toEqual({
       maxHistory: 100,
       items: []
     })
+    expect(await readFile(join(tempDir, 'input_history.json'), 'utf8')).toBe('legacy history is not parsed')
   })
 
   it('persists the first entry atomically after an empty first run', async () => {

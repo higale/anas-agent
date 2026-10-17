@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
 import { renameSync } from 'node:fs'
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { getDefaultWorkspaceDir, getProjectStoreFile } from './config/dataDir'
 import { PROJECT_ICON_COLORS, PROJECT_ICON_NAMES } from '@shared/projectAppearance'
@@ -492,11 +492,11 @@ export async function updateProjectState(projectId: string, update: ProjectState
 }
 
 function projectDeletionJournalPath(): string {
-  return `${getProjectStoreFile()}.delete-journal`
+  return join(dirname(getProjectStoreFile()), 'project-deletion.json')
 }
 
 function projectDeletionStagePath(): string {
-  return `${getProjectStoreFile()}.delete-stage`
+  return join(dirname(getProjectStoreFile()), 'project-deletion.stage.json')
 }
 
 export async function recoverProjectDeletion(
@@ -558,7 +558,7 @@ export async function deleteProjectWithThreads<T>(
       next: serializeProjectStore(next)
     }
     const storePath = getProjectStoreFile()
-    await mkdir(dirname(storePath), { recursive: true })
+    await mkdir(dirname(projectDeletionStagePath()), { recursive: true })
     await writeFile(projectDeletionStagePath(), `${JSON.stringify(journal.next, null, 2)}\n`, 'utf8')
     await writeJsonFileAtomic(projectDeletionJournalPath(), journal)
     let storeCommitted = false

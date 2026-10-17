@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { AgentStorage } from './agent/agentStorage'
-import { getAgentCatalogFile, getAgentConversationDatabaseFile } from './config/dataDir'
+import { configFileNames, getAgentCatalogFile, getAgentConversationDatabaseFile } from './config/dataDir'
 import { validateRestoredDataDirectory } from './dataRestoreValidation'
 
 const temporaryDirectories: string[] = []
@@ -12,7 +12,8 @@ const temporaryDirectories: string[] = []
 async function fixture(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'anas-restore-validation-'))
   temporaryDirectories.push(root)
-  await cp(join(process.cwd(), 'data', 'config'), join(root, 'config'), { recursive: true })
+  await mkdir(join(root, 'config'))
+  for (const name of configFileNames) await cp(join(process.cwd(), 'data', 'config', name), join(root, 'config', name))
   return root
 }
 
@@ -26,6 +27,18 @@ afterEach(async () => {
 })
 
 describe('restored data validation', () => {
+  it('accepts nested managed packages while continuing to validate adjacent user packages', async () => {
+    const root = await fixture()
+    for (const category of ['skills', 'tools', 'plugins']) {
+      await cp(join(process.cwd(), 'data', category, '_system'), join(root, category, '_system'), { recursive: true })
+    }
+    await writeText(join(root, 'skills/personal/SKILL.md'), '---\nname: personal\ndescription: Personal skill\n---\nBody\n')
+    await cp(join(process.cwd(), 'data/examples/tools/read_text_raw'), join(root, 'tools/read_text_raw'), { recursive: true })
+    await expect(validateRestoredDataDirectory(root)).resolves.toBeUndefined()
+    await writeText(join(root, 'skills/personal/SKILL.md'), 'invalid skill')
+    await expect(validateRestoredDataDirectory(root)).rejects.toThrow('Invalid skill personal')
+  })
+
   it.each([
     ['unsupported version', '{"version":99,"crop":{"x":0,"y":0,"width":100,"height":100},"rotation":0}'],
     ['missing version', '{"crop":{"x":0,"y":0,"width":100,"height":100},"rotation":0}'],
@@ -34,25 +47,25 @@ describe('restored data validation', () => {
     ['invalid rotation', '{"version":0,"crop":{"x":0,"y":0,"width":100,"height":100},"rotation":45}']
   ])('rejects avatar metadata with %s without modifying staged assets', async (_description, raw) => {
     const root = await fixture()
-    const path = join(root, 'assets/avatar-transform.json')
+    const path = join(root, 'config/assets/avatar-transform.json')
     await writeText(path, raw)
 
     await expect(validateRestoredDataDirectory(root)).rejects.toThrow()
 
     expect(await readFile(path, 'utf8')).toBe(raw)
-    expect(await readdir(join(root, 'assets'))).toEqual(['avatar-transform.json'])
+    expect(await readdir(join(root, 'config', 'assets'))).toEqual(['avatar-transform.json'])
   })
 
   it('accepts current avatar metadata without generating derived images', async () => {
     const root = await fixture()
-    const path = join(root, 'assets/avatar-transform.json')
+    const path = join(root, 'config/assets/avatar-transform.json')
     const raw = '{"version":0,"crop":{"x":20,"y":10,"width":60,"height":80},"rotation":90}\n'
     await writeText(path, raw)
 
     await expect(validateRestoredDataDirectory(root)).resolves.toBeUndefined()
 
     expect(await readFile(path, 'utf8')).toBe(raw)
-    expect(await readdir(join(root, 'assets'))).toEqual(['avatar-transform.json'])
+    expect(await readdir(join(root, 'config', 'assets'))).toEqual(['avatar-transform.json'])
   })
 
   it('leaves absent optional avatar assets for initialization after restore', async () => {
@@ -60,7 +73,7 @@ describe('restored data validation', () => {
 
     await expect(validateRestoredDataDirectory(root)).resolves.toBeUndefined()
 
-    await expect(lstat(join(root, 'assets'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(lstat(join(root, 'config', 'assets'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it.each(['settings', 'models', 'subagents', 'mcp_servers', 'skills', 'tools'])('requires an explicit v0 in %s and never rewrites rejected data', async name => {
@@ -78,7 +91,7 @@ describe('restored data validation', () => {
 
   it('accepts formal config, project, input history, Skill, custom tool, SQLite, and attachment state', async () => {
     const root = await fixture()
-    await writeText(join(root, 'projects.json'), JSON.stringify({
+    await writeText(join(root, 'db/projects.json'), JSON.stringify({
       version: 0,
       projects: [{
  capabilities: serializeCapabilities(defaultCapabilities), restrict_subagents: false, coding_mode: false, advanced_settings: true, prompt: '',
@@ -102,13 +115,13 @@ describe('restored data validation', () => {
         updatedAt: '2026-08-10T00:00:00.000Z'
       }]
     }))
-    await writeText(join(root, 'input_history.json'), JSON.stringify({
+    await writeText(join(root, 'db/input_history.json'), JSON.stringify({
       version: 0,
       maxHistory: 10,
       items: []
     }))
     await writeText(join(root, 'skills', 'sample', 'SKILL.md'), '---\nname: sample\ndescription: Sample skill\n---\nBody\n')
-    await cp(join(process.cwd(), 'data/tools_examples/read_text_raw'), join(root, 'tools/read_text_raw'), { recursive: true })
+    await cp(join(process.cwd(), 'data/examples/tools/read_text_raw'), join(root, 'tools/read_text_raw'), { recursive: true })
     await writeText(join(root, 'config/tools.json'), JSON.stringify({ version: 0, order: ['user:example-read-text-raw'], external_directories: [] }))
     const storage = AgentStorage.open(root)
     storage.createThread({ projectId: 'project-1', title: 'Project conversation' })
@@ -175,7 +188,7 @@ describe('restored data validation', () => {
     storage.close()
     await writeText(getAgentConversationDatabaseFile('unlisted', root), 'unlisted content')
 
-    await expect(validateRestoredDataDirectory(root)).rejects.toThrow('Unexpected conversation storage entry: unlisted.sqlite')
+    await expect(validateRestoredDataDirectory(root)).rejects.toThrow('Unexpected conversation storage entry: unlisted')
   })
 
   it('rejects valid conversation databases exchanged between catalog entries', async () => {
@@ -207,7 +220,7 @@ describe('restored data validation', () => {
 
   it('rejects invalid project and Skill data', async () => {
     const projectRoot = await fixture()
-    await writeText(join(projectRoot, 'projects.json'), JSON.stringify({ version: 0, projects: [{ id: 1 }] }))
+    await writeText(join(projectRoot, 'db/projects.json'), JSON.stringify({ version: 0, projects: [{ id: 1 }] }))
     await expect(validateRestoredDataDirectory(projectRoot)).rejects.toThrow('Project 1')
 
     const skillRoot = await fixture()

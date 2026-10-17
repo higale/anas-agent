@@ -4,7 +4,7 @@ import { createDeepAgent } from 'deepagents'
 import { FakeToolCallingModel } from 'langchain'
 import { randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import capabilities from '../../data/config/capabilities.json'
@@ -33,6 +33,7 @@ async function fixture(projectVersion = 4) {
   roots.push(root)
   const data = join(root, 'data')
   await mkdir(join(data, 'config'), { recursive: true })
+  await mkdir(join(data, 'db'))
   for (const name of ['settings', 'models', 'tools', 'skills', 'subagents', 'mcp_servers', 'capabilities']) {
     await writeFile(join(data, `config/${name}.json`), await readFile(join(process.cwd(), `data/config/${name}.json`)))
   }
@@ -41,7 +42,7 @@ async function fixture(projectVersion = 4) {
     pinned: false, collapsed: false, sourceFolders: ['/keep/source'], restrict_subagents: false,
     capabilities, createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z' }
   const projects = { version: projectVersion, projects: [project] }
-  await writeFile(join(data, 'projects.json'), JSON.stringify(projects))
+  await writeFile(join(data, 'db/projects.json'), JSON.stringify(projects))
   const storage = AgentStorage.open(data)
   const thread = storage.createThread({ title: 'Keep conversation' })
   const conversation = storage.conversationForThread(thread.id)
@@ -54,6 +55,7 @@ async function fixture(projectVersion = 4) {
   await storage.memoryStore.saveMemory({ scope: 'global', kind: 'fact', content: 'Preserve this memory', keywords: ['keep'], importance: 3 }, { origin: 'user' })
   storage.refreshConversation(thread.id)
   storage.close()
+  await mkdir(join(data, 'sqlite'), { recursive: true })
   await writeFile(join(data, 'sqlite/agent.sqlite'), 'unrelated historical data, preserved verbatim')
   const databases = [getAgentCatalogFile(data), getAgentConversationDatabaseFile(thread.id, data)]
   for (const path of databases) {
@@ -74,7 +76,7 @@ async function archivedChangeFixture(version: number | undefined, databaseVersio
   const storage = AgentStorage.open(value.data)
   const database = storage.conversationForThread(value.thread.id)
   const run = database.createRun(value.thread.id, randomUUID())
-  const store = new FileEditStore(join(value.data, 'file_edits'))
+  const store = new FileEditStore(join(value.data, 'db', 'conversations', value.thread.id, 'file_edits'))
   const target = join(value.root, 'edited.txt')
   let inverseRunId: string | undefined
   const finishRun = async (runId: string) => {
@@ -136,6 +138,29 @@ async function archivedChangeFixture(version: number | undefined, databaseVersio
 }
 
 describe('project version metadata recovery', () => {
+  it('preserves nested plugin state and private files when replacing project storage', async () => {
+    const { root, data, thread } = await fixture()
+    const pluginData = join(data, 'db/plugins/test-plugin')
+    await mkdir(pluginData, { recursive: true })
+    const files = { 'state.json': Buffer.from('{"version":0,"values":{"draft":"keep"}}'),
+      'private.sqlite': Buffer.from([0, 255, 13, 10, 32]) }
+    for (const [name, bytes] of Object.entries(files)) await writeFile(join(pluginData, name), bytes)
+    const preservedFiles = ['db/input_history.json', `db/conversations/${thread.id}/tool_results/result.txt`,
+      'conversations/obsolete/conversation.sqlite']
+    for (const name of preservedFiles) {
+      await mkdir(dirname(join(data, name)), { recursive: true })
+      await writeFile(join(data, name), `keep ${name}`)
+    }
+    const result = await repairRecoveryData(data, 'projects.json', () => preserveRecoveryData(data, root))
+    expect(result.unresolved).toEqual([])
+    expect(JSON.parse(await readFile(join(data, 'db/projects.json'), 'utf8')).version).toBe(0)
+    for (const [name, bytes] of Object.entries(files)) expect(await readFile(join(pluginData, name))).toEqual(bytes)
+    for (const name of preservedFiles) expect(await readFile(join(data, name), 'utf8')).toBe(`keep ${name}`)
+    const storage = AgentStorage.open(data)
+    try { expect(storage.conversationForThread(thread.id).getThread(thread.id)?.title).toBe('Keep conversation') }
+    finally { storage.close() }
+  })
+
   it.each([undefined, 7])('repairs archived file records with version %s and preserves a usable conversation', async version => {
     const { root, data, databases, thread, run, target } = await archivedChangeFixture(version, version === undefined ? 1 : 0)
     const original = await readFile(databases[1])
@@ -146,8 +171,8 @@ describe('project version metadata recovery', () => {
     expect(await readFile(databases[1])).toEqual(original)
     const result = await repairRecoveryData(data, 'projects.json', () => preserveRecoveryData(data, root))
     expect(result.unresolved).toEqual([])
-    expect(await readFile(join(result.preservationPath!, 'data/sqlite/conversations', `${thread.id}.sqlite`))).toEqual(original)
-    AgentDatabase.validateBackup(databases[1], join(data, 'attachments'), new Set([thread.projectId]), thread.id)
+    expect(await readFile(join(result.preservationPath!, 'data/db/conversations', thread.id, 'conversation.sqlite'))).toEqual(original)
+    AgentDatabase.validateBackup(databases[1], join(data, 'db', 'conversations', thread.id, 'attachments'), new Set([thread.projectId]), thread.id)
     const preserve = vi.fn(async () => '/unused')
     expect((await repairRecoveryData(data, 'projects.json', preserve)).repaired).toEqual([])
     expect(preserve).not.toHaveBeenCalled()
@@ -180,11 +205,11 @@ describe('project version metadata recovery', () => {
   })
 
   it('keeps archived forward and reverse operations linked without replaying either', async () => {
-    const { root, data, databases, run, target, operationId } = await archivedChangeFixture(undefined, 1, true)
+    const { root, data, databases, thread, run, target, operationId } = await archivedChangeFixture(undefined, 1, true)
     await writeFile(target, 'Keep the current user content')
     const result = await repairRecoveryData(data, 'projects.json', () => preserveRecoveryData(data, root))
     expect(result.unresolved).toEqual([])
-    const database = AgentDatabase.open(databases[1], join(data, 'attachments'))
+    const database = AgentDatabase.open(databases[1], join(data, 'db', 'conversations', thread.id, 'attachments'))
     try {
       database.fileChanges.validateIntegrity()
       const source = (await database.fileChanges.load(run.id, operationId))!
@@ -207,7 +232,7 @@ describe('project version metadata recovery', () => {
       await database.replaceMessageHistory(thread.id, [new HumanMessage({ id: 'original-message', content: 'Keep my original message',
         additional_kwargs: { anas_run_id: run.id } })], inverseRunId!)
     } finally { storage.close() }
-    AgentDatabase.validateBackup(databases[1], join(data, 'attachments'), new Set([thread.projectId]), thread.id)
+    AgentDatabase.validateBackup(databases[1], join(data, 'db', 'conversations', thread.id, 'attachments'), new Set([thread.projectId]), thread.id)
     const raw = new Database(databases[1])
     let row: { definition_json: string; metadata_json: string }
     try {
@@ -222,14 +247,14 @@ describe('project version metadata recovery', () => {
     } finally { raw.close() }
     const original = await readFile(databases[1])
     const result = await repairRecoveryData(data, 'projects.json', () => preserveRecoveryData(data, root))
-    expect(await readFile(join(result.preservationPath!, 'data/sqlite/conversations', `${thread.id}.sqlite`))).toEqual(original)
+    expect(await readFile(join(result.preservationPath!, 'data/db/conversations', thread.id, 'conversation.sqlite'))).toEqual(original)
     if (field === 'definition') {
       expect(result.unresolved.join('\n')).toContain('unavailable in this archive')
       expect(await readFile(databases[1])).toEqual(original)
       return
     }
     expect(result.unresolved).toEqual([])
-    AgentDatabase.validateBackup(databases[1], join(data, 'attachments'), new Set([thread.projectId]), thread.id)
+    AgentDatabase.validateBackup(databases[1], join(data, 'db', 'conversations', thread.id, 'attachments'), new Set([thread.projectId]), thread.id)
     const repaired = new Database(databases[1], { readonly: true })
     try {
       const current = repaired.prepare('SELECT definition_json, metadata_json FROM agent_file_changes WHERE operation_id = ?').get(operationId) as typeof row
@@ -237,7 +262,7 @@ describe('project version metadata recovery', () => {
       expect(JSON.parse(current.metadata_json)).toEqual(JSON.parse(row.metadata_json))
       expect(repaired.prepare('SELECT count(*) AS count FROM agent_file_changes').get()).toEqual({ count: 1 })
     } finally { repaired.close() }
-    const database = AgentDatabase.open(databases[1], join(data, 'attachments'))
+    const database = AgentDatabase.open(databases[1], join(data, 'db', 'conversations', thread.id, 'attachments'))
     try {
       expect((await database.fileChanges.load(run.id, operationId))?.transaction.state).toBe('resolved')
       const tuple = await database.checkpointer.getTuple({ configurable: { thread_id: thread.id, checkpoint_ns: '' } })
@@ -248,7 +273,7 @@ describe('project version metadata recovery', () => {
   })
 
   it('preserves an absent source reference when repairing only inverse metadata', async () => {
-    const { root, data, databases, run, inverseRunId, operationId } = await archivedChangeFixture(0, 0, true)
+    const { root, data, databases, thread, run, inverseRunId, operationId } = await archivedChangeFixture(0, 0, true)
     const raw = new Database(databases[1])
     let definition: string
     let inverseId: string
@@ -261,7 +286,7 @@ describe('project version metadata recovery', () => {
     } finally { raw.close() }
     const result = await repairRecoveryData(data, 'projects.json', () => preserveRecoveryData(data, root))
     expect(result.unresolved).toEqual([])
-    const database = AgentDatabase.open(databases[1], join(data, 'attachments'))
+    const database = AgentDatabase.open(databases[1], join(data, 'db', 'conversations', thread.id, 'attachments'))
     try {
       const inverse = (await database.fileChanges.load(inverseRunId!, inverseId))!
       expect(inverse.definitionHash).toBe(patchTextHash(definition))
@@ -297,8 +322,8 @@ describe('project version metadata recovery', () => {
   })
 
   it('does not split an archive from still-present file recovery material', async () => {
-    const { root, data, databases, run, operationId } = await archivedChangeFixture(undefined)
-    const recoveryDirectory = join(data, 'file_edits', run.id, operationId)
+    const { root, data, databases, thread, run, operationId } = await archivedChangeFixture(undefined)
+    const recoveryDirectory = join(data, 'db', 'conversations', thread.id, 'file_edits', run.id, operationId)
     await mkdir(recoveryDirectory, { recursive: true })
     await writeFile(join(recoveryDirectory, 'record.json'), 'preserve this recovery material')
     const original = await readFile(databases[1])
@@ -309,10 +334,10 @@ describe('project version metadata recovery', () => {
   })
 
   it('rejects replacement if recovery material appears after inspection', async () => {
-    const { data, databases, run, operationId } = await archivedChangeFixture(undefined)
+    const { data, databases, thread, run, operationId } = await archivedChangeFixture(undefined)
     const original = await readFile(databases[1])
     await expect(repairRecoveryData(data, 'projects.json', async () => {
-      await mkdir(join(data, 'file_edits', run.id, operationId), { recursive: true })
+      await mkdir(join(data, 'db', 'conversations', thread.id, 'file_edits', run.id, operationId), { recursive: true })
       return '/preserved'
     })).rejects.toThrow('changed since inspection')
     expect(await readFile(databases[1])).toEqual(original)
@@ -320,7 +345,7 @@ describe('project version metadata recovery', () => {
 
   it('preserves an orphan deletion stage before repairing project and database versions', async () => {
     const { root, data, projects, databases, thread } = await fixture()
-    const stagePath = join(data, 'projects.json.delete-stage')
+    const stagePath = join(data, 'db/project-deletion.stage.json')
     const stage = `${JSON.stringify({ ...projects, version: 0 }, null, 2)}\n`
     await writeFile(stagePath, stage)
     const originals = await Promise.all(databases.map(path => readFile(path)))
@@ -328,7 +353,7 @@ describe('project version metadata recovery', () => {
     expect(plan.files.find(file => file.name === 'projects.json')?.error).toBeUndefined()
     const preserve = vi.fn(async () => {
       expect(await readFile(stagePath, 'utf8')).toBe(stage)
-      expect(JSON.parse(await readFile(join(data, 'projects.json'), 'utf8'))).toEqual(projects)
+      expect(JSON.parse(await readFile(join(data, 'db/projects.json'), 'utf8'))).toEqual(projects)
       for (const [index, path] of databases.entries()) expect(await readFile(path)).toEqual(originals[index])
       return preserveRecoveryData(data, root)
     })
@@ -337,8 +362,8 @@ describe('project version metadata recovery', () => {
     expect(result.repaired).toHaveLength(3)
     expect(result.unresolved).toEqual([])
     expect(await readFile(stagePath, 'utf8')).toBe(stage)
-    expect(await readFile(join(result.preservationPath!, 'data/projects.json.delete-stage'), 'utf8')).toBe(stage)
-    expect(JSON.parse(await readFile(join(data, 'projects.json'), 'utf8'))).toEqual({ ...projects, version: 0 })
+    expect(await readFile(join(result.preservationPath!, 'data/db/project-deletion.stage.json'), 'utf8')).toBe(stage)
+    expect(JSON.parse(await readFile(join(data, 'db/projects.json'), 'utf8'))).toEqual({ ...projects, version: 0 })
     const storage = AgentStorage.open(data)
     try { expect(storage.getThread(thread.id)?.title).toBe('Keep conversation') } finally { storage.close() }
   })
@@ -348,7 +373,7 @@ describe('project version metadata recovery', () => {
     const previous = { version: 0, projects: [...projects.projects, { ...projects.projects[0], id: 'pending-project' }] }
     const next = { ...projects, version: 0 }
     const journal = { version: 0, projectId: 'pending-project', threadIds: [], previous, next }
-    const paths = [join(data, 'projects.json'), join(data, 'projects.json.delete-stage'), join(data, 'projects.json.delete-journal'), ...databases]
+    const paths = [join(data, 'db/projects.json'), join(data, 'db/project-deletion.stage.json'), join(data, 'db/project-deletion.json'), ...databases]
     await writeFile(paths[0], JSON.stringify({ ...previous, version: projects.version }))
     await writeFile(paths[1], JSON.stringify(next))
     await writeFile(paths[2], JSON.stringify(journal))
@@ -392,6 +417,8 @@ describe('project version metadata recovery', () => {
 
   it.each([0, 4])('repairs catalog and every conversation together with project version %s', async version => {
     const { root, data, projects, databases, thread } = await fixture(version)
+    const history = '{"version":0,"maxHistory":100,"items":[]}'
+    await writeFile(join(data, 'db/input_history.json'), history)
     const before = await Promise.all(databases.map(path => readFile(path)))
     const inspected = await inspectRecoveryRepair(data)
     const status = inspected.files.find(file => file.name === 'projects.json')!
@@ -401,8 +428,9 @@ describe('project version metadata recovery', () => {
     const result = await repairRecoveryData(data, 'projects.json', () => preserveRecoveryData(data, root))
     expect(result.unresolved).toEqual([])
     expect(await readFile(join(data, 'sqlite/agent.sqlite'), 'utf8')).toBe('unrelated historical data, preserved verbatim')
-    expect(JSON.parse(await readFile(join(data, 'projects.json'), 'utf8'))).toEqual({ ...projects, version: 0 })
-    expect(JSON.parse(await readFile(join(result.preservationPath!, 'data/projects.json'), 'utf8'))).toEqual(projects)
+    expect(JSON.parse(await readFile(join(data, 'db/projects.json'), 'utf8'))).toEqual({ ...projects, version: 0 })
+    expect(await readFile(join(data, 'db/input_history.json'), 'utf8')).toBe(history)
+    expect(JSON.parse(await readFile(join(result.preservationPath!, 'data/db/projects.json'), 'utf8'))).toEqual(projects)
     for (const [index, path] of databases.entries()) {
       const db = new Database(path, { readonly: true })
       try { expect(db.pragma('user_version', { simple: true })).toBe(0) } finally { db.close() }
@@ -429,7 +457,7 @@ describe('project version metadata recovery', () => {
     if (fault === 'schema') db.exec('ALTER TABLE agent_runs RENAME COLUMN error TO old_error')
     else db.exec("UPDATE agent_conversations SET project_id = 'missing-project'")
     db.close()
-    const before = await Promise.all([join(data, 'projects.json'), ...databases].map(path => readFile(path)))
+    const before = await Promise.all([join(data, 'db/projects.json'), ...databases].map(path => readFile(path)))
     const preserve = vi.fn(() => preserveRecoveryData(data, root))
     const result = await repairRecoveryData(data, 'projects.json', preserve)
     expect(result.repaired).toHaveLength(2)
@@ -437,15 +465,15 @@ describe('project version metadata recovery', () => {
     expect(preserve).toHaveBeenCalledOnce()
     const damagedIndex = fault === 'schema' ? 1 : 0
     expect(await readFile(databases[damagedIndex])).toEqual(before[damagedIndex + 1])
-    expect(JSON.parse(await readFile(join(data, 'projects.json'), 'utf8')).version).toBe(0)
-    for (const [index, path] of [join(data, 'projects.json'), ...databases].entries()) {
+    expect(JSON.parse(await readFile(join(data, 'db/projects.json'), 'utf8')).version).toBe(0)
+    for (const [index, path] of [join(data, 'db/projects.json'), ...databases].entries()) {
       expect(await readFile(join(result.preservationPath!, 'data', path.slice(data.length + 1)))).toEqual(before[index])
     }
   })
 
   it('leaves all originals intact if preservation fails or data changes during preservation', async () => {
     const { data, databases } = await fixture()
-    const paths = [join(data, 'projects.json'), ...databases]
+    const paths = [join(data, 'db/projects.json'), ...databases]
     const before = await Promise.all(paths.map(path => readFile(path)))
     await expect(repairRecoveryData(data, 'projects.json', async () => { throw new Error('disk full') })).rejects.toThrow('disk full')
     for (const [index, path] of paths.entries()) expect(await readFile(path)).toEqual(before[index])

@@ -102,7 +102,7 @@ async function verifyMainWindowLifecycle(launchApplication) {
     await expect.poll(() => child.exitCode !== null || child.signalCode !== null, { timeout: 10000 }).toBe(true)
     assert.equal(child.exitCode, 0, 'Main-window close must complete normal application shutdown.')
     assert.equal(plugin.page().isClosed(), true)
-    assert.deepEqual(JSON.parse(await readFile(join(root, 'plugins_data/window-lifecycle/stopped.json'), 'utf8')), { stopped: true })
+    assert.deepEqual(JSON.parse(await readFile(join(root, 'db/plugins/window-lifecycle/stopped.json'), 'utf8')), { stopped: true })
     await expect.poll(() => server.clients.size).toBe(0)
     await expect.poll(() => {
       try { process.kill(backend.pid, 0); return false } catch { return true }

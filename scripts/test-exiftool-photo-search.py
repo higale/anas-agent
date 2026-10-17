@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 
-SCRIPT = Path(__file__).resolve().parents[1] / "data/skills_examples/exiftool-photo-search/scripts/search.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "data/examples/skills/exiftool-photo-search/scripts/search.py"
 spec = importlib.util.spec_from_file_location("photo_skill", SCRIPT)
 skill = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(skill)

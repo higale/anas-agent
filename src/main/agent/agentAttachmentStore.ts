@@ -5,7 +5,6 @@ import type {
   AgentAttachmentArtifact,
   AgentAttachmentInput
 } from '@shared/agentTypes'
-import { getAgentAttachmentsDir } from '../config/dataDir'
 import { withApplicationDataMutation } from '../applicationDataSnapshot'
 
 export interface ArchivedAgentAttachment {
@@ -75,7 +74,7 @@ async function archiveOne(
 export async function archiveAgentAttachments(
   inputs: AgentAttachmentInput[],
   context: { threadId: string; runId: string; messageId: string },
-  root = getAgentAttachmentsDir()
+  root: string
 ): Promise<ArchivedAgentAttachment[]> {
   if (inputs.length === 0) return []
   await mkdir(join(root, context.threadId), { recursive: true })
@@ -96,7 +95,7 @@ export async function archiveAgentAttachments(
 
 export async function deleteArchivedAgentAttachments(
   attachments: Array<Pick<AgentAttachmentArtifact, 'id' | 'path'>>,
-  root = getAgentAttachmentsDir()
+  root: string
 ): Promise<void> {
   return withApplicationDataMutation(async () => {
     const managedRoot = resolve(root)
@@ -116,7 +115,7 @@ export async function deleteArchivedAgentAttachments(
 
 export async function deleteArchivedAgentThreadAttachments(
   threadId: string,
-  root = getAgentAttachmentsDir()
+  root: string
 ): Promise<void> {
   return withApplicationDataMutation(async () => {
     const managedRoot = resolve(root)

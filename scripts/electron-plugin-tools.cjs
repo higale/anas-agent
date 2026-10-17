@@ -37,7 +37,7 @@ async function verifyPluginTools(launchApplication) {
   try {
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
     const fixture = join(home, 'fixture'), callsFile = join(home, 'calls.jsonl')
-    await cp(resolve(__dirname, '../data/plugins_examples/text-tools'), fixture, { recursive: true })
+    await cp(resolve(__dirname, '../data/examples/plugins/text-tools'), fixture, { recursive: true })
     await appendFile(join(fixture, 'backend.cjs'), `
 let calls = 0;
 module.exports.activate = async ({ host }) => { await host.getViews(); };
@@ -182,7 +182,7 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
     await application.evaluate(({ dialog }, paths) => { dialog.showOpenDialog = async (_window, options) => {
       if (options.defaultPath !== paths.examples) throw new Error('Plugin installation must open the runtime examples directory.')
       return { canceled: false, filePaths: [paths.manifest] }
-    } }, { examples: join(home, 'plugins_examples'), manifest: join(home, 'plugins_examples/writing-helper/PLUGIN.json') })
+    } }, { examples: join(home, 'examples/plugins'), manifest: join(home, 'examples/plugins/writing-helper/PLUGIN.json') })
     await page.evaluate(() => globalThis.gale.plugins.install())
     await expect(page.getByRole('button', { name: 'Plugins', exact: true })).toHaveCount(0)
     await page.locator('.sidebar-settings').click()
@@ -221,7 +221,7 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
     assert.equal(await page.locator('iframe').count(), 0)
     const staticPlugin = (await page.evaluate(() => globalThis.gale.plugins.list())).find(plugin => plugin.id === 'writing-helper')
     assert.equal(staticPlugin.backendStatus, 'stopped')
-    await application.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, join(home, 'plugins_examples/notepad/PLUGIN.json'))
+    await application.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, join(home, 'examples/plugins/notepad/PLUGIN.json'))
     await page.evaluate(() => globalThis.gale.plugins.install())
     await page.getByRole('button', { name: 'Plugins', exact: true }).click()
     await expect(page.getByRole('menuitem')).toHaveText(['Notepad'])
@@ -234,8 +234,8 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
     await expect.poll(() => page.evaluate(async () => (await globalThis.gale.skills.get()).skills.some(skill => skill.id === 'writing-helper:skill:proofread'))).toBe(false)
     const archivePath = join(archiveRoot, 'plugin-history.zip')
     await page.evaluate(() => globalThis.gale.plugins.setEnabled('usage-meter', false))
-    await writeFile(join(home, 'plugins_system/usage-meter/stale.txt'), 'bundled file from an older backup')
-    await writeFile(join(home, 'plugins_examples/notepad/stale.txt'), 'example file from an older backup')
+    await writeFile(join(home, 'plugins/_system/usage-meter/stale.txt'), 'bundled file from an older backup')
+    await writeFile(join(home, 'examples/plugins/notepad/stale.txt'), 'example file from an older backup')
     await application.evaluate(({ dialog }, path) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: path }) }, archivePath)
     const backup = await page.evaluate(() => globalThis.gale.app.backupData())
     assert.equal(backup.path, archivePath)
@@ -263,8 +263,8 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
     const builtin = (await restarted.evaluate(() => globalThis.gale.plugins.list())).find(plugin => plugin.id === 'usage-meter')
     assert.equal(builtin.enabled, false, 'Refreshing built-in packages must preserve their disabled state.')
     assert.equal(builtin.error, undefined)
-    await assert.rejects(readFile(join(home, 'plugins_system/usage-meter/stale.txt')), { code: 'ENOENT' })
-    await assert.rejects(readFile(join(home, 'plugins_examples/notepad/stale.txt')), { code: 'ENOENT' })
+    await assert.rejects(readFile(join(home, 'plugins/_system/usage-meter/stale.txt')), { code: 'ENOENT' })
+    await assert.rejects(readFile(join(home, 'examples/plugins/notepad/stale.txt')), { code: 'ENOENT' })
     assert.deepEqual(errors, [])
     console.log('Plugin backup E2E passed: image history after uninstall/restart and recovery of deleted conversation, package and settings.')
     console.log('Plugin tools E2E passed: ordinary tool results/history, per-call cancellation, persistent backend state without conversation identity, static contributions, shared capability selection and current settings without a page; dark/light settings and large-font layout.')

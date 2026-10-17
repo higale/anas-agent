@@ -56,7 +56,7 @@ describe('agent database snapshots', () => {
     const snapshots = await snapshotAgentStorage(source, destination)
 
     expect(snapshots.map(({ relPath }) => relPath)).toEqual([
-      'sqlite/catalog.sqlite', 'sqlite/conversations/first.sqlite', 'sqlite/conversations/second.sqlite'
+      'db/catalog.sqlite', 'db/conversations/first/conversation.sqlite', 'db/conversations/second/conversation.sqlite'
     ])
     expect(snapshots.every(({ size }) => size > 0)).toBe(true)
     for (const id of ['first', 'second']) {
@@ -80,7 +80,7 @@ describe('agent database snapshots', () => {
     const catalog = await openDatabase(getAgentCatalogFile(source))
     catalog.exec("CREATE TABLE agent_conversations (id TEXT PRIMARY KEY); CREATE TABLE agent_conversation_deletions (owner_thread_id TEXT); CREATE TABLE agent_thread_locations (thread_id TEXT, owner_thread_id TEXT); INSERT INTO agent_conversations VALUES ('../outside')")
 
-    await expect(snapshotAgentStorage(source, destination)).rejects.toThrow('not a valid database file name')
+    await expect(snapshotAgentStorage(source, destination)).rejects.toThrow('not a valid storage directory name')
   })
 
   it('has no database snapshots before storage has been created', async () => {

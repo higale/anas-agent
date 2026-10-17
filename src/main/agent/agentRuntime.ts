@@ -100,10 +100,8 @@ import { countMessagesApproximately } from './localTokenCounting'
 import { latestServerTokenUsage } from './serverTokenUsage'
 import { projectToolImages } from './toolImageProjection'
 import { toAgentMessage, toHumanMessage } from './messageMapper'
-import { deleteFileEditRecordsForRequest } from '../fileEditStore'
 import { runWithCurrentAgentToolEffect } from './toolEffectScope'
 import { runtimeLog } from '../runtimeLogger'
-import { getTempDir } from '../config/dataDir'
 import { getAppConfigSnapshot } from '../config/appConfig'
 import { getProject, prepareProjectPreview } from '../projectStore'
 import { DEFAULT_WORKSPACE_PROJECT_ID } from '@shared/types'
@@ -1341,8 +1339,8 @@ export class AgentRuntime {
       const instance: AgentInstance = await createAgentInstance(thread, db, context)
       return instance as unknown as RuntimeAgentInstance
     },
-    private readonly temporaryRoot = getTempDir(),
-    private readonly cleanupFileEdits: FileEditCleanup = deleteFileEditRecordsForRequest,
+    private readonly temporaryRoot = database.temporaryRoot,
+    private readonly cleanupFileEdits: FileEditCleanup = (requestId, retained) => database.fileEditStore.deleteFileEditRecordsForRequest(requestId, retained),
     private readonly publishDetachedEvent?: (
       event: AgentRuntimeEvent
     ) => void | Promise<void>,
@@ -1576,7 +1574,7 @@ export class AgentRuntime {
 
     const draftRoot = join(
       this.temporaryRoot,
-      'agent-message-edit',
+      'message_edit',
       randomUUID()
     )
     await mkdir(draftRoot, { recursive: true })
@@ -1629,39 +1627,6 @@ export class AgentRuntime {
       const run = await this.prepareRegeneration(input, queue)
       return { run, events: queue }
     })
-  }
-
-  async deleteThread(threadId: string): Promise<void> {
-    await this.withThreadMutation(threadId, 'be deleted', async () => {
-      await this.cancelSubagentsForOwner(threadId)
-      const ownedThreadIds = this.database.listOwnedThreadIds(threadId)
-      for (const ownedThreadId of ownedThreadIds) {
-        const cancellation = await this.managedCalls.cancelThread(ownedThreadId)
-        const executorStillActive = this.managedCalls.hasActiveForThread(ownedThreadId)
-        if (
-          cancellation.uncertainCallIds.length > 0
-          || cancellation.lingeringCallIds.length > 0
-          || executorStillActive
-        ) {
-          throw new AgentThreadLockedError(ownedThreadId, 'be deleted')
-        }
-      }
-      const attachmentsByThread = await this.database.deleteThreadTree(threadId)
-      for (const [ownedThreadId, attachments] of attachmentsByThread) {
-        await this.completeThreadAttachmentCleanup(ownedThreadId, attachments)
-      }
-    })
-  }
-
-  async finishDeletionCleanup(): Promise<void> {
-    await this.startupCleanupTask
-    await this.drainPendingAttachmentCleanup()
-    await this.drainPendingFileEditCleanup()
-    if (this.database.listAttachmentCleanupThreadIds().length > 0
-      || this.database.listAttachmentFileCleanup().length > 0
-      || this.database.listFileEditCleanupRunIds().length > 0) {
-      throw new Error('Conversation deletion still has pending resource cleanup.')
-    }
   }
 
   private async cleanupOrphanedSubagentThreads(): Promise<void> {
@@ -1800,13 +1765,6 @@ export class AgentRuntime {
     if (this.hasLiveWork() || this.tasks.size > 0) return false
     this.shuttingDown = true
     return true
-  }
-
-  assertCanDeleteThread(threadId: string): void {
-    this.assertThreadAvailable(threadId, 'be deleted')
-    if (this.managedCalls.hasActiveForThread(threadId)) {
-      throw new AgentThreadLockedError(threadId, 'be deleted')
-    }
   }
 
   async waitForStartupCleanup(): Promise<void> {
@@ -4364,7 +4322,7 @@ export class AgentRuntime {
   }
 
   private directionAttachmentStagingRoot(): string {
-    return join(this.temporaryRoot, 'agent-direction')
+    return join(this.temporaryRoot, 'direction')
   }
 
   private async cleanupDirectionAttachmentStaging(

@@ -6,20 +6,48 @@ LangGraph checkpoint 是会话状态的唯一权威来源。框架负责模型�
 
 当前应用自有数据格式以显式 `v0` 为唯一兼容原点，包括 SQLite 的 `user_version = 0`；通过现有表结构区分空库与已初始化的 v0 库。此前无版本或旧编号的数据不提供升级路径，遇到不支持的格式拒绝读取，不自动清空数据。后续格式变更遵循[迁移规则](DATA_MIGRATIONS.md)。LangGraph checkpoint 的原生版本和通道版本保留框架定义。
 
+4.0 是经用户批准的会话存储兼容边界：旧 `sqlite/` 中的对话目录与全部记忆，以及根目录的 `projects.json`、`input_history.json` 弃用，不迁移、不回退读取、不自动删除旧文件；旧备份不能导入。全局配置仍使用原 v0，其他格式兼容规则不变。
+
+项目定义和输入历史的现有 v0 文件格式不变：完全退出程序后，可将数据根目录的 `projects.json`、`input_history.json` 手动移到 `db/` 下恢复。建议在 4.0 创建新数据前操作；源文件及目标同名文件先备份，覆盖只替换、不合并。此方式不恢复旧对话和记忆，程序不增加自动迁移或旧路径回退。
+
+头像资源使用 `config/assets/`；旧根目录 `assets/` 不读取、迁移或自动删除，不纳入新备份。可退出程序并备份后手动整体移入新路径恢复，内部格式不变；未恢复时初始化默认头像。
+
 ## 文件与职责
+
+数据清理白名单与备份默认目录见[数据清理](DATA_CLEANUP.md)。旧布局文件只在用户选择“未知文件”后按预览删除，不在启动时清理。
 
 ```text
 <dataDir>/
-  sqlite/
+  config/
+    *.json
+    assets/                       # 头像原图、裁剪参数及生成图标
+  db/
     catalog.sqlite
+    projects.json
+    input_history.json
+    plugins/<插件ID>/             # 插件独立数据、通用设置及内置插件启停状态
+    project-deletion.json          # 仅项目删除事务期间存在
+    project-deletion.stage.json
     conversations/
-      <主对话ID>.sqlite
-  attachments/
+      <主对话ID>/
+        conversation.sqlite
+        attachments/<threadId>/<attachmentId>/content.<ext>
+        file_edits/<runId>/<operationId>/...
+        tool_results/<内容哈希>.txt
+  tmp/conversations/<主对话ID>/
+    message_edit/
+    direction/
 ```
+
+`db/projects.json` 保存项目定义与设置，`db/input_history.json` 保存全局输入历史和置顶输入，`db/plugins/<id>/` 保存插件独立数据。项目重置只删除项目元数据、catalog 及对话资源，保留输入历史和插件数据。项目修复保留同目录其他文件，并在切换前核对源数据未变化。
+
+对话持久资源统一位于 `db/conversations/`，临时草稿仍在 `tmp/conversations/`。开发期间的根目录 `conversations/` 不读取、不迁移、不纳入备份，也不自动删除。
+
+旧 `plugins_data/` 不自动读取、迁移或删除；完全退出程序并备份后，可将它整体移动为 `db/plugins/` 恢复，内部格式不变。目标已有数据时先单独备份，目录替换不合并数据。插件代码仍在 `plugins/`，临时文件仍在 `tmp/`。
 
 [AgentStorage](../src/main/agent/agentStorage.ts) 的 catalog 保存主对话列表、项目归属、库定位、工作区选择及共享记忆。列表查询不打开全部会话库；catalog 的运行状态只是列表投影，会话库保留权威产品状态。
 
-一个主对话及其全部子 Agent 共用会话库，各自使用独立的框架 thread ID。父子关系、运行、审批、效果记录和结果交付可在同库事务内更新。更换项目只修改归属，不搬迁数据库或附件。
+一个主对话及其全部子 Agent 共用物理目录和会话库，各自使用独立的框架 thread ID。目录名使用既有主对话 ID，不新增另一套 session ID。父子关系、运行、审批、效果记录和结果交付可在同库事务内更新。更换项目只修改归属，不搬迁数据库或附件。
 
 [AgentRuntimeCoordinator](../src/main/agent/agentRuntimeCoordinator.ts) 按需创建 runtime，保护运行、审批等待及在途操作持有的连接，按最近使用顺序淘汰空闲连接，最多保留 32 个空闲会话。空闲连接和整份消息状态的内存缓存有独立生命周期。
 
@@ -76,13 +104,17 @@ Responses 流式生图结果通过 SDK 的响应转换生成标准图片块供�
 
 [工具图片请求投影](../src/main/agent/toolImageProjection.ts) 在发送模型、计算上下文和压缩时，将已有后续正常模型响应的工具图片替换为占位说明。原始图片及 artifact 始终保留在消息正文中；未处理图片、工具文本、调用 ID 和用户附件不变。压缩与重试不能截断待处理图片；主子 Agent 各自依据消息状态判断。
 
-[工具结果文件](../src/main/agent/toolResultFile.ts)用于上下文溢出时的文本收缩：先将完整文本（结构化内容为 JSON）原子写入数据目录 `cache/tool-results/`，再向本次模型请求提供绝对文件路径和首尾预览；不重跑工具，不修改 checkpoint 的完整消息，待处理图片不走此收缩。文件按内容哈希命名，重复内容复用路径；写入失败则报错，不返回不存在的引用。它是可重建缓存，不是第二份会话状态。当前备份会包含这些文件；它们不随对话删除，使用设置中的缓存清理统一删除。读取沿用现有文件工具与权限；Shell、自定义工具等已有内联输出上限和受管输出查询机制保持不变。
+[工具结果文件](../src/main/agent/toolResultFile.ts)用于上下文溢出时的文本收缩：先将完整文本（结构化内容为 JSON）原子写入数据目录 `db/conversations/<主对话ID>/tool_results/`，再向本次模型请求提供绝对文件路径和首尾预览；不重跑工具，不修改 checkpoint 的完整消息，待处理图片不走此收缩。文件按内容哈希命名，重复内容复用路径；写入失败则报错，不返回不存在的引用。它是会话持有的可读副本，不是第二份会话状态。同一主对话内按内容去重；文件纳入备份，随整个对话删除，清缓存或结束单轮运行不删除。读取沿用现有文件工具与权限；Shell、自定义工具等已有内联输出上限和受管输出查询机制保持不变。
 
-编辑和重新生成从当前消息选择有效前缀。[AgentDatabase.replaceMessageHistory](../src/main/agent/agentDatabase.ts) 在一次事务中替换当前根状态、截断相关运行和活动、处理移除的子线程并创建新运行输入，不依赖旧 checkpoint fork。事务失败保留原状态；废弃附件进入持久清理队列，删除失败不撤销编辑或丢弃编辑草稿，重新打开会话时重试。资源清理完成后才删除待移除的会话库。
+编辑和重新生成从当前消息选择有效前缀。[AgentDatabase.replaceMessageHistory](../src/main/agent/agentDatabase.ts) 在一次事务中替换当前根状态、截断相关运行和活动、处理移除的子线程并创建新运行输入，不依赖旧 checkpoint fork。事务失败保留原状态；废弃附件进入持久清理队列，删除失败不撤销编辑或丢弃编辑草稿，重新打开会话时重试。资源清理完成、写入停止且数据库关闭后，删除整个会话目录及其 `tmp/conversations/<主对话ID>/`；目录删除失败仍保留 catalog 删除标记，可在重启后重试，部分删除不会使其他会话失效。
+
+显式删除整个对话按 catalog 中的主对话 ID 定位，仅停止已有运行实例、关闭已打开的数据库，再删除其持久目录与临时目录，最后清除索引。不为删除创建运行实例，不读取或校验待丢弃的消息、附件引用或数据库版本；数据库缺失、损坏或无法读取均不阻止删除。实际文件删除失败时保留可重试的删除标记，不冒充删除成功。批量清理仍保留置顶、运行中和审批等待的对话，并检查可读会话中的未解决后台调用。
 
 UI 按索引分页读取，run 活动初始窗口为末尾 100 条，先选窗口再解码正文。只合并连续分页区间，漏收实时事件形成的空段仍可补载；子 Agent 结果按需读取。模型轮次按数据库中的 run/Agent 索引计算，不随分页改变。同步解码用于界面投影，模型恢复仍用框架原生反序列化。
 
-备份通过 [SQLite backup API](../src/main/agent/agentDatabaseBackup.ts) 分别快照 catalog 和登记的会话库，不直接复制可能存在 WAL 的主文件。复制期间数据结构变更、附件删除和文件恢复材料维护排队，后台 Agent 可继续提交完整消息。catalog 持久记录已接受的删除，备份排除这些会话及附件；恢复校验当前格式后，停止相关写入再切换数据目录。
+备份通过 [SQLite backup API](../src/main/agent/agentDatabaseBackup.ts) 分别快照 catalog 和登记的会话库，不直接复制可能存在 WAL 的主文件。复制期间数据结构变更、附件删除和文件恢复材料维护排队，后台 Agent 可继续提交完整消息。会话文件仅按 catalog 快照中未删除的主对话清单收集；已接受删除或创建中断留下的未登记目录不进入备份，未登记的原文件仍保留在磁盘。恢复校验当前格式后，停止相关写入再切换数据目录。ZIP 中的 `anas-backup.json` 明确声明当前布局；旧备份在停止运行时和替换数据之前拒绝。新备份排除旧布局、全局缓存和临时目录。
+
+文件修改恢复材料按主对话隔离，当前对话及其子 Agent 共享同一 `FileEditStore`；正常收尾先将差异和内容归档进会话数据库，再清除不再需要的材料，崩溃恢复所需记录继续保留。`get_file_edit_diff` 的 retained 范围仍可发现其他对话保留的恢复记录，恢复工具按运行 ID 定位所属目录；已截断运行的材料从当前对话目录查找，不依赖旧目录。正在使用的恢复材料阻止所属对话被删除。SQLite WAL/SHM 与所属数据库同目录。消息编辑、方向附件等临时副本放在全局 `tmp` 下，可随启动、退出清理。文件补丁的 `.anas-patch-*.tmp` 仍位于目标文件旁，以保证同文件系统原子替换，由事务清理。
 
 ## 性能与验证
 

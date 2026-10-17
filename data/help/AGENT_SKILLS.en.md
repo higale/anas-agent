@@ -39,7 +39,7 @@ This does not enable command execution, selected tools or Skills, or expand proj
 
 ## System Skills And Examples
 
-The application supplies these system skills in `skills_system/` under application data:
+The application supplies these system skills in `skills/_system/` under application data:
 
 | Skill | Purpose |
 | --- | --- |
@@ -47,7 +47,7 @@ The application supplies these system skills in `skills_system/` under applicati
 | `skill-manager` | Creates or modifies skills, or installs them from local directories and Git repositories. Requires file reading and writing; remote installation also needs Git and network access, and script testing needs the appropriate runtimes. |
 | `tool-manager` | Creates, modifies, and troubleshoots Anas custom tools, with a format reference and Python example template. Requires file reading and writing; testing also needs command execution and the appropriate runtime. |
 
-`skills_examples/` contains examples that are not loaded by default. Import them into **User** before use:
+`examples/skills/` contains examples that are not loaded by default. Import them into **User** before use:
 
 | Example | Purpose and main dependencies |
 | --- | --- |
@@ -59,7 +59,7 @@ The application supplies these system skills in `skills_system/` under applicati
 | `ip-location` | Public IP and approximate network location; Python 3.8+ and network access to ipinfo.io. |
 | `obsidian-cli` | Operates Obsidian vaults; Obsidian desktop with its command-line interface enabled and an available `obsidian` command. |
 
-System and example directories are restored from bundled files at startup. Copy or import a skill into User or a project skill directory before customizing it.
+System skills are refreshed from bundled files at startup. The complete `examples/` tree is refreshed at startup and after restoring a backup, including documentation, skill examples, tool examples and plugin examples. Copy or import a skill into User or a project skill directory before customizing it.
 
 ## Prepare To Run
 

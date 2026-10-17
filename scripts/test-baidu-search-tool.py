@@ -10,7 +10,7 @@ from unittest.mock import patch
 import urllib.error
 
 
-PACKAGE = Path(__file__).resolve().parents[1] / "data/tools_examples/baidu-search"
+PACKAGE = Path(__file__).resolve().parents[1] / "data/examples/tools/baidu-search"
 SCRIPT = PACKAGE / "scripts/run.py"
 spec = importlib.util.spec_from_file_location("baidu_tool", SCRIPT)
 tool = importlib.util.module_from_spec(spec)

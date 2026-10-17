@@ -2,7 +2,7 @@
 
 [简体中文](README.md)
 
-This directory ships with the application resources. Startup and backup restore copy its examples to `plugins_examples/` under application data. **Settings > Plugins > Install plugin** opens that directory by default. Select `PLUGIN.json` from one of the subdirectories below or a packaged plugin ZIP. Selecting a manifest copies the entire plugin directory into the user installation directory, `plugins/`. These examples require no npm dependencies and are not registered or enabled automatically; refreshing examples does not overwrite installed copies.
+This directory ships with the application resources. Startup and backup restore copy its examples to `examples/plugins/` under application data. **Settings > Plugins > Install plugin** opens that directory by default. Select `PLUGIN.json` from one of the subdirectories below or a packaged plugin ZIP. Selecting a manifest copies the entire plugin directory into the user installation directory, `plugins/`. These examples require no npm dependencies and are not registered or enabled automatically; refreshing examples does not overwrite installed copies.
 
 - `notepad/`: a Chinese/English notepad without a backend, demonstrating bundled SVG icons, shared save actions, language resources, host language selection, data persistence, and preservation of unsaved edits.
 - `text-tools/`: tools without a page, demonstrating text, Base64 images, cancellation, backend reuse, and general settings that can be edited without starting the backend.

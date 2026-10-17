@@ -46,7 +46,7 @@ describe('optional plugin backend', () => {
     await started()
     const [, args] = mocks.fork.mock.calls.at(-1)!
     expect(JSON.parse(args[1])).toEqual({ pluginId: 'test-plugin', packageDirectory: '/plugin',
-      dataDirectory: '/data/plugins_data/test-plugin', tempDirectory: '/data/tmp/anas-plugin-test-plugin' })
+      dataDirectory: '/data/db/plugins/test-plugin', tempDirectory: '/data/tmp/anas-plugin-test-plugin' })
     await backend.stopAll()
   })
 

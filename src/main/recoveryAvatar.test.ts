@@ -35,7 +35,7 @@ afterEach(async () => {
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'anas-avatar-rescue-'))
   roots.push(root)
-  const data = join(root, 'data'), assets = join(data, 'assets'), backup = join(root, 'preserved')
+  const data = join(root, 'data'), assets = join(data, 'config', 'assets'), backup = join(root, 'preserved')
   await mkdir(assets, { recursive: true })
   for (const [name, content] of Object.entries({
     'avatar-source.png': 'good original source', 'avatar-crop.png': 'good original crop',
@@ -53,7 +53,7 @@ describe('manual avatar rescue', () => {
     await writeFile(icon, 'good ico')
     const original = JSON.stringify({ version: 99, ...transform, annotation: 'keep' })
     await writeFile(join(assets, 'avatar-transform.json'), original)
-    expect(await inspectAvatarRepair(data)).toEqual({ fields: ['assets/avatar-transform.json: version'], issues: [] })
+    expect(await inspectAvatarRepair(data)).toEqual({ fields: ['config/assets/avatar-transform.json: version'], issues: [] })
     expect(await readFile(join(assets, 'avatar-transform.json'), 'utf8')).toBe(original)
     const result = await repairAvatarData(data, preserve)
     expect(result.unresolved).toEqual([])
@@ -142,7 +142,7 @@ describe('manual avatar rescue', () => {
     const result = await repairAvatarData(data, preserve)
     expect(result.repaired).toEqual([])
     expect(result.unresolved.join('\n')).toContain('generation failed')
-    expect(await readdir(data)).toEqual(['assets'])
+    expect(await readdir(data)).toEqual(['config'])
     for (const name of await readdir(assets)) expect(await readFile(join(assets, name))).toEqual(await readFile(join(backup, name)))
   })
 

@@ -7,7 +7,10 @@ import { useComposerKeyDown } from './useComposerKeyDown'
 import { defaultModelConfig, resolveProviderModelConfig } from '@shared/modelConfig'
 import type { AppConfigSnapshot, ModelProviderConfig } from '@shared/types'
 
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
+vi.mock('react-i18next', () => ({ useTranslation: () => ({
+  t: (key: string) => key,
+  i18n: { language: 'en', resolvedLanguage: 'en' }
+}) }))
 
 function composerProps(): ComponentProps<typeof ChatComposer> {
   return {

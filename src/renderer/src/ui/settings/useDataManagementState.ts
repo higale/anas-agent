@@ -3,6 +3,7 @@ import type { TFunction } from 'i18next'
 import type { AgentStorageUsageSnapshot, AgentThreadCleanupResult } from '@shared/agentTypes'
 import type { AppConfigSnapshot, AppDataStorageUsageSnapshot, DataCleanupRequest, InputHistorySnapshot, StorageUsageValue } from '@shared/types'
 import { dataCleanupTargets, defaultDataCleanupSelection } from '../dialogs/AppDialogs'
+import { visibleDataCleanupTargets } from '../dialogs/dialogTypes'
 import type { ConfirmDialogRequest, DataCleanupDialogTarget, DataCleanupSelection, DataCleanupUsage } from '../dialogs/AppDialogs'
 import { notice } from '../notice'
 import type { SettingsTab } from './settingsTabs'
@@ -196,7 +197,9 @@ export function useDataManagementState({
   function toggleAllDataCleanupTargets(checked: boolean): void {
     setDataCleanupSelection(() => {
       const selection = defaultDataCleanupSelection()
-      for (const target of dataCleanupTargets) selection[target] = checked
+      const visible = new Set(visibleDataCleanupTargets(dataCleanupUsage))
+      for (const target of dataCleanupTargets) selection[target] = checked && visible.has(target)
+        && (target !== 'unknown_files' || (!storageUsageLoading && appStorageUsage?.unknownFiles !== undefined))
       return selection
     })
   }
@@ -208,6 +211,9 @@ export function useDataManagementState({
 
   async function runDataCleanup(): Promise<void> {
     const request = { ...dataCleanupSelection }
+    const visible = new Set(visibleDataCleanupTargets(dataCleanupUsage))
+    for (const target of dataCleanupTargets) if (!visible.has(target)) request[target] = false
+    if (storageUsageLoading || appStorageUsage?.unknownFiles === undefined) request.unknown_files = false
     const selectedCount = dataCleanupTargets.filter((target) => request[target]).length
     if (selectedCount === 0 || dataCleanupBusy) return
 
@@ -218,7 +224,9 @@ export function useDataManagementState({
         cache_folder: request.cache_folder,
         temp_folder: request.temp_folder,
         log_folder: request.log_folder,
-        developer_http_trace: request.developer_http_trace
+        developer_http_trace: request.developer_http_trace,
+        unknown_files: request.unknown_files,
+        ...(request.unknown_files ? { unknown_file_paths: appStorageUsage!.unknownFiles } : {})
       }
       const shouldCompactAgentDatabase = Boolean(!request.memories && request.agent_unpinned_threads)
       const [appResult, agentResults] = await Promise.all([
@@ -262,6 +270,7 @@ export function useDataManagementState({
     dataCleanupOpen,
     dataCleanupSelection,
     dataCleanupUsage,
+    dataCleanupUnknownFiles: appStorageUsage?.unknownFiles,
     dataDirectoryUsage: appStorageUsage?.dataDirectory,
     developerHttpTraceEnabled,
     developerHttpTraceUsage,

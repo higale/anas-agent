@@ -24,6 +24,7 @@ import { installRuntimeNetworkPolicy } from './runtimeNetworkPolicy'
 import { initializeSkillsStore } from './skillsStore'
 import { initializeToolsStore } from './toolsStore'
 import { initializePluginsStore } from './plugins/pluginRuntime'
+import { initializeBundledExamples } from './bundledExamples'
 import { getInputHistory } from './inputHistoryStore'
 import { migrateDataDirectory } from './migrations'
 import { recoverInterruptedDataRestore } from './backupService'
@@ -86,6 +87,7 @@ function startApplication(): void {
     registerPluginProtocol()
     const recoveredInterruptedRestore = await recoverInterruptedDataRestore()
     await migrateDataDirectory(getDataDir())
+    await initializeBundledExamples()
     await initializePluginsStore()
     await recoverPendingProjectDeletion()
     await initializeAgentRuntime()

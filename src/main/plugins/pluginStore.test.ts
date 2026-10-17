@@ -24,6 +24,27 @@ beforeEach(async () => {
 afterEach(async () => { vi.restoreAllMocks(); await rm(root, { recursive: true, force: true }) })
 
 describe('plugin installation and data', () => {
+  it('uses db/plugins for new data and leaves the obsolete data directory untouched', async () => {
+    await store.install(source)
+    const legacy = join(root, 'data/plugins_data', manifest.id)
+    await mkdir(legacy, { recursive: true })
+    const previous = '{"version":0,"values":{"draft":"old"}}'
+    await writeFile(join(legacy, 'state.json'), previous)
+    expect(await store.data(manifest.id, 'draft')).toBeNull()
+    await store.data(manifest.id, 'draft', true, 'new')
+    expect(JSON.parse(await readFile(join(root, 'data/db/plugins', manifest.id, 'state.json'), 'utf8')).values.draft).toBe('new')
+    expect(await readFile(join(legacy, 'state.json'), 'utf8')).toBe(previous)
+  })
+
+  it('validates the db parent before creating or accessing a plugin data directory', async () => {
+    await store.install(source)
+    const outside = join(root, 'outside')
+    await mkdir(outside)
+    await symlink(outside, join(root, 'data/db'), process.platform === 'win32' ? 'junction' : 'dir')
+    await expect(store.data(manifest.id, 'draft', true, 'value')).rejects.toThrow('managed directory')
+    expect(await readdir(outside)).toEqual([])
+  })
+
   it('loads bundled code without installation, persists disabling, and preserves preferences across bundled updates', async () => {
     store = new PluginStore(join(root, 'data'), { [manifest.id]: source })
     expect(await store.list()).toEqual([expect.objectContaining({ id: manifest.id, builtin: true, enabled: true })])
@@ -36,9 +57,9 @@ describe('plugin installation and data', () => {
     await expect(store.install(source)).rejects.toThrow('cannot be replaced')
     await store.setEnabled(manifest.id, true)
     expect(await store.data(manifest.id, 'choice')).toBe('kept')
-    await writeFile(join(root, 'data/plugins_data', manifest.id, 'anas-installation.json'), 'null')
+    await writeFile(join(root, 'data/db/plugins', manifest.id, 'anas-installation.json'), 'null')
     expect(await store.read(manifest.id)).toMatchObject({ enabled: false, error: expect.any(String) })
-    await writeFile(join(root, 'data/plugins_data', manifest.id, 'anas-installation.json'), '{broken')
+    await writeFile(join(root, 'data/db/plugins', manifest.id, 'anas-installation.json'), '{broken')
     expect(await store.read(manifest.id)).toMatchObject({ enabled: false, builtin: true, error: expect.any(String) })
   })
   it('reports a bundled ID collision without replacing the existing installed plugin or its data', async () => {
@@ -53,7 +74,7 @@ describe('plugin installation and data', () => {
     const temp = await store.directory('tmp', manifest.id, true)
     expect(temp).toBe(join(root, 'data', 'tmp', 'anas-plugin-test-plugin'))
     expect(await store.directory('tmp', 'a'.repeat(64), true)).not.toBe(temp)
-    expect(await store.directory('plugins_data', manifest.id, true)).toBe(join(root, 'data', 'plugins_data', manifest.id))
+    expect(await store.directory('db/plugins', manifest.id, true)).toBe(join(root, 'data', 'db/plugins', manifest.id))
     await writeFile(join(temp, 'disposable'), 'test')
     await rm(join(root, 'data', 'tmp'), { recursive: true })
     expect(await store.directory('tmp', manifest.id, true)).toBe(temp)
@@ -84,7 +105,7 @@ describe('plugin installation and data', () => {
     const updated = await store.settings(manifest.id)
     expect(updated.values).toEqual({ enabled: false, count: 0, label: '' })
     await expect(store.settings(manifest.id, { revision: first.revision, values: first.values })).rejects.toThrow('changed')
-    const path = join(await store.directory('plugins_data', manifest.id), 'anas-settings.json')
+    const path = join(await store.directory('db/plugins', manifest.id), 'anas-settings.json')
     await writeFile(path, '{broken')
     await expect(store.settings(manifest.id)).rejects.toThrow()
     expect(await readFile(path, 'utf8')).toBe('{broken')
@@ -183,7 +204,7 @@ describe('plugin installation and data', () => {
   it('isolates a damaged plugin and preserves invalid data instead of resetting it', async () => {
     await store.install(join(source, 'PLUGIN.json'))
     await store.data(manifest.id, 'key', true, 'saved')
-    const dataFile = join(root, 'data/plugins_data/test-plugin/state.json')
+    const dataFile = join(root, 'data/db/plugins/test-plugin/state.json')
     await writeFile(dataFile, '{broken')
     await expect(store.data(manifest.id, 'key', true, 'new')).rejects.toThrow()
     expect(await readFile(dataFile, 'utf8')).toBe('{broken')
@@ -226,9 +247,9 @@ describe('optional data removal on uninstall', () => {
   it('deletes only the selected plugin data and permits a fresh installation', async () => {
     await store.install(join(source, 'PLUGIN.json'))
     await store.data(manifest.id, 'home_open_location', true, 'window')
-    const data = join(root, 'data/plugins_data/test-plugin')
+    const data = join(root, 'data/db/plugins/test-plugin')
     await writeFile(join(data, 'profiles.json'), '{broken credentials file')
-    const other = join(root, 'data/plugins_data/other-plugin')
+    const other = join(root, 'data/db/plugins/other-plugin')
     await mkdir(other)
     await writeFile(join(other, 'state.json'), 'keep')
     await store.uninstall(manifest.id, true)
@@ -248,8 +269,8 @@ describe('optional data removal on uninstall', () => {
 
   it('refuses linked data directories without uninstalling or touching their targets', async () => {
     await store.install(join(source, 'PLUGIN.json'))
-    const group = join(root, 'data/plugins_data')
-    await mkdir(group)
+    const group = join(root, 'data/db/plugins')
+    await mkdir(group, { recursive: true })
     const outside = join(root, 'outside-data')
     await mkdir(outside)
     await writeFile(join(outside, 'keep'), 'untouched')
@@ -263,7 +284,7 @@ describe('optional data removal on uninstall', () => {
     await store.install(join(source, 'PLUGIN.json'))
     await store.data(manifest.id, 'draft', true, 'keep')
     const rename = fs.retry.rename({ timeout: 2_000, interval: 25 })
-    const data = join(root, 'data/plugins_data/test-plugin')
+    const data = join(root, 'data/db/plugins/test-plugin')
     vi.spyOn(fs.retry, 'rename').mockImplementation(() => async (from, to) => {
       if (from === data) throw new Error('Data directory is busy')
       return rename(from, to)
@@ -279,14 +300,22 @@ describe('optional data removal on uninstall', () => {
     await store.data(manifest.id, 'draft', true, 'keep')
     const rename = fs.retry.rename({ timeout: 2_000, interval: 25 })
     const installation = join(root, 'data/plugins/test-plugin')
+    const data = join(root, 'data/db/plugins/test-plugin')
     vi.spyOn(fs.retry, 'rename').mockImplementation(() => async (from, to) => {
-      if (from !== installation) throw new Error('Directory busy')
+      if (from === data || to === installation) throw new Error('Directory busy')
       return rename(from, to)
     })
     await expect(store.uninstall(manifest.id, true)).rejects.toThrow('preserved files remain')
-    const [stage] = await readdir(join(root, 'data/tmp'))
-    expect(await readFile(join(root, 'data/tmp', stage, 'removed/package/index.html'), 'utf8')).toBe('<p>Hello</p>')
-    expect(JSON.parse(await readFile(join(root, 'data/plugins_data/test-plugin/state.json'), 'utf8')).values.draft).toBe('keep')
+    await rm(join(root, 'data/tmp'), { recursive: true, force: true })
+    const [stage] = (await readdir(join(root, 'data/plugins'))).filter(name => name.startsWith('.remove-'))
+    expect(await readFile(join(root, 'data/plugins', stage, 'previous/package/index.html'), 'utf8')).toBe('<p>Hello</p>')
+    expect(JSON.parse(await readFile(join(root, 'data/db/plugins/test-plugin/state.json'), 'utf8')).values.draft).toBe('keep')
+    expect(await store.read(manifest.id)).toMatchObject({ enabled: false, error: expect.stringContaining('preserved files remain') })
+    vi.restoreAllMocks()
+    const restarted = new PluginStore(store.dataDirectory)
+    await restarted.recoverTransactions()
+    expect(await restarted.read(manifest.id)).toMatchObject({ enabled: true, error: undefined })
+    expect(await restarted.data(manifest.id, 'draft')).toBe('keep')
   })
 })
 
@@ -297,7 +326,7 @@ describe('plugin home location', () => {
     await store.data(manifest.id, 'draft', true, 'keep')
     await store.data(manifest.id, 'home_open_location', true, 'window')
     expect((await store.home(manifest.id)).location).toBe('window')
-    const saved = JSON.parse(await readFile(join(root, 'data/plugins_data/test-plugin/state.json'), 'utf8'))
+    const saved = JSON.parse(await readFile(join(root, 'data/db/plugins/test-plugin/state.json'), 'utf8'))
     expect(saved.values).toEqual({ draft: 'keep', home_open_location: 'window' })
     await store.uninstall(manifest.id)
     await store.install(join(source, 'PLUGIN.json'))
@@ -338,7 +367,7 @@ describe('plugin home location', () => {
   it('preserves corrupted stored preferences and rejects invalid home declarations', async () => {
     await store.install(join(source, 'PLUGIN.json'))
     await store.data(manifest.id, 'draft', true, 'keep')
-    const file = join(root, 'data/plugins_data/test-plugin/state.json')
+    const file = join(root, 'data/db/plugins/test-plugin/state.json')
     const broken = '{"version":0,"values":{"home_open_location":"invalid","draft":"keep"}}'
     await writeFile(file, broken)
     await expect(store.home(manifest.id)).rejects.toThrow('home location')
@@ -405,7 +434,7 @@ describe('plugin language packs', () => {
     await expect(stat(join(lang, 'de.json'))).rejects.toMatchObject({ code: 'ENOENT' })
     expect(pluginDisplayText(await store.read(manifest.id), 'en')).toBe('New English')
     expect(pluginDisplayText(await store.read(manifest.id), 'zh-CN')).toBe('新版记事本')
-    await expect(stat(join(root, 'data/plugins_data/test-plugin'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(join(root, 'data/db/plugins/test-plugin'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('reports oversized language files without disabling the plugin or preventing uninstall', async () => {
@@ -624,7 +653,7 @@ describe('confirmed plugin replacement', () => {
   it('installs the approved snapshot and preserves enabled state and all data by default', async () => {
     await store.install(join(source, 'PLUGIN.json'))
     for (const [index, value] of [false, 0, '', [], null].entries()) await store.data(manifest.id, 'key' + index, true, value)
-    const data = join(root, 'data/plugins_data/test-plugin')
+    const data = join(root, 'data/db/plugins/test-plugin')
     await writeFile(join(data, 'profiles.json'), '{unreadable but retained')
     const preview = await replacement()
     await store.setEnabled(manifest.id, false)
@@ -643,15 +672,15 @@ describe('confirmed plugin replacement', () => {
 
   it('deletes only opted-in plugin data, including data written during backend shutdown', async () => {
     await store.install(join(source, 'PLUGIN.json'))
-    const other = join(root, 'data/plugins_data/other-plugin')
+    const other = join(root, 'data/db/plugins/other-plugin')
     await mkdir(other, { recursive: true })
     await writeFile(join(other, 'keep'), 'untouched')
     const preview = await replacement()
     await store.finishInstall(preview.token, { replace: true, deleteData: true }, async () => {
       await store.data(manifest.id, 'draft', true, 'last write')
-      await writeFile(join(root, 'data/plugins_data/test-plugin/profiles.json'), 'private data')
+      await writeFile(join(root, 'data/db/plugins/test-plugin/profiles.json'), 'private data')
     })
-    await expect(stat(join(root, 'data/plugins_data/test-plugin'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(join(root, 'data/db/plugins/test-plugin'))).rejects.toMatchObject({ code: 'ENOENT' })
     expect(await readFile(join(other, 'keep'), 'utf8')).toBe('untouched')
     expect(await installedHtml()).toBe('<p>New</p>')
   })
@@ -707,7 +736,7 @@ describe('confirmed plugin replacement', () => {
     await store.data(manifest.id, 'draft', true, 'keep')
     const preview = await replacement()
     const move = fs.retry.rename({ timeout: 2_000, interval: 25 })
-    const target = join(root, 'data/plugins/test-plugin'), data = join(root, 'data/plugins_data/test-plugin')
+    const target = join(root, 'data/plugins/test-plugin'), data = join(root, 'data/db/plugins/test-plugin')
     let failed = false
     vi.spyOn(fs.retry, 'rename').mockImplementation(() => async (from, to) => {
       if (!failed && ((failure === 'data' && from === data) || (failure === 'package' && to === target))) {
@@ -729,7 +758,7 @@ describe('confirmed plugin replacement', () => {
     await store.data(manifest.id, 'draft', true, 'keep')
     const preview = await replacement()
     const move = fs.retry.rename({ timeout: 2_000, interval: 25 })
-    const target = join(root, 'data/plugins/test-plugin'), data = join(root, 'data/plugins_data/test-plugin')
+    const target = join(root, 'data/plugins/test-plugin'), data = join(root, 'data/db/plugins/test-plugin')
     vi.spyOn(fs.retry, 'rename').mockImplementation(() => async (from, to) => {
       if (to === target || to === data) throw new Error('Directory busy')
       return move(from, to)
@@ -739,16 +768,21 @@ describe('confirmed plugin replacement', () => {
     const [stage] = (await readdir(join(root, 'data/plugins'))).filter(name => name.startsWith('.replace-'))
     expect(await readFile(join(root, 'data/plugins', stage, 'previous/package/index.html'), 'utf8')).toBe('<p>Hello</p>')
     expect(JSON.parse(await readFile(join(root, 'data/plugins', stage, 'data/state.json'), 'utf8')).values.draft).toBe('keep')
-    expect(await new PluginStore(store.dataDirectory).list()).toEqual([])
+    const restarted = new PluginStore(store.dataDirectory)
+    vi.restoreAllMocks()
+    await restarted.recoverTransactions()
+    expect(await restarted.read(manifest.id)).toMatchObject({ enabled: true, manifest: { pluginVersion: '1.0.0' } })
+    expect(await restarted.data(manifest.id, 'draft')).toBe('keep')
+    expect((await readdir(join(root, 'data/plugins'))).filter(name => name.startsWith('.replace-'))).toEqual([])
   })
 
   it('rejects linked data before stopping the plugin when deletion was selected', async () => {
     await store.install(join(source, 'PLUGIN.json'))
-    await mkdir(join(root, 'data/plugins_data'))
+    await mkdir(join(root, 'data/db/plugins'), { recursive: true })
     const outside = join(root, 'outside-data')
     await mkdir(outside)
     await writeFile(join(outside, 'keep'), 'untouched')
-    await symlink(outside, join(root, 'data/plugins_data/test-plugin'), process.platform === 'win32' ? 'junction' : 'dir')
+    await symlink(outside, join(root, 'data/db/plugins/test-plugin'), process.platform === 'win32' ? 'junction' : 'dir')
     const preview = await replacement()
     const stop = vi.fn()
     await expect(store.finishInstall(preview.token, { replace: true, deleteData: true }, stop)).rejects.toThrow('managed directory')

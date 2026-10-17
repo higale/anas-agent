@@ -479,19 +479,14 @@ export async function readDroppedAttachments(filePaths: string[]): Promise<Selec
 }
 
 export async function releaseTemporaryAttachments(filePaths: string[]): Promise<void> {
-  const temporaryRoots = [
-    resolve(getTempDir(), 'agent-message-edit')
-  ]
+  const temporaryRoot = resolve(getTempDir(), 'conversations')
   const directories = new Set<string>()
   for (const filePath of filePaths) {
-    const resolved = resolve(filePath)
-    for (const temporaryRoot of temporaryRoots) {
-      const rel = relative(temporaryRoot, resolved)
-      if (!rel || rel === '..' || rel.startsWith(`..${sep}`)) continue
-      const [draftId] = rel.split(sep)
-      if (draftId) directories.add(resolve(temporaryRoot, draftId))
-      break
-    }
+    const rel = relative(temporaryRoot, resolve(filePath))
+    if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) continue
+    const [ownerId, kind, draftId, index, ...fileName] = rel.split(sep)
+    if (kind !== 'message_edit' || !ownerId || !draftId || !index || !fileName.length) continue
+    directories.add(resolve(temporaryRoot, ownerId, kind, draftId))
   }
   await Promise.all([...directories].map((directory) =>
     rm(directory, { recursive: true, force: true })

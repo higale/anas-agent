@@ -212,28 +212,37 @@ export function getEnvFile(): string {
 }
 
 export function getAgentCatalogFile(dataDir = getDataDir()): string {
-  return join(dataDir, 'sqlite', 'catalog.sqlite')
+  return join(dataDir, 'db', 'catalog.sqlite')
 }
 
 export function getAgentConversationsDir(dataDir = getDataDir()): string {
-  return join(dataDir, 'sqlite', 'conversations')
+  return join(dataDir, 'db', 'conversations')
 }
 
-export function getAgentConversationDatabaseFile(ownerThreadId: string, dataDir = getDataDir()): string {
+export function getAgentConversationDir(ownerThreadId: string, dataDir = getDataDir()): string {
   if (
     typeof ownerThreadId !== 'string'
     || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(ownerThreadId)
     || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(ownerThreadId)
-  ) throw new Error('Agent conversation ID is not a valid database file name.')
-  return join(getAgentConversationsDir(dataDir), `${ownerThreadId}.sqlite`)
+  ) throw new Error('Agent conversation ID is not a valid storage directory name.')
+  return join(getAgentConversationsDir(dataDir), ownerThreadId)
 }
 
-export function getAgentAttachmentsDir(): string {
-  return join(getDataDir(), 'attachments')
+export function getAgentConversationDatabaseFile(ownerThreadId: string, dataDir = getDataDir()): string {
+  return join(getAgentConversationDir(ownerThreadId, dataDir), 'conversation.sqlite')
 }
 
-export function getFileEditRecordsDir(): string {
-  return join(getDataDir(), 'file_edits')
+export function getAgentAttachmentsDir(ownerThreadId: string, dataDir = getDataDir()): string {
+  return join(getAgentConversationDir(ownerThreadId, dataDir), 'attachments')
+}
+
+export function getFileEditRecordsDir(ownerThreadId: string, dataDir = getDataDir()): string {
+  return join(getAgentConversationDir(ownerThreadId, dataDir), 'file_edits')
+}
+
+export function getAgentConversationTempDir(ownerThreadId: string, dataDir = getDataDir()): string {
+  getAgentConversationDir(ownerThreadId, dataDir) // Validate before constructing a managed path.
+  return join(dataDir, 'tmp', 'conversations', ownerThreadId)
 }
 
 export function getCacheDir(): string {
@@ -244,12 +253,12 @@ export function getTempDir(): string {
   return join(getDataDir(), 'tmp')
 }
 
-export function getProjectStoreFile(): string {
-  return join(getDataDir(), 'projects.json')
+export function getProjectStoreFile(dataDir = getDataDir()): string {
+  return join(dataDir, 'db', 'projects.json')
 }
 
-export function getInputHistoryFile(): string {
-  return join(getDataDir(), inputHistoryFileName)
+export function getInputHistoryFile(dataDir = getDataDir()): string {
+  return join(dataDir, 'db', inputHistoryFileName)
 }
 
 export function getLangDir(): string {
@@ -261,23 +270,27 @@ export function getSkillsDir(): string {
 }
 
 export function getSystemSkillsDir(): string {
-  return join(getDataDir(), 'skills_system')
+  return join(getSkillsDir(), '_system')
+}
+
+export function getExamplesDir(): string {
+  return join(getDataDir(), 'examples')
 }
 
 export function getSkillExamplesDir(): string {
-  return join(getDataDir(), 'skills_examples')
+  return join(getExamplesDir(), 'skills')
 }
 
 export function getToolExamplesDir(): string {
-  return join(getDataDir(), 'tools_examples')
+  return join(getExamplesDir(), 'tools')
 }
 
 export function getSystemPluginsDir(): string {
-  return join(getDataDir(), 'plugins_system')
+  return join(getDataDir(), 'plugins', '_system')
 }
 
 export function getPluginExamplesDir(): string {
-  return join(getDataDir(), 'plugins_examples')
+  return join(getExamplesDir(), 'plugins')
 }
 
 export function getLogDir(): string {

@@ -1,15 +1,13 @@
 import { BrowserWindow } from 'electron'
-import { lstat, readFile } from 'node:fs/promises'
 import type { ResolvedPluginTool } from '@shared/pluginTools'
 import type { PluginBackendCallContext } from '@shared/plugins'
-import { parsePluginManifest } from '@shared/plugins'
 import { pluginToolId } from '@shared/pluginTools'
-import { getDataDir, getBundledDataDir, getSystemPluginsDir, getPluginExamplesDir } from '../config/dataDir'
+import { getDataDir, getBundledDataDir, getSystemPluginsDir } from '../config/dataDir'
 import { join } from 'node:path'
 import { isMainRendererWindow } from '../ipcSecurity'
 import { runApplicationDataOperation } from '../applicationDataLifecycle'
 import { mirrorBundledDirectories } from '../bundledDirectories'
-import { PluginStore } from './pluginStore'
+import { PluginStore, validateBundledPlugin } from './pluginStore'
 import { PluginBackends, type PluginViewAction } from './pluginBackend'
 
 let store: PluginStore | undefined
@@ -30,20 +28,8 @@ export function changed(): void {
 /** Called before opening the application, or while plugin runtimes are closed for restore. */
 export async function initializePluginsStore(): Promise<void> {
   await pluginRuntime().store.exclusive(async () => {
-    for (const [sourceName, target] of [
-      ['plugins_system', getSystemPluginsDir()],
-      ['plugins_examples', getPluginExamplesDir()]
-    ] as const) {
-      await mirrorBundledDirectories(join(getBundledDataDir(), sourceName), target, async (path, name) => {
-        const directory = await lstat(path)
-        if (!directory.isDirectory() || directory.isSymbolicLink()) throw new Error('Bundled plugin must be a regular directory.')
-        const file = join(path, 'PLUGIN.json')
-        const info = await lstat(file)
-        if (!info.isFile() || info.size > 64 * 1024) throw new Error('Invalid or oversized bundled plugin manifest.')
-        const manifest = parsePluginManifest(JSON.parse(await readFile(file, 'utf8')))
-        if (sourceName === 'plugins_system' && manifest.id !== name) throw new Error('Bundled plugin ID does not match its directory.')
-      })
-    }
+    await pluginRuntime().store.recoverTransactions()
+    await mirrorBundledDirectories(join(getBundledDataDir(), 'plugins/_system'), getSystemPluginsDir(), 'PLUGIN.json', validateBundledPlugin)
   })
 }
 

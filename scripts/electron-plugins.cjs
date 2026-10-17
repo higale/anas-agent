@@ -217,19 +217,19 @@ async function checkLifecycle(application, page, directory) {
         error => { globalThis.pluginCallResults.push({ status: 'rejected', reason: String(error) }) }
       )))
     })
-    const log = join(directory, 'plugins_data/lifecycle-test/executions.log')
+    const log = join(directory, 'db/plugins/lifecycle-test/executions.log')
     await expect.poll(() => readFile(log, 'utf8').catch(() => '')).toBe('1\n')
     await page.evaluate(() => { globalThis.pluginStop = globalThis.gale.plugins.stopBackend('lifecycle-test') })
     await expect.poll(() => page.evaluate(() => globalThis.pluginCallResults.length), { timeout: 2000 }).toBe(2)
     // Cleanup starts before accepted calls settle; queued calls must never execute.
     await expect.poll(() => readFile(log, 'utf8')).toBe('1\ndeactivate\n')
-    await writeFile(join(directory, 'plugins_data/lifecycle-test/release'), '')
+    await writeFile(join(directory, 'db/plugins/lifecycle-test/release'), '')
     await page.evaluate(() => Promise.all([globalThis.pluginStop, globalThis.pluginCalls]))
     assert.equal(await readFile(log, 'utf8'), '1\ndeactivate\n')
     const results = await page.evaluate(() => globalThis.pluginCallResults)
     assert.deepEqual(results.filter(result => result.status === 'fulfilled'), [{ status: 'fulfilled', value: 1 }])
     assert.ok(results.filter(result => result.status === 'rejected').every(result => result.reason.includes('before this request started')))
-    await writeFile(join(directory, 'plugins_data/lifecycle-test/fail-cleanup'), '')
+    await writeFile(join(directory, 'db/plugins/lifecycle-test/fail-cleanup'), '')
     await page.evaluate(() => globalThis.gale.plugins.startBackend('lifecycle-test'))
     await assert.rejects(page.evaluate(() => globalThis.gale.plugins.stopBackend('lifecycle-test')), /cleanup failed: cleanup unavailable/)
     assert.equal(await page.evaluate(async () => (await globalThis.gale.plugins.list()).find(item => item.id === 'lifecycle-test').backendStatus), 'failed')
@@ -254,7 +254,7 @@ async function openPluginHome(page, name) {
 async function checkForms(application, page, directory, settings) {
   const source = join(directory, 'form-fixture')
   await mkdir(join(source, 'assets'), { recursive: true })
-  await cp(join(process.cwd(), 'data/plugins_examples/notepad/assets/save.svg'), join(source, 'assets/save.svg'))
+  await cp(join(process.cwd(), 'data/examples/plugins/notepad/assets/save.svg'), join(source, 'assets/save.svg'))
   await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ version: 0, id: 'form-test', name: 'Form test', plugin_version: '1.0.0', api_version: 2, ui: 'index.html' }))
   await writeFile(join(source, 'index.html'), '<html><body><script src="/_anas/sdk.js"></script><form id="form"><input id="name" required><button id="submit">Submit</button></form><output id="count">0</output><form id="navigation" action="https://example.com/blocked"><button id="navigate">Navigate</button></form><script src="app.js"></script></body></html>')
   await writeFile(join(source, 'app.js'), `(async () => {
@@ -346,11 +346,13 @@ async function checkForms(application, page, directory, settings) {
   await page.evaluate(() => globalThis.gale.plugins.uninstall('form-test'))
 }
 
-async function checkBackup(application, page) {
+async function checkBackup(application, page, directory) {
   const backups = await mkdtemp(join(tmpdir(), 'anas-plugin-backups-'))
   try {
     await application.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }) }, join(backups, 'plugins.zip'))
     await page.evaluate(() => globalThis.gale.plugins.startBackend('example-backend'))
+    await writeFile(join(directory, 'examples/plugins/README.md'), 'Stale example documentation')
+    await writeFile(join(directory, 'examples/obsolete.txt'), 'Remove with the complete tree')
     const backup = await page.evaluate(() => globalThis.gale.app.backupData())
     assert.ok(backup?.path)
     assert.equal(await page.evaluate(async () => (await globalThis.gale.plugins.list()).find(item => item.id === 'example-backend').backendStatus), 'stopped')
@@ -362,6 +364,11 @@ async function checkBackup(application, page) {
     await expect.poll(() => windowCount(application)).toBe(2)
     await page.evaluate(() => globalThis.gale.plugins.startBackend('example-backend'))
     await page.evaluate(path => globalThis.gale.app.restoreData(path), backup.path)
+    for (const file of ['plugins/README.md', 'plugins/README.en.md', 'skills/weather/SKILL.md',
+      'tools/read_text_raw/TOOL.json', 'plugins/notepad/PLUGIN.json']) {
+      assert.deepEqual(await readFile(join(directory, 'examples', file)), await readFile(join(process.cwd(), 'data/examples', file)))
+    }
+    await assert.rejects(readFile(join(directory, 'examples/obsolete.txt')), { code: 'ENOENT' })
     await expect.poll(() => windowCount(application)).toBe(1)
     assert.equal((await page.evaluate(() => globalThis.gale.panels.list())).length, 0)
     assert.equal(await page.evaluate(() => globalThis.gale.plugins.invoke('example-notepad', 'data.get', { key: 'draft' })), 'Plugin saved draft')
@@ -409,7 +416,7 @@ async function checkHomePolicies(application, page, directory) {
 
 async function checkReplacement(application, page, directory, repository, settings) {
   const source = join(directory, 'replacement-source'), archive = join(directory, 'replacement.zip')
-  await cp(join(repository, 'data/plugins_examples/backend-demo'), source, { recursive: true })
+  await cp(join(repository, 'data/examples/plugins/backend-demo'), source, { recursive: true })
   const manifestPath = join(source, 'PLUGIN.json')
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
   manifest.id = 'replacement-test'
@@ -523,7 +530,7 @@ async function checkReplacement(application, page, directory, repository, settin
     await dialog.getByRole('button', { name: 'Replace plugin', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Install plugin', exact: true })).toBeEnabled()
     assert.equal((await summary()).enabled, false)
-    await assert.rejects(readFile(join(directory, 'plugins_data/replacement-test/state.json')), { code: 'ENOENT' })
+    await assert.rejects(readFile(join(directory, 'db/plugins/replacement-test/state.json')), { code: 'ENOENT' })
     await page.evaluate(() => globalThis.gale.plugins.uninstall('replacement-test', true))
     console.log('Plugin replacement passed: versions, cancel with live page/backend, atomic registry refresh, visible cleanup failures, ZIP update, default data retention, explicit data removal, and enabled-state preservation.')
   } finally {
@@ -544,7 +551,7 @@ async function main() {
     const backendZip = join(directory, 'backend.zip')
     const notepadZip = join(directory, 'notepad.zip')
     const notepadSource = join(directory, 'notepad-source')
-    await cp(join(repository, 'data/plugins_examples/notepad'), notepadSource, { recursive: true })
+    await cp(join(repository, 'data/examples/plugins/notepad'), notepadSource, { recursive: true })
     const iconManifest = JSON.parse(await readFile(join(notepadSource, 'PLUGIN.json'), 'utf8'))
     iconManifest.icon = { light: 'assets/light.svg', dark: 'assets/dark.svg' }
     await writeFile(join(notepadSource, 'PLUGIN.json'), JSON.stringify(iconManifest))
@@ -556,8 +563,8 @@ async function main() {
     await writeFile(join(notepadSource, 'lang/fr.json'), JSON.stringify({ version: 0, _meta: { name: 'Français' }, plugin: { name: 'Bloc-notes' }, actions: { save: '' } }))
     await mkdir(join(directory, 'lang'))
     await writeFile(join(directory, 'lang/fr.json'), JSON.stringify({ version: 0, _meta: { name: 'Français' }, plugins: { install: 'Installer un plugin', install_zip_filter: '' } }))
-    await zipExample(join(repository, 'data/plugins_examples/backend-demo'), backendZip, 'backend-demo/')
-    await zipExample(join(repository, 'data/plugins_examples/notepad'), notepadZip)
+    await zipExample(join(repository, 'data/examples/plugins/backend-demo'), backendZip, 'backend-demo/')
+    await zipExample(join(repository, 'data/examples/plugins/notepad'), notepadZip)
     application = await electron.launch({ args: [repository, '--data-dir', directory], cwd: repository, env: environment, executablePath: require('electron'), timeout: 45000 })
     const page = await application.firstWindow({ timeout: 45000 })
     const errors = []
@@ -725,7 +732,7 @@ async function main() {
     await page.getByRole('button', { name: 'Uninstall plugin', exact: true }).click()
     await page.getByRole('alertdialog').getByRole('button', { name: /Confirm|确认/ }).click()
     await expect(page.getByRole('button', { name: 'Notepad', exact: true })).toHaveCount(0)
-    assert.equal(JSON.parse(await readFile(join(directory, 'plugins_data/example-notepad/state.json'), 'utf8')).values.draft, 'Plugin saved draft')
+    assert.equal(JSON.parse(await readFile(join(directory, 'db/plugins/example-notepad/state.json'), 'utf8')).values.draft, 'Plugin saved draft')
     await page.getByRole('button', { name: 'Install plugin', exact: true }).click()
     await openPluginHome(page, 'Notepad')
     frame = await pluginPage(application, 'example-notepad')
@@ -768,15 +775,17 @@ async function main() {
     await checkForms(application, page, directory, settings)
     await require('./electron-plugin-transfer.cjs')(application, page, directory)
     await checkLifecycle(application, page, directory)
-    await checkBackup(application, page)
+    await checkBackup(application, page, directory)
     assert.deepEqual(errors, [])
     assert.deepEqual(await application.evaluate(() => globalThis.__pluginTestErrors), [])
+    const installedBeforeRestart = await page.evaluate(async () =>
+      (await globalThis.gale.plugins.list()).map(({ id, enabled }) => ({ id, enabled })))
     await application.close()
     application = await electron.launch({ args: [repository, '--data-dir', directory], cwd: repository, env: environment, executablePath: require('electron'), timeout: 45000 })
     const restarted = await application.firstWindow({ timeout: 45000 })
     await restarted.locator('[data-agent-composer-input]').waitFor({ timeout: 45000 })
     const restored = await restarted.evaluate(() => globalThis.gale.plugins.list())
-    assert.equal(restored.length, 2)
+    assert.deepEqual(restored.map(({ id, enabled }) => ({ id, enabled })), installedBeforeRestart)
     assert.equal(restored.find(item => item.id === 'example-backend').backendStatus, 'stopped')
     assert.equal(await restarted.evaluate(() => globalThis.gale.plugins.invoke('example-notepad', 'data.get', { key: 'draft' })), 'Plugin saved draft')
     await checkHomePolicies(application, restarted, directory)

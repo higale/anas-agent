@@ -4,7 +4,7 @@ import { FileChangeLedger, fileChangeLedgerSchema } from './fileChangeLedger'
 import { agentToolEffectArtifactId } from './toolEffectScope'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, statSync } from 'node:fs'
-import { dirname, resolve, sep } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import {
   BaseMessage,
   AIMessage,
@@ -44,7 +44,8 @@ import {
   type AgentToolActivity,
   type AgentToolCall
 } from '@shared/agentTypes'
-import { getAgentAttachmentsDir } from '../config/dataDir'
+import { getTempDir } from '../config/dataDir'
+import { FileEditStore } from '../fileEditStore'
 import {
   DEFAULT_WORKSPACE_PROJECT_ID,
   type SelectedAttachment,
@@ -1287,6 +1288,9 @@ export class AgentDatabase {
   readonly checkpointer: CurrentStateSqliteSaver
   readonly memoryStore: SqliteMemoryStore
   readonly fileChanges: FileChangeLedger
+  readonly fileEditStore: FileEditStore
+  readonly toolResultsRoot: string
+  readonly temporaryRoot: string
   private readonly ownMemoryDatabase?: Database.Database
   private changeNotificationQueued = false
   private closed = false
@@ -1299,9 +1303,14 @@ export class AgentDatabase {
     onFileChanges?: (runId: string) => void,
     private readonly options: {
       memoryStore?: SqliteMemoryStore
+      temporaryRoot?: string
+      fileEditStore?: FileEditStore
       onChanged?: (database: AgentDatabase) => void
     } = {}
   ) {
+    this.fileEditStore = options.fileEditStore ?? new FileEditStore(join(dirname(attachmentRoot), 'file_edits'))
+    this.toolResultsRoot = join(dirname(attachmentRoot), 'tool_results')
+    this.temporaryRoot = options.temporaryRoot ?? join(getTempDir(), 'conversations', randomUUID())
     this.database.pragma('foreign_keys = ON')
     this.initializeSchema()
     this.database.pragma('journal_mode = WAL')
@@ -1324,9 +1333,9 @@ export class AgentDatabase {
 
   static open(
     file = ':memory:',
-    attachmentRoot = getAgentAttachmentsDir(),
+    attachmentRoot = join(file === ':memory:' ? join(getTempDir(), 'conversations', randomUUID()) : dirname(file), 'attachments'),
     onFileChanges?: (runId: string) => void,
-    options?: { memoryStore?: SqliteMemoryStore; onChanged?: (database: AgentDatabase) => void }
+    options?: { memoryStore?: SqliteMemoryStore; temporaryRoot?: string; fileEditStore?: FileEditStore; onChanged?: (database: AgentDatabase) => void }
   ): AgentDatabase {
     if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true })
     const database = new Database(file)

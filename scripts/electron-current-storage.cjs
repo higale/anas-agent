@@ -232,6 +232,30 @@ async function verifyCurrentStorage(repositoryRoot, executablePath) {
     assert.deepEqual(pageErrors, [])
     await expect(page.locator('.thread-title.error, .agent-activity-error')).toHaveCount(0)
     await page.screenshot({ path: process.env.ANAS_E2E_STORAGE_SCREENSHOT || join(tmpdir(), 'anas-current-storage.png') })
+    phase = 'delete missing and damaged conversations through real IPC'
+    for (const kind of ['missing', 'corrupt', 'unsupported version']) {
+      const lost = await application.evaluate((_electron, kind) => {
+        const storage = globalThis.__anasStorageAccess.currentStorage()
+        const thread = storage.createThread({ title: `Discard ${kind} conversation` })
+        storage.closeConversation(thread.id)
+        const require = globalThis.__anasStorageProbe.nativeRequire
+        const directory = require('node:path').join(storage.dataDir, 'db/conversations', thread.id)
+        const file = require('node:path').join(directory, 'conversation.sqlite')
+        if (kind === 'missing') require('node:fs').rmSync(directory, { recursive: true })
+        else if (kind === 'corrupt') require('node:fs').writeFileSync(file, 'damaged database')
+        else {
+          const database = new (require('better-sqlite3'))(file)
+          database.pragma('user_version = 999')
+          database.close()
+        }
+        return thread.id
+      }, kind)
+      await assert.rejects(page.evaluate(id => globalThis.gale.agent.threads.get(id), lost))
+      await page.evaluate(id => globalThis.gale.agent.threads.delete(id), lost)
+      const remaining = await page.evaluate(() => globalThis.gale.agent.threads.list())
+      assert.equal(remaining.some(thread => thread.id === lost), false)
+      assert.equal(remaining.some(thread => thread.id === seeded.threads[0]), true)
+    }
     console.log(`Current storage Electron E2E passed: ${JSON.stringify({ messages: count, seedMs: seeded.seedMs, ...result, frameMaxMs, interactionMs })}`)
   } catch (error) {
     console.error(`Current storage E2E failed during ${phase}:`, error)

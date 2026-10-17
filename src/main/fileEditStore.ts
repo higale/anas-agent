@@ -3,7 +3,6 @@ import { lstat, mkdir, open, readdir, realpath, rename, rm, stat } from 'node:fs
 import { constants } from 'node:fs'
 import path, { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
-import { getFileEditRecordsDir } from './config/dataDir'
 import { withApplicationDataMutation } from './applicationDataSnapshot'
 import { decodePatchRecord, encodePatchDefinition, encodePatchMetadata, filePatchRecordMetadataSchema,
   patchCompensationComplete, patchRecordNeedsRetention, patchTextHash, validatePatchTransaction, validatePatchTransition, type FilePatchEditRecord } from './filePatchRecord'
@@ -78,10 +77,6 @@ export function managedDirectChildPath(
   return target
 }
 
-export function fileEditRecordsRoot(): string {
-  return path.resolve(getFileEditRecordsDir())
-}
-
 function missingRequestId(requestId: string | undefined, purpose: string): string {
   if (!requestId) throw new Error(`request id is required to ${purpose}`)
   return requireInternalId(requestId, 'request id')
@@ -104,12 +99,26 @@ function sameCanonicalPath(left: string, right: string): boolean {
 export class FileEditStore {
   readonly root: string
 
-  constructor(root: string = fileEditRecordsRoot()) {
+  constructor(root: string, private readonly routing?: {
+    requestRoot: (requestId: string) => string
+    roots: () => string[]
+  }) {
     this.root = path.resolve(root)
   }
 
+  static isRootBusy(root: string): boolean {
+    const prefix = `${path.resolve(root)}${path.sep}`
+    const normalized = process.platform === 'win32' ? prefix.toLowerCase() : prefix
+    return [operationWrites, patchExecutions].some(queue => [...queue.keys()].some(key => key.startsWith(normalized)))
+  }
+
+  private requestRoot(requestId: string): string {
+    requireInternalId(requestId, 'request id')
+    return path.resolve(this.routing?.requestRoot(requestId) ?? this.root)
+  }
+
   editRecordsDir(requestId: string): string {
-    return managedDirectChildPath(this.root, requireInternalId(requestId, 'request id'))
+    return managedDirectChildPath(this.requestRoot(requestId), requestId)
   }
 
   editRecordDir(requestId: string, operationId: string): string {
@@ -212,7 +221,7 @@ export class FileEditStore {
           throw new Error('Missing patch preparation requires a matching unarmed effect journal; preserve recovery evidence.', { cause: error })
         }
         if (error instanceof UnpublishedFileEditError) {
-          await this.deleteManagedDirectChild(this.editRecordsDir(requestId), operationId)
+          await this.deleteManagedDirectChild(this.requestRoot(requestId), this.editRecordsDir(requestId), operationId)
         }
         return undefined
       }
@@ -641,8 +650,8 @@ export class FileEditStore {
     }
   }
 
-  private async managedRootIdentity(): Promise<ManagedDirectoryIdentity | undefined> {
-    return this.readDirectoryIdentity(this.root, 'Managed file edit root')
+  private async managedRootIdentity(root: string): Promise<ManagedDirectoryIdentity | undefined> {
+    return this.readDirectoryIdentity(root, 'Managed file edit root')
   }
 
   private async assertExistingDirectChild(
@@ -665,8 +674,9 @@ export class FileEditStore {
 
   private async ensureRequestDirectory(requestId: string): Promise<string> {
     const id = requireInternalId(requestId, 'request id')
-    await mkdir(this.root, { recursive: true })
-    const rootIdentity = await this.managedRootIdentity()
+    const root = this.requestRoot(id)
+    await mkdir(root, { recursive: true })
+    const rootIdentity = await this.managedRootIdentity(root)
     if (!rootIdentity) throw new Error('Managed file edit root was not created.')
     const requestDirectory = this.editRecordsDir(id)
     try {
@@ -674,7 +684,7 @@ export class FileEditStore {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
     }
-    const verified = await this.assertExistingDirectChild(this.root, id)
+    const verified = await this.assertExistingDirectChild(root, id)
     if (!verified) throw new Error(`Managed request directory ${id} was not created.`)
     await this.assertSameDirectoryIdentity(rootIdentity, 'Managed file edit root')
     return verified.path
@@ -695,15 +705,15 @@ export class FileEditStore {
     operationId: string
   ): Promise<ManagedDirectoryIdentity | undefined> {
     const requestDirectory = this.editRecordsDir(requestId)
-    const verifiedRequest = await this.assertExistingDirectChild(this.root, requestId)
+    const verifiedRequest = await this.assertExistingDirectChild(this.requestRoot(requestId), requestId)
     if (!verifiedRequest) return undefined
     return this.assertExistingDirectChild(requestDirectory, operationId)
   }
 
-  private async deleteManagedDirectChild(managedRoot: string, id: string): Promise<void> {
-    const fileEditRootIdentity = await this.managedRootIdentity()
+  private async deleteManagedDirectChild(fileEditRoot: string, managedRoot: string, id: string): Promise<void> {
+    const fileEditRootIdentity = await this.managedRootIdentity(fileEditRoot)
     if (!fileEditRootIdentity) return
-    const parentIdentity = sameCanonicalPath(managedRoot, this.root)
+    const parentIdentity = sameCanonicalPath(managedRoot, fileEditRoot)
       ? fileEditRootIdentity
       : await this.readDirectoryIdentity(managedRoot, 'Managed deletion parent')
     if (!parentIdentity) return
@@ -778,7 +788,7 @@ export class FileEditStore {
     const requiredRequestId = missingRequestId(requestId, 'read file edit diffs')
     const requestDirectory = this.editRecordsDir(requiredRequestId)
     try {
-      if (!await this.assertExistingDirectChild(this.root, requiredRequestId)) return []
+      if (!await this.assertExistingDirectChild(this.requestRoot(requiredRequestId), requiredRequestId)) return []
     } catch (error) {
       if (isMissing(error)) return []
       throw error
@@ -802,17 +812,19 @@ export class FileEditStore {
   }
 
   async listRetainedEditRecords(): Promise<RetainedFileEditRecord[]> {
-    if (!await this.managedRootIdentity()) return []
-    const requests = await readdir(this.root, { withFileTypes: true })
     const records: FileOperationRecord[] = []
     const unavailable: UnavailableFileEditRecord[] = []
-    for (const request of requests) {
-      if (!request.isDirectory() || !isFileEditInternalId(request.name)) {
-        throw new Error('Managed file edit root contains an unexpected entry.')
-      }
-      for (const record of await this.listEditRecordsForRequest(request.name, unavailable)) {
-        if (patchRecordNeedsRetention(record) || await this.patchFinalizationNeedsRetention(record)) {
-          records.push(record)
+    for (const root of this.routing?.roots() ?? [this.root]) {
+      if (!await this.managedRootIdentity(root)) continue
+      const requests = await readdir(root, { withFileTypes: true })
+      for (const request of requests) {
+        if (!request.isDirectory() || !isFileEditInternalId(request.name)) {
+          throw new Error('Managed file edit root contains an unexpected entry.')
+        }
+        for (const record of await this.listEditRecordsForRequest(request.name, unavailable)) {
+          if (patchRecordNeedsRetention(record) || await this.patchFinalizationNeedsRetention(record)) {
+            records.push(record)
+          }
         }
       }
     }
@@ -837,9 +849,10 @@ export class FileEditStore {
       requireInternalId(operationId, 'retained operation id')
     )))
     const retainedFound = new Set<string>()
+    const root = this.requestRoot(requiredRequestId)
     const requestDirectory = this.editRecordsDir(requiredRequestId)
-    if (!await this.managedRootIdentity()) return
-    if (!await this.assertExistingDirectChild(this.root, requiredRequestId)) return
+    if (!await this.managedRootIdentity(root)) return
+    if (!await this.assertExistingDirectChild(root, requiredRequestId)) return
     const entries = await readdir(requestDirectory, { withFileTypes: true })
     for (const entry of entries) {
       if (!entry.isDirectory() || !isFileEditInternalId(entry.name)) {
@@ -860,7 +873,7 @@ export class FileEditStore {
           if (patchRecordNeedsRetention(current) || retained.has(entry.name) || waitingForSource) {
             if (!waitingForSource || retained.has(entry.name)) await this.retainLockedPatchOperation(current)
             retainedFound.add(entry.name)
-          } else await this.deleteManagedDirectChild(requestDirectory, entry.name)
+          } else await this.deleteManagedDirectChild(root, requestDirectory, entry.name)
         }), patchExecutions)
         continue
       }
@@ -871,27 +884,9 @@ export class FileEditStore {
       }
     }
     if ((await readdir(requestDirectory)).length === 0) {
-      await this.deleteManagedDirectChild(this.root, requiredRequestId)
+      await this.deleteManagedDirectChild(root, root, requiredRequestId)
     }
   }
-}
-
-// Resolve the configured profile at the operation boundary. Each instance keeps
-// its root fixed while asynchronous work continues or another profile is selected.
-export function getDefaultFileEditStore(): FileEditStore {
-  return new FileEditStore()
-}
-
-export async function loadOperationRecord(operationId: string, requestId: string | undefined): Promise<FileOperationRecord> {
-  return getDefaultFileEditStore().loadOperationRecord(operationId, requestId)
-}
-
-export function editRecordsDir(requestId: string): string {
-  return getDefaultFileEditStore().editRecordsDir(requestId)
-}
-
-export function editRecordDir(requestId: string, operationId: string): string {
-  return getDefaultFileEditStore().editRecordDir(requestId, operationId)
 }
 
 export async function pathExists(targetPath: string): Promise<boolean> {
@@ -902,19 +897,4 @@ export async function pathExists(targetPath: string): Promise<boolean> {
     if (isMissing(error)) return false
     throw error
   }
-}
-
-export async function listEditRecordsForRequest(requestId: string | undefined): Promise<FileOperationRecord[]> {
-  return getDefaultFileEditStore().listEditRecordsForRequest(requestId)
-}
-
-export async function listRetainedEditRecords(): Promise<RetainedFileEditRecord[]> {
-  return getDefaultFileEditStore().listRetainedEditRecords()
-}
-
-export async function deleteFileEditRecordsForRequest(
-  requestId: string,
-  retainedOperationIds: readonly string[] = []
-): Promise<void> {
-  return getDefaultFileEditStore().deleteFileEditRecordsForRequest(requestId, retainedOperationIds)
 }

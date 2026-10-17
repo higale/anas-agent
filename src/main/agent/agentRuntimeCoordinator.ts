@@ -275,36 +275,26 @@ export class AgentRuntimeCoordinator {
     const thread = this.storage.getThread(threadId)
     if (!thread) throw new Error(`Conversation ${threadId} was not found.`)
     if (this.mutatingProjects.has(thread.projectId)) throw new AgentThreadLockedError(threadId, 'be deleted while its project is being deleted')
-    const database = this.storage.conversationForDeletion(threadId)
+    const database = this.storage.openedConversation(threadId)
     if (database) {
       this.assertNoOtherLeases(database, threadId)
-      const runtime = this.runtimeForDatabase(database)
-      if (database.getThread(threadId)) runtime.assertCanDeleteThread(threadId)
     }
     await this.deletePreparedConversation(threadId, database)
   }
 
   private async deletePreparedConversation(threadId: string, database?: AgentDatabase): Promise<void> {
     this.storage.beginConversationDeletion(threadId)
-    if (!database) {
-      await this.storage.removeConversation(threadId)
-      return
+    if (database) {
+      this.lease(database)
+      const runtime = this.runtimes.get(database)
+      if (runtime) {
+        const result = await runtime.shutdown()
+        if (!result.drained) throw new AgentThreadLockedError(threadId, 'be removed before its work stops')
+      }
+      this.runtimes.delete(database)
+      this.lastUsed.delete(database)
     }
-    const runtime = this.runtimeForDatabase(database)
-    if (database.getThread(threadId)) await runtime.deleteThread(threadId)
-    await this.removeConversation(threadId, database)
-  }
-
-  private async removeConversation(ownerId: string, database: AgentDatabase): Promise<void> {
-    const runtime = this.runtimes.get(database)
-    if (runtime) {
-      const result = await runtime.shutdown()
-      if (!result.drained) throw new AgentThreadLockedError(ownerId, 'be removed before its work stops')
-      await runtime.finishDeletionCleanup()
-    }
-    this.runtimes.delete(database)
-    this.lastUsed.delete(database)
-    await this.storage.removeConversation(ownerId)
+    await this.storage.removeConversation(threadId)
   }
 
   cleanupThreads(): Promise<AgentThreadCleanupResult> {
@@ -322,7 +312,7 @@ export class AgentRuntimeCoordinator {
         continue
       }
       try {
-        const database = this.storage.conversationForDeletion(thread.id)
+        const database = this.storage.conversationForCleanup(thread.id)
         if (database && (this.runtimeForDatabase(database).hasLiveWork()
           || database.listThreadIdsWithUnresolvedManagedCalls().length > 0)) {
           result.skippedThreadIds.push(thread.id)
@@ -361,12 +351,10 @@ export class AgentRuntimeCoordinator {
       const threads = this.storage.listThreads().filter((thread) => thread.projectId === projectId)
       const targets = threads.map((thread) => {
         if (isAgentThreadLocked(thread.status)) throw new AgentThreadLockedError(thread.id, 'be deleted with its project')
-        const database = this.storage.conversationForDeletion(thread.id)
+        const database = this.storage.openedConversation(thread.id)
         if (database) {
           this.assertNoOtherLeases(database, thread.id)
-          const runtime = this.runtimeForDatabase(database)
-          if (database.getThread(thread.id)) runtime.assertCanDeleteThread(thread.id)
-          if (runtime.hasLiveWork()) throw new AgentThreadLockedError(thread.id, 'be deleted with its project')
+          if (this.runtimes.get(database)?.hasLiveWork()) throw new AgentThreadLockedError(thread.id, 'be deleted with its project')
         }
         return { thread, database }
       })

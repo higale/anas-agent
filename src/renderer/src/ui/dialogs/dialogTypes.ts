@@ -23,8 +23,13 @@ export const dataCleanupTargets: DataCleanupDialogTarget[] = [
   'cache_folder',
   'temp_folder',
   'log_folder',
-  'developer_http_trace'
+  'developer_http_trace',
+  'unknown_files'
 ]
+
+export function visibleDataCleanupTargets(usage: DataCleanupUsage): DataCleanupDialogTarget[] {
+  return dataCleanupTargets.filter(target => usage[target]?.hasData !== false)
+}
 
 export function defaultDataCleanupSelection(): DataCleanupSelection {
   return {
@@ -34,6 +39,7 @@ export function defaultDataCleanupSelection(): DataCleanupSelection {
     cache_folder: true,
     temp_folder: true,
     log_folder: true,
-    developer_http_trace: true
+    developer_http_trace: true,
+    unknown_files: false
   }
 }

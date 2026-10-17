@@ -47,7 +47,8 @@ describe('data storage usage', () => {
       file('tmp/speech.bin', 13),
       file('log/current.log', 14),
       file('dev/model-http/request/response-body.sse', 15),
-      file('input_history.json', 16)
+      file('db/input_history.json', 16),
+      file('input_history.json', 5)
     ])
 
     const snapshot = await getDataStorageUsage({
@@ -55,14 +56,15 @@ describe('data storage usage', () => {
       electronCacheSize: async () => 17
     })
 
-    expect(snapshot.dataDirectory).toEqual({ totalBytes: 81, approximate: false })
+    expect(snapshot.dataDirectory).toEqual({ totalBytes: 86, approximate: false })
     expect(snapshot.developerHttpTrace).toEqual({ totalBytes: 15, approximate: false })
     expect(snapshot.cleanup).toEqual({
-      input_history: { totalBytes: 16, approximate: false },
-      cache_folder: { totalBytes: 29, approximate: true },
-      temp_folder: { totalBytes: 13, approximate: false },
-      log_folder: { totalBytes: 14, approximate: false },
-      developer_http_trace: { totalBytes: 15, approximate: false }
+      input_history: { totalBytes: 16, approximate: false, hasData: undefined },
+      cache_folder: { totalBytes: 29, approximate: true, hasData: true },
+      temp_folder: { totalBytes: 13, approximate: false, hasData: true },
+      log_folder: { totalBytes: 14, approximate: false, hasData: true },
+      developer_http_trace: { totalBytes: 15, approximate: false, hasData: true },
+      unknown_files: { totalBytes: 5, approximate: false, hasData: true }
     })
     await expect(measureDirectorySize(join(root, 'dev', 'model-http'))).resolves.toBe(15)
   })
@@ -76,7 +78,27 @@ describe('data storage usage', () => {
       electronCacheSize: async () => { throw new Error('unavailable') }
     })
 
-    expect(snapshot.cleanup.cache_folder).toEqual({ totalBytes: 9, approximate: true })
+    expect(snapshot.cleanup.cache_folder).toEqual({ totalBytes: 9, approximate: true, hasData: true })
     await expect(measureDirectorySize(join(root, 'missing'))).resolves.toBe(0)
+  })
+
+  it('distinguishes empty and pinned-only history from unreadable history and unknown Chromium cache size', async () => {
+    root = await mkdtemp(join(tmpdir(), 'anas-storage-usage-'))
+    await mkdir(join(root, 'db'))
+    const historyPath = join(root, 'db/input_history.json')
+    for (const items of [[], [{ text: 'pinned', pinned: true }]]) {
+      await writeFile(historyPath, JSON.stringify({ version: 0, items }))
+      const snapshot = await getDataStorageUsage({ dataDir: root, electronCacheSize: async () => 0 })
+      expect(snapshot.cleanup.input_history.hasData).toBe(false)
+      expect(snapshot.cleanup.cache_folder.hasData).toBe(false)
+      expect(snapshot.cleanup.temp_folder.hasData).toBe(false)
+      expect(snapshot.cleanup.unknown_files.hasData).toBe(false)
+    }
+    await writeFile(historyPath, JSON.stringify({ version: 0, items: [{ text: 'can remove', pinned: false }] }))
+    expect((await getDataStorageUsage({ dataDir: root })).cleanup.input_history.hasData).toBe(true)
+    await writeFile(historyPath, 'corrupt')
+    const failed = await getDataStorageUsage({ dataDir: root, electronCacheSize: async () => { throw new Error('unavailable') } })
+    expect(failed.cleanup.input_history.hasData).toBeUndefined()
+    expect(failed.cleanup.cache_folder.hasData).toBeUndefined()
   })
 })

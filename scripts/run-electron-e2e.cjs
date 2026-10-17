@@ -28,6 +28,8 @@ const { verifyControlLayout } = require('./electron-control-layout.cjs')
 const { verifySkillApproval } = require('./electron-skill-approval.cjs')
 const { verifyCustomTools } = require('./electron-custom-tools.cjs')
 const { verifyCurrentData } = require('./electron-data-migrations.cjs')
+const { verifyDataCleanup } = require('./electron-data-cleanup.cjs')
+const { verifyPluginTransactions } = require('./electron-plugin-transactions.cjs')
 const { verifyModelSelection } = require('./electron-model-selection.cjs')
 const { verifySpeechReply } = require('./electron-speech-reply.cjs')
 const { verifyAttachmentPreviews } = require('./electron-attachment-previews.cjs')
@@ -1090,12 +1092,20 @@ async function verifyCodeReview(electronApplication) {
 }
 
 async function main() {
+  if (process.argv.includes('--cleanup-only')) {
+    await verifyDataCleanup(launchApplication)
+    return
+  }
   if (process.argv.includes('--window-lifecycle-only')) {
     await verifyMainWindowLifecycle(launchApplication)
     return
   }
   if (process.argv.includes('--current-data-only')) {
     await verifyCurrentData(launchApplication)
+    return
+  }
+  if (process.argv.includes('--plugin-transactions-only')) {
+    await verifyPluginTransactions(launchApplication)
     return
   }
 
@@ -1183,6 +1193,8 @@ async function main() {
   }
   if (!process.argv.includes('--changes-only') && !process.argv.includes('--workspace-only')) {
     await verifyCurrentData(launchApplication)
+    await verifyDataCleanup(launchApplication)
+    await verifyPluginTransactions(launchApplication)
     await verifySpeechReply(launchApplication)
     await verifyCapabilities(launchApplication)
     await verifyGlobalSettings(launchApplication)

@@ -15,7 +15,9 @@ async function verifyCurrentData(launchApplication) {
     await mkdir(join(root, 'config'), { recursive: true })
     const path = join(root, 'config/tools.json')
     await writeFile(path, JSON.stringify({ version: 0, order: ['user:example-read-text-raw'], external_directories: [] }))
-    await cp(resolve(__dirname, '../data/tools_examples/read_text_raw'), join(root, 'tools/read_text_raw'), { recursive: true })
+    await writeFile(join(root, 'projects.json'), 'abandoned project metadata')
+    await writeFile(join(root, 'input_history.json'), 'abandoned input history')
+    await cp(resolve(__dirname, '../data/examples/tools/read_text_raw'), join(root, 'tools/read_text_raw'), { recursive: true })
     application = await launchApplication(root)
     const page = await application.firstWindow()
     await expect(page.locator('[data-agent-composer-input]')).toBeVisible({ timeout: 20000 })
@@ -31,10 +33,14 @@ async function verifyCurrentData(launchApplication) {
     await assert.rejects(readFile(`${path}.v0.bak`), { code: 'ENOENT' })
     await closeElectronTestApplication(application)
     application = undefined
-    for (const file of ['settings', 'models', 'capabilities', 'subagents', 'mcp_servers', 'skills', 'tools']) {
+    for (const file of ['settings', 'models', 'subagents', 'mcp_servers', 'skills', 'tools']) {
       assert.equal(JSON.parse(await readFile(join(root, `config/${file}.json`), 'utf8')).version, 0)
     }
-    assert.equal(JSON.parse(await readFile(join(root, 'projects.json'), 'utf8')).version, 0)
+    await assert.rejects(readFile(join(root, 'config/capabilities.json')), { code: 'ENOENT' })
+    assert.equal(JSON.parse(await readFile(join(root, 'db/projects.json'), 'utf8')).version, 0)
+    assert.equal(await readFile(join(root, 'projects.json'), 'utf8'), 'abandoned project metadata')
+    assert.equal(await readFile(join(root, 'input_history.json'), 'utf8'), 'abandoned input history')
+    await mkdir(join(root, 'sqlite'), { recursive: true })
     await writeFile(join(root, 'sqlite/agent.sqlite'), 'Keep unrelated historical data')
     application = await launchApplication(root)
     await expect((await application.firstWindow()).locator('[data-agent-composer-input]')).toBeVisible({ timeout: 20000 })
@@ -44,11 +50,11 @@ async function verifyCurrentData(launchApplication) {
       await writeFile(path, invalid)
       const numbered = Object.hasOwn(JSON.parse(invalid), 'version')
       if (numbered) {
-        const projects = JSON.parse(await readFile(join(root, 'projects.json'), 'utf8'))
-        await writeFile(join(root, 'projects.json'), JSON.stringify({ ...projects, version: 4 }))
+        const projects = JSON.parse(await readFile(join(root, 'db/projects.json'), 'utf8'))
+        await writeFile(join(root, 'db/projects.json'), JSON.stringify({ ...projects, version: 4 }))
         await promisify(execFile)(require('electron'), ['-e', `
           const Database = require('better-sqlite3');
-          const db = new Database(require('node:path').join(process.argv[1], 'sqlite/catalog.sqlite'));
+          const db = new Database(require('node:path').join(process.argv[1], 'db/catalog.sqlite'));
           db.pragma('user_version = 1'); db.close();
         `, root], { cwd: resolve(__dirname, '..'), env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } })
       }
@@ -71,14 +77,14 @@ async function verifyCurrentData(launchApplication) {
         assert.deepEqual(repaired.order, ['user:example-read-text-raw'])
         assert.deepEqual(repaired.external_directories, [])
         if (numbered) {
-          const projectsBefore = await readFile(join(root, 'projects.json'), 'utf8')
+          const projectsBefore = await readFile(join(root, 'db/projects.json'), 'utf8')
           await failed.getByRole('group', { name: 'projects.json', exact: true }).getByRole('button', { name: /^(修复|Repair)$/ }).click()
           await failed.getByRole('alertdialog').getByRole('button', { name: /^(修复|Repair)$/ }).click()
-          await expect.poll(async () => JSON.parse(await readFile(join(root, 'projects.json'), 'utf8')).version, { timeout: 15000 }).toBe(0)
+          await expect.poll(async () => JSON.parse(await readFile(join(root, 'db/projects.json'), 'utf8')).version, { timeout: 15000 }).toBe(0)
           await expect(failed.locator('.initial-app-status-error')).toHaveAttribute('aria-busy', 'false')
           const status = await failed.evaluate(() => globalThis.gale.recovery.inspect())
           assert.equal(status.files.find(file => file.name === 'projects.json').error, undefined)
-          assert.equal(await readFile(join(status.lastPreservationPath, 'data/projects.json'), 'utf8'), projectsBefore)
+          assert.equal(await readFile(join(status.lastPreservationPath, 'data/db/projects.json'), 'utf8'), projectsBefore)
           assert.equal(await readFile(join(root, 'sqlite/agent.sqlite'), 'utf8'), 'Keep unrelated historical data')
         }
         await closeElectronTestApplication(application)
@@ -91,23 +97,24 @@ async function verifyCurrentData(launchApplication) {
     const history = { maxHistory: 100, items: Array.from({ length: 59 }, (_, index) => ({
       text: `Keep input ${index}`, pinned: index % 2 === 0, createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-28T00:00:00.000Z'
     })) }
-    for (const file of ['input_history.json', 'assets/avatar-transform.json']) {
-      const current = file === 'input_history.json' ? history : JSON.parse(await readFile(join(root, file), 'utf8'))
+    for (const file of ['input_history.json', 'config/assets/avatar-transform.json']) {
+      const relative = file === 'input_history.json' ? 'db/input_history.json' : file
+      const current = file === 'input_history.json' ? history : JSON.parse(await readFile(join(root, relative), 'utf8'))
       const invalid = JSON.stringify({ ...current, version: 1 })
-      await writeFile(join(root, file), invalid)
+      await writeFile(join(root, relative), invalid)
       application = await launchApplication(root)
       const recovery = await application.firstWindow()
       await expect(recovery.getByRole('group', { name: file, exact: true })).toBeVisible({ timeout: 20000 })
       await expect(recovery.locator('[data-agent-composer-input]')).toHaveCount(0)
       await expect(recovery.locator('.app-issue-tray')).toHaveCount(0)
-      assert.equal(await readFile(join(root, file), 'utf8'), invalid)
+      assert.equal(await readFile(join(root, relative), 'utf8'), invalid)
       await recovery.getByRole('group', { name: file, exact: true }).getByRole('button', { name: /^(修复|Repair)$/ }).click()
       await recovery.getByRole('alertdialog').getByRole('button', { name: /^(修复|Repair)$/ }).click()
       await expect(recovery.locator('.initial-app-status-error')).toHaveAttribute('aria-busy', 'false')
       const status = await recovery.evaluate(() => globalThis.gale.recovery.inspect())
       assert.equal(status.files.find(item => item.name === file).error, undefined)
-      assert.equal(await readFile(join(status.lastPreservationPath, 'data', file), 'utf8'), invalid)
-      assert.deepEqual(JSON.parse(await readFile(join(root, file), 'utf8')), { ...current, version: 0 })
+      assert.equal(await readFile(join(status.lastPreservationPath, 'data', relative), 'utf8'), invalid)
+      assert.deepEqual(JSON.parse(await readFile(join(root, relative), 'utf8')), { ...current, version: 0 })
       await closeElectronTestApplication(application)
       application = await launchApplication(root)
       const restored = await application.firstWindow()
@@ -118,30 +125,30 @@ async function verifyCurrentData(launchApplication) {
       application = undefined
     }
     const mixedHistory = JSON.stringify({ version: 0, ...history, items: [...history.items, { text: 7 }] })
-    await writeFile(join(root, 'input_history.json'), mixedHistory)
-    const sourceName = (await readdir(join(root, 'assets'))).find(name => /^avatar-source\./.test(name))
+    await writeFile(join(root, 'db/input_history.json'), mixedHistory)
+    const sourceName = (await readdir(join(root, 'config', 'assets'))).find(name => /^avatar-source\./.test(name))
     assert.ok(sourceName)
-    const cropBefore = await readFile(join(root, 'assets/avatar-crop.png'))
-    await writeFile(join(root, 'assets', sourceName), 'damaged avatar source')
-    await rm(join(root, 'assets/avatar.png'))
-    await rm(join(root, 'assets/avatar-dock.png'))
+    const cropBefore = await readFile(join(root, 'config/assets/avatar-crop.png'))
+    await writeFile(join(root, 'config', 'assets', sourceName), 'damaged avatar source')
+    await rm(join(root, 'config/assets/avatar.png'))
+    await rm(join(root, 'config/assets/avatar-dock.png'))
     application = await launchApplication(root)
     const rescue = await application.firstWindow()
     await expect(rescue.getByRole('group', { name: 'input_history.json', exact: true })).toBeVisible({ timeout: 20000 })
-    await expect(rescue.getByRole('group', { name: 'assets/avatar-transform.json', exact: true })).toBeVisible()
+    await expect(rescue.getByRole('group', { name: 'config/assets/avatar-transform.json', exact: true })).toBeVisible()
     await expect(rescue.locator('[data-agent-composer-input]')).toHaveCount(0)
-    for (const file of ['input_history.json', 'assets/avatar-transform.json']) {
+    for (const file of ['input_history.json', 'config/assets/avatar-transform.json']) {
       await rescue.getByRole('group', { name: file, exact: true }).getByRole('button', { name: /^(修复|Repair)$/ }).click()
       await rescue.getByRole('alertdialog').getByRole('button', { name: /^(修复|Repair)$/ }).click()
       await expect(rescue.locator('.initial-app-status-error')).toHaveAttribute('aria-busy', 'false')
       const status = await rescue.evaluate(() => globalThis.gale.recovery.inspect())
       assert.equal(status.files.find(item => item.name === file).error, undefined)
       if (file === 'input_history.json') {
-        assert.equal(await readFile(join(status.lastPreservationPath, 'data/input_history.json'), 'utf8'), mixedHistory)
+        assert.equal(await readFile(join(status.lastPreservationPath, 'data/db/input_history.json'), 'utf8'), mixedHistory)
         await expect(rescue.getByText(/已部分修复|Partially repaired/)).toBeVisible()
       } else {
-        assert.equal(await readFile(join(status.lastPreservationPath, 'data/assets', sourceName), 'utf8'), 'damaged avatar source')
-        assert.deepEqual(await readFile(join(root, 'assets/avatar-crop.png')), cropBefore)
+        assert.equal(await readFile(join(status.lastPreservationPath, 'data/config/assets', sourceName), 'utf8'), 'damaged avatar source')
+        assert.deepEqual(await readFile(join(root, 'config/assets/avatar-crop.png')), cropBefore)
       }
     }
     await closeElectronTestApplication(application)

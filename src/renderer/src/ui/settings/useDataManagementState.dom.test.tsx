@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { StorageUsageValue } from '@shared/types'
 import type { SettingsTab } from './settingsTabs'
 import { useDataManagementState } from './useDataManagementState'
+import { dataCleanupTargets } from '../dialogs/dialogTypes'
 
 vi.mock('../notice', () => ({ notice: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }))
 
@@ -73,5 +74,42 @@ describe('Dev storage usage', () => {
     rerender({ settingsTab: 'dev', settingsOpen: false })
     rerender({ settingsTab: 'dev', settingsOpen: true })
     await waitFor(() => expect(result.current.developerHttpTraceUsage?.totalBytes).toBe(15))
+  })
+})
+
+describe('cleanup selection', () => {
+  it('selects and submits only visible items, carrying the unknown-file preview', async () => {
+    const cleanup = Object.fromEntries(dataCleanupTargets.map(target => [target, {
+      totalBytes: 0, approximate: false, hasData: target === 'temp_folder' || target === 'unknown_files'
+    }]))
+    allData.mockResolvedValue({ cleanup, unknownFiles: ['old-empty', 'backup.zip'] })
+    agentData.mockResolvedValue({ conversations: cleanup.agent_unpinned_threads, memories: cleanup.memories })
+    const clean = vi.fn().mockResolvedValue({ items: [] })
+    Object.assign(window.gale.app, { cleanupData: clean })
+    const { result } = renderState('general')
+    await waitFor(() => expect(result.current.storageUsageLoading).toBe(false))
+    expect(result.current.dataCleanupSelection.unknown_files).toBe(false)
+    act(() => result.current.toggleAllDataCleanupTargets(true))
+    expect(result.current.dataCleanupSelection.input_history).toBe(false)
+    expect(result.current.dataCleanupSelection.temp_folder).toBe(true)
+    expect(result.current.dataCleanupSelection.unknown_files).toBe(true)
+    await act(async () => { await result.current.runDataCleanup() })
+    expect(clean).toHaveBeenCalledWith({
+      input_history: false, cache_folder: false, temp_folder: true, log_folder: false,
+      developer_http_trace: false, unknown_files: true, unknown_file_paths: ['old-empty', 'backup.zip']
+    })
+    expect(result.current.dataCleanupSelection.unknown_files).toBe(false)
+  })
+
+  it('does not submit hidden selections or unknown-file cleanup before its preview is available', async () => {
+    const clean = vi.fn().mockResolvedValue({ items: [] })
+    Object.assign(window.gale.app, { cleanupData: clean })
+    const { result } = renderState('general')
+    act(() => {
+      result.current.toggleAllDataCleanupTargets(false)
+      result.current.toggleDataCleanupTarget('unknown_files', true)
+    })
+    await act(async () => { await result.current.runDataCleanup() })
+    expect(clean).not.toHaveBeenCalled()
   })
 })

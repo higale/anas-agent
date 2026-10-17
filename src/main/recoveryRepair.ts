@@ -24,6 +24,7 @@ import { parseProjectStore } from './projectStore'
 import { normalizeSkillsConfig } from './skillsStore'
 import { DEFAULT_WORKSPACE_PROJECT_ID } from '@shared/types'
 import { inspectProjectStorageRepair, repairProjectStorage } from './recoveryProjectStorage'
+import { getInputHistoryFile, getProjectStoreFile } from './config/dataDir'
 
 const { version: _projectDefaultsVersion, ...projectDefaults } = projectDefaultsDocument
 type RecordValue = Record<string, unknown>
@@ -262,12 +263,13 @@ export async function inspectRecoveryRepair(dataDir: string): Promise<RecoveryRe
   const documents = new Map<string, RecordValue>()
   for (const file of [...resettableConfigFiles, 'projects.json', ...recoverableAuxiliaryFiles] as const) {
     const auxiliary = recoverableAuxiliaryFiles.includes(file as typeof recoverableAuxiliaryFiles[number])
-    const path = file === 'assets/avatar-transform.json' ? join(root, 'assets')
-      : file === 'projects.json' || auxiliary ? join(root, file) : join(root, 'config', file)
+    const path = file === 'config/assets/avatar-transform.json' ? join(root, 'config', 'assets')
+      : file === 'projects.json' ? getProjectStoreFile(root)
+        : file === 'input_history.json' ? getInputHistoryFile(root) : join(root, 'config', file)
     const status: RecoveryFileStatus = { name: file, path, repairableFields: [] }
     plan.files.push(status)
     try {
-      if (file === 'assets/avatar-transform.json') {
+      if (file === 'config/assets/avatar-transform.json') {
         const avatar = await inspectAvatarRepair(root)
         status.repairableFields = avatar.fields
         if (avatar.issues.length) status.error = avatar.issues.join('\n')
@@ -315,7 +317,7 @@ export async function inspectRecoveryRepair(dataDir: string): Promise<RecoveryRe
 
 export async function repairRecoveryData(dataDir: string, file: RecoveryFile, preserve: () => Promise<string>): Promise<RecoveryRepairResult> {
   requireRecoveryFile(file)
-  if (file === 'assets/avatar-transform.json') return repairAvatarData(await realpath(dataDir), preserve)
+  if (file === 'config/assets/avatar-transform.json') return repairAvatarData(await realpath(dataDir), preserve)
   const plan = await inspectRecoveryRepair(dataDir)
   const candidates = plan.candidates.filter((candidate) => candidate.file === file)
   const result: RecoveryRepairResult = { repaired: [], unresolved: [] }

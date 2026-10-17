@@ -12,6 +12,7 @@ import { loadPluginLanguages } from './pluginLanguages'
 import { inspectSkillText } from '../skillDefinition'
 import type { PluginContributionKind, PluginContributionPreview, PluginSkillSummary } from '@shared/plugins'
 import { pluginSettingValues, type PluginSettingsSnapshot } from '@shared/pluginSettings'
+import { newPluginTransaction, PluginTransactionError, PluginTransactions, writePluginTransaction } from './pluginTransactions'
 
 const MAX_FILE_BYTES = 128 * 1024 * 1024
 const MAX_PACKAGE_BYTES = 512 * 1024 * 1024
@@ -38,10 +39,18 @@ async function optionalJson(path: string, maxBytes = 1024 * 1024): Promise<unkno
   }
 }
 
+export async function validateBundledPlugin(directory: string, expectedId?: string): Promise<void> {
+  const info = await lstat(directory)
+  if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Bundled plugin must be a regular directory.')
+  const manifest = parsePluginManifest(await optionalJson(join(directory, 'PLUGIN.json'), 64 * 1024))
+  if (expectedId !== undefined && manifest.id !== expectedId) throw new Error('Bundled plugin ID does not match its directory.')
+}
+
 export class PluginStore {
   private resourceUses = new Map<string, number>()
   private tail: Promise<unknown> = Promise.resolve()
   private pending?: { stage: string; preview: PluginInstallPreview; identity?: string }
+  private transactionErrors = new Map<string, Error>()
   constructor(readonly dataDirectory: string, private bundled: Readonly<Record<string, string>> = {}) {}
 
   isBuiltin(id: string): boolean { return Object.hasOwn(this.bundled, id) }
@@ -82,10 +91,10 @@ export class PluginStore {
   }
 
   // Managed directories must retain their physical identity across reads and writes.
-  async directory(group: 'plugins' | 'plugins_data' | 'tmp', id?: string, create = false): Promise<string> {
+  async directory(group: 'plugins' | 'db/plugins' | 'tmp', id?: string, create = false): Promise<string> {
     if (id) requirePluginId(id)
     let target = await realpath(this.dataDirectory)
-    for (const part of [group, ...(id ? [group === 'tmp' ? `anas-plugin-${id}` : id] : [])]) {
+    for (const part of [...group.split('/'), ...(id ? [group === 'tmp' ? `anas-plugin-${id}` : id] : [])]) {
       target = join(target, part)
       if (create) await mkdir(target).catch(error => { if (error.code !== 'EEXIST') throw error })
       const info = await lstat(target)
@@ -96,6 +105,7 @@ export class PluginStore {
 
   async packageDirectory(id: string): Promise<string> {
     requirePluginId(id)
+    if (this.transactionErrors.has(id)) throw this.transactionErrors.get(id)
     if (this.isBuiltin(id)) return realpath(this.bundled[id])
     const path = join(await this.directory('plugins', id), 'package')
     const info = await lstat(path)
@@ -116,6 +126,7 @@ export class PluginStore {
   async read(id: string, includeLanguages = true): Promise<PluginSummary> {
     requirePluginId(id)
     try {
+      if (this.transactionErrors.has(id)) throw this.transactionErrors.get(id)
       const builtin = this.isBuiltin(id)
       if (builtin) {
         const collision = await lstat(join(this.dataDirectory, 'plugins', id)).catch(error => {
@@ -124,7 +135,7 @@ export class PluginStore {
         })
         if (collision) throw new Error(`A user-installed plugin already uses the built-in ID "${id}". Its files are preserved in plugins/${id}; move that installation out before using the built-in plugin.`)
       }
-      const root = await this.directory(builtin ? 'plugins_data' : 'plugins', id, builtin)
+      const root = await this.directory(builtin ? 'db/plugins' : 'plugins', id, builtin)
       const saved = await optionalJson(join(root, builtin ? 'anas-installation.json' : 'installation.json'))
       const raw = (saved === undefined && builtin ? { version: 0, enabled: true } : saved) as { version?: unknown; enabled?: unknown } | undefined
       if (!raw || raw.version !== 0 || (raw.enabled !== undefined && typeof raw.enabled !== 'boolean')) throw new Error('Invalid plugin installation state.')
@@ -245,7 +256,7 @@ export class PluginStore {
     try { root = await this.directory('plugins') } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
-    const names = [...new Set([...Object.keys(this.bundled), ...(root ? await readdir(root) : [])])]
+    const names = [...new Set([...Object.keys(this.bundled), ...this.transactionErrors.keys(), ...(root ? await readdir(root) : [])])]
       .filter(name => { try { requirePluginId(name); return true } catch { return false } })
     return Promise.all(names.sort().map(name => this.read(name)))
   }
@@ -256,6 +267,7 @@ export class PluginStore {
   }
 
   async prepareInstall(sourcePath: string): Promise<PluginInstallPreview> {
+    await this.recoverTransactions()
     await this.cancelInstall()
     const source = await realpath(sourcePath)
     const info = await stat(source)
@@ -362,20 +374,34 @@ export class PluginStore {
     this.pending = undefined
   }
 
+  private transactions(): PluginTransactions {
+    return new PluginTransactions(group => this.directory(group, undefined, group === 'plugins'))
+  }
+
+  /** Startup/restore runs this before any plugin backend or page is opened. */
+  async recoverTransactions(): Promise<void> {
+    await this.transactions().recoverAll()
+    this.transactionErrors.clear()
+  }
+
+  private async executeTransaction(stage: string, id: string): Promise<void> {
+    try { await this.transactions().execute(stage) } catch (error) {
+      if (error instanceof PluginTransactionError && !error.committed) this.transactionErrors.set(id, error)
+      throw error
+    }
+  }
+
   async finishInstall(token: string, options: { replace?: boolean; deleteData?: boolean } = {}, beforeReplace?: (id: string) => Promise<void>): Promise<PluginSummary> {
     const { replace = false, deleteData = false } = options
     if (typeof replace !== 'boolean' || typeof deleteData !== 'boolean') throw new Error('Invalid plugin replacement options.')
     if (typeof token !== 'string' || !this.pending || this.pending.preview.token !== token) throw new Error('Plugin installation is no longer pending. Select the package again.')
-    const { preview, identity } = this.pending
-    let stage = this.pending.stage
+    const { preview, identity, stage } = this.pending
     this.pending = undefined
     const { incoming: manifest, installed } = preview
-    let incoming = join(stage, 'incoming'), previous = join(stage, 'previous'), savedData = join(stage, 'data')
-    let target: string | undefined, data: string | undefined
-    let moved = false, dataMoved = false, committed = false, preserve = false
-    const rename = fs.retry.rename({ timeout: 2_000, interval: 25 })
+    let recoveryStage: string
     try {
       const unchanged = async () => {
+        if (this.transactionErrors.has(manifest.id)) throw this.transactionErrors.get(manifest.id)
         if (await this.installationIdentity(manifest.id) !== identity
           || (installed && JSON.stringify((await this.read(manifest.id)).manifest) !== JSON.stringify(installed.manifest))) {
           throw new Error('Installed plugin changed. Select the package again before replacing it.')
@@ -383,92 +409,71 @@ export class PluginStore {
       }
       await unchanged()
       if (installed && !replace) throw new Error('Plugin is already installed. Confirm replacement before installing another version.')
-      target = join(await this.directory('plugins', undefined, true), manifest.id)
-      const dataDirectory = () => this.directory('plugins_data', manifest.id).catch(error => {
+      const dataDirectory = () => this.directory('db/plugins', manifest.id).catch(error => {
         if (error.code === 'ENOENT') return undefined
         throw error
       })
       if (installed && deleteData) await dataDirectory()
       if (installed) {
         await this.assertPackageIdle(manifest.id)
-        // Old files must survive both a crash and the application's temp cleanup.
-        const recoveryStage = join(dirname(target), '.replace-' + token)
-        await rename(stage, recoveryStage)
-        stage = recoveryStage
-        incoming = join(stage, 'incoming'); previous = join(stage, 'previous'); savedData = join(stage, 'data')
         await beforeReplace?.(manifest.id)
       }
       await unchanged()
-      // Backend shutdown may finish writing or create its data directory.
-      if (installed && deleteData) data = await dataDirectory()
+      // Shutdown can finish writing or create the plugin's data directory.
+      const data = installed && deleteData ? await dataDirectory() : undefined
       const enabled = installed ? (await this.read(manifest.id)).enabled : true
-      await writeJsonFileAtomic(join(incoming, 'installation.json'), { version: 0, enabled })
-      if (installed) { await rename(target, previous); moved = true }
-      if (data) { await rename(data, savedData); dataMoved = true }
-      await rename(incoming, target)
-      committed = true
-      return this.read(manifest.id)
+      await writeJsonFileAtomic(join(stage, 'incoming', 'installation.json'), { version: 0, enabled })
+      await writePluginTransaction(stage, newPluginTransaction(manifest.id, 'replace', Boolean(installed), Boolean(data)))
+      recoveryStage = join(await this.directory('plugins', undefined, true), '.replace-' + token)
+      await fs.retry.rename({ timeout: 2_000, interval: 25 })(stage, recoveryStage)
     } catch (error) {
-      const failures: unknown[] = []
-      if (dataMoved) { try { await rename(savedData, data!); dataMoved = false } catch (rollback) { failures.push(rollback) } }
-      if (moved) { try { await rename(previous, target!); moved = false } catch (rollback) { failures.push(rollback) } }
-      if (failures.length) {
-        preserve = true
-        throw new AggregateError([error, ...failures], 'Plugin replacement failed; preserved files remain at ' + stage + '.')
-      }
+      // No live files move until the complete journal and incoming package are
+      // published outside tmp. Failed preparation contains no recovery data.
+      await rm(stage, { recursive: true, force: true })
       throw error
-    } finally {
-      // Preserve the only remaining copies if rollback failed. Never delete in place.
-      if (committed || !preserve) await rm(stage, { recursive: true, force: true })
     }
+    await this.executeTransaction(recoveryStage, manifest.id)
+    return this.read(manifest.id)
   }
 
   async setEnabled(id: string, enabled: boolean): Promise<void> {
     if (typeof enabled !== 'boolean') throw new Error('Invalid plugin enabled state.')
+    if (this.transactionErrors.has(id)) throw this.transactionErrors.get(id)
     const item = await this.read(id)
     if (enabled && item.error) throw new Error(item.error)
     const builtin = this.isBuiltin(id)
-    const root = await this.directory(builtin ? 'plugins_data' : 'plugins', id, builtin)
+    const root = await this.directory(builtin ? 'db/plugins' : 'plugins', id, builtin)
     await writeJsonFileAtomic(join(root, builtin ? 'anas-installation.json' : 'installation.json'), { version: 0, enabled })
   }
 
   async uninstall(id: string, deleteData = false): Promise<void> {
     if (this.isBuiltin(id)) throw new Error('Built-in plugins can be disabled, but cannot be uninstalled.')
     if (typeof deleteData !== 'boolean') throw new Error('Invalid plugin data deletion option.')
+    await this.recoverTransactions()
     await this.assertPackageIdle(id)
-    const root = await this.directory('plugins', id)
-    const data = deleteData ? await this.directory('plugins_data', id).catch(error => {
+    const data = deleteData ? await this.directory('db/plugins', id).catch(error => {
       if (error.code === 'ENOENT') return undefined
       throw error
     }) : undefined
-    const temp = await this.directory('tmp', undefined, true)
-    const stage = await mkdtemp(join(temp, 'plugin-remove-'))
-    let moved = false
-    let committed = false
+    const stage = await mkdtemp(join(await this.directory('tmp', undefined, true), 'plugin-remove-'))
+    const recoveryStage = join(await this.directory('plugins'), '.remove-' + randomUUID())
     try {
-      // Windows can briefly retain a package directory handle after a page or
-      // utility process exits. Retry the same atomic move; never delete in place.
-      await fs.retry.rename({ timeout: 2_000, interval: 25 })(root, join(stage, 'removed'))
-      moved = true
-      if (data) await fs.retry.rename({ timeout: 2_000, interval: 25 })(data, join(stage, 'data'))
-      committed = true
+      // Publish a complete journal before moving any live files. An interrupted
+      // initial write stays disposable and cannot block startup recovery.
+      await writePluginTransaction(stage, newPluginTransaction(id, 'remove', true, Boolean(data)))
+      await fs.retry.rename({ timeout: 2_000, interval: 25 })(stage, recoveryStage)
     } catch (error) {
-      if (moved) {
-        try { await fs.retry.rename({ timeout: 2_000, interval: 25 })(join(stage, 'removed'), root); moved = false }
-        catch (rollback) { throw new AggregateError([error, rollback], `Plugin removal failed; preserved files remain at ${stage}.`) }
-      }
+      await rm(stage, { recursive: true, force: true })
       throw error
-    } finally {
-      // Never discard staged files if restoring the installation failed.
-      if (committed || !moved) await rm(stage, { recursive: true, force: true })
     }
+    await this.executeTransaction(recoveryStage, id)
   }
 
   async data(id: string, key: unknown, write = false, value?: unknown): Promise<unknown> {
     // The host-owned home preference remains configurable while the plugin is disabled.
     const manifest = key === 'home_open_location' ? await this.readManifest(id) : await this.requireEnabled(id)
     if (typeof key !== 'string' || !/^[a-zA-Z0-9_.-]{1,80}$/.test(key) || ['__proto__', 'constructor', 'prototype'].includes(key)) throw new Error('Invalid plugin data key.')
-    const root = await this.directory('plugins_data', id, true)
+    const root = await this.directory('db/plugins', id, true)
     const path = join(root, 'state.json')
     const raw = await optionalJson(path) as { version?: unknown; values?: unknown } | undefined
     if (raw !== undefined && (!raw || raw.version !== 0 || !raw.values || typeof raw.values !== 'object' || Array.isArray(raw.values))) throw new Error('Invalid plugin data file; original content was preserved.')
@@ -489,7 +494,7 @@ export class PluginStore {
     if (plugin.error || !plugin.manifest) throw new Error(plugin.error ?? 'Plugin is unavailable.')
     const fields = plugin.manifest.settings ?? []
     if (!fields.length) throw new Error('Plugin has no settings declaration.')
-    const path = join(await this.directory('plugins_data', id, true), 'anas-settings.json')
+    const path = join(await this.directory('db/plugins', id, true), 'anas-settings.json')
     const raw = await optionalJson(path) as { version?: unknown; values?: unknown } | undefined
     if (raw !== undefined && (!raw || raw.version !== 0 || !raw.values || typeof raw.values !== 'object' || Array.isArray(raw.values))) throw new Error('Invalid plugin settings file; original content was preserved.')
     const saved = (raw?.values ?? {}) as Record<string, unknown>

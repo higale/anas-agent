@@ -5,8 +5,8 @@ import { validateRestoredSkillsDirectory } from './skillsStore'
 
 describe('bundled Skills', () => {
   it('ships valid system and example Skill directories', async () => {
-    const systemRoot = resolve('data/skills_system')
-    const exampleRoot = resolve('data/skills_examples')
+    const systemRoot = resolve('data/skills/_system')
+    const exampleRoot = resolve('data/examples/skills')
 
     await expect(validateRestoredSkillsDirectory(systemRoot)).resolves.toBeUndefined()
     await expect(validateRestoredSkillsDirectory(exampleRoot)).resolves.toBeUndefined()

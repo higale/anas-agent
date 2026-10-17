@@ -69,6 +69,7 @@ import {
 } from './contextRuntime'
 import type { CompressionTrackingCallbacks } from './compressionTracking'
 import { createAnasSummarizationMiddleware } from './summarizationMiddleware'
+import { saveToolResultFile } from './toolResultFile'
 import { agentContextStateSchema } from './contextStateSchema'
 import { buildSubagentSystemPrompt } from './subagentPrompt'
 import { createAgentRunLifecycleMiddleware } from './runLifecycleMiddleware'
@@ -680,6 +681,7 @@ async function prepareAgentInstanceFromConfig(
         toolNames: enabledBuiltinFileToolNames(features, activeToolNames),
         signal: context.signal,
         fileChanges: database.fileChanges,
+        fileEditStore: database.fileEditStore,
         requestId: context.requestId,
         primaryFolder: workspace.primaryFolder
       })
@@ -824,11 +826,13 @@ async function prepareAgentInstanceFromConfig(
           getModelTokenCountingOptions,
           responseTools,
           allowInterrupts: options.persistCheckpoints,
+          fileEditStore: database.fileEditStore,
           accessMode: createAgentAccessModeResolver(database, thread.id, context.subagentCall),
           signal: context.signal
         })
       : undefined
     const summaryMiddleware = createAnasSummarizationMiddleware({
+          saveToolResult: content => saveToolResultFile(content, database.toolResultsRoot),
           codingMode: runConfiguration.codingMode,
           compressionPrompt: activeSubagent ? undefined : runConfiguration.compressionPrompt,
           responseTools,
@@ -1028,7 +1032,7 @@ async function prepareAgentInstanceFromConfig(
           runId: context.requestId, toolName: commandShellToolName(commandShell.executable), analyzer: shellCommandAuthorization,
           accessMode: createAgentAccessModeResolver(database, thread.id, context.subagentCall)
         })] : []),
-        ...(context.requestId ? [createPatchAuthorizationMiddleware({ runId: context.requestId,
+        ...(context.requestId ? [createPatchAuthorizationMiddleware({ runId: context.requestId, fileEditStore: database.fileEditStore,
           primaryFolder: workspace.primaryFolder, folders: workspace.trustedFolders,
           accessMode: createAgentAccessModeResolver(database, thread.id, context.subagentCall) })] : []),
         // Recall must precede budget checks and compression so the same required

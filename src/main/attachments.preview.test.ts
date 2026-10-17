@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, truncate, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createReadStream } from 'node:fs'
@@ -24,7 +24,8 @@ vi.mock('./config/appConfig', () => ({ getAppConfigSnapshot: async () => ({
   settings: { attachmentTextMaxChars: 100_000, attachmentTextOverflow: 'truncate' }
 }) }))
 
-import { readAttachmentPreview, readSelectedAttachments, registerAttachmentPreviewProtocol } from './attachments'
+import { readAttachmentPreview, readSelectedAttachments, registerAttachmentPreviewProtocol, releaseTemporaryAttachments } from './attachments'
+import * as dataDir from './config/dataDir'
 import { archiveAgentAttachments } from './agent/agentAttachmentStore'
 
 const onePixelPng = Buffer.from(
@@ -196,4 +197,20 @@ describe('bounded attachment previews', () => {
     }
     await expect(Promise.all(requests)).resolves.toHaveLength(paths.length)
   })
+})
+
+it('releases only the selected conversation edit draft, preserving other drafts and persistent attachments', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'anas-release-draft-'))
+  const temporary = join(root, 'tmp')
+  const paths = [join(temporary, 'conversations', 'one', 'message_edit', 'draft', '0', 'file.txt'),
+    join(temporary, 'conversations', 'two', 'message_edit', 'draft', '0', 'file.txt'),
+    join(temporary, 'conversations', 'one', 'direction', 'draft', 'file.txt'),
+    join(root, 'db', 'conversations', 'one', 'attachments', 'file.txt')]
+  const mockedRoot = vi.spyOn(dataDir, 'getTempDir').mockReturnValue(temporary)
+  try {
+    for (const path of paths) { await mkdir(join(path, '..'), { recursive: true }); await writeFile(path, 'keep') }
+    await releaseTemporaryAttachments([paths[0], paths[2], paths[3]])
+    await expect(stat(paths[0])).rejects.toMatchObject({ code: 'ENOENT' })
+    for (const path of paths.slice(1)) expect(await readFile(path, 'utf8')).toBe('keep')
+  } finally { mockedRoot.mockRestore(); await rm(root, { recursive: true, force: true }) }
 })
