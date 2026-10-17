@@ -86,7 +86,6 @@ export interface RawAppSettings {
   theme?: string
   font_size?: number
   chat_content_width?: string
-  new_thread_model_selection?: string
   attachment_text_max_chars?: number
   attachment_text_overflow?: string
   log_level?: RuntimeLogLevel

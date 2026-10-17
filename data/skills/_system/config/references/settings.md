@@ -44,11 +44,12 @@ For an avatar request, report success only when the tool returns `ok: true` and 
 
 | Key | Value |
 | --- | --- |
-| `new_thread_model_selection` | `"prompt"`, `"default"`, or `"current"` |
 | `default_model_id` | exact configured model ID string, or `null` to clear the default |
 | `attachment_text_max_chars` | integer from `1000` through `2000000` |
 | `attachment_text_overflow` | `"truncate"` or `"error"` |
 | `max_model_calls_per_run` | integer from `0` through `9999`; `0` means no application limit |
+
+New conversations choose the project model, then the global default, then the previously selected model; otherwise the model remains unselected. Existing conversations and restored drafts keep their selection.
 
 Do not guess a model ID. Change `default_model_id` only when the exact configured ID is available.
 

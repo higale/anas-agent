@@ -1,5 +1,5 @@
 import { findProviderModelConfig, isSelectableModelConfig } from './modelConfig'
-import type { ModelProviderConfig, NewThreadModelSelection, ProjectModelSelection, ProviderModelConfig } from './types'
+import type { ModelProviderConfig, ProjectModelSelection, ProviderModelConfig } from './types'
 
 type DraftModelCandidate = Pick<
   ProviderModelConfig,
@@ -7,12 +7,7 @@ type DraftModelCandidate = Pick<
 > & { baseUrl: string }
 
 interface DraftModelDefaultsSource {
-  settings: { newThreadModelSelection: NewThreadModelSelection }
   defaultModel?: DraftModelCandidate
-  providers?: Array<{
-    baseUrl: string
-    models: Array<Pick<ProviderModelConfig, 'id' | 'defaultParameterPresetId' | 'model'>>
-  }>
 }
 
 export interface DraftModelSelection {
@@ -41,27 +36,13 @@ export function newThreadDraftModelSelection(
   projectSelection?: DraftModelSelection
 ): DraftModelSelection {
   if (projectSelection) return projectSelection
-  const selection = config?.settings.newThreadModelSelection
   const selectableCurrent = currentModel && isSelectableModelConfig(currentModel)
     ? { model: currentModel, source: 'current' as const }
     : undefined
   const selectableDefault = config?.defaultModel && isSelectableModelConfig(config.defaultModel)
     ? { model: config.defaultModel, source: 'model-default' as const }
     : undefined
-  const firstSelectable = config?.providers?.flatMap((provider) => (
-    provider.models.map((model) => ({ ...model, baseUrl: provider.baseUrl }))
-  )).find(isSelectableModelConfig)
-  const firstProviderModel = firstSelectable
-    ? { model: firstSelectable, source: 'model-default' as const }
-    : undefined
-  const requested = selection === 'current'
-    ? selectableCurrent
-    : selection === 'default'
-      ? selectableDefault
-      : undefined
-  const resolved = selection === 'prompt'
-    ? undefined
-    : requested ?? selectableCurrent ?? selectableDefault ?? firstProviderModel
+  const resolved = selectableDefault ?? selectableCurrent
   const model = resolved?.model
   const usesCurrentSelection = resolved?.source === 'current'
   return {

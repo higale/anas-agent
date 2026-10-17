@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AgentModelRequestPreview, AgentSystemContextPreview } from '@shared/agentTypes'
 import { compressionPromptError, summaryPromptForLanguage } from '@shared/summaryPrompt'
-import type { AppSettings, ProjectCreateRequest } from '@shared/types'
+import type { AppSettings, ProjectCreateRequest, ProjectModelSelection } from '@shared/types'
 import { getLanguageOptions, resolveLanguagePreference } from '../../i18n'
 import { notice } from '../notice'
 import { DropdownMenuContent, DropdownMenuRoot } from '../DropdownMenuShell'
@@ -18,20 +18,22 @@ interface ProjectPromptPreviewsProps {
   disabled?: boolean
   settings: AppSettings | undefined
   projectId?: string
+  currentModelSelection?: ProjectModelSelection
 }
 
 export function ProjectPromptPreviews({
   project,
   disabled,
   settings,
-  projectId
+  projectId,
+  currentModelSelection
 }: ProjectPromptPreviewsProps) {
   const { t } = useTranslation()
   const triggerRef = useRef<HTMLButtonElement>(null)
   const [kind, setKind] = useState<PromptPreviewKind>()
   const [modelRequestPreview, setModelRequestPreview] = useState<AgentModelRequestPreview>()
   const [systemPreview, setSystemPreview] = useState<AgentSystemContextPreview>()
-  const [previewFailed, setPreviewFailed] = useState(false)
+  const [previewError, setPreviewError] = useState<'model' | 'failed'>()
   const [previewLoading, setPreviewLoading] = useState(false)
   const codingMode = project.kind === 'workspace' && project.codingMode
   const customCompressionPrompt = project.kind === 'workspace' && project.advancedSettings ? project.compressionPrompt : undefined
@@ -48,24 +50,26 @@ export function ProjectPromptPreviews({
     let cancelled = false
     setModelRequestPreview(undefined)
     setSystemPreview(undefined)
-    setPreviewFailed(false)
+    setPreviewError(undefined)
     setPreviewLoading(true)
     void (async () => {
       try {
         const input = {
           projectId,
           project,
-          settings
+          settings,
+          currentModelSelection
         }
-        if (kind === 'system') {
-          const preview = await window.gale.agent.context.preview(input)
-          if (!cancelled) setSystemPreview(preview)
-        } else {
-          const preview = await window.gale.agent.context.previewModelRequest(input)
-          if (!cancelled) setModelRequestPreview(preview)
+        const preview = kind === 'system'
+          ? await window.gale.agent.context.preview(input)
+          : await window.gale.agent.context.previewModelRequest(input)
+        if (!cancelled) {
+          if (preview.unavailableReason === 'model_not_selected') setPreviewError('model')
+          else if (kind === 'system') setSystemPreview(preview)
+          else setModelRequestPreview(preview)
         }
       } catch {
-        if (!cancelled) setPreviewFailed(true)
+        if (!cancelled) setPreviewError('failed')
       } finally {
         if (!cancelled) setPreviewLoading(false)
       }
@@ -73,7 +77,7 @@ export function ProjectPromptPreviews({
     return () => {
       cancelled = true
     }
-  }, [kind, project, projectId, settings])
+  }, [kind, project, projectId, settings, currentModelSelection])
 
   const previewText = kind === 'compression'
     ? compressionPrompt
@@ -82,7 +86,7 @@ export function ProjectPromptPreviews({
       : systemPreview?.content ?? ''
   const dynamicPreview = kind === 'system' || kind === 'modelRequest'
   const currentPreviewLoading = dynamicPreview && previewLoading
-  const currentPreviewFailed = dynamicPreview && previewFailed
+  const currentPreviewError = dynamicPreview ? previewError : undefined
   const title = kind === 'compression'
     ? t('settings.context_compression_prompt')
     : kind === 'modelRequest'
@@ -179,7 +183,9 @@ export function ProjectPromptPreviews({
                 ? <div className="ui-status-danger">{t('project.compression_prompt_invalid')}</div>
                 : currentPreviewLoading
                 ? <div className="ui-field-hint">{t('common.loading')}</div>
-                : currentPreviewFailed
+                : currentPreviewError === 'model'
+                  ? <div className="ui-field-hint">{t('settings.preview_select_model')}</div>
+                : currentPreviewError
                   ? <div className="ui-status-danger">{t(kind === 'modelRequest' ? 'settings.model_request_failed' : 'settings.effective_system_context_failed')}</div>
                   : previewText
                     ? <pre className="ui-code-block settings-code-preview-code">{previewText}</pre>

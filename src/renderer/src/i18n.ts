@@ -47,7 +47,7 @@ export function resolveLanguagePreference(preference?: string): string {
 
 export async function applyLanguagePreference(preference?: string): Promise<string> {
   const language = resolveLanguagePreference(preference)
-  await i18next.changeLanguage(language)
+  if (i18next.language !== language) await i18next.changeLanguage(language)
   document.documentElement.lang = language
   return language
 }

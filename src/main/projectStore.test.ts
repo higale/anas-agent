@@ -549,7 +549,7 @@ describe('project store', () => {
     expect(await store.listProjects()).toEqual(next.projects)
   })
 
-  it('keeps the default workspace last with icon, tool permissions and model editable and rejects pinning or deletion', async () => {
+  it('persists default workspace settings like a regular project while retaining its fixed identity', async () => {
     const store = await import('./projectStore')
     const initial = await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)
     if (initial.kind !== 'workspace') throw new Error('Expected workspace')
@@ -561,7 +561,13 @@ describe('project store', () => {
       accessMode: 'full_access',
       modelConfigId: 'workspace-model',
       modelParameterPresetId: null,
-      sourceFolders: [join(tempDir, 'default-workspace')]
+      sourceFolders: [tempDir, join(tempDir, 'default-workspace')],
+      advancedSettings: true,
+      codingMode: true,
+      prompt: 'Follow project instructions',
+      compressionPrompt: 'Keep decisions: {conversation}',
+      restrictSubagents: true,
+      capabilities: { ...initial.capabilities, memory: false, skills: { ...initial.capabilities.skills, mode: 'off' } }
     })
 
     expect(updated).toMatchObject({
@@ -570,7 +576,10 @@ describe('project store', () => {
       accessMode: 'full_access',
       modelConfigId: 'workspace-model',
       modelParameterPresetId: null,
-      sourceFolders: [join(tempDir, 'default-workspace')]
+      sourceFolders: [tempDir, join(tempDir, 'default-workspace')],
+      advancedSettings: true, codingMode: true, prompt: 'Follow project instructions',
+      compressionPrompt: 'Keep decisions: {conversation}', restrictSubagents: true,
+      capabilities: { memory: false, skills: { mode: 'off' } }
     })
     expect(updated.createdAt).toBe(initial.createdAt)
     await expect(store.updateProjectState(DEFAULT_WORKSPACE_PROJECT_ID, { pinned: true }))
@@ -578,8 +587,19 @@ describe('project store', () => {
     await expect(store.deleteProjectWithThreads(DEFAULT_WORKSPACE_PROJECT_ID, [], (commit) => commit()))
       .rejects.toThrow('cannot be deleted')
     expect((await store.listProjects()).at(-1)).toEqual(updated)
+    expect(await store.getProject(initial.id)).toEqual(updated)
+    const raw = JSON.parse(await readFile(storePaths.projectFile, 'utf8'))
+    expect(raw.version).toBe(0)
+    expect(raw.projects.find((item: Project) => item.id === initial.id)).toMatchObject({
+      advanced_settings: true, coding_mode: true, restrict_subagents: true,
+      compression_prompt: 'Keep decisions: {conversation}'
+    })
+    if (updated.kind !== 'workspace') throw new Error('Expected workspace')
+    const disabled = await store.updateProject(initial.id, { ...updated, advancedSettings: false })
+    expect(await store.getProject(initial.id)).toEqual(disabled)
+    expect(disabled).toMatchObject({ prompt: updated.prompt, compressionPrompt: updated.compressionPrompt, capabilities: updated.capabilities })
   })
-  it('keeps existing projects readable and appearance editable when the default directory is unavailable', async () => {
+  it('keeps projects readable and allows correcting an unavailable default directory', async () => {
     const store = await import('./projectStore')
     const other = await store.createProject({ kind: 'simple_chat', name: 'Other', prompt: '' })
     const project = await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)
@@ -591,7 +611,10 @@ describe('project store', () => {
     expect(await store.listProjects()).toContainEqual(other)
     expect(await store.getProject(other.id)).toEqual(other)
     expect(await readFile(storePaths.projectFile, 'utf8')).toBe(before)
-    expect(await store.updateProject(project.id, { ...project, icon: 'braces' })).toMatchObject({ icon: 'braces' })
+    await expect(store.updateProject(project.id, { ...project, icon: 'braces' })).rejects.toThrow('not a directory')
+    expect(await readFile(storePaths.projectFile, 'utf8')).toBe(before)
+    expect(await store.updateProject(project.id, { ...project, sourceFolders: [tempDir], icon: 'braces' }))
+      .toMatchObject({ sourceFolders: [tempDir], icon: 'braces' })
     expect(await readFile(directory, 'utf8')).toBe('Keep this file')
   })
 
@@ -615,31 +638,29 @@ describe('project store', () => {
       .rejects.toThrow('already exists')
   })
 
-  it('rejects edits to every fixed default workspace setting without writing changes', async () => {
+  it('rejects renaming the default workspace and validates its editable settings without writing invalid changes', async () => {
     const store = await import('./projectStore')
     const project = await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)
     if (project.kind !== 'workspace') throw new Error('Expected workspace')
     const before = await readFile(storePaths.projectFile, 'utf8')
-    const changes = [
-      { name: 'Renamed' }, { sourceFolders: [tempDir] }, { advancedSettings: true },
-      { codingMode: true }, { prompt: 'Custom instructions' }, { restrictSubagents: true },
-      { capabilities: { ...project.capabilities, skills: { ...defaultCapabilities.skills, mode: 'off' as const } } }
-    ]
+    await expect(store.updateProject(project.id, { ...project, name: 'Renamed' }))
+      .rejects.toThrow('The default project name cannot be changed')
+    const changes = [{ sourceFolders: [] }, { compressionPrompt: 'Missing placeholder' }, { capabilities: {} }]
     for (const change of changes) {
-      await expect(store.updateProject(project.id, { ...project, ...change }))
-        .rejects.toThrow('Only the default project icon, tool access mode and model can be changed')
+      await expect(store.updateProject(project.id, { ...project, ...change } as ProjectCreateRequest)).rejects.toThrow()
     }
     expect(await readFile(storePaths.projectFile, 'utf8')).toBe(before)
     expect(await store.getProject(project.id)).toEqual(project)
   })
 
-  it('uses fixed defaults for existing v0 overrides while preserving identity, appearance, model and original files', async () => {
+  it('reads saved v0 default workspace settings and previews unsaved changes without overwriting them', async () => {
     const store = await import('./projectStore')
     const project = await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)
     const original = JSON.parse(await readFile(storePaths.projectFile, 'utf8'))
     Object.assign(original.projects[0], {
       name: 'Previous custom name', sourceFolders: [join(tempDir, 'old-folder')],
       prompt: 'Old custom prompt', advanced_settings: true, coding_mode: true, restrict_subagents: true,
+      compression_prompt: 'Saved summary: {conversation}',
       capabilities: serializeCapabilities({ ...defaultCapabilities, skills: { ...defaultCapabilities.skills, mode: 'off' } }),
       icon: 'braces', iconColor: 'blue', model_config_id: 'custom-model', model_parameter_preset_id: null,
       collapsed: true
@@ -647,15 +668,22 @@ describe('project store', () => {
     const before = JSON.stringify(original)
     await writeFile(storePaths.projectFile, before)
     const effective = await store.getProject(project.id)
-    expect(effective).toEqual({ ...project, icon: 'braces', iconColor: 'blue', modelConfigId: 'custom-model', modelParameterPresetId: null, collapsed: true })
+    expect(effective).toEqual({ ...project, icon: 'braces', iconColor: 'blue', modelConfigId: 'custom-model', modelParameterPresetId: null, collapsed: true,
+      sourceFolders: [join(tempDir, 'old-folder')], prompt: 'Old custom prompt', advancedSettings: true, codingMode: true, restrictSubagents: true,
+      compressionPrompt: 'Saved summary: {conversation}',
+      capabilities: { ...defaultCapabilities, skills: { ...defaultCapabilities.skills, mode: 'off' } }
+    })
     expect((await store.listProjects()).at(-1)).toEqual(effective)
     expect(await readFile(storePaths.projectFile, 'utf8')).toBe(before)
     const request = { ...effective, kind: 'workspace' as const, sourceFolders: [tempDir],
       capabilities: defaultCapabilities, restrictSubagents: true, advancedSettings: true, codingMode: true,
-      prompt: 'Draft override', modelConfigId: undefined, modelParameterPresetId: undefined }
-    expect(await store.prepareProjectPreview(request, project.id)).toEqual({
-      ...effective, modelConfigId: undefined, modelParameterPresetId: undefined
+      compressionPrompt: 'Draft summary: {conversation}', prompt: 'Draft override', modelConfigId: undefined, modelParameterPresetId: undefined }
+    expect(await store.prepareProjectPreview(request, project.id)).toMatchObject({
+      id: project.id, name: project.name, sourceFolders: [tempDir], capabilities: defaultCapabilities,
+      restrictSubagents: true, advancedSettings: true, codingMode: true,
+      compressionPrompt: 'Draft summary: {conversation}', prompt: 'Draft override'
     })
+    expect(await readFile(storePaths.projectFile, 'utf8')).toBe(before)
     expect(await store.updateProjectState(project.id, { collapsed: false })).toEqual({ ...effective, collapsed: false })
     expect(await store.getProject(project.id)).toEqual({ ...effective, collapsed: false })
   })

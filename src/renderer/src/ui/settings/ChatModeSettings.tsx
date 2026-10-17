@@ -1,9 +1,8 @@
 import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { AppSettings, NewThreadModelSelection, SpeechReplyConfig } from '@shared/types'
+import type { AppSettings, SpeechReplyConfig } from '@shared/types'
 import { CommitNumberInput } from '../CommitNumberInput'
 import { clampIntegerInput } from '../numberInput'
-import { SearchableOptionPicker } from '../SearchableOptionPicker'
 import { SpeechReplySettings } from '../speech/SpeechReplySettings'
 import {
   SETTINGS_COUNT_MIN,
@@ -23,32 +22,11 @@ interface ChatModeSettingsProps {
 export function ChatModeSettings({ settings, speechReply, onChange, onSpeechReplyChange }: ChatModeSettingsProps) {
   const { t } = useTranslation()
   const maxCallsId = useId()
-  const newThreadModelOptions = [
-    { value: 'prompt', label: t('settings.new_thread_model_prompt') },
-    { value: 'default', label: t('settings.new_thread_model_default') },
-    { value: 'current', label: t('settings.new_thread_model_current') }
-  ]
   const maxModelCallsPerRun = settings?.maxModelCallsPerRun ?? SETTINGS_MAX_MODEL_CALLS_DEFAULT
 
   return (
     <div className="settings-page-groups">
       <SettingsGroup title={t('settings.tabs.general')}>
-        <div className="ui-form-row ui-form-row-narrow">
-          <span>
-            <strong>{t('settings.new_thread_model_selection')}</strong>
-            <small>{t('settings.new_thread_model_selection_hint')}</small>
-          </span>
-          <SearchableOptionPicker
-            ariaLabel={t('settings.new_thread_model_selection')}
-            emptyLabel={t('settings.no_options')}
-            options={newThreadModelOptions}
-            searchable={false}
-            value={settings?.newThreadModelSelection ?? 'default'}
-            onChange={(newThreadModelSelection) => void onChange({
-              newThreadModelSelection: newThreadModelSelection as NewThreadModelSelection
-            })}
-          />
-        </div>
         <div className="ui-form-row ui-form-row-narrow">
           <label htmlFor={maxCallsId}>
             <strong>{t('settings.max_model_calls_per_run')}</strong>

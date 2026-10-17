@@ -14,13 +14,15 @@ Choose Help from the lower-left menu to read this guide in the right workspace. 
 2. Select a model in the toolbar at the bottom of the message input box.
 3. Type and send a message. Add attachments or select a project as needed.
 
+New conversations use the project model, then the global default, then the model selected before creating the conversation. If none is available, select a model before sending. Project models use the project reasoning selection; global defaults use the model's default reasoning; reusing the previous model retains its reasoning selection. Existing conversations and restored drafts keep their selection. Full prompt and request previews in the project editor follow the same order.
+
 During tool execution, one continuous shimmer moves across the entire tool header, including its icon, name, description, status indicators and controls, without affecting clicks or expansion. It stops when awaiting user approval or an answer, or when the call ends. The system's reduced-motion setting keeps the text static.
 
 ## Projects And Capabilities
 
 Enable **Customize capabilities** in the project editor to choose prompts, context, tools, skills, and subagents. Turning it off uses all enabled capabilities and retains custom choices. Settings manages source availability; there is no global default-capability page. Coding mode controls the development workflow without increasing access permissions.
 
-The default project only allows changes to its icon, color, tool access mode, model, and reasoning option. Its name, working directory, and other project settings use defaults, and all enabled capabilities apply. Create a regular project to customize folders, prompts, or capabilities.
+The default project name cannot be changed. All other settings work the same as for regular projects, including its icon, color, working folders, tool access mode, model and reasoning option, coding mode, and customized capabilities. Its initial working folder is the current system user's Documents folder, with no extra subfolder created; saved folder selections are preserved. Enable “Customize capabilities” to edit project and compression prompts and capability selections. Turning it off preserves those custom settings while using the default prompt behavior and all enabled capabilities.
 
 - File read, File write, and Memory expand into individual choices. Use each group switch to select or clear all items. Saved selections that are deleted or unavailable can still be deselected.
 - Every tool listed below requires a model that supports tool use with **Tool use** enabled. Context-only capabilities do not require tool use. Using a skill also requires tools for reading its instructions and performing its task.
@@ -210,6 +212,8 @@ Explicit invocation sends the unchanged skill file and its source path, keeping 
 
 OpenAI-compatible and Anthropic-compatible services are supported. Manage models in Settings > Model and switch between them below the message input.
 
+The settings list and model picker use the same two-line layout: the model name above, followed by the context limit, maximum output, compression threshold, and capability and reasoning icons below. An unset maximum output or disabled compression is shown as “—”.
+
 Changes to the model name, capabilities, context limits, extra parameters, and reasoning options remain drafts until you choose **Save**. Choosing **Cancel** or closing the editor discards those changes.
 
 Set Vision and Tool use to match the model's actual capabilities. Turning Tool use off prevents calls to built-in tools, MCP tools, and subagents. Profile, runtime information, project information, skill listings, and automatic memory recall still follow capability settings; saved choices are unchanged.
@@ -232,7 +236,7 @@ Subagents can work in the background. Select a subagent status entry to view its
 
 ## Runtime Environment And Variables
 
-Bundled commands in Runtime Environment is enabled by default and gives the Agent instructions for bundled rg. Detect System Environment updates information about system commands; bundled rg needs no detection.
+Bundled commands in Runtime Environment is enabled by default and gives the Agent instructions for bundled rg. Detect System Environment updates information about system commands; bundled rg needs no detection. The result is inserted at the last cursor position in Custom Environment Information, replacing any selected text.
 
 Custom Environment Information is enabled by default. If selected and empty at startup, it is filled by background detection without blocking startup. Existing content is preserved; deselecting it during detection discards the result.
 
@@ -334,7 +338,7 @@ Application backups include plugins and their data. Backups stop plugin backends
 
 ## Local Data And Backups
 
-**4.0 data change: previous projects and their settings, and input history (including pinned inputs), disappear from the interface after upgrading but can be restored manually as described below. Previous conversations and all long-term memory, including project memory, are no longer retained.** No automatic migration or import of pre-4.0 backups is provided. Global settings, project source files and user packages remain unchanged. Independent plugin data now lives in `db/plugins/`; the old `plugins_data/` directory is not loaded automatically and can be moved manually to restore it. Old-layout files stay on disk for now, but are not read, automatically deleted or included in new backups; review and remove residues through Data cleanup → Unknown files (unchecked by default).
+**Data changes when upgrading from a pre-4.0 version to 4.x: previous projects and their settings, and input history (including pinned inputs), disappear from the interface after upgrading but can be restored manually as described below. Previous conversations and all long-term memory, including project memory, are no longer retained.** No automatic migration or import of pre-4.0 backups is provided. Global settings, project source files and user packages remain unchanged. Independent plugin data now lives in `db/plugins/`; the old `plugins_data/` directory is not loaded automatically and can be moved manually to restore it. Old-layout files stay on disk for now, but are not read, automatically deleted or included in new backups; review and remove residues through Data cleanup → Unknown files (unchecked by default).
 
 To restore projects and input history, preferably before creating new data in 4.0, fully quit Anas, back up the original files, and move these two files from the data directory root into its `db/` subdirectory (create it if needed):
 

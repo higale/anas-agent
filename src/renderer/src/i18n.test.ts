@@ -4,7 +4,7 @@ import ts from 'typescript'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import en from '../../../data/lang/en.json'
 import zhCN from '../../../data/lang/zh-CN.json'
-import { initializeI18n } from './i18n'
+import i18next, { applyLanguagePreference, initializeI18n } from './i18n'
 
 function sourceFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -121,5 +121,25 @@ describe('renderer translations', () => {
     const snapshot = await initializeI18n(true)
     expect(snapshot.resources['zh-CN']).toEqual(zhCN)
     expect(document.documentElement.lang).toBe('zh-CN')
+  })
+
+  it('does not announce a language change when saved preferences resolve to the active language', async () => {
+    vi.stubGlobal('navigator', { language: 'en-US', languages: ['en-US'] })
+    vi.stubGlobal('document', { documentElement: { lang: '' } })
+    await initializeI18n(true)
+    const changed = vi.fn()
+    i18next.on('languageChanged', changed)
+    try {
+      for (const preference of ['en', 'en-US', 'system']) {
+        await expect(applyLanguagePreference(preference)).resolves.toBe('en')
+      }
+      expect(changed).not.toHaveBeenCalled()
+      expect(document.documentElement.lang).toBe('en')
+
+      vi.stubGlobal('navigator', { language: 'zh-CN', languages: ['zh-CN'] })
+      await expect(applyLanguagePreference('system')).resolves.toBe('zh-CN')
+      expect(changed).toHaveBeenCalledExactlyOnceWith('zh-CN')
+      expect(document.documentElement.lang).toBe('zh-CN')
+    } finally { i18next.off('languageChanged', changed) }
   })
 })

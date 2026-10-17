@@ -32,7 +32,6 @@ function config(): AppConfigSnapshot {
       theme: 'dark',
       fontSize: 14,
       chatContentWidth: 'narrow',
-      newThreadModelSelection: 'default',
       attachmentTextMaxChars: 1000,
       attachmentTextOverflow: 'truncate',
       logLevel: 'info',

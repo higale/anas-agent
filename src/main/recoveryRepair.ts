@@ -183,7 +183,7 @@ export function repairDocument(file: string, input: unknown): { value: RecordVal
     repair.fill(value, templates[file] as RecordValue)
     if (file === 'settings.json') {
       for (const [key, choices] of Object.entries({ theme: ['system', 'light', 'dark'], chat_content_width: ['narrow', 'wide', 'adaptive'],
-        diff_view_mode: ['inline', 'side_by_side'], new_thread_model_selection: ['default', 'prompt', 'current'], attachment_text_overflow: ['truncate', 'error'], log_level: ['trace', 'debug', 'info', 'warn', 'error', 'off'] })) {
+        diff_view_mode: ['inline', 'side_by_side'], attachment_text_overflow: ['truncate', 'error'], log_level: ['trace', 'debug', 'info', 'warn', 'error', 'off'] })) {
         repair.choice(value, key, choices, (settingsDefaults as RecordValue)[key] as string, 'settings')
       }
       for (const [key, min, max] of [['font_size', UI_FONT_SIZE_MIN, UI_FONT_SIZE_MAX], ['sidebar_width', 220, 420], ['workspace_panel_width', 320, Number.MAX_SAFE_INTEGER], ['log_retention_days', 0, 3650],

@@ -1,7 +1,7 @@
 import { userGuideId } from '@shared/helpDocuments'
 import { unwrapProjectResult } from '@shared/projectOperation'
 import { UserInputDialog } from './agent/UserInputDialog'
-import { FormEvent, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import { getLanguageOptions, systemLanguagePreference } from '../i18n'
 import {
@@ -182,6 +182,10 @@ export function App() {
   const selectedModelParameterPresetId = agent.activeThread
     ? agent.activeThread.modelParameterPresetId
     : draftModelParameterPresetId ?? undefined
+  const currentModelSelection = useMemo(() => ({
+    modelConfigId: selectedModelId,
+    modelParameterPresetId: selectedModelParameterPresetId ?? null
+  }), [selectedModelId, selectedModelParameterPresetId])
   const selectedPresetValid = !selectedModelParameterPresetId || selectedModel?.parameterPresets?.some(
     (preset) => preset.id === selectedModelParameterPresetId
   )
@@ -1428,6 +1432,7 @@ export function App() {
       />
       <ProjectDialog
         config={config}
+        currentModelSelection={currentModelSelection}
         open={projectDialogOpen}
         kind={projectDialogKind}
         project={editingProject}

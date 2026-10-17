@@ -21,7 +21,6 @@
   "theme": "system",
   "font_size": 14,
   "chat_content_width": "narrow",
-  "new_thread_model_selection": "default",
   "default_model_id": null,
   "attachment_text_max_chars": 200000,
   "attachment_text_overflow": "truncate",

@@ -1,12 +1,12 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { Eye, FileText, Settings2, Star, Wrench } from 'lucide-react'
+import { Check, Settings2, Star } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
 import { findProviderModelConfig, isSelectableModelConfig, resolveProviderModelConfig } from '@shared/modelConfig'
 import type { ModelProviderConfig, ResolvedModelConfig } from '@shared/types'
 import { DropdownMenuContent, DropdownMenuRoot, DropdownMenuTrigger } from '../DropdownMenuShell'
 import { NoFocusButton } from '../NoFocusButton'
-import { ModelParameterPresetBadge } from './ModelParameterPresetBadge'
+import { ModelListItemContent } from './ModelListItemContent'
 import { ProviderIcon } from './ProviderIcon'
 import { providerProtocolLabel } from './providerProtocol'
 
@@ -74,7 +74,6 @@ export function ModelPicker({
   const label = selectedId && (!selectedModel || !isSelectableModelConfig(selectedModel))
     ? t('chat.model_unavailable')
     : selectedModel?.displayName.trim() || selectedModel?.model.trim() || emptyLabel || t('chat.select_model')
-  const compactTokens = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 })
   function modelSummary(model: ResolvedModelConfig, location: 'trigger' | 'item'): string {
     const name = model.displayName.trim() || model.model.trim()
     const number = new Intl.NumberFormat(i18n.resolvedLanguage ?? i18n.language)
@@ -197,20 +196,6 @@ export function ModelPicker({
             focusRef.current?.focus()
           }}
         >
-          {onClear && (
-            <DropdownMenu.RadioGroup value={selectedModel?.id ?? ''}>
-              <DropdownMenu.RadioItem
-                className={`composer-model-item ui-list-item ui-menu-item ui-menu-item-row${!selectedModel ? ' ui-list-item-active active' : ''}`}
-                value=""
-                onSelect={() => {
-                  setOpen(false)
-                  window.requestAnimationFrame(onClear)
-                }}
-              >
-                {clearLabel ?? t('chat.clear_model_selection')}
-              </DropdownMenu.RadioItem>
-            </DropdownMenu.RadioGroup>
-          )}
           {providers.length === 0 ? (
             <DropdownMenu.Item className="composer-model-empty ui-menu-item ui-menu-item-row" disabled>
               {t('chat.no_available_models')}
@@ -283,56 +268,36 @@ export function ModelPicker({
                     onContextMenu={onSetDefault ? (event) => openContextMenu(event, model.id) : undefined}
                     onSelect={() => select(model.id)}
                   >
-                    <span className="composer-model-name ui-copy-stack">
-                      <span className="ui-row">
-                        <span className="composer-model-name ui-truncate">
-                          {model.displayName.trim() || model.model.trim()}
+                    <ModelListItemContent
+                      model={model}
+                      hideCapabilityTooltips={Boolean(contextMenu)}
+                      nameAccessory={model.id === defaultModelId && (
+                        <span className="composer-model-default-marker" aria-hidden="true" data-tooltip={t('chat.default_model')}>
+                          <Star size={13} fill="currentColor" />
                         </span>
-                        {model.id === defaultModelId && (
-                          <span
-                            className="composer-model-default-marker"
-                            aria-hidden="true"
-                            data-tooltip={t('chat.default_model')}
-                          >
-                            <Star size={13} fill="currentColor" />
-                          </span>
-                        )}
-                      </span>
-                      <small className="composer-model-details ui-row">
-                        <span className="ui-truncate">
-                          {compactTokens.format(model.maxContextTokens)} · {model.maxOutputTokens > 0 ? compactTokens.format(model.maxOutputTokens) : '—'}
-                          {' · '}{model.contextCompressionEnabled ? `${Math.round(model.contextCompressionThreshold * 100)}%` : '—'}
-                        </span>
-                        <span className="composer-model-capabilities ui-row">
-                          {[
-                            { Icon: FileText, label: t('chat.model_non_streaming'), visible: !model.stream },
-                            { Icon: Eye, label: `${t('settings.model_capability_vision')}: ${t('common.on')}`, visible: model.capabilities.vision },
-                            { Icon: Wrench, label: `${t('settings.model_capability_tool_use')}: ${t('common.on')}`, visible: model.capabilities.toolUse }
-                          ].filter(({ visible }) => visible).map(({ Icon, label }) => (
-                            <span
-                              key={label}
-                              className="ui-status-icon"
-                              aria-label={label}
-                              data-tooltip={contextMenu ? undefined : label}
-                            >
-                              <Icon size={13} aria-hidden="true" />
-                            </span>
-                          ))}
-                          <ModelParameterPresetBadge
-                            mode={model.parameterPresetMode}
-                            presetCount={model.parameterPresets?.length ?? 0}
-                          />
-                        </span>
-                      </small>
-                    </span>
+                      )}
+                    />
                   </DropdownMenu.RadioItem>
                 ))}
               </DropdownMenu.RadioGroup>
             </div>
           )}
-          {(onOpenModelSettings || onSetDefault) && <>
+          {(onClear || onOpenModelSettings || onSetDefault) && <>
             <DropdownMenu.Separator className="ui-menu-separator" />
             <div className="composer-model-footer">
+              {onClear && <DropdownMenu.RadioGroup className="composer-model-clear" value={selectedId ?? ''}>
+                <DropdownMenu.RadioItem
+                  className="ui-menu-item ui-menu-item-row"
+                  value=""
+                  onSelect={() => {
+                    setOpen(false)
+                    window.requestAnimationFrame(onClear)
+                  }}
+                >
+                  <span>{clearLabel ?? t('chat.clear_model_selection')}</span>
+                  <DropdownMenu.ItemIndicator><Check size={15} aria-hidden="true" /></DropdownMenu.ItemIndicator>
+                </DropdownMenu.RadioItem>
+              </DropdownMenu.RadioGroup>}
               {onOpenModelSettings && <DropdownMenu.Item
                 className="composer-model-settings ui-menu-item ui-menu-item-row"
                 onSelect={() => void onOpenModelSettings()}

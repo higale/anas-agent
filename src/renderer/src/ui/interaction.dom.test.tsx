@@ -1303,17 +1303,18 @@ describe('renderer interaction accessibility', () => {
     expect(onClose).toHaveBeenCalledOnce()
   })
 
-  it('limits the default workspace editor to appearance and model preferences', async () => {
+  it('edits all default workspace settings except its name and preserves drafts when customization is toggled', async () => {
     const user = userEvent.setup()
     const onSave = vi.fn().mockResolvedValue(undefined)
     const defaultWorkspace: Project = {
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, advancedSettings: true, prompt: '',
+ capabilities: { ...structuredClone(defaultCapabilities), memory: false }, restrictSubagents: false, codingMode: false, advancedSettings: true,
+      prompt: 'Saved project instructions', compressionPrompt: 'Saved summary: {conversation}',
       id: DEFAULT_WORKSPACE_PROJECT_ID,
       kind: 'workspace',
       name: 'Default Workspace',
       pinned: false,
       collapsed: false,
-      sourceFolders: ['/default-workspace'],
+      sourceFolders: ['/default-workspace', '/another-workspace'],
       createdAt: '2026-08-13T00:00:00.000Z',
       updatedAt: '2026-08-13T00:00:00.000Z'
     }
@@ -1332,12 +1333,30 @@ describe('renderer interaction accessibility', () => {
     expect(name).toHaveAttribute('readonly')
     await user.type(name, 'Changed')
     expect(name).toHaveValue('Default Workspace')
-    expect(screen.queryByRole('button', { name: 'project.add_folders' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /project.remove_folder/ })).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('project.project_prompt')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('project.advanced_settings')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('project.coding_mode')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'project.add_folders' })).toBeEnabled()
+    expect(screen.getByRole('region', { name: 'settings.capabilities' })).toBeVisible()
+    expect(screen.getByRole('checkbox', { name: 'project.advanced_settings' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'settings.capability_profile' })).toBeChecked()
+    await user.click(screen.getByRole('checkbox', { name: 'settings.capability_profile' }))
+    await user.click(screen.getByRole('checkbox', { name: 'capabilities.restrict_subagents' }))
+    await user.click(screen.getByRole('checkbox', { name: 'project.coding_mode' }))
+    await user.click(screen.getByRole('button', { name: 'project.set_primary_folder' }))
+    await user.click(screen.getAllByRole('button', { name: /project.remove_folder/ })[1])
+    expect(screen.queryByText('/default-workspace')).not.toBeInTheDocument()
+    const prompt = screen.getByRole('textbox', { name: 'project.project_prompt' })
+    expect(prompt).toHaveValue('Saved project instructions')
+    await user.clear(prompt)
+    await user.type(prompt, 'Edited project instructions')
+    await user.click(screen.getByRole('tab', { name: 'settings.view_context_compression_prompt' }))
+    const compression = screen.getByRole('textbox', { name: 'settings.view_context_compression_prompt' })
+    expect(compression).toHaveValue('Saved summary: {conversation}')
+    fireEvent.change(compression, { target: { value: 'Edited summary: {conversation}' } })
+    await user.click(screen.getByRole('checkbox', { name: 'project.advanced_settings' }))
     expect(screen.queryByLabelText('settings.capabilities')).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'settings.view_context_compression_prompt' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('checkbox', { name: 'project.advanced_settings' }))
+    expect(screen.getByRole('textbox', { name: 'project.project_prompt' })).toHaveValue('Edited project instructions')
+    expect(screen.getByRole('checkbox', { name: 'settings.capability_profile' })).not.toBeChecked()
     await user.click(screen.getByRole('button', { name: 'project.choose_icon' }))
     await user.click(screen.getAllByRole('button', { name: 'project.icon_option' })[PROJECT_ICON_NAMES.indexOf('braces')])
     await user.click(screen.getByRole('button', { name: 'common.done' }))
@@ -1346,9 +1365,10 @@ describe('renderer interaction accessibility', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'chat.select_model' })).toHaveTextContent('Friendly model'))
     await user.click(screen.getByRole('button', { name: 'common.save' }))
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
-      name: 'Default Workspace', sourceFolders: ['/default-workspace'],
+      name: 'Default Workspace', sourceFolders: ['/another-workspace'],
       icon: 'braces', modelConfigId: 'model-1', modelParameterPresetId: null,
-      advancedSettings: false, codingMode: false, prompt: '', capabilities: defaultCapabilities
+      advancedSettings: true, codingMode: true, prompt: 'Edited project instructions', compressionPrompt: 'Edited summary: {conversation}',
+      capabilities: { ...defaultCapabilities, memory: false, profile: false }, restrictSubagents: true
     }))
     expect(screen.getByText('common.default')).toHaveClass('project-default-badge')
     expect(screen.queryByText('project.primary_folder')).not.toBeInTheDocument()

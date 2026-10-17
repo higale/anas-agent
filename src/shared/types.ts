@@ -569,8 +569,6 @@ export interface SystemEnvironmentDetection {
   tools: DetectedSystemEnvironmentTool[]
 }
 
-export type NewThreadModelSelection = 'prompt' | 'default' | 'current'
-
 export interface AppSettings {
   profile: AppProfile
   speechReply: SpeechReplyConfig
@@ -578,7 +576,6 @@ export interface AppSettings {
   theme: string
   fontSize: number
   chatContentWidth: ChatContentWidth
-  newThreadModelSelection: NewThreadModelSelection
   attachmentTextMaxChars: number
   attachmentTextOverflow: AttachmentTextOverflowMode
   logLevel: RuntimeLogLevel

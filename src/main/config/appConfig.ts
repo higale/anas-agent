@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { CustomToolSave } from '@shared/customTools'
 import { listToolSnapshot, saveToolPackage, deleteToolPackage, moveToolPackage } from '../toolsStore'
 import { clampSpeechReplySpeed, defaultSpeechReplyVoice } from '@shared/speechText'
-import type { AppConfigSnapshot, AppProfile, AppProfileUpdate, AppSettings, AppSettingsUpdate, AttachmentTextOverflowMode, ChatContentWidth, McpServerConfigSave, McpServerUpdate, ModelProviderConfig, ModelProviderConfigSave, NewThreadModelSelection, ProviderModelConfigSave, ResolvedModelConfig, RuntimeLogLevel, SidebarCollapsedSections, SpeechReplyConfig, SubagentConfigSave } from '@shared/types'
+import type { AppConfigSnapshot, AppProfile, AppProfileUpdate, AppSettings, AppSettingsUpdate, AttachmentTextOverflowMode, ChatContentWidth, McpServerConfigSave, McpServerUpdate, ModelProviderConfig, ModelProviderConfigSave, ProviderModelConfigSave, ResolvedModelConfig, RuntimeLogLevel, SidebarCollapsedSections, SpeechReplyConfig, SubagentConfigSave } from '@shared/types'
 import { normalizeSidebarWidth, normalizeUiFontSize, normalizeWorkspacePanelWidth } from '@shared/uiPreferences'
 import { mcpServerConfigDetail, normalizeMcpServer, rawMcpServerFromSave, type McpServerConfig } from './mcpServerConfigMapper'
 import { modelProviderConfigDetail, normalizeModelProvider, normalizeProviderModel, rawModelProviderFromSave, rawProviderModelFromSave, resolveModelConfig } from './modelConfigMapper'
@@ -192,10 +192,6 @@ function normalizeChatContentWidth(value: unknown): ChatContentWidth {
   return value === 'wide' || value === 'adaptive' ? value : 'narrow'
 }
 
-function normalizeNewThreadModelSelection(value: unknown): NewThreadModelSelection {
-  return value === 'prompt' || value === 'current' ? value : 'default'
-}
-
 function normalizeSidebarCollapsedSections(raw: RawAppConfig): SidebarCollapsedSections {
   const sections = raw.settings?.sidebar_collapsed_sections
   if (!sections) throw new Error('Config setting settings.sidebar_collapsed_sections is missing.')
@@ -236,7 +232,6 @@ function normalizeSettings(raw: RawAppConfig): AppSettings {
     theme: normalizeTheme(settings.theme),
     fontSize: normalizeUiFontSize(settings.font_size),
     chatContentWidth: normalizeChatContentWidth(settings.chat_content_width),
-    newThreadModelSelection: normalizeNewThreadModelSelection(settings.new_thread_model_selection),
     attachmentTextMaxChars: normalizeAttachmentTextMaxChars(settings.attachment_text_max_chars),
     attachmentTextOverflow: normalizeAttachmentTextOverflow(settings.attachment_text_overflow),
     logLevel: normalizeRuntimeLogLevel(settings.log_level),
@@ -385,7 +380,6 @@ function rawSettingsFromSnapshot(snapshot: AppConfigSnapshot): RawAppSettings {
     theme: settings.theme,
     font_size: settings.fontSize,
     chat_content_width: settings.chatContentWidth,
-    new_thread_model_selection: settings.newThreadModelSelection,
     attachment_text_max_chars: settings.attachmentTextMaxChars,
     attachment_text_overflow: settings.attachmentTextOverflow,
     log_level: settings.logLevel,
@@ -840,7 +834,6 @@ export async function updateSettings(settings: AppSettingsUpdate): Promise<AppCo
         ? raw.settings?.font_size
         : normalizeUiFontSize(settings.fontSize),
       chat_content_width: settings.chatContentWidth ?? raw.settings?.chat_content_width,
-      new_thread_model_selection: settings.newThreadModelSelection ?? raw.settings?.new_thread_model_selection,
       attachment_text_max_chars: settings.attachmentTextMaxChars ?? raw.settings?.attachment_text_max_chars,
       attachment_text_overflow: settings.attachmentTextOverflow ?? raw.settings?.attachment_text_overflow,
       log_level: settings.logLevel ?? raw.settings?.log_level,

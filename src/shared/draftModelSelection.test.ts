@@ -5,7 +5,7 @@ import {
   reconcileDraftModelSelection
 } from './draftModelSelection'
 import { defaultModelConfig, findProviderModelConfig } from './modelConfig'
-import type { ModelProviderConfig, NewThreadModelSelection } from './types'
+import type { ModelProviderConfig } from './types'
 
 const model = {
   baseUrl: 'https://provider.example/v1',
@@ -27,19 +27,15 @@ describe('draft model selection', () => {
     }]
   }]
 
-  it.each<NewThreadModelSelection>(['current', 'default', 'prompt'])(
-    'prioritizes the project model and reasoning over the global %s strategy', (strategy) => {
-      const projectSelection = projectDraftModelSelection(providers, {
-        modelConfigId: 'project-model', modelParameterPresetId: 'thinking-off'
-      })
-      expect(newThreadDraftModelSelection({
-        settings: { newThreadModelSelection: strategy },
-        defaultModel: { ...model, id: 'global-default' }
-      }, { ...model, id: 'current' }, null, projectSelection)).toEqual({
-        modelConfigId: 'project-model', modelParameterPresetId: 'thinking-off', parameterPresetSource: 'explicit'
-      })
-    }
-  )
+  it('prioritizes the project model and reasoning over default and current selections', () => {
+    const projectSelection = projectDraftModelSelection(providers, {
+      modelConfigId: 'project-model', modelParameterPresetId: 'thinking-off'
+    })
+    expect(newThreadDraftModelSelection({ defaultModel: { ...model, id: 'global' } },
+      { ...model, id: 'current' }, null, projectSelection)).toEqual({
+      modelConfigId: 'project-model', modelParameterPresetId: 'thinking-off', parameterPresetSource: 'explicit'
+    })
+  })
 
   it('distinguishes an explicit empty project reasoning selection from the model default', () => {
     expect(projectDraftModelSelection(providers, {
@@ -57,153 +53,59 @@ describe('draft model selection', () => {
 
   it('resolves protocol-default reasoning options before validating the project selection', () => {
     const protocolProviders: ModelProviderConfig[] = [{
-      ...providers[0],
-      protocol: 'openai_responses',
+      ...providers[0], protocol: 'openai_responses',
       models: [{ ...providers[0].models[0], parameterPresetMode: 'protocol_default' }]
     }]
     const preset = findProviderModelConfig(protocolProviders, 'project-model')!.parameterPresets![0]
     expect(projectDraftModelSelection(protocolProviders, {
       modelConfigId: 'project-model', modelParameterPresetId: preset.id
-    })).toMatchObject({ modelParameterPresetId: preset.id, parameterPresetSource: 'explicit' })
+    })).toMatchObject({ modelParameterPresetId: preset.id })
   })
 
   it.each([
-    { project: undefined, candidates: providers },
-    { project: {}, candidates: providers },
-    { project: { modelConfigId: 'deleted' }, candidates: providers },
-    { project: { modelConfigId: 'project-model' }, candidates: [] },
-    { project: { modelConfigId: 'project-model' }, candidates: [{ ...providers[0], baseUrl: '' }] },
-    { project: { modelConfigId: 'project-model' }, candidates: [{ ...providers[0], models: [{ ...providers[0].models[0], model: '' }] }] }
-  ])('uses the unchanged global path for an absent or unavailable project model: %j', ({ project, candidates }) => {
-    const preferred = projectDraftModelSelection(candidates, project)
-    expect(preferred).toBeUndefined()
-    for (const strategy of ['current', 'default', 'prompt'] as const) {
-      const config = { settings: { newThreadModelSelection: strategy }, defaultModel: { ...model, id: 'global' } }
-      const current = { ...model, id: 'current' }
-      expect(newThreadDraftModelSelection(config, current, null, preferred))
-        .toEqual(newThreadDraftModelSelection(config, current, null))
+    undefined, {}, { modelConfigId: 'deleted' }
+  ])('skips an absent or deleted project preference: %j', (project) => {
+    expect(newThreadDraftModelSelection({ defaultModel: { ...model, id: 'global' } },
+      { ...model, id: 'current' }, null, projectDraftModelSelection(providers, project)))
+      .toMatchObject({ modelConfigId: 'global', modelParameterPresetId: 'thinking-on' })
+  })
+
+  it.each(['baseUrl', 'model'] as const)('skips an incomplete project %s', (field) => {
+    const candidates = [{ ...providers[0],
+      ...(field === 'baseUrl' ? { baseUrl: '' } : { models: [{ ...providers[0].models[0], model: '' }] })
+    }]
+    expect(projectDraftModelSelection(candidates, { modelConfigId: 'project-model' })).toBeUndefined()
+  })
+
+  it.each(['current', 'global'])('chooses the global default and its default reasoning before current %s', (currentId) => {
+    expect(newThreadDraftModelSelection({ defaultModel: { ...model, id: 'global' } },
+      { ...model, id: currentId }, 'thinking-off')).toEqual({
+      modelConfigId: 'global', modelParameterPresetId: 'thinking-on', parameterPresetSource: 'model-default'
+    })
+  })
+
+  it.each([undefined, { ...model, id: 'global', baseUrl: '' }, { ...model, id: 'global', model: '' }])(
+    'falls back to the current selection when the default is unavailable: %j', (defaultModel) => {
+      expect(newThreadDraftModelSelection({ defaultModel }, { ...model, id: 'current' }, 'thinking-off')).toEqual({
+        modelConfigId: 'current', modelParameterPresetId: 'thinking-off', parameterPresetSource: 'explicit'
+      })
     }
-  })
+  )
 
-  it('starts a new thread with the configured default model and its parameter default', () => {
-    expect(newThreadDraftModelSelection({
-      settings: { newThreadModelSelection: 'default' },
-      defaultModel: { id: 'model-1', ...model }
-    })).toEqual({
-      modelConfigId: 'model-1',
-      modelParameterPresetId: 'thinking-on',
-      parameterPresetSource: 'model-default'
+  it('preserves an explicit empty reasoning selection with the current model', () => {
+    expect(newThreadDraftModelSelection({}, { ...model, id: 'current' }, null)).toEqual({
+      modelConfigId: 'current', modelParameterPresetId: null, parameterPresetSource: 'explicit'
     })
   })
 
-  it('can preserve the current model or leave selection to the user', () => {
-    const currentModel = { id: 'model-2', ...model }
-
-    expect(newThreadDraftModelSelection({
-      settings: { newThreadModelSelection: 'current' }
-    }, currentModel, 'thinking-off')).toEqual({
-      modelConfigId: 'model-2',
-      modelParameterPresetId: 'thinking-off',
-      parameterPresetSource: 'explicit'
-    })
-    expect(newThreadDraftModelSelection({
-      settings: { newThreadModelSelection: 'prompt' }
-    }, currentModel)).toEqual({
-      modelConfigId: undefined,
-      modelParameterPresetId: null,
-      parameterPresetSource: 'model-default'
-    })
-  })
-
-  it('preserves an explicit empty parameter selection with the current model', () => {
-    expect(newThreadDraftModelSelection({
-      settings: { newThreadModelSelection: 'current' }
-    }, { id: 'model-2', ...model }, null)).toEqual({
-      modelConfigId: 'model-2',
-      modelParameterPresetId: null,
-      parameterPresetSource: 'explicit'
-    })
-  })
-
-  it('falls back from an unavailable current model to the default model', () => {
-    expect(newThreadDraftModelSelection({
-      settings: { newThreadModelSelection: 'current' },
-      defaultModel: { id: 'model-default', ...model },
-      providers: [{
-        baseUrl: 'https://first.example/v1',
-        models: [{ id: 'model-first', model: 'first-model', defaultParameterPresetId: undefined }]
-      }]
-    })).toEqual({
-      modelConfigId: 'model-default',
-      modelParameterPresetId: 'thinking-on',
-      parameterPresetSource: 'model-default'
-    })
-  })
-
-  it('falls back from an unavailable default to the current model', () => {
-    expect(newThreadDraftModelSelection({
-      settings: { newThreadModelSelection: 'default' },
-      defaultModel: {
-        id: 'model-default-incomplete',
-        baseUrl: 'https://default.example/v1',
-        model: '',
-        defaultParameterPresetId: undefined
-      },
-      providers: [{
-        baseUrl: 'https://first.example/v1',
-        models: [{ id: 'model-first', model: 'first-model', defaultParameterPresetId: undefined }]
-      }]
-    }, { id: 'model-current', ...model }, null)).toEqual({
-      modelConfigId: 'model-current',
-      modelParameterPresetId: null,
-      parameterPresetSource: 'explicit'
-    })
-  })
-
-  it('uses the first provider model when current and default are unavailable', () => {
-    expect(newThreadDraftModelSelection({
-      settings: { newThreadModelSelection: 'default' },
-      providers: [{
-        baseUrl: 'https://first.example/v1',
-        models: [{ id: 'model-first', model: 'first-model', defaultParameterPresetId: 'first-default' }]
-      }]
-    })).toEqual({
-      modelConfigId: 'model-first',
-      modelParameterPresetId: 'first-default',
-      parameterPresetSource: 'model-default'
-    })
-  })
-
-  it('skips incomplete current, default, and provider model candidates', () => {
-    expect(newThreadDraftModelSelection({
-      settings: { newThreadModelSelection: 'current' },
-      defaultModel: {
-        id: 'model-default-incomplete',
-        baseUrl: 'https://default.example/v1',
-        model: '',
-        defaultParameterPresetId: undefined
-      },
-      providers: [
-        {
-          baseUrl: '',
-          models: [{ id: 'model-first-incomplete', model: 'first', defaultParameterPresetId: undefined }]
-        },
-        {
-          baseUrl: 'https://second.example/v1',
-          models: [{ id: 'model-second', model: 'second', defaultParameterPresetId: 'second-default' }]
-        }
-      ]
-    }, {
-      id: 'model-current-incomplete',
-      baseUrl: '',
-      model: 'current',
-      defaultParameterPresetId: undefined
-    })).toEqual({
-      modelConfigId: 'model-second',
-      modelParameterPresetId: 'second-default',
-      parameterPresetSource: 'model-default'
-    })
-  })
+  it.each([undefined, { ...model, id: 'current', baseUrl: '' }, { ...model, id: 'current', model: '' }])(
+    'leaves the model unselected instead of choosing the first configured model: %j', (current) => {
+      const config = { defaultModel: undefined, providers }
+      expect(newThreadDraftModelSelection(config, current)).toEqual({
+        modelConfigId: undefined, modelParameterPresetId: null, parameterPresetSource: 'model-default'
+      })
+    }
+  )
 
   it('follows a changed default until the draft is manually changed', () => {
     expect(reconcileDraftModelSelection(model, {

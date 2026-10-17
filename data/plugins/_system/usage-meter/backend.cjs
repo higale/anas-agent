@@ -266,19 +266,17 @@ function renderWidget(content, language, displayMode) {
   const detailGroups = content.detailGroups ?? []
   const groupTexts = detailGroups.map(group => [group.summary, group.text].filter(Boolean).join('\n')).filter(Boolean)
   const lineExtras = line => [line.explanation, ...(line.breakdown ?? []).map(item => `${item.label}: ${item.value}`)].filter(Boolean).join('\n')
-  const detailsText = [...groupTexts, ...content.lines.filter(line => lineExtras(line))
-    .map(line => [content.lines.length > 1 ? line.compactLabel : '', lineExtras(line)].filter(Boolean).join('\n'))].join('\n\n')
-  const detailsButton = detailsText ? `<button class="ui-tool-button ui-tool-button-small" aria-label="${zh ? '详情' : 'Details'}" data-details="${escapeHtml(detailsText)}"><img src="assets/info.svg" alt=""></button>` : ''
-  const updated = content.updatedAt !== undefined ? `<small class="ui-field-hint">${zh ? '更新于' : 'Updated'} <time datetime="${new Date(content.updatedAt).toISOString()}">${escapeHtml(new Date(content.updatedAt).toLocaleTimeString(language))}</time></small>` : ''
+  const updated = content.updatedAt !== undefined ? `${zh ? '更新于' : 'Updated'}: ${new Date(content.updatedAt).toLocaleString(language)}` : ''
+  const details = escapeHtml([content.title, ...(content.notes ?? []), ...groupTexts,
+    ...content.lines.map(line => [line.label + ' ' + line.value, line.description, line.detail, lineExtras(line)].filter(Boolean).join('\n')),
+    updated, status].filter(Boolean).join('\n\n'))
   if (displayMode === 'compact') {
-    const details = [content.title, ...(content.notes ?? []), ...groupTexts, ...content.lines.map(line => [line.label + ' ' + line.value, line.description, line.detail, lineExtras(line)].filter(Boolean).join('\n')),
-      content.updatedAt !== undefined ? `${zh ? '更新于' : 'Updated'}: ${new Date(content.updatedAt).toLocaleString(language)}` : '', status].filter(Boolean).join('\n\n')
     const summary = content.lines.map(line => `${line.compactLabel} ${line.value}`).join(' · ') || content.emptyLabel
     const summaryHtml = content.lines.length && content.lines.every(line => line.progress !== undefined)
       ? `<span class="ui-numeric ui-adaptive-text"><span data-full-text>${escapeHtml(summary)}</span><span data-short-text>${escapeHtml(content.lines.map(line => line.value).join(' · '))}</span></span>`
       : `<span class="ui-numeric ui-truncate">${escapeHtml(summary)}</span>`
     return { title: content.title, html: `<div class="ui-stack ui-stack-tight"><div class="ui-row-between">
-      <span class="ui-row ui-row-tight" title="${escapeHtml(details)}" tabindex="0" aria-label="${escapeHtml(details)}">
+      <span class="ui-row ui-row-tight" title="${details}" tabindex="0" aria-label="${details}">
         <img src="assets/meter.svg" width="16" height="16" alt="">
         ${summaryHtml}
       </span>
@@ -295,13 +293,12 @@ function renderWidget(content, language, displayMode) {
     ${line.description ? `<small class="ui-field-hint">${escapeHtml(line.description)}</small>` : ''}
   </section>`).join('')
   return { title: content.title, html: `<div class="ui-stack ui-stack-tight">
-    <header class="ui-row-between"><span class="ui-truncate" title="${title}">${title}</span>
+    <header class="ui-row-between"><span class="ui-truncate" title="${details}" tabindex="0" aria-label="${details}">${title}</span>
       <span class="ui-row ui-row-tight">${refreshButton}${toggleButton}</span>
     </header>
     ${rows}${!content.lines.length && !content.error ? `<p class="ui-field-hint">${escapeHtml(content.emptyLabel ?? '')}</p>` : ''}
     ${notes}${controls}
     ${status ? `<p class="ui-field-hint" role="status">${escapeHtml(status)}</p>` : ''}
-    ${detailsButton ? `<footer class="ui-row-between">${updated || '<span></span>'}${detailsButton}</footer>` : updated}
   </div>` }
 }
 

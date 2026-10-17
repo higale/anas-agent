@@ -112,7 +112,7 @@ import {
 import { manualContextCompressionInput } from './manualCompressionMiddleware'
 import { isProjectRulesError } from './projectRules'
 import { createAgentModelResolver, isModelSelectionError, resolveSubagentModelSelection } from './modelSelection'
-import { modelContextKey } from '@shared/modelConfig'
+import { findProviderModelConfig, modelContextKey } from '@shared/modelConfig'
 import { isModelRequestChangedError } from './modelRequestValidation'
 import { ManagedCallService } from './managedCallService'
 import { cleanupUnresolvedBackgroundTasks, hasUnresolvedBackgroundTasks } from './backgroundTaskCleanup'
@@ -1284,16 +1284,17 @@ function runCheckpointFingerprint(state: AgentRunCheckpointState | undefined): s
 async function resolveAgentPreviewTarget(
   input: AgentSystemContextPreviewInput,
   synthetic: { id: string; title: string }
-): Promise<{ config: AppConfigSnapshot; thread: AgentThread; project: Project }> {
+): Promise<{ config: AppConfigSnapshot; thread: AgentThread; project: Project } | undefined> {
   const persisted = await getAppConfigSnapshot()
   const project = await prepareProjectPreview(input.project, input.projectId)
-  const selection = newThreadDraftModelSelection({
-    providers: persisted.providers,
-    defaultModel: persisted.defaultModel,
-    // A preview always needs a model, even when new chats prompt the user.
-    settings: { newThreadModelSelection: 'default' }
-  }, undefined, null, projectDraftModelSelection(persisted.providers, project))
-  if (!selection.modelConfigId) throw new Error('No selectable model is configured for this preview.')
+  const currentSelection = projectDraftModelSelection(persisted.providers, input.currentModelSelection)
+  const selection = newThreadDraftModelSelection(
+    persisted,
+    findProviderModelConfig(persisted.providers, currentSelection?.modelConfigId),
+    currentSelection?.modelParameterPresetId ?? null,
+    projectDraftModelSelection(persisted.providers, project)
+  )
+  if (!selection.modelConfigId) return undefined
   const now = new Date().toISOString()
   const thread: AgentThread = {
     id: synthetic.id,
@@ -2530,10 +2531,12 @@ export class AgentRuntime {
   async previewSystemContext(
     input: AgentSystemContextPreviewInput
   ): Promise<AgentSystemContextPreview> {
-    const { config, thread, project } = await resolveAgentPreviewTarget(input, {
+    const target = await resolveAgentPreviewTarget(input, {
       id: 'system-context-preview',
       title: 'System context preview'
     })
+    if (!target) return { content: '', unavailableReason: 'model_not_selected' }
+    const { config, thread, project } = target
     return {
       content: await captureAgentSystemPrompt(thread, this.database, config, project)
     }
@@ -2542,10 +2545,12 @@ export class AgentRuntime {
   async previewModelRequest(
     input: AgentModelRequestPreviewInput
   ): Promise<AgentModelRequestPreview> {
-    const { config, thread, project } = await resolveAgentPreviewTarget(input, {
+    const target = await resolveAgentPreviewTarget(input, {
       id: 'model-request-preview',
       title: 'Model request preview'
     })
+    if (!target) return { content: '', unavailableReason: 'model_not_selected' }
+    const { config, thread, project } = target
     return {
       content: await captureAgentModelRequest(thread, this.database, config, this.managedCalls, project)
     }

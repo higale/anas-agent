@@ -224,20 +224,20 @@ describe('application data directory', () => {
     expect(() => dataDir.resolveDataDirArgument(['Anas', '--data-dir', parse(home).root])).toThrow('filesystem root')
   })
 
-  it('uses the Documents directory and the data directory name without its leading dot for the default workspace', async () => {
+  it('uses the system Documents directory directly for the default workspace', async () => {
     const { appMock, dataDir, documents } = await loadDataDir({
       executablePath: '/Applications/Anas Work.app/Contents/MacOS/Anas'
     })
 
-    expect(dataDir.getDefaultWorkspaceDir()).toBe(join(documents, 'galeAnas Work'))
+    expect(dataDir.getDefaultWorkspaceDir()).toBe(documents)
     expect(appMock.getPath).toHaveBeenCalledWith('documents')
   })
 
-  it('uses the complete custom data directory name for the default workspace', async () => {
+  it('keeps the default workspace in Documents when using a custom data directory', async () => {
     const { dataDir, documents, home } = await loadDataDir()
     const customDataDir = join(home, 'research')
     dataDir.configureDataRuntime(['Anas', '--data-dir', customDataDir])
 
-    expect(dataDir.getDefaultWorkspaceDir()).toBe(join(documents, 'research'))
+    expect(dataDir.getDefaultWorkspaceDir()).toBe(documents)
   })
 })

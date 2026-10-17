@@ -6,7 +6,6 @@ import { app } from 'electron'
 import { renameSync } from 'node:fs'
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
-import { isDeepStrictEqual } from 'node:util'
 import { getDefaultWorkspaceDir, getProjectStoreFile } from './config/dataDir'
 import { PROJECT_ICON_COLORS, PROJECT_ICON_NAMES } from '@shared/projectAppearance'
 import { defaultCapabilities, defaultProjectSettings, defaultRestrictSubagents, parseCapabilities, serializeCapabilities, validateCapabilities } from '@shared/agentCapabilities'
@@ -55,23 +54,10 @@ function initialDefaultWorkspaceName(): string {
   return locale.toLowerCase().startsWith('zh') ? '默认项目' : 'Default Project'
 }
 
-function defaultWorkspaceSettings() {
-  return {
-    compressionPrompt: undefined,
-    name: initialDefaultWorkspaceName(),
-    sourceFolders: [getDefaultWorkspaceDir()],
-    ...defaultProjectSettings,
-    capabilities: structuredClone(defaultCapabilities),
-    restrictSubagents: defaultRestrictSubagents
-  }
-}
-
-function applyDefaultWorkspacePolicy(store: StoredProjects): StoredProjects {
-  const settings = defaultWorkspaceSettings()
-  // The default workspace always follows application defaults, regardless of saved overrides.
-  // Keep the persisted v0 format readable; reading alone does not rewrite the original file.
+function applyDefaultWorkspaceName(store: StoredProjects): StoredProjects {
+  const name = initialDefaultWorkspaceName()
   return { ...store, projects: store.projects.map(project => project.id === DEFAULT_WORKSPACE_PROJECT_ID
-    ? { ...project, ...settings }
+    ? { ...project, name }
     : project) }
 }
 
@@ -171,7 +157,7 @@ function serializeProjectStore(store: StoredProjects) {
 async function readStore(): Promise<StoredProjects> {
   const path = getProjectStoreFile()
   try {
-    return await applyDefaultWorkspacePolicy(await readProjectStoreFile(path))
+    return applyDefaultWorkspaceName(await readProjectStoreFile(path))
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       let pending = projectInitializations.get(path)
@@ -181,7 +167,7 @@ async function readStore(): Promise<StoredProjects> {
         void pending.finally(() => { projectInitializations.delete(path) }).catch(() => undefined)
       }
       await pending
-      return applyDefaultWorkspacePolicy(await readProjectStoreFile(path))
+      return applyDefaultWorkspaceName(await readProjectStoreFile(path))
     }
     throw error
   }
@@ -350,15 +336,12 @@ export async function prepareProjectPreview(request: ProjectCreateRequest, proje
     throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Project request is invalid.')
   }
   const timestamp = now()
-  if (projectId === DEFAULT_WORKSPACE_PROJECT_ID) {
-    if (request.kind !== 'workspace') throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'The default project must be a workspace.')
-    const project = await getProject(projectId)
-    const selection = validateProjectModelSelection(request)
-    return { ...project, ...(project.kind === 'workspace' ? { accessMode: validateProjectAccessMode(request.accessMode) } : {}), modelConfigId: selection.modelConfigId, modelParameterPresetId: selection.modelParameterPresetId }
+  if (projectId === DEFAULT_WORKSPACE_PROJECT_ID && request.kind !== 'workspace') {
+    throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'The default project must be a workspace.')
   }
   const common = {
     id: projectId,
-    name: validateProjectName(request.name),
+    name: projectId === DEFAULT_WORKSPACE_PROJECT_ID ? initialDefaultWorkspaceName() : validateProjectName(request.name),
     ...validateProjectModelSelection(request),
     pinned: false,
     collapsed: false,
@@ -414,11 +397,8 @@ export async function updateProject(projectId: string, request: ProjectUpdateReq
     const current = store.projects.find((project) => project.id === projectId)
     if (!current) throw new ProjectOperationFailure({ code: 'not_found' }, 'Project was not found.')
     if (current.kind !== request.kind) throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Project kind cannot be changed.')
-    if (projectId === DEFAULT_WORKSPACE_PROJECT_ID) {
-      const fixed = defaultWorkspaceSettings()
-      if (Object.entries(fixed).some(([key, value]) => !isDeepStrictEqual(request[key as keyof ProjectUpdateRequest], value))) {
-        throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Only the default project icon, tool access mode and model can be changed.')
-      }
+    if (projectId === DEFAULT_WORKSPACE_PROJECT_ID && name !== current.name) {
+      throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'The default project name cannot be changed.')
     }
     if (name !== current.name && hasDuplicateName(store.projects, name, projectId)) {
       throw new ProjectOperationFailure({ code: 'duplicate_name', name }, `A project named "${name}" already exists.`)
@@ -438,8 +418,7 @@ export async function updateProject(projectId: string, request: ProjectUpdateReq
           ...modelSelection,
           kind: 'workspace',
           name,
-          sourceFolders: projectId === DEFAULT_WORKSPACE_PROJECT_ID && current.kind === 'workspace'
-            ? current.sourceFolders : await validateProjectSourceFolders(request.sourceFolders),
+          sourceFolders: await validateProjectSourceFolders(request.sourceFolders),
           ...projectCapabilities(request),
           updatedAt
         }

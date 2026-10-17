@@ -54,6 +54,7 @@ export function EnvironmentSettingsSections({
   const environmentContextRef = useRef(environmentContext)
   const customInformationDraftRef = useRef(environmentContext.customInformation)
   const savedCustomInformationRef = useRef(environmentContext.customInformation)
+  const customInformationSelectionRef = useRef<{ value: string; start: number; end: number } | null>(null)
   const [detectingEnvironment, setDetectingEnvironment] = useState(false)
   const windows = document.documentElement.dataset.platform === 'win32'
   environmentContextRef.current = environmentContext
@@ -69,6 +70,12 @@ export function EnvironmentSettingsSections({
     customInformationDraftRef.current = value
   }
 
+  function rememberCustomInformationSelection(input: HTMLTextAreaElement): void {
+    customInformationSelectionRef.current = {
+      value: input.value, start: input.selectionStart, end: input.selectionEnd
+    }
+  }
+
   function saveEnvironment(update: Partial<EnvironmentContextSettings>): void | Promise<void> {
     const next = { ...environmentContextRef.current, ...update }
     environmentContextRef.current = next
@@ -77,6 +84,9 @@ export function EnvironmentSettingsSections({
 
   async function detectEnvironment(): Promise<void> {
     if (detectingEnvironment) return
+    const draft = customInformationDraftRef.current
+    const selection = customInformationSelectionRef.current
+    const target = selection?.value === draft ? selection : { value: draft, start: draft.length, end: draft.length }
     setDetectingEnvironment(true)
     try {
       const detection = await window.gale.app.detectSystemEnvironment()
@@ -84,11 +94,15 @@ export function EnvironmentSettingsSections({
         notice.info(t('settings.environment_detection_empty'))
         return
       }
-      const current = customInformationDraftRef.current.trimEnd()
-      const customInformation = current
-        ? `${current}\n\n${detection.content}`
-        : detection.content
+      const current = customInformationDraftRef.current
+      if (current !== target.value) {
+        notice.info(t('settings.environment_detection_content_changed'))
+        return
+      }
+      const customInformation = `${current.slice(0, target.start)}${detection.content}${current.slice(target.end)}`
+      const caret = target.start + detection.content.length
       customInformationDraftRef.current = customInformation
+      customInformationSelectionRef.current = { value: customInformation, start: caret, end: caret }
       await saveEnvironment({ customInformation })
     } catch {
       notice.error(t('settings.environment_detection_failed'))
@@ -161,6 +175,8 @@ export function EnvironmentSettingsSections({
               value={environmentContext.customInformation}
               onInput={onAutosizeInput}
               onDraftChange={updateCustomInformationDraft}
+              onSelect={(event) => rememberCustomInformationSelection(event.currentTarget)}
+              onBlur={(event) => rememberCustomInformationSelection(event.currentTarget)}
               onCommit={(customInformation) => void saveEnvironment({ customInformation })}
             />
           </div>

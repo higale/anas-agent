@@ -4,9 +4,9 @@ const { verifyUnifiedPanels } = require('./electron-panels.cjs')
 const assert = require('node:assert/strict')
 const { execFile } = require('node:child_process')
 const { promisify } = require('node:util')
-const { mkdtemp, rm, writeFile } = require('node:fs/promises')
+const { mkdir, mkdtemp, rm, writeFile } = require('node:fs/promises')
 const { tmpdir } = require('node:os')
-const { basename, join, resolve } = require('node:path')
+const { join, resolve } = require('node:path')
 const { source: axeSource } = require('axe-core')
 const { _electron: electron } = require('playwright')
 const { expect } = require('playwright/test')
@@ -547,7 +547,7 @@ async function verifyProjectModelSelection(electronApplication) {
   const page = await electronApplication.firstWindow()
   const fixture = await page.evaluate(async () => {
     const api = globalThis.gale.config
-    await api.updateSettings({ language: 'en', theme: 'dark', newThreadModelSelection: 'prompt' })
+    await api.updateSettings({ language: 'en', theme: 'dark' })
     const snapshot = await api.saveModelProvider({
       name: 'E2E Models', protocol: 'openai_chat_completions', baseUrl: 'https://model-test.invalid/v1',
       apiKey: '', parameters: {}
@@ -570,7 +570,8 @@ async function verifyProjectModelSelection(electronApplication) {
     const models = config.providers.find((provider) => provider.id === providerId).models
     const globalId = models.find((model) => model.displayName === 'Global Model').id
     const preferredId = models.find((model) => model.displayName === 'Project Model').id
-    await api.selectDefaultModel(globalId)
+    await api.selectDefaultModel(null)
+    await globalThis.gale.agent.workspace.set({ mode: 'new_thread', projectId: 'default-workspace', modelParameterPresetId: null })
     const defaultProjectName = (await globalThis.gale.projects.list()).find(project => project.id === 'default-workspace').name
     return { providerId, globalId, preferredId, defaultProjectName }
   })
@@ -578,6 +579,10 @@ async function verifyProjectModelSelection(electronApplication) {
   const composerModel = page.locator('form .composer-model-trigger')
   const composerReasoning = page.locator('form .composer-model-parameter-preset-trigger')
   const dialog = page.locator('.project-dialog')
+  await expect(composerModel).toHaveText('Select model')
+  await page.evaluate(id => globalThis.gale.config.selectDefaultModel(id), fixture.globalId)
+  await page.locator('.project-thread-group[data-default-workspace] .project-thread-new-chat').click()
+  await expect(composerModel).toHaveText('Global Model')
   async function verifyModelPosition() {
     const groupBox = await dialog.locator('.composer-model-selection-group').boundingBox()
     const rowBox = await dialog.locator('.composer-model-selection-group').locator('..').boundingBox()
@@ -695,7 +700,7 @@ async function verifyProjectModelSelection(electronApplication) {
   assert.equal(project.modelParameterPresetId, 'off')
   await page.locator('.project-picker-trigger').click()
   await page.locator('.project-picker-item').filter({ hasText: fixture.defaultProjectName }).click()
-  await expect(composerModel).toHaveText('Select model')
+  await expect(composerModel).toHaveText('Global Model')
   await page.locator('.project-picker-trigger').click()
   await page.locator('.project-picker-item').filter({ hasText: 'Model preference E2E' }).click()
   await expect(composerModel).toHaveText('Project Model')
@@ -731,9 +736,27 @@ async function verifyProjectModelSelection(electronApplication) {
   await dialog.locator('button[type="submit"]').click()
   await expect(dialog).not.toBeVisible()
   await projectGroup.locator('.project-thread-new-chat').click()
-  await expect(composerModel).toHaveText('Select model')
+  await expect(composerModel).toHaveText('Global Model')
 
-  // Restore the preference, then remove its model; prompt/default paths must remain unchanged.
+  // Without a default, retain the preceding model and reasoning across new chats and reloads.
+  await page.evaluate(() => globalThis.gale.config.selectDefaultModel(null))
+  await composerModel.click()
+  await page.getByRole('menuitemradio', { name: /^Project Model/ }).click()
+  await composerReasoning.click()
+  await page.getByRole('menuitemradio', { name: 'Thinking off', exact: true }).click()
+  await projectGroup.locator('.project-thread-new-chat').click()
+  await expect(composerModel).toHaveText('Project Model')
+  await expect(composerReasoning).toHaveText('Thinking off')
+  await page.reload()
+  await expect(composerModel).toHaveText('Project Model')
+  await expect(composerReasoning).toHaveText('Thinking off')
+  await page.evaluate(id => globalThis.gale.config.selectDefaultModel(id), fixture.globalId)
+  await expect(composerModel).toHaveText('Project Model')
+  await projectGroup.locator('.project-thread-new-chat').click()
+  await expect(composerModel).toHaveText('Global Model')
+  await expect(composerReasoning).toHaveText('Thinking on')
+
+  // A removed project model falls back to the global default.
   await editProject()
   await dialog.locator('.composer-model-trigger').click()
   await page.getByRole('menuitemradio', { name: /^Project Model/ }).click()
@@ -744,9 +767,7 @@ async function verifyProjectModelSelection(electronApplication) {
     await globalThis.gale.config.deleteProviderModel(providerId, preferredId)
   }, fixture)
   await page.reload()
-  await expect(composerModel).toHaveText('Select model')
-  await page.evaluate(async () => globalThis.gale.config.updateSettings({ newThreadModelSelection: 'default' }))
-  await page.reload()
+  await expect(composerModel).toHaveText('Global Model')
   await projectGroup.locator('.project-thread-new-chat').click()
   await expect(composerModel).toHaveText('Global Model')
 }
@@ -1092,6 +1113,7 @@ async function verifyCodeReview(electronApplication) {
 }
 
 async function main() {
+  const projectModelsOnly = process.argv.includes('--project-model-selection-only')
   if (process.argv.includes('--cleanup-only')) {
     await verifyDataCleanup(launchApplication)
     return
@@ -1191,7 +1213,7 @@ async function main() {
     await verifyPtyLifecycle(launchApplication)
     return
   }
-  if (!process.argv.includes('--changes-only') && !process.argv.includes('--workspace-only')) {
+  if (!projectModelsOnly && !process.argv.includes('--changes-only') && !process.argv.includes('--workspace-only')) {
     await verifyCurrentData(launchApplication)
     await verifyDataCleanup(launchApplication)
     await verifyPluginTransactions(launchApplication)
@@ -1206,19 +1228,31 @@ async function main() {
     await verifyMainWindowLifecycle(launchApplication)
     await verifyAttachmentPreviews(launchApplication)
   }
-  if (!packagedExecutable && !process.argv.includes('--changes-only') && !process.argv.includes('--workspace-only')) await verifyEnvironmentStartup(repositoryRoot, electronExecutable)
+  if (!projectModelsOnly && !packagedExecutable && !process.argv.includes('--changes-only') && !process.argv.includes('--workspace-only')) await verifyEnvironmentStartup(repositoryRoot, electronExecutable)
   const testHome = await mkdtemp(join(tmpdir(), 'anas-electron-e2e-'))
   let electronApplication
-  let testWorkspace
   try {
     electronApplication = await launchApplication(testHome)
     const page = await electronApplication.firstWindow()
     await page.locator('[data-agent-composer-input]').waitFor()
-    const workspace = await page.evaluate(async () =>
+    const defaultWorkspace = await page.evaluate(async () =>
       (await globalThis.gale.projects.list()).find(project => project.id === 'default-workspace').sourceFolders[0])
-    const expectedWorkspace = join(await electronApplication.evaluate(({ app }) => app.getPath('documents')), basename(testHome))
-    assert.equal(resolve(workspace), resolve(expectedWorkspace), 'Only the isolated profile workspace may contain test files.')
-    testWorkspace = resolve(expectedWorkspace)
+    const documents = await electronApplication.evaluate(({ app }) => app.getPath('documents'))
+    assert.equal(resolve(defaultWorkspace), resolve(documents), 'New default projects must use Documents directly.')
+    // All writes and cleanup must stay in the isolated fixture, never the user's Documents.
+    const workspace = join(testHome, 'workspace')
+    await mkdir(workspace)
+    await page.evaluate(async (folder) => {
+      const project = (await globalThis.gale.projects.list()).find(project => project.id === 'default-workspace')
+      const result = await globalThis.gale.projects.update(project.id, { ...project, sourceFolders: [folder] })
+      if (result.status !== 'ok') throw new Error(`Could not isolate test workspace: ${JSON.stringify(result)}`)
+    }, workspace)
+    await page.reload()
+    if (projectModelsOnly) {
+      await verifyProjectModelSelection(electronApplication)
+      console.log('New conversation model selection passed: project, default, previous, unselected, reasoning, deleted models and restored drafts.')
+      return
+    }
     const git = (...args) => promisify(execFile)('git', args, { cwd: workspace })
     await git('init', '-b', 'main')
     await git('config', 'user.name', 'Anas E2E')
@@ -1252,7 +1286,6 @@ async function main() {
   } finally {
     await electronApplication?.close().catch(() => undefined)
     await rm(testHome, { recursive: true, force: true })
-    if (testWorkspace) await rm(testWorkspace, { recursive: true, force: true })
   }
   await verifyPtyLifecycle(launchApplication)
   await verifyToolArguments(launchApplication)

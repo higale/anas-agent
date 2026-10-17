@@ -5,6 +5,7 @@ import { NoFocusButton } from '../NoFocusButton'
 import { SettingsListActions } from '../settings/SettingsListActions'
 import { UI_ICON_SIZE_LARGE } from '../uiConstants'
 import { ModelListUrlPopover } from './ModelListUrlPopover'
+import { ModelListItemContent } from './ModelListItemContent'
 import type { ModelListSettingsUpdate } from './ModelListUrlPopover'
 
 interface ProviderModelListProps {
@@ -58,24 +59,25 @@ export function ProviderModelList({
           <div className="ui-empty-state ui-empty-state-compact">{t('settings.no_models_configured')}</div>
         )}
         {provider.models.map((model) => {
-          const name = model.displayName.trim() || model.model || t('settings.no_model_id')
+          const name = model.displayName.trim() || model.model.trim() || t('settings.no_model_id')
           const selected = model.index === selectedIndex
           return (
             <div
               className={selected
-                ? 'provider-model-item ui-list-item ui-list-item-compact ui-list-item-row ui-list-item-action-host ui-list-item-active active'
-                : 'provider-model-item ui-list-item ui-list-item-compact ui-list-item-row ui-list-item-action-host'}
+                ? 'provider-model-item ui-list-item ui-list-item-row ui-list-item-action-host ui-list-item-active active'
+                : 'provider-model-item ui-list-item ui-list-item-row ui-list-item-action-host'}
               key={model.id}
             >
               <button
                 aria-selected={selected}
+                aria-label={name}
                 className="provider-model-select ui-list-item-main"
                 onClick={() => void onSelect(model.index)}
                 onDoubleClick={() => void onEdit(model.index)}
                 role="option"
                 type="button"
               >
-                <span className="ui-truncate">{name}</span>
+                <ModelListItemContent model={model} />
               </button>
               <div className="ui-list-item-action-wrap">
                 <NoFocusButton

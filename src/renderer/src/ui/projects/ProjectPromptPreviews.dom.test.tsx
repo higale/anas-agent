@@ -31,7 +31,6 @@ const settings = {
   theme: 'dark',
   fontSize: 14,
   chatContentWidth: 'narrow',
-  newThreadModelSelection: 'default',
   attachmentTextMaxChars: 200_000,
   attachmentTextOverflow: 'truncate',
   logLevel: 'info',
@@ -105,6 +104,34 @@ describe('model request preview', () => {
     expect(contextMocks.previewModelRequest).not.toHaveBeenCalled()
     await user.keyboard('{Escape}')
     await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
+  it.each([
+    ['preview', 'settings.view_effective_system_context'],
+    ['previewModelRequest', 'settings.view_model_request']
+  ] as const)('passes the current selection to %s and asks for a model when none is available', async (method, label) => {
+    contextMocks[method].mockResolvedValue({ content: '', unavailableReason: 'model_not_selected' })
+    const currentModelSelection = { modelConfigId: 'current', modelParameterPresetId: null }
+    render(<ProjectPromptPreviews project={project} settings={settings} currentModelSelection={currentModelSelection} />)
+    await userEvent.click(screen.getByRole('button', { name: 'common.more' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: label }))
+    expect(await screen.findByText('settings.preview_select_model')).toBeInTheDocument()
+    expect(contextMocks[method]).toHaveBeenCalledWith(expect.objectContaining({ project, settings, currentModelSelection }))
+    expect(screen.getByRole('button', { name: 'common.copy' })).toBeDisabled()
+  })
+
+  it.each([
+    ['preview', 'settings.view_effective_system_context', 'settings.effective_system_context_failed'],
+    ['previewModelRequest', 'settings.view_model_request', 'settings.model_request_failed']
+  ] as const)('shows a localized failure for %s without displaying diagnostic text', async (method, label, failure) => {
+    contextMocks[method].mockRejectedValue(new Error('Internal diagnostic text'))
+    render(<ProjectPromptPreviews project={project} settings={settings} />)
+    await userEvent.click(screen.getByRole('button', { name: 'common.more' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: label }))
+    expect(await screen.findByText(failure)).toBeInTheDocument()
+    expect(screen.queryByText('Internal diagnostic text')).not.toBeInTheDocument()
+    expect(screen.queryByText('settings.preview_select_model')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'common.copy' })).toBeDisabled()
   })
 
   it('uses the current coding mode in the open compression preview', async () => {

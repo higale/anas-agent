@@ -177,7 +177,6 @@ function config(settings: Partial<AppConfigSnapshot['settings']> = {}): AppConfi
       theme: 'dark',
       fontSize: 14,
       chatContentWidth: 'narrow',
-      newThreadModelSelection: 'default',
       attachmentTextMaxChars: 1000,
       attachmentTextOverflow: 'truncate',
       logLevel: 'info',

@@ -11,7 +11,8 @@ import {
   type ProjectCreateRequest,
   type ProjectIconColor,
   type ProjectIconName,
-  type ProjectKind
+  type ProjectKind,
+  type ProjectModelSelection
 } from '@shared/types'
 import { findProviderModelConfig } from '@shared/modelConfig'
 import { unwrapProjectResult } from '@shared/projectOperation'
@@ -43,11 +44,12 @@ interface ProjectDialogProps {
   kind: ProjectCreationKind
   project?: Project
   config?: AppConfigSnapshot
+  currentModelSelection?: ProjectModelSelection
   onClose: () => void
   onSave: (request: ProjectCreateRequest) => Promise<Project>
 }
 
-export function ProjectDialog({ open, kind, project, config, onClose, onSave }: ProjectDialogProps) {
+export function ProjectDialog({ open, kind, project, config, currentModelSelection, onClose, onSave }: ProjectDialogProps) {
   const { t } = useTranslation()
   const nameInputId = useId()
   const promptInputId = useId()
@@ -97,25 +99,25 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
 
   useEffect(() => {
     if (!open) return
-    const initialCodingMode = defaultWorkspace ? defaultProjectSettings.codingMode : project?.kind === 'workspace' ? project.codingMode : kind === 'coding' || defaultProjectSettings.codingMode
+    const initialCodingMode = project?.kind === 'workspace' ? project.codingMode : kind === 'coding' || defaultProjectSettings.codingMode
     setName(project?.name ?? '')
     setIcon(project ? project.icon : initialCodingMode ? defaultProjectIcon(projectKind, initialCodingMode) : undefined)
     setIconColor(project?.iconColor)
     setSourceFolders(project?.kind === 'workspace' ? project.sourceFolders : [])
-    setPrompt(defaultWorkspace ? defaultProjectSettings.prompt : project?.prompt ?? defaultProjectSettings.prompt)
-    setAdvancedSettings(defaultWorkspace ? defaultProjectSettings.advancedSettings : project?.kind === 'workspace' ? project.advancedSettings : defaultProjectSettings.advancedSettings)
+    setPrompt(project?.prompt ?? defaultProjectSettings.prompt)
+    setAdvancedSettings(project?.kind === 'workspace' ? project.advancedSettings : defaultProjectSettings.advancedSettings)
     setCodingMode(initialCodingMode)
-    setCapabilities(structuredClone(defaultWorkspace ? defaultCapabilities : project?.kind === 'workspace' ? project.capabilities : defaultCapabilities))
-    setRestrictSubagents(defaultWorkspace ? defaultRestrictSubagents : project?.kind === 'workspace' ? project.restrictSubagents : defaultRestrictSubagents)
+    setCapabilities(structuredClone(project?.kind === 'workspace' ? project.capabilities : defaultCapabilities))
+    setRestrictSubagents(project?.kind === 'workspace' ? project.restrictSubagents : defaultRestrictSubagents)
     setAccessMode(project?.kind === 'workspace' ? project.accessMode ?? 'read_only_allowed' : 'read_only_allowed')
     setModelConfigId(project?.modelConfigId)
     setModelParameterPresetId(project?.modelParameterPresetId)
-    setCompressionPrompt(!defaultWorkspace && project?.kind === 'workspace' ? project.compressionPrompt ?? '' : '')
+    setCompressionPrompt(project?.kind === 'workspace' ? project.compressionPrompt ?? '' : '')
     setPromptTab(project?.kind === 'workspace' && project.advancedSettings ? 'project' : 'compression')
     setBusy(false)
     dragDepthRef.current = 0
     setDragActive(false)
-  }, [open, project, kind, projectKind, defaultWorkspace])
+  }, [open, project, kind, projectKind])
 
   function loadDefaultCompressionPrompt(): void {
     const code = resolveLanguagePreference(config?.settings.language)
@@ -131,7 +133,7 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
   }
 
   useEffect(() => {
-    if (!open || simpleChat || defaultWorkspace) return
+    if (!open || simpleChat) return
     let disposed = false
     let receivedMcpStatus = false
     setMcpStatus(undefined)
@@ -147,29 +149,28 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
         setRuntimeToolStatus(tools)
       }).catch((reason) => { if (!disposed) notice.error(t('chat.failed_load_app'), { description: projectErrorDescription(reason, t) }) })
     return () => { disposed = true; unsubscribe() }
-  }, [open, simpleChat, defaultWorkspace, project?.id, t])
+  }, [open, simpleChat, project?.id, t])
 
   useEffect(() => {
-    if (!open || simpleChat || defaultWorkspace) return
+    if (!open || simpleChat) return
     let disposed = false
     setSkills(undefined)
     void window.gale.skills.get(project?.id, sourceFolders)
       .then((snapshot) => { if (!disposed) setSkills(snapshot) })
       .catch((reason) => { if (!disposed) notice.error(t('chat.failed_load_app'), { description: projectErrorDescription(reason, t) }) })
     return () => { disposed = true }
-  }, [open, simpleChat, defaultWorkspace, project?.id, sourceFolders, t])
+  }, [open, simpleChat, project?.id, sourceFolders, t])
   useEffect(() => {
     let cancelled = false
     setProjectTools([])
-    if (open && !simpleChat && !defaultWorkspace) void window.gale.tools.get(project?.id, sourceFolders).then(snapshot => {
+    if (open && !simpleChat) void window.gale.tools.get(project?.id, sourceFolders).then(snapshot => {
       if (!cancelled) setProjectTools(snapshot.tools)
     }).catch(error => { if (!cancelled) notice.error(t('custom_tools.update_failed'), { description: String(error) }) })
     return () => { cancelled = true }
-  }, [open, simpleChat, defaultWorkspace, project?.id, sourceFolders, config?.customTools, t])
+  }, [open, simpleChat, project?.id, sourceFolders, config?.customTools, t])
 
 
   function appendSourceFolders(folders: string[]): void {
-    if (defaultWorkspace) return
     if (!editing && sourceFolders.length === 0 && folders.length > 0) {
       setName((current) => current.trim() ? current : getSourceFolderName(folders[0]))
     }
@@ -191,14 +192,14 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
   }
 
   function handleDragEnter(event: DragEvent<HTMLDivElement>): void {
-    if (defaultWorkspace || busy || !dataTransferHasFiles(event.dataTransfer)) return
+    if (busy || !dataTransferHasFiles(event.dataTransfer)) return
     event.preventDefault()
     dragDepthRef.current += 1
     setDragActive(true)
   }
 
   function handleDragOver(event: DragEvent<HTMLDivElement>): void {
-    if (defaultWorkspace || busy || !dataTransferHasFiles(event.dataTransfer)) return
+    if (busy || !dataTransferHasFiles(event.dataTransfer)) return
     event.preventDefault()
     event.dataTransfer.dropEffect = 'copy'
     setDragActive(true)
@@ -216,7 +217,7 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
     event.preventDefault()
     dragDepthRef.current = 0
     setDragActive(false)
-    if (defaultWorkspace || busy) return
+    if (busy) return
     const droppedFiles = Array.from(event.dataTransfer.files)
     if (droppedFiles.length === 0) return
     try {
@@ -247,7 +248,7 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
         <Dialog.Overlay className="ui-backdrop" />
         <Dialog.Content
           asChild
-          className={`ui-dialog ui-dialog-medium ui-dialog-font-scaled ui-dialog-centered ui-dialog-fixed-footer ui-popover project-dialog${!defaultWorkspace && !simpleChat && advancedSettings ? ' ui-dialog-split' : ''}`}
+          className={`ui-dialog ui-dialog-medium ui-dialog-font-scaled ui-dialog-centered ui-dialog-fixed-footer ui-popover project-dialog${!simpleChat && advancedSettings ? ' ui-dialog-split' : ''}`}
           onPointerDownOutside={(event) => event.preventDefault()}
           onOpenAutoFocus={(event) => {
             if (!defaultWorkspace) {
@@ -285,7 +286,8 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
                         </p>
                       </Dialog.Description>
                     </div>
-                    {open && <ProjectPromptPreviews project={draft} projectId={project?.id} settings={config?.settings} disabled={busy} />}
+                    {open && <ProjectPromptPreviews project={draft} projectId={project?.id} settings={config?.settings}
+                      currentModelSelection={currentModelSelection} disabled={busy} />}
                   </header>
 
                   <div className="ui-field-stack">
@@ -302,7 +304,7 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
                     />
                   </div>
 
-                  {!defaultWorkspace && !simpleChat && advancedSettings && <Tabs.Root value={promptTab} onValueChange={setPromptTab}
+                  {!simpleChat && advancedSettings && <Tabs.Root value={promptTab} onValueChange={setPromptTab}
                     className="ui-field-stack ui-field-stack-fill project-prompt-tabs">
                     <div className="ui-toolbar ui-toolbar-between">
                       <Tabs.List className="ui-tab-list" aria-label={t('project.prompt_tabs')}>
@@ -354,12 +356,7 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
                         onCommit={setPrompt}
                         placeholder={t('project.simple_chat_prompt_placeholder')}
                       />
-                    ) : defaultWorkspace ? <div className="project-folder-list">
-                      {sourceFolders.map(folder => <div className="project-folder-item" key={folder}>
-                        <Folder size={15} />
-                        <span className="ui-truncate" title={folder}>{folder}</span>
-                      </div>)}
-                    </div> : <div
+                    ) : <div
                       className={dragActive ? 'project-folders drag-active' : 'project-folders'}
                       data-empty={sourceFolders.length === 0 ? true : undefined}
                       onDragEnter={handleDragEnter}
@@ -442,7 +439,7 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
                   </div>
                 </div>
               </div>
-              {!defaultWorkspace && !simpleChat && advancedSettings && <section className="ui-dialog-pane ui-form-section" aria-label={t('settings.capabilities')}>
+              {!simpleChat && advancedSettings && <section className="ui-dialog-pane ui-form-section" aria-label={t('settings.capabilities')}>
                 <h3 className="ui-dialog-title">{t('settings.capabilities')}</h3>
                 <CapabilityEditor customTools={projectTools} value={capabilities} skills={skills} mcpStatus={mcpStatus} mcpServers={config?.mcpServers} runtimeToolStatus={runtimeToolStatus} disabled={busy}
                   subagents={config?.subagents ?? []}
@@ -454,7 +451,7 @@ export function ProjectDialog({ open, kind, project, config, onClose, onSave }: 
             </div>
 
             <footer className="ui-dialog-footer">
-              {!defaultWorkspace && !simpleChat && <div className="ui-row ui-row-lg ui-dialog-footer-start">
+              {!simpleChat && <div className="ui-row ui-row-lg ui-dialog-footer-start">
                 <CheckboxField className="ui-checkbox-field-inline" checked={codingMode} disabled={busy}
                   label={t('project.coding_mode')} onChange={updateCodingMode} />
                 <CheckboxField className="ui-checkbox-field-inline" checked={advancedSettings}

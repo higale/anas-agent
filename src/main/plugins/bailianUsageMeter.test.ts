@@ -23,7 +23,7 @@ const text = async (action?: string, changes = {}, language = 'zh-CN') => {
   const result = await backend.call('quota', { model: { ...model, ...changes }, language, action }, { signal: new AbortController().signal })
   const template = document.createElement('template'); template.innerHTML = result.html
   return { html: result.html, dom: template.content, text: template.content.textContent ?? '',
-    details: template.content.querySelector('[data-details]')?.getAttribute('data-details') }
+    details: template.content.querySelector('[tabindex="0"]')?.getAttribute('title') }
 }
 function defaultResponse(args: string[]) {
   if (args[0] === 'auth') return { config: 'token-plan', console: noConsole ? undefined : { masked: 'console-credential' } }
@@ -69,7 +69,7 @@ it('shows monthly remaining quota, account and expiry without exposing credentia
   const first = await text()
   expect(first.text).toContain('35.00%')
   expect(first.text).toContain('月 剩余')
-  expect(first.dom.querySelector('[data-details]')?.getAttribute('data-details')).toContain('套餐到期')
+  expect(first.details).toContain('套餐到期')
   expect(first.details).toContain('Readable account (account-1)')
   expect(first.text).not.toContain('Readable account')
   expect(first.dom.querySelector('progress')!.value).toBe(.35)
@@ -81,28 +81,31 @@ it('shows monthly remaining quota, account and expiry without exposing credentia
   await text('refresh')
   expect(commands.filter(args => args.includes('zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/usage'))).toHaveLength(2)
 })
-it.each(['zh-CN', 'en'])('groups subscription details locally while keeping the compact tooltip complete (%s)', async language => {
+it.each(['zh-CN', 'en'])('shares complete subscription hover details between expanded and compact modes (%s)', async language => {
+  vi.useFakeTimers({ toFake: ['Date'] })
   respond = args => args.some(x => x.endsWith('/subscription'))
     ? wrap({ specCode: 'lite', status: 'VALID', autoRenewFlag: false, endTime: Date.now() + 86400000 }) : defaultResponse(args)
   const zh = language === 'zh-CN'
   const detailed = await text(undefined, {}, language)
   expect(detailed.text).not.toContain(zh ? '套餐: lite' : 'Plan: lite')
   expect(detailed.text).not.toContain(zh ? '自动续费' : 'Auto-renew')
-  const button = detailed.dom.querySelector('[data-details]')!
-  expect(button.getAttribute('aria-label')).toBe(zh ? '详情' : 'Details')
-  expect(button.querySelector('img')).not.toBeNull()
-  expect(button.closest('footer')?.querySelector('time')).not.toBeNull()
-  expect(detailed.dom.querySelectorAll('[data-details]')).toHaveLength(1)
-  expect(button.hasAttribute('data-action')).toBe(false)
-  const details = button.getAttribute('data-details')!
+  const title = detailed.dom.querySelector('header [tabindex="0"]')!
+  expect(title).not.toBeNull()
+  expect(title.getAttribute('aria-label')).toBe(detailed.details)
+  expect(detailed.dom.querySelector('time, footer')).toBeNull()
+  expect(detailed.dom.querySelector('[data-details]')).toBeNull()
+  const details = detailed.details!
   expect(details).toContain(zh ? '套餐: lite' : 'Plan: lite')
   expect(details).toContain('Readable account (account-1)')
   expect(details).toContain(zh ? '状态: 有效' : 'Status: Active')
   expect(details).toContain(zh ? '自动续费: 关闭' : 'Auto-renew: Off')
   expect(details).toContain(zh ? '套餐到期:' : 'Plan expires:')
+  const updated = details.split('\n').find(line => line.startsWith(zh ? '更新于:' : 'Updated:'))!
+  expect(updated).toBeTruthy()
+  expect(detailed.text).not.toContain(updated)
   const compact = await text('show_compact', {}, language)
   expect(compact.dom.querySelector('[data-details]')).toBeNull()
-  expect(compact.dom.querySelector('[tabindex="0"]')!.getAttribute('title')).toContain(details)
+  expect(compact.details).toBe(details)
   expect(commands.filter(args => args.includes('zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/subscription'))).toHaveLength(1)
 })
 it('keeps account and partial subscription details without inventing missing values', async () => {
@@ -116,7 +119,8 @@ it('keeps account and partial subscription details without inventing missing val
   expect(partial.details).not.toMatch(/lite|套餐到期|状态/)
   respond = args => args.some(x => x.endsWith('/subscription')) ? wrap({}) : defaultResponse(args)
   const accountOnly = await text('refresh')
-  expect(accountOnly.details).toBe('控制台账户: Readable account (account-1)')
+  expect(accountOnly.details).toContain('控制台账户: Readable account (account-1)')
+  expect(accountOnly.details).not.toMatch(/套餐:|自动续费|套餐到期|状态/)
 })
 it.each(['EXPIRED', 'INVALID'])('keeps an unusable subscription visible outside the details (%s)', async status => {
   respond = args => args.some(x => x.endsWith('/subscription')) ? wrap({ specCode: 'lite', status }) : defaultResponse(args)
@@ -251,7 +255,7 @@ it('keeps subscription information when the plan returns no quota windows', asyn
   respond = args => args.some(x => x.endsWith('/usage')) ? wrap({}) : defaultResponse(args)
   const result = await text()
   expect(result.text).toContain('套餐未返回额度数据')
-  expect(result.dom.querySelector('[data-details]')?.getAttribute('data-details')).toContain('套餐到期')
+  expect(result.details).toContain('套餐到期')
   expect(result.details).toContain('lite')
   expect(result.text).not.toContain('无法识别')
   expect(result.dom.querySelector('progress')).toBeNull()
@@ -287,7 +291,7 @@ it('handles absent keys, invalid quota payloads and English UI', async () => {
   respond = defaultResponse
   const result = await text('refresh', {}, 'en')
   expect(result.text).toContain('Monthly remaining')
-  expect(result.dom.querySelector('[data-details]')?.getAttribute('data-details')).toContain('Plan expires')
+  expect(result.details).toContain('Plan expires')
 })
 it('bounds query time and kills hung commands', async () => {
   vi.useFakeTimers()

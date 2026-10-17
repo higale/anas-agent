@@ -63,7 +63,7 @@ describe('provider model list selection', () => {
     expect(screen.getByRole('button', { name: 'settings.delete_model' })).toBeDisabled()
   })
 
-  it('renders models as compact list actions without inline editors', () => {
+  it('shows model limits and capability indicators alongside list actions', () => {
     render(
       <ProviderModelList
         provider={provider}
@@ -81,8 +81,14 @@ describe('provider model list selection', () => {
     const secondModel = screen.getByRole('option', { name: /^second-model/ })
     expect(firstModel).toHaveAttribute('aria-selected', 'true')
     expect(secondModel).toHaveAttribute('aria-selected', 'false')
-    expect(screen.queryByLabelText(/settings.model_parameter_presets/)).not.toBeInTheDocument()
-    expect(document.querySelectorAll('[data-model-status-badge]')).toHaveLength(0)
+    expect(firstModel).toHaveTextContent('128K · 16K · 80%')
+    expect(secondModel).toHaveTextContent('128K · 16K · 80%')
+    expect(within(firstModel).getByLabelText('settings.model_capability_vision: common.on')).toBeVisible()
+    expect(within(firstModel).getByLabelText('settings.model_capability_tool_use: common.on')).toBeVisible()
+    expect(within(firstModel).getByLabelText('settings.model_parameter_presets: settings.enabled')).toBeVisible()
+    expect(within(secondModel).queryByLabelText('settings.model_capability_vision: common.on')).not.toBeInTheDocument()
+    expect(within(secondModel).getByLabelText('settings.model_parameter_presets: settings.enabled')).toBeVisible()
+    expect(within(firstModel).queryByLabelText('chat.model_non_streaming')).not.toBeInTheDocument()
     const firstEdit = screen.getByRole('button', { name: 'settings.edit_model: Friendly model' })
     const secondEdit = screen.getByRole('button', { name: 'settings.edit_model: second-model' })
     expect(firstEdit).toHaveClass('ui-list-item-action', 'ui-tool-button')
@@ -93,6 +99,23 @@ describe('provider model list selection', () => {
     expect(secondEdit.parentElement).toHaveClass('ui-list-item-action-wrap')
     expect(secondEdit.closest('.provider-model-item')).toHaveClass('ui-list-item-action-host')
     expect(document.querySelector('.provider-model-option-editor')).not.toBeInTheDocument()
+  })
+
+  it('updates the displayed limits and indicators when a model is saved', () => {
+    const props = { onAdd: vi.fn(), onDelete: vi.fn(), onEdit: vi.fn(), onMove: vi.fn(),
+      onModelListSettingsChange: vi.fn(), onSelect: vi.fn() }
+    const { rerender } = render(<ProviderModelList {...props} provider={provider} />)
+    const updated = { ...provider, models: provider.models.map(model => ({ ...model,
+      maxContextTokens: 256000, maxOutputTokens: 0, contextCompressionEnabled: false, stream: false,
+      capabilities: { vision: false, toolUse: false }, parameterPresetMode: 'none' as const
+    })) }
+    rerender(<ProviderModelList {...props} provider={updated} />)
+    const item = screen.getByRole('option', { name: 'Friendly model' })
+    expect(item).toHaveTextContent('256K · — · —')
+    expect(within(item).getByLabelText('chat.model_non_streaming')).toBeVisible()
+    expect(within(item).queryByLabelText('settings.model_capability_vision: common.on')).not.toBeInTheDocument()
+    expect(within(item).queryByLabelText('settings.model_capability_tool_use: common.on')).not.toBeInTheDocument()
+    expect(within(item).queryByLabelText('settings.model_parameter_presets: settings.enabled')).not.toBeInTheDocument()
   })
 
   it('edits the model list URL from the model list heading', async () => {

@@ -1,4 +1,4 @@
-import type { AppSettings, ProjectCreateRequest, SelectedAttachment, StorageUsageValue } from './types'
+import type { AppSettings, ProjectCreateRequest, ProjectModelSelection, SelectedAttachment, StorageUsageValue } from './types'
 import type { CodeReviewRequest, CodeReviewPresentation } from './codeReview'
 import type { AgentBackgroundCleanup } from './backgroundCleanup'
 
@@ -68,17 +68,17 @@ export interface AgentSystemContextPreviewInput {
   projectId?: string
   project: ProjectCreateRequest
   settings: AppSettings
+  currentModelSelection?: ProjectModelSelection
 }
 
 export interface AgentSystemContextPreview {
   content: string
+  unavailableReason?: 'model_not_selected'
 }
 
 export type AgentModelRequestPreviewInput = AgentSystemContextPreviewInput
 
-export interface AgentModelRequestPreview {
-  content: string
-}
+export type AgentModelRequestPreview = AgentSystemContextPreview
 
 export type AgentRunStatus = 'running' | 'interrupted' | 'completed' | 'failed' | 'cancelled'
 

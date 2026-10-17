@@ -2,18 +2,7 @@
 
 [简体中文](README.md) · [English](README.en.md)
 
-**4.0 data change: previous projects and their settings, and input history (including pinned inputs), disappear from the interface after upgrading but can be restored manually as described below. Previous conversations and all long-term memory, including project memory, are no longer retained.** No automatic migration or import of pre-4.0 backups is provided. Global settings, project source files and user packages remain unchanged. Independent plugin data now lives in `db/plugins/`; the old `plugins_data/` directory is not loaded automatically and can be moved manually to restore it. Old-layout files stay on disk for now, but are not read, automatically deleted or included in new backups; review and remove residues through Data cleanup → Unknown files (unchecked by default).
-
-To restore projects and input history, preferably before creating new data in 4.0, fully quit Anas, back up the original files, and move these two files from the data directory root into its `db/` subdirectory (create it if needed):
-
-- `projects.json` → `db/projects.json`: restores project definitions and settings.
-- `input_history.json` → `db/input_history.json`: restores input history and pinned inputs.
-
-Both files retain their existing v0 format and need no content changes; restart Anas to load them. If files with the same names already exist in `db/`, back them up separately first. Overwriting replaces the corresponding new data; it does not merge it. This restores only projects and input history, not previous conversations or memory.
-
-To restore plugin data, fully quit Anas, back up your data, and move the entire old `plugins_data/` directory to `db/plugins/` without changing its contents. If the destination already exists, back it up separately first; replacing the directory does not merge the two sets of data.
-
-Avatar resources now live in `config/assets/`. The old root-level `assets/` directory is no longer read, so the default avatar is used until you restore your custom avatar manually. Fully quit Anas and back up your data, then move the entire old `assets/` directory to `config/assets/` without changing its files. If the destination already exists, back it up separately first; replace the directory rather than merging it.
+**Upgrade notice: upgrading from a version before 4.0 to 4.x loses previous conversations and long-term memory. Previous projects, input history, plugin data and avatars require manual recovery; there is no automatic migration or import of pre-4.0 backups. Back up first and see the [4.0.0 release notes](https://github.com/higale/anas-agent/releases/tag/v4.0.0) for the impact and recovery instructions.** This notice applies when moving to 4.x; upgrading from 4.0.0 to 4.0.1 introduces no additional data loss.
 
 Anas is a local desktop AI agent built with Electron, React, and TypeScript, powered by LangGraph and Deep Agents. Each project can choose its context, tools, skills, and subagents. Configuration and conversations stay locally; requests send the required task content to the selected model provider.
 
@@ -39,7 +28,7 @@ The application's Help menu opens bundled guides in the right workspace pane, wi
 
 - OpenAI-compatible and Anthropic-compatible providers, streamed replies, context compression, and resumable approvals.
 - Source availability in Settings, optional project customization, and independently configured subagents.
-- The default project allows only icon (including color), tool access mode, and model (including reasoning options) changes. Its name, working folder, and other settings use defaults; all enabled capabilities apply.
+- The default project name cannot be changed. All other settings work as in regular projects, including folders, prompts, and capabilities. Its initial working folder is the system Documents folder, with no extra subfolder created.
 - Built-in file, image, network, memory, and command tools; bundled ripgrep; MCP integration and custom tool packages.
 - User and project Skills, prompt shortcuts, input history, and speech input/output.
 - Text, image, PDF, and DOCX attachments. Images use native multimodal content blocks; documents are extracted locally.

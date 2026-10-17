@@ -152,14 +152,39 @@
   margin-inline-start: auto;
 }
 
-.provider-model-item.ui-list-item-compact {
-  padding: 2px 3px;
+.provider-model-item {
+  --ui-list-item-row-padding: 0;
 }
 
 .provider-model-select {
   align-self: stretch;
-  padding: 0 34px 0 7px;
+  padding: 6px 34px 6px 9px;
   cursor: pointer;
+}
+
+.model-item-copy,
+.model-item-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.model-item-copy {
+  gap: 4px;
+  font-size: var(--font-size-ui);
+  line-height: var(--font-line-height-ui);
+}
+
+.model-item-details {
+  --ui-row-gap: 6px;
+  color: var(--text-muted);
+  font-size: var(--font-size-small);
+  line-height: var(--font-line-height-small);
+}
+
+.model-item-capabilities {
+  --ui-row-gap: 4px;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .model-list-url-inline-trigger {

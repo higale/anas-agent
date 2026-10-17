@@ -22,6 +22,7 @@ const call = async (changes: Record<string, unknown> = {}) => {
   const template = document.createElement('template')
   template.innerHTML = result.html
   const dom = template.content
+  const details = dom.querySelector('[tabindex="0"]')?.getAttribute('title')
   return { ...result, dom,
     lines: [...dom.querySelectorAll('progress')].map(progress => {
       const section = progress.closest('section')!
@@ -30,8 +31,8 @@ const call = async (changes: Record<string, unknown> = {}) => {
         ...(section.getAttribute('title') ? { detail: section.getAttribute('title') } : {}) }
     }),
     error: dom.querySelector('[role="status"]')?.textContent,
-    details: dom.querySelector('[data-details]')?.getAttribute('data-details'),
-    updatedAt: dom.querySelector('time')?.getAttribute('datetime')
+    details,
+    updatedAt: details?.split('\n').find(line => /^(更新于|Updated): /.test(line))
   }
 }
 beforeEach(() => {
@@ -77,7 +78,7 @@ it('shows boosted remaining quota in both modes and moves totals and usage into 
   expect(result?.details).toContain('总额度: 100%\n已用: 10%')
   expect(result?.details).toContain('总额度: 150%\n已用: 1.5%')
   expect(result?.details).toContain('套餐加成')
-  expect(result?.details).not.toContain('重置时间')
+  expect(result?.details).toContain('重置时间')
   const chineseCompact = await call({ action: 'show_compact' })
   expect(chineseCompact?.dom.querySelector('[data-full-text]')?.textContent).toBe('5h 90% · 周 148.5%')
   const compact = await call({ action: 'show_compact', language: 'en' })
@@ -152,14 +153,15 @@ it('shows plan quota categories and recomputes reset countdowns from cached data
     { label: '周限额', value: '99%', description: '约 3 天后重置' }
   ])
   expect(initial?.details).toContain('总额度: 100%')
-  expect(initial?.details).not.toContain('重置时间')
+  expect(initial?.details).toContain('重置时间')
   vi.setSystemTime(now + 60000)
   const cached = await call({ language: 'en' })
   expect(cached?.lines).toMatchObject([
     { label: '5h limit', description: 'Resets in 59m' },
     { label: 'Weekly limit', description: 'Resets in 2d 23h' }
   ])
-  expect(cached?.updatedAt).toBe(initial?.updatedAt)
+  expect(initial?.updatedAt).toBe(`更新于: ${new Date(now).toLocaleString('zh-CN')}`)
+  expect(cached?.updatedAt).toBe(`Updated: ${new Date(now).toLocaleString('en')}`)
   expect(fetcher).toHaveBeenCalledTimes(1)
 })
 
@@ -260,8 +262,36 @@ it('escapes provider text and puts layout and refresh markup in the plugin HTML'
   const result = await call({ model: { ...model, providerName } })
   expect(result?.dom.querySelector('script')).toBeNull()
   expect(result?.dom.textContent).toContain(providerName)
-  expect(result?.dom.querySelector('button')?.getAttribute('data-action')).toBe('refresh')
-  expect(result?.dom.querySelector('img')?.getAttribute('src')).toBe('assets/refresh.svg')
+  expect(result?.dom.querySelector('[data-action="refresh"] img')?.getAttribute('src')).toBe('assets/refresh.svg')
+})
+
+it.each(['zh-CN', 'en'])('shares complete hover details between the title and compact summary (%s)', async language => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  const now = Date.now()
+  const result = await call({ language })
+  const updated = `${language === 'zh-CN' ? '更新于' : 'Updated'}: ${new Date(now).toLocaleString(language)}`
+  expect(result?.updatedAt).toBe(updated)
+  expect(result?.dom.textContent).not.toContain(updated)
+  expect(result?.dom.querySelector('time, footer')).toBeNull()
+  expect(result?.dom.querySelector('[data-details]')).toBeNull()
+  const title = result?.dom.querySelector('header [tabindex="0"]')
+  expect(title?.textContent).toBe(result?.title)
+  expect(title?.getAttribute('aria-label')).toBe(result?.details)
+  expect(result?.dom.querySelectorAll('button')).toHaveLength(2)
+  const compactInitial = await call({ language, action: 'show_compact' })
+  expect(compactInitial?.details).toBe(result?.details)
+  await call({ language, action: 'show_detailed' })
+
+  vi.setSystemTime(now + 60_000)
+  const cached = await call({ language })
+  expect(cached?.updatedAt).toBe(updated)
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  fetcher.mockResolvedValueOnce(new Response('', { status: 429 }))
+  const failed = await call({ language, action: 'refresh' })
+  expect(failed?.updatedAt).toBe(updated)
+  expect(failed?.error).toBeTruthy()
+  const compact = await call({ language, action: 'show_compact' })
+  expect(compact?.details).toBe(failed?.details)
 })
 
 it('defaults to a compact summary with reset details on hover and switches layouts without refetching quota', async () => {
@@ -334,9 +364,9 @@ it('recognizes DeepSeek URLs and displays exact balances and breakdowns without 
     expect(result?.dom.textContent).toContain('CNY 可用余额')
     expect(result?.dom.textContent).toContain('110.00001')
     expect(result?.dom.textContent).not.toContain('赠金余额')
-    expect(result?.details).toBe('赠金余额: 10.00\n充值余额: 100.00001')
-    expect(result?.dom.querySelector('footer [data-details]')).not.toBeNull()
-    expect(result?.dom.querySelector('footer time')).not.toBeNull()
+    expect(result?.details).toContain('CNY 可用余额 110.00001\n赠金余额: 10.00\n充值余额: 100.00001')
+    expect(result?.dom.querySelector('header [tabindex="0"]')).not.toBeNull()
+    expect(result?.dom.querySelector('footer')).toBeNull()
     expect(result?.dom.querySelector('progress')).toBeNull()
     expect(result?.dom.textContent).not.toMatch(/重置|%/)
     expect(result?.error).toBeUndefined()
@@ -358,7 +388,7 @@ it('keeps currencies separate and reports zero or negative unavailable balances'
   expect(multi?.dom.textContent).toContain('CNY 110.00001 · USD 0.000001')
   expect(multi?.dom.querySelector('[tabindex="0"]')?.getAttribute('title')).toContain('Granted balance')
   const detailed = await call({ model: deepseek, action: 'show_detailed', language: 'en' })
-  expect(detailed?.details).toBe('CNY\nGranted balance: 10.00\nTopped-up balance: 100.00001\n\nUSD\nGranted balance: 10.00\nTopped-up balance: 100.00001')
+  expect(detailed?.details).toContain('CNY available 110.00001\nGranted balance: 10.00\nTopped-up balance: 100.00001\n\nUSD available 0.000001\nGranted balance: 10.00\nTopped-up balance: 100.00001')
   await call({ model: deepseek, action: 'show_compact' })
   fetcher.mockResolvedValueOnce(Response.json(balancePayload({ is_available: false, balance_infos: [{ ...balance, total_balance: '0.00', granted_balance: '0.00', topped_up_balance: '0.00' }] })))
   const empty = await call({ model: deepseek, action: 'refresh' })
@@ -399,7 +429,7 @@ it('queries Moonshot regional balances without summing negative cash and voucher
     expect(result?.dom.textContent).toContain('46.58893')
     expect(result?.dom.textContent).not.toContain('-3.00001')
     expect(result?.details).toContain('现金余额: -3.00001')
-    expect(result?.details).not.toMatch(/CNY|USD|可用余额/)
+    expect(result?.details).toContain(`${currency} 可用余额 46.58893`)
     expect(result?.dom.querySelector('progress')).toBeNull()
     const compact = await call({ model: provider, action: 'show_compact', language: 'en' })
     expect(compact?.dom.textContent).toContain(`${currency} 46.58893`)
@@ -467,7 +497,8 @@ it.each(['open.bigmodel.cn', 'api.z.ai'])('reads GLM quotas from %s with raw-key
       { label: 'MCP 每月额度剩余', value: '60%', progress: .6 }
     ])
     expect(result?.dom.textContent).not.toMatch(/余额|重置/)
-    expect(result?.dom.querySelector('[data-details]')).toBeNull()
+    expect(result?.updatedAt).toMatch(/^更新于: /)
+    expect(result?.details).not.toContain('重置')
   }
   for (const baseUrl of [`https://${host}.example/api/anthropic`, `https://proxy.example/${host}`]) {
     expect(await call({ model: { ...glm, baseUrl } })).toBeNull()
@@ -594,7 +625,8 @@ it('uses GLM reset timestamps independently and recomputes countdowns from the c
   vi.setSystemTime(now + 60000)
   const cached = await call({ model: glm, language: 'en' })
   expect(cached?.lines).toMatchObject([{ description: 'Resets in 59m' }, { description: 'Resets in 23h 59m' }])
-  expect(cached?.updatedAt).toBe(initial?.updatedAt)
+  expect(initial?.updatedAt).toBe(`更新于: ${new Date(now).toLocaleString('zh-CN')}`)
+  expect(cached?.updatedAt).toBe(`Updated: ${new Date(now).toLocaleString('en')}`)
   expect(fetcher).toHaveBeenCalledTimes(1)
 })
 

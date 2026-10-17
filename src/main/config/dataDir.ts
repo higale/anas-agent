@@ -148,8 +148,7 @@ export function getDataDir(): string {
 export function getDefaultWorkspaceDir(): string {
   const electronApp = app as typeof app | undefined
   if (!electronApp) throw new Error('Electron app runtime is unavailable.')
-  const dataDirName = path.basename(getDataDir())
-  return join(electronApp.getPath('documents'), dataDirName.startsWith('.') ? dataDirName.slice(1) : dataDirName)
+  return electronApp.getPath('documents')
 }
 
 export function getElectronUserDataDir(): string {

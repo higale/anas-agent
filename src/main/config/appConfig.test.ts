@@ -507,18 +507,16 @@ describe('configuration domain writes', () => {
     expect((await appConfig.getAppConfigSnapshot()).settings.chatContentWidth).toBe('narrow')
   })
 
-  it('persists the new-thread model selection and falls back to the default model strategy', async () => {
+  it.each(['prompt', 'current', 'default', 'unsupported'])('ignores a retired new-thread strategy (%s) without invalidating settings', async (strategy) => {
     const raw = rawConfig()
-    const { appConfig, writeRawSettingsConfig } = await loadAppConfig(raw)
-
-    const snapshot = await appConfig.updateSettings({ newThreadModelSelection: 'current' })
-
-    expect(raw.settings?.new_thread_model_selection).toBe('current')
-    expect(snapshot.settings.newThreadModelSelection).toBe('current')
-    expect(writeRawSettingsConfig).toHaveBeenCalledOnce()
-
-    raw.settings!.new_thread_model_selection = 'unsupported'
-    expect((await appConfig.getAppConfigSnapshot()).settings.newThreadModelSelection).toBe('default')
+    Object.assign(raw.settings!, { new_thread_model_selection: strategy })
+    const { appConfig } = await loadAppConfig(raw)
+    const snapshot = await appConfig.getAppConfigSnapshot()
+    expect(snapshot.defaultModelId).toBe('first')
+    expect(snapshot.settings).not.toHaveProperty('newThreadModelSelection')
+    const updated = await appConfig.updateSettings({ theme: 'light' })
+    expect(updated.settings.theme).toBe('light')
+    expect(updated.defaultModelId).toBe('first')
   })
 
   it('persists font size and clamps it to the supported range', async () => {

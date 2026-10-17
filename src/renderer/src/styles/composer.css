@@ -1176,23 +1176,18 @@
   width: auto;
 }
 
-.composer-model-default {
-  margin-left: auto;
-}
-
-.composer-model-name {
+.composer-model-clear {
   flex: 1 1 auto;
   min-width: 0;
 }
 
-.composer-model-details {
-  --ui-row-gap: 6px;
+.composer-model-clear .ui-menu-item {
+  width: 100%;
+  justify-content: center;
 }
 
-.composer-model-capabilities {
-  --ui-row-gap: 4px;
-  flex: 0 0 auto;
-  white-space: nowrap;
+.composer-model-default {
+  margin-left: auto;
 }
 
 .composer-model-default-marker {

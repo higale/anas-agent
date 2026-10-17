@@ -98,7 +98,6 @@ describe('AgentRuntime system prompt preview', () => {
         theme: 'dark',
         fontSize: 14,
         chatContentWidth: 'narrow',
-        newThreadModelSelection: 'default',
         attachmentTextMaxChars: 200_000,
         attachmentTextOverflow: 'truncate',
         logLevel: 'info',
@@ -148,7 +147,6 @@ describe('AgentRuntime system prompt preview', () => {
       theme: 'dark',
       fontSize: 14,
       chatContentWidth: 'narrow',
-      newThreadModelSelection: 'default',
       attachmentTextMaxChars: 200_000,
       attachmentTextOverflow: 'truncate',
       logLevel: 'info',
@@ -209,7 +207,6 @@ describe('AgentRuntime system prompt preview', () => {
       theme: 'dark',
       fontSize: 14,
       chatContentWidth: 'narrow',
-      newThreadModelSelection: 'prompt',
       attachmentTextMaxChars: 200_000,
       attachmentTextOverflow: 'truncate',
       logLevel: 'info',
@@ -253,6 +250,7 @@ describe('AgentRuntime system prompt preview', () => {
   const previewSelections: Array<{
     name: string
     project?: ProjectModelSelection
+    current?: ProjectModelSelection
     defaultIndex?: number
     incompleteIndex?: number
     empty?: boolean
@@ -264,17 +262,21 @@ describe('AgentRuntime system prompt preview', () => {
     { name: 'inherited project preset', project: { modelConfigId: 'model-2' }, defaultIndex: 1, expectedIndex: 2, expectedPreset: 'preset-2' },
     { name: 'removed project preset', project: { modelConfigId: 'model-2', modelParameterPresetId: 'deleted' }, defaultIndex: 1, expectedIndex: 2, expectedPreset: 'preset-2' },
     { name: 'default before first', defaultIndex: 1, expectedIndex: 1, expectedPreset: 'preset-1' },
-    { name: 'first without default', expectedIndex: 0, expectedPreset: 'preset-0' },
-    { name: 'skip incomplete default', defaultIndex: 1, incompleteIndex: 1, expectedIndex: 0, expectedPreset: 'preset-0' },
-    { name: 'skip incomplete first', incompleteIndex: 0, expectedIndex: 1, expectedPreset: 'preset-1' },
+    { name: 'no default leaves selection empty' },
+    { name: 'incomplete default leaves selection empty', defaultIndex: 1, incompleteIndex: 1 },
+    { name: 'does not select the next provider model', incompleteIndex: 0 },
     { name: 'removed project model', project: { modelConfigId: 'deleted', modelParameterPresetId: 'custom' }, defaultIndex: 1, expectedIndex: 1, expectedPreset: 'preset-1' },
     { name: 'incomplete project model', project: { modelConfigId: 'model-2', modelParameterPresetId: 'custom' }, incompleteIndex: 2, defaultIndex: 1, expectedIndex: 1, expectedPreset: 'preset-1' },
-    { name: 'no configured models', empty: true }
+    { name: 'no configured models', empty: true },
+    { name: 'current model without a default', current: { modelConfigId: 'model-2', modelParameterPresetId: 'custom' }, expectedIndex: 2, expectedPreset: 'custom' },
+    { name: 'current explicit empty reasoning', current: { modelConfigId: 'model-2', modelParameterPresetId: null }, expectedIndex: 2 },
+    { name: 'default before current', defaultIndex: 1, current: { modelConfigId: 'model-2', modelParameterPresetId: 'custom' }, expectedIndex: 1, expectedPreset: 'preset-1' },
+    { name: 'project before current', project: { modelConfigId: 'model-1' }, current: { modelConfigId: 'model-2' }, expectedIndex: 1, expectedPreset: 'preset-1' },
+    { name: 'deleted current model', current: { modelConfigId: 'deleted' } },
+    { name: 'incomplete current model', current: { modelConfigId: 'model-2' }, incompleteIndex: 2 }
   ]
 
-  it.each((['default', 'current', 'prompt'] as const).flatMap((strategy) => (
-    previewSelections.map((scenario) => ({ ...scenario, strategy }))
-  )))('shares preview selection without persisting it: $name, chat strategy $strategy', async (scenario) => {
+  it.each(previewSelections)('shares preview selection without persisting it: $name', async (scenario) => {
     database = AgentDatabase.open(':memory:')
     const thread = database.createThread({ title: 'Request preview', projectId: 'preview-chat' })
     const providers = scenario.empty ? [] : ['First', 'Default', 'Project'].map((name, index) => {
@@ -300,7 +302,6 @@ describe('AgentRuntime system prompt preview', () => {
       theme: 'dark',
       fontSize: 14,
       chatContentWidth: 'narrow',
-      newThreadModelSelection: scenario.strategy,
       attachmentTextMaxChars: 200_000,
       attachmentTextOverflow: 'truncate',
       logLevel: 'info',
@@ -329,12 +330,13 @@ describe('AgentRuntime system prompt preview', () => {
     const input = {
       projectId: thread.projectId,
       project: { kind: 'simple_chat' as const, name: 'Draft', prompt: 'Unsaved prompt', ...scenario.project },
+      currentModelSelection: scenario.current,
       settings
     }
     const draftBefore = structuredClone(input.project)
     if (scenario.expectedIndex === undefined) {
-      await expect(runtime.previewSystemContext(input)).rejects.toThrow('No selectable model')
-      await expect(runtime.previewModelRequest(input)).rejects.toThrow('No selectable model')
+      await expect(runtime.previewSystemContext(input)).resolves.toEqual({ content: '', unavailableReason: 'model_not_selected' })
+      await expect(runtime.previewModelRequest(input)).resolves.toEqual({ content: '', unavailableReason: 'model_not_selected' })
       expect(previewMocks.captureAgentSystemPrompt).not.toHaveBeenCalled()
       expect(previewMocks.captureAgentModelRequest).not.toHaveBeenCalled()
     } else {
