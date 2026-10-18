@@ -329,6 +329,11 @@ export function App() {
     setSettingsOpen(true)
   }
 
+  function openPluginSettings(): void {
+    setSettingsTab('plugins')
+    openSettings()
+  }
+
   const {
     inputHistory,
     removeInputHistoryItem,
@@ -1331,6 +1336,7 @@ export function App() {
       <AgentWorkspace
         plugins={pluginRegistry.plugins}
         onOpenPlugin={openPlugin}
+        onOpenPluginSettings={openPluginSettings}
         onDiffPreferencesChange={async (update) => { setConfig(await window.gale.config.updateSettings(update)) }}
         panels={workspacePanels}
         onPanelWidthCommit={async (workspacePanelWidth) => {

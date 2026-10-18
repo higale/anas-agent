@@ -224,6 +224,11 @@ export function registerPluginIpc(): void {
     })
     changed()
   })
+  handleMainIpc('plugins:setShowInTitlebar', async (_event, id: string, show: boolean) => {
+    const { store } = runtime()
+    await store.exclusive(() => store.setShowInTitlebar(id, show))
+    changed()
+  })
   handleMainIpc('plugins:uninstall', async (_event, id: string, deleteData = false) => {
     if (typeof deleteData !== 'boolean') throw new Error('Invalid plugin data deletion option.')
     const { store, backends } = runtime()

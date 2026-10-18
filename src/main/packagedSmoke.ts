@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { mkdir, mkdtemp, open, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, open, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import http from 'node:http'
@@ -54,6 +54,16 @@ export async function runPackagedSmoke(): Promise<void> {
     } finally { await imageFile.close() }
     app.setPath('documents', documents)
     configureDataRuntime([process.execPath, '--data-dir', root])
+    const { initializeBundledExamples } = await import('./bundledExamples')
+    const { PluginStore } = await import('./plugins/pluginStore')
+    await initializeBundledExamples()
+    const examples = join(root, 'examples/plugins')
+    const plugins = new PluginStore(root)
+    for (const name of await readdir(examples)) {
+      if (!name.endsWith('.zip')) continue
+      const plugin = await plugins.install(join(examples, name))
+      if (plugin.error) throw new Error(`Packaged plugin example failed: ${plugin.error}`)
+    }
     const { bundledSearchEnvironment } = await import('./bundledRipgrep')
     const { createShellCommandAuthorization } = await import('./shellCommandAuthorization')
     const { getCommandShell, prepareShellCommand, runShellCommand, runPreparedProcess } = await import('./shellRuntime')

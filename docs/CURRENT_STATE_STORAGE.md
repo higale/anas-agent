@@ -8,9 +8,7 @@ LangGraph checkpoint 是会话状态的唯一权威来源。框架负责模型�
 
 4.0 是经用户批准的会话存储兼容边界：旧 `sqlite/` 中的对话目录与全部记忆，以及根目录的 `projects.json`、`input_history.json` 弃用，不迁移、不回退读取、不自动删除旧文件；旧备份不能导入。全局配置仍使用原 v0，其他格式兼容规则不变。
 
-项目定义和输入历史的现有 v0 文件格式不变：完全退出程序后，可将数据根目录的 `projects.json`、`input_history.json` 手动移到 `db/` 下恢复。建议在 4.0 创建新数据前操作；源文件及目标同名文件先备份，覆盖只替换、不合并。此方式不恢复旧对话和记忆，程序不增加自动迁移或旧路径回退。
-
-头像资源使用 `config/assets/`；旧根目录 `assets/` 不读取、迁移或自动删除，不纳入新备份。可退出程序并备份后手动整体移入新路径恢复，内部格式不变；未恢复时初始化默认头像。
+项目、输入历史、插件数据和头像的手动恢复步骤见[4.x 升级数据说明](../data/help/UPGRADE_TO_4.zh-CN.md)。项目定义和输入历史仍使用现有 v0 格式；头像资源使用 `config/assets/`，旧根目录 `assets/` 不读取、迁移或纳入新备份，未恢复时初始化默认头像。手动恢复这些文件不恢复旧对话或记忆。
 
 ## 文件与职责
 
@@ -25,7 +23,7 @@ LangGraph checkpoint 是会话状态的唯一权威来源。框架负责模型�
     catalog.sqlite
     projects.json
     input_history.json
-    plugins/<插件ID>/             # 插件独立数据、通用设置及内置插件启停状态
+    plugins/<插件ID>/             # 插件独立数据、通用设置及安装状态
     project-deletion.json          # 仅项目删除事务期间存在
     project-deletion.stage.json
     conversations/
@@ -39,7 +37,7 @@ LangGraph checkpoint 是会话状态的唯一权威来源。框架负责模型�
     direction/
 ```
 
-`db/projects.json` 保存项目定义与设置，`db/input_history.json` 保存全局输入历史和置顶输入，`db/plugins/<id>/` 保存插件独立数据。项目重置只删除项目元数据、catalog 及对话资源，保留输入历史和插件数据。项目修复保留同目录其他文件，并在切换前核对源数据未变化。
+`db/projects.json` 保存项目定义与设置，`db/input_history.json` 保存全局输入历史和置顶输入，`db/plugins/<id>/` 保存所有插件的独立数据、通用设置和安装状态；`anas-installation.json` 记录启用状态和标题栏图标设置。用户插件代码直接位于 `plugins/<id>/`，内置插件位于 `plugins/_system/<id>/`，均无额外的 `package/` 层级。项目重置只删除项目元数据、catalog 及对话资源，保留输入历史和插件数据。项目修复保留同目录其他文件，并在切换前核对源数据未变化。
 
 对话持久资源统一位于 `db/conversations/`，临时草稿仍在 `tmp/conversations/`。开发期间的根目录 `conversations/` 不读取、不迁移、不纳入备份，也不自动删除。
 

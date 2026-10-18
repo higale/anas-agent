@@ -10,12 +10,12 @@ async function verifyPluginTransactions(launchApplication) {
   const id = 'recovery-fixture', live = join(root, 'plugins', id), data = join(root, 'db/plugins', id)
   let application
   try {
-    await mkdir(join(live, 'package'), { recursive: true })
-    await writeFile(join(live, 'package/PLUGIN.json'), JSON.stringify({ version: 0, id, name: 'Recovery fixture',
+    await mkdir(live, { recursive: true })
+    await writeFile(join(live, 'PLUGIN.json'), JSON.stringify({ version: 0, id, name: 'Recovery fixture',
       plugin_version: '1.0.0', api_version: 2, ui: 'index.html' }))
-    await writeFile(join(live, 'package/index.html'), 'original package')
-    await writeFile(join(live, 'installation.json'), '{"version":0,"enabled":false}')
+    await writeFile(join(live, 'index.html'), 'original package')
     await mkdir(data, { recursive: true })
+    await writeFile(join(data, 'anas-installation.json'), '{"version":0,"enabled":false}')
     const saved = '{"version":0,"values":{"draft":"retained original data"}}'
     await writeFile(join(data, 'state.json'), saved)
     // An interrupted first journal write is still preparation, outside recovery.
@@ -28,7 +28,7 @@ async function verifyPluginTransactions(launchApplication) {
       await mkdir(stage)
       if (replace) {
         await cp(live, join(stage, 'incoming'), { recursive: true })
-        await writeFile(join(stage, 'incoming/package/index.html'), 'uncommitted replacement')
+        await writeFile(join(stage, 'incoming/index.html'), 'uncommitted replacement')
       }
       await rename(live, join(stage, 'previous'))
       await rename(data, join(stage, 'data'))
@@ -42,8 +42,8 @@ async function verifyPluginTransactions(launchApplication) {
       await expect(page.locator('[data-agent-composer-input]')).toBeVisible({ timeout: 20000 })
       const plugins = await page.evaluate(() => globalThis.gale.plugins.list())
       for (const file of ['plugins/README.md', 'plugins/README.en.md', 'skills/weather/SKILL.md',
-        'tools/read_text_raw/TOOL.json', 'plugins/notepad/PLUGIN.json']) {
-        assert.deepEqual(await readFile(join(root, 'examples', file)), await readFile(join(process.cwd(), 'data/examples', file)))
+        'tools/read_text_raw/TOOL.json', 'plugins/notepad.zip']) {
+        assert.deepEqual(await readFile(join(root, 'examples', file)), await readFile(join(process.cwd(), 'out/examples', file)))
       }
       if (committed) {
         assert.equal(plugins.some(plugin => plugin.id === id), false)
@@ -51,7 +51,7 @@ async function verifyPluginTransactions(launchApplication) {
         await assert.rejects(lstat(data), { code: 'ENOENT' })
       } else {
         assert.equal(plugins.find(plugin => plugin.id === id).enabled, false)
-        assert.equal(await readFile(join(live, 'package/index.html'), 'utf8'), 'original package')
+        assert.equal(await readFile(join(live, 'index.html'), 'utf8'), 'original package')
         assert.equal(await readFile(join(data, 'state.json'), 'utf8'), saved)
       }
       await assert.rejects(lstat(stage), { code: 'ENOENT' })

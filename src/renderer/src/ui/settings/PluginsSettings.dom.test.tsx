@@ -8,7 +8,7 @@ import { notice } from '../notice'
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'en' } }) }))
 vi.mock('../notice', () => ({ notice: { error: vi.fn(), success: vi.fn() } }))
 const invoke = vi.fn(), uninstall = vi.fn(), install = vi.fn(), confirmInstall = vi.fn(), cancelInstall = vi.fn(), readContribution = vi.fn(), setEnabled = vi.fn()
-const startBackend = vi.fn(), stopBackend = vi.fn()
+const startBackend = vi.fn(), stopBackend = vi.fn(), setShowInTitlebar = vi.fn()
 const plugin: PluginSummary = { id: 'example', enabled: true, backendStatus: 'stopped', manifest: { tools: [],
   id: 'example', name: 'Example', pluginVersion: '1.0.0', apiVersion: 2, description: '', ui: 'index.html',
   home: { defaultLocation: 'window', locations: ['window', 'sidebar'] }
@@ -22,13 +22,40 @@ beforeEach(() => {
   confirmInstall.mockReset().mockResolvedValue(plugin)
   cancelInstall.mockReset().mockResolvedValue(undefined)
   setEnabled.mockReset().mockResolvedValue(undefined)
+  setShowInTitlebar.mockReset().mockResolvedValue(undefined)
   startBackend.mockReset().mockResolvedValue(undefined)
   stopBackend.mockReset().mockResolvedValue(undefined)
   readContribution.mockReset().mockResolvedValue({ content: '# Guide body', resolvedPath: 'C:/plugins/guide/SKILL.md' })
-  Object.defineProperty(window, 'gale', { configurable: true, value: { plugins: { invoke, uninstall, install, confirmInstall, cancelInstall, readContribution, setEnabled, startBackend, stopBackend } } })
+  Object.defineProperty(window, 'gale', { configurable: true, value: { plugins: { invoke, uninstall, install, confirmInstall, cancelInstall, readContribution, setEnabled, setShowInTitlebar, startBackend, stopBackend } } })
 })
 
 describe('plugin settings', () => {
+  it.each([true, false])('saves a titlebar shortcut without launching the plugin when enabled=%s', async enabled => {
+    const refresh = vi.fn(async () => {})
+    const view = render(<PluginsSettings plugins={[{ ...plugin, enabled }]} onRefresh={refresh} />)
+    const checkbox = screen.getByRole('checkbox', { name: 'plugins.show_in_titlebar' })
+    expect(checkbox).not.toBeChecked()
+    expect(checkbox).toBeEnabled()
+    await userEvent.click(checkbox)
+    expect(setShowInTitlebar).toHaveBeenCalledExactlyOnceWith('example', true)
+    expect(refresh).toHaveBeenCalledOnce()
+    view.rerender(<PluginsSettings plugins={[{ ...plugin, enabled, showInTitlebar: true }]} onRefresh={refresh} />)
+    expect(checkbox).toBeChecked()
+    expect(invoke.mock.calls.every(([, method]) => method === 'host.home')).toBe(true)
+  })
+
+  it('retains the saved shortcut choice after failure and hides the setting for a plugin without a home', async () => {
+    setShowInTitlebar.mockRejectedValueOnce(new Error('disk failure'))
+    const view = renderSettings([{ ...plugin, showInTitlebar: true }])
+    const checkbox = screen.getByRole('checkbox', { name: 'plugins.show_in_titlebar' })
+    await userEvent.click(checkbox)
+    expect(checkbox).toBeChecked()
+    expect(checkbox).toBeEnabled()
+    expect(notice.error).toHaveBeenCalledWith('plugins.operation_failed', { description: 'disk failure' })
+    view.rerender(<PluginsSettings plugins={[{ ...plugin, manifest: { ...plugin.manifest!, ui: undefined } }]} onRefresh={vi.fn()} />)
+    expect(screen.queryByRole('checkbox', { name: 'plugins.show_in_titlebar' })).toBeNull()
+  })
+
   it('shows localized multiline plugin descriptions in the overview without adding preferences', () => {
     renderSettings([{ ...plugin, manifest: { ...plugin.manifest!, ui: undefined, description: 'Fallback' }, languages: [
       { code: 'en', name: 'English', pluginDescription: 'Supported providers:\nMiniMax: Plan quota\nDeepSeek: Balance' },

@@ -79,7 +79,7 @@ async function checkNotepadLanguages(application, page, sidebar, popup) {
     for (const [view, value] of [[sidebar, 'Unsaved page state'], [popup, 'Window language draft']]) {
       await view.evaluate(() => globalThis.dispatchEvent(new Event('focus')))
       await expect(view.locator('#save')).toHaveText(save, { timeout: 10000 })
-      await expect(view.locator('label')).toHaveText(title)
+      await expect(view.locator('#draft')).toHaveAccessibleName(title)
       await expect(view.locator('#status')).toHaveText(status)
       await expect(view.locator('#draft')).toHaveValue(value)
       await expect(view.locator('html')).toHaveAttribute('lang', language)
@@ -247,8 +247,51 @@ async function openPluginHome(page, name) {
   if (await page.locator('.workspace-panels-drawer').isVisible()) {
     await page.getByRole('button', { name: 'Hide right workspace', exact: true }).click()
   }
-  await page.getByRole('button', { name: 'Plugins', exact: true }).click()
+  await page.getByRole('button', { name: 'Workspace menu', exact: true }).click()
   await page.getByRole('menuitem', { name, exact: true }).click()
+}
+
+async function checkWorkspaceMenu(application, page, settings) {
+  const toggle = page.getByRole('checkbox', { name: 'Show launch icon in the title bar', exact: true })
+  await expect(toggle).not.toBeChecked()
+  await toggle.click()
+  await expect(toggle).toBeChecked()
+  await mkdir(resolve('tmp'), { recursive: true })
+  await page.locator('.plugin-settings').screenshot({ path: resolve('tmp/plugin-launch-settings.png') })
+  await page.getByRole('button', { name: 'Back to app', exact: true }).click()
+  const shortcut = page.locator('.topbar').getByRole('button', { name: 'Notepad', exact: true })
+  await expect(shortcut).toBeVisible()
+  await page.getByRole('button', { name: 'Workspace menu', exact: true }).click()
+  const menu = page.getByRole('menu')
+  await expect(menu.getByRole('menuitem', { name: 'File changes', exact: true })).toBeVisible()
+  await menu.screenshot({ path: resolve('tmp/workspace-menu.png') })
+  const plugins = menu.getByRole('group', { name: 'Plugins', exact: true })
+  await expect(plugins.getByRole('menuitem', { name: 'Notepad', exact: true })).toBeVisible()
+  await plugins.getByRole('menuitem', { name: 'Plugin settings', exact: true }).click()
+  await expect(toggle).toBeChecked()
+  await page.getByRole('button', { name: 'Back to app', exact: true }).click()
+  await shortcut.click()
+  await pluginPage(application, 'example-notepad')
+  const home = await page.evaluate(() => globalThis.gale.panels.list().then(views => views.find(view => view.content.pluginId === 'example-notepad' && view.content.instanceId === 'main')))
+  await page.evaluate(id => globalThis.gale.panels.move(id, 'window'), home.viewId)
+  await expect.poll(() => windowCount(application)).toBe(2)
+  await shortcut.click()
+  const homes = await page.evaluate(() => globalThis.gale.panels.list().then(views => views.filter(view => view.content.pluginId === 'example-notepad' && view.content.instanceId === 'main')))
+  assert.equal(homes.length, 1, 'The titlebar shortcut must reuse the existing home.')
+  assert.equal(homes[0].location, 'window')
+  await page.evaluate(id => globalThis.gale.panels.close(id), home.viewId)
+  await expect.poll(() => windowCount(application)).toBe(1)
+  await settings()
+  await page.getByRole('checkbox', { name: 'Enabled', exact: true }).click()
+  await expect(toggle).toBeChecked()
+  await expect(toggle).toBeEnabled()
+  await page.getByRole('button', { name: 'Back to app', exact: true }).click()
+  await expect(shortcut).toHaveCount(0)
+  await settings()
+  await page.getByRole('checkbox', { name: 'Enabled', exact: true }).click()
+  await expect(toggle).toBeChecked()
+  await toggle.click()
+  await expect(toggle).not.toBeChecked()
 }
 
 async function checkForms(application, page, directory, settings) {
@@ -365,8 +408,8 @@ async function checkBackup(application, page, directory) {
     await page.evaluate(() => globalThis.gale.plugins.startBackend('example-backend'))
     await page.evaluate(path => globalThis.gale.app.restoreData(path), backup.path)
     for (const file of ['plugins/README.md', 'plugins/README.en.md', 'skills/weather/SKILL.md',
-      'tools/read_text_raw/TOOL.json', 'plugins/notepad/PLUGIN.json']) {
-      assert.deepEqual(await readFile(join(directory, 'examples', file)), await readFile(join(process.cwd(), 'data/examples', file)))
+      'tools/read_text_raw/TOOL.json', 'plugins/notepad.zip']) {
+      assert.deepEqual(await readFile(join(directory, 'examples', file)), await readFile(join(process.cwd(), 'out/examples', file)))
     }
     await assert.rejects(readFile(join(directory, 'examples/obsolete.txt')), { code: 'ENOENT' })
     await expect.poll(() => windowCount(application)).toBe(1)
@@ -389,7 +432,7 @@ async function checkHomePolicies(application, page, directory) {
     await writeFile(join(source, 'app.js'), 'anas.registerLifecycle({prepare: async () => null}); anas.ready();')
     await application.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, join(source, 'PLUGIN.json'))
     await page.evaluate(() => globalThis.gale.plugins.install())
-    await page.getByRole('button', { name: 'Plugins', exact: true }).click()
+    await page.getByRole('button', { name: 'Workspace menu', exact: true }).click()
     await page.getByRole('menuitem', { name: id, exact: true }).click()
     const plugin = await pluginPage(application, id, 'main', location)
     if (location === 'window') {
@@ -423,6 +466,12 @@ async function checkReplacement(application, page, directory, repository, settin
   manifest.name = 'Replacement test'
   manifest.plugin_version = '1.0.0'
   await writeFile(manifestPath, JSON.stringify(manifest))
+  // Reinstallation is the supported way to replace the obsolete nested layout.
+  const obsolete = join(directory, 'plugins/replacement-test')
+  await cp(source, join(obsolete, 'package'), { recursive: true })
+  await writeFile(join(obsolete, 'installation.json'), '{"version":0,"enabled":false}')
+  await mkdir(join(directory, 'db/plugins/replacement-test'), { recursive: true })
+  await writeFile(join(directory, 'db/plugins/replacement-test/state.json'), '{"version":0,"values":{"draft":"retained old draft"}}')
   await application.evaluate(({ dialog }, path) => {
     globalThis.__replacementOriginalDialog = dialog.showOpenDialog
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] })
@@ -430,8 +479,15 @@ async function checkReplacement(application, page, directory, repository, settin
   try {
     await settings()
     await page.getByRole('button', { name: 'Install plugin', exact: true }).click()
+    const reinstall = page.getByRole('alertdialog')
+    await expect(reinstall).toBeVisible()
+    await expect(reinstall.getByRole('checkbox', { name: 'Delete plugin data', exact: true })).not.toBeChecked()
+    await reinstall.getByRole('button', { name: 'Replace plugin', exact: true }).click()
     await expect(page.locator('.settings-detail-heading')).toContainText('1.0.0')
     await expect(page.getByRole('alertdialog')).toHaveCount(0)
+    assert.equal(await page.evaluate(() => globalThis.gale.plugins.invoke('replacement-test', 'data.get', { key: 'draft' })), 'retained old draft')
+    await assert.rejects(readFile(join(obsolete, 'package/PLUGIN.json')), { code: 'ENOENT' })
+    assert.equal(JSON.parse(await readFile(join(obsolete, 'PLUGIN.json'), 'utf8')).id, 'replacement-test')
     await page.evaluate(async () => {
       await globalThis.gale.plugins.invoke('replacement-test', 'data.set', { key: 'draft', value: 'keep me' })
       await globalThis.gale.plugins.openWindow('replacement-test')
@@ -509,7 +565,7 @@ async function checkReplacement(application, page, directory, repository, settin
     assert.equal(await page.evaluate(() => globalThis.gale.plugins.invoke('replacement-test', 'data.get', { key: 'draft' })), 'keep me')
     assert.equal((await page.evaluate(() => globalThis.gale.panels.list())).filter(view => view.content.pluginId === 'replacement-test').length, 0)
     // A real shutdown failure must remain visible after the install refresh.
-    const backendPath = join(directory, 'plugins/replacement-test/package', manifest.backend)
+    const backendPath = join(directory, 'plugins/replacement-test', manifest.backend)
     await writeFile(backendPath, `${await readFile(backendPath, 'utf8')}\nmodule.exports.deactivate = async () => { throw new Error('Replacement cleanup failed') }\n`)
     await page.evaluate(() => globalThis.gale.plugins.startBackend('replacement-test'))
     await page.getByRole('button', { name: 'Install plugin', exact: true }).click()
@@ -607,6 +663,7 @@ async function main() {
     await page.evaluate(() => globalThis.gale.config.updateSettings({ theme: 'light' }))
     await expect(settingsIcon).toHaveAttribute('src', /assets\/light.svg$/)
     await page.evaluate(() => globalThis.gale.config.updateSettings({ theme: 'dark' }))
+    await checkWorkspaceMenu(application, page, settings)
     const installDialog = await application.evaluate(() => globalThis.__pluginInstallDialog)
     assert.deepEqual(installDialog.properties, ['openFile'])
     assert.deepEqual(installDialog.filters.map(filter => filter.extensions), [['zip'], ['json']])
@@ -632,7 +689,7 @@ async function main() {
     const closedChat = await page.locator('.agent-chat-column').boundingBox()
     const closedScroll = await page.locator('.agent-message-panel').boundingBox()
     assert.ok(Math.abs(closedChat.x + closedChat.width - closedScroll.x - closedScroll.width) < 1, 'Closing the sidebar must release the conversation gutter.')
-    await page.getByRole('button', { name: 'Plugins', exact: true }).click()
+    await page.getByRole('button', { name: 'Workspace menu', exact: true }).click()
     await expect(page.getByRole('menuitem', { name: 'Notepad', exact: true }).locator('img:visible')).toHaveAttribute('src', /assets\/dark.svg$/)
     await page.getByRole('menuitem', { name: 'Notepad', exact: true }).click()
     await expect(page.getByRole('tab', { name: 'Notepad', exact: true }).locator('img:visible')).toHaveAttribute('src', /assets\/dark.svg$/)
@@ -691,7 +748,7 @@ async function main() {
     // Force a fresh image request while disabled; ordinary plugin APIs remain unavailable.
     await settingsIcon.evaluate(image => { image.src += '?disabled-check' })
     await expect.poll(() => settingsIcon.evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true)
-    const installedIcon = join(directory, 'plugins/example-notepad/package/assets/dark.svg')
+    const installedIcon = join(directory, 'plugins/example-notepad/assets/dark.svg')
     await writeFile(installedIcon, '<svg broken')
     await settingsIcon.evaluate(image => { image.src += '&invalid-image' })
     await expect(page.getByRole('alert').filter({ hasText: 'Could not load the plugin icon.' })).toBeVisible()

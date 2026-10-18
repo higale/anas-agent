@@ -46,6 +46,9 @@ extraResources:
       - "!**/__pycache__/**"
       - "!**/*.pyc"
       - "!**/*.pyo"
+      - "!examples{,/**/*}"
+  - from: out/examples
+    to: data/examples
   - from: build/icon.png
     to: icon.png
 mac:

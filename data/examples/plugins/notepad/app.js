@@ -20,6 +20,7 @@ function t(key) {
 }
 function setStatus(key) { statusKey = key; status.textContent = t(key) }
 function showError(error) { statusKey = ''; status.textContent = error.message }
+function syncView({ location }) { save.hidden = location === 'window' }
 async function syncToolbar() {
   const toolbar = { actions: [{ id: 'save', label: t('actions.save'), icon: 'assets/save.svg', disabled: save.disabled }] }
   const snapshot = JSON.stringify(toolbar)
@@ -51,7 +52,7 @@ async function syncInfo() {
     document.documentElement.style.colorScheme = info.theme
     document.documentElement.style.fontSize = `${info.fontSize}px`
     document.title = t('plugin.name')
-    document.querySelector('label').textContent = t('plugin.name')
+    draft.setAttribute('aria-label', t('plugin.name'))
     save.querySelector('span:last-child').textContent = t('actions.save')
     warning.textContent = t('errors.languages')
     if (statusKey) status.textContent = t(statusKey)
@@ -66,6 +67,8 @@ async function start() {
   warning.title = languages.errors.join('\n')
   await syncInfo()
   const page = await anas.getContext()
+  syncView(page)
+  anas.onViewChanged(syncView)
   draft.value = page.restoreState?.draft ?? await anas.data.get('draft') ?? ''
   statusKey = page.restoreState?.statusKey ?? ''
   anas.registerLifecycle({

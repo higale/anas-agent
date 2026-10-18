@@ -19,6 +19,17 @@ GitHub 目标仓库：`higale/anas-agent`。日常开发仓库与公开仓库拥
 
 公开仓库的提交和附注标签会公开作者、提交者的姓名与邮箱。首次提交前，在公开仓库单独配置预期的公开署名和 GitHub 提供的 noreply 邮箱，不直接沿用开发仓库的私人邮箱；这些仓库级配置无需更改日常开发身份。
 
+## 后续发布的升级提醒
+
+后续每份 Release 说明的中英文部分都保留简短的跨版本提醒，分别链接 [4.x 升级数据说明](../data/help/UPGRADE_TO_4.zh-CN.md)和[英文版](../data/help/UPGRADE_TO_4.en.md)。说明从 4.0 之前直接升级到当前 4.x 时，旧对话和长期记忆不再可用，其他可恢复的数据按文档手动处理；不要将其写成每次 4.x 更新都会丢失数据。本次发布另有兼容性影响时，单独说明，不能用历史提醒代替。
+
+GitHub Release 正文使用完整链接，避免相对路径落到 Release 页面下：
+
+- 中文：`https://github.com/higale/anas-agent/blob/main/data/help/UPGRADE_TO_4.zh-CN.md`
+- 英文：`https://github.com/higale/anas-agent/blob/main/data/help/UPGRADE_TO_4.en.md`
+
+维护这两个固定路径；同步源码时一并发布文档。无需每次复制完整恢复步骤，也不再让用户到旧 Release 中查找说明。
+
 ## 开发标记
 
 启动或构建时，从 `refs/anas/github/v*` 中位于当前主线、距离 HEAD 最近的同步基点计算开发标记，例如 `3.1.3-dev.5+g9e8317f8.dirty`：正式版本仍为 `3.1.3`，基点后有 5 个主线提交，工作区有未提交修改。合并提交按一个主线提交计数；未忽略的新增文件也会标记 `.dirty`。普通引用不出现在分支或标签列表中。标记固定在本次启动／构建时，不实时跟踪后续 Git 变化。

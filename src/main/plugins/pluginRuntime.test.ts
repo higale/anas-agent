@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { cp, mkdtemp, rm, writeFile, readFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 const state = vi.hoisted(() => ({ root: '', bundled: '', fork: vi.fn() }))
@@ -18,17 +19,20 @@ class Child extends EventEmitter {
 }
 let child: Child
 let runtime: typeof import('./pluginRuntime')
+const { prepareExamples } = createRequire(import.meta.url)('../../../scripts/prepare-examples.cjs') as {
+  prepareExamples(source: string, target: string): Promise<void>
+}
 beforeEach(async () => {
   vi.resetModules()
   state.root = await mkdtemp(join(tmpdir(), 'anas-plugin-runtime-'))
   state.bundled = join(state.root, 'bundled')
   await cp(resolve('data/plugins/_system'), join(state.bundled, 'plugins/_system'), { recursive: true })
-  await cp(resolve('data/examples/plugins'), join(state.root, 'examples/plugins'), { recursive: true })
+  await prepareExamples(resolve('data/examples'), join(state.root, 'examples'))
   child = new Child()
   state.fork.mockReset().mockReturnValue(child)
   runtime = await import('./pluginRuntime')
   await runtime.initializePluginsStore()
-  await runtime.pluginRuntime().store.install(join(state.root, 'examples/plugins/text-tools/PLUGIN.json'))
+  await runtime.pluginRuntime().store.install(join(state.root, 'examples/plugins/text-tools.zip'))
 })
 afterEach(async () => { await runtime.stopPluginBackends(); await rm(state.root, { recursive: true, force: true }) })
 
@@ -43,6 +47,7 @@ it('loads mirrored built-ins, keeps examples inactive and refreshes only app-own
   const installed = await store.packageFile('example-text-tools', 'backend.cjs')
   const original = await readFile(installed, 'utf8')
   await writeFile(join(state.root, 'plugins/_system/usage-meter/stale.txt'), 'old file')
+  await mkdir(join(state.root, 'examples/plugins/text-tools'))
   await writeFile(join(state.root, 'examples/plugins/text-tools/stale.txt'), 'old file')
   await writeFile(join(state.bundled, 'plugins/_system/usage-meter/backend.cjs'), 'module.exports = {}\n')
   await Promise.all([runtime.initializePluginsStore(), runtime.initializePluginsStore()])

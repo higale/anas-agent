@@ -18,6 +18,7 @@ async function verifyEnvironmentStartup(repositoryRoot, executablePath) {
     await mkdir(traceDirectory, { recursive: true })
     await writeFile(join(traceDirectory, 'fixture.txt'), '1234567')
     await symlink(join(repositoryRoot, 'data'), join(root, 'data'), 'junction')
+    await symlink(join(repositoryRoot, 'out'), join(root, 'out'), 'junction')
     await writeFile(join(root, 'package.json'), JSON.stringify({
       name: 'anas-startup-test', version: '1.0.0', main: 'main.cjs'
     }))
@@ -102,7 +103,7 @@ async function verifyEnvironmentStartup(repositoryRoot, executablePath) {
     const profile = join(root, 'profile')
     assert.ok((await readdir(join(profile, 'examples/skills'))).length > 0)
     assert.equal(JSON.parse(await readFile(join(profile, 'plugins/_system/usage-meter/PLUGIN.json'), 'utf8')).id, 'usage-meter')
-    assert.equal(JSON.parse(await readFile(join(profile, 'examples/plugins/notepad/PLUGIN.json'), 'utf8')).id, 'example-notepad')
+    assert.deepEqual((await readdir(join(profile, 'examples/plugins'))).sort(), ['README.en.md', 'README.md', 'backend-demo.zip', 'notepad.zip', 'text-tools.zip', 'writing-helper.zip'])
     const plugins = await page.evaluate(() => globalThis.gale.plugins.list())
     assert.deepEqual(plugins.map(plugin => plugin.id), ['usage-meter'], 'Plugin examples must not be registered automatically.')
     assert.equal(plugins[0].error, undefined)

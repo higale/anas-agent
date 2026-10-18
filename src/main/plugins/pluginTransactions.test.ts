@@ -55,7 +55,7 @@ it('keeps an interrupted first uninstall journal outside the recovery directory'
   const restarted = new PluginStore(restartedRoot)
   await restarted.recoverTransactions()
   expect(await restarted.read(id)).toMatchObject({ enabled: false, error: undefined })
-  expect(await readFile(join(restartedRoot, 'plugins', id, 'package/index.html'), 'utf8')).toBe('old package')
+  expect(await readFile(join(restartedRoot, 'plugins', id, 'index.html'), 'utf8')).toBe('old package')
   expect(JSON.parse(await readFile(join(restartedRoot, 'db/plugins', id, 'state.json'), 'utf8')).values.draft).toBe('saved data')
   await rm(join(restartedRoot, 'tmp'), { recursive: true, force: true })
   await restarted.recoverTransactions()
@@ -68,7 +68,7 @@ async function interrupted(operation: Operation, moved: number, phase = 'pending
   const live = join(plugins, id), liveData = join(data, 'db/plugins', id)
   if (operation === 'replace') {
     await cp(live, join(stage, 'incoming'), { recursive: true })
-    await writeFile(join(stage, 'incoming/package/index.html'), 'new package')
+    await writeFile(join(stage, 'incoming/index.html'), 'new package')
   }
   const steps = [[live, join(stage, 'previous')], [liveData, join(stage, 'data')],
     ...(operation === 'replace' ? [[join(stage, 'incoming'), live]] : [])]
@@ -82,7 +82,7 @@ async function interrupted(operation: Operation, moved: number, phase = 'pending
 async function expectRestored() {
   const restarted = new PluginStore(data)
   await restarted.recoverTransactions()
-  expect(await readFile(join(plugins, id, 'package/index.html'), 'utf8')).toBe('old package')
+  expect(await readFile(join(plugins, id, 'index.html'), 'utf8')).toBe('old package')
   expect(await restarted.read(id)).toMatchObject({ enabled: false, error: undefined })
   expect(JSON.parse(await readFile(join(data, 'db/plugins', id, 'state.json'), 'utf8')).values.draft).toBe('saved data')
   expect((await readdir(plugins)).filter(name => /^\.(replace|remove)-/.test(name))).toEqual([])
@@ -113,11 +113,11 @@ describe.each(['replace', 'remove'] as const)('%s transaction recovery', operati
 
   it('cleans committed leftovers without restoring old code or data', async () => {
     const { stage, live, liveData } = await interrupted(operation, length, 'committed')
-    await rm(join(stage, 'previous/package/index.html')) // interrupted recursive cleanup
+    await rm(join(stage, 'previous/index.html')) // interrupted recursive cleanup
     await new PluginStore(data).recoverTransactions()
     await expect(lstat(stage)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(lstat(liveData)).rejects.toMatchObject({ code: 'ENOENT' })
-    if (operation === 'replace') expect(await readFile(join(live, 'package/index.html'), 'utf8')).toBe('new package')
+    if (operation === 'replace') expect(await readFile(join(live, 'index.html'), 'utf8')).toBe('new package')
     else await expect(lstat(live)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
@@ -131,9 +131,8 @@ describe.each(['replace', 'remove'] as const)('%s transaction recovery', operati
 it('rolls back a new install interrupted before its commit marker', async () => {
   await rm(join(plugins, id), { recursive: true })
   const stage = join(plugins, '.replace-new-install')
-  await mkdir(join(stage, 'incoming'), { recursive: true })
-  await cp(source, join(stage, 'incoming/package'), { recursive: true })
-  await writeFile(join(stage, 'incoming/installation.json'), '{"version":0,"enabled":true}')
+  await mkdir(stage)
+  await cp(source, join(stage, 'incoming'), { recursive: true })
   await writeFile(join(stage, 'transaction.json'), JSON.stringify({ version: 0, plugin_id: id, operation: 'replace',
     had_package: false, move_data: false, phase: 'pending', completed_moves: 0, move_pending: true }))
   await rename(join(stage, 'incoming'), join(plugins, id))
@@ -153,9 +152,9 @@ it('recovers a transaction copied to another data root without using its origina
   const relocated = join(root, 'restored-backup')
   await cp(data, relocated, { recursive: true })
   await new PluginStore(relocated).recoverTransactions()
-  expect(await readFile(join(relocated, 'plugins', id, 'package/index.html'), 'utf8')).toBe('old package')
+  expect(await readFile(join(relocated, 'plugins', id, 'index.html'), 'utf8')).toBe('old package')
   expect(JSON.parse(await readFile(join(relocated, 'db/plugins', id, 'state.json'), 'utf8')).values.draft).toBe('saved data')
-  expect(await readFile(join(stage, 'previous/package/index.html'), 'utf8')).toBe('old package')
+  expect(await readFile(join(stage, 'previous/index.html'), 'utf8')).toBe('old package')
 })
 
 it.each(['missing', 'invalid', 'unsupported', 'unsafe-id', 'wrong-progress'])('preserves %s journals and reports the recovery location', async kind => {
@@ -165,8 +164,8 @@ it.each(['missing', 'invalid', 'unsupported', 'unsafe-id', 'wrong-progress'])('p
     ...(kind === 'unsupported' ? { version: 99 } : kind === 'unsafe-id' ? { plugin_id: '../outside' } : { completed_moves: 0 }) }))
   const restarted = new PluginStore(data)
   await expect(restarted.recoverTransactions()).rejects.toThrow(stage)
-  expect(await readFile(join(stage, 'previous/package/index.html'), 'utf8')).toBe('old package')
-  expect(await readFile(join(stage, 'incoming/package/index.html'), 'utf8')).toBe('new package')
+  expect(await readFile(join(stage, 'previous/index.html'), 'utf8')).toBe('old package')
+  expect(await readFile(join(stage, 'incoming/index.html'), 'utf8')).toBe('new package')
 })
 
 it('preserves conflicting destination files and resumes after the conflict is resolved', async () => {
@@ -176,7 +175,7 @@ it('preserves conflicting destination files and resumes after the conflict is re
   const restarted = new PluginStore(data)
   await expect(restarted.recoverTransactions()).rejects.toThrow('preserved files remain')
   expect(await readFile(join(live, 'unrelated'), 'utf8')).toBe('do not overwrite')
-  expect(await readFile(join(stage, 'previous/package/index.html'), 'utf8')).toBe('old package')
+  expect(await readFile(join(stage, 'previous/index.html'), 'utf8')).toBe('old package')
   await rm(live, { recursive: true })
   await expectRestored()
 })
@@ -198,12 +197,13 @@ it('retains the commit journal on cleanup failure and only retries cleanup after
   const [name] = (await readdir(plugins)).filter(name => name.startsWith('.replace-'))
   const record = JSON.parse(await readFile(join(plugins, name, 'transaction.json'), 'utf8'))
   expect(record.phase).toBe('committed')
-  expect(await readFile(join(plugins, id, 'package/index.html'), 'utf8')).toBe('new package')
+  expect(await readFile(join(plugins, id, 'index.html'), 'utf8')).toBe('new package')
   await expect(new PluginStore(data).recoverTransactions()).rejects.toThrow('Cleanup busy')
   faults.failCleanup = false
   await new PluginStore(data).recoverTransactions()
-  expect(await readFile(join(plugins, id, 'package/index.html'), 'utf8')).toBe('new package')
-  await expect(lstat(join(data, 'db/plugins', id))).rejects.toMatchObject({ code: 'ENOENT' })
+  expect(await readFile(join(plugins, id, 'index.html'), 'utf8')).toBe('new package')
+  expect(await readdir(join(data, 'db/plugins', id))).toEqual(['anas-installation.json'])
+  expect(await store.read(id)).toMatchObject({ enabled: false, error: undefined })
 })
 
 it('recovers using persisted intent if a rename succeeds but reporting completion fails', async () => {
@@ -215,4 +215,57 @@ it('recovers using persisted intent if a rename succeeds but reporting completio
   })
   await expect(store.uninstall(id, true)).rejects.toThrow('Lost rename acknowledgment')
   await expectRestored()
+})
+
+it.each(['install', 'replace', 'reset', 'remove'] as const)('recovers code and db settings after interruption during %s', async operation => {
+  await store.setShowInTitlebar(id, true)
+  if (operation === 'install') await store.uninstall(id)
+  await writeFile(join(source, 'index.html'), 'new package')
+  const preview = operation === 'remove' ? undefined : await store.prepareInstall(source)
+  const snapshots: string[] = []
+  const capture = async () => {
+    const path = join(root, `interrupted-${snapshots.length}`)
+    await cp(data, path, { recursive: true })
+    snapshots.push(path)
+  }
+  const nativeRename = fs.retry.rename({ timeout: 2_000, interval: 25 })
+  const spy = vi.spyOn(fs.retry, 'rename').mockImplementation(() => async (from, to) => {
+    const liveMove = /[\\/]\.(?:replace|remove)-[^\\/]+[\\/]/.test(String(from) + '|' + String(to))
+      && !String(to).endsWith('transaction.json')
+    if (liveMove) await capture()
+    await nativeRename(from, to)
+    if (liveMove) await capture()
+  })
+  if (operation === 'remove') await store.uninstall(id)
+  else await store.finishInstall(preview!.token, { replace: operation !== 'install', deleteData: operation === 'reset' })
+  spy.mockRestore()
+  expect(snapshots.length).toBeGreaterThan(0)
+  for (const path of snapshots) {
+    const restarted = new PluginStore(path)
+    await restarted.recoverTransactions()
+    if (operation === 'install') {
+      expect(await restarted.list()).toEqual([])
+      await expect(lstat(join(path, 'db/plugins', id, 'anas-installation.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+    } else {
+      expect(await restarted.read(id)).toMatchObject({ enabled: false, showInTitlebar: true, error: undefined })
+      expect(await readFile(join(path, 'plugins', id, 'index.html'), 'utf8')).toBe('old package')
+    }
+    expect(JSON.parse(await readFile(join(path, 'db/plugins', id, 'state.json'), 'utf8')).values.draft).toBe('saved data')
+    expect((await readdir(join(path, 'plugins'))).filter(name => /^\.(replace|remove)-/.test(name))).toEqual([])
+    await restarted.recoverTransactions()
+  }
+})
+
+it.each(['replace', 'remove'] as const)('rolls back %s when moving installation settings fails', async operation => {
+  await store.setShowInTitlebar(id, true)
+  const nativeRename = fs.retry.rename({ timeout: 2_000, interval: 25 })
+  vi.spyOn(fs.retry, 'rename').mockImplementation(() => async (from, to) => {
+    if (String(from).endsWith('anas-installation.json')) throw new Error('Installation settings busy')
+    await nativeRename(from, to)
+  })
+  const attempt = operation === 'remove' ? store.uninstall(id)
+    : store.prepareInstall(source).then(preview => store.finishInstall(preview.token, { replace: true }))
+  await expect(attempt).rejects.toThrow('Installation settings busy')
+  await expectRestored()
+  expect(await store.read(id)).toMatchObject({ enabled: false, showInTitlebar: true, error: undefined })
 })

@@ -1,12 +1,16 @@
-:root { color-scheme: light dark; font: 14px system-ui, sans-serif; }
+:root { color-scheme: light dark; font: 14px system-ui, sans-serif; --control-height: max(30px, calc(1rem + 18px)); }
 * { box-sizing: border-box; }
 body { margin: 0; background: light-dark(#fff, #202020); color: light-dark(#252525, #e5e5e5); }
 main { display: flex; flex-direction: column; gap: 12px; height: 100vh; padding: 16px; }
-label { font-weight: 600; }
-textarea { flex: 1; resize: none; font: inherit; padding: 10px; border: 1px solid light-dark(#d4d4d4, #484848); border-radius: 6px; background: transparent; color: inherit; }
-button { font: inherit; min-height: max(30px, calc(1rem + 18px)); padding: 0 12px; border: 1px solid light-dark(#d4d4d4, #484848); border-radius: 6px; cursor: pointer; }
-button { display: inline-flex; align-items: center; gap: 6px; color: inherit; }
+textarea { flex: 1; min-height: 0; resize: none; font: inherit; padding: 10px; border: 1px solid light-dark(#d4d4d4, #484848); border-radius: 6px; background: transparent; color: inherit; }
+button { appearance: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: var(--control-height); padding: 0 12px; border: 1px solid light-dark(#d4d4d4, #484848); border-radius: 6px; background: transparent; color: inherit; font: inherit; white-space: nowrap; cursor: pointer; }
+button:hover:not(:disabled) { background: light-dark(#ebebeb, #2a2a2a); }
+button:active:not(:disabled) { background: light-dark(#e5e5e5, #333); }
+button:focus-visible { outline: 2px solid light-dark(#2d6bc9, #75a7f5); outline-offset: 2px; }
+button:disabled { color: light-dark(#737373, #a0a0a0); cursor: default; }
 .save-icon { width: 16px; height: 16px; object-fit: contain; }
 button:disabled .save-icon { filter: grayscale(1); opacity: .48; }
-main > div { display: flex; align-items: center; gap: 12px; }
-#status { font-size: .9rem; }
+footer { display: flex; align-items: center; gap: 12px; }
+#status { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: .9rem; }
+#save { flex-shrink: 0; }
+[hidden] { display: none; }

@@ -2,7 +2,7 @@
 
 [简体中文](README.md) · [English](README.en.md)
 
-**升级提醒：从 4.0 之前的版本升级到 4.x 会丢失旧对话记录和长期记忆。旧项目、输入历史、插件数据及头像需要按说明手动恢复；不提供自动迁移，也不支持导入旧版备份。升级前请备份，具体影响与恢复方法见 [4.0.0 发布说明](https://github.com/higale/anas-agent/releases/tag/v4.0.0)。** 此提醒针对跨入 4.x 的升级，4.0.0 升级到 4.0.1 没有新增的数据丢弃。
+**升级提醒：从 4.0 之前的版本升级到 4.x，旧对话和长期记忆不再可用；项目、输入历史、插件数据和头像可手动恢复。升级前请备份，详见 [4.x 升级数据说明](data/help/UPGRADE_TO_4.zh-CN.md)。** 此提醒针对跨入 4.x 的升级，并非每次 4.x 升级都会丢失数据。
 
 Anas 是基于 Electron、React 和 TypeScript 构建的本地桌面 AI Agent，使用 LangGraph 和 Deep Agents 运行时。每个项目可以选择自己的上下文、工具、技能和子 Agent。配置与会话保存在本地；请求模型时，会将任务所需的内容发送给所选模型供应商。
 
@@ -124,7 +124,7 @@ npm run dev -- -- --data-dir "./runtime-data/research"
 | `skills/`、`tools/` | 用户管理的包 |
 | `plugins/`、`db/plugins/` | 已安装插件及独立数据；卸载默认保留数据，可勾选删除 |
 | `skills/_system/`、`tools/_system/`、`plugins/_system/` | 由应用刷新的内置包 |
-| `examples/skills/`、`examples/tools/`、`examples/plugins/` | 由应用刷新的示例；需先导入或安装再使用 |
+| `examples/skills/`、`examples/tools/`、`examples/plugins/` | 由应用刷新的示例；插件提供独立 ZIP，需先导入或安装再使用 |
 | `help/`、`lang/` | 帮助与语言包 |
 | `config/assets/` | 头像原图、裁剪参数及生成图标 |
 | `log/`、`cache/`、`tmp/`、`electron/` | 日志、缓存、临时文件与 Electron 用户配置 |

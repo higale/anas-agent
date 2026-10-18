@@ -51,6 +51,7 @@ const api: GaleApi = {
     confirmInstall: (token, deleteData) => ipcRenderer.invoke('plugins:confirmInstall', token, deleteData),
     cancelInstall: token => ipcRenderer.invoke('plugins:cancelInstall', token),
     setEnabled: (id, enabled) => ipcRenderer.invoke('plugins:setEnabled', id, enabled),
+    setShowInTitlebar: (id, show) => ipcRenderer.invoke('plugins:setShowInTitlebar', id, show),
     uninstall: (id, deleteData) => ipcRenderer.invoke('plugins:uninstall', id, deleteData),
     openWindow: id => ipcRenderer.invoke('plugins:openWindow', id),
     startBackend: id => ipcRenderer.invoke('plugins:startBackend', id),

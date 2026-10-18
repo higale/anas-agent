@@ -19,6 +19,7 @@ async function verifyCurrentStorage(repositoryRoot, executablePath) {
     const documents = join(root, 'documents')
     await mkdir(documents)
     await symlink(join(repositoryRoot, 'data'), join(root, 'data'), 'junction')
+    await symlink(join(repositoryRoot, 'out'), join(root, 'out'), 'junction')
     await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'anas-current-storage-test', version: '1.0.0', main: 'main.cjs' }))
     await writeFile(join(root, 'main.cjs'), `
       const { app, ipcMain } = require('electron')

@@ -14,6 +14,7 @@ async function verifyUnifiedPanels() {
   try {
     await mkdir(join(root, 'documents'))
     await symlink(join(repository, 'data'), join(root, 'data'), 'junction')
+    await symlink(join(repository, 'out'), join(root, 'out'), 'junction')
     await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'anas-panels-test', version: '1.0.0', main: 'main.cjs' }))
     // Test-only access to the real storage and event publisher, with no production hooks.
     await writeFile(join(root, 'main.cjs'), `

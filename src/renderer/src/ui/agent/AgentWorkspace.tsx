@@ -1,4 +1,4 @@
-import { FileDiff, PanelLeftOpen, PanelRightOpen } from 'lucide-react'
+import { PanelLeftOpen, PanelRightOpen } from 'lucide-react'
 import { useLayoutEffect, useRef, useState } from 'react'
 import type { DragEvent, FormEvent, KeyboardEvent, RefObject } from 'react'
 import { useLiveContextStatus } from './useLiveContextStatus'
@@ -12,7 +12,7 @@ import { NoFocusButton } from '../NoFocusButton'
 import { AgentApprovalPanel } from './AgentApprovalPanel'
 import { DiffPreferences, type DiffViewSettings } from '../diff/DiffView'
 import { WorkspacePanels } from './WorkspacePanels'
-import { PluginMenu } from '../plugins/PluginMenu'
+import { WorkspaceMenu } from './WorkspaceMenu'
 import type { PluginSummary } from '@shared/plugins'
 import { workspacePanelGroup, workspacePanelScope, type WorkspacePanelsController } from './useWorkspacePanels'
 import { WORKSPACE_PANEL_WIDTH_DEFAULT } from '@shared/uiPreferences'
@@ -36,6 +36,7 @@ import { normalizeChatContentWidth } from '../settings/AppearanceSettings'
 interface AgentWorkspaceProps {
   plugins?: PluginSummary[]
   onOpenPlugin?(plugin: PluginSummary): void
+  onOpenPluginSettings?(): void
   onDiffPreferencesChange?(update: Partial<DiffViewSettings>): Promise<void>
   panels: WorkspacePanelsController
   onPanelWidthCommit(width: number): void | Promise<void>
@@ -218,14 +219,12 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
           onToggleThreadPinned={props.onToggleThreadPinned}
         />
         <div className="topbar-actions ui-row ui-row-tight ui-push-end">
-          {props.onOpenPlugin && <PluginMenu plugins={props.plugins ?? []} onOpen={props.onOpenPlugin} />}
-          {selectedProject && <NoFocusButton type="button" className="ui-tool-button ui-tool-button-square"
-            aria-label={t('agent.file_changes')} data-tooltip={t('agent.file_changes')} onClick={() => props.panels.open({
+          {(selectedProject || props.onOpenPluginSettings) && <WorkspaceMenu plugins={props.plugins ?? []}
+            onOpenPlugin={props.onOpenPlugin} onOpenPluginSettings={props.onOpenPluginSettings}
+            project={selectedProject ? { name: selectedProject.name, onOpenFiles: () => props.panels.open({
               kind: 'files', projectId: selectedProject.id, threadId: props.activeThreadId,
               ...(!props.activeThreadId ? { draft: { modelConfigId: selectedModel?.id, modelParameterPresetId: props.selectedModelParameterPresetId ?? null, accessMode: props.accessMode } } : {})
-            })}>
-            <FileDiff size={18} />
-          </NoFocusButton>}
+            }) } : undefined} />}
           {panelGroup.tabs.length > 0 && !panelGroup.expanded && <NoFocusButton ref={panelToggleRef} type="button"
             className="ui-tool-button ui-tool-button-square" aria-expanded={false}
             aria-label={t('agent.show_panels')}

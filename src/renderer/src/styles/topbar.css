@@ -62,6 +62,25 @@
   background: var(--border-panel);
 }
 
+.topbar-actions {
+  min-width: 0;
+  max-width: 55%;
+}
+
+.topbar .workspace-launcher {
+  min-width: var(--control-height);
+}
+
+.workspace-launcher > button {
+  flex-shrink: 0;
+}
+
+.workspace-menu {
+  width: min(280px, var(--radix-dropdown-menu-content-available-width, calc(100vw - 24px)));
+  max-height: var(--radix-dropdown-menu-content-available-height, calc(100vh - 24px));
+  overflow-y: auto;
+}
+
 .thread-topbar {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;

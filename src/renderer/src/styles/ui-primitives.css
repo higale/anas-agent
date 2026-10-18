@@ -2094,6 +2094,24 @@ button.ui-avatar:has(> img):focus-visible,
   padding: var(--ui-menu-padding, 8px);
 }
 
+.ui-menu-group {
+  display: grid;
+  gap: var(--ui-menu-gap, 3px);
+  min-width: 0;
+}
+
+.ui-menu-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: var(--control-height);
+  padding: 0 9px;
+  color: var(--text-muted);
+  font-size: var(--font-size-small);
+  font-weight: 600;
+}
+
 .ui-details-trigger { display: inline-flex; flex-shrink: 0; }
 .ui-details-popover {
   width: max-content;

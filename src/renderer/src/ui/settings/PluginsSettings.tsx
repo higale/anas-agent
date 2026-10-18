@@ -14,8 +14,8 @@ import { PluginPreferences } from './PluginPreferences'
 import { PluginContributions } from './PluginContributions'
 import { dataTransferHasFiles } from '../dragDrop'
 
-function PluginHomeLocation({ plugin, busy }: {
-  plugin: PluginSummary; busy: boolean
+function PluginLaunchSettings({ plugin, busy, onRefresh }: {
+  plugin: PluginSummary; busy: boolean; onRefresh(): Promise<void>
 }) {
   const { t } = useTranslation()
   const [location, setLocation] = useState<PluginViewOptions['location']>()
@@ -37,7 +37,15 @@ function PluginHomeLocation({ plugin, busy }: {
     } catch (reason) { notice.error(t('plugins.operation_failed'), { description: errorDetail(reason) }) }
     finally { setSaving(false) }
   }
-  return <div className="ui-form-row ui-form-row-narrow ui-form-row-fit-control">
+  async function saveTitlebar(show: boolean) {
+    setSaving(true)
+    try {
+      await window.gale.plugins.setShowInTitlebar(plugin.id, show)
+      await onRefresh()
+    } catch (reason) { notice.error(t('plugins.operation_failed'), { description: errorDetail(reason) }) }
+    finally { setSaving(false) }
+  }
+  return <><div className="ui-form-row ui-form-row-narrow ui-form-row-fit-control">
     <span><strong>{t('plugins.home_location')}</strong><small>{t('plugins.home_location_hint')}</small>
       {error && <small role="alert"><span className="ui-status-danger">{t('plugins.operation_failed')} {error}</span></small>}
     </span>
@@ -46,6 +54,9 @@ function PluginHomeLocation({ plugin, busy }: {
       options={policy.locations.map(value => ({ value, label: t(`plugins.home_${value}`) }))}
       onChange={value => void save(value as PluginViewOptions['location'])} />
   </div>
+    <CheckboxField checked={plugin.showInTitlebar ?? false} disabled={busy || saving}
+      label={t('plugins.show_in_titlebar')} onChange={show => void saveTitlebar(show)} />
+  </>
 }
 
 function PluginHeading({ plugin, busy, onEnabledChange }: { plugin: PluginSummary; busy: boolean; onEnabledChange(enabled: boolean): Promise<void> }) {
@@ -225,7 +236,7 @@ export function PluginsSettings({ plugins, error, onRefresh, className = 'settin
           skills: selected.manifest?.skills?.length ?? 0, prompts: selected.manifest?.prompts?.length ?? 0 })}</small>}
         {Boolean(selected.languageErrors?.length) && <div className="ui-note ui-note-danger" role="alert"><p>{t('plugins.language_failed')}</p>{selected.languageErrors?.map((message, index) => <p key={index}>{message}</p>)}</div>}
         {(selected.error || selected.backendError) && <div className="ui-note ui-note-danger" role="alert"><p>{selected.error ?? selected.backendError}</p></div>}
-        {selected.manifest?.ui && !selected.error && <PluginHomeLocation key={selected.id} plugin={selected} busy={busy} />}
+        {selected.manifest?.ui && !selected.error && <PluginLaunchSettings key={selected.id} plugin={selected} busy={busy} onRefresh={onRefresh} />}
         {selected.manifest && <PluginBackendStatus key={`backend:${selected.id}`} plugin={selected} busy={busy} onRefresh={onRefresh} />}
         <PluginContributions key={`contributions:${selected.id}`} plugin={selected} />
         </div>}

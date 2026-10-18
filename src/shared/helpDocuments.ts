@@ -2,7 +2,9 @@ export const helpDocuments = {
   'USER_GUIDE.en.md': 'User Guide',
   'USER_GUIDE.zh-CN.md': '用户手册',
   'AGENT_SKILLS.en.md': 'Agent Skills · English',
-  'AGENT_SKILLS.zh-CN.md': 'Agent Skills · 中文'
+  'AGENT_SKILLS.zh-CN.md': 'Agent Skills · 中文',
+  'UPGRADE_TO_4.en.md': 'Upgrading to Anas 4.x',
+  'UPGRADE_TO_4.zh-CN.md': '升级到 Anas 4.x'
 } as const
 
 export type HelpDocumentId = keyof typeof helpDocuments

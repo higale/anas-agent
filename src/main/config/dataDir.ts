@@ -86,6 +86,12 @@ export function getBundledDataDir(): string {
     : join(electronApp?.getAppPath() ?? process.cwd(), 'data')
 }
 
+export function getBundledExamplesDir(): string {
+  return app?.isPackaged
+    ? join(getBundledDataDir(), 'examples')
+    : join(app?.getAppPath() ?? process.cwd(), 'out', 'examples')
+}
+
 function getDefaultDataDir(): string {
   return join(homedir(), `.gale${getProgramName()}`)
 }

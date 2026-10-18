@@ -46,6 +46,17 @@ export async function validateBundledPlugin(directory: string, expectedId?: stri
   if (expectedId !== undefined && manifest.id !== expectedId) throw new Error('Bundled plugin ID does not match its directory.')
 }
 
+export async function validateBundledPluginZip(path: string, temporaryRoot: string): Promise<void> {
+  await mkdir(temporaryRoot, { recursive: true })
+  const stage = await mkdtemp(join(temporaryRoot, 'plugin-example-'))
+  try {
+    await extractZipArchive(path, stage, pluginArchiveLimits, { validatePath: requirePluginPath })
+    await validateBundledPlugin(stage)
+  } finally {
+    await rm(stage, { recursive: true, force: true })
+  }
+}
+
 export class PluginStore {
   private resourceUses = new Map<string, number>()
   private tail: Promise<unknown> = Promise.resolve()
@@ -107,10 +118,7 @@ export class PluginStore {
     requirePluginId(id)
     if (this.transactionErrors.has(id)) throw this.transactionErrors.get(id)
     if (this.isBuiltin(id)) return realpath(this.bundled[id])
-    const path = join(await this.directory('plugins', id), 'package')
-    const info = await lstat(path)
-    if (!info.isDirectory() || info.isSymbolicLink() || !samePath(await realpath(path), path)) throw new Error('Invalid plugin package directory.')
-    return path
+    return this.directory('plugins', id)
   }
 
   async packageFile(id: string, name: string): Promise<string> {
@@ -135,19 +143,35 @@ export class PluginStore {
         })
         if (collision) throw new Error(`A user-installed plugin already uses the built-in ID "${id}". Its files are preserved in plugins/${id}; move that installation out before using the built-in plugin.`)
       }
-      const root = await this.directory(builtin ? 'db/plugins' : 'plugins', id, builtin)
-      const saved = await optionalJson(join(root, builtin ? 'anas-installation.json' : 'installation.json'))
-      const raw = (saved === undefined && builtin ? { version: 0, enabled: true } : saved) as { version?: unknown; enabled?: unknown } | undefined
-      if (!raw || raw.version !== 0 || (raw.enabled !== undefined && typeof raw.enabled !== 'boolean')) throw new Error('Invalid plugin installation state.')
+      const { state } = await this.installationState(id)
       const manifest = await this.readManifest(id)
       for (const entry of [manifest.ui, manifest.backend]) if (entry) await this.packageFile(id, entry)
       const skillSummaries = await this.validateContributions(manifest, entry => this.packageFile(id, entry))
       const error = manifest.platforms && !manifest.platforms.includes(process.platform) ? 'Plugin does not support this platform.' : undefined
       const language = includeLanguages ? await loadPluginLanguages(await this.packageDirectory(id), manifest) : undefined
-      return { id, ...(builtin ? { builtin: true } : {}), manifest, skillSummaries, enabled: raw.enabled ?? true, error, backendStatus: 'stopped', languages: language?.languages, languageErrors: language?.errors }
+      return { id, ...(builtin ? { builtin: true } : {}), manifest, skillSummaries, enabled: state.enabled, showInTitlebar: state.show_in_titlebar ?? false, error, backendStatus: 'stopped', languages: language?.languages, languageErrors: language?.errors }
     } catch (error) {
       return { id, ...(this.isBuiltin(id) ? { builtin: true } : {}), enabled: false, error: error instanceof Error ? error.message : String(error), backendStatus: 'stopped' }
     }
+  }
+
+  private async installationPath(id: string, create = false): Promise<string> {
+    requirePluginId(id)
+    const root = await this.directory('db/plugins', id, create).catch(async error => {
+      if (create || error.code !== 'ENOENT') throw error
+      return join(await realpath(this.dataDirectory), 'db/plugins', id)
+    })
+    return join(root, 'anas-installation.json')
+  }
+
+  private async installationState(id: string, create = false) {
+    const path = await this.installationPath(id, create)
+    const saved = await optionalJson(path)
+    const raw = (saved === undefined ? { version: 0 } : saved) as { version?: unknown; enabled?: unknown; show_in_titlebar?: unknown } | undefined
+    if (!raw || raw.version !== 0 || (raw.enabled !== undefined && typeof raw.enabled !== 'boolean')
+      || (raw.show_in_titlebar !== undefined && typeof raw.show_in_titlebar !== 'boolean')) throw new Error('Invalid plugin installation state.')
+    return { path, exists: saved !== undefined, state: { version: 0, enabled: raw.enabled ?? true,
+      ...(raw.show_in_titlebar === undefined ? {} : { show_in_titlebar: raw.show_in_titlebar }) } }
   }
 
   private async readManifest(id: string): Promise<PluginManifest> {
@@ -314,7 +338,6 @@ export class PluginStore {
     let retained = false
     try {
       const incoming = join(stage, 'incoming')
-      await mkdir(incoming)
       let bytes = 0
       let entries = 0
       const copy = async (from: string, to: string, ancestors: Set<string>): Promise<void> => {
@@ -337,14 +360,14 @@ export class PluginStore {
           await chmod(to, info.mode & 0o777)
         }
       }
-      await copy(source, join(incoming, 'package'), new Set())
-      const staged = parsePluginManifest(await optionalJson(join(incoming, 'package', 'PLUGIN.json'), 64 * 1024))
+      await copy(source, incoming, new Set())
+      const staged = parsePluginManifest(await optionalJson(join(incoming, 'PLUGIN.json'), 64 * 1024))
       if (JSON.stringify(staged) !== JSON.stringify(manifest)) throw new Error('Plugin manifest changed while installing.')
       for (const entry of [manifest.ui, manifest.backend]) {
-        if (entry && !(await stat(join(incoming, 'package', entry))).isFile()) throw new Error('Missing plugin entry.')
+        if (entry && !(await stat(join(incoming, entry))).isFile()) throw new Error('Missing plugin entry.')
       }
       await this.validateContributions(manifest, async path => {
-        const file = join(incoming, 'package', path)
+        const file = join(incoming, path)
         if (!(await stat(file)).isFile()) throw new Error('Missing plugin contribution.')
         return file
       })
@@ -421,9 +444,17 @@ export class PluginStore {
       await unchanged()
       // Shutdown can finish writing or create the plugin's data directory.
       const data = installed && deleteData ? await dataDirectory() : undefined
-      const enabled = installed ? (await this.read(manifest.id)).enabled : true
-      await writeJsonFileAtomic(join(stage, 'incoming', 'installation.json'), { version: 0, enabled })
-      await writePluginTransaction(stage, newPluginTransaction(manifest.id, 'replace', Boolean(installed), Boolean(data)))
+      const current = await this.installationState(manifest.id)
+      const installation = installed ? current.state : { version: 0, enabled: true }
+      const installationChange = data ? 'reset' : current.exists ? 'replace' : 'create'
+      if (data) {
+        await mkdir(join(stage, 'incoming-data'))
+        await writeJsonFileAtomic(join(stage, 'incoming-data', 'anas-installation.json'), installation)
+      } else {
+        await this.directory('db/plugins', manifest.id, true)
+        await writeJsonFileAtomic(join(stage, 'incoming-installation.json'), installation)
+      }
+      await writePluginTransaction(stage, newPluginTransaction(manifest.id, 'replace', Boolean(installed), Boolean(data), installationChange))
       recoveryStage = join(await this.directory('plugins', undefined, true), '.replace-' + token)
       await fs.retry.rename({ timeout: 2_000, interval: 25 })(stage, recoveryStage)
     } catch (error) {
@@ -441,9 +472,17 @@ export class PluginStore {
     if (this.transactionErrors.has(id)) throw this.transactionErrors.get(id)
     const item = await this.read(id)
     if (enabled && item.error) throw new Error(item.error)
-    const builtin = this.isBuiltin(id)
-    const root = await this.directory(builtin ? 'db/plugins' : 'plugins', id, builtin)
-    await writeJsonFileAtomic(join(root, builtin ? 'anas-installation.json' : 'installation.json'), { version: 0, enabled })
+    const { path, state } = await this.installationState(id, true)
+    await writeJsonFileAtomic(path, { ...state, enabled })
+  }
+
+  async setShowInTitlebar(id: string, show: boolean): Promise<void> {
+    if (typeof show !== 'boolean') throw new Error('Invalid plugin titlebar preference.')
+    const item = await this.read(id)
+    if (item.error) throw new Error(item.error)
+    if (!item.manifest?.ui) throw new Error('Plugin has no home page.')
+    const { path, state } = await this.installationState(id, true)
+    await writeJsonFileAtomic(path, { ...state, show_in_titlebar: show })
   }
 
   async uninstall(id: string, deleteData = false): Promise<void> {
@@ -455,12 +494,16 @@ export class PluginStore {
       if (error.code === 'ENOENT') return undefined
       throw error
     }) : undefined
+    const installation = !deleteData && await lstat(await this.installationPath(id)).catch(error => {
+      if (error.code !== 'ENOENT') throw error
+      return undefined
+    })
     const stage = await mkdtemp(join(await this.directory('tmp', undefined, true), 'plugin-remove-'))
     const recoveryStage = join(await this.directory('plugins'), '.remove-' + randomUUID())
     try {
       // Publish a complete journal before moving any live files. An interrupted
       // initial write stays disposable and cannot block startup recovery.
-      await writePluginTransaction(stage, newPluginTransaction(id, 'remove', true, Boolean(data)))
+      await writePluginTransaction(stage, newPluginTransaction(id, 'remove', true, Boolean(data), installation ? 'remove' : undefined))
       await fs.retry.rename({ timeout: 2_000, interval: 25 })(stage, recoveryStage)
     } catch (error) {
       await rm(stage, { recursive: true, force: true })

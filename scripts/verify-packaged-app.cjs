@@ -108,6 +108,12 @@ function packagePaths(unpackedDirectory) {
 
 function packageManifest(unpackedDirectory) {
   const paths = packagePaths(unpackedDirectory)
+  const pluginExamples = join(paths.resources, 'data/examples/plugins')
+  const pluginEntries = readdirSync(pluginExamples, { withFileTypes: true })
+  if (!pluginEntries.some(entry => entry.name.endsWith('.zip'))
+    || pluginEntries.some(entry => !entry.isFile() || !/\.(zip|md)$/i.test(entry.name))) {
+    throw new Error('Packaged plugin examples must contain only ZIP packages and documentation.')
+  }
   for (const path of [paths.executable, paths.asar, paths.native]) {
     if (!existsSync(path)) throw new Error(`Packaged application file is missing: ${path}`)
   }

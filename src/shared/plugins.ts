@@ -153,6 +153,7 @@ export interface PluginSummary {
   builtin?: boolean
   manifest?: PluginManifest
   enabled: boolean
+  showInTitlebar?: boolean
   error?: string
   backendStatus: 'stopped' | 'starting' | 'running' | 'failed'
   backendError?: string
@@ -181,6 +182,7 @@ export interface PluginsApi {
   confirmInstall(token: string, deleteData?: boolean): Promise<PluginSummary>
   cancelInstall(token: string): Promise<void>
   setEnabled(id: string, enabled: boolean): Promise<void>
+  setShowInTitlebar(id: string, show: boolean): Promise<void>
   uninstall(id: string, deleteData?: boolean): Promise<void>
   openWindow(id: string): Promise<void>
   startBackend(id: string): Promise<void>

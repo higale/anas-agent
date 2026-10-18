@@ -167,6 +167,13 @@ describe('application data directory', () => {
     expect(dataDir.getDataDir()).toBe(join(home, '.galeAnas'))
   })
 
+  it('uses generated examples in development and distributed resources when packaged', async () => {
+    const development = await loadDataDir({ isPackaged: false })
+    expect(development.dataDir.getBundledExamplesDir()).toBe(join('/app', 'out', 'examples'))
+    const packaged = await loadDataDir()
+    expect(packaged.dataDir.getBundledExamplesDir()).toBe(join(process.resourcesPath, 'data', 'examples'))
+  })
+
   it('uses an absolute custom data directory from the startup arguments', async () => {
     const { appMock, dataDir, home } = await loadDataDir()
     const customDataDir = join(home, 'Anas profiles', 'research')

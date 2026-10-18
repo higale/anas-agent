@@ -1,28 +1,24 @@
-## Anas v4.0.1
+## Anas v4.0.2
 
-**升级提醒：从 4.0 之前的版本升级到 4.x 会丢失旧对话记录和长期记忆。旧项目、输入历史、插件数据及头像需要按说明手动恢复；不提供自动迁移，也不支持导入旧版备份。升级前请备份，具体影响与恢复方法见 [4.0.0 发布说明](https://github.com/higale/anas-agent/releases/tag/v4.0.0)。** 此提醒针对跨入 4.x 的升级，4.0.0 升级到 4.0.1 没有新增的数据丢弃。
+**升级提醒：从 4.0 之前的版本升级到 4.x，旧对话和长期记忆不再可用；项目、输入历史、插件数据和头像可手动恢复。升级前请备份，详见 [4.x 升级数据说明](https://github.com/higale/anas-agent/blob/main/data/help/UPGRADE_TO_4.zh-CN.md)。** 此提醒针对跨入 4.x 的升级，并非每次 4.x 升级都会丢失数据。
 
-- 修复调整侧边栏宽度等无关设置触发用量仪表刷新的问题。展开视图与紧凑视图共用完整悬停详情，更新时间收入详情，移除独立详情图标。
+**本次插件兼容性变更：** 用户插件安装目录取消旧的 `package/` 层级。已有用户插件会显示加载错误，需要重新覆盖安装同 ID 插件；保持“删除插件数据”不勾选即可保留业务数据、配置及首页位置。旧安装状态不自动迁移，新状态文件缺失时默认启用、不显示标题栏图标。内置插件不受此布局调整影响。
 
-- “检测系统环境”在记住的光标位置插入结果，有选区时替换选区；检测期间内容已被修改时保留用户修改并提示。
+- 文件改动与插件入口合并到工作区菜单，按当前项目和插件分组；插件标题右侧提供设置齿轮。可在插件设置中开启独立的标题栏启动图标，默认关闭。
+- 简化记事本页面：删除顶部标题，侧栏保存按钮右对齐，独立窗口使用标题栏保存入口；统一明暗主题下的按钮外观和交互状态。
+- 用户插件直接安装到 `plugins/<id>/`，安装设置统一存入 `db/plugins/<id>/anas-installation.json`。覆盖安装保留启用状态和标题栏图标设置，卸载后重装恢复默认；完善代码、安装设置和业务数据的事务回滚与中断恢复。
+- 四个插件示例以独立 ZIP 随包提供，可直接选择安装；仓库保留源码。启动及恢复备份时整体刷新示例，保留已安装副本。
+- 新增中英文 4.x 升级数据说明，可从用户手册离线查看，集中说明受影响数据、备份、手动恢复路径和旧文件清理。
 
-- 模型设置列表与模型选择器统一为双行展示，显示上下文、输出限制、压缩阈值和能力；“未选择／跟随父 Agent”移到菜单底部，满宽居中。
+**Upgrade notice: when upgrading from a pre-4.0 version to 4.x, previous conversations and long-term memory become unavailable. Projects, input history, plugin data, and avatars can be recovered manually. Back up first and read the [4.x upgrade data guide](https://github.com/higale/anas-agent/blob/main/data/help/UPGRADE_TO_4.en.md).** This notice concerns crossing into 4.x, not data loss on every 4.x update.
 
-- 移除“新会话使用模型”设置，统一按项目模型、全局默认、上次选择、未选择的顺序选择；项目提示词和请求预览遵循相同顺序。
+**Plugin compatibility change in this release:** user plugin installations no longer have the old nested `package/` directory. Existing user plugins show a loading error until you reinstall the same plugin ID with replacement confirmed. Leave **Delete plugin data** unchecked to keep business data, configuration, and home location. Old installation settings are not migrated automatically; a missing new settings file defaults to enabled with the titlebar icon hidden. Built-in plugins are unaffected by this layout change.
 
-- 默认项目仅名称不可修改，目录、提示词、编码模式和能力等设置与普通项目一致。新建默认项目直接使用系统“文档”目录，不创建额外子目录；保留已保存的目录选择。
-
-**Upgrade notice: upgrading from a version before 4.0 to 4.x loses previous conversations and long-term memory. Previous projects, input history, plugin data and avatars require manual recovery; there is no automatic migration or import of pre-4.0 backups. Back up first and see the [4.0.0 release notes](https://github.com/higale/anas-agent/releases/tag/v4.0.0) for the impact and recovery instructions.** This notice applies when moving to 4.x; upgrading from 4.0.0 to 4.0.1 introduces no additional data loss.
-
-- Fix unnecessary usage-meter refreshes caused by sidebar resizing and unrelated settings. Expanded and compact views share complete hover details, including the last update time, without a separate details icon.
-
-- Insert detected system environment information at the remembered caret position, replacing selected text when present. Preserve edits made while detection is running and show a notice.
-
-- Unify model settings and selection lists with two-line entries showing context, output limits, compression thresholds and capabilities. Center the full-width Not selected / Inherit parent Agent option in the menu footer.
-
-- Remove the model-selection strategy setting. New conversations use the project model, global default, previous selection, or remain unselected, in that order. Project prompt and request previews follow the same order.
-
-- Allow all default-project settings except its name to be edited, including folders, prompts, coding mode and capabilities. New default projects use the system Documents folder directly; saved folder selections are preserved.
+- Combine file changes and plugin entries in a workspace menu grouped by the current project and plugins, with a settings gear beside the plugin heading. Optional titlebar launch icons can be enabled per plugin and are hidden by default.
+- Simplify Notepad: remove the heading, align the sidebar Save button to the right, and use the titlebar save action in separate windows. Unify button appearance and interaction states in light and dark themes.
+- Install user plugins directly under `plugins/<id>/` and store installation settings in `db/plugins/<id>/anas-installation.json`. Replacement preserves enabled state and titlebar preference; uninstalling and reinstalling resets them. Improve transaction rollback and interrupted-operation recovery for code, installation settings, and business data.
+- Ship four independently installable plugin example ZIPs while retaining source directories in the repository. Refresh the complete example tree at startup and after backup restore without replacing installed copies.
+- Add Chinese and English 4.x upgrade data guides, available offline from the user guide, covering affected data, backups, manual recovery paths, and cleanup of old files.
 
 ## 下载与安装 / Downloads & installation
 

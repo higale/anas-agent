@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'stubborn-fs'
 import { createWriteStream } from 'node:fs'
-import { mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { cp, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ZipFile } from 'yazl'
@@ -24,6 +24,40 @@ beforeEach(async () => {
 afterEach(async () => { vi.restoreAllMocks(); await rm(root, { recursive: true, force: true }) })
 
 describe('plugin installation and data', () => {
+  it('writes installation settings only under db and leaves obsolete installation settings unread and unchanged', async () => {
+    await store.install(source)
+    const path = join(root, 'data/db/plugins/test-plugin/anas-installation.json')
+    const old = join(root, 'data/plugins/test-plugin/installation.json')
+    await expect(stat(old)).rejects.toMatchObject({ code: 'ENOENT' })
+    await store.setEnabled(manifest.id, false)
+    await store.setShowInTitlebar(manifest.id, true)
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({ version: 0, enabled: false, show_in_titlebar: true })
+    const previous = '{"version":0,"enabled":false,"show_in_titlebar":true}'
+    await writeFile(old, previous)
+    await rm(path)
+    store = new PluginStore(join(root, 'data'))
+    expect(await store.read(manifest.id)).toMatchObject({ enabled: true, showInTitlebar: false, error: undefined })
+    await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(old, 'utf8')).toBe(previous)
+    await store.setShowInTitlebar(manifest.id, true)
+    expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({ enabled: true, show_in_titlebar: true })
+    expect(await readFile(old, 'utf8')).toBe(previous)
+  })
+
+  it('removes only host installation settings when uninstalling with retained plugin data', async () => {
+    await store.install(source)
+    await store.data(manifest.id, 'draft', true, 'kept')
+    await store.setShowInTitlebar(manifest.id, true)
+    await store.setEnabled(manifest.id, false)
+    await store.uninstall(manifest.id)
+    const data = join(root, 'data/db/plugins/test-plugin')
+    await expect(stat(join(data, 'anas-installation.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(JSON.parse(await readFile(join(data, 'state.json'), 'utf8')).values.draft).toBe('kept')
+    await store.install(source)
+    expect(await store.read(manifest.id)).toMatchObject({ enabled: true, showInTitlebar: false, error: undefined })
+    expect(await store.data(manifest.id, 'draft')).toBe('kept')
+  })
+
   it('uses db/plugins for new data and leaves the obsolete data directory untouched', async () => {
     await store.install(source)
     const legacy = join(root, 'data/plugins_data', manifest.id)
@@ -40,6 +74,7 @@ describe('plugin installation and data', () => {
     await store.install(source)
     const outside = join(root, 'outside')
     await mkdir(outside)
+    await rm(join(root, 'data/db'), { recursive: true })
     await symlink(outside, join(root, 'data/db'), process.platform === 'win32' ? 'junction' : 'dir')
     await expect(store.data(manifest.id, 'draft', true, 'value')).rejects.toThrow('managed directory')
     expect(await readdir(outside)).toEqual([])
@@ -164,7 +199,7 @@ describe('plugin installation and data', () => {
     expect(resource.bytes.toString()).toBe(svg)
     await expect(store.requireEnabled(manifest.id)).rejects.toThrow('disabled')
     for (const path of ['index.html', '../icon.svg', 'missing.png']) await expect(store.iconResource(manifest.id, path)).rejects.toThrow()
-    await writeFile(join(root, 'data/plugins/test-plugin/package/icon.svg'), 'x'.repeat(256 * 1024 + 1))
+    await writeFile(join(root, 'data/plugins/test-plugin/icon.svg'), 'x'.repeat(256 * 1024 + 1))
     await expect(store.iconResource(manifest.id, 'icon.svg')).rejects.toThrow('256 KiB')
     expect((await store.read(manifest.id)).error).toBeUndefined()
   })
@@ -182,12 +217,57 @@ describe('plugin installation and data', () => {
 
   it('defaults a missing enabled field without migrating and rejects disabled calls', async () => {
     await store.install(join(source, 'PLUGIN.json'))
-    await writeFile(join(root, 'data/plugins/test-plugin/installation.json'), '{"version":0}')
+    await writeFile(join(root, 'data/db/plugins/test-plugin/anas-installation.json'), '{"version":0}')
     expect((await store.read(manifest.id)).enabled).toBe(true)
+    expect((await store.read(manifest.id)).showInTitlebar).toBe(false)
     await store.setEnabled(manifest.id, false)
     await expect(store.data(manifest.id, 'test')).rejects.toThrow('disabled')
     await store.setEnabled(manifest.id, true)
     expect(await store.data(manifest.id, 'test')).toBeNull()
+  })
+
+  it('preserves titlebar preferences across disabling, replacement and restart', async () => {
+    await store.install(source)
+    await store.setShowInTitlebar(manifest.id, true)
+    await store.setEnabled(manifest.id, false)
+    expect(await store.read(manifest.id)).toMatchObject({ enabled: false, showInTitlebar: true })
+    await store.setShowInTitlebar(manifest.id, false)
+    const preview = await store.prepareInstall(source)
+    await store.finishInstall(preview.token, { replace: true })
+    store = new PluginStore(join(root, 'data'))
+    expect(await store.read(manifest.id)).toMatchObject({ enabled: false, showInTitlebar: false })
+    await store.setShowInTitlebar(manifest.id, true)
+    const next = await store.prepareInstall(source)
+    await store.finishInstall(next.token, { replace: true })
+    await store.setEnabled(manifest.id, true)
+    expect(await new PluginStore(join(root, 'data')).read(manifest.id)).toMatchObject({ enabled: true, showInTitlebar: true })
+    expect(JSON.parse(await readFile(join(root, 'data/db/plugins/test-plugin/anas-installation.json'), 'utf8')))
+      .toEqual({ version: 0, enabled: true, show_in_titlebar: true })
+  })
+
+  it('keeps built-in titlebar preferences separate from bundled code updates', async () => {
+    store = new PluginStore(join(root, 'data'), { [manifest.id]: source })
+    expect((await store.read(manifest.id)).showInTitlebar).toBe(false)
+    await store.setShowInTitlebar(manifest.id, true)
+    await store.setEnabled(manifest.id, false)
+    await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ ...manifest, plugin_version: '1.0.1' }))
+    store = new PluginStore(join(root, 'data'), { [manifest.id]: source })
+    expect(await store.read(manifest.id)).toMatchObject({ enabled: false, showInTitlebar: true, manifest: { pluginVersion: '1.0.1' } })
+  })
+
+  it('rejects invalid titlebar preferences and plugins without a home without changing installation state', async () => {
+    await store.install(source)
+    const path = join(root, 'data/db/plugins/test-plugin/anas-installation.json')
+    const before = await readFile(path, 'utf8')
+    await expect(store.setShowInTitlebar(manifest.id, 'true' as unknown as boolean)).rejects.toThrow('preference')
+    expect(await readFile(path, 'utf8')).toBe(before)
+    await writeFile(join(root, 'data/plugins/test-plugin/PLUGIN.json'), JSON.stringify({ ...manifest, ui: undefined,
+      prompts: [{ id: 'guide', path: 'guide.md', description: 'Guide' }] }))
+    await writeFile(join(root, 'data/plugins/test-plugin/guide.md'), 'Guide body')
+    await expect(store.setShowInTitlebar(manifest.id, true)).rejects.toThrow('no home page')
+    expect(await readFile(path, 'utf8')).toBe(before)
+    await writeFile(path, '{"version":0,"show_in_titlebar":"true"}')
+    expect(await store.read(manifest.id)).toMatchObject({ enabled: false, error: 'Invalid plugin installation state.' })
   })
 
   it('does not overwrite a duplicate or install an incomplete/incompatible package', async () => {
@@ -208,7 +288,7 @@ describe('plugin installation and data', () => {
     await writeFile(dataFile, '{broken')
     await expect(store.data(manifest.id, 'key', true, 'new')).rejects.toThrow()
     expect(await readFile(dataFile, 'utf8')).toBe('{broken')
-    await writeFile(join(root, 'data/plugins/test-plugin/package/PLUGIN.json'), '{}')
+    await writeFile(join(root, 'data/plugins/test-plugin/PLUGIN.json'), '{}')
     expect((await store.list())[0].error).toContain('manifest version')
     await store.uninstall(manifest.id)
     expect(await readFile(dataFile, 'utf8')).toBe('{broken')
@@ -274,9 +354,10 @@ describe('optional data removal on uninstall', () => {
     const outside = join(root, 'outside-data')
     await mkdir(outside)
     await writeFile(join(outside, 'keep'), 'untouched')
+    await rm(join(group, manifest.id), { recursive: true })
     await symlink(outside, join(group, manifest.id), process.platform === 'win32' ? 'junction' : 'dir')
     await expect(store.uninstall(manifest.id, true)).rejects.toThrow('managed directory')
-    expect((await store.read(manifest.id)).enabled).toBe(true)
+    expect((await store.read(manifest.id)).error).toContain('managed directory')
     expect(await readFile(join(outside, 'keep'), 'utf8')).toBe('untouched')
   })
 
@@ -308,7 +389,7 @@ describe('optional data removal on uninstall', () => {
     await expect(store.uninstall(manifest.id, true)).rejects.toThrow('preserved files remain')
     await rm(join(root, 'data/tmp'), { recursive: true, force: true })
     const [stage] = (await readdir(join(root, 'data/plugins'))).filter(name => name.startsWith('.remove-'))
-    expect(await readFile(join(root, 'data/plugins', stage, 'previous/package/index.html'), 'utf8')).toBe('<p>Hello</p>')
+    expect(await readFile(join(root, 'data/plugins', stage, 'previous/index.html'), 'utf8')).toBe('<p>Hello</p>')
     expect(JSON.parse(await readFile(join(root, 'data/db/plugins/test-plugin/state.json'), 'utf8')).values.draft).toBe('keep')
     expect(await store.read(manifest.id)).toMatchObject({ enabled: false, error: expect.stringContaining('preserved files remain') })
     vi.restoreAllMocks()
@@ -389,7 +470,7 @@ describe('plugin language packs', () => {
     await writeFile(join(source, 'lang/en.json'), JSON.stringify({ version: 0, _meta: { name: 'English' }, plugin: { name: 'Notebook', description: 'English description' }, actions: { save: 'Save' } }))
     await writeFile(join(source, 'lang/zh-CN.json'), JSON.stringify({ version: 0, _meta: { name: '简体中文' }, plugin: { name: '记事本' } }))
     await store.install(join(source, 'PLUGIN.json'))
-    return join(root, 'data/plugins/test-plugin/package/lang')
+    return join(root, 'data/plugins/test-plugin/lang')
   }
 
   it('reads user-added languages without a backend and resolves localized metadata per field', async () => {
@@ -434,7 +515,7 @@ describe('plugin language packs', () => {
     await expect(stat(join(lang, 'de.json'))).rejects.toMatchObject({ code: 'ENOENT' })
     expect(pluginDisplayText(await store.read(manifest.id), 'en')).toBe('New English')
     expect(pluginDisplayText(await store.read(manifest.id), 'zh-CN')).toBe('新版记事本')
-    await expect(stat(join(root, 'data/db/plugins/test-plugin'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readdir(join(root, 'data/db/plugins/test-plugin'))).toEqual(['anas-installation.json'])
   })
 
   it('reports oversized language files without disabling the plugin or preventing uninstall', async () => {
@@ -452,7 +533,7 @@ describe('plugin language packs', () => {
     const outside = join(root, 'outside-languages')
     await mkdir(outside)
     await writeFile(join(outside, 'en.json'), '{"version":0}')
-    await symlink(outside, join(root, 'data/plugins/test-plugin/package/lang'), process.platform === 'win32' ? 'junction' : 'dir')
+    await symlink(outside, join(root, 'data/plugins/test-plugin/lang'), process.platform === 'win32' ? 'junction' : 'dir')
     expect((await store.read(manifest.id)).languageErrors?.join()).toContain('directory')
     await store.uninstall(manifest.id)
     expect(await readFile(join(outside, 'en.json'), 'utf8')).toBe('{"version":0}')
@@ -635,6 +716,32 @@ describe('confirmed plugin replacement', () => {
   }
   async function installedHtml() { return readFile(await store.packageFile(manifest.id, 'index.html'), 'utf8') }
 
+  it('replaces the obsolete package layout without reading it or changing retained data', async () => {
+    const installed = join(root, 'data/plugins', manifest.id)
+    await cp(source, join(installed, 'package'), { recursive: true })
+    const oldState = '{"version":0,"enabled":false,"show_in_titlebar":true}'
+    await writeFile(join(installed, 'installation.json'), oldState)
+    const data = join(root, 'data/db/plugins', manifest.id)
+    await mkdir(data, { recursive: true })
+    const saved = '{"version":0,"values":{"draft":"retained","home_open_location":"window"}}'
+    await writeFile(join(data, 'state.json'), saved)
+    await writeFile(join(data, 'profiles.json'), 'retained plugin-owned data')
+    expect(await store.list()).toEqual([expect.objectContaining({ id: manifest.id, error: expect.any(String) })])
+    await expect(store.packageFile(manifest.id, 'PLUGIN.json')).rejects.toMatchObject({ code: 'ENOENT' })
+    const preview = await replacement()
+    expect(preview.installed).toMatchObject({ id: manifest.id, error: expect.any(String) })
+    expect(preview.installed?.manifest).toBeUndefined()
+    expect(await readFile(join(installed, 'installation.json'), 'utf8')).toBe(oldState)
+    expect(await store.finishInstall(preview.token, { replace: true }))
+      .toMatchObject({ enabled: true, showInTitlebar: false, error: undefined, manifest: { pluginVersion: '2.0.0' } })
+    expect(await store.packageDirectory(manifest.id)).toBe(installed)
+    expect(await installedHtml()).toBe('<p>New</p>')
+    await expect(stat(join(installed, 'package'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(join(installed, 'installation.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(join(data, 'state.json'), 'utf8')).toBe(saved)
+    expect(await readFile(join(data, 'profiles.json'), 'utf8')).toBe('retained plugin-owned data')
+  })
+
   it('previews both versions without changing the installation and cancels only the staged copy', async () => {
     await store.install(join(source, 'PLUGIN.json'))
     await store.data(manifest.id, 'draft', true, 'keep')
@@ -672,15 +779,18 @@ describe('confirmed plugin replacement', () => {
 
   it('deletes only opted-in plugin data, including data written during backend shutdown', async () => {
     await store.install(join(source, 'PLUGIN.json'))
+    await store.setShowInTitlebar(manifest.id, true)
+    await store.setEnabled(manifest.id, false)
     const other = join(root, 'data/db/plugins/other-plugin')
     await mkdir(other, { recursive: true })
     await writeFile(join(other, 'keep'), 'untouched')
     const preview = await replacement()
     await store.finishInstall(preview.token, { replace: true, deleteData: true }, async () => {
-      await store.data(manifest.id, 'draft', true, 'last write')
+      await writeFile(join(root, 'data/db/plugins/test-plugin/state.json'), '{"version":0,"values":{"draft":"last write"}}')
       await writeFile(join(root, 'data/db/plugins/test-plugin/profiles.json'), 'private data')
     })
-    await expect(stat(join(root, 'data/db/plugins/test-plugin'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readdir(join(root, 'data/db/plugins/test-plugin'))).toEqual(['anas-installation.json'])
+    expect(await store.read(manifest.id)).toMatchObject({ enabled: false, showInTitlebar: true, error: undefined })
     expect(await readFile(join(other, 'keep'), 'utf8')).toBe('untouched')
     expect(await installedHtml()).toBe('<p>New</p>')
   })
@@ -724,7 +834,7 @@ describe('confirmed plugin replacement', () => {
     await expect(store.prepareInstall(join(source, 'PLUGIN.json'))).rejects.toThrow()
     expect(await installedHtml()).toBe('<p>Hello</p>')
     expect(await readdir(join(root, 'data/tmp'))).toEqual([])
-    await writeFile(join(root, 'data/plugins/test-plugin/package/PLUGIN.json'), '{broken')
+    await writeFile(join(root, 'data/plugins/test-plugin/PLUGIN.json'), '{broken')
     const preview = await replacement()
     expect(preview.installed?.manifest).toBeUndefined()
     expect(preview.installed?.error).toBeTruthy()
@@ -766,7 +876,7 @@ describe('confirmed plugin replacement', () => {
     await expect(store.finishInstall(preview.token, { replace: true, deleteData: true })).rejects.toThrow('preserved files remain at')
     await rm(join(root, 'data/tmp'), { recursive: true, force: true })
     const [stage] = (await readdir(join(root, 'data/plugins'))).filter(name => name.startsWith('.replace-'))
-    expect(await readFile(join(root, 'data/plugins', stage, 'previous/package/index.html'), 'utf8')).toBe('<p>Hello</p>')
+    expect(await readFile(join(root, 'data/plugins', stage, 'previous/index.html'), 'utf8')).toBe('<p>Hello</p>')
     expect(JSON.parse(await readFile(join(root, 'data/plugins', stage, 'data/state.json'), 'utf8')).values.draft).toBe('keep')
     const restarted = new PluginStore(store.dataDirectory)
     vi.restoreAllMocks()
@@ -778,7 +888,7 @@ describe('confirmed plugin replacement', () => {
 
   it('rejects linked data before stopping the plugin when deletion was selected', async () => {
     await store.install(join(source, 'PLUGIN.json'))
-    await mkdir(join(root, 'data/db/plugins'), { recursive: true })
+    await rm(join(root, 'data/db/plugins/test-plugin'), { recursive: true })
     const outside = join(root, 'outside-data')
     await mkdir(outside)
     await writeFile(join(outside, 'keep'), 'untouched')
@@ -813,7 +923,7 @@ describe('plugin tool resolution', () => {
     await store.finishInstall(preview.token, { replace: true })
     await store.requireTool(tool)
     expect((await store.resolveTools(['test-plugin:tool:echo']))[0]).toEqual(tool)
-    expect(JSON.parse(await readFile(join(root, 'data/plugins/test-plugin/installation.json'), 'utf8'))).toEqual({ version: 0, enabled: true })
+    expect(JSON.parse(await readFile(join(root, 'data/db/plugins/test-plugin/anas-installation.json'), 'utf8'))).toEqual({ version: 0, enabled: true })
     expect(tool).not.toHaveProperty('binding')
     expect(tool).not.toHaveProperty('pluginVersion')
   })

@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { constants } from 'node:fs'
 import { mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, symlink, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -10,6 +11,9 @@ import { resolveToolSelection } from '@shared/toolPackages'
 import { defaultCapabilities, intersectCapabilities, parseRunConfiguration, resolveSkillSelection, serializeRunConfiguration } from '@shared/agentCapabilities'
 
 const trashItem = vi.hoisted(() => vi.fn(async (_path: string) => {}))
+const { prepareExamples } = createRequire(import.meta.url)('../../scripts/prepare-examples.cjs') as {
+  prepareExamples(source: string, target: string): Promise<void>
+}
 vi.mock('electron', () => ({ shell: { trashItem } }))
 vi.mock('./runtimeLogger', () => ({ runtimeLog: vi.fn() }))
 let root: string
@@ -28,6 +32,7 @@ beforeEach(async () => {
     configDirName: 'config', customToolsConfigFileName: 'tools.json', getDataDir: () => root,
     getBundledDataDir: () => resolve('data'), getToolExamplesDir: () => join(root, 'examples/tools'),
     getExamplesDir: () => join(root, 'examples'),
+    getBundledExamplesDir: () => join(root, 'bundled-examples'), getTempDir: () => join(root, 'tmp'),
     getSystemPluginsDir: () => join(root, 'plugins/_system'),
     getConfigFile: (name: string) => join(root, 'config', name),
     getBundledConfigFile: (name: string) => resolve('data/config', name)
@@ -105,6 +110,7 @@ describe('tool directory imports', () => {
       await readFile(resolve('data/skills/_system/tool-manager/assets/python-tool/scripts/run.py'), 'utf8'))
   })
   it('initializes examples and the user directory before import, then imports independent copies', async () => {
+    await prepareExamples(resolve('data/examples'), join(root, 'bundled-examples'))
     await (await import('./bundledExamples')).initializeBundledExamples()
     await store.initializeToolsStore()
     const examples = join(root, 'examples/tools')
@@ -151,6 +157,7 @@ describe('tool directory imports', () => {
     await Promise.all([store.initializeToolsStore(), store.initializeToolsStore()])
     expect((await store.listToolSnapshot()).tools.filter(tool => tool.source === 'user').map(tool => tool.name)).toEqual(['user_tool'])
     expect(await readFile(join(root, 'examples/tools/stale/old.txt'), 'utf8')).toBe('old bundled example')
+    await prepareExamples(resolve('data/examples'), join(root, 'bundled-examples'))
     await (await import('./bundledExamples')).initializeBundledExamples()
     await expect(readFile(join(root, 'examples/tools/stale/old.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
     expect(JSON.parse(await readFile(join(root, 'examples/tools/read_text_raw/TOOL.json'), 'utf8')).name).toBe('read_text_raw')

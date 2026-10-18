@@ -2,7 +2,7 @@
 
 [简体中文](README.md) · [English](README.en.md)
 
-**Upgrade notice: upgrading from a version before 4.0 to 4.x loses previous conversations and long-term memory. Previous projects, input history, plugin data and avatars require manual recovery; there is no automatic migration or import of pre-4.0 backups. Back up first and see the [4.0.0 release notes](https://github.com/higale/anas-agent/releases/tag/v4.0.0) for the impact and recovery instructions.** This notice applies when moving to 4.x; upgrading from 4.0.0 to 4.0.1 introduces no additional data loss.
+**Upgrade notice: when upgrading from a pre-4.0 version to 4.x, previous conversations and long-term memory become unavailable. Projects, input history, plugin data, and avatars can be recovered manually. Back up first and read the [4.x upgrade data guide](data/help/UPGRADE_TO_4.en.md).** This notice concerns crossing into 4.x, not data loss on every 4.x update.
 
 Anas is a local desktop AI agent built with Electron, React, and TypeScript, powered by LangGraph and Deep Agents. Each project can choose its context, tools, skills, and subagents. Configuration and conversations stay locally; requests send the required task content to the selected model provider.
 
@@ -124,7 +124,7 @@ npm run dev -- -- --data-dir "./runtime-data/research"
 | `skills/`, `tools/` | User-managed packages |
 | `plugins/`, `db/plugins/` | Installed plugins and independent data; uninstalling retains data unless deletion is selected |
 | `skills/_system/`, `tools/_system/`, `plugins/_system/` | Built-in packages refreshed by the app |
-| `examples/skills/`, `examples/tools/`, `examples/plugins/` | Examples refreshed by the app; import or install them before use |
+| `examples/skills/`, `examples/tools/`, `examples/plugins/` | Examples refreshed by the app, with plugins supplied as individual ZIPs; import or install before use |
 | `help/`, `lang/` | Help and language packs |
 | `config/assets/` | Avatar source, crop settings, and generated icons |
 | `log/`, `cache/`, `tmp/`, `electron/` | Logs, cache, temporary files, and Electron profile |
