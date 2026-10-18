@@ -2,6 +2,7 @@ import type { RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AppConfigSnapshot } from '@shared/types'
 import { SettingsListActions } from '../settings/SettingsListActions'
+import { SettingsAvailabilityBadge } from '../settings/SettingsAvailabilityBadge'
 
 interface SubagentListPaneProps {
   config: AppConfigSnapshot | undefined
@@ -53,19 +54,15 @@ export function SubagentListPane({
             type="button"
             onClick={() => onEdit(subagent.index)}
           >
-            <span>
-              <strong>{subagent.name}</strong>
-              <small className="ui-list-item-meta">
-                {subagent.enabled
-                  ? t('settings.subagent_default_enabled')
-                  : t('settings.subagent_default_disabled')}
-              </small>
-            </span>
-            {subagent.builtIn && (
-              <em className="ui-list-item-badge ui-badge-info">
-                {t('settings.subagent_builtin')}
-              </em>
-            )}
+            <strong>{subagent.name}</strong>
+            <div className="ui-row">
+              {subagent.builtIn && (
+                <em className="ui-list-item-badge ui-badge-info">
+                  {t('settings.subagent_builtin')}
+                </em>
+              )}
+              <SettingsAvailabilityBadge disabled={!subagent.enabled} />
+            </div>
           </button>
         ))}
       </div>

@@ -37,7 +37,7 @@ it('builds independently installable plugin ZIPs with all source files and keeps
       }
     }
   }
-  for (const file of ['skills/weather/SKILL.md', 'tools/read_text_raw/TOOL.json', 'plugins/README.md']) {
+  for (const file of ['skills/weather/SKILL.md', 'tools/read_text_raw/TOOL.json', 'tools/file_sha256/TOOL.json', 'tools/json_format/TOOL.json', 'plugins/README.md']) {
     expect(await readFile(join(output, file))).toEqual(await readFile(join(source, file)))
   }
 })

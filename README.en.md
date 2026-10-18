@@ -45,7 +45,7 @@ Each main conversation and its subagents share a SQLite database; the catalog st
 
 Ordinary tools share a managed executor with **8 execution slots** and a **64-call active/queued limit**. Busy slots and conflicting mutations queue automatically. With Background tools enabled, a call waiting or running for over 10 seconds returns a handle for supervision. Cancellation retains execution ownership until the real executor settles; uncertain external outcomes are explicit. Planning, subagent orchestration, user questions, and supervision remain outside this execution pool.
 
-Custom tools run in their package directory. Sources include system packages, user packages in the data directory's `tools/`, added external directories, and project packages in each source folder's `.agents/tools/`. Tools and Skills share directory-tree and file-preview interactions; project tools appear only in project settings. Uncustomized projects use enabled tools; customized projects select All, Custom, or Off. See [Custom tool packages](docs/CUSTOM_TOOLS.md) for execution and import rules.
+Custom tools run in their package directory. Sources include user packages in the data directory's `tools/`, added external directories, and project packages in each source folder's `.agents/tools/`. Bundled tool examples must be imported before use. Tools and Skills share directory-tree and file-preview interactions; project tools appear only in project settings. Uncustomized projects use enabled tools; customized projects select All, Custom, or Off. See [Custom tool packages](docs/CUSTOM_TOOLS.md) for execution and import rules.
 
 Shell commands preserve the model's command text, arguments, and search behavior. Supported read-only commands may be approved automatically after target and environment checks; analysis does not rewrite commands to obtain approval. Other commands follow the selected access mode. The security model defines platform support and recovery rules.
 
@@ -123,7 +123,7 @@ npm run dev -- -- --data-dir "./runtime-data/research"
 | `attachments/`, `file_edits/`, `tool_results/` under `db/conversations/<threadId>/` | Attachments, file-edit recovery material and long tool results inside the main conversation directory; removed with that conversation |
 | `skills/`, `tools/` | User-managed packages |
 | `plugins/`, `db/plugins/` | Installed plugins and independent data; uninstalling retains data unless deletion is selected |
-| `skills/_system/`, `tools/_system/`, `plugins/_system/` | Built-in packages refreshed by the app |
+| `skills/_system/`, `plugins/_system/` | Built-in packages refreshed by the app |
 | `examples/skills/`, `examples/tools/`, `examples/plugins/` | Examples refreshed by the app, with plugins supplied as individual ZIPs; import or install before use |
 | `help/`, `lang/` | Help and language packs |
 | `config/assets/` | Avatar source, crop settings, and generated icons |

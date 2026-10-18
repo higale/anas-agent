@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { TFunction } from 'i18next'
+import { missingModelApiKeyEnvironmentVariable } from '@shared/modelConfig'
 import { notice } from '../notice'
 import { buildModelListRequest } from './modelDraft'
 import type { ModelDraft } from './modelDraft'
@@ -32,9 +33,10 @@ export function useModelCandidateRefresh({
       const result = await window.gale.config.fetchModels(request)
       setModelCandidates(result.models)
       notice.success(t('settings.model_list_refreshed'))
-    } catch {
+    } catch (reason) {
       setModelCandidates([])
-      notice.error(t('settings.failed_fetch_model_list'))
+      const name = missingModelApiKeyEnvironmentVariable(reason)
+      notice.error(name ? t('settings.api_key_variable_missing', { name }) : t('settings.failed_fetch_model_list'))
     } finally {
       setModelListLoading(false)
     }

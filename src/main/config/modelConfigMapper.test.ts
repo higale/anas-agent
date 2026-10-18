@@ -50,6 +50,15 @@ function rawProvider(overrides: Partial<RawModelProviderConfig> = {}): RawModelP
 }
 
 describe('model provider configuration mapper', () => {
+  it('round-trips an unresolved environment reference without storing its value', () => {
+    for (const apiKey of ['${NOT_CONFIGURED_YET}', '${ TEST_API_KEY }', '${9provider-token}', '${中文密钥}']) {
+      const saved = rawModelProviderFromSave(providerSave({ apiKey }), 'provider-id')
+      expect(saved.api_key).toBe(apiKey)
+      expect(normalizeModelProvider(saved, 0).apiKey).toBe(apiKey)
+    }
+    expect(() => rawModelProviderFromSave(providerSave({ apiKey: '${A=B}' }), 'provider-id')).toThrow('environment reference')
+  })
+
   it('round-trips icons, preserves an omitted update, and supports explicit removal', () => {
     const iconData = `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>').toString('base64')}`
     const saved = rawModelProviderFromSave(providerSave({ iconData }), 'provider-id')

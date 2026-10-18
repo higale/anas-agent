@@ -1708,9 +1708,12 @@ button.ui-avatar:has(> img):focus-visible,
 .ui-autosize-textarea {
   min-width: 0;
   width: 100%;
-  max-height: none;
+  field-sizing: content;
+  height: auto;
+  min-height: var(--autosize-min-height, calc(2lh + 18px));
+  max-height: var(--autosize-max-height, 420px);
   resize: none;
-  overflow-y: hidden;
+  overflow-y: auto;
   scrollbar-gutter: stable;
 }
 

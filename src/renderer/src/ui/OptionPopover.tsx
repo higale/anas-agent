@@ -16,9 +16,11 @@ export interface OptionPopoverOption<Value extends OptionValue = string> {
 interface OptionPopoverAutoFocusTargets {
   firstOption: HTMLButtonElement | null
   selectedOption: HTMLButtonElement | null
+  list: HTMLDivElement | null
 }
 
 interface OptionPopoverProps<Option extends OptionPopoverOption<OptionValue>> {
+  caseSensitive?: boolean
   align?: 'start' | 'center' | 'end'
   ariaLabel: string
   className?: string
@@ -42,8 +44,8 @@ interface OptionPopoverProps<Option extends OptionPopoverOption<OptionValue>> {
   renderOption: (option: Option, active: boolean) => ReactNode
 }
 
-function valuesMatch(left: OptionValue, right: OptionValue): boolean {
-  if (typeof left === 'string' && typeof right === 'string') return left.toLowerCase() === right.toLowerCase()
+function valuesMatch(left: OptionValue, right: OptionValue, caseSensitive: boolean): boolean {
+  if (!caseSensitive && typeof left === 'string' && typeof right === 'string') return left.toLowerCase() === right.toLowerCase()
   return left === right
 }
 
@@ -52,6 +54,7 @@ function optionKey(value: OptionValue): string {
 }
 
 export function OptionPopover<Option extends OptionPopoverOption<OptionValue>>({
+  caseSensitive = false,
   align = 'end',
   ariaLabel,
   className,
@@ -131,9 +134,9 @@ export function OptionPopover<Option extends OptionPopoverOption<OptionValue>>({
           requestAnimationFrame(() => {
             scrollSelectedIntoList()
             if (onAutoFocus) {
-              onAutoFocus({ firstOption: firstOptionRef.current, selectedOption: selectedRef.current })
+              onAutoFocus({ firstOption: firstOptionRef.current, selectedOption: selectedRef.current, list: listRef.current })
             } else {
-              const optionToFocus = selectedRef.current ?? firstOptionRef.current
+              const optionToFocus = selectedRef.current ?? firstOptionRef.current ?? listRef.current
               optionToFocus?.focus({ preventScroll: true })
             }
           })
@@ -171,7 +174,7 @@ export function OptionPopover<Option extends OptionPopoverOption<OptionValue>>({
           }}
         >
           {options.map((option, index) => {
-            const active = valuesMatch(option.value, value)
+            const active = valuesMatch(option.value, value, caseSensitive)
             return (
               <Fragment key={optionKey(option.value)}>
               {option.group && option.group !== options[index - 1]?.group && <div className="ui-option-group" role="presentation">{option.group}</div>}

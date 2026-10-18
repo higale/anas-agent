@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { pluginDisplayText, type PluginSummary } from '@shared/plugins'
 import { widgetMatchesModel, type PluginWidgetContent, type PluginWidgetDefinition } from '@shared/pluginWidgets'
 import type { ResolvedModelConfig } from '@shared/types'
+import { missingModelApiKeyEnvironmentVariable } from '@shared/modelConfig'
 import { parseWidgetHtml, PluginWidgetHtml } from './PluginWidgetHtml'
 
 function PluginWidget({ plugin, definition, model, active }: {
@@ -30,9 +31,11 @@ function PluginWidget({ plugin, definition, model, active }: {
           return
         }
         setState(old => ({ context, content: old.context === context && old.content && content && old.content.html === content.html && old.content.title === content.title ? old.content : content, busy: false }))
-      } catch {
+      } catch (reason) {
         // Backend/network diagnostics must not accidentally expose connection credentials.
-        if (!disposed) setState(old => ({ context, content: old.context === context ? old.content : undefined, busy: false, error: t('plugins.widget_failed') }))
+        const name = missingModelApiKeyEnvironmentVariable(reason)
+        if (!disposed) setState(old => ({ context, content: old.context === context ? old.content : undefined, busy: false,
+          error: name ? t('settings.api_key_variable_missing', { name }) : t('plugins.widget_failed') }))
       } finally { pending = false }
     }
     request.current = action => { void load(action) }

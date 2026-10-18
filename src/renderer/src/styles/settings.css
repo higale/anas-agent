@@ -484,16 +484,6 @@
   font-weight: 650;
 }
 
-.settings-skill-tree-row-fully-unavailable {
-  color: var(--text-muted);
-}
-
-.settings-skill-tree-row-fully-unavailable .settings-skill-tree-label {
-  font-style: italic;
-  text-decoration: line-through;
-  opacity: 0.72;
-}
-
 .settings-skill-tree-spacer {
   flex: 0 0 14px;
 }

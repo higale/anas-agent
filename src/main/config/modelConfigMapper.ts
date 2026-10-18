@@ -11,6 +11,7 @@ import type {
 } from '@shared/types'
 import {
   defaultModelProviderConfig,
+  isModelApiKeyReferenceInvalid,
   modelReservedParameterKeys,
   requireModelParameterPresetMode,
   requireModelProtocol,
@@ -147,10 +148,16 @@ export function rawModelProviderFromSave(
     model_list_url: provider.modelListUrl === undefined
       ? ''
       : requireString(provider.modelListUrl, 'provider.modelListUrl'),
-    api_key: requireString(provider.apiKey, 'provider.apiKey'),
+    api_key: requireModelApiKey(provider.apiKey),
     parameters: normalizeParameters(provider.parameters, 'provider.parameters'),
     models
   }
+}
+
+function requireModelApiKey(value: unknown): string {
+  const key = requireString(value, 'provider.apiKey')
+  if (isModelApiKeyReferenceInvalid(key)) throw new Error('Invalid API key environment reference. Use ${VARIABLE_NAME}.')
+  return key
 }
 
 export function rawProviderModelFromSave(

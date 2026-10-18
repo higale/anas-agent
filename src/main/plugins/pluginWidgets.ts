@@ -1,5 +1,6 @@
 import { requirePluginWidgetContent, widgetMatchesModel } from '@shared/pluginWidgets'
 import { getAppConfigSnapshot, findResolvedModelConfig } from '../config/appConfig'
+import { resolveModelApiKey } from '../config/apiKeys'
 import { resolveConfiguredLanguage } from '../languageStore'
 import type { PluginStore } from './pluginStore'
 import type { PluginBackends } from './pluginBackend'
@@ -19,7 +20,8 @@ export async function readPluginWidget(store: PluginStore, backends: PluginBacke
       if (!widget) throw new Error('Plugin widget is not declared.')
       if (action !== undefined && !widget.actions.includes(action as string)) throw new Error('Plugin widget action is not declared.')
       if (!widgetMatchesModel(widget, model?.baseUrl) || !backends.canStartAutomatically(id)) return null
-      return { widget, model, language, prepared: await backends.prepare(id) }
+      const resolvedModel = model ? { ...model, apiKey: resolveModelApiKey(model) } : undefined
+      return { widget, model: resolvedModel, language, prepared: await backends.prepare(id) }
     })
   })
   if (!request) return null

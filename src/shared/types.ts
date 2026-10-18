@@ -462,6 +462,12 @@ export interface EnvFileSnapshot {
   content: string
 }
 
+export interface ModelApiKeyEnvironmentVariable {
+  name: string
+  source: 'envFile' | 'system'
+  hasValue: boolean
+}
+
 export interface LanguagePackSummary {
   code: string
   name: string
@@ -920,6 +926,7 @@ export interface GaleApi {
     setDeveloperHttpTraceEnabled(enabled: boolean): Promise<boolean>
     openDeveloperHttpTraceDir(): Promise<string>
     readEnvFile(): Promise<EnvFileSnapshot>
+    listApiKeyEnvironmentVariables(): Promise<ModelApiKeyEnvironmentVariable[]>
     saveEnvFile(content: string): Promise<EnvFileSnapshot>
     detectSystemEnvironment(): Promise<SystemEnvironmentDetection>
     getLanguageResources(): Promise<LanguageResourcesSnapshot>

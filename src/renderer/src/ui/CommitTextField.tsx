@@ -125,23 +125,7 @@ export function CommitTextarea({
     const textarea = textareaRef.current
     if (!textarea?.classList.contains('ui-autosize-textarea')) return
     resizeAutosizeTextarea(textarea)
-  }, [draft])
-
-  useEffect(() => {
-    const textarea = textareaRef.current
-    if (!textarea?.classList.contains('ui-autosize-textarea')) return
-    let width = -1
-    let frame = 0
-    const observer = new ResizeObserver(([entry]) => {
-      if (entry.contentRect.width === width) return
-      width = entry.contentRect.width
-      cancelAnimationFrame(frame)
-      // Measure after layout; height changes must not trigger a resize loop.
-      if (width > 0) frame = requestAnimationFrame(() => resizeAutosizeTextarea(textarea))
-    })
-    observer.observe(textarea)
-    return () => { observer.disconnect(); cancelAnimationFrame(frame) }
-  }, [props.className])
+  })
 
   function handleBlur(event: FocusEvent<HTMLTextAreaElement>): void {
     if (draftRef.current !== value) void onCommit(draftRef.current)

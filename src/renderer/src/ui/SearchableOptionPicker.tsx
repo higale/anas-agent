@@ -13,6 +13,7 @@ export interface SearchableOption extends OptionPopoverOption<string> {
 
 interface SearchableOptionPickerProps {
   allowInput?: boolean
+  caseSensitive?: boolean
   ariaLabel: string
   className?: string
   contentAlign?: 'start' | 'center' | 'end'
@@ -24,6 +25,7 @@ interface SearchableOptionPickerProps {
   inputPlaceholder?: string
   inputCommitMode?: 'change' | 'blur'
   inputSize?: number
+  inputType?: 'text' | 'password' | ((value: string, focused: boolean) => 'text' | 'password')
   open?: boolean
   options: SearchableOption[]
   popoverClassName?: string
@@ -39,6 +41,7 @@ interface SearchableOptionPickerProps {
 
 export function SearchableOptionPicker({
   allowInput = false,
+  caseSensitive = false,
   ariaLabel,
   className,
   contentAlign = 'end',
@@ -50,6 +53,7 @@ export function SearchableOptionPicker({
   inputPlaceholder,
   inputCommitMode = 'change',
   inputSize,
+  inputType = 'text',
   open: controlledOpen,
   options,
   popoverClassName,
@@ -64,6 +68,7 @@ export function SearchableOptionPicker({
 }: SearchableOptionPickerProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
   const [inputDraft, setInputDraft] = useState(value)
+  const [inputFocused, setInputFocused] = useState(false)
   const [query, setQuery] = useState('')
   const listboxId = useId()
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -85,7 +90,7 @@ export function SearchableOptionPicker({
     return options.filter((option) => (option.searchText ?? option.label).toLowerCase().includes(normalizedQuery))
   }, [options, query, searchable])
 
-  const selectedOption = options.find((option) => option.value.toLowerCase() === value.toLowerCase())
+  const selectedOption = options.find((option) => caseSensitive ? option.value === value : option.value.toLowerCase() === value.toLowerCase())
   const triggerLabel = selectedOption?.label ?? value
   const canCommitSearch = searchable && query.trim().length > 0
   const resolvedSearchPlaceholder = searchPlaceholder ?? ariaLabel
@@ -143,8 +148,10 @@ export function SearchableOptionPicker({
             placeholder={inputPlaceholder}
             readOnly={!allowInput}
             size={inputSize}
+            type={typeof inputType === 'function' ? inputType(inputValue, inputFocused) : inputType}
             value={inputValue}
-            onBlur={commitInputDraft}
+            onFocus={() => setInputFocused(true)}
+            onBlur={() => { setInputFocused(false); commitInputDraft() }}
             onChange={(event) => {
               if (!allowInput || disabled) return
               if (usesBlurInputCommit) {
@@ -196,6 +203,7 @@ export function SearchableOptionPicker({
         </div>
       </Popover.Anchor>
       <OptionPopover
+        caseSensitive={caseSensitive}
         align={contentAlign}
         ariaLabel={ariaLabel}
         className={['searchable-option-popover ui-popover', popoverClassName ?? className ?? ''].filter(Boolean).join(' ')}
@@ -241,11 +249,11 @@ export function SearchableOptionPicker({
         portalContainer={portalContainer}
         style={{ '--searchable-option-picker-width': popoverWidth ?? `${rootRef.current?.offsetWidth ?? UI_POPOVER_FALLBACK_WIDTH}px` } as CSSProperties}
         value={value}
-        onAutoFocus={({ firstOption, selectedOption }) => {
+        onAutoFocus={({ firstOption, selectedOption, list }) => {
           if (searchable) {
             searchRef.current?.focus({ preventScroll: true })
           } else {
-            const optionToFocus = selectedOption ?? firstOption
+            const optionToFocus = selectedOption ?? firstOption ?? list
             optionToFocus?.focus({ preventScroll: true })
           }
         }}

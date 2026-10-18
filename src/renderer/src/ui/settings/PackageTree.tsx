@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp, Box, ChevronRight, File, FileCode2, Folder, FolderInput, Link2, Pencil, Puzzle, RefreshCw, SquareChevronDown, SquareChevronRight, UserRound } from 'lucide-react'
-import { useRef, useState, type ReactNode } from 'react'
+import { useId, useRef, useState, type ReactNode, type Ref } from 'react'
 import type { PackageFileNode, PackageFilePreview, PackageFileUpdate } from '@shared/packageFiles'
 import { CodeFileEditor } from '../CodeFileEditor'
 import { SegmentedControl } from '../SegmentedControl'
@@ -10,7 +10,7 @@ import { localFilePathFromHref } from '../chat/localFileLinks'
 export function packageNodeKey(id: string, path = ''): string { return `${id}\0${path}` }
 
 export function PackageList({ items, label, emptyLabel, onSelect }: {
-  items: readonly { id: string; name: string; description?: string; detail?: string; status?: string }[]
+  items: readonly { id: string; name: string; description?: string; detail?: string; status?: ReactNode }[]
   label: string; emptyLabel: string; onSelect(id: string): void
 }) {
   if (!items.length) return <div className="ui-empty-state ui-empty-state-compact">{emptyLabel}</div>
@@ -21,9 +21,8 @@ export function PackageList({ items, label, emptyLabel, onSelect }: {
           <strong>{item.name}</strong>
           {item.description && <small>{item.description}</small>}
           {item.detail && <small>{item.detail}</small>}
-          {item.status && <small>{item.status}</small>}
         </span>
-        <ChevronRight size={14} aria-hidden="true" />
+        <div className="ui-row">{item.status}<ChevronRight size={14} aria-hidden="true" /></div>
       </button>
     </div>)}
   </div>
@@ -47,21 +46,25 @@ export function PackageTreeRoot({ name, count, expanded, selected, onSelect, onE
   </div>
 }
 
-export function PackageTreeItem({ name, icon, depth, selected, expanded, badge, linked, unavailable, highlighted, expandLabel, tooltip, onExpand, onSelect, onDoubleClick, children }: {
-  name: string; icon: ReactNode; depth: number; selected: boolean; expanded: boolean; badge?: string; linked?: boolean; unavailable?: boolean; highlighted?: boolean
+export function PackageTreeItem({ name, icon, depth, selected, expanded, badge, status, linked, highlighted, expandLabel, tooltip, onExpand, onSelect, onDoubleClick, buttonRef, children }: {
+  name: string; icon: ReactNode; depth: number; selected: boolean; expanded: boolean; badge?: string; status?: ReactNode; linked?: boolean; highlighted?: boolean
   expandLabel: string; tooltip?: string; onExpand(): void; onSelect(): void; onDoubleClick?(): void; children?: ReactNode
+  buttonRef?: Ref<HTMLButtonElement>
 }) {
+  const tooltipId = useId()
   return <div>
-    <div className={`settings-skill-tree-row settings-skill-tree-split${selected ? ' active' : ''}${unavailable ? ' settings-skill-tree-row-fully-unavailable' : ''}`} style={{ paddingLeft: 10 + depth * 16 }}>
+    <div className={`settings-skill-tree-row settings-skill-tree-split${selected ? ' active' : ''}`} style={{ paddingLeft: 10 + depth * 16 }}>
       <button aria-expanded={expanded} aria-label={expandLabel} className="settings-skill-tree-toggle" type="button" onClick={onExpand}>
         {expanded ? <SquareChevronDown size={14} /> : <SquareChevronRight size={14} />}
       </button>
-      <button className="settings-skill-tree-select" type="button" aria-pressed={selected} data-tooltip={tooltip}
-        aria-label={tooltip ? [name, badge, tooltip].filter(Boolean).join(' · ') : undefined} onClick={onSelect} onDoubleClick={onDoubleClick}>
+      <button className="settings-skill-tree-select" type="button" aria-pressed={selected} data-tooltip={tooltip} ref={buttonRef}
+        aria-describedby={tooltip ? tooltipId : undefined} onClick={onSelect} onDoubleClick={onDoubleClick}>
         {linked ? <Link2 size={14} /> : icon}<span className={`settings-skill-tree-label${highlighted ? ' ui-text-success' : ''}`}>{name}</span>
         {badge && <em>{badge}</em>}
+        {status}
       </button>
     </div>
+    {tooltip && <span id={tooltipId} hidden>{tooltip}</span>}
     {expanded && children}
   </div>
 }

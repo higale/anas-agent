@@ -17,6 +17,29 @@ import { modelReservedParameterKeys } from './modelParameterValidation'
 
 export { modelReservedParameterKeys, reservedModelParameterKeys } from './modelParameterValidation'
 
+export function isModelApiKeyEnvironmentNameValid(name: string): boolean {
+  // Preserve OS variable names, including spaces; braces delimit this reference syntax.
+  return name.length > 0 && !name.includes('\0') && !/[={}\r\n]/.test(name)
+}
+
+export function modelApiKeyEnvironmentName(value: string): string | undefined {
+  const reference = value.trim()
+  if (!reference.startsWith('${') || !reference.endsWith('}')) return undefined
+  const name = reference.slice(2, -1)
+  return isModelApiKeyEnvironmentNameValid(name) ? name : undefined
+}
+
+export function isModelApiKeyReferenceInvalid(value: string): boolean {
+  return value.trim().startsWith('${') && !modelApiKeyEnvironmentName(value)
+}
+
+/** Electron preserves the message, but not custom error properties, across IPC. */
+export function missingModelApiKeyEnvironmentVariable(error: unknown): string | undefined {
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
+  const name = /(?:^|Error: )API key environment variable (.+) is missing or empty\.$/.exec(message)?.[1]
+  return name && isModelApiKeyEnvironmentNameValid(name) ? name : undefined
+}
+
 export function requireModelProtocol(value: unknown, path: string): ModelProtocol {
   if (
     value === 'openai_responses'

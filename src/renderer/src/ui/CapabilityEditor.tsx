@@ -90,7 +90,7 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
     })),
     { id: 'customTools', name: t('custom_tools.title'), tools: [
       ...customToolItems.map((tool) => ({ id: tool.id, name: tool.name, unavailable: tool.enabled === false || Boolean(tool.error), missing: !tool.definition,
-        sourceId: tool.rootId, sourceName: tool.source === 'system' || tool.source === 'user' ? t(`settings.skill_group_${tool.source}`) : tool.rootName,
+        sourceId: tool.rootId, sourceName: tool.source === 'user' ? t('settings.skill_group_user') : tool.rootName,
         ariaLabel: `${tool.rootName} ${tool.name}`, shadowedBy: tool.shadowedBy, requiresBackground: tool.definition?.interactive && !value.backgroundTools })),
       ...value.customTools.entries.filter((id) => !customTools.some((tool) => tool.id === id)).map((id) => ({ id, name: id, unavailable: true, missing: true }))
     ] },

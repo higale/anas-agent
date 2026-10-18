@@ -1,12 +1,11 @@
 import { writeJsonFileAtomic as writeAtomic } from './atomicJson'
-import { mirrorBundledDirectories } from './bundledDirectories'
 import { createHash, randomUUID } from 'node:crypto'
 import { copyFile, cp, lstat, mkdir, open, readFile, readdir, realpath, rename, rm } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { shell } from 'electron'
 import { listPackageFiles, readPackageFile, savePackageFile, createPackageFile, packageFileExists } from './packageFiles'
-import { customToolsConfigFileName, getBundledConfigFile, getBundledDataDir, getConfigFile, getDataDir, getToolExamplesDir } from './config/dataDir'
+import { customToolsConfigFileName, getBundledConfigFile, getConfigFile, getDataDir, getToolExamplesDir } from './config/dataDir'
 import { parseCustomTools, serializeCustomTool, validateCustomTool, type CustomToolDefinition, type CustomToolSave } from '@shared/customTools'
 import { normalizeToolSettings, serializeToolSettings, type ToolImportError, type ToolLoadError, type ToolPackage, type ToolRoot, type ToolSnapshot, type ToolSettings } from '@shared/toolPackages'
 
@@ -15,20 +14,13 @@ const activeDirectories = new Map<string, number>()
 const manifestName = 'TOOL.json'
 const maxManifestBytes = 128 * 1024
 const maxSourceEntries = 2048
-let initialization: Promise<void> | undefined
 export const getToolsDir = () => join(getDataDir(), 'tools')
-export const getSystemToolsDir = () => join(getToolsDir(), '_system')
 const message = (reason: unknown) => reason instanceof Error ? reason.message : String(reason)
-async function toolEntries(root: ToolRoot) {
-  return (await readdir(root.path, { withFileTypes: true }))
-    .filter(entry => root.source !== 'user' || entry.name.toLowerCase() !== '_system')
-}
 async function exists(path: string) {
   try { await lstat(path); return true } catch (reason) { if ((reason as NodeJS.ErrnoException).code === 'ENOENT') return false; throw reason }
 }
 async function ensureDirectoriesAndConfig(): Promise<string> {
   await mkdir(getToolsDir(), { recursive: true })
-  await mkdir(getSystemToolsDir(), { recursive: true })
   const path = getConfigFile(customToolsConfigFileName)
   await mkdir(dirname(path), { recursive: true })
   try { await copyFile(getBundledConfigFile(customToolsConfigFileName), path, constants.COPYFILE_EXCL) }
@@ -102,14 +94,7 @@ export async function validateBundledTool(directory: string): Promise<void> {
 }
 
 export async function initializeToolsStore(): Promise<void> {
-  if (!initialization) {
-    initialization = (async () => {
-      await ensureDirectoriesAndConfig()
-      await mirrorBundledDirectories(join(getBundledDataDir(), 'tools/_system'), getSystemToolsDir(), manifestName, validateBundledTool)
-    })()
-    initialization.catch(() => { initialization = undefined })
-  }
-  await initialization
+  await ensureDirectoriesAndConfig()
 }
 
 class ToolImportFailure extends Error {
@@ -134,13 +119,10 @@ export function importToolDirectories(sourcePaths: readonly string[], rootId = '
     const ids = new Set(catalog.tools.map(tool => tool.id))
     const targets = new Set<string>()
     const root = await realpath(targetRoot.path)
-    if ((await toolEntries(targetRoot)).length + sourcePaths.length > maxSourceEntries) throw new ToolImportFailure({ code: 'too_many_tools' })
+    if ((await readdir(targetRoot.path)).length + sourcePaths.length > maxSourceEntries) throw new ToolImportFailure({ code: 'too_many_tools' })
     const sources = []
     for (const path of sourcePaths) {
       const name = basename(path)
-      if (targetRoot.source === 'user' && name.toLowerCase() === '_system') {
-        throw new ToolImportFailure({ code: 'invalid_directory', name, detail: '_system is reserved for built-in tools.' })
-      }
       const canonical = await realpath(path).catch(() => undefined)
       if (!canonical || name.startsWith('.') || !(await lstat(canonical)).isDirectory()) throw new ToolImportFailure({ code: 'invalid_directory' })
       const rootRelative = relative(canonical, root)
@@ -201,7 +183,7 @@ export function importToolDirectories(sourcePaths: readonly string[], rootId = '
 async function scan(root: ToolRoot, config: ToolSettings): Promise<ToolPackage[]> {
   try {
     if (!isAbsolute(root.path)) throw new ToolLoadFailure({ code: 'invalid_source_path', path: root.path })
-    const entries = await toolEntries(root)
+    const entries = await readdir(root.path, { withFileTypes: true })
     if (entries.length > maxSourceEntries) throw new ToolLoadFailure({ code: 'too_many_entries', path: root.path })
     const tools: ToolPackage[] = []
     for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
@@ -252,8 +234,7 @@ async function readToolSnapshot(sourceFolders: readonly string[] = []): Promise<
       name: basename(folder), path: join(folder, '.agents', 'tools'), source: 'project' as const
     })),
     { id: 'user', name: 'User', path: getToolsDir(), source: 'user' },
-    ...config.externalDirectories.map(directory => ({ ...directory, source: 'external' as const })),
-    { id: 'system', name: 'System', path: getSystemToolsDir(), source: 'system' }
+    ...config.externalDirectories.map(directory => ({ ...directory, source: 'external' as const }))
   ]
   const tools = (await Promise.all(roots.map(root => scan(root, config)))).flat()
   return { roots, tools: tools.map(tool => ({ ...tool, enabled: !config.disabledTools?.includes(tool.id) })) }
@@ -318,9 +299,6 @@ export async function saveToolPackage(input: CustomToolSave): Promise<void> {
     const targetRoot = editableToolRoot(catalog, existing?.rootId ?? (input.rootId === undefined ? 'user' : input.rootId))
     const id = existing?.definition?.id.slice(targetRoot.id.length + 1) ?? randomUUID()
     const definition = validateCustomTool({ ...input, id, directory: undefined })
-    if (targetRoot.source === 'user' && definition.name.toLowerCase() === '_system') {
-      throw new Error('_system is reserved for built-in tools.')
-    }
     if ((!existing || existing.name !== definition.name) && catalog.tools.some(tool => tool.rootId === targetRoot.id && tool.id !== existing?.id && tool.name.toLowerCase() === definition.name.toLowerCase())) {
       throw new Error(`Tool name already exists in this source: ${definition.name}`)
     }
@@ -333,7 +311,7 @@ export async function saveToolPackage(input: CustomToolSave): Promise<void> {
       await renameToolDirectory(existing.directory, directory, document)
     } else if (existing) await writeAtomic(join(directory, manifestName), document)
     else {
-      if ((await toolEntries(targetRoot)).length >= maxSourceEntries) throw new Error(`Tool source cannot exceed ${maxSourceEntries} entries.`)
+      if ((await readdir(targetRoot.path)).length >= maxSourceEntries) throw new Error(`Tool source cannot exceed ${maxSourceEntries} entries.`)
       const stage = join(targetRoot.path, `.new-${randomUUID()}`)
       const previous = structuredClone(config)
       let settingsSaved = false
@@ -398,7 +376,7 @@ export function addExternalToolDirectory(path: string): Promise<void> {
     if (typeof path !== 'string' || !isAbsolute(path)) throw new Error('Tool directory must be an absolute path.')
     const canonical = await realpath(path)
     if (!(await lstat(canonical)).isDirectory()) throw new Error('Tool source is not a directory.')
-    const reserved = [getToolsDir(), getSystemToolsDir(), getToolExamplesDir(), ...config.externalDirectories.map(d => d.path)]
+    const reserved = [getToolsDir(), getToolExamplesDir(), ...config.externalDirectories.map(d => d.path)]
     for (const candidate of reserved) {
       if (resolve(candidate) === resolve(path) || await realpath(candidate).catch(() => undefined) === canonical) throw new Error('Tool directory is already managed.')
     }
@@ -450,14 +428,13 @@ export function listToolFiles(id: string, relativePath?: string, sourceFolders: 
 export function readToolFile(id: string, relativePath: string, sourceFolders: readonly string[] = []) {
   return serialize(async () => {
     const tool = await findToolPackage(id, sourceFolders)
-    return { ...await readPackageFile(tool.directory, relativePath), editable: tool.source !== 'system' }
+    return { ...await readPackageFile(tool.directory, relativePath), editable: true }
   })
 }
 
 export function createToolFile(id: string, relativePath: string, sourceFolders: readonly string[] = []) {
   return serialize(async () => {
     const tool = await findToolPackage(id, sourceFolders)
-    if (tool.source === 'system') throw new Error('System tool files are read-only.')
     return { ...await createPackageFile(tool.directory, relativePath), editable: true }
   })
 }
@@ -469,7 +446,6 @@ export function toolFileExists(id: string, relativePath: string, sourceFolders: 
 export function saveToolFile(id: string, relativePath: string, update: import('@shared/packageFiles').PackageFileUpdate, sourceFolders: readonly string[] = []) {
   return serialize(async () => {
     const tool = await findToolPackage(id, sourceFolders)
-    if (tool.source === 'system') throw new Error('System tool files are read-only.')
     const definitionPath = await realpath(join(tool.directory, manifestName)).catch(reason => {
       if ((reason as NodeJS.ErrnoException).code === 'ENOENT') return undefined
       throw reason

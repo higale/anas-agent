@@ -5,6 +5,7 @@ import {
   defaultModelProviderConfig,
   isSelectableModelConfig,
   mergeModelParameters,
+  missingModelApiKeyEnvironmentVariable,
   modelContextKey,
   modelReservedParameterKeys,
   requireModelParameterPresetMode,
@@ -12,6 +13,18 @@ import {
   resolveProviderModelConfig
 } from './modelConfig'
 import type { ResolvedModelConfig } from './types'
+
+describe('API key reference errors', () => {
+  it('preserves unusual names across IPC errors without exposing unrelated diagnostics', () => {
+    for (const name of [' TEST_API_KEY ', '9provider-token', '中文密钥', 'api.key']) {
+      const message = `API key environment variable ${name} is missing or empty.`
+      expect(missingModelApiKeyEnvironmentVariable(new Error(message))).toBe(name)
+      expect(missingModelApiKeyEnvironmentVariable(new Error(`Error invoking remote method 'config:fetchModels': Error: ${message}`))).toBe(name)
+    }
+    expect(missingModelApiKeyEnvironmentVariable(new Error('Network error with sensitive diagnostic details'))).toBeUndefined()
+    expect(missingModelApiKeyEnvironmentVariable('API key environment variable A\nB is missing or empty.')).toBeUndefined()
+  })
+})
 
 describe('selectable model configuration', () => {
   it('identifies request context without depending on parameter property order or budget settings', () => {

@@ -1,5 +1,5 @@
-import type { DragEvent, FormEvent, RefObject } from 'react'
-import { PanelLeftOpen } from 'lucide-react'
+import { useState, type DragEvent, type FormEvent, type RefObject } from 'react'
+import { FolderDown, PanelLeftOpen } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type {
   AppAvatarImage,
@@ -99,7 +99,7 @@ interface SettingsScreenProps {
   onDeleteModel: () => void | Promise<void>
   onDeleteProviderModel: () => boolean | void | Promise<boolean | void>
   onAddSkillDirectory: () => void | Promise<void>
-  onImportSkills: () => void | Promise<void>
+  onImportSkills: () => Promise<string | undefined>
   onEditMcpServer: (index: number) => void | Promise<void>
   onEditSubagent: (index: number) => void
   onEditModel: (index: number) => void | Promise<void>
@@ -236,6 +236,7 @@ export function SettingsScreen({
   onUpdateSkillAvailability
 }: SettingsScreenProps) {
   const { t } = useTranslation()
+  const [skillToReveal, setSkillToReveal] = useState<string>()
   const sectionClass = (tab: SettingsTab, extra = ''): string => settingsSectionClass(activeTab, tab, extra)
   const sidebarLabel = t('chat.show_sidebar')
   const activeTabDefinition = settingsTabs.find((tab) => tab.id === activeTab)
@@ -264,10 +265,17 @@ export function SettingsScreen({
               <h1 className="settings-page-title">{activeTabDefinition ? t(activeTabDefinition.labelKey) : ''}</h1>
               {pageDescription && <div className="ui-field-hint">{pageDescription}</div>}
             </div>
-            {activeTab === 'skills' && <SegmentedMultiSelect ariaLabel={t('settings.skill_scripts_auto_approve_all')}
-              disabled={!skills}
-              options={[{ value: 'scriptAutoApprove', label: t('settings.skill_scripts_auto_approve_all'), checked: skills?.scriptAutoApprove ?? false }]}
-              onChange={(_value, enabled) => void onUpdateSkillScriptApproval(undefined, enabled)} />}
+            {activeTab === 'skills' && <div className="ui-toolbar">
+              <button className="ui-button" type="button" disabled={!skills} data-tooltip={t('settings.import_skill_to_user')}
+                onClick={async () => {
+                  const importedId = await onImportSkills()
+                  if (importedId) setSkillToReveal(importedId)
+                }}><FolderDown size={14} aria-hidden="true" />{t('settings.import_skill')}</button>
+              <SegmentedMultiSelect ariaLabel={t('settings.skill_scripts_auto_approve_all')}
+                disabled={!skills}
+                options={[{ value: 'scriptAutoApprove', label: t('settings.skill_scripts_auto_approve_all'), checked: skills?.scriptAutoApprove ?? false }]}
+                onChange={(_value, enabled) => void onUpdateSkillScriptApproval(undefined, enabled)} />
+            </div>}
           </header>
           {error && <div className="settings-error" role="alert">{error}</div>}
           {activeTab === 'general' && (
@@ -456,7 +464,8 @@ export function SettingsScreen({
               sectionClass={sectionClass('skills', 'settings-workbench ui-workbench ui-grid-sidebar')}
               skills={skills}
               onAddDirectory={onAddSkillDirectory}
-              onImportDirectories={onImportSkills}
+              revealSkillId={skillToReveal}
+              onSkillRevealed={() => setSkillToReveal(undefined)}
               onMoveDirectory={onMoveSkillDirectory}
               onRefresh={onRefreshSkills}
               onUpdateDirectory={onUpdateSkillDirectory}

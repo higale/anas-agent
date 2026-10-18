@@ -19,6 +19,17 @@ const t = vi.fn((key: string, options?: Record<string, unknown>) => (
 )) as unknown as TFunction
 
 describe('model draft configuration', () => {
+  it('accepts direct keys and manual variable references independently of suggestions, but rejects malformed references', () => {
+    for (const apiKey of ['', 'sk-secret', '${MyCredential}', '${_VALUE_2}', '${ TEST_API_KEY }', '${9NAME}', '${provider-key}', '${中文密钥}']) {
+      const draft = { ...emptyModelDraft(), apiKey }
+      expect(validateModelProviderDraft(draft, t)).toBeUndefined()
+      expect(buildProviderPayload(draft)?.apiKey).toBe(apiKey)
+    }
+    for (const apiKey of ['${}', '${A=B}', '${NAME', '${A}${B}', '${A\0B}', '${A\r\nB}']) {
+      expect(validateModelProviderDraft({ ...emptyModelDraft(), apiKey }, t)).toBe('settings.api_key_reference_invalid')
+    }
+  })
+
   it('copies template icons into independent provider drafts and save payloads', () => {
     const template = modelTemplates[0]
     const draft = modelTemplateToDraft(template)

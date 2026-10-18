@@ -6,7 +6,7 @@ import { dirname, join, resolve, sep } from 'node:path'
 import type { AppBuildInfo, AppDataStorageUsageSnapshot, DataBackupResult, DataCleanupRequest, DataCleanupResult, DataRestoreResult, EnvFileSnapshot, LanguageResourcesSnapshot, RuntimeToolStatus, SpeechRendererDiagnostics, SpeechRendererWarningKind, SystemEnvironmentDetection } from '@shared/types'
 import { getAppConfigSnapshot, getBackupDirectory, updateBackupDirectory } from './config/appConfig'
 import { getDataDir, getDeveloperHttpTraceDir } from './config/dataDir'
-import { readDataEnvFile, reloadDataEnv, writeDataEnvFile } from './config/apiKeys'
+import { listApiKeyEnvironmentVariables, readDataEnvFile, reloadDataEnv, writeDataEnvFile } from './config/apiKeys'
 import { backupDialogDefaultPath, createDataBackupZip, restoreDataBackupZip } from './backupService'
 import { cleanupData } from './dataCleanupService'
 import { getLanguageResources } from './languageStore'
@@ -168,6 +168,7 @@ export function registerAppIpcHandlers(): void {
     return traceDir
   })
   handleMainIpc('app:readEnvFile', async (): Promise<EnvFileSnapshot> => readDataEnvFile())
+  handleMainIpc('app:listApiKeyEnvironmentVariables', async () => listApiKeyEnvironmentVariables())
   handleMainIpc('app:saveEnvFile', async (_event, content: string): Promise<EnvFileSnapshot> => {
     const snapshot = writeDataEnvFile(content)
     runtimeLog('info', 'config', 'Data .env file saved.', {

@@ -108,9 +108,11 @@ async function verifyEnvironmentStartup(repositoryRoot, executablePath) {
     assert.deepEqual(plugins.map(plugin => plugin.id), ['usage-meter'], 'Plugin examples must not be registered automatically.')
     assert.equal(plugins[0].error, undefined)
     assert.equal(plugins[0].backendStatus, 'stopped')
-    assert.deepEqual(await readdir(join(profile, 'tools')), ['_system'])
-    const rawTool = JSON.parse(await readFile(join(profile, 'examples/tools/read_text_raw/TOOL.json'), 'utf8'))
-    assert.equal(rawTool.name, 'read_text_raw')
+    assert.deepEqual(await readdir(join(profile, 'tools')), [], 'Tool examples must not be installed automatically.')
+    for (const name of ['read_text_raw', 'file_sha256', 'json_format']) {
+      const tool = JSON.parse(await readFile(join(profile, 'examples/tools', name, 'TOOL.json'), 'utf8'))
+      assert.equal(tool.name, name)
+    }
     await expect.poll(() => application.evaluate(() => globalThis.__anasEnvironmentProbe?.pending)).toBe(true)
     const initial = await page.evaluate(async () => (await globalThis.gale.config.get()).settings.environmentContext)
     assert.equal(initial.customInformationEnabled, true)

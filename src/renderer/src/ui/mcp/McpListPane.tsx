@@ -3,6 +3,7 @@ import { RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { AppConfigSnapshot, McpToolStatus } from '@shared/types'
 import { SettingsListActions } from '../settings/SettingsListActions'
+import { SettingsAvailabilityBadge } from '../settings/SettingsAvailabilityBadge'
 import { UI_ICON_SIZE_LARGE } from '../uiConstants'
 import { mcpErrorStatus, mcpLoadedStatus, mcpServerRuntimeStatus } from './mcpDraft'
 
@@ -67,9 +68,9 @@ export function McpListPane({
       <div className="ui-scroll-list ui-list" ref={listRef}>
         {config && config.mcpServers.length === 0 && <div className="ui-empty-state ui-empty-state-compact">{t('settings.no_mcp_servers_configured')}</div>}
         {config?.mcpServers.map((server) => {
-          const runtimeStatus = runtimeEnabled ? mcpServerRuntimeStatus(status, server) : undefined
-          const loaded = runtimeEnabled ? mcpLoadedStatus(status, server) : undefined
-          const errorText = runtimeEnabled ? mcpErrorStatus(status, server) : undefined
+          const runtimeStatus = runtimeEnabled && server.enabled ? mcpServerRuntimeStatus(status, server) : undefined
+          const loaded = runtimeEnabled && server.enabled ? mcpLoadedStatus(status, server) : undefined
+          const errorText = runtimeEnabled && server.enabled ? mcpErrorStatus(status, server) : undefined
           const recovering = runtimeStatus?.state === 'recovering'
           const loading = runtimeEnabled && server.enabled && !loaded && !errorText && (!runtimeStatus || runtimeStatus.state === 'idle' || runtimeStatus.state === 'starting')
           const detailText = loaded
@@ -94,8 +95,8 @@ export function McpListPane({
                   {server.type} - {server.id || '-'}{detailText ? ` · ${detailText}` : ''}
                 </small>
               </span>
-              {errorText ? (
-                <em className="ui-list-item-badge ui-badge-danger">{t('settings.error')}</em>
+              {!server.enabled || errorText ? (
+                <SettingsAvailabilityBadge disabled={!server.enabled} error={Boolean(errorText)} />
               ) : loaded ? (
                 <em className="ui-list-item-badge ui-badge-success">{t('settings.running')}</em>
               ) : recovering ? (

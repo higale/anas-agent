@@ -20,6 +20,16 @@ describe('model list configuration', () => {
   beforeEach(() => vi.clearAllMocks())
   afterEach(() => vi.unstubAllGlobals())
 
+  it('does not request models or read cached results when resolving a variable fails', async () => {
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    mocks.resolveModelApiKey.mockImplementationOnce(() => { throw new Error('API key environment variable MISSING is missing or empty.') })
+    await expect(fetchAvailableModels({ protocol: 'openai_chat_completions', baseUrl: 'https://example.com/v1', apiKey: '${MISSING}' }))
+      .rejects.toThrow('MISSING is missing or empty')
+    expect(fetch).not.toHaveBeenCalled()
+    expect(mocks.readModelListCache).not.toHaveBeenCalled()
+  })
+
   it('rejects an unknown provider before selecting credentials or a fallback protocol', async () => {
     await expect(getCachedAvailableModels({
       protocol: 'unknown' as never,

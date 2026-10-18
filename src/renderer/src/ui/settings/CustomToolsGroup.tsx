@@ -13,6 +13,7 @@ import { ConfirmDialog } from '../dialogs/ConfirmDialog'
 import { CommitTextInput } from '../CommitTextField'
 import { notice } from '../notice'
 import { PackageList, PackageSourceActions, PackageTreeRoot, PackageTreeItem, PackageFileTree, PackageFileViewer, packageNodeKey } from './PackageTree'
+import { SettingsAvailabilityBadge } from './SettingsAvailabilityBadge'
 
 const toolNoticeId = 'settings-tool-status'
 
@@ -46,8 +47,8 @@ export function CustomToolsGroup({ tools, onConfigChange, catalogNavigation, cat
   const rootIndex = external.findIndex(item => item.id === root?.id)
   const peers = snapshot?.tools.filter(tool => tool.rootId === selected?.rootId) ?? []
   const index = peers.findIndex(tool => tool.id === selected?.id)
-  const roots = [...(snapshot?.roots ?? [])].sort((a, b) => ({ system: 0, user: 1, project: 2, external: 3 }[a.source] - { system: 0, user: 1, project: 2, external: 3 }[b.source]))
-  const rootLabel = (root: ToolRoot) => root.source === 'system' || root.source === 'user' ? t(`settings.skill_group_${root.source}`) : root.name
+  const roots = [...(snapshot?.roots ?? [])].sort((a, b) => ({ user: 0, project: 1, external: 2 }[a.source] - { user: 0, project: 1, external: 2 }[b.source]))
+  const rootLabel = (root: ToolRoot) => root.source === 'user' ? t('settings.skill_group_user') : root.name
   const loadErrorText = (error: ToolLoadError) => [
     t(`custom_tools.load_error_${error.code}`), error.path,
     ['invalid_json', 'invalid_definition', 'read_failed'].includes(error.code) ? error.detail : undefined
@@ -139,8 +140,7 @@ export function CustomToolsGroup({ tools, onConfigChange, catalogNavigation, cat
       const exists = await window.gale.tools.fileExists(tool.id, path)
       if (request.current !== revision) return
       if (!exists) {
-        if (tool.source === 'system') notice.error(t('custom_tools.command_file_missing', { path }), { id: toolNoticeId })
-        else setCreating({ tool, path })
+        setCreating({ tool, path })
         return
       }
       for (const [index, name] of parts.entries()) {
@@ -189,7 +189,8 @@ export function CustomToolsGroup({ tools, onConfigChange, catalogNavigation, cat
   function renderTool(tool: ToolPackage, showSource = false) {
     const isExpanded = expanded.has(`files:${packageNodeKey(tool.id)}`)
     return <PackageTreeItem key={tool.id} name={tool.name} icon={<Wrench size={14} aria-hidden="true" />} depth={1} selected={selection?.kind === 'tool' && selection.id === tool.id && !catalogView}
-      expanded={isExpanded} unavailable={Boolean(tool.error)} badge={[showSource ? rootLabel(roots.find(root => root.id === tool.rootId)!) : '', tool.error ? t('capabilities.inactive') : ''].filter(Boolean).join(' · ')}
+      expanded={isExpanded} badge={showSource ? rootLabel(roots.find(root => root.id === tool.rootId)!) : undefined}
+      status={<SettingsAvailabilityBadge disabled={tool.enabled === false} error={Boolean(tool.error)} />}
       expandLabel={t(isExpanded ? 'custom_tools.collapse' : 'custom_tools.expand', { name: tool.name })}
       onExpand={() => void expandFiles(tool.id)} onSelect={() => select({ kind: 'tool', id: tool.id })}
       onDoubleClick={() => { if ((tool.source === 'user' || tool.source === 'external') && tool.definition) setEditing(tool) }}>
@@ -292,7 +293,7 @@ export function CustomToolsGroup({ tools, onConfigChange, catalogNavigation, cat
           onSelect={id => select({ kind: 'tool', id })} items={groupTools.map(tool => ({
             id: tool.id, name: tool.name, description: tool.description,
             detail: selection?.kind === 'all' ? `${rootLabel(roots.find(root => root.id === tool.rootId)!)} · ${tool.directory}` : undefined,
-            status: tool.error || tool.enabled === false ? t('capabilities.inactive') : undefined
+            status: <SettingsAvailabilityBadge disabled={tool.enabled === false} error={Boolean(tool.error)} />
           }))} />}
         <PackageFileViewer key={preview?.path} onSave={preview && selected ? async update => {
           const saved = await window.gale.tools.saveFile(selected.id, preview.relativePath, update)

@@ -36,13 +36,14 @@ async function openGroup(button: HTMLElement): Promise<void> {
 }
 
 describe('custom tool settings', () => {
-  async function commandFixture(present = true, source: 'user' | 'system' = 'user') {
+  async function commandFixture(present = true) {
+    const source = 'user' as const
     const tool = { ...toolPackageFixture({ ...definition, command: 'scripts/run.py {{args}}' }), source, rootId: source }
     const file = { name: 'run.py', relativePath: 'scripts/run.py', path: `${tool.directory}/scripts/run.py`, kind: 'text' }
     const fileExists = vi.fn(async () => present)
     const createFile = vi.fn(async () => { present = true })
     const listFiles = vi.fn(async (_id: string, path?: string) => path ? [file] : [{ name: 'scripts', relativePath: 'scripts', path: `${tool.directory}/scripts`, kind: 'directory' }])
-    const readFile = vi.fn(async () => ({ ...file, content: 'print(1)', size: 8, resolvedPath: file.path, revision: 'v', editable: source !== 'system' }))
+    const readFile = vi.fn(async () => ({ ...file, content: 'print(1)', size: 8, resolvedPath: file.path, revision: 'v', editable: true }))
     vi.stubGlobal('gale', { tools: { ...toolApi, fileExists, createFile, listFiles, readFile,
       get: vi.fn(async () => ({ roots: [{ id: source, name: source, source, path: '/tools' }], tools: [tool] })) } })
     render(<CustomToolsGroup tools={[tool]} onConfigChange={vi.fn()} />)
@@ -69,13 +70,6 @@ describe('custom tool settings', () => {
     await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'custom_tools.command_file_create' }))
     expect(createFile).toHaveBeenCalledExactlyOnceWith(tool.id, 'scripts/run.py')
     expect(await screen.findByRole('button', { name: 'run.py', current: true })).toBeVisible()
-  })
-  it('keeps system tools read-only when a command script is missing', async () => {
-    const { createFile } = await commandFixture(false, 'system')
-    await userEvent.click(screen.getByRole('button', { name: 'scripts/run.py' }))
-    expect(notice.error).toHaveBeenCalledWith('custom_tools.command_file_missing', { id: 'settings-tool-status' })
-    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
-    expect(createFile).not.toHaveBeenCalled()
   })
   it('reports a failed creation without leaving the tool busy or selecting a nonexistent file', async () => {
     const { createFile } = await commandFixture(false)
@@ -155,7 +149,7 @@ describe('custom tool settings', () => {
     await userEvent.click(screen.getByRole('button', { name: 'custom_tools.import' }))
     expect(notice.error).toHaveBeenCalledWith(`custom_tools.import_error_invalid_tool\ncustom_tools.load_error_path_not_found\n${path}`, { id: 'settings-tool-status' })
   })
-  it.each(['all', 'system', 'user', 'external'] as const)('selects %s without toggling and keeps the detail when toggling its disclosure', async group => {
+  it.each(['all', 'user', 'external'] as const)('selects %s without toggling and keeps the detail when toggling its disclosure', async group => {
     const source = group === 'all' ? 'user' : group
     const tool = { ...toolPackageFixture(definition), source, rootId: source }
     vi.stubGlobal('gale', { tools: { ...toolApi, get: vi.fn(async () => ({ roots: [{ id: source, source, name: 'Shared', path: '/tools' }], tools: [tool] })) } })
@@ -301,12 +295,12 @@ describe('custom tool settings', () => {
   it('lists each group and navigates to the exact tool even when names match', async () => {
     const user = userEvent.setup()
     const roots = [
-      { id: 'system', name: 'System', source: 'system', path: '/system' },
+      { id: 'team', name: 'Team', source: 'external', path: '/team' },
       { id: 'user', name: 'User', source: 'user', path: '/user' },
       { id: 'shared', name: 'Shared', source: 'external', path: '/shared' }
     ]
     const items: ToolPackage[] = [
-      { ...toolPackageFixture({ ...definition, id: 'system-tool' }), rootId: 'system', source: 'system', directory: '/system/example' },
+      { ...toolPackageFixture({ ...definition, id: 'team-tool' }), rootId: 'team', source: 'external', directory: '/team/example' },
       { ...toolPackageFixture({ ...definition, id: 'user-tool' }), directory: '/user/example' },
       { ...toolPackageFixture({ ...definition, id: 'broken-tool', name: 'broken' }), rootId: 'shared', source: 'external', directory: '/shared/broken', definition: undefined, error: { code: 'invalid_definition', path: '/shared/broken/TOOL.json', detail: 'Invalid manifest' } }
     ]
@@ -314,13 +308,13 @@ describe('custom tool settings', () => {
     const view = render(<CustomToolsGroup tools={items} onConfigChange={vi.fn()} />)
     const tree = within(view.container.querySelector('.settings-skill-tree') as HTMLElement)
     const detail = within(view.container.querySelector('.settings-skill-viewer') as HTMLElement)
-    for (const [label, index] of [['settings.skill_group_system', 0], ['settings.skill_group_user', 1], ['Shared', 2]] as const) {
+    for (const [label, index] of [['Team', 0], ['settings.skill_group_user', 1], ['Shared', 2]] as const) {
       await openGroup(await tree.findByRole('button', { name: new RegExp(`^${label}`) }))
       const list = detail.getByRole('list', { name: 'custom_tools.title' })
       expect(within(list).getAllByRole('listitem')).toHaveLength(1)
       expect(list).toHaveTextContent(items[index].name)
       if (index === 2) {
-        expect(list).toHaveTextContent('capabilities.inactive')
+        expect(list).toHaveTextContent('settings.error')
         expect(detail.getByRole('button', { name: 'custom_tools.remove_directory' })).toBeEnabled()
       }
     }
@@ -328,7 +322,7 @@ describe('custom tool settings', () => {
     const list = detail.getByRole('list', { name: 'custom_tools.title' })
     const rows = within(list).getAllByRole('listitem')
     expect(rows).toHaveLength(3)
-    expect(rows[0]).toHaveTextContent('settings.skill_group_system · /system/example')
+    expect(rows[0]).toHaveTextContent('Team · /team/example')
     expect(rows[1]).toHaveTextContent('settings.skill_group_user · /user/example')
     within(rows[1]).getByRole('button').focus()
     await user.keyboard('{Enter}')
@@ -356,7 +350,7 @@ describe('custom tool settings', () => {
     expect(detail.queryByText('custom_tools.group_empty')).not.toBeInTheDocument()
   })
 
-  it.each(['user', 'system', 'external'] as const)('shows creation and import in writable group headers only (%s)', async source => {
+  it.each(['user', 'external'] as const)('shows creation and import in writable group headers only (%s)', async source => {
     const user = userEvent.setup()
     const tool = { ...toolPackageFixture(definition), source, rootId: source }
     const root = { id: source, source, name: 'Shared', path: '/tools' }
@@ -377,13 +371,11 @@ describe('custom tool settings', () => {
     expectActions(false)
     const label = source === 'external' ? 'Shared' : `settings.skill_group_${source}`
     await openGroup(await screen.findByRole('button', { name: new RegExp(`^${label}`) }))
-    expectActions(source !== 'system')
-    if (source !== 'system') {
-      const header = within(view.container.querySelector('.settings-detail-heading') as HTMLElement)
-      expect(header.getByRole('button', { name: 'custom_tools.add' })).toBeVisible()
-      expect(header.getByRole('button', { name: 'custom_tools.import' })).toBeVisible()
-      expect(within(view.container.querySelector('.settings-skill-tree') as HTMLElement).queryByRole('button', { name: 'custom_tools.add' })).not.toBeInTheDocument()
-    }
+    expectActions(true)
+    const header = within(view.container.querySelector('.settings-detail-heading') as HTMLElement)
+    expect(header.getByRole('button', { name: 'custom_tools.add' })).toBeVisible()
+    expect(header.getByRole('button', { name: 'custom_tools.import' })).toBeVisible()
+    expect(within(view.container.querySelector('.settings-skill-tree') as HTMLElement).queryByRole('button', { name: 'custom_tools.add' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'submit_result' }))
     expectActions(false)
     await user.click(screen.getByRole('button', { name: 'custom_tools.expand' }))
@@ -475,8 +467,7 @@ describe('custom tool settings', () => {
     const tools: ToolPackage[] = [
       { ...toolPackageFixture({ ...definition, id: 'external' }), source: 'external', rootId: 'external', rootName: 'Shared' },
       { ...toolPackageFixture({ ...definition, id: 'project' }), source: 'project', rootId: 'project', rootName: 'Project' },
-      toolPackageFixture(definition),
-      { ...toolPackageFixture({ ...definition, id: 'system' }), source: 'system', rootId: 'system', rootName: 'System' }
+      toolPackageFixture(definition)
     ]
     function Capabilities() {
       const [value, setValue] = useState<AgentCapabilities>({ ...structuredClone(defaultCapabilities), customTools: selectedTools(['missing']) })
@@ -484,7 +475,7 @@ describe('custom tool settings', () => {
     }
     render(<Capabilities />)
     fireEvent.click(screen.getByRole('button', { name: 'custom_tools.title' }))
-    for (const name of ['settings.skill_group_system', 'settings.skill_group_user', 'Shared', 'capabilities.other_tools']) expect(screen.getByText(name)).toBeVisible()
+    for (const name of ['settings.skill_group_user', 'Shared', 'capabilities.other_tools']) expect(screen.getByText(name)).toBeVisible()
     expect(Boolean(screen.queryByText('Project'))).toBe(!subagent)
     expect(screen.getByRole('checkbox', { name: 'missing' })).toBeChecked()
     fireEvent.click(screen.getByRole('checkbox', { name: 'missing' }))

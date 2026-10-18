@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { ModelProviderConfigDetail } from '@shared/types'
+import type { ModelApiKeyEnvironmentVariable, ModelProviderConfigDetail } from '@shared/types'
+import { modelApiKeyEnvironmentName } from '@shared/modelConfig'
 import { CommitTextInput } from '../CommitTextField'
 import { SearchableOptionPicker } from '../SearchableOptionPicker'
 import { ModelDetailsDialog } from './ModelDetailsDialog'
@@ -41,7 +42,10 @@ export function ModelEditor({
   onSaveDetails
 }: ModelEditorProps) {
   const { t } = useTranslation()
-  const [apiKeyFocused, setApiKeyFocused] = useState(false)
+  const [apiKeyVariables, setApiKeyVariables] = useState<ModelApiKeyEnvironmentVariable[]>([])
+  const [apiKeyVariablesLoading, setApiKeyVariablesLoading] = useState(false)
+  const [apiKeyVariablesFailed, setApiKeyVariablesFailed] = useState(false)
+  const apiKeyVariablesRequest = useRef(0)
   const [modelAddOpen, setModelAddOpen] = useState(false)
   const [modelDetailsOpen, setModelDetailsOpen] = useState(false)
   const [newModel, setNewModel] = useState(false)
@@ -50,6 +54,23 @@ export function ModelEditor({
     { value: 'openai_chat_completions', label: providerProtocolLabels.openai_chat_completions },
     { value: 'anthropic_messages', label: providerProtocolLabels.anthropic_messages }
   ]
+
+  useEffect(() => () => { apiKeyVariablesRequest.current += 1 }, [])
+
+  async function loadApiKeyVariables(): Promise<void> {
+    const request = ++apiKeyVariablesRequest.current
+    setApiKeyVariables([])
+    setApiKeyVariablesLoading(true)
+    setApiKeyVariablesFailed(false)
+    try {
+      const variables = await window.gale.app.listApiKeyEnvironmentVariables()
+      if (request === apiKeyVariablesRequest.current) setApiKeyVariables(variables)
+    } catch {
+      if (request === apiKeyVariablesRequest.current) setApiKeyVariablesFailed(true)
+    } finally {
+      if (request === apiKeyVariablesRequest.current) setApiKeyVariablesLoading(false)
+    }
+  }
 
   async function addProviderModel(): Promise<boolean> {
     setNewModel(true)
@@ -111,17 +132,31 @@ export function ModelEditor({
             placeholder="https://..."
           />
         </label>
-        <label className="ui-field-stack">
+        <div className="ui-field-stack">
           <span>{t('settings.api_key')}</span>
-          <CommitTextInput
+          <SearchableOptionPicker
+            allowInput
+            caseSensitive
+            ariaLabel={t('settings.api_key')}
+            searchable={false}
+            inputCommitMode="blur"
             value={modelDraft.apiKey}
-            onBlur={() => setApiKeyFocused(false)}
-            onCommit={(apiKey) => onUpdateDraft({ apiKey })}
-            onFocus={() => setApiKeyFocused(true)}
-            placeholder={t('common.optional')}
-            type={apiKeyFocused ? 'text' : 'password'}
+            onChange={(apiKey) => onUpdateDraft({ apiKey })}
+            onOpenChange={(open) => { if (open) void loadApiKeyVariables() }}
+            inputPlaceholder={t('settings.api_key_placeholder')}
+            inputType={(value, focused) => focused || modelApiKeyEnvironmentName(value) ? 'text' : 'password'}
+            emptyLabel={apiKeyVariablesLoading ? t('common.loading') : apiKeyVariablesFailed
+              ? t('settings.api_key_variables_failed') : t('settings.api_key_variables_empty')}
+            options={apiKeyVariables.map(variable => {
+              const label = variable.name.trim() === variable.name ? variable.name : JSON.stringify(variable.name)
+              return {
+                value: '${' + variable.name + '}',
+                label: variable.hasValue ? label : `${label} (${t('settings.api_key_variable_empty')})`,
+                group: variable.source === 'envFile' ? '.env' : t('settings.system_environment_variables')
+              }
+            })}
           />
-        </label>
+        </div>
         <ModelExtraParametersField
           key={modelDraft.providerId}
           value={modelDraft.providerParametersJson}

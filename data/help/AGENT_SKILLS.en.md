@@ -10,7 +10,7 @@ Use **Settings > Skills** to manage global sources and browse skill instructions
 
 Markdown files open in rendered **Preview**, with a **Source** switch and collapsible metadata. Relative images load from the file's directory; same-page links jump to headings, and other local file links reveal their targets in your file manager.
 
-- **Import skills**: Select the **User** group, then click the import icon in the right pane header. Select one or more skill directories containing `SKILL.md` to copy into `skills/` under application data. Name conflicts prevent import without overwriting existing skills. The picker opens in the examples directory by default.
+- **Install skills**: Click **Install skill** beside **Auto-approve all Skill scripts** at the top of the page. Select one or more skill directories containing `SKILL.md` to copy into `skills/` under application data. Name conflicts prevent installation without overwriting existing skills. The picker opens in the examples directory by default. On success, the **User** group expands and the first installed skill is selected and scrolled into view.
 - **Add directory**: Select an external directory containing skill subdirectories. Anas references its files without copying them. External sources can be renamed, assigned shortcut aliases, reordered, or removed. Removing a source only removes its reference, not its files.
 - **Project skills**: Place them in `.agents/skills/` under each project source folder. They appear in that project's capability choices and conversations, not on the global Skills page.
 
@@ -22,6 +22,8 @@ Skill details show **Shortcut**, **Available to model**, then **Auto-approve scr
 
 - **Shortcut** allows explicit invocation with `/skill-name request` in the message input. Type `/` to see suggestions. Anas sends the complete, unchanged `SKILL.md` and its source path, with the text after the command as a separate user request; expand the skill entry in the conversation to inspect the actual submitted text.
 - **Available to model** supplies the Agent with the name, description, and absolute `SKILL.md` path so it can read the instructions when relevant.
+
+When both options are off, the list shows **Disabled** on the right; the skill can still be viewed and edited. Turning off only one option does not mark it disabled. Loading failures show **Error** separately, without strikethrough.
 
 Global switches limit skill availability. In a project's **Customize capabilities > Skills**, **All** uses all globally available skills; **Custom** offers **Shortcut**, then **Model**, and cannot newly select a globally disabled use. Previously selected uses that become disabled show a warning and can be cleared; unselected disabled options show no notice. **Off** preserves selections but stops providing the skill catalog and shortcuts. Project-local skills are independent of the global switches; skills with loading errors remain unavailable. Plugin skills are selected under their own plugin group.
 
@@ -47,19 +49,14 @@ The application supplies these system skills in `skills/_system/` under applicat
 | `skill-manager` | Creates or modifies skills, or installs them from local directories and Git repositories. Requires file reading and writing; remote installation also needs Git and network access, and script testing needs the appropriate runtimes. |
 | `tool-manager` | Creates, modifies, and troubleshoots Anas custom tools, with a format reference and Python example template. Requires file reading and writing; testing also needs command execution and the appropriate runtime. |
 
-`examples/skills/` contains examples that are not loaded by default. Import them into **User** before use:
+`examples/skills/` contains examples that are not loaded by default. Use **Install skill** to copy them into **User** before use:
 
 | Example | Purpose and main dependencies |
 | --- | --- |
-| `baidu-search` | Baidu search; Python 3, network access, and `BAIDU_SEARCH_API_KEY`. |
-| `bailian-image` | Qwen/Wan image generation and editing from local files or URLs; Python 3.10+, network access, `BAILIAN_IMAGE_API_KEY`, and a model set by `BAILIAN_IMAGE_MODEL` or `--model`. |
-| `exiftool-photo-search` | Searches photo metadata; Python 3.9+, ExifTool, and access to local photos. |
-| `edge-tts-gen` | Generates speech files; Python 3, network access, file writing, and either the `edge_tts` package, the `edge-tts` command, or `uvx`. |
 | `weather` | Weather queries; Python 3 and network access to wttr.in. |
 | `ip-location` | Public IP and approximate network location; Python 3.8+ and network access to ipinfo.io. |
-| `obsidian-cli` | Operates Obsidian vaults; Obsidian desktop with its command-line interface enabled and an available `obsidian` command. |
 
-System skills are refreshed from bundled files at startup. The complete `examples/` tree is refreshed at startup and after restoring a backup, including documentation, skill examples, tool examples and plugin examples. Copy or import a skill into User or a project skill directory before customizing it.
+System skills are refreshed from bundled files at startup. The complete `examples/` tree is refreshed at startup and after restoring a backup, including documentation, skill examples, tool examples and plugin examples. Install a skill into User or copy it into a project skill directory before customizing it.
 
 ## Prepare To Run
 

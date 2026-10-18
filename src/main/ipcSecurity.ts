@@ -40,6 +40,7 @@ const applicationDataIpcChannels = new Set([
   'app:openLogViewer',
   'app:openPath',
   'app:readEnvFile',
+  'app:listApiKeyEnvironmentVariables',
   'app:restartInConsole',
   'app:saveEnvFile',
   'app:setDeveloperHttpTraceEnabled',

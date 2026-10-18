@@ -330,6 +330,7 @@ const api: GaleApi = {
     setDeveloperHttpTraceEnabled: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('app:setDeveloperHttpTraceEnabled', enabled),
     openDeveloperHttpTraceDir: (): Promise<string> => ipcRenderer.invoke('app:openDeveloperHttpTraceDir'),
     readEnvFile: (): Promise<EnvFileSnapshot> => ipcRenderer.invoke('app:readEnvFile'),
+    listApiKeyEnvironmentVariables: () => ipcRenderer.invoke('app:listApiKeyEnvironmentVariables'),
     saveEnvFile: (content: string): Promise<EnvFileSnapshot> => ipcRenderer.invoke('app:saveEnvFile', content),
     detectSystemEnvironment: (): Promise<SystemEnvironmentDetection> => ipcRenderer.invoke('app:detectSystemEnvironment'),
     getLanguageResources: (): Promise<LanguageResourcesSnapshot> => ipcRenderer.invoke('app:getLanguageResources'),

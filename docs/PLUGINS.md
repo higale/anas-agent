@@ -295,7 +295,7 @@ module.exports = {
 
 示例源码位于 `data/examples/plugins/`。`npm run dev`、`npm run build` 先通过 `build:examples` 生成 `out/examples/`：保留技能、工具及说明文件，插件按目录分别生成 `notepad.zip`、`backend-demo.zip`、`text-tools.zip`、`writing-helper.zip`，每个 ZIP 根部包含 `PLUGIN.json`，不另包一层目录。ZIP 条目顺序和时间固定，不随源码文件时间变化；生成物不提交 Git。正式包从生成目录携带示例，不重复分发插件源码目录。
 
-启动及恢复备份时，宿主从随包资源（开发时为 `out/examples/`）整体复制 `examples/`，校验技能、工具及插件 ZIP 后统一替换；ZIP 使用安装器相同的解包限制，清单校验失败保留原目录，验证产生的临时文件及时删除。恢复旧备份时也会用当前示例整体替换，清除旧示例源码目录。各模块仅刷新自己的 `_system/`。示例不直接注册或启用，安装对话框默认打开 `examples/plugins/`，直接选择 ZIP 安装；已安装副本不随示例刷新而覆盖。记事本验证纯 UI 和页面交接，可选后台示例验证延迟启动与 RPC，text-tools 验证模型工具与通用设置，writing-helper 验证纯静态贡献。测试覆盖不兼容清单、损坏包、路径边界、并发写入、排队取消与在途结果、慢资源加载隔离、停用／卸载、备份恢复和真实 Electron 页面通信。
+启动及恢复备份时，宿主从随包资源（开发时为 `out/examples/`）整体复制 `examples/`，校验技能、工具及插件 ZIP 后统一替换；ZIP 使用安装器相同的解包限制，清单校验失败保留原目录，验证产生的临时文件及时删除。恢复旧备份时也会用当前示例整体替换，清除旧示例源码目录。技能和插件模块另行刷新各自的 `_system/`。示例不直接注册或启用，安装对话框默认打开 `examples/plugins/`，直接选择 ZIP 安装；已安装副本不随示例刷新而覆盖。记事本验证纯 UI 和页面交接，可选后台示例验证延迟启动与 RPC，text-tools 验证模型工具与通用设置，writing-helper 验证纯静态贡献。测试覆盖不兼容清单、损坏包、路径边界、并发写入、排队取消与在途结果、慢资源加载隔离、停用／卸载、备份恢复和真实 Electron 页面通信。
 
 在完成 `npm run build` 后运行 `node scripts/electron-plugins.cjs`，使用临时数据目录验证真实应用，不修改个人配置。
 

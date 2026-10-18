@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict')
-const { mkdir, mkdtemp, readFile, rm, writeFile } = require('node:fs/promises')
+const { cp, mkdir, mkdtemp, readFile, rm, writeFile } = require('node:fs/promises')
 const { tmpdir } = require('node:os')
 const { join } = require('node:path')
 const { expect } = require('playwright/test')
@@ -90,12 +90,80 @@ async function verifySegmentMinimumWidth(locator) {
     'Content mode must preserve individual label width differences when widened.')
 }
 
+async function verifyEnvironmentTextarea(application, page) {
+  await page.locator('[data-settings-tab="environment"]').click()
+  const input = page.locator('textarea[data-max-height="320"]')
+  const wrap = page.getByRole('checkbox', { name: 'Auto wrap', exact: true })
+  const settleLayout = () => page.evaluate(() => new Promise(resolve => globalThis.requestAnimationFrame(() => globalThis.requestAnimationFrame(resolve))))
+  const state = () => input.evaluate(element => ({
+    pageScroll: globalThis.document.querySelector('.settings-content').scrollTop,
+    scrollTop: element.scrollTop, scrollLeft: element.scrollLeft,
+    height: element.getBoundingClientRect().height, top: element.getBoundingClientRect().top,
+    caret: element.selectionStart, focused: globalThis.document.activeElement === element
+  }))
+  await input.scrollIntoViewIfNeeded()
+  for (const wordWrap of [false, true]) {
+    await wrap.setChecked(wordWrap)
+    await settleLayout()
+    await input.evaluate(element => {
+      const caret = element.value.split('\n').slice(0, 25).join('\n').length + 12
+      element.focus({ preventScroll: true })
+      element.setSelectionRange(caret, caret)
+      element.scrollTop = 20 * parseFloat(globalThis.getComputedStyle(element).lineHeight)
+      const panel = globalThis.document.querySelector('.settings-content')
+      panel.scrollTop += element.getBoundingClientRect().top - panel.getBoundingClientRect().top - 80
+    })
+    await settleLayout()
+    const before = await state()
+    assert.ok(before.pageScroll > 0 && before.scrollTop > 0, 'Exercise both the page and the editor while scrolled.')
+    await page.keyboard.type('xyz')
+    await settleLayout()
+    const after = await state()
+    for (const key of ['pageScroll', 'scrollTop', 'scrollLeft', 'height', 'top']) {
+      assert.ok(Math.abs(after[key] - before[key]) < 1, `${wordWrap ? 'Wrapped' : 'Unwrapped'} typing moved ${key}: ${before[key]} → ${after[key]}`)
+    }
+    assert.equal(after.caret, before.caret + 3)
+    assert.ok(after.focused)
+  }
+  await wrap.uncheck()
+  await input.fill('TEST_LONG=' + 'x'.repeat(600))
+  await settleLayout()
+  const shortHeight = (await state()).height
+  assert.ok(shortHeight < 320)
+  assert.ok(await input.evaluate(element => element.scrollWidth > element.clientWidth))
+  await wrap.check()
+  await settleLayout()
+  assert.ok((await state()).height > shortHeight, 'Wrapping must grow the editor without manual measurement.')
+  assert.ok((await state()).height <= 320.5)
+  assert.ok(await input.evaluate(element => element.scrollWidth <= element.clientWidth + 1))
+  const narrowHeight = (await state()).height
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1180, 700))
+  await settleLayout()
+  assert.ok((await state()).height < narrowHeight, 'A wider window must reflow wrapped text without a resize observer.')
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(900, 700))
+  await input.fill('TEST_VALUE=short')
+  await settleLayout()
+  assert.ok((await state()).height < 320, 'Removing content must shrink the editor.')
+  await input.press('End')
+  await input.press('Enter')
+  await input.press('Enter')
+  await settleLayout()
+  assert.ok((await state()).height > shortHeight, 'New lines must grow the editor naturally.')
+  if (process.env.ANAS_E2E_CONTROL_LAYOUT_SCREENSHOT) {
+    await page.screenshot({ path: `${process.env.ANAS_E2E_CONTROL_LAYOUT_SCREENSHOT}.env.png` })
+  }
+}
+
 async function verifyControlLayout(launchApplication) {
   const root = await mkdtemp(join(tmpdir(), 'anas-control-layout-'))
   let application
   try {
     await mkdir(join(root, 'config'))
-    await writeFile(join(root, 'config/settings.json'), JSON.stringify({ ...settingsDefaults, language: 'en' }))
+    await writeFile(join(root, 'config/settings.json'), JSON.stringify({ ...settingsDefaults, language: 'en',
+      environment_context: { ...settingsDefaults.environment_context, custom_information: 'Existing test environment.' }
+    }))
+    await writeFile(join(root, '.env'), Array.from({ length: 50 }, (_, index) => `TEST_VAR_${index}=example_value_${index}`).join('\n'))
+    await cp(join(__dirname, '../data/examples/tools/json_format'), join(root, 'tools/json_format'), { recursive: true })
     application = await launchApplication(root)
     const page = await application.firstWindow()
     page.setDefaultTimeout(15_000)
@@ -237,7 +305,7 @@ async function verifyControlLayout(launchApplication) {
     await expect(page.getByRole('button', { name: 'Log files', exact: true })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'HTTP trace files', exact: true })).toHaveCount(0)
     await page.locator('[data-settings-tab="tools"]').click()
-    await page.getByRole('button', { name: /^System\s*2$/ }).click()
+    await page.getByRole('button', { name: /^User\s*1$/ }).click()
     await page.locator('.settings-skill-viewer').getByRole('list').getByRole('button', { name: /json_format/ }).click()
     await page.getByRole('button', { name: 'Expand tool “json_format”', exact: true }).click()
     await page.getByRole('button', { name: 'README.md', exact: true }).click()
@@ -246,8 +314,17 @@ async function verifyControlLayout(launchApplication) {
     if (process.env.ANAS_E2E_CONTROL_LAYOUT_SCREENSHOT) {
       await page.screenshot({ path: `${process.env.ANAS_E2E_CONTROL_LAYOUT_SCREENSHOT}.narrow.png` })
     }
+    await verifyEnvironmentTextarea(application, page)
     await page.locator('.app-sidebar .ui-sidebar-action').click()
     await expectChildrenInside(page.locator('.composer-toolbar, .topbar, .project-thread-heading'))
+    const composer = page.locator('[data-agent-composer-input]')
+    await composer.fill('Short draft')
+    const shortComposerHeight = await composer.evaluate(element => element.getBoundingClientRect().height)
+    await composer.fill(Array.from({ length: 20 }, () => 'Line of text').join('\n'))
+    const longComposerHeight = await composer.evaluate(element => element.getBoundingClientRect().height)
+    assert.ok(longComposerHeight > shortComposerHeight && longComposerHeight <= 150.5)
+    await composer.fill('')
+    assert.ok(await composer.evaluate(element => element.getBoundingClientRect().height) < longComposerHeight)
     await openGeneral()
     await appearance.getByRole('combobox', { name: 'Language', exact: true }).click()
     await page.getByRole('option', { name: '简体中文 (zh-CN)', exact: true }).click()
@@ -268,7 +345,7 @@ async function verifyControlLayout(launchApplication) {
       }
     }
     assert.deepEqual(errors, [])
-    console.log('Control layout passed: live font sizes 10–18, slider marks/drag/keyboard, fractional speech speed persistence, light/dark themes, fields, segment minimum widths, independent appearance control sizing, menu/options, trees and narrow-window containment.')
+    console.log('Control layout passed: live font sizes 10–18, slider marks/drag/keyboard, fractional speech speed persistence, light/dark themes, fields, segment minimum widths, independent appearance control sizing, menu/options, trees, narrow-window containment, stable .env editing scroll and native textarea sizing.')
   } finally {
     if (application) await application.close()
     await rm(root, { recursive: true, force: true })

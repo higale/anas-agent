@@ -1,6 +1,7 @@
 import { PackageList, PackageSourceActions, PackageTreeRoot, PackageTreeItem, PackageFileTree, PackageFileViewer, packageNodeKey as nodeKey } from './PackageTree'
+import { SettingsAvailabilityBadge } from './SettingsAvailabilityBadge'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { FolderDown, ListTree, Trash2, Wand2 } from 'lucide-react'
+import { ListTree, Trash2, Wand2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { SKILL_ROOT_DISPLAY_NAME_MAX_LENGTH, SKILL_SHORTCUT_ALIAS_MAX_LENGTH, SKILL_SHORTCUT_ALIAS_PATTERN } from '@shared/types'
 import type { SkillAvailabilityUpdate, SkillFileNode, SkillFilePreview, SkillRootSummary, SkillRootUpdate, SkillSnapshot, SkillSummary } from '@shared/types'
@@ -13,7 +14,8 @@ interface Props {
   sectionClass: string
   skills?: SkillSnapshot
   onAddDirectory: () => void | Promise<void>
-  onImportDirectories: () => void | Promise<void>
+  revealSkillId?: string
+  onSkillRevealed?: () => void
   onMoveDirectory: (rootId: string, direction: -1 | 1) => void | Promise<void>
   onRefresh: () => void | Promise<void>
   onUpdateDirectory: (rootId: string, update: SkillRootUpdate) => void | Promise<void>
@@ -32,7 +34,8 @@ export function SkillsSettings({
   sectionClass,
   skills,
   onAddDirectory,
-  onImportDirectories,
+  revealSkillId,
+  onSkillRevealed,
   onMoveDirectory,
   onRefresh,
   onUpdateDirectory,
@@ -47,6 +50,7 @@ export function SkillsSettings({
   const [selection, setSelection] = useState<Selection>()
   const [preview, setPreview] = useState<SkillFilePreview>()
   const previewRequestRef = useRef(0)
+  const selectedSkillButtonRef = useRef<HTMLButtonElement>(null)
   const catalogIdentityRef = useRef('')
   const roots = useMemo(() => skills?.roots ?? [], [skills?.roots])
   const allSkills = useMemo(() => skills?.skills ?? [], [skills?.skills])
@@ -96,6 +100,21 @@ export function SkillsSettings({
       return skillById.has(current.skillId) ? current : undefined
     })
   }, [skills, rootById, skillById])
+
+  useEffect(() => {
+    const skill = revealSkillId ? skillById.get(revealSkillId) : undefined
+    if (!skill) return
+    previewRequestRef.current += 1
+    setPreview(undefined)
+    setSelection({ kind: 'skill', skillId: skill.id })
+    setExpanded(current => new Set([...current, `root:${skill.rootId}`]))
+  }, [revealSkillId, skillById])
+
+  useEffect(() => {
+    if (!revealSkillId || selection?.kind !== 'skill' || selection.skillId !== revealSkillId || !selectedSkillButtonRef.current) return
+    selectedSkillButtonRef.current.scrollIntoView({ block: 'nearest' })
+    onSkillRevealed?.()
+  }, [revealSkillId, selection, expanded, onSkillRevealed])
 
   function toggle(key: string): void {
     setExpanded((current) => {
@@ -176,9 +195,11 @@ export function SkillsSettings({
   function renderSkill(skill: SkillSummary, depth: number, showSource = false): ReactNode {
     const isExpanded = expanded.has(`files:${nodeKey(skill.id)}`)
     return <PackageTreeItem key={skill.id} name={skill.name} icon={<Wand2 size={14} aria-hidden="true" />} depth={depth}
+      buttonRef={!showSource && selection?.kind === 'skill' && selection.skillId === skill.id ? selectedSkillButtonRef : undefined}
       expanded={isExpanded} selected={selection?.kind === 'skill' && selection.skillId === skill.id}
-      unavailable={!skill.modelAvailable && !skill.userAvailable} linked={skill.linked} highlighted={skill.scriptAutoApprove}
-      badge={[showSource ? `@${skill.shortcutAlias}` : '', skill.loadError ? t('settings.skill_load_error_badge') : ''].filter(Boolean).join(' · ')}
+      linked={skill.linked} highlighted={skill.scriptAutoApprove}
+      badge={showSource ? `@${skill.shortcutAlias}` : undefined}
+      status={<SettingsAvailabilityBadge disabled={!skill.modelAvailable && !skill.userAvailable} error={Boolean(skill.loadError)} />}
       tooltip={skill.scriptAutoApprove ? t('settings.skill_scripts_auto_approve') : undefined}
       expandLabel={t(isExpanded ? 'settings.skill_collapse' : 'settings.skill_expand', { name: skill.name })}
       onExpand={() => void expandFiles(skill.id)} onSelect={() => selectSkill(skill.id)}>
@@ -245,7 +266,6 @@ export function SkillsSettings({
           <div className="settings-detail-heading ui-toolbar ui-toolbar-between">
             <div><div className="ui-row"><button className="ui-link-button" type="button" disabled={!selectedRoot.available} data-tooltip={t('chat.show_in_folder')} onClick={() => void showItemInFolder(selectedRoot.path)}>{rootLabel(selectedRoot)}</button><small>@{selectedRoot.shortcutAlias}</small></div><small>{selectedRoot.path}</small></div>
             <div className="ui-toolbar">
-              {selectedRoot.kind === 'user' && <button className="ui-icon-button" type="button" aria-label={t('settings.import_skill')} data-tooltip={t('settings.import_skill')} onClick={() => void onImportDirectories()}><FolderDown size={14} /></button>}
               {selectedRoot.removable && <>
                 <button className="ui-button ui-button-compact ui-button-danger" type="button" onClick={() => onRemoveDirectory(selectedRoot)}>
                   <Trash2 size={UI_ICON_SIZE_SMALL} /> {t('settings.remove_skill_directory')}
@@ -288,8 +308,7 @@ export function SkillsSettings({
           items={groupSkills.map(skill => ({
             id: skill.id, name: skill.name, description: skill.description,
             detail: selection?.kind === 'all' ? `${rootLabel(rootById.get(skill.rootId)!)} · ${skill.dirPath}` : undefined,
-            status: skill.loadError ? t('settings.skill_load_error_badge')
-              : !skill.modelAvailable && !skill.userAvailable ? t('capabilities.inactive') : undefined
+            status: <SettingsAvailabilityBadge disabled={!skill.modelAvailable && !skill.userAvailable} error={Boolean(skill.loadError)} />
           }))} />}
 
         {selectedSkill && !preview && selection?.kind === 'skill' && <>

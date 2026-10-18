@@ -61,13 +61,12 @@ const snapshot: SkillSnapshot = {
   }]
 }
 
-function renderSkills(onImportDirectories = vi.fn(), skills = snapshot, onMoveDirectory = vi.fn()): void {
+function renderSkills(skills = snapshot, onMoveDirectory = vi.fn()): void {
   render(
     <SkillsSettings
       sectionClass="settings-section"
       skills={skills}
       onAddDirectory={vi.fn()}
-      onImportDirectories={onImportDirectories}
       onMoveDirectory={onMoveDirectory}
       onRefresh={vi.fn()}
       onRemoveDirectory={vi.fn()}
@@ -106,7 +105,7 @@ describe('Skills settings tree', () => {
     const pending = new Promise<void>(resolve => { finish = resolve })
     const update = vi.fn(() => pending)
     render(<SkillsSettings sectionClass="settings-section" skills={{ ...snapshot, roots: [...snapshot.roots, root] }}
-      onAddDirectory={vi.fn()} onImportDirectories={vi.fn()} onMoveDirectory={vi.fn()} onRefresh={vi.fn()}
+      onAddDirectory={vi.fn()} onMoveDirectory={vi.fn()} onRefresh={vi.fn()}
       onRemoveDirectory={vi.fn()} onUpdateDirectory={update} onUpdateScriptApproval={vi.fn()} onUpdateAvailability={vi.fn()} />)
     await userEvent.click(screen.getByRole('button', { name: /^Shared/ }))
     expect(screen.queryByRole('button', { name: 'common.save' })).not.toBeInTheDocument()
@@ -135,7 +134,7 @@ describe('Skills settings tree', () => {
 
   it.each(['all', 'system', 'user', 'external'])('selects %s without toggling and toggles only with its disclosure button', async group => {
     const external = { ...snapshot.roots[1], id: 'external', kind: 'external' as const, name: 'Shared', removable: true }
-    renderSkills(vi.fn(), { ...snapshot, roots: [...snapshot.roots, external], skills: [
+    renderSkills({ ...snapshot, roots: [...snapshot.roots, external], skills: [
       ...snapshot.skills, { ...snapshot.skills[0], id: 'user:example', rootId: 'user', name: 'user-example' },
       { ...snapshot.skills[0], id: 'external:example', rootId: 'external', name: 'external-example' }
     ] })
@@ -172,7 +171,7 @@ describe('Skills settings tree', () => {
     expect(listFiles).not.toHaveBeenCalled()
   })
   it('opens the exact Skill from a collapsed group list even when names match', async () => {
-    renderSkills(vi.fn(), { ...snapshot, skills: [...snapshot.skills, {
+    renderSkills({ ...snapshot, skills: [...snapshot.skills, {
       ...snapshot.skills[0], id: 'user:config', rootId: 'user', source: 'user',
       dirPath: '/skills/user/config', modelAvailable: false, userAvailable: false
     }] })
@@ -182,18 +181,18 @@ describe('Skills settings tree', () => {
     const rows = within(list).getAllByRole('listitem')
     expect(rows[0]).toHaveTextContent('settings.skill_group_system · /skills/system/config')
     expect(rows[1]).toHaveTextContent('settings.skill_group_user · /skills/user/config')
-    expect(rows[1]).toHaveTextContent('capabilities.inactive')
+    expect(rows[1]).toHaveTextContent('settings.disabled')
     within(rows[1]).getByRole('button').focus()
     await userEvent.keyboard('{Enter}')
     expect(screen.queryByRole('list')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '/skills/user/config' })).toBeVisible()
-    expect(tree.getByRole('button', { name: 'config', pressed: true })).toBeVisible()
+    expect(tree.getByRole('button', { name: /^config\s*settings.disabled$/, pressed: true })).toBeVisible()
     expect(screen.getByRole('checkbox', { name: 'settings.skill_model_available' })).not.toBeChecked()
     expect(listFiles).not.toHaveBeenCalled()
   })
 
   it('shows an empty group and updates its list when the catalog changes', async () => {
-    const props = { sectionClass: 'settings-section', skills: snapshot, onAddDirectory: vi.fn(), onImportDirectories: vi.fn(),
+    const props = { sectionClass: 'settings-section', skills: snapshot, onAddDirectory: vi.fn(),
       onMoveDirectory: vi.fn(), onRefresh: vi.fn(), onUpdateDirectory: vi.fn(), onRemoveDirectory: vi.fn(),
       onUpdateScriptApproval: vi.fn(), onUpdateAvailability: vi.fn() }
     const view = render(<SkillsSettings {...props} />)
@@ -204,13 +203,13 @@ describe('Skills settings tree', () => {
       ...snapshot.skills[0], id: 'user:broken', rootId: 'user', name: 'broken', loadError: { code: 'missing_frontmatter' }
     }] }} />)
     const list = screen.getByRole('list', { name: 'settings.skills' })
-    expect(list).toHaveTextContent('settings.skill_load_error_badge')
+    expect(list).toHaveTextContent('settings.error')
     await userEvent.click(within(list).getByRole('button'))
     expect(screen.getByText(/^settings.skill_issue_missing_frontmatter/)).toBeVisible()
   })
   it('moves external groups from the sidebar with selection and boundary checks', async () => {
     const moveDirectory = vi.fn()
-    renderSkills(vi.fn(), { ...snapshot, roots: [...snapshot.roots,
+    renderSkills({ ...snapshot, roots: [...snapshot.roots,
       { id: 'first', kind: 'external', name: 'First', shortcutAlias: 'first', path: '/first', removable: true, available: true },
       { id: 'last', kind: 'external', name: 'Last', shortcutAlias: 'last', path: '/last', removable: true, available: true }
     ] }, moveDirectory)
@@ -234,7 +233,7 @@ describe('Skills settings tree', () => {
   })
 
   it.each([true, false])('opens source titles only when the directory is available (%s)', async available => {
-    renderSkills(vi.fn(), { ...snapshot, roots: [{ ...snapshot.roots[0], available }] })
+    renderSkills({ ...snapshot, roots: [{ ...snapshot.roots[0], available }] })
     await openGroup(screen.getByRole('button', { name: /^settings\.skill_group_system/ }))
     const title = within(document.querySelector('.settings-skill-viewer') as HTMLElement).getByRole('button', { name: 'settings.skill_group_system' })
     expect(title).toHaveProperty('disabled', !available)
@@ -248,23 +247,25 @@ describe('Skills settings tree', () => {
     else expect(showItemInFolder).not.toHaveBeenCalled()
   })
   it.each([false, true])('marks only individually exempt Skills when global approval is %s', async (globalApproval) => {
-    renderSkills(vi.fn(), {
+    renderSkills({
       ...snapshot,
       scriptAutoApprove: globalApproval,
       skills: [
         snapshot.skills[0],
-        { ...snapshot.skills[0], id: 'system:exempt', name: 'exempt', scriptAutoApprove: true }
+        { ...snapshot.skills[0], id: 'system:exempt', name: 'exempt', scriptAutoApprove: true },
+        { ...snapshot.skills[0], id: 'system:disabled-exempt', name: 'disabled-exempt', scriptAutoApprove: true, modelAvailable: false, userAvailable: false }
       ]
     })
     await openGroup(screen.getByRole('button', { name: /^settings\.skill_group_all/ }))
     expect(screen.getByRole('button', { name: /^config\s*@system$/ })).toBeVisible()
-    expect(screen.getByRole('button', { name: 'exempt · @system · settings.skill_scripts_auto_approve' })).toBeVisible()
+    expect(screen.getByRole('button', { name: /^exempt\s*@system$/ })).toHaveAccessibleDescription('settings.skill_scripts_auto_approve')
+    expect(screen.getByRole('button', { name: /^disabled-exempt\s*@system\s*settings.disabled$/ })).toHaveAccessibleDescription('settings.skill_scripts_auto_approve')
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
   })
 
   it('opens Skill titles and locations while preserving script approval controls', async () => {
     const user = userEvent.setup()
-    renderSkills(vi.fn(), { ...snapshot, scriptAutoApprove: true })
+    renderSkills({ ...snapshot, scriptAutoApprove: true })
     await openGroup(screen.getByRole('button', { name: /^settings\.skill_group_all/ }))
     await user.click(screen.getByText('config', { selector: '.settings-skill-tree-select > span' }))
     const checkbox = screen.getByRole('checkbox', { name: 'settings.skill_scripts_auto_approve' })
@@ -281,7 +282,7 @@ describe('Skills settings tree', () => {
   })
 
   it('disables both title and location for a broken Skill link', async () => {
-    renderSkills(vi.fn(), { ...snapshot, skills: [{ ...snapshot.skills[0], linked: true }] })
+    renderSkills({ ...snapshot, skills: [{ ...snapshot.skills[0], linked: true }] })
     await openGroup(screen.getByRole('button', { name: /^settings\.skill_group_all/ }))
     await userEvent.click(screen.getByText('config', { selector: '.settings-skill-tree-select > span' }))
     const detail = within(document.querySelector('.settings-skill-viewer') as HTMLElement)
@@ -329,27 +330,48 @@ describe('Skills settings tree', () => {
     expect(screen.getByRole('button', { name: 'settings.skill_collapse:config' })).toBeInTheDocument()
   })
 
-  it('offers import only while the Anas User root is selected', async () => {
-    const user = userEvent.setup()
-    const onImportDirectories = vi.fn()
-    renderSkills(onImportDirectories, { ...snapshot, skills: [{ ...snapshot.skills[0], id: 'user:config', source: 'user', rootId: 'user' }] })
+  it('reveals the imported user skill even when All Skills is expanded and an old file read is pending', async () => {
+    const onSkillRevealed = vi.fn()
+    const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView')
+    let resolvePreview!: (value: unknown) => void
+    readFile.mockReturnValue(new Promise(resolve => { resolvePreview = resolve }))
+    const props = { sectionClass: 'settings-section', skills: snapshot, onAddDirectory: vi.fn(),
+      onMoveDirectory: vi.fn(), onRefresh: vi.fn(), onUpdateDirectory: vi.fn(), onRemoveDirectory: vi.fn(),
+      onUpdateScriptApproval: vi.fn(), onUpdateAvailability: vi.fn(), onSkillRevealed }
+    const view = render(<SkillsSettings {...props} />)
+    await openGroup(screen.getByRole('button', { name: /^settings.skill_group_all/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'settings.skill_expand:config' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'SKILL.md' }))
+    const imported = { ...snapshot.skills[0], id: 'user:config', source: 'user' as const, rootId: 'user',
+      rootName: 'User', shortcutAlias: 'user', dirPath: '/skills/user/config', description: 'Imported user skill' }
+    view.rerender(<SkillsSettings {...props} skills={{ ...snapshot, skills: [...snapshot.skills, imported] }} revealSkillId={imported.id} />)
+    expect(screen.getByRole('button', { name: 'settings.package_group_collapse:settings.skill_group_user' })).toHaveAttribute('aria-expanded', 'true')
+    const selected = within(document.querySelector('.settings-skill-tree') as HTMLElement).getByRole('button', { name: 'config', pressed: true })
+    expect(scroll.mock.instances).toContain(selected)
+    expect(scroll).toHaveBeenLastCalledWith({ block: 'nearest' })
+    expect(screen.getByText('Imported user skill')).toBeVisible()
+    expect(onSkillRevealed).toHaveBeenCalledOnce()
+    await act(async () => resolvePreview({ skillId: 'system:config', name: 'SKILL.md', path: '/old/SKILL.md',
+      relativePath: 'SKILL.md', resolvedPath: '/old/SKILL.md', size: 3, kind: 'text', content: 'Late old preview' }))
+    expect(screen.queryByText('Late old preview')).not.toBeInTheDocument()
+    view.rerender(<SkillsSettings {...props} skills={{ ...snapshot, skills: [...snapshot.skills, imported] }} />)
+    await userEvent.click(screen.getByRole('button', { name: /^settings.skill_group_system/ }))
+    expect(screen.getByRole('list', { name: 'settings.skills' })).toBeVisible()
+    expect(onSkillRevealed).toHaveBeenCalledOnce()
+    scroll.mockRestore()
+  })
 
-    expect(screen.queryByRole('button', { name: 'settings.import_skill' })).not.toBeInTheDocument()
-    const userRoot = screen.getByText('settings.skill_group_user').closest('button')
-    if (!userRoot) throw new Error('Anas User root button was not rendered.')
-    await openGroup(userRoot)
-
-    const importButton = within(document.querySelector('.settings-detail-heading') as HTMLElement).getByRole('button', { name: 'settings.import_skill' })
-    expect(within(document.querySelector('.ui-list-pane') as HTMLElement).queryByRole('button', { name: 'settings.import_skill' })).not.toBeInTheDocument()
-    await user.click(importButton)
-    expect(onImportDirectories).toHaveBeenCalledOnce()
-    await user.click(screen.getByRole('button', { name: 'config' }))
-    expect(screen.queryByRole('button', { name: 'settings.import_skill' })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'settings.skill_expand:config' }))
-    await user.click(await screen.findByRole('button', { name: 'SKILL.md' }))
-    expect(screen.queryByRole('button', { name: 'settings.import_skill' })).not.toBeInTheDocument()
-    await openGroup(screen.getByRole('button', { name: /^settings\.skill_group_system/ }))
-    expect(screen.queryByRole('button', { name: 'settings.import_skill' })).not.toBeInTheDocument()
+  it('waits for the imported skill to arrive in the catalog before revealing it', () => {
+    const onSkillRevealed = vi.fn()
+    const props = { sectionClass: 'settings-section', skills: snapshot, onAddDirectory: vi.fn(),
+      onMoveDirectory: vi.fn(), onRefresh: vi.fn(), onUpdateDirectory: vi.fn(), onRemoveDirectory: vi.fn(),
+      onUpdateScriptApproval: vi.fn(), onUpdateAvailability: vi.fn(), revealSkillId: 'user:new', onSkillRevealed }
+    const view = render(<SkillsSettings {...props} />)
+    expect(onSkillRevealed).not.toHaveBeenCalled()
+    const imported = { ...snapshot.skills[0], id: 'user:new', source: 'user' as const, rootId: 'user', name: 'new' }
+    view.rerender(<SkillsSettings {...props} skills={{ ...snapshot, skills: [...snapshot.skills, imported] }} />)
+    expect(within(document.querySelector('.settings-skill-tree') as HTMLElement).getByRole('button', { name: 'new', pressed: true })).toBeVisible()
+    expect(onSkillRevealed).toHaveBeenCalledOnce()
   })
 
   it('orders All Skills by root order and then by name within each root', async () => {
@@ -367,7 +389,7 @@ describe('Skills settings tree', () => {
         { ...snapshot.skills[0], id: 'system:alpha', name: 'alpha' }
       ]
     }
-    renderSkills(vi.fn(), groupedSnapshot)
+    renderSkills(groupedSnapshot)
 
     await openGroup(screen.getByRole('button', { name: /^settings\.skill_group_all/ }))
 
@@ -401,7 +423,7 @@ describe('Skills settings tree', () => {
     readFile.mockImplementation(async (_projectId, skillId: string) => (
       skillId === 'system:first' ? firstPreview : secondPreview
     ))
-    renderSkills(vi.fn(), twoSkills)
+    renderSkills(twoSkills)
     await openGroup(screen.getByRole('button', { name: /^settings\.skill_group_all/ }))
     await user.click(screen.getByRole('button', { name: 'settings.skill_expand:first' }))
     await user.click(screen.getByRole('button', { name: 'settings.skill_expand:second' }))
@@ -426,7 +448,7 @@ describe('Skills settings tree', () => {
 
 it('preserves the open file when the same catalog refreshes its metadata', async () => {
   readFile.mockResolvedValue({skillId:'system:config',name:'SKILL.md',path:'/skills/system/config/SKILL.md',relativePath:'SKILL.md',resolvedPath:'/skills/system/config/SKILL.md',kind:'text',content:'Keep this preview',size:17})
-  const props = {sectionClass:'settings-section',skills:snapshot,onAddDirectory:vi.fn(),onImportDirectories:vi.fn(),onMoveDirectory:vi.fn(),onRefresh:vi.fn(),onUpdateDirectory:vi.fn(),onRemoveDirectory:vi.fn(),onUpdateScriptApproval:vi.fn(),onUpdateAvailability:vi.fn()}
+  const props = {sectionClass:'settings-section',skills:snapshot,onAddDirectory:vi.fn(),onMoveDirectory:vi.fn(),onRefresh:vi.fn(),onUpdateDirectory:vi.fn(),onRemoveDirectory:vi.fn(),onUpdateScriptApproval:vi.fn(),onUpdateAvailability:vi.fn()}
   const view=render(<SkillsSettings {...props} />)
   await openGroup(screen.getByRole('button',{name:/^settings\.skill_group_all/}))
   await userEvent.click(screen.getByRole('button',{name:'settings.skill_expand:config'}))

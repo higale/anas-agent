@@ -6,26 +6,18 @@ function cssNumber(value: string, fallback = 0): number {
 export function resizeAutosizeTextarea(textarea: HTMLTextAreaElement | null): void {
   if (!textarea || textarea.offsetParent === null) return
   const style = window.getComputedStyle(textarea)
-  const fontSize = cssNumber(style.fontSize, 14)
-  const lineHeight = cssNumber(style.lineHeight, fontSize * 1.4)
-  const verticalPadding = cssNumber(style.paddingTop) + cssNumber(style.paddingBottom)
-  const verticalBorder = cssNumber(style.borderTopWidth) + cssNumber(style.borderBottomWidth)
+  const verticalInsets = cssNumber(style.paddingTop) + cssNumber(style.paddingBottom)
+    + cssNumber(style.borderTopWidth) + cssNumber(style.borderBottomWidth)
   const minRows = Number(textarea.dataset.minRows ?? 2) || 2
-  const rowMinHeight = Math.ceil(lineHeight * minRows + verticalPadding + verticalBorder)
-  const minHeight = Math.max(rowMinHeight, cssNumber(style.minHeight))
   const maxRows = Number(textarea.dataset.maxRows)
-  const maxHeightValue = textarea.dataset.maxHeight ?? (maxRows > 0
-    ? String(Math.ceil(lineHeight * Math.max(minRows, maxRows) + verticalPadding + verticalBorder)) : undefined)
-  const maxHeight = maxHeightValue === 'none' ? Number.POSITIVE_INFINITY : Number(maxHeightValue ?? 420) || 420
-  textarea.style.height = 'auto'
-  const naturalHeight = textarea.scrollHeight + verticalBorder
-  const height = Math.min(Math.max(naturalHeight, minHeight), maxHeight)
-  textarea.style.height = `${height}px`
-  const clippedHeight = textarea.scrollHeight - textarea.clientHeight
-  if (clippedHeight > 0 && height < maxHeight) {
-    textarea.style.height = `${Math.min(height + clippedHeight + verticalBorder, maxHeight)}px`
-  }
-  textarea.style.overflowY = Number.isFinite(maxHeight) && textarea.scrollHeight > textarea.clientHeight + 1 ? 'scroll' : 'hidden'
+  const rowHeight = (rows: number) => `calc(${rows}lh + ${verticalInsets}px)`
+  const maxHeight = textarea.dataset.maxHeight
+  // Chromium sizes the content directly. Only configure bounds; measuring by
+  // shrinking the live field changes the page's scroll range while typing.
+  textarea.style.setProperty('--autosize-min-height', rowHeight(minRows))
+  textarea.style.setProperty('--autosize-max-height', maxHeight === 'none' ? 'none'
+    : maxHeight !== undefined ? `${Number(maxHeight) || 420}px`
+      : maxRows > 0 ? rowHeight(Math.max(minRows, maxRows)) : '420px')
 }
 
 export function resizeAutosizeTextareasIn(root: ParentNode | null): void {

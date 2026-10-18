@@ -20,7 +20,7 @@ export interface ToolRoot {
   id: string
   name: string
   path: string
-  source: 'system' | 'user' | 'external' | 'project'
+  source: 'user' | 'external' | 'project'
   error?: ToolLoadError
 }
 

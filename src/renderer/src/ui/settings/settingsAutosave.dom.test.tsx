@@ -22,6 +22,40 @@ function deferred<T>() {
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks() })
 
 describe('autosave page boundaries', () => {
+  it('returns the first imported user skill ID, not a same-named external skill or catalog order', async () => {
+    const initial = { scriptAutoApprove: false, roots: [], skills: [] } satisfies SkillSnapshot
+    const skill = { id: 'user:z-first', name: 'z-first', source: 'user', rootId: 'user', description: '',
+      modelAvailable: true, userAvailable: true, scriptAutoApprove: false, dirPath: '', linked: false,
+      relativePath: 'z-first', rootName: 'User', shortcutAlias: 'user' } as const
+    const imported = { ...initial, skills: [
+      { ...skill, id: 'external:z-first', source: 'external' as const },
+      { ...skill, id: 'user:a-second', name: 'a-second' }, skill
+    ] }
+    vi.stubGlobal('gale', { plugins: { onChanged: vi.fn(() => () => {}) }, skills: {
+      get: vi.fn().mockResolvedValue(initial),
+      importDirectories: vi.fn().mockResolvedValue({ status: 'imported', names: ['z-first', 'a-second'], snapshot: imported })
+    } })
+    const { result } = renderHook(() => useSkillsSettingsState({ openConfirmDialog: vi.fn(), settingsOpen: false, settingsTab: 'skills', t }))
+    await waitFor(() => expect(result.current.skills).toBeDefined())
+    await act(async () => expect(await result.current.importDirectories()).toBe('user:z-first'))
+    expect(result.current.skills).toEqual(imported)
+    expect(notice.success).toHaveBeenCalledWith('settings.skills_imported', expect.anything())
+  })
+
+  it.each(['cancelled', 'error', 'rejected'])('keeps the skill catalog and returns no selection after an import is %s', async status => {
+    const initial = { scriptAutoApprove: false, roots: [], skills: [] } satisfies SkillSnapshot
+    const importDirectories = status === 'rejected' ? vi.fn().mockRejectedValue(new Error('Failed'))
+      : vi.fn().mockResolvedValue({ status, error: { code: 'already_exists', name: 'existing' } })
+    vi.stubGlobal('gale', { plugins: { onChanged: vi.fn(() => () => {}) }, skills: {
+      get: vi.fn().mockResolvedValue(initial), importDirectories
+    } })
+    const { result } = renderHook(() => useSkillsSettingsState({ openConfirmDialog: vi.fn(), settingsOpen: false, settingsTab: 'skills', t }))
+    await waitFor(() => expect(result.current.skills).toBeDefined())
+    await act(async () => expect(await result.current.importDirectories()).toBeUndefined())
+    expect(result.current.skills).toBe(initial)
+    expect(notice.success).not.toHaveBeenCalled()
+  })
+
   it('loads the surviving subagent draft after deletion reuses the selected index', async () => {
     const base = createSubagentDraft(undefined, t)
     const initial = { providers: [], mcpServers: [], subagents: [

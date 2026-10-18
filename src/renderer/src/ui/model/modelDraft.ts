@@ -2,6 +2,7 @@ import type { TFunction } from 'i18next'
 import {
   defaultModelConfig,
   defaultModelProviderConfig,
+  isModelApiKeyReferenceInvalid,
   modelReservedParameterKeys,
   resolveModelParameterPresets
 } from '@shared/modelConfig'
@@ -219,6 +220,7 @@ export function buildProviderPayload(draft: ModelDraft): ModelProviderConfigSave
 }
 
 export function validateModelProviderDraft(draft: ModelDraft, t: TFunction): string | undefined {
+  if (isModelApiKeyReferenceInvalid(draft.apiKey)) return t('settings.api_key_reference_invalid')
   const parameters = parseModelParametersJson(draft.providerParametersJson)
   if (!parameters) return t('settings.model_parameters_invalid_json')
   const reserved = parameters ? modelReservedParameterKeys(parameters) : []

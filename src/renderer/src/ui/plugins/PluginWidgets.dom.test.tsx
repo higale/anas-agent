@@ -6,7 +6,7 @@ import type { ResolvedModelConfig } from '@shared/types'
 import { PluginWidgets } from './PluginWidgets'
 import { parseWidgetHtml } from './PluginWidgetHtml'
 
-const mocks = vi.hoisted(() => ({ read: vi.fn(), open: vi.fn(), t: (key: string) => key }))
+const mocks = vi.hoisted(() => ({ read: vi.fn(), open: vi.fn(), t: (key: string, options?: { name?: string }) => options?.name ? `${key}:${options.name}` : key }))
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: mocks.t, i18n: { language: 'en' } }) }))
 const plugins = [{ id: 'usage', enabled: true, backendStatus: 'running', manifest: { name: 'Usage', widgets: [
   { id: 'quota', location: 'sidebar.footer', handler: 'quota', actions: ['refresh'], modelHosts: ['api.minimaxi.com'] }
@@ -39,6 +39,13 @@ it('renders plugin HTML in a shadow root and bridges nested action clicks withou
   await act(async () => { complete({ ...content, html: content.html.replace('68%', '60%') }) })
   expect(widget().getByText('60%')).toBeVisible()
   expect(widget().getByRole('button', { name: 'Refresh now' })).toBeEnabled()
+})
+
+it('identifies missing credential variables without displaying other backend diagnostics', async () => {
+  mocks.read.mockRejectedValueOnce(new Error("Error invoking remote method 'plugins:readWidget': Error: API key environment variable MY_TOKEN is missing or empty."))
+  render(<PluginWidgets plugins={plugins} model={{ ...model, apiKey: '${MY_TOKEN}' }} active />)
+  expect(await screen.findByText('settings.api_key_variable_missing:MY_TOKEN')).toBeVisible()
+  expect(screen.queryByText(/Error invoking/)).not.toBeInTheDocument()
 })
 
 it('shows a loading state before the first supported query finishes', async () => {

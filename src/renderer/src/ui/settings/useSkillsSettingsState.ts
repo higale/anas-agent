@@ -97,7 +97,7 @@ export function useSkillsSettingsState({ openConfirmDialog, settingsOpen, settin
     }
   }
 
-  async function importDirectories(): Promise<void> {
+  async function importDirectories(): Promise<string | undefined> {
     try {
       await edits.waitForIdle()
       const result = await window.gale.skills.importDirectories()
@@ -108,6 +108,7 @@ export function useSkillsSettingsState({ openConfirmDialog, settingsOpen, settin
       }
       setSkills(result.snapshot)
       notice.success(t('settings.skills_imported', { count: result.names.length }), { id: noticeId })
+      return result.snapshot.skills.find(skill => skill.source === 'user' && skill.name === result.names[0])?.id
     } catch {
       notice.error(t('settings.failed_import_skill'), { id: noticeId })
     }

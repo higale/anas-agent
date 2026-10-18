@@ -2,11 +2,11 @@
 
 ## Discovery and Identity
 
-Each package is a directory with `TOOL.json` at its root and any scripts/resources beside it. User packages live under the application data directory's `tools/`; project packages live under a configured project source folder's `.agents/tools/`. System packages are mirrored to `tools/_system/`; added external directories are referenced in place. Project packages do not appear in the global tool-management list.
+Each package is a directory with `TOOL.json` at its root and any scripts/resources beside it. User packages live under the application data directory's `tools/`; project packages live under a configured project source folder's `.agents/tools/`. Added external directories are referenced in place. Bundled examples in `examples/tools/` must be imported into a user or external directory before use. Project packages do not appear in the global tool-management list.
 
 `config/tools.json` stores versioned source references and ordering, not tool definitions. Creating a package does not require adding its manifest there. Inspect names and IDs before choosing a destination; do not overwrite a conflicting package. Preserve the ID when updating or renaming. Use Anas's management UI to rename or delete installed user packages so selection, ordering, and active-directory checks remain consistent.
 
-Among valid enabled tools with the same callable name, precedence is project source-folder order, user tools, added external-directory order, then system tools. A file existing on disk does not establish which definition is selected.
+Among valid enabled tools with the same callable name, precedence is project source-folder order, user tools, then added external-directory order. A file existing on disk does not establish which definition is selected.
 
 ## TOOL.json
 

@@ -97,11 +97,11 @@ describe('custom command tools', () => {
     await expect(tool.invoke({ title: 'test' })).rejects.toMatchObject({ name: 'AbortError' })
     await expect(readFile(join(directory, 'executed'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
-  it('runs bundled script-only system tools and the raw-text example with a real Python when installed', async ({ skip }) => {
+  it('runs script-only tool examples with a real Python when installed', async ({ skip }) => {
     if (!await runtimeDiscovery.discoverPython3()) return skip()
     const { directory } = await fixture('')
     const definitions = await Promise.all([
-      ['examples/tools', 'read_text_raw'], ['tools/_system', 'file_sha256'], ['tools/_system', 'json_format']
+      ['examples/tools', 'read_text_raw'], ['examples/tools', 'file_sha256'], ['examples/tools', 'json_format']
     ].map(async ([source, name]) => {
       const packageDirectory = resolve('data', source, name)
       return { ...parseCustomTools([JSON.parse(await readFile(join(packageDirectory, 'TOOL.json'), 'utf8'))])[0], directory: packageDirectory }

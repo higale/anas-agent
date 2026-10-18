@@ -9,6 +9,7 @@ import { notice } from '../notice'
 import { SegmentedControl } from '../SegmentedControl'
 import { UI_ICON_SIZE_LARGE, UI_ICON_SIZE_SMALL } from '../uiConstants'
 import { SettingsListActions } from './SettingsListActions'
+import { SettingsAvailabilityBadge } from './SettingsAvailabilityBadge'
 import { PluginIcon } from '../plugins/PluginIcon'
 import { PluginPreferences } from './PluginPreferences'
 import { PluginContributions } from './PluginContributions'
@@ -212,12 +213,12 @@ export function PluginsSettings({ plugins, error, onRefresh, className = 'settin
         {plugins.map(item => {
           const name = pluginDisplayText(item, i18n.language)
           const failed = Boolean(item.error || item.backendError || item.languageErrors?.length)
-          const state = failed ? 'error' : !item.enabled ? 'disabled'
-            : item.backendStatus === 'running' ? 'running' : item.backendStatus === 'starting' ? 'pending' : undefined
+          const state = item.backendStatus === 'running' ? 'running' : item.backendStatus === 'starting' ? 'pending' : undefined
           return <button type="button" key={item.id} className={`ui-list-item ui-list-item-split ui-list-item-compact${selected?.id === item.id ? ' active' : ''}`}
             aria-label={name} aria-pressed={selected?.id === item.id} data-tooltip={name} onClick={() => setSelectedId(item.id)}>
             <strong className="plugin-label"><PluginIcon icon={pluginIconSources(item.id, item.manifest?.icon)} /><span className="ui-truncate">{name}</span></strong>
-            {state && <em className={`ui-list-item-badge${failed ? ' ui-badge-danger' : state === 'running' ? ' ui-badge-success' : state === 'pending' ? ' ui-badge-warning' : ''}`}>{t(`settings.${state}`)}</em>}
+            {failed || !item.enabled ? <SettingsAvailabilityBadge disabled={!item.enabled} error={failed} />
+              : state && <em className={`ui-list-item-badge ${state === 'running' ? 'ui-badge-success' : 'ui-badge-warning'}`}>{t(`settings.${state}`)}</em>}
           </button>
         })}
       </div>

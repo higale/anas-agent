@@ -1,24 +1,24 @@
-## Anas v4.0.2
+## Anas v4.0.3
 
 **升级提醒：从 4.0 之前的版本升级到 4.x，旧对话和长期记忆不再可用；项目、输入历史、插件数据和头像可手动恢复。升级前请备份，详见 [4.x 升级数据说明](https://github.com/higale/anas-agent/blob/main/data/help/UPGRADE_TO_4.zh-CN.md)。** 此提醒针对跨入 4.x 的升级，并非每次 4.x 升级都会丢失数据。
 
-**本次插件兼容性变更：** 用户插件安装目录取消旧的 `package/` 层级。已有用户插件会显示加载错误，需要重新覆盖安装同 ID 插件；保持“删除插件数据”不勾选即可保留业务数据、配置及首页位置。旧安装状态不自动迁移，新状态文件缺失时默认启用、不显示标题栏图标。内置插件不受此布局调整影响。
+**自定义工具调整：** 移除系统来源，`file_sha256` 和 `json_format` 改为可选示例。需要继续使用时，从“设置 > 工具”导入对应示例；原有系统工具的定制选择需改选导入的副本。旧 `tools/_system/` 目录可能显示为错误工具，可在工具页删除。
 
-- 文件改动与插件入口合并到工作区菜单，按当前项目和插件分组；插件标题右侧提供设置齿轮。可在插件设置中开启独立的标题栏启动图标，默认关闭。
-- 简化记事本页面：删除顶部标题，侧栏保存按钮右对齐，独立窗口使用标题栏保存入口；统一明暗主题下的按钮外观和交互状态。
-- 用户插件直接安装到 `plugins/<id>/`，安装设置统一存入 `db/plugins/<id>/anas-installation.json`。覆盖安装保留启用状态和标题栏图标设置，卸载后重装恢复默认；完善代码、安装设置和业务数据的事务回滚与中断恢复。
-- 四个插件示例以独立 ZIP 随包提供，可直接选择安装；仓库保留源码。启动及恢复备份时整体刷新示例，保留已安装副本。
-- 新增中英文 4.x 升级数据说明，可从用户手册离线查看，集中说明受影响数据、备份、手动恢复路径和旧文件清理。
+- 模型 API Key 支持从 `.env` 和系统环境变量下拉选择，也可手动填写密钥或 `${变量名}` 引用；下拉只展示变量名称及状态，支持包含空格的变量名。
+- “安装技能”移至技能页顶部，成功后自动展开用户分组并定位到安装的技能。
+- 统一技能、自定义工具、MCP、插件和子 Agent 的停用状态显示，在列表右侧标注“已停用”，加载错误单独显示。
+- 精简随包技能示例，保留天气和 IP 位置查询；工具示例均需导入后使用，导入的副本可以自由编辑。已安装的用户技能不受示例清理影响。
+- 使用原生文本框自动高度，修复编辑 `.env` 时页面自动滚动的问题，同时保持换行、窗口缩放和高度限制正常。
 
 **Upgrade notice: when upgrading from a pre-4.0 version to 4.x, previous conversations and long-term memory become unavailable. Projects, input history, plugin data, and avatars can be recovered manually. Back up first and read the [4.x upgrade data guide](https://github.com/higale/anas-agent/blob/main/data/help/UPGRADE_TO_4.en.md).** This notice concerns crossing into 4.x, not data loss on every 4.x update.
 
-**Plugin compatibility change in this release:** user plugin installations no longer have the old nested `package/` directory. Existing user plugins show a loading error until you reinstall the same plugin ID with replacement confirmed. Leave **Delete plugin data** unchecked to keep business data, configuration, and home location. Old installation settings are not migrated automatically; a missing new settings file defaults to enabled with the titlebar icon hidden. Built-in plugins are unaffected by this layout change.
+**Custom tool change:** remove the system source and provide `file_sha256` and `json_format` as optional examples. Import them from Settings > Tools to keep using them, and replace previous system-tool selections in customized capabilities with the imported copies. A leftover `tools/_system/` directory may appear as an invalid tool and can be deleted from the Tools page.
 
-- Combine file changes and plugin entries in a workspace menu grouped by the current project and plugins, with a settings gear beside the plugin heading. Optional titlebar launch icons can be enabled per plugin and are hidden by default.
-- Simplify Notepad: remove the heading, align the sidebar Save button to the right, and use the titlebar save action in separate windows. Unify button appearance and interaction states in light and dark themes.
-- Install user plugins directly under `plugins/<id>/` and store installation settings in `db/plugins/<id>/anas-installation.json`. Replacement preserves enabled state and titlebar preference; uninstalling and reinstalling resets them. Improve transaction rollback and interrupted-operation recovery for code, installation settings, and business data.
-- Ship four independently installable plugin example ZIPs while retaining source directories in the repository. Refresh the complete example tree at startup and after backup restore without replacing installed copies.
-- Add Chinese and English 4.x upgrade data guides, available offline from the user guide, covering affected data, backups, manual recovery paths, and cleanup of old files.
+- Allow model API keys to be selected from `.env` or system environment variables, entered directly, or referenced as `${VARIABLE_NAME}`. The dropdown shows only variable names and status, and supports names containing spaces.
+- Move Install skill to the top of the Skills page. Successful installation expands the User group and selects and scrolls to the installed skill.
+- Show a consistent Disabled label on the right of skill, custom tool, MCP, plugin, and subagent lists, with loading errors displayed separately.
+- Reduce bundled skill examples to weather and IP-location queries. All tool examples require import before use, and imported copies are editable. Removing bundled examples does not affect installed user skills.
+- Use native textarea sizing to fix page scrolling while editing `.env`, while preserving wrapping, window resizing, and height limits.
 
 ## 下载与安装 / Downloads & installation
 
