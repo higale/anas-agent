@@ -2,6 +2,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { CircleHelp, Info, Plus, Power, Settings } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { AgentThread } from '@shared/agentTypes'
+import type { SidebarReorderRequest } from '@shared/sidebarOrder'
 import type { AppBuildInfo, Project, SidebarCollapsedSections, SidebarSectionId } from '@shared/types'
 import { formatBuildTime, formatBuildVersion } from '../buildInfo'
 import { DropdownMenuContent, DropdownMenuRoot, DropdownMenuTrigger } from '../DropdownMenuShell'
@@ -15,6 +16,7 @@ interface ThreadSidebarContentProps {
   selectedProjectId?: string
   sidebarCollapsedSections: SidebarCollapsedSections
   threads: AgentThread[]
+  onReorder?(request: SidebarReorderRequest): void
   onDeleteProject(project: Project): void
   onDeleteProjectThreads(project: Project): void
   onDeleteThread(threadId: string): void | Promise<void>
@@ -59,6 +61,7 @@ export function ThreadSidebarContent(props: ThreadSidebarContentProps) {
         selectedProjectId={props.selectedProjectId}
         sidebarCollapsedSections={props.sidebarCollapsedSections}
         threads={props.threads}
+        onReorder={props.onReorder}
         onDeleteProject={props.onDeleteProject}
         onDeleteProjectThreads={props.onDeleteProjectThreads}
         onDeleteThread={props.onDeleteThread}

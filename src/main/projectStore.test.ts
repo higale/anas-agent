@@ -37,6 +37,54 @@ afterEach(async () => {
 })
 
 describe('project store', () => {
+  it('persists group order independently of updates, preserves it on editing, and puts new projects first', async () => {
+    const store = await import('./projectStore')
+    const a = await store.createProject({ kind: 'simple_chat', name: 'A', prompt: '' })
+    const b = await store.createProject({ kind: 'simple_chat', name: 'B', prompt: '' })
+    expect(a.sortOrder).toBeUndefined()
+    const request = { kind: 'project' as const, groupId: 'simple_chat', pinned: false, id: a.id, beforeId: b.id }
+    await store.reorderSidebar(request, () => [])
+    await store.updateProject(b.id, { kind: 'simple_chat', name: 'Edited B', prompt: '' })
+    expect((await store.listProjects()).map(p => p.id)).toEqual([a.id, b.id, DEFAULT_WORKSPACE_PROJECT_ID])
+    const c = await store.createProject({ kind: 'simple_chat', name: 'C', prompt: '' })
+    expect((await store.listProjects()).map(p => p.id)).toEqual([c.id, a.id, b.id, DEFAULT_WORKSPACE_PROJECT_ID])
+    await store.updateProjectState(b.id, { pinned: true })
+    const before = await readFile(storePaths.projectFile, 'utf8')
+    await expect(store.reorderSidebar(request, () => [])).rejects.toThrow('target changed')
+    await expect(store.reorderSidebar({ ...request, id: DEFAULT_WORKSPACE_PROJECT_ID, beforeId: null }, () => [])).rejects.toThrow()
+    await expect(store.reorderSidebar({ ...request, groupId: 'workspace' }, () => [])).rejects.toThrow()
+    expect(await readFile(storePaths.projectFile, 'utf8')).toBe(before)
+    const raw = JSON.parse(before)
+    expect(raw.version).toBe(0)
+    expect(raw.projects.find((p: Project) => p.id === a.id)).toHaveProperty('sort_order', 0)
+    expect(raw.projects.find((p: Project) => p.id === a.id)).not.toHaveProperty('sortOrder')
+    expect((await store.getProject(a.id)).updatedAt).toBe(a.updatedAt)
+  })
+
+  it('saves default project conversation order and rejects cross-project, cross-pin and deleted targets without writing', async () => {
+    const store = await import('./projectStore')
+    const project = await store.createProject({ kind: 'simple_chat', name: 'Other', prompt: '' })
+    const makeThread = (id: string, projectId = DEFAULT_WORKSPACE_PROJECT_ID, pinned = false): import('@shared/agentTypes').AgentThread => ({
+      id, projectId, pinned, title: id, accessMode: 'full_access', status: 'idle', userTurnCount: 0,
+      createdAt: '2026-10-01', updatedAt: '2026-10-01'
+    })
+    const threads = [makeThread('a'), makeThread('b'), makeThread('pin', DEFAULT_WORKSPACE_PROJECT_ID, true), makeThread('other', project.id)]
+    const request = { kind: 'thread' as const, groupId: DEFAULT_WORKSPACE_PROJECT_ID, pinned: false, id: 'b', beforeId: 'a' }
+    await store.reorderSidebar(request, () => threads)
+    expect((await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)).threadOrder).toEqual(['b', 'a', 'pin'])
+    const before = await readFile(storePaths.projectFile, 'utf8')
+    for (const beforeId of ['other', 'pin', 'deleted']) {
+      await expect(store.reorderSidebar({ ...request, beforeId }, () => threads)).rejects.toThrow('target changed')
+    }
+    expect(await readFile(storePaths.projectFile, 'utf8')).toBe(before)
+    const raw = JSON.parse(before)
+    expect(raw.projects.find((p: Project) => p.id === DEFAULT_WORKSPACE_PROJECT_ID).thread_order).toEqual(['b', 'a', 'pin'])
+    raw.projects.find((p: Project) => p.id === DEFAULT_WORKSPACE_PROJECT_ID).thread_order = []
+    expect(store.parseProjectStore(raw).projects.find(p => p.id === DEFAULT_WORKSPACE_PROJECT_ID)?.threadOrder).toEqual([])
+    raw.projects[0].sort_order = 0.5
+    expect(() => store.parseProjectStore(raw)).toThrow('sort order')
+  })
+
   it('defaults missing v0 tool permissions to read-only and persists explicit choices without a format upgrade', async () => {
     const store = await import('./projectStore')
     const request = { kind: 'workspace' as const, name: 'Permissions', sourceFolders: [tempDir],

@@ -21,6 +21,9 @@ interface ProjectBase extends ProjectModelSelection {
   iconColor?: ProjectIconColor
   pinned: boolean
   collapsed: boolean
+  /** Undefined keeps automatic ordering until the group is reordered. */
+  sortOrder?: number
+  threadOrder?: string[]
   createdAt: string
   updatedAt: string
 }
@@ -55,6 +58,8 @@ export function compareProjects(left: Project, right: Project): number {
   const rightDefault = isDefaultWorkspaceProject(right)
   if (leftDefault !== rightDefault) return leftDefault ? 1 : -1
   return Number(right.pinned) - Number(left.pinned)
+    || (left.sortOrder === undefined ? (right.sortOrder === undefined ? 0 : -1)
+      : right.sortOrder === undefined ? 1 : left.sortOrder - right.sortOrder)
     || Date.parse(right.updatedAt) - Date.parse(left.updatedAt)
 }
 
@@ -795,6 +800,7 @@ export interface GaleApi {
   agent: AgentApi
   projects: {
     list(): Promise<Project[]>
+    reorder(request: import('./sidebarOrder').SidebarReorderRequest): Promise<Project[]>
     create(request: ProjectCreateRequest): Promise<ProjectOperationResult<Project>>
     update(projectId: string, request: ProjectUpdateRequest): Promise<ProjectOperationResult<Project>>
     updateState(projectId: string, update: ProjectStateUpdate): Promise<Project>

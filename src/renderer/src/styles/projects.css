@@ -344,17 +344,23 @@
   min-width: 0;
 }
 
+.thread-list > section + section {
+  margin-top: 12px;
+}
+
 .thread-group-label {
   display: flex;
   align-items: center;
-  gap: 6px;
+  min-width: 0;
   width: 100%;
-  padding: 9px 5px 6px 0;
+  height: var(--control-height);
+  padding: 0 calc(var(--thread-list-row-inline-padding) + var(--thread-list-content-inline-padding));
   border: 0;
   background: transparent;
   color: var(--text-muted);
   font-size: var(--font-size-small);
   font-weight: 650;
+  line-height: var(--font-line-height-ui);
   text-align: left;
 }
 
@@ -362,18 +368,21 @@
   color: var(--text-secondary);
 }
 
-.thread-group-label.separated {
-  margin-top: 6px;
-  padding-top: 12px;
-}
-
 .thread-group-chevron {
   flex: 0 0 auto;
-  transition: transform 120ms ease;
+  margin-left: 4px;
+  opacity: 0;
+  transition: opacity 120ms ease, transform 120ms ease;
 }
 
 .thread-group-label[aria-expanded="true"] .thread-group-chevron {
   transform: rotate(90deg);
+}
+
+.thread-group-label[aria-expanded="false"] .thread-group-chevron,
+.thread-group-label:focus-visible .thread-group-chevron,
+.thread-list > section:hover .thread-group-chevron {
+  opacity: 1;
 }
 
 .project-thread-label > svg {
@@ -439,6 +448,25 @@
   font-size: var(--font-size-ui);
   line-height: var(--font-line-height-ui);
   text-align: left;
+}
+
+.project-thread-group[data-default-workspace] {
+  --thread-list-text-start: 6px;
+}
+
+.project-thread-group[data-default-workspace] > .project-thread-heading {
+  padding: 0;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.project-thread-group[data-default-workspace] .thread-open {
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 0;
+}
+
+.project-thread-group[data-default-workspace] .thread-status-indicator:not(:empty) {
+  margin-right: var(--thread-list-leading-gap);
 }
 
 .project-thread-more,

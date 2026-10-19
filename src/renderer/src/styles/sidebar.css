@@ -1,3 +1,21 @@
+.ui-sidebar-dragging,
+.ui-sidebar-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+[data-sidebar-dragging="true"] {
+  opacity: 0.5;
+}
+
+.sidebar-drag-marker {
+  position: fixed;
+  height: 2px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 1000;
+}
+
 .thread-list,
 .agent-message-panel,
 .composer,
@@ -103,23 +121,6 @@
 
 .thread-item {
   --ui-list-item-row-padding: var(--thread-list-row-inline-padding);
-}
-
-.thread-item[data-pinned] {
-  overflow: hidden;
-}
-
-.thread-item[data-pinned]::before {
-  position: absolute;
-  top: 0;
-  left: 0;
-  z-index: 1;
-  width: 0;
-  height: 0;
-  border-top: 8px solid var(--accent);
-  border-right: 8px solid transparent;
-  content: '';
-  pointer-events: none;
 }
 
 .thread-name {

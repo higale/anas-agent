@@ -162,6 +162,7 @@ const api: GaleApi = {
     })
   },
   projects: {
+    reorder: (request) => ipcRenderer.invoke('projects:reorder', request),
     list: (): Promise<Project[]> => ipcRenderer.invoke('projects:list'),
     create: (request: ProjectCreateRequest): Promise<ProjectOperationResult<Project>> => ipcRenderer.invoke('projects:create', request),
     update: (projectId: string, request: ProjectUpdateRequest): Promise<ProjectOperationResult<Project>> => ipcRenderer.invoke('projects:update', projectId, request),

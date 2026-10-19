@@ -1208,19 +1208,21 @@ describe('renderer interaction accessibility', () => {
 
     expect([...container.querySelectorAll('.thread-group-label')].map((element) => element.textContent)).toEqual([
       'project.projects',
-      'project.simple_chats'
+      'project.simple_chats',
+      'common.default'
     ])
     const content = container.textContent ?? ''
     expect(content.indexOf('Workspace thread')).toBeLessThan(content.indexOf('Default workspace thread'))
-    expect(content.indexOf('Default workspace thread')).toBeLessThan(content.indexOf('Simple thread'))
+    expect(content.indexOf('Simple thread')).toBeLessThan(content.indexOf('Default workspace thread'))
     const defaultWorkspaceGroup = container.querySelector('.project-thread-group[data-default-workspace]')
     if (!defaultWorkspaceGroup) throw new Error('Default workspace project group was not rendered.')
-    expect(within(defaultWorkspaceGroup as HTMLElement).getByText('Default Workspace'))
-      .toHaveClass('project-default-workspace-name')
+    expect(within(defaultWorkspaceGroup as HTMLElement).getByText('common.default'))
+      .not.toHaveClass('project-default-workspace-name')
+    expect(defaultWorkspaceGroup.querySelector('.thread-group-chevron')).toBeInTheDocument()
     expect(screen.getByText('Workspace project')).not.toHaveClass('project-default-workspace-name')
     expect(screen.getByText('Workspace project').closest('.project-thread-heading'))
       .toHaveAttribute('data-selected', 'true')
-    expect(screen.getByText('Default Workspace').closest('.project-thread-heading'))
+    expect(screen.getByText('common.default').closest('.project-thread-heading'))
       .not.toHaveAttribute('data-selected')
 
     await user.click(within(defaultWorkspaceGroup as HTMLElement).getByRole('button', { name: 'project.show_details' }))
@@ -1235,7 +1237,7 @@ describe('renderer interaction accessibility', () => {
     await user.click(projectsToggle)
     expect(projectsToggle).toHaveAttribute('aria-expanded', 'false')
     expect(screen.queryByText('Workspace thread')).not.toBeInTheDocument()
-    expect(screen.queryByText('Default workspace thread')).not.toBeInTheDocument()
+    expect(screen.getByText('Default workspace thread')).toBeVisible()
     expect(screen.getByText('Simple thread')).toBeVisible()
 
     await user.click(projectsToggle)

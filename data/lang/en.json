@@ -225,6 +225,7 @@
       "unexpected": "An unexpected error occurred. See the logs for details."
     },
     "failed_update": "Failed to update project.",
+    "failed_reorder": "Failed to save the list order. Please try again.",
     "failed_delete": "Failed to delete project.",
     "failed_update_sidebar_sections": "Failed to update sidebar sections."
   },
@@ -344,6 +345,7 @@
     "command_all": "Show all input history",
     "command_fav": "Show favorite prompts",
     "pin_thread": "Pin",
+    "pinned_thread": "Pinned conversation",
     "unpin_thread": "Unpin",
     "rename_thread": "Rename",
     "access_mode": "Tool access",

@@ -1,5 +1,6 @@
 import { normalizeCompressionPrompt } from '@shared/summaryPrompt'
-import type { AgentAccessMode } from '@shared/agentTypes'
+import type { AgentAccessMode, AgentThread } from '@shared/agentTypes'
+import { orderProjectThreads, reorderSidebarItems, type SidebarReorderRequest } from '@shared/sidebarOrder'
 import { ProjectOperationFailure } from '@shared/projectOperation'
 import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
@@ -89,7 +90,15 @@ function requireProject(value: unknown, index: number): Project {
   } else {
     throw new Error(`Project ${index + 1} has an invalid format.`)
   }
-  const { model_config_id, model_parameter_preset_id, capabilities, restrict_subagents, advanced_settings, coding_mode, compression_prompt, access_mode, ...metadata } = project
+  const { model_config_id, model_parameter_preset_id, capabilities, restrict_subagents, advanced_settings, coding_mode, compression_prompt, access_mode, sort_order, thread_order, ...metadata } = project
+  if (sort_order !== undefined && (typeof sort_order !== 'number' || !Number.isSafeInteger(sort_order))) {
+    throw new Error(`Project ${index + 1} has an invalid sort order.`)
+  }
+  if (thread_order !== undefined && (!Array.isArray(thread_order)
+    || thread_order.some((id) => typeof id !== 'string' || !id.trim())
+    || new Set(thread_order).size !== thread_order.length)) {
+    throw new Error(`Project ${index + 1} has an invalid thread order.`)
+  }
   const selection = validateProjectModelSelection({
     modelConfigId: model_config_id,
     modelParameterPresetId: model_parameter_preset_id
@@ -99,6 +108,8 @@ function requireProject(value: unknown, index: number): Project {
   if (project.kind === 'workspace' && typeof coding_mode !== 'boolean') throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Invalid project coding mode.')
   return {
     ...metadata, ...selection,
+    ...(sort_order !== undefined ? { sortOrder: sort_order } : {}),
+    ...(thread_order !== undefined ? { threadOrder: thread_order } : {}),
     ...(project.kind === 'workspace' ? { accessMode: validateProjectAccessMode(access_mode), capabilities: parseCapabilities(capabilities), restrictSubagents: restrict_subagents, advancedSettings: advanced_settings, codingMode: coding_mode, compressionPrompt: normalizeCompressionPrompt(compression_prompt), prompt: validateProjectPrompt(project.prompt) } : {})
   } as Project
 }
@@ -132,7 +143,7 @@ function serializeProjectStore(store: StoredProjects) {
   return {
     version: store.version,
     projects: store.projects.map((project) => {
-      const { modelConfigId, modelParameterPresetId, ...metadata } = project
+      const { modelConfigId, modelParameterPresetId, sortOrder, threadOrder, ...metadata } = project
       const stored = { ...metadata } as Record<string, unknown>
       delete stored.capabilities
       delete stored.restrictSubagents
@@ -142,6 +153,8 @@ function serializeProjectStore(store: StoredProjects) {
       delete stored.codingMode
       return {
         ...stored,
+        ...(sortOrder !== undefined ? { sort_order: sortOrder } : {}),
+        ...(threadOrder !== undefined ? { thread_order: threadOrder } : {}),
         ...(project.kind === 'workspace' && project.accessMode && project.accessMode !== 'read_only_allowed'
           ? { access_mode: project.accessMode } : {}),
         ...(project.kind === 'workspace' ? { capabilities: serializeCapabilities(project.capabilities), restrict_subagents: project.restrictSubagents, advanced_settings: project.advancedSettings, coding_mode: project.codingMode, ...(project.compressionPrompt ? { compression_prompt: project.compressionPrompt } : {}) } : {}),
@@ -217,6 +230,46 @@ async function writeStore(store: StoredProjects): Promise<void> {
 
 function sortProjects(projects: Project[]): Project[] {
   return [...projects].sort(compareProjects)
+}
+
+function placeAtGroupStart(project: Project, projects: Project[]): void {
+  const group = sortProjects(projects.filter((item) => item.id !== project.id
+    && item.id !== DEFAULT_WORKSPACE_PROJECT_ID && item.kind === project.kind && item.pinned === project.pinned))
+  delete project.sortOrder
+  const positions = group.flatMap((item) => item.sortOrder === undefined ? [] : [item.sortOrder])
+  if (positions.length) {
+    project.sortOrder = Math.min(...positions) - 1
+    if (!Number.isSafeInteger(project.sortOrder)) throw new Error('Project sort order exceeds the supported range.')
+  }
+}
+
+export async function reorderSidebar(
+  request: SidebarReorderRequest,
+  getThreads: () => AgentThread[]
+): Promise<Project[]> {
+  return serializeProjectMutation(async () => {
+    if (!request || !['project', 'thread'].includes(request.kind)
+      || typeof request.groupId !== 'string' || !request.groupId
+      || typeof request.pinned !== 'boolean' || typeof request.id !== 'string' || !request.id
+      || (request.beforeId !== null && (typeof request.beforeId !== 'string' || !request.beforeId))) {
+      throw new Error('Sidebar reorder request is invalid.')
+    }
+    const store = await readStore()
+    if (request.kind === 'project') {
+      const group = sortProjects(store.projects.filter((project) => project.id !== DEFAULT_WORKSPACE_PROJECT_ID
+        && project.kind === request.groupId && project.pinned === request.pinned))
+      reorderSidebarItems(group, request).forEach((project, index) => { project.sortOrder = index })
+    } else {
+      const project = store.projects.find((item) => item.id === request.groupId)
+      if (!project) throw new Error('Sidebar project no longer exists.')
+      const threads = orderProjectThreads(getThreads().filter((thread) => thread.projectId === project.id), project.threadOrder)
+      const group = reorderSidebarItems(threads.filter((thread) => thread.pinned === request.pinned), request)
+      const others = threads.filter((thread) => thread.pinned !== request.pinned)
+      project.threadOrder = [...group, ...others].map((thread) => thread.id)
+    }
+    await writeStore(store)
+    return sortProjects(store.projects)
+  })
 }
 
 export async function validateProjectSourceFolders(sourceFolders: string[]): Promise<string[]> {
@@ -378,6 +431,7 @@ export async function createProject(request: ProjectCreateRequest): Promise<Proj
     const project: Project = request.kind === 'workspace'
       ? { ...common, kind: 'workspace', sourceFolders: await validateProjectSourceFolders(request.sourceFolders), ...projectCapabilities(request) }
       : { ...common, kind: 'simple_chat', prompt: validateProjectPrompt(request.prompt) }
+    placeAtGroupStart(project, store.projects)
     store.projects = sortProjects([project, ...store.projects])
     await writeStore(store)
     return project
@@ -464,6 +518,7 @@ export async function updateProjectState(projectId: string, update: ProjectState
       collapsed: update.collapsed ?? current.collapsed
     }
     if (project.pinned === current.pinned && project.collapsed === current.collapsed) return current
+    if (project.pinned !== current.pinned) placeAtGroupStart(project, store.projects)
     store.projects = sortProjects(store.projects.map((item) => item.id === projectId ? project : item))
     await writeStore(store)
     return project

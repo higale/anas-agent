@@ -118,3 +118,14 @@ it('reports assigned viewport changes without repeating unchanged dimensions', (
   update(1200); update(1200); update(1400)
   expect(sizes).toEqual([{ width: 1200, height: 800 }, { width: 1400, height: 800 }])
 })
+
+it('routes directory selection and file reveal through the plugin host port', async () => {
+  const f = fixture()
+  const api = f.window.anas as unknown as { selectDirectory(options?: { title?: string }): Promise<string | null>; showItemInFolder(path: string): Promise<void> }
+  expect(await api.selectDirectory({ title: 'Save files' })).toBeNull()
+  await api.showItemInFolder('/chosen/file.txt')
+  expect(f.calls).toEqual([
+    expect.objectContaining({ method: 'invoke', params: { method: 'host.selectDirectory', params: { title: 'Save files' } } }),
+    expect.objectContaining({ method: 'invoke', params: { method: 'host.showItemInFolder', params: { path: '/chosen/file.txt' } } })
+  ])
+})

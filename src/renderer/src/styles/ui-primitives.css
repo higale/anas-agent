@@ -1840,8 +1840,25 @@ button.ui-avatar:has(> img):focus-visible,
 }
 
 .ui-list-item-action-host:hover .ui-list-item-action,
+.ui-list-item-action:focus-visible,
 .ui-list-item-action[aria-expanded="true"] {
   opacity: 1;
+}
+
+.ui-list-item-action-marker {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.ui-list-item-action-host:hover .ui-list-item-action-marker,
+.ui-list-item-action-wrap:has(.ui-list-item-action:focus-visible) .ui-list-item-action-marker,
+.ui-list-item-action-wrap:has(.ui-list-item-action[aria-expanded="true"]) .ui-list-item-action-marker {
+  opacity: 0;
 }
 
 .ui-list-item-action[aria-expanded="true"]::after {

@@ -4,11 +4,41 @@
 
 **升级提醒：从 4.0 之前的版本升级到 4.x，旧对话和长期记忆不再可用；项目、输入历史、插件数据和头像可手动恢复。升级前请备份，详见 [4.x 升级数据说明](data/help/UPGRADE_TO_4.zh-CN.md)。** 此提醒针对跨入 4.x 的升级，并非每次 4.x 升级都会丢失数据。
 
-Anas 是基于 Electron、React 和 TypeScript 构建的本地桌面 AI Agent，使用 LangGraph 和 Deep Agents 运行时。每个项目可以选择自己的上下文、工具、技能和子 Agent。配置与会话保存在本地；请求模型时，会将任务所需的内容发送给所选模型供应商。
+Anas 是本地桌面 AI Agent，支持多模型、项目、工具、技能和子 Agent。每个项目可以选择自己的工作目录、上下文和能力。配置与会话保存在本地；请求模型时，会将任务所需的内容发送给所选模型供应商。
 
-[GitHub](https://github.com/higale/anas-agent) · [MIT 协议](LICENSE) · [参与贡献](CONTRIBUTING.md)
+[下载](https://github.com/higale/anas-agent/releases) · [GitHub](https://github.com/higale/anas-agent) · [MIT 协议](LICENSE) · [参与贡献](CONTRIBUTING.md)
 
-公开仓库定期接收源码快照，每次同步新增一个提交；发布标签与 `package.json` 中的版本号一致。日常开发历史单独保留。
+![Anas 界面：项目列表、对话与用量仪表](docs/images/anas.zh-CN.png)
+
+## 功能
+
+- 接入 OpenAI 兼容和 Anthropic 兼容的模型服务，支持流式回复与上下文压缩。
+- 按项目管理对话、工作目录和能力，为子 Agent 配置独立的模型与工具。
+- 使用文件、图片、网络、记忆和命令工具，通过 MCP、自定义工具包和 Skills 扩展能力。
+- 支持文本、图片、PDF 和 DOCX 附件，以及语音输入与输出。
+- 在右侧工作区或独立窗口中查看子 Agent、帮助、文件差异和插件页面。
+- 通过插件扩展界面、工具和技能；内置用量仪表可查看受支持供应商的额度或余额。
+- 提供工具执行权限控制、本地数据备份、恢复与启动故障恢复。
+
+## 下载与开始使用
+
+1. 从 [GitHub Releases](https://github.com/higale/anas-agent/releases) 下载适合平台的版本。Windows 解压后运行 `Anas/Anas.exe`，保留完整文件夹；macOS 选择对应芯片架构的 DMG，将 Anas 拖入“应用程序”后启动。
+2. 在“设置 > 模型”中添加模型供应商，填写 API 地址和密钥，并配置要使用的模型。应用不内置模型服务凭据。
+3. 新建对话或项目，在输入框下方选择模型，根据任务需要配置工作目录与工具权限。
+
+### 打开下载的 macOS 应用
+
+macOS 首次启动若提示无法验证开发者，可在“系统设置 > 隐私与安全”中选择“仍要打开”。其他启动问题见[用户指南](data/help/USER_GUIDE.zh-CN.md#打开下载的-macos-应用)。
+
+## 插件
+
+在“设置 > 插件”中安装插件 ZIP，也可拖入 ZIP、插件目录或 `PLUGIN.json`。插件可提供侧边页面、独立窗口、工具、技能及提示词，并按项目选择是否启用。
+
+内置“用量仪表”显示当前模型供应商的额度、余额或消费数据，支持紧凑／详细显示与立即刷新；不支持的供应商自动隐藏。安装、管理及厂商支持范围见[用户指南](data/help/USER_GUIDE.zh-CN.md#插件)；开发插件见[接口文档](docs/PLUGINS.md)和[示例](data/examples/plugins/README.md)。
+
+## 本地数据
+
+默认数据目录为 `~/.galeAnas/`。可通过 `--data-dir <路径>` 指定其他目录；项目源码目录与应用数据相互独立。应用支持备份与恢复，项目源文件夹和外部引用的技能需另行备份。目录位置、内容及备份范围见[用户指南](data/help/USER_GUIDE.zh-CN.md#本地数据与备份)。
 
 ## 文档
 
@@ -16,6 +46,8 @@ Anas 是基于 Electron、React 和 TypeScript 构建的本地桌面 AI Agent，
 - Agent Skills：[English](data/help/AGENT_SKILLS.en.md) · [中文](data/help/AGENT_SKILLS.zh-CN.md)
 - [编码模式与项目规则](docs/CODING_MODE.md)
 - [自定义工具包](docs/CUSTOM_TOOLS.md)
+- [插件开发](docs/PLUGINS.md)
+- [插件示例](data/examples/plugins/README.md)
 - [当前状态存储](docs/CURRENT_STATE_STORAGE.md)
 - [安全与审批模型](docs/SECURITY_MODEL.md)
 - [框架补丁](docs/FRAMEWORK_PATCHES.md)
@@ -24,151 +56,17 @@ Anas 是基于 Electron、React 和 TypeScript 构建的本地桌面 AI Agent，
 
 应用的“帮助”菜单会在右侧工作区打开内置指南，提供目录并保存阅读位置。
 
-## 功能
-
-- 支持 OpenAI 兼容和 Anthropic 兼容的模型供应商、流式回复、上下文压缩，以及审批后的任务恢复。
-- 设置页管理各来源的启用范围，项目按需定制能力，子 Agent 独立配置。
-- 默认项目名称不可修改，其他设置与普通项目相同，可定制目录、提示词和能力；初始工作目录直接使用系统“文档”目录，不额外创建子目录。
-- 内置文件、图片、网络、记忆和命令工具，随应用提供 ripgrep，支持 MCP 与自定义工具包。
-- 支持用户级和项目级 Skills、提示词快捷输入、输入历史，以及语音输入与输出。
-- 支持文本、图片、PDF 和 DOCX 附件。图片通过原生多模态内容块发送，文档在本地提取内容。
-- 可调整宽度的右侧工作区，用于子 Agent、帮助、只读 Git 差异及已记录的文件差异。Monaco 支持行内和并排对比，设置页保持双栏布局。
-- 本地数据备份、恢复、日志和启动恢复。
-
-能力选择与执行审批分别生效。项目可设置新对话的默认工具权限，未配置时为“允许只读”；对话可单独切换，修改项目默认值不影响已有对话。各能力包含的工具和依赖见用户指南；三种会话访问模式见安全模型。
-
-## 运行时架构
-
-LangChain、LangGraph 和 Deep Agents 负责模型与工具循环、消息、checkpoint、interrupt、重试及子 Agent 调度。LangGraph 当前 checkpoint 状态是会话的唯一权威来源。Anas 负责 Electron 生命周期、配置、项目、界面展示、备份及其他产品服务。
-
-每个主会话及其子 Agent 共用一个 SQLite 数据库；catalog 保存会话位置和共享记忆。完整消息逐条存储，不维护第二份由应用管理的模型历史。当前实现拒绝不支持的存储格式，尚无旧格式迁移路径。应用自有数据格式以当前显式 `v0` 为兼容原点，此前无版本和旧编号数据不再支持；后续格式升级遵循[迁移规则](docs/DATA_MIGRATIONS.md)。详见[当前状态存储](docs/CURRENT_STATE_STORAGE.md)。
-
-普通工具共用受管执行器，提供 **8 个执行槽位**，活跃与排队调用总数上限为 **64**。槽位繁忙或修改操作冲突时自动排队。启用后台工具后，等待或运行超过 10 秒的调用会返回可用于监督的句柄。取消操作会保留执行归属，直到实际执行器结束；外部操作结果不确定时会明确标记。规划、子 Agent 调度、用户提问和监督不占用此执行池。
-
-自定义工具在各自的包目录中运行。支持数据目录 `tools/` 中的用户工具包、添加的外部目录，以及项目源码目录 `.agents/tools/` 中的项目工具包。随包工具示例需导入后使用。全局工具页与技能页共用目录树和文件预览，项目工具只在项目设置中展示。项目未定制时使用已启用工具；定制时按“全部／定制／关闭”选择。执行和导入规则见[自定义工具包](docs/CUSTOM_TOOLS.md)。
-
-Shell 命令保留模型提供的命令文本、参数及搜索行为。受支持的只读命令通过目标与环境检查后可以自动获批；分析过程不会为获得批准而改写命令。其他命令遵循所选访问模式。平台支持与恢复规则由安全模型定义。
-
-## 插件
-
-内置“用量仪表”在设置按钮上方显示当前模型供应商的额度、余额或消费数据，支持紧凑／详细两种样式、悬停详情和立即刷新。按 API URL 识别 MiniMax 和智谱 / Z.ai Coding Plan 套餐额度、DeepSeek 和 Moonshot/Kimi 余额，以及 OpenRouter 密钥额度与消费，复用供应商密钥；百炼 / Qwen 中国站通过 `bl` 核对账户，显示 Token Plan 额度与套餐详情或普通 Key 免费额度及近期用量，支持在仪表内登录。智谱 / Z.ai 的 Coding 专用路径和官方 Anthropic 路径查询套餐；国内智谱普通 API 显示人民币账户余额及充值、消费明细，国际普通 API 暂不支持。不支持的地址自动隐藏，可在“设置 > 插件”停用。
-
-在“设置 > 插件”的概览中可预览插件的提示词、技能和工具：悬停名称查看简介，点击查看并复制正文或工具参数。停用插件也可查看，预览不会启动后台。
-
-Anas 3.3.8 起使用插件 API 2；API 1 插件需更新后使用。RDP 插件 0.1.9 需要 Anas 3.3.13 或更新版本，请先更新宿主，再安装插件。
-
-可选插件在“设置 > 插件”中选择 ZIP 文件或 `PLUGIN.json` 安装，也可一次拖入一个 ZIP、`PLUGIN.json` 或根部包含清单的插件目录。插件可提供侧边页面、独立窗口、按需后台、工具、技能及静态提示词。纯界面或声明包无需后台进程。项目和子 Agent 中按插件集中选择“全部／定制／关闭”；未定制项目使用所有已启用插件的可用能力。插件管理页负责整体启停，不重复设置贡献开关。开发接口见[插件文档](docs/PLUGINS.md)，示例位于 [data/examples/plugins](data/examples/plugins)。
-
 ## 开发
 
-先阅读 [AGENTS.md](AGENTS.md)，检查工作区和近期 Git 历史，再安装当前平台的依赖。内置 ripgrep 和原生模块需要 npm 可选依赖，请勿跳过。
-
-使用 Node.js 24、npm 和 Git。在目标操作系统上安装依赖，不要跨平台复制 `node_modules`。如果没有匹配的预编译原生模块，可能需要安装平台构建工具。只有使用 Python 工具、Skills 或相关测试时才需要 Python。在 Windows PowerShell 中，如果执行策略阻止 `npm.ps1`，请使用 `npm.cmd`。
+使用 Node.js 24、npm 和 Git，在目标操作系统上安装依赖：
 
 ```bash
 npm ci
 npm run dev
-npm run typecheck
-npm test -- <test-file>
-npm run build
 ```
 
-日常开发保持正式版本号不变，仅在准备同步 GitHub 时递增一次 PATCH。开发仓库通过 `refs/anas/github/v<版本>` 普通 Git 引用记录同步基点，不创建标签；运行及打包后的菜单和“关于”均显示如 `3.1.3-dev.5+g9e8317f8.dirty` 的启动／构建时标记。GitHub 独立源码快照发布包只显示正式版本。无 Git 或无基点时不生成开发标记。详见[发布流程](docs/SOURCE_PUBLISHING.md)。
-
-启动后，在“设置 > 模型”中添加模型供应商，再在消息工具栏选择模型。应用不内置模型服务凭据。`data/config/` 和 `data/.env` 是随包分发的默认配置；个人设置与密钥应保存在应用数据目录中。
-
-供应商名称前的图标可点击或拖入 SVG、PNG、JPEG、静态 WebP 或 BMP 更换，悬停后可恢复默认。SVG 不超过 1 MB，保留原始矢量；位图自动居中裁成正方形，并缩小到最大 512 × 512 像素，统一保存为 PNG，小图不放大，保留透明背景。不支持 GIF 和动态 WebP。模板自带品牌图标；图片以 Base64 保存在供应商配置中，随配置备份。图标为空时直接显示通用图标。只有点击恢复默认时才按当前 API URL 查找模板，并保存匹配的品牌图标；找不到则清空。
-
-`build` 会检查类型，构建主进程、preload 和渲染进程资源，并验证主进程依赖边界。按修改的行为运行相关测试。Electron 检查使用隔离的数据目录：
-
-```bash
-npm run test:e2e -- --help-only
-npm run test:e2e -- --startup-only
-npm run test:e2e -- --storage-only
-npm run test:e2e -- --workspace-only
-```
-
-构建、打包与后端测试共用生成文件和原生依赖，请串行运行。
-
-| 目录 | 职责 |
-| --- | --- |
-| `src/main/agent/` | Agent 构建、持久化、生命周期与 IPC |
-| `src/main/` | Electron 与产品服务 |
-| `src/preload/` | 带类型的 `window.gale` 桥接接口 |
-| `src/renderer/` | React 工作区、设置与共享控件 |
-| `src/shared/` | 共享类型与辅助函数 |
-| `data/` | 内置配置、帮助、语言包、技能、示例和资源 |
-| `patches/` | 由 `postinstall` 应用的必要依赖补丁 |
-
-## 数据目录
-
-默认目录为 `~/.gale<program-name>/`，通常是 `~/.galeAnas/`。打包后的程序名由实际可执行文件或应用包名称决定，重命名后的副本可以使用独立的数据目录。
-
-可以通过应用的第一个参数、`--data-dir <path>` 或 `--data-dir=<path>` 指定其他目录。相对路径以启动目录为基准解析，不允许使用文件系统根目录。
-
-```bash
-Anas.exe --data-dir "D:\Anas Data\Research"
-./Anas.AppImage --data-dir "$HOME/Anas Data/Research"
-npm run dev -- -- --data-dir "./runtime-data/research"
-```
-
-| 数据目录内的路径 | 内容 |
-| --- | --- |
-| `config/` | 设置、供应商与模型、子 Agent、MCP、Skill 来源与可用性、自定义工具来源与排序 |
-| `db/catalog.sqlite` | 主会话目录与共享记忆 |
-| `db/conversations/<threadId>/conversation.sqlite` | 一个主会话及其子 Agent |
-| `db/projects.json` | 项目定义与源码目录 |
-| `db/input_history.json` | 全局输入历史及置顶输入 |
-| `.env` | 应用环境变量 |
-| `db/conversations/<threadId>/` 下的 `attachments/`、`file_edits/`、`tool_results/` | 该主对话及其子 Agent 的附件、文件修改恢复材料和长工具结果；随对话删除 |
-| `skills/`、`tools/` | 用户管理的包 |
-| `plugins/`、`db/plugins/` | 已安装插件及独立数据；卸载默认保留数据，可勾选删除 |
-| `skills/_system/`、`plugins/_system/` | 由应用刷新的内置包 |
-| `examples/skills/`、`examples/tools/`、`examples/plugins/` | 由应用刷新的示例；插件提供独立 ZIP，需先导入或安装再使用 |
-| `help/`、`lang/` | 帮助与语言包 |
-| `config/assets/` | 头像原图、裁剪参数及生成图标 |
-| `log/`、`cache/`、`tmp/`、`electron/` | 日志、缓存、临时文件与 Electron 用户配置 |
-
-`skills/`、`tools/`、`plugins/` 下的 `_system/` 是内置包保留目录，由应用刷新；用户包与它并列存放，不会随内置包刷新而覆盖。
-
-项目源码目录与应用数据相互独立。备份包含用户工具和 Skill 包，并使用 SQLite 快照；不备份项目源码目录或外部 Skill 根目录，也不包含 `dev/`、`electron/`、`log/`、`cache/`、`tmp/` 及旧布局残留。恢复时会校验并暂存归档，创建恢复前备份，替换应用数据，然后重新加载应用。
-
-内置帮助、系统 Skills、示例和内置语言包会由应用刷新。需要定制时，请修改用户包或添加独立的语言文件。详见[语言包](data/lang/README.md)。
-
-## 打包
-
-```bash
-npm run pack       # 本地未压缩的应用目录
-npm run dist       # pack 的别名
-npm run portable   # Windows x64 便携包
-npm run pack:win:release  # Windows x64 完整应用文件夹 ZIP
-npm run pack:mac:release  # 当前 Mac 架构的 ad-hoc 签名 DMG
-```
-
-在 macOS 上，`pack` 会在 `release-build/` 下生成 ad-hoc 签名的应用，不使用证书签名、时间戳或公证，也不需要 `sudo`。打包时会校验内置依赖，包括原生 ripgrep；跨平台构建需要目标平台对应的包。
-
-`pack:mac:release` 在 Mac 上运行：Apple Silicon 生成 ARM64 DMG，Intel 生成 x64 DMG，输出至 `release-macos/`。它采用 ad-hoc 签名，不需要 Apple 开发者账户、签名证书、时间戳或公证。构建会检查签名，并对打包后的应用进行冒烟检查。下载的应用在首次尝试启动后，可能需要在“系统设置 > 隐私与安全”中选择“仍要打开”。
-
-`pack:win:release` 在 Windows x64 上运行，验证应用后生成 `release-build/Anas-<version>-windows-x64.zip`。解压后运行 `Anas/Anas.exe`，请保留整个文件夹。用户数据仍使用正常的应用数据目录。除非明确设置镜像环境变量，否则发布命令使用标准 Electron 下载地址；命令本身不会上传安装包。
-
-推送 `v<version>` 标签时，[GitHub Actions 工作流](.github/workflows/release.yml)会在各平台原生主机上构建三个安装包。只有全部构建通过后，才会创建 GitHub Release，附上三个下载文件及 SHA-256 校验值。手动选择 **Run workflow** 只生成可下载的构建产物，不创建 Release。仓库配置和发布步骤见[源码快照发布](docs/SOURCE_PUBLISHING.md)。
-
-### 打开下载的 macOS 应用
-
-从 [GitHub Releases](https://github.com/higale/anas-agent/releases) 下载适合你 Mac 架构的 DMG，打开后将 Anas 拖入“应用程序”，再启动安装后的副本。如果 macOS 因无法验证开发者而阻止启动，请按 [Apple 的说明](https://support.apple.com/102445)，在“系统设置 > 隐私与安全”中选择“仍要打开”，然后确认“打开”。
-
-如果上述方法仍未解决下载隔离问题，且你信任此版本，请先将 DMG 的 `shasum -a 256` 输出与该 Release 的 `SHA256SUMS.txt` 对应条目比较，再仅移除已安装 Anas 应用的隔离属性：
-
-```bash
-xattr -r -d com.apple.quarantine "/Applications/Anas.app"
-```
-
-如果安装在其他位置，请修改路径。仅在权限不足且确认路径正确时，才在命令前添加 `sudo`。此操作只移除下载隔离标记，不修复损坏的应用，也不提供 Apple 公证。签名校验失败时请重新下载，不要用此方法绕过恶意软件警告。
-
-发布构建已应用并验证 ad-hoc 签名。用户通常不应运行 `codesign --force --deep --sign -`：它会替换嵌套代码的签名，[Apple 将深度签名限定为应急修复用途](https://developer.apple.com/library/archive/technotes/tn2206/)。开发者可以通过 `npm run pack:mac:release` 重新构建。未来如果采用 [Developer ID 签名与 Apple 公证](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)，可以避免因开发者身份或缺少公证导致的拦截；当前版本使用 ad-hoc 签名。
+开发环境、测试与本地打包见[贡献指南](CONTRIBUTING.md)，项目约定见 [AGENTS.md](AGENTS.md)，发布流程见[源码快照发布](docs/SOURCE_PUBLISHING.md)。
 
 ## 开源协议
 
 Anas 使用 [MIT 协议](LICENSE)，版权归 © 2026 gale 所有。第三方组件保留各自的协议，详见[第三方声明](THIRD_PARTY_NOTICES.md)。
-
-维护者可以按[源码快照发布](docs/SOURCE_PUBLISHING.md)的流程发布版本，无需公开日常开发历史。

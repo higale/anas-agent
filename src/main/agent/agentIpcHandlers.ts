@@ -59,7 +59,8 @@ import {
 } from './agentRunInput'
 import { findResolvedModelConfig, getAppConfigSnapshot } from '../config/appConfig'
 import { runtimeLog } from '../runtimeLogger'
-import { getProject, recoverProjectDeletion } from '../projectStore'
+import { getProject, recoverProjectDeletion, reorderSidebar } from '../projectStore'
+import type { SidebarReorderRequest } from '@shared/sidebarOrder'
 import type {
   MemoryItem,
   MemorySaveRequest,
@@ -500,6 +501,10 @@ export function registerAgentIpcHandlers(): void {
     state: AgentWorkspaceState
   ): Promise<void> => enqueueWorkspaceMutation(() => persistWorkspaceState(state)))
   handleAgentIpc('agent:threads:list', () => currentStorage().listThreads())
+  handleAgentIpc('projects:reorder', (_event, request: SidebarReorderRequest) => enqueueWorkspaceMutation(async () => {
+    await recoverPendingProjectDeletion()
+    return reorderSidebar(request, () => currentStorage().listThreads())
+  }))
   const digest = z.string().regex(/^[a-f0-9]{64}$/)
   const threadId = z.string().min(1).max(256)
   const filePath = z.string().min(1).max(32768)

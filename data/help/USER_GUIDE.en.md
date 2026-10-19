@@ -20,6 +20,8 @@ During tool execution, one continuous shimmer moves across the entire tool heade
 
 ## Projects And Capabilities
 
+The sidebar shows Projects, Simple chats, then the separate default project. Drag a project name to reorder it within its category, or a conversation name to reorder it within its project. Pinned and unpinned items sort separately; dragging cannot move items between groups. Release to save or press Esc to cancel. After manual sorting, new items appear before unpinned items, and message updates preserve the saved order. The default project stays last.
+
 Enable **Customize capabilities** in the project editor to choose prompts, context, tools, skills, and subagents. Turning it off uses all enabled capabilities and retains custom choices. Settings manages source availability; there is no global default-capability page. Coding mode controls the development workflow without increasing access permissions.
 
 The default project name cannot be changed. All other settings work the same as for regular projects, including its icon, color, working folders, tool access mode, model and reasoning option, coding mode, and customized capabilities. Its initial working folder is the current system user's Documents folder, with no extra subfolder created; saved folder selections are preserved. Enable “Customize capabilities” to edit project and compression prompts and capability selections. Turning it off preserves those custom settings while using the default prompt behavior and all enabled capabilities.
@@ -212,6 +214,8 @@ Explicit invocation sends the unchanged skill file and its source path, keeping 
 
 OpenAI-compatible and Anthropic-compatible services are supported. Manage models in Settings > Model and switch between them below the message input.
 
+Click the icon before a provider’s name, or drop an SVG, PNG, JPEG, static WebP, or BMP onto it, to replace it; hover to reset it. SVG files must not exceed 1 MB and retain their original vector data. Raster images are automatically center-cropped to a square, reduced to at most 512 × 512 pixels, and saved as PNG, preserving transparency without enlarging small images. GIF and animated WebP are not supported. Templates include brand icons. Images are stored as Base64 in provider configuration and included in backups. An empty image displays the generic icon directly. Only clicking Reset looks up the current API URL in the templates and saves the matching brand icon, or clears the image if no match is found.
+
 The API key field accepts a literal key or a `${VARIABLE_NAME}` reference. Its dropdown groups suggestions from the application `.env` file and system environment, matching names containing `KEY`, `TOKEN`, or `SECRET` without case sensitivity. It shows names and empty-value status, with no search box. Manually entered references need not match those keywords. Names can contain spaces, Unicode characters, and hyphens, or begin with digits. Names inside references are preserved exactly: `${ TEST_API_KEY}` differs from `${TEST_API_KEY}`. Dropdown names with leading or trailing whitespace are quoted for display only; the quotes are not part of the name. The reference syntax excludes empty names, equals signs, braces, line breaks, and null characters. The `.env` parser continues to trim whitespace around assignment names. Valid references can be saved before the variable is configured. Missing or empty values produce an explicit error when requesting a model, fetching the model list, or querying usage. References remain visible; literal keys are masked when the field loses focus.
 
 A non-empty value in the application data directory's `.env` takes priority over the same system variable. Saving `.env` in Settings reloads it immediately. External edits are not watched; reopening the dropdown or restarting the app rereads the file. System variables come from the current Anas process environment, so operating-system changes require restarting Anas; in development mode, also reopen the terminal used to launch it. Changes do not affect requests already sent. Configuration stores the reference, and an empty field never selects a variable automatically. The project's `.env` capability switch does not affect model connections.
@@ -358,6 +362,23 @@ Data cleanup in Settings > General hides categories confirmed to have no removab
 
 Deleting an entire conversation from its menu does not require repairing a missing, damaged or unsupported-version conversation database first. Deletion also removes its attachments, file-edit recovery material, long tool results and temporary drafts. If the operating system refuses to delete files, deletion progress is retained so you can retry after resolving file locks or permissions.
 
+| Path under the data directory | Contents |
+| --- | --- |
+| `config/` | Settings, providers/models, subagents, MCP, Skill sources/availability, and custom-tool sources/ordering |
+| `db/catalog.sqlite` | Main conversation directory and shared memory |
+| `db/conversations/<threadId>/conversation.sqlite` | One main conversation and its subagents |
+| `db/projects.json` | Project definitions and source folders |
+| `db/input_history.json` | Global input history and pinned inputs |
+| `.env` | Application environment variables |
+| `attachments/`, `file_edits/`, `tool_results/` under `db/conversations/<threadId>/` | Attachments, file-edit recovery material and long tool results inside the main conversation directory; removed with that conversation |
+| `skills/`, `tools/` | User-managed packages |
+| `plugins/`, `db/plugins/` | Installed plugins and independent data; uninstalling retains data unless deletion is selected |
+| `skills/_system/`, `plugins/_system/` | Built-in packages refreshed by the app |
+| `examples/skills/`, `examples/tools/`, `examples/plugins/` | Examples refreshed by the app, with plugins supplied as individual ZIPs; import or install before use |
+| `help/`, `lang/` | Help and language packs |
+| `config/assets/` | Avatar source, crop settings, and generated icons |
+| `log/`, `cache/`, `tmp/`, `electron/` | Logs, cache, temporary files, and Electron profile |
+
 ## Troubleshooting
 
 Settings > Dev provides developer tools, logs, and Start in console. Console startup preserves the data directory and restarts the app in a system terminal to show startup and runtime output.
@@ -381,3 +402,17 @@ Application-owned persisted data uses explicit format version `0` as its current
 Input history can recover readable entries individually while retaining their order and pinned state. Invalid entries remain in the preserved original, and the result reports partial recovery. A nonempty history with no readable entries is not replaced with an empty list. A staged project-deletion file without its corresponding journal is also preserved and does not block project repair.
 
 Avatar repair rebuilds required assets from a readable source, crop, or display image after preserving the originals. If no image can be recovered, it reports the problem without automatically replacing the avatar with the default. Backup imports also validate avatar parameters before replacing data, rejecting unsupported versions or invalid parameters. Missing optional avatar parameters can still be initialized normally.
+
+### Opening the macOS download
+
+Download the DMG matching your Mac from [GitHub Releases](https://github.com/higale/anas-agent/releases), open it, and drag Anas into Applications. Launch the installed copy. If macOS blocks it because the developer cannot be verified, use **System Settings > Privacy & Security > Open Anyway**, then confirm **Open**, as described by [Apple](https://support.apple.com/102445).
+
+If that route does not resolve a download-quarantine block, and you trust this release, compare the DMG's `shasum -a 256` output with its entry in the release's `SHA256SUMS.txt`. Then remove only the installed Anas app's quarantine attribute:
+
+```bash
+xattr -r -d com.apple.quarantine "/Applications/Anas.app"
+```
+
+Adjust the path if installed elsewhere. Use `sudo` before this command only if it fails with a permissions error and the path is correct. This removes download quarantine; it does not repair a damaged app or provide Apple notarization. For a signature verification failure, download a fresh copy; do not bypass a malware warning.
+
+The release build already applies and verifies an ad-hoc signature. Users should not normally run `codesign --force --deep --sign -`: it replaces nested signatures, and [Apple reserves deep signing for emergency repairs](https://developer.apple.com/library/archive/technotes/tn2206/). Developers can rebuild with `npm run pack:mac:release` instead. A future release using [Developer ID signing and Apple notarization](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution) would avoid the unidentified-developer/notarization block; current releases use ad-hoc signing.

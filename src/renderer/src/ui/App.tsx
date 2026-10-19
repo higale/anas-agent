@@ -39,6 +39,7 @@ import {
 } from '@shared/draftModelSelection'
 import { AgentWorkspace } from './agent/AgentWorkspace'
 import { ThreadSidebarContent, ThreadSidebarFooter } from './agent/ThreadSidebar'
+import type { SidebarReorderRequest } from '@shared/sidebarOrder'
 import { useAgentWorkspace } from './agent/useAgentWorkspace'
 import { agentActionError } from './agent/agentErrorMessage'
 import { AppSidebar } from './AppSidebar'
@@ -1002,6 +1003,15 @@ export function App() {
     }
   }
 
+  async function reorderSidebar(request: SidebarReorderRequest): Promise<void> {
+    try {
+      setProjects(await window.gale.projects.reorder(request))
+      setAppError(undefined)
+    } catch {
+      setAppError(t('project.failed_reorder'))
+    }
+  }
+
   async function commitSidebarWidth(width: number): Promise<void> {
     if (!config || width === config.settings.sidebarWidth) return
     try {
@@ -1218,6 +1228,7 @@ export function App() {
             selectedProjectId={agent.activeThreadId ? undefined : agent.draftProjectId}
             sidebarCollapsedSections={sidebarCollapsedSections}
             threads={agent.threads}
+            onReorder={(request) => void reorderSidebar(request)}
             onDeleteProject={requestDeleteProject}
             onDeleteProjectThreads={requestDeleteProjectThreads}
             onDeleteThread={requestDeleteThread}

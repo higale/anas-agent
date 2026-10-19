@@ -4,11 +4,11 @@ export const pluginSdk = `(() => {
   const pending = new Map(), controllers = new Map(), listeners = new Set();
   let connect, commands = Promise.resolve();
   const connected = new Promise(resolve => { connect = resolve; });
-  const request = async (method, params) => {
+  const request = async (method, params, timeout = 60000) => {
     await connected;
     const id = String(++sequence);
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { pending.delete(id); reject(new Error('Plugin host request timed out.')); }, 60000);
+      const timer = timeout ? setTimeout(() => { pending.delete(id); reject(new Error('Plugin host request timed out.')); }, timeout) : undefined;
       pending.set(id, { resolve, reject, timer });
       port.postMessage({ id, method, params });
     });
@@ -91,6 +91,8 @@ export const pluginSdk = `(() => {
       return () => { if (action === listener) action = undefined; }; },
     getHome: () => invoke('host.home'), openHome: () => invoke('host.openHome'),
     getLanguageResources: () => invoke('host.languages'),
+    selectDirectory: options => request('invoke', { method: 'host.selectDirectory', params: options }, 0),
+    showItemInFolder: path => invoke('host.showItemInFolder', { path }),
     openExternal: url => invoke('host.openExternal', { url }),
     data: Object.freeze({ get: key => invoke('data.get', { key }), set: (key, value) => invoke('data.set', { key, value }) }),
     settings: Object.freeze({ get: () => invoke('settings.get'), set: (values, revision) => invoke('settings.set', { values, revision }) }),

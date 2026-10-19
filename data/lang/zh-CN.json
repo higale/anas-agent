@@ -225,6 +225,7 @@
       "unexpected": "发生未预期的错误，请查看日志中的详细原因。"
     },
     "failed_update": "更新项目失败。",
+    "failed_reorder": "保存列表顺序失败，请重试。",
     "failed_delete": "删除项目失败。",
     "failed_update_sidebar_sections": "更新侧栏分组状态失败。"
   },
@@ -342,6 +343,7 @@
     "command_all": "显示全部输入历史",
     "command_fav": "显示收藏提示词",
     "pin_thread": "置顶",
+    "pinned_thread": "已置顶对话",
     "unpin_thread": "取消置顶",
     "rename_thread": "重命名",
     "access_mode": "工具权限",

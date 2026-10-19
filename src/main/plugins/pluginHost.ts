@@ -1,5 +1,6 @@
-import { app, ipcMain, nativeTheme, net, protocol } from 'electron'
+import { app, ipcMain, nativeTheme, net, protocol, shell, type BrowserWindow } from 'electron'
 import { pathToFileURL } from 'node:url'
+import { stat } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import { PLUGIN_API_VERSION, PLUGIN_ICON_PATH, PLUGIN_SCHEME, requirePluginJson, requirePluginView, type PluginSummary, type PluginViewOptions, type PluginInstallResult } from '@shared/plugins'
 import { getAppConfigSnapshot } from '../config/appConfig'
@@ -64,7 +65,26 @@ export function registerPluginProtocol(): void {
   })
 }
 
-async function invoke(id: string, method: unknown, params: unknown, caller?: PanelState, assertAvailable = () => {}): Promise<unknown> {
+async function invoke(id: string, method: unknown, params: unknown, caller?: PanelState, assertAvailable = () => {}, parent?: BrowserWindow): Promise<unknown> {
+  if (method === 'host.selectDirectory' || method === 'host.showItemInFolder') {
+    requirePluginJson(params ?? null)
+    if (!caller) throw new Error('Plugin page required.')
+    if (params != null && (typeof params !== 'object' || Array.isArray(params))) throw new Error('Invalid file dialog options.')
+    await runApplicationDataOperation(() => runtime().store.requireEnabled(id))
+    const input = params as { title?: unknown; path?: unknown } | null
+    if (method === 'host.selectDirectory') {
+      if (input?.title !== undefined && (typeof input.title !== 'string' || input.title.length > 200)) throw new Error('Invalid directory dialog title.')
+      // A modal dialog must not retain the application data lock while waiting for the user.
+      const result = await showModalOpenDialog(parent, { ...(typeof input?.title === 'string' ? { title: input.title } : {}), properties: ['openDirectory', 'createDirectory'] })
+      await runApplicationDataOperation(() => runtime().store.requireEnabled(id))
+      if (!views.list().some(view => view.viewId === caller.viewId)) throw new Error('Plugin page closed.')
+      return result.canceled ? null : result.filePaths[0] ?? null
+    }
+    if (typeof input?.path !== 'string' || !isAbsolute(input.path) || input.path.includes('\0') || input.path.length > 32768) throw new Error('Invalid local path.')
+    await stat(input.path)
+    shell.showItemInFolder(input.path)
+    return null
+  }
   if (method === 'host.openHome' || method === 'host.openView') {
     const prepared = await runApplicationDataOperation(async () => {
       requirePluginJson(params ?? null)
@@ -254,6 +274,6 @@ export function registerPluginIpc(): void {
     const caller = { ...page.view, location: page.location }
     if (caller.content.kind !== 'plugin') throw new Error('Plugin page required.')
     const { pluginId } = caller.content
-    return invoke(pluginId, method, params, caller)
+    return invoke(pluginId, method, params, caller, undefined, dialogParentFromEvent(event))
   })
 }
