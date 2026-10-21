@@ -1,8 +1,10 @@
-import { selectedTools } from '../test/toolPackageFixture'
+import { selectedTools, toolPackageFixture } from '../test/toolPackageFixture'
 import { describe, expect, it } from 'vitest'
 import { allCapabilities, pluginSelectionMode, assertResolvedCapabilities, capabilityFeatures, defaultCapabilities, intersectCapabilities, mcpToolAllowed, mcpServerSelection, removeEmptyMissingMcpSelections, setMcpServerMode, setMcpToolSelection, parseCapabilities, parseRunConfiguration, projectSkillSnapshot, resolveSkillSelection, resolvePluginCapabilities, effectiveProjectCapabilities, serializeCapabilities, serializeRunConfiguration, setToolSelection, toolAllowed, validateCapabilities, validateRunConfiguration, type AgentCapabilities } from './agentCapabilities'
 import { parsePluginManifest, type PluginSummary } from './plugins'
 import type { SkillSummary, WorkspaceProject } from './types'
+import { customToolDefaults } from './customTools'
+import { resolveToolSelection } from './toolPackages'
 
 const skill = (id: string, modelAvailable = false, userAvailable = false): SkillSummary => ({ scriptAutoApprove: false,
   id, rootId: 'user', name: id, description: '', modelAvailable, userAvailable, dirPath: `/skills/${id}`, linked: false, relativePath: id, source: 'user', rootName: 'User', shortcutAlias: 'user'
@@ -16,6 +18,41 @@ describe('compression configuration compatibility', () => {
     expect(raw.compression_prompt).toBe('Remember sources: {conversation}')
     expect(parseRunConfiguration(raw).compressionPrompt).toBe(raw.compression_prompt)
     expect(parseRunConfiguration({ ...raw, compression_prompt: '' })).not.toHaveProperty('compressionPrompt')
+  })
+})
+
+describe('package resource capability selections', () => {
+  const skills = ['guide', 'extra'].map(name => ({ ...skill(`subagent:owner:skill:${name}`, true, false), name, source: 'subagent' as const, rootId: 'subagent:owner:skill' }))
+  const tools = ['query', 'extra'].map(name => ({ ...toolPackageFixture({ ...customToolDefaults, id: `subagent:owner:tool:${name}`, name,
+    description: name, inputSchema: { type: 'object' } }), source: 'subagent' as const, rootId: 'subagent:owner:tool' }))
+
+  it('defaults absent package choices on and round trips explicit true and false inside capabilities', () => {
+    const original = parseCapabilities(serializeCapabilities(defaultCapabilities))
+    expect(resolveSkillSelection(original.skills, skills, true, true).entries.every(entry => entry.model)).toBe(true)
+    expect(resolveToolSelection(original.customTools, tools, true).entries).toEqual(tools.map(tool => tool.id))
+    const value = { ...original, skills: { ...original.skills, package: { guide: false, extra: true } },
+      customTools: { ...original.customTools, package: { query: false, extra: true } } }
+    expect(parseCapabilities(serializeCapabilities(value))).toEqual(value)
+    const frozen = parseRunConfiguration(serializeRunConfiguration({ capabilities: value, customTools: [], codingMode: false }))
+    expect(frozen.capabilities).toEqual(value)
+  })
+
+  it.each(['all', 'custom', 'off'] as const)('honors package choices and the %s group mode before resolving runtime entries', mode => {
+    const value = { ...defaultCapabilities, skills: { ...defaultCapabilities.skills, mode: mode === 'all' ? 'default' as const : mode, package: { guide: false } },
+      customTools: { ...defaultCapabilities.customTools, mode, package: { query: false } } }
+    const resolved = { ...value, skills: resolveSkillSelection(value.skills, skills, true, true), customTools: resolveToolSelection(value.customTools, tools, true) }
+    expect(resolved.skills.entries.filter(entry => entry.model).map(entry => entry.id)).toEqual(mode === 'off' ? [] : [skills[1].id])
+    expect(resolved.customTools.entries).toEqual(mode === 'off' ? [] : [tools[1].id])
+    expect(resolved.skills).not.toHaveProperty('package')
+    expect(resolved.customTools).not.toHaveProperty('package')
+    const limit = { ...defaultCapabilities, skills: resolveSkillSelection({ ...defaultCapabilities.skills, mode: 'custom', entries: [] }, skills), customTools: selectedTools() }
+    expect(intersectCapabilities(resolved, limit).skills.entries.every(entry => !entry.model)).toBe(true)
+    expect(intersectCapabilities(resolved, limit).customTools.entries).toEqual([])
+  })
+
+  it.each([null, [], false, { guide: 0 }, { guide: 'false' }])('rejects malformed package switches instead of silently enabling resources: %j', invalid => {
+    expect(() => validateCapabilities({ ...defaultCapabilities, skills: { ...defaultCapabilities.skills, package: invalid } })).toThrow(/package resource/i)
+    expect(() => validateCapabilities({ ...defaultCapabilities, customTools: { ...defaultCapabilities.customTools, package: invalid } })).toThrow(/package resource/i)
   })
 })
 

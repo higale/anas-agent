@@ -202,6 +202,7 @@ describe('data backup restore', () => {
     const service = await loadBackupService(dataRoot, validateRestoredDataDirectory, undefined, snapshotAgentStorage)
     const { AgentStorage } = await import('./agent/agentStorage')
     await cp(join(process.cwd(), 'data/config'), join(dataRoot, 'config'), { recursive: true })
+    await cp(join(process.cwd(), 'data/subagents'), join(dataRoot, 'subagents'), { recursive: true })
     const storage = AgentStorage.open(dataRoot)
     try {
       storage.createThread({ title: 'Keep registered conversation' })
@@ -218,6 +219,7 @@ describe('data backup restore', () => {
     const extracted = await extractBackupArchive(backup.path, destination)
     expect([...extracted.entryNames].some(name => name.includes('unfinished-creation'))).toBe(false)
     await validateRestoredDataDirectory(destination)
+    expect(await readFile(join(destination, 'subagents/_system/general-purpose/PROMPT.md'), 'utf8')).toBe(await readFile(join(dataRoot, 'subagents/_system/general-purpose/PROMPT.md'), 'utf8'))
     const restored = AgentStorage.open(destination)
     try { expect(restored.listThreads().map(thread => thread.title)).toEqual(['Keep registered conversation']) }
     finally { restored.close() }

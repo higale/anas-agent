@@ -257,11 +257,14 @@ it('bounds response size and request time', async () => {
   expect((await pending)?.error).toContain('超时')
 })
 
-it('escapes provider text and puts layout and refresh markup in the plugin HTML', async () => {
+it('uses a fixed title regardless of provider name and puts refresh markup in the plugin HTML', async () => {
   const providerName = '<script>alert("name")</script> & Quota'
   const result = await call({ model: { ...model, providerName } })
   expect(result?.dom.querySelector('script')).toBeNull()
-  expect(result?.dom.textContent).toContain(providerName)
+  expect(result?.title).toBe('MiniMax Token Plan')
+  expect(result?.dom.querySelector('header')?.textContent).toContain('MiniMax Token Plan')
+  expect(result?.dom.textContent).not.toContain(providerName)
+  expect(result?.details).not.toContain(providerName)
   expect(result?.dom.querySelector('[data-action="refresh"] img')?.getAttribute('src')).toBe('assets/refresh.svg')
 })
 
@@ -307,7 +310,7 @@ it('defaults to a compact summary with reset details on hover and switches layou
   expect(compact?.dom.textContent).toContain('5h 80% · 周 99%')
   expect(compact?.dom.querySelector('progress')).toBeNull()
   const details = compact?.dom.querySelector('[tabindex="0"]')?.getAttribute('title')
-  expect(details).toContain('MiniMax CN')
+  expect(details).toContain('MiniMax Token Plan')
   expect(details).toContain('重置时间')
   expect(details).toContain('更新于')
   expect(compact?.dom.querySelector('button')?.getAttribute('data-action')).toBe('refresh')

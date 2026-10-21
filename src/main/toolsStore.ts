@@ -1,3 +1,4 @@
+import { findSubagentPackage, withSubagentPackage } from './subagentPackages'
 import { writeJsonFileAtomic as writeAtomic } from './atomicJson'
 import { createHash, randomUUID } from 'node:crypto'
 import { copyFile, cp, lstat, mkdir, open, readFile, readdir, realpath, rename, rm } from 'node:fs/promises'
@@ -8,6 +9,8 @@ import { listPackageFiles, readPackageFile, savePackageFile, createPackageFile, 
 import { customToolsConfigFileName, getBundledConfigFile, getConfigFile, getDataDir, getToolExamplesDir } from './config/dataDir'
 import { parseCustomTools, serializeCustomTool, validateCustomTool, type CustomToolDefinition, type CustomToolSave } from '@shared/customTools'
 import { normalizeToolSettings, serializeToolSettings, type ToolImportError, type ToolLoadError, type ToolPackage, type ToolRoot, type ToolSnapshot, type ToolSettings } from '@shared/toolPackages'
+import { parseCapabilities } from '@shared/agentCapabilities'
+import { packageResourceEnabled } from '@shared/packageResourceSelection'
 
 let mutationTail: Promise<unknown> = Promise.resolve()
 const activeDirectories = new Map<string, number>()
@@ -211,6 +214,23 @@ async function scan(root: ToolRoot, config: ToolSettings): Promise<ToolPackage[]
   } catch (reason) { root.error = toToolLoadError(reason, root.path, 'read_failed'); return [] }
 }
 
+export async function listSubagentTools(ids: readonly string[]): Promise<ToolPackage[]> {
+  const result: ToolPackage[] = []
+  for (const id of [...new Set(ids)]) {
+    const agent = await findSubagentPackage(id)
+    result.push(...await readSubagentTools(agent))
+  }
+  return result
+}
+
+async function readSubagentTools(agent: import('./config/rawAppConfig').RawSubagentConfig): Promise<ToolPackage[]> {
+  const root: ToolRoot = { id: `subagent:${agent.id}:tool`, source: 'subagent', name: agent.name!, path: join(agent.directory!, 'tools') }
+  const tools = await scan(root, { version: 0, order: [], externalDirectories: [] })
+  if (root.error && root.error.code !== 'path_not_found') throw new Error(root.error.detail ?? root.error.code)
+  const selection = parseCapabilities(agent.capabilities).customTools.package
+  return tools.map(tool => ({ ...tool, enabled: packageResourceEnabled(selection, tool) }))
+}
+
 export function setToolEnabled(id: string, enabled: boolean): Promise<void> {
   return mutate(async config => {
     if (typeof id !== 'string' || typeof enabled !== 'boolean') throw new Error('Invalid tool availability.')
@@ -245,7 +265,16 @@ export async function withToolPackageDirectory<T>(definition: CustomToolDefiniti
   const directory = await serialize(async () => {
     let current = definition.directory
     // Catalog IDs resolve current global sources; project and standalone definitions use their supplied directory.
-    if (definition.id.includes(':') && !definition.id.startsWith('project-')) {
+    const agentId = /^subagent:([^:]+):tool:/.exec(definition.id)?.[1]
+    if (agentId) {
+      return withSubagentPackage(agentId, async agent => {
+        const tool = (await readSubagentTools(agent)).find(tool => tool.id === definition.id && tool.enabled !== false)
+        if (!tool?.definition?.directory) throw new Error(`Tool package is unavailable: ${definition.id}`)
+        const directory = await realpath(tool.definition.directory)
+        activeDirectories.set(directory, (activeDirectories.get(directory) ?? 0) + 1)
+        return directory
+      })
+    } else if (definition.id.includes(':') && !definition.id.startsWith('project-')) {
       current = (await readToolSnapshot()).tools.find(tool => tool.id === definition.id && tool.enabled !== false)?.definition?.directory
     }
     if (!current) throw new Error(`Tool package is unavailable: ${definition.id}`)
@@ -258,6 +287,13 @@ export async function withToolPackageDirectory<T>(definition: CustomToolDefiniti
     const count = activeDirectories.get(directory)! - 1
     if (count) activeDirectories.set(directory, count)
     else activeDirectories.delete(directory)
+  }
+}
+
+export function assertToolDirectoryTreeIdle(directory: string): void {
+  for (const active of activeDirectories.keys()) {
+    const path = relative(directory, active)
+    if (!path || path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path)) throw new Error('Agent tools are running; try again after they finish.')
   }
 }
 

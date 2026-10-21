@@ -51,7 +51,8 @@ it('refreshes the whole tree, including documentation and new categories, while 
   await writeFile(join(state.bundled, 'examples/future/guide.txt'), 'Future resource')
   await initialize()
   for (const file of ['README.md', 'plugins/README.md', 'plugins/README.en.md', 'future/guide.txt',
-    'skills/weather/SKILL.md', 'tools/read_text_raw/TOOL.json', 'plugins/notepad.zip']) {
+    'skills/weather/SKILL.md', 'tools/read_text_raw/TOOL.json', 'plugins/notepad.zip', 'subagents/README.md', 'subagents/README.en.md',
+    'subagents/web-researcher/AGENT.json', 'subagents/web-researcher/PROMPT.md', 'subagents/project-analyst/AGENT.json', 'subagents/project-analyst/PROMPT.md']) {
     expect(await readFile(join(examples, file))).toEqual(await readFile(join(state.bundled, 'examples', file)))
   }
   await expect(lstat(join(examples, 'retired'))).rejects.toMatchObject({ code: 'ENOENT' })
@@ -59,13 +60,13 @@ it('refreshes the whole tree, including documentation and new categories, while 
   // Reinitialization after restoring an older backup refreshes every category.
   await rm(examples, { recursive: true })
   await initialize()
-  expect(await readdir(examples)).toEqual(expect.arrayContaining(['skills', 'tools', 'plugins', 'README.md']))
+  expect(await readdir(examples)).toEqual(expect.arrayContaining(['skills', 'tools', 'plugins', 'subagents', 'README.md']))
   expect(await readdir(join(examples, 'plugins'))).toEqual(expect.arrayContaining(['notepad.zip', 'backend-demo.zip', 'text-tools.zip', 'writing-helper.zip']))
   await expect(lstat(join(examples, 'plugins/notepad'))).rejects.toMatchObject({ code: 'ENOENT' })
   expect(await readdir(join(state.root, 'data/tmp'))).toEqual([])
 })
 
-it.each(['skills/weather/SKILL.md', 'tools/read_text_raw/TOOL.json', 'plugins/notepad.zip'])(
+it.each(['skills/weather/SKILL.md', 'tools/read_text_raw/TOOL.json', 'plugins/notepad.zip', 'subagents/web-researcher/AGENT.json'])(
   'retains every current category if %s is invalid, and retries after correction', async file => {
     await initialize()
     const published = join(state.root, 'data/examples')

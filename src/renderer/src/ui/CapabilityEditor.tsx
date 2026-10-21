@@ -3,7 +3,9 @@ import { isPluginSkillId } from '@shared/pluginTools'
 import { PluginCapabilitySelection } from './plugins/PluginCapabilitySelection'
 import { setAllCustomTools, withToolShadows, resolveToolSelection } from '@shared/toolPackages'
 import { SubagentSelectionEditor, type SubagentSelectionProps } from './SubagentSelectionEditor'
-import { type ReactNode } from 'react'
+import { SubagentPackagePanel } from './subagent/SubagentPackagePanel'
+import { packageResourceKey } from '@shared/packageResourceSelection'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Folder, Plug, Trash2 } from 'lucide-react'
 import { builtinToolCatalog, runtimeToolSelectionId } from '@shared/toolRegistry'
@@ -32,14 +34,36 @@ interface Props {
   runtimeToolStatus?: RuntimeToolStatus
   subagents?: SubagentSelectionProps['definitions']
   subagent?: boolean
+  subagentId?: string
+  restrictSubagents?: boolean
   disabled?: boolean
   toolbarEnd?: ReactNode
+  children?: ReactNode
   onChange(value: AgentCapabilities): void
   onEnableAll?(capabilities: AgentCapabilities): void
 }
 
-export function CapabilityEditor({ customTools = [], value: storedValue, skills, mcpStatus, mcpServers = [], runtimeToolStatus, subagents = [], subagent = false, disabled = false, toolbarEnd, onChange: onValueChange, onEnableAll }: Props) {
+export function CapabilityEditor({ customTools: globalTools = [], value: storedValue, skills: globalSkills, mcpStatus, mcpServers = [], runtimeToolStatus, subagents = [], subagent = false, subagentId, restrictSubagents = false, disabled = false, toolbarEnd, children, onChange: onValueChange, onEnableAll }: Props) {
   const { t } = useTranslation()
+  const [packageCatalog, setPackageCatalog] = useState<{ key: string; resources?: Awaited<ReturnType<typeof window.gale.config.subagentResources>>; error?: string }>()
+  const packageIds = subagent ? (subagentId ? `agent:${subagentId}` : '')
+    : restrictSubagents ? subagents.flatMap(a => a.id ? [a.id] : []).join(',') : ''
+  useEffect(() => {
+    let active = true
+    if (!packageIds) return
+    window.gale.config.subagentResources(subagent ? subagentId : undefined)
+      .then(resources => { if (active) setPackageCatalog({ key: packageIds, resources }) })
+      .catch(reason => { if (active) setPackageCatalog({ key: packageIds, error: String(reason) }) })
+    return () => { active = false }
+  }, [packageIds, subagent, subagentId])
+  const catalog = packageIds && packageCatalog?.key === packageIds ? packageCatalog : undefined
+  const packageError = catalog?.error
+  const ownResources = subagent ? catalog?.resources : undefined
+  const resources = subagent ? undefined : catalog?.resources
+  const packageSelectionPending = Boolean(subagent && subagentId && !ownResources)
+  const customTools = [...globalTools, ...(resources?.tools ?? []).map(tool => ({ ...tool, rootName: t('settings.subagent_resource_source', { name: tool.rootName }) }))]
+  const skills = resources ? { ...globalSkills, scriptAutoApprove: globalSkills?.scriptAutoApprove ?? false,
+    roots: [...(globalSkills?.roots ?? []), ...resources.skills.roots.map(root => ({ ...root, name: t('settings.subagent_resource_source', { name: root.name }) }))], skills: [...(globalSkills?.skills ?? []), ...resources.skills.skills.map(skill => ({ ...skill, rootName: t('settings.subagent_resource_source', { name: skill.rootName }) }))] } : globalSkills
   const { plugins, error: pluginsError } = usePlugins()
   const ordinaryTools = builtinToolCatalog.filter((tool) => tool.feature !== 'backgroundTools')
   const servers = new Map(mcpServers.map((server) => [server.id, server]))
@@ -97,7 +121,7 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
     ...(missingTools.length ? [{ id: 'missing-tools', name: t('capabilities.other_tools'), tools: missingTools.map((id) => ({ id, name: id, unavailable: true })) }] : [])
   ]
   function renderCapabilityTool(group: typeof groups[number], tool: typeof groups[number]['tools'][number]) {
-    return <CheckboxField className="ui-checkbox-field-inline" key={tool.id} disabled={group.id === 'customTools' && tool.missing && !value.customTools.entries.includes(tool.id)} checked={group.id === 'customTools' ? value.customTools.entries.includes(tool.id) : toolSelected(value, tool.id)} aria-label={tool.ariaLabel ?? tool.name} label={<span className="ui-row"><code className="ui-tool-name">{tool.name}</code>{tool.unavailable && <span className="ui-badge">{t('capabilities.inactive')}</span>}{tool.shadowedBy && <span className="ui-badge" data-tooltip={t('custom_tools.shadowed_by', { source: tool.shadowedBy })}>{t('custom_tools.shadowed')}</span>}{tool.requiresBackground && <span className="ui-badge">{t('custom_tools.requires_background')}</span>}</span>}
+    return <CheckboxField key={tool.id} disabled={group.id === 'customTools' && tool.missing && !value.customTools.entries.includes(tool.id)} checked={group.id === 'customTools' ? value.customTools.entries.includes(tool.id) : toolSelected(value, tool.id)} aria-label={tool.ariaLabel ?? tool.name} label={<span className="ui-row"><code className="ui-tool-name">{tool.name}</code>{tool.unavailable && <span className="ui-badge">{t('capabilities.inactive')}</span>}{tool.shadowedBy && <span className="ui-badge" data-tooltip={t('custom_tools.shadowed_by', { source: tool.shadowedBy })}>{t('custom_tools.shadowed')}</span>}{tool.requiresBackground && <span className="ui-badge">{t('custom_tools.requires_background')}</span>}</span>}
                     onChange={(checked) => onChange(selectGroupTools(group, [tool.id], checked))} />
   }
   const isDirectToggle = (group: typeof groups[number]) => (group.tools.length === 1 && group.id !== 'missing-tools' && group.id !== 'customTools') || (!group.tools.length && Boolean(group.flag))
@@ -134,9 +158,7 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
     const selected = selectedSkills.get(skill.id)
     const modelUnavailable = skill.unavailable || (skill.source !== 'project' && skill.modelAvailable === false)
     const shortcutUnavailable = skill.unavailable || (skill.source !== 'project' && skill.userAvailable === false)
-    return <div className="ui-capability-skill" key={skill.id}>
-      <span className="ui-field-stack"><span className="ui-row">
-        <code className="ui-truncate" data-tooltip={skill.description}>{skill.name}</code>
+    const status = <>
         {(skill.unavailable || missing.length > 0) && <span className="ui-badge">{t('capabilities.inactive')}</span>}
         {missing.length > 0 && <SettingsStatusIndicator label={t('plugins.missing_tools')} hint={t('plugins.missing_tools_detail', { tools: missing.join(', ') })} />}
         {skill.missing && <button type="button" className="ui-icon-button"
@@ -145,15 +167,27 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
           onClick={() => onChange({ ...value, skills: { ...value.skills, entries: value.skills.entries.filter((entry) => entry.id !== skill.id) } })}>
           <Trash2 size={UI_ICON_SIZE_SMALL} />
         </button>}
-      </span><SkillAvailabilityNotice skill={skill} selected={selected} subagent={subagent} /></span>
-      {subagent
-        ? <CheckboxField className="ui-checkbox-field-inline" checked={selected?.model ?? false} disabled={modelUnavailable && !selected?.model} label="" aria-label={`${skill.name} ${t('capabilities.model')}`} onChange={(checked) => setSkill(skill.id, 'model', checked)} />
-        : <SegmentedMultiSelect<'shortcut' | 'model'> ariaLabel={skill.name}
+    </>
+    if (subagent || skill.source === 'subagent') return <div className="ui-field-stack" key={skill.id}>
+      <div className="ui-capability-skill">
+        <CheckboxField checked={selected?.model ?? false} disabled={modelUnavailable && !selected?.model}
+          label={skill.name} tooltip={skill.description} aria-label={`${skill.name} ${t('capabilities.model')}`}
+          onChange={checked => setSkill(skill.id, 'model', checked)} />
+        {status}
+      </div>
+      <SkillAvailabilityNotice skill={skill} selected={selected} subagent />
+    </div>
+    return <div className="ui-capability-skill" key={skill.id}>
+      <span className="ui-field-stack"><span className="ui-row">
+        <code className="ui-truncate" data-tooltip={skill.description}>{skill.name}</code>
+        {status}
+      </span><SkillAvailabilityNotice skill={skill} selected={selected} /></span>
+      <SegmentedMultiSelect<'shortcut' | 'model'> ariaLabel={skill.name}
           options={[
             { value: 'shortcut', label: t('capabilities.shortcut'), ariaLabel: `${skill.name} ${t('capabilities.shortcut')}`, checked: selected?.shortcut ?? false, disabled: shortcutUnavailable && !selected?.shortcut },
             { value: 'model', label: t('capabilities.model'), ariaLabel: `${skill.name} ${t('capabilities.model')}`, checked: selected?.model ?? false, disabled: modelUnavailable && !selected?.model }
           ]}
-          onChange={(key, checked) => setSkill(skill.id, key, checked)} />}
+          onChange={(key, checked) => setSkill(skill.id, key, checked)} />
     </div>
   }
   function setAll(checked: boolean) {
@@ -169,6 +203,12 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
       skills: { ...value.skills, mode: checked ? 'default' : 'off' },
       subagents: { ...value.subagents, mode: checked ? 'default' : 'off' }
     }
+    if (ownResources) {
+      for (const [group, items] of [['skills', ownResources.skills.skills], ['customTools', ownResources.tools]] as const) {
+        const keys = new Set([...Object.keys(value[group].package ?? {}), ...items.map(packageResourceKey)])
+        if (keys.size) next[group].package = Object.fromEntries([...keys].map(key => [key, checked]))
+      }
+    }
     if (checked && onEnableAll) onEnableAll(next)
     else onChange(next)
   }
@@ -178,10 +218,10 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
         <div className="ui-toolbar ui-toolbar-between">
           {subagent && <strong className="ui-section-title">{t('settings.capabilities')}</strong>}
           <div className="ui-toolbar">
-            <button type="button" className="ui-button ui-button-compact" onClick={() => setAll(true)}>{t('settings.capabilities_enable_all')}</button>
-            <button type="button" className="ui-button ui-button-compact" onClick={() => setAll(false)}>{t('settings.capabilities_disable_all')}</button>
+            <button type="button" className="ui-button ui-button-compact" disabled={packageSelectionPending} onClick={() => setAll(true)}>{t('settings.capabilities_enable_all')}</button>
+            <button type="button" className="ui-button ui-button-compact" disabled={packageSelectionPending} onClick={() => setAll(false)}>{t('settings.capabilities_disable_all')}</button>
           </div>
-          {toolbarEnd}
+          {packageError && <p role="alert" className="ui-status-danger">{packageError}</p>}{toolbarEnd}
         </div>
         <div className="ui-grid-auto">
           {orderedGroups.map((group) => {
@@ -195,11 +235,11 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
               mode={value.customTools.mode ?? 'custom'} disabled={disabled}
               onChange={mode => onChange({ ...value, customTools: { ...value.customTools, mode } })}>
               <div className="ui-capability-list ui-capability-tools">
-                {subagent && <CheckboxField className="ui-checkbox-field-inline" checked={value.customTools.project} label={t('custom_tools.project_tools')}
+                {subagent && <CheckboxField checked={value.customTools.project} label={t('custom_tools.project_tools')}
                   onChange={project => onChange({ ...value, customTools: { ...value.customTools, project } })} />}
                 {[...new Set(group.tools.map(tool => tool.sourceId ?? 'missing'))].map(id => <div className="ui-form-section" key={id}>
                   <strong>{group.tools.find(tool => (tool.sourceId ?? 'missing') === id)?.sourceName ?? t('capabilities.other_tools')}</strong>
-                  <div className="ui-grid-auto">{group.tools.filter(tool => (tool.sourceId ?? 'missing') === id).map(tool => renderCapabilityTool(group, tool))}</div>
+                  <div className="ui-grid-auto ui-resource-grid">{group.tools.filter(tool => (tool.sourceId ?? 'missing') === id).map(tool => renderCapabilityTool(group, tool))}</div>
                 </div>)}
                 {!group.tools.length && <small>{t('custom_tools.empty')}</small>}
               </div>
@@ -213,8 +253,8 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
                 aria-label={group.name} label="" disabled={total === 0} onChange={toggle} />
               <details>
                 <summary>{group.name} <small>{count}/{total}</small></summary>
-                <fieldset className={`ui-capability-list ui-capability-tools${group.id === 'customTools' ? '' : ' ui-grid-auto'}`}>
-                  {group.flag && <CheckboxField className="ui-checkbox-field-inline" checked={value[group.flag]}
+                <fieldset className="ui-capability-list ui-capability-tools ui-grid-auto ui-resource-grid">
+                  {group.flag && <CheckboxField checked={value[group.flag]}
                     label={t('settings.capability_memory_recall')} onChange={(checked) => onChange({ ...value, [group.flag!]: checked })} />}
                   {group.tools.map(tool => renderCapabilityTool(group, tool))}
                 </fieldset>
@@ -229,9 +269,9 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
             mode={group.selection.mode === 'selected' ? 'custom' : group.selection.mode} disabled={disabled}
             reason={group.unavailable ? t('capabilities.inactive') : undefined}
             onChange={mode => onChange(setMcpServerMode(value, group.id, mode === 'custom' ? 'selected' : mode))}>
-            <div className="ui-capability-list ui-capability-tools ui-grid-auto">
+            <div className="ui-capability-list ui-capability-tools ui-grid-auto ui-resource-grid">
               {!group.tools.length && <small>{t('capabilities.no_known_mcp_tools')}</small>}
-              {group.tools.map(tool => <CheckboxField className="ui-checkbox-field-inline" key={tool.name} aria-label={`${group.name} ${tool.name}`}
+              {group.tools.map(tool => <CheckboxField key={tool.name} aria-label={`${group.name} ${tool.name}`}
                 label={<span className="ui-row"><code className="ui-tool-name">{tool.name}</code>{tool.unavailable && <span className="ui-badge">{t('capabilities.inactive')}</span>}</span>}
                 disabled={disabled || (!tool.known && !group.selection.tools.includes(tool.name))} checked={group.selection.tools.includes(tool.name)}
                 onChange={checked => onChange(setMcpToolSelection(value, group.id, tool.name, checked))} />)}
@@ -250,17 +290,13 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
             {value.skills.mode === 'custom' && <>
               <div className="ui-capability-list">
                 {skillSourceGroups((skills?.roots ?? []).filter(root => root.kind !== 'plugin'), t).map((group) => {
-                  if (subagent && group.id === 'project') return <div className="ui-capability-skill" key={group.id}>
-                    <span className="ui-row"><Folder size={UI_ICON_SIZE_MEDIUM} aria-hidden="true" /><span>{t('capabilities.project_skills')}</span></span>
-                    <CheckboxField
-                      className="ui-checkbox-field-inline"
+                  if (subagent && group.id === 'project') return <CheckboxField key={group.id}
                       checked={value.skills.project}
-                      label=""
+                      label={<span className="ui-row"><Folder size={UI_ICON_SIZE_MEDIUM} aria-hidden="true" /><span>{t('capabilities.project_skills')}</span></span>}
                       aria-label={t('capabilities.project_skills')}
                       tooltip={t('capabilities.project_skills_hint')}
                       onChange={(project) => onChange({ ...value, skills: { ...value.skills, project } })}
                     />
-                  </div>
                   const rootIds = new Set(group.roots.map((root) => root.id))
                   const items = (skills?.skills ?? []).filter((skill) => rootIds.has(skill.rootId))
                   if (!items.length) return null
@@ -271,14 +307,16 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
                       if (!rootItems.length) return null
                       return <div className="ui-form-section" key={root.id}>
                         {group.roots.length > 1 && <strong className="ui-row"><Folder size={UI_ICON_SIZE_MEDIUM} aria-hidden="true" /><span>{root.name}</span></strong>}
-                        {rootItems.map((skill) => renderSkill({ ...skill, unavailable: Boolean(skill.loadError) }))}
+                        <div className={subagent || root.kind === 'subagent' ? 'ui-grid-auto ui-resource-grid' : 'ui-form-section'}>
+                          {rootItems.map((skill) => renderSkill({ ...skill, unavailable: Boolean(skill.loadError) }))}
+                        </div>
                       </div>
                     })}
                   </div>
                 })}
                 {missingSkills.length > 0 && <div className="ui-form-section">
                   <strong>{t('capabilities.other_skills')}</strong>
-                  {missingSkills.map(renderSkill)}
+                  <div className={subagent ? 'ui-grid-auto ui-resource-grid' : 'ui-form-section'}>{missingSkills.map(renderSkill)}</div>
                 </div>}
                 {!skills && <small>{t('capabilities.loading')}</small>}
               </div>
@@ -286,6 +324,8 @@ export function CapabilityEditor({ customTools = [], value: storedValue, skills,
           </div>
           </CapabilitySection>
         </div>
+        {ownResources && <SubagentPackagePanel resources={ownResources} value={value} onChange={onChange} />}
+        {children}
       </div>
     </fieldset>
   )

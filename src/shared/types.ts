@@ -225,6 +225,9 @@ export interface SubagentDefaults {
 }
 
 export interface SubagentConfig extends ProjectModelSelection {
+  /** Package identity; assigned when a new draft is saved. */
+  id?: string
+  directory?: string
   index: number
   name: string
   /** Included by default; custom selections may grant access independently. */
@@ -237,6 +240,7 @@ export interface SubagentConfig extends ProjectModelSelection {
 }
 
 export interface SubagentConfigSave extends ProjectModelSelection {
+  id?: string
   index?: number
   name: string
   enabled: boolean
@@ -681,7 +685,7 @@ export interface MemorySaveRequest {
   importance: number
 }
 
-export type SkillRootKind = 'system' | 'user' | 'project' | 'external' | 'plugin'
+export type SkillRootKind = 'system' | 'user' | 'project' | 'external' | 'plugin' | 'subagent'
 
 export const SKILL_ROOT_DISPLAY_NAME_MAX_LENGTH = 80
 export const SKILL_SHORTCUT_ALIAS_MAX_LENGTH = 64
@@ -823,10 +827,17 @@ export interface GaleApi {
     saveCustomTool(tool: import('./customTools').CustomToolSave): Promise<AppConfigSnapshot>
     deleteCustomTool(id: string): Promise<AppConfigSnapshot>
     moveCustomTool(id: string, direction: -1 | 1): Promise<AppConfigSnapshot>
+    listSubagentRoots(): Promise<import('./subagentPackages').SubagentRootSummary[]>
+    addSubagentDirectory(): Promise<boolean>
+    updateSubagentDirectory(id: string, update: import('./subagentPackages').SubagentDirectoryUpdate): Promise<void>
+    importSubagentPackage(): Promise<AppConfigSnapshot | null>
+    subagentResources(id?: string): Promise<{ skills: SkillSnapshot; tools: import('./toolPackages').ToolPackage[] }>
+    listSubagentFiles(id: string, path?: string): Promise<import('./packageFiles').PackageFileNode[]>
+    readSubagentFile(id: string, path: string): Promise<import('./packageFiles').PackageFilePreview>
+    saveSubagentFile(id: string, path: string, update: import('./packageFiles').PackageFileUpdate): Promise<import('./packageFiles').PackageFilePreview>
     saveSubagent(subagent: SubagentConfigSave): Promise<AppConfigSnapshot>
-    deleteSubagent(index: number): Promise<AppConfigSnapshot>
-    moveSubagent(index: number, direction: -1 | 1): Promise<AppConfigSnapshot>
-    restoreSubagent(index: number): Promise<AppConfigSnapshot>
+    deleteSubagent(index: number | string): Promise<AppConfigSnapshot>
+    moveSubagent(index: number | string, direction: -1 | 1): Promise<AppConfigSnapshot>
     getCachedModels(request: ModelListRequest): Promise<ModelListResponse | null>
     fetchModels(request: ModelListRequest): Promise<ModelListResponse>
     updateSettings(settings: AppSettingsUpdate): Promise<AppConfigSnapshot>

@@ -1,3 +1,4 @@
+import { normalizeSubagentPackageSettings } from '@shared/subagentPackages'
 import { compressionPromptError } from '@shared/summaryPrompt'
 import { requireDataVersion } from '@shared/dataVersion'
 import { UI_FONT_SIZE_MAX, UI_FONT_SIZE_MIN } from '@shared/uiPreferences'
@@ -31,7 +32,11 @@ type RecordValue = Record<string, unknown>
 const isObject = (value: unknown): value is RecordValue => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 const projectCapabilityDefaults = serializeCapabilities(parseCapabilities(capabilityDefaults))
 const templates: Record<string, unknown> = {
-  'settings.json': settingsDefaults, 'models.json': modelDefaults, 'subagents.json': subagentDefaults,
+  'settings.json': settingsDefaults,
+  // Provider/model defaults belong to the bundled creation template, not the
+  // user document written by writeRawModelsConfig.
+  'models.json': { version: modelDefaults.version, providers: modelDefaults.providers },
+  'subagents.json': { version: subagentDefaults.version, order: subagentDefaults.order, disabled: [], external_directories: [] },
   'mcp_servers.json': mcpDefaults, 'skills.json': skillsDefaults, 'tools.json': toolsDefaults
 }
 
@@ -121,18 +126,18 @@ class Repair {
 }
 
 function validateConfig(file: string, value: RecordValue): void {
-  requireDataVersion(value, 0, file)
+  requireDataVersion(value, file === 'subagents.json' ? 1 : 0, file)
+  if (file === 'subagents.json') { normalizeSubagentPackageSettings(value); return }
   if (file === 'skills.json') { normalizeSkillsConfig(value); return }
   if (file === 'tools.json') { normalizeToolSettings(value); return }
   const raw: RawAppConfig = {
-    settings: structuredClone(settingsDefaults) as RawAppConfig['settings'], providers: [], subagents: structuredClone(subagentDefaults.subagents), mcp_servers: []
+    settings: structuredClone(settingsDefaults) as RawAppConfig['settings'], providers: [], subagents: [], mcp_servers: []
   }
   if (file === 'settings.json') {
     // Model references are checked against the actual models separately, not
     // cleared merely because this file is being checked in isolation.
     raw.settings = { ...value, default_model_id: null }
   } else if (file === 'models.json') raw.providers = value.providers as RawAppConfig['providers']
-  else if (file === 'subagents.json') raw.subagents = value.subagents as RawAppConfig['subagents']
   else raw.mcp_servers = value.mcp_servers as unknown[]
   normalizeAppConfigSnapshot(raw)
 }
@@ -142,8 +147,9 @@ export function repairDocument(file: string, input: unknown): { value: RecordVal
   const value = structuredClone(input)
   const repair = new Repair(file)
   const unresolved: string[] = []
-  if (value.version !== 0) {
-    repair.replace(value, 'version', 0, 'version')
+  const version = file === 'subagents.json' ? 1 : 0
+  if (value.version !== version) {
+    repair.replace(value, 'version', version, 'version')
   }
   if (file === 'input_history.json') {
     repair.number(value, 'maxHistory', 1, Number.MAX_SAFE_INTEGER, 100, 'inputHistory')
@@ -180,7 +186,7 @@ export function repairDocument(file: string, input: unknown): { value: RecordVal
     parseProjectStore(value)
   } else {
     if (!templates[file]) throw new Error('Unsupported repair file.')
-    repair.fill(value, templates[file] as RecordValue)
+    if (file !== 'subagents.json') repair.fill(value, templates[file] as RecordValue)
     if (file === 'settings.json') {
       for (const [key, choices] of Object.entries({ theme: ['system', 'light', 'dark'], chat_content_width: ['narrow', 'wide', 'adaptive'],
         diff_view_mode: ['inline', 'side_by_side'], attachment_text_overflow: ['truncate', 'error'], log_level: ['trace', 'debug', 'info', 'warn', 'error', 'off'] })) {
@@ -192,12 +198,8 @@ export function repairDocument(file: string, input: unknown): { value: RecordVal
       }
       repair.number(value.speech_reply as RecordValue, 'speed', 0.25, 4, settingsDefaults.speech_reply.speed, 'speech_reply', false)
     } else if (file === 'subagents.json') {
-      for (const [index, agent] of repair.list(value.subagents, 'subagents').entries()) {
-        const preset = subagentDefaults.subagents.find((item) => item.preset === agent.preset)
-        const path = `subagents[${index}]`
-        repair.fill(agent, preset ?? subagentDefaults.subagent_defaults, path)
-        repair.capabilities(agent, (preset ?? subagentDefaults.subagent_defaults).capabilities, path)
-      }
+      if ('subagents' in value) throw new Error('Subagent array configuration is no longer supported. Create or import Agent packages; the original configuration is retained.')
+      repair.validated(value, templates[file] as RecordValue, normalizeSubagentPackageSettings)
     } else if (file === 'models.json') {
       for (const [index, provider] of repair.list(value.providers, 'providers').entries()) {
         const path = `providers[${index}]`
@@ -302,7 +304,7 @@ export async function inspectRecoveryRepair(dataDir: string): Promise<RecoveryRe
       normalizeAppConfigSnapshot({
         settings: documents.get('settings.json') as RawAppConfig['settings'],
         providers: documents.get('models.json')!.providers as RawAppConfig['providers'],
-        subagents: documents.get('subagents.json')!.subagents as RawAppConfig['subagents'],
+        subagents: [],
         mcp_servers: documents.get('mcp_servers.json')!.mcp_servers as unknown[]
       })
     } catch (error) {

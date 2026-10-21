@@ -61,15 +61,14 @@ const snapshot: SkillSnapshot = {
   }]
 }
 
-function renderSkills(skills = snapshot, onMoveDirectory = vi.fn()): void {
+function renderSkills(skills = snapshot, onMoveDirectory = vi.fn(), onRemoveDirectory = vi.fn()): void {
   render(
     <SkillsSettings
       sectionClass="settings-section"
       skills={skills}
-      onAddDirectory={vi.fn()}
       onMoveDirectory={onMoveDirectory}
       onRefresh={vi.fn()}
-      onRemoveDirectory={vi.fn()}
+      onRemoveDirectory={onRemoveDirectory}
       onUpdateDirectory={vi.fn()}
       onUpdateScriptApproval={updateScriptApproval}
       onUpdateAvailability={updateAvailability}
@@ -105,7 +104,7 @@ describe('Skills settings tree', () => {
     const pending = new Promise<void>(resolve => { finish = resolve })
     const update = vi.fn(() => pending)
     render(<SkillsSettings sectionClass="settings-section" skills={{ ...snapshot, roots: [...snapshot.roots, root] }}
-      onAddDirectory={vi.fn()} onMoveDirectory={vi.fn()} onRefresh={vi.fn()}
+      onMoveDirectory={vi.fn()} onRefresh={vi.fn()}
       onRemoveDirectory={vi.fn()} onUpdateDirectory={update} onUpdateScriptApproval={vi.fn()} onUpdateAvailability={vi.fn()} />)
     await userEvent.click(screen.getByRole('button', { name: /^Shared/ }))
     expect(screen.queryByRole('button', { name: 'common.save' })).not.toBeInTheDocument()
@@ -192,7 +191,7 @@ describe('Skills settings tree', () => {
   })
 
   it('shows an empty group and updates its list when the catalog changes', async () => {
-    const props = { sectionClass: 'settings-section', skills: snapshot, onAddDirectory: vi.fn(),
+    const props = { sectionClass: 'settings-section', skills: snapshot,
       onMoveDirectory: vi.fn(), onRefresh: vi.fn(), onUpdateDirectory: vi.fn(), onRemoveDirectory: vi.fn(),
       onUpdateScriptApproval: vi.fn(), onUpdateAvailability: vi.fn() }
     const view = render(<SkillsSettings {...props} />)
@@ -209,10 +208,11 @@ describe('Skills settings tree', () => {
   })
   it('moves external groups from the sidebar with selection and boundary checks', async () => {
     const moveDirectory = vi.fn()
+    const removeDirectory = vi.fn()
     renderSkills({ ...snapshot, roots: [...snapshot.roots,
       { id: 'first', kind: 'external', name: 'First', shortcutAlias: 'first', path: '/first', removable: true, available: true },
       { id: 'last', kind: 'external', name: 'Last', shortcutAlias: 'last', path: '/last', removable: true, available: true }
-    ] }, moveDirectory)
+    ] }, moveDirectory, removeDirectory)
     const sidebar = within(document.querySelector('.ui-list-pane') as HTMLElement)
     const up = sidebar.getByRole('button', { name: 'common.move_up' })
     const down = sidebar.getByRole('button', { name: 'common.move_down' })
@@ -225,11 +225,16 @@ describe('Skills settings tree', () => {
     expect(up).toBeEnabled(); expect(down).toBeDisabled()
     await userEvent.click(up)
     expect(moveDirectory).toHaveBeenLastCalledWith('last', -1)
+    await userEvent.click(sidebar.getByRole('button', { name: 'settings.remove_skill_directory' }))
+    expect(removeDirectory).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'last' }))
     expect(within(document.querySelector('.settings-skill-viewer') as HTMLElement).queryByRole('button', { name: 'common.move_up' })).not.toBeInTheDocument()
+    expect(within(document.querySelector('.settings-skill-viewer') as HTMLElement).queryByRole('button', { name: 'settings.remove_skill_directory' })).not.toBeInTheDocument()
     await openGroup(sidebar.getByRole('button', { name: /^settings.skill_group_system/ }))
     expect(up).toBeDisabled(); expect(down).toBeDisabled()
+    expect(sidebar.getByRole('button', { name: 'common.delete' })).toBeDisabled()
     await userEvent.click(sidebar.getByRole('button', { name: /^config/ }))
     expect(up).toBeDisabled(); expect(down).toBeDisabled()
+    expect(sidebar.getByRole('button', { name: 'common.delete' })).toBeDisabled()
   })
 
   it.each([true, false])('opens source titles only when the directory is available (%s)', async available => {
@@ -335,7 +340,7 @@ describe('Skills settings tree', () => {
     const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView')
     let resolvePreview!: (value: unknown) => void
     readFile.mockReturnValue(new Promise(resolve => { resolvePreview = resolve }))
-    const props = { sectionClass: 'settings-section', skills: snapshot, onAddDirectory: vi.fn(),
+    const props = { sectionClass: 'settings-section', skills: snapshot,
       onMoveDirectory: vi.fn(), onRefresh: vi.fn(), onUpdateDirectory: vi.fn(), onRemoveDirectory: vi.fn(),
       onUpdateScriptApproval: vi.fn(), onUpdateAvailability: vi.fn(), onSkillRevealed }
     const view = render(<SkillsSettings {...props} />)
@@ -363,7 +368,7 @@ describe('Skills settings tree', () => {
 
   it('waits for the imported skill to arrive in the catalog before revealing it', () => {
     const onSkillRevealed = vi.fn()
-    const props = { sectionClass: 'settings-section', skills: snapshot, onAddDirectory: vi.fn(),
+    const props = { sectionClass: 'settings-section', skills: snapshot,
       onMoveDirectory: vi.fn(), onRefresh: vi.fn(), onUpdateDirectory: vi.fn(), onRemoveDirectory: vi.fn(),
       onUpdateScriptApproval: vi.fn(), onUpdateAvailability: vi.fn(), revealSkillId: 'user:new', onSkillRevealed }
     const view = render(<SkillsSettings {...props} />)
@@ -448,7 +453,7 @@ describe('Skills settings tree', () => {
 
 it('preserves the open file when the same catalog refreshes its metadata', async () => {
   readFile.mockResolvedValue({skillId:'system:config',name:'SKILL.md',path:'/skills/system/config/SKILL.md',relativePath:'SKILL.md',resolvedPath:'/skills/system/config/SKILL.md',kind:'text',content:'Keep this preview',size:17})
-  const props = {sectionClass:'settings-section',skills:snapshot,onAddDirectory:vi.fn(),onMoveDirectory:vi.fn(),onRefresh:vi.fn(),onUpdateDirectory:vi.fn(),onRemoveDirectory:vi.fn(),onUpdateScriptApproval:vi.fn(),onUpdateAvailability:vi.fn()}
+  const props = {sectionClass:'settings-section',skills:snapshot,onMoveDirectory:vi.fn(),onRefresh:vi.fn(),onUpdateDirectory:vi.fn(),onRemoveDirectory:vi.fn(),onUpdateScriptApproval:vi.fn(),onUpdateAvailability:vi.fn()}
   const view=render(<SkillsSettings {...props} />)
   await openGroup(screen.getByRole('button',{name:/^settings\.skill_group_all/}))
   await userEvent.click(screen.getByRole('button',{name:'settings.skill_expand:config'}))

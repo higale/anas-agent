@@ -1,3 +1,8 @@
+import { getDataDir } from './config/dataDir'
+import { addExternalSubagentDirectory, listSubagentRoots, updateExternalSubagentDirectory, importSubagentPackages, readSubagentPackages } from './subagentPackages'
+import { listSubagentFiles, readSubagentFile, saveSubagentFile } from './subagentPackageFiles'
+import { listSubagentSkills } from './skillsStore'
+import { listSubagentTools } from './toolsStore'
 import { setToolEnabled, addExternalToolDirectory, updateExternalToolDirectory, removeExternalToolDirectory, moveExternalToolDirectory, listToolFiles, readToolFile, saveToolFile, createToolFile, toolFileExists, importToolDirectories, initializeToolsStore, listToolSnapshot, toToolImportError } from './toolsStore'
 import { updateSkillScriptApproval } from './config/appConfig'
 import type { ToolImportResult } from '@shared/types'
@@ -7,10 +12,10 @@ import { BrowserWindow, shell } from 'electron'
 import { stat } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import type { AppAvatarImage, AppConfigSnapshot, AppProfileUpdate, AppSettingsUpdate, AttachmentPreview, AttachmentPreviewOptions, AvatarCropSource, AvatarCropSourceReadResult, FileIconImage, FileIconSize, InputHistorySnapshot, McpMaintenanceResult, McpServerConfigSave, McpServerUpdate, McpToolStatus, ModelListRequest, ModelListResponse, ModelProviderConfigSave, Project, ProjectCreateRequest, ProjectStateUpdate, ProjectUpdateRequest, ProviderModelConfigSave, SelectedAttachment, SkillAvailabilityUpdate, SkillDirectoryAddResult, SkillFileNode, SkillFilePreview, SkillImportResult, SkillInvocationResult, SkillRootUpdate, SkillSnapshot, SpeechReplyConfig, SubagentConfigSave } from '@shared/types'
-import { saveCustomTool, deleteCustomTool, moveCustomTool, addProviderModels, deleteMcpServer, deleteModelProvider, deleteProviderModel, deleteSubagent, getAppConfigSnapshot, moveMcpServer, moveModelProvider, moveProviderModel, moveSubagent, onAppConfigChanged, restoreSubagent, saveMcpServer, saveModelProvider, saveProviderModel, saveSubagent, selectDefaultModel, updateMcpServer, updateProfile, updateSettings, updateSpeechReply } from './config/appConfig'
+import { saveCustomTool, deleteCustomTool, moveCustomTool, addProviderModels, deleteMcpServer, deleteModelProvider, deleteProviderModel, deleteSubagent, getAppConfigSnapshot, moveMcpServer, moveModelProvider, moveProviderModel, moveSubagent, onAppConfigChanged, saveMcpServer, saveModelProvider, saveProviderModel, saveSubagent, selectDefaultModel, updateMcpServer, updateProfile, updateSettings, updateSpeechReply } from './config/appConfig'
 import { validateCustomToolSchema } from '@shared/customTools'
 import { addExternalSkillDirectory, buildUserSkillInvocation, importSkillDirectories, listSkillFiles, listSkillSnapshot, moveExternalSkillDirectory, readSkillFile, saveSkillFile, removeExternalSkillDirectory, toSkillImportError, updateExternalSkillDirectory, updateSkillAvailability } from './skillsStore'
-import { getSkillExamplesDir, getToolExamplesDir } from './config/dataDir'
+import { getSkillExamplesDir, getSubagentExamplesDir, getToolExamplesDir } from './config/dataDir'
 import { addInputHistory, getInputHistory, removeInputHistory, setInputHistoryPinned } from './inputHistoryStore'
 import { closeCachedMcpServerIndex, getCachedMcpStatus, loadMcpRuntimeForCurrentConfig, pingAndReloadFailedMcpServers, reloadMcpRuntimeForServer } from './mcpRuntimeService'
 import { fetchAvailableModels, getCachedAvailableModels } from './modelListService'
@@ -173,10 +178,30 @@ export function registerWorkspaceIpcHandlers(): void {
   handleMainIpc('config:saveCustomTool', async (_event, tool: import('@shared/customTools').CustomToolSave) => saveCustomTool(tool))
   handleMainIpc('config:deleteCustomTool', async (_event, id: string) => deleteCustomTool(id))
   handleMainIpc('config:moveCustomTool', async (_event, id: string, direction: -1 | 1) => moveCustomTool(id, direction))
+  handleMainIpc('subagents:roots', () => listSubagentRoots())
+  handleMainIpc('subagents:addDirectory', async event => {
+    const result = await showModalOpenDialog(dialogParentFromEvent(event), { properties: ['openDirectory'] })
+    if (result.canceled || !result.filePaths[0]) return false
+    await addExternalSubagentDirectory(result.filePaths[0])
+    return true
+  })
+  handleMainIpc('subagents:updateDirectory', (_event, id: string, update: import('@shared/subagentPackages').SubagentDirectoryUpdate) => updateExternalSubagentDirectory(id, update))
+  handleMainIpc('subagents:resources', async (_event, id?: string) => {
+    const ids = id ? [id] : (await readSubagentPackages(getDataDir())).map(a => a.id!)
+    return { skills: await listSubagentSkills(ids), tools: await listSubagentTools(ids) }
+  })
+  handleMainIpc('subagents:listFiles', (_event, id: string, path?: string) => listSubagentFiles(id, path))
+  handleMainIpc('subagents:readFile', (_event, id: string, path: string) => readSubagentFile(id, path))
+  handleMainIpc('subagents:saveFile', (_event, id: string, path: string, update: import('@shared/packageFiles').PackageFileUpdate) => saveSubagentFile(id, path, update))
+  handleMainIpc('subagents:import', async event => {
+    const result = await showModalOpenDialog(dialogParentFromEvent(event), { defaultPath: getSubagentExamplesDir(), properties: ['openDirectory', 'multiSelections'] })
+    if (result.canceled || !result.filePaths.length) return null
+    await importSubagentPackages(result.filePaths)
+    return getAppConfigSnapshot()
+  })
   handleMainIpc('config:saveSubagent', async (_event, subagent: SubagentConfigSave): Promise<AppConfigSnapshot> => saveSubagent(subagent))
-  handleMainIpc('config:deleteSubagent', async (_event, index: number): Promise<AppConfigSnapshot> => deleteSubagent(index))
-  handleMainIpc('config:moveSubagent', async (_event, index: number, direction: -1 | 1): Promise<AppConfigSnapshot> => moveSubagent(index, direction))
-  handleMainIpc('config:restoreSubagent', async (_event, index: number): Promise<AppConfigSnapshot> => restoreSubagent(index))
+  handleMainIpc('config:deleteSubagent', async (_event, index: number | string): Promise<AppConfigSnapshot> => deleteSubagent(index))
+  handleMainIpc('config:moveSubagent', async (_event, index: number | string, direction: -1 | 1): Promise<AppConfigSnapshot> => moveSubagent(index, direction))
   handleMainIpc('config:getCachedModels', async (_event, request: ModelListRequest): Promise<ModelListResponse | null> => getCachedAvailableModels(request))
   handleMainIpc('config:fetchModels', async (_event, request: ModelListRequest): Promise<ModelListResponse> => fetchAvailableModels(request))
   handleMainIpc('config:updateSettings', async (_event, settings: AppSettingsUpdate): Promise<AppConfigSnapshot> => {

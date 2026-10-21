@@ -1,6 +1,7 @@
 // Skill settings keep their domain store and serialized mutation queue.
 export { updateSkillScriptApproval } from '../skillsStore'
 import { createHash, randomUUID } from 'node:crypto'
+import { dirname } from 'node:path'
 import type { CustomToolSave } from '@shared/customTools'
 import { listToolSnapshot, saveToolPackage, deleteToolPackage, moveToolPackage } from '../toolsStore'
 import { clampSpeechReplySpeed, defaultSpeechReplyVoice } from '@shared/speechText'
@@ -653,6 +654,11 @@ export async function saveSubagent(subagent: SubagentConfigSave): Promise<AppCon
   return serializeConfigMutation(async () => {
     const raw = await readRawConfig()
     const subagents = Array.isArray(raw.subagents) ? [...raw.subagents] : []
+    if (subagent.id) {
+      const index = subagents.findIndex(item => item.id === subagent.id)
+      if (index < 0) throw new Error(`Agent package is unavailable: ${subagent.id}`)
+      subagent = { ...subagent, index }
+    }
     if (subagent.index === undefined) {
       subagents.push(rawSubagentFromSave(subagent))
     } else {
@@ -662,8 +668,7 @@ export async function saveSubagent(subagent: SubagentConfigSave): Promise<AppCon
       subagents[subagent.index] = rawSubagentFromSave(subagent, subagents[subagent.index])
     }
     assertUniqueSubagentNames(subagents)
-    raw.subagents = subagents
-    await writeRawSubagentsConfig(raw)
+    await writeRawSubagentsConfig({ ...raw, subagents }, raw.subagents ?? [])
     return getAppConfigSnapshot()
   })
 }
@@ -681,52 +686,36 @@ export async function moveCustomTool(id: string, direction: -1 | 1): Promise<App
   return getAppConfigSnapshot()
 }
 
-export async function deleteSubagent(index: number): Promise<AppConfigSnapshot> {
+export async function deleteSubagent(target: number | string): Promise<AppConfigSnapshot> {
   return serializeConfigMutation(async () => {
     const raw = await readRawConfig()
     const subagents = Array.isArray(raw.subagents) ? [...raw.subagents] : []
+    const index = typeof target === 'string' ? subagents.findIndex(a => a.id === target) : target
     if (index < 0 || index >= subagents.length) throw new Error(`Subagent index ${index} is out of range.`)
     if (normalizeSubagent(subagents[index], index).builtIn) {
       throw new Error('Built-in subagents cannot be deleted.')
     }
     subagents.splice(index, 1)
-    raw.subagents = subagents
-    await writeRawSubagentsConfig(raw)
+    await writeRawSubagentsConfig({ ...raw, subagents }, raw.subagents ?? [])
     return getAppConfigSnapshot()
   })
 }
 
-export async function moveSubagent(index: number, direction: -1 | 1): Promise<AppConfigSnapshot> {
+export async function moveSubagent(target: number | string, direction: -1 | 1): Promise<AppConfigSnapshot> {
   return serializeConfigMutation(async () => {
     const raw = await readRawConfig()
     const subagents = Array.isArray(raw.subagents) ? [...raw.subagents] : []
-    const nextIndex = index + direction
+    const index = typeof target === 'string' ? subagents.findIndex(a => a.id === target) : target
     if (index < 0 || index >= subagents.length) throw new Error(`Subagent index ${index} is out of range.`)
-    if (nextIndex < 0 || nextIndex >= subagents.length) return getAppConfigSnapshot()
-    const [subagent] = subagents.splice(index, 1)
-    subagents.splice(nextIndex, 0, subagent)
-    raw.subagents = subagents
-    await writeRawSubagentsConfig(raw)
-    return getAppConfigSnapshot()
-  })
-}
-
-export async function restoreSubagent(index: number): Promise<AppConfigSnapshot> {
-  return serializeConfigMutation(async () => {
-    const raw = await readRawConfig()
-    const subagents = Array.isArray(raw.subagents) ? [...raw.subagents] : []
-    if (index < 0 || index >= subagents.length) throw new Error(`Subagent index ${index} is out of range.`)
-    const current = normalizeSubagent(subagents[index], index)
-    if (!current.preset) throw new Error('Only built-in subagents can be restored.')
-    const bundled = await readBundledRawConfig()
-    const replacement = (bundled.subagents ?? []).find((candidate, candidateIndex) =>
-      normalizeSubagent(candidate, candidateIndex).preset === current.preset
-    )
-    if (!replacement) throw new Error(`Bundled subagent preset "${current.preset}" was not found.`)
-    subagents[index] = replacement
-    assertUniqueSubagentNames(subagents)
-    raw.subagents = subagents
-    await writeRawSubagentsConfig(raw)
+    if (direction !== -1 && direction !== 1) throw new Error('Invalid Agent move direction.')
+    const parent = subagents[index].directory ? dirname(subagents[index].directory!) : undefined
+    const siblings = subagents.map((agent, position) => ({ agent, position })).filter(({ agent }) =>
+      (agent.directory ? dirname(agent.directory) : undefined) === parent)
+    const siblingIndex = siblings.findIndex(item => item.position === index)
+    const nextIndex = siblings[siblingIndex + direction]?.position
+    if (nextIndex === undefined) return getAppConfigSnapshot()
+    ;[subagents[index], subagents[nextIndex]] = [subagents[nextIndex], subagents[index]]
+    await writeRawSubagentsConfig({ ...raw, subagents }, raw.subagents ?? [])
     return getAppConfigSnapshot()
   })
 }

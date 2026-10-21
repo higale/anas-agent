@@ -13,6 +13,7 @@ async function fixture(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'anas-restore-validation-'))
   temporaryDirectories.push(root)
   await mkdir(join(root, 'config'))
+  await cp(join(process.cwd(), 'data/subagents'), join(root, 'subagents'), { recursive: true })
   for (const name of configFileNames) await cp(join(process.cwd(), 'data', 'config', name), join(root, 'config', name))
   return root
 }
@@ -27,9 +28,19 @@ afterEach(async () => {
 })
 
 describe('restored data validation', () => {
+  it('validates Agent packages and rejects the removed array format without converting it', async () => {
+    const root = await fixture()
+    await expect(validateRestoredDataDirectory(root)).resolves.toBeUndefined()
+    const path = join(root, 'config/subagents.json')
+    const old = JSON.stringify({ version: 0, subagents: [] })
+    await writeFile(path, old)
+    await expect(validateRestoredDataDirectory(root)).rejects.toThrow('version')
+    expect(await readFile(path, 'utf8')).toBe(old)
+  })
+
   it('accepts nested managed packages while continuing to validate adjacent user packages', async () => {
     const root = await fixture()
-    for (const category of ['skills', 'tools', 'plugins']) {
+    for (const category of ['skills', 'plugins']) {
       await cp(join(process.cwd(), 'data', category, '_system'), join(root, category, '_system'), { recursive: true })
     }
     await writeText(join(root, 'skills/personal/SKILL.md'), '---\nname: personal\ndescription: Personal skill\n---\nBody\n')
@@ -76,11 +87,11 @@ describe('restored data validation', () => {
     await expect(lstat(join(root, 'config', 'assets'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it.each(['settings', 'models', 'subagents', 'mcp_servers', 'skills', 'tools'])('requires an explicit v0 in %s and never rewrites rejected data', async name => {
+  it.each(['settings', 'models', 'subagents', 'mcp_servers', 'skills', 'tools'])('requires the current explicit version in %s and never rewrites rejected data', async name => {
     const root = await fixture()
     const path = join(root, 'config', `${name}.json`)
     const document = JSON.parse(await readFile(path, 'utf8'))
-    for (const version of [undefined, 1, 99]) {
+    for (const version of [undefined, name === 'subagents' ? 0 : 1, 99]) {
       const candidate = { ...document, version }
       const raw = JSON.stringify(candidate)
       await writeFile(path, raw)

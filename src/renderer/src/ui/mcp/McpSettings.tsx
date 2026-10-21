@@ -13,7 +13,6 @@ interface McpSettingsProps {
   runtimeEnabled: boolean
   sectionClass: string
   status: McpToolStatus | undefined
-  onAddServer: () => void | Promise<void>
   onAutosizeInput: (event: FormEvent<HTMLTextAreaElement>) => void
   onDeleteServer: () => void | Promise<void>
   onEditServer: (index: number) => void | Promise<void>
@@ -31,7 +30,6 @@ export function McpSettings({
   runtimeEnabled,
   sectionClass,
   status,
-  onAddServer,
   onAutosizeInput,
   onDeleteServer,
   onEditServer,
@@ -52,7 +50,6 @@ export function McpSettings({
         reloadingFailed={reloadingFailed}
         runtimeEnabled={runtimeEnabled}
         status={status}
-        onAddServer={onAddServer}
         onDeleteServer={onDeleteServer}
         onEditServer={onEditServer}
         onMoveServer={onMoveServer}

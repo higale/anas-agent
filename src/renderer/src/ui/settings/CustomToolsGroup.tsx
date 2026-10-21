@@ -1,5 +1,6 @@
+import { SettingsSelectionActions } from './SettingsListActions'
 import { errorDetail } from '@shared/recovery'
-import { ArrowDown, ArrowUp, FolderDown, ListTree, Pencil, Plus, Trash2, Wrench } from 'lucide-react'
+import { ListTree, Pencil, Wrench } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AppConfigSnapshot } from '@shared/types'
@@ -12,14 +13,16 @@ import { CheckboxField } from '../CheckboxField'
 import { ConfirmDialog } from '../dialogs/ConfirmDialog'
 import { CommitTextInput } from '../CommitTextField'
 import { notice } from '../notice'
-import { PackageList, PackageSourceActions, PackageTreeRoot, PackageTreeItem, PackageFileTree, PackageFileViewer, packageNodeKey } from './PackageTree'
+import { PackageList, PackageTreeRoot, PackageTreeItem, PackageFileTree, PackageFileViewer, packageNodeKey } from './PackageTree'
 import { SettingsAvailabilityBadge } from './SettingsAvailabilityBadge'
+import { PackageActions } from './PackageActions'
 
 const toolNoticeId = 'settings-tool-status'
 
 type Selection = { kind: 'all' } | { kind: 'root'; id: string } | { kind: 'tool'; id: string } | { kind: 'file'; id: string; file: PackageFileNode }
 
-export function CustomToolsGroup({ tools, onConfigChange, catalogNavigation, catalogView, onSelectCustom }: {
+export function CustomToolsGroup({ actionsTarget = null, tools, onConfigChange, catalogNavigation, catalogView, onSelectCustom }: {
+  actionsTarget?: HTMLElement | null
   tools: ToolPackage[]; onConfigChange(config: AppConfigSnapshot): void
   catalogNavigation?: ReactNode; catalogView?: ReactNode; onSelectCustom?(): void
 }) {
@@ -47,8 +50,11 @@ export function CustomToolsGroup({ tools, onConfigChange, catalogNavigation, cat
   const rootIndex = external.findIndex(item => item.id === root?.id)
   const peers = snapshot?.tools.filter(tool => tool.rootId === selected?.rootId) ?? []
   const index = peers.findIndex(tool => tool.id === selected?.id)
-  const roots = [...(snapshot?.roots ?? [])].sort((a, b) => ({ user: 0, project: 1, external: 2 }[a.source] - { user: 0, project: 1, external: 2 }[b.source]))
+  const roots = [...(snapshot?.roots ?? [])].sort((a, b) => ({ subagent: -1, user: 0, project: 1, external: 2 }[a.source] - { subagent: -1, user: 0, project: 1, external: 2 }[b.source]))
   const rootLabel = (root: ToolRoot) => root.source === 'user' ? t('settings.skill_group_user') : root.name
+  const selectedRoot = !showingCatalog ? root ?? roots.find(item => item.id === selected?.rootId) : undefined
+  const actionRoot = selectedRoot?.source === 'user' || selectedRoot?.source === 'external' ? selectedRoot : roots.find(item => item.source === 'user')
+  const selectedTool = !showingCatalog && selection?.kind === 'tool' && (selected?.source === 'user' || selected?.source === 'external') ? selected : undefined
   const loadErrorText = (error: ToolLoadError) => [
     t(`custom_tools.load_error_${error.code}`), error.path,
     ['invalid_json', 'invalid_definition', 'read_failed'].includes(error.code) ? error.detail : undefined
@@ -215,15 +221,25 @@ export function CustomToolsGroup({ tools, onConfigChange, catalogNavigation, cat
   }
 
   return <>
+    <PackageActions resource="tool" destination={actionRoot ? rootLabel(actionRoot) : t('settings.skill_group_user')}
+      target={actionsTarget} disabled={busy || !actionRoot}
+      addDirectory={{ label: t('custom_tools.add_directory'), onClick: () => void mutate(async () => (await window.gale.tools.addDirectory()).status !== 'cancelled') }}
+      create={{ label: t('custom_tools.add'), onClick: () => { if (actionRoot) setEditing({ rootId: actionRoot.id }) } }}
+      importLabel={t('custom_tools.import')} onImport={() => { if (actionRoot) void mutate(() => importDirectories(actionRoot.id)) }} />
     <div className="ui-list-pane">
+      <SettingsSelectionActions refreshLabel={t('common.refresh')} disabled={busy}
+        moveUpLabel={t('common.move_up')} moveDownLabel={t('common.move_down')}
+        deleteLabel={t(!showingCatalog && root?.source === 'external' ? 'custom_tools.remove_directory' : 'custom_tools.delete')}
+        targetName={!showingCatalog ? root ? rootLabel(root) : selection?.kind === 'tool' ? selected?.name : undefined : undefined}
+        onMoveUp={!showingCatalog && root && rootIndex > 0 ? () => void mutate(() => window.gale.tools.moveDirectory(root.id, -1))
+          : selectedTool && index > 0 ? () => void mutate(() => window.gale.config.moveCustomTool(selectedTool.id, -1)) : undefined}
+        onMoveDown={!showingCatalog && root && rootIndex >= 0 && rootIndex < external.length - 1 ? () => void mutate(() => window.gale.tools.moveDirectory(root.id, 1))
+          : selectedTool && index >= 0 && index < peers.length - 1 ? () => void mutate(() => window.gale.config.moveCustomTool(selectedTool.id, 1)) : undefined}
+        onDelete={!showingCatalog && root?.source === 'external' ? () => setRemoving(root)
+          : selectedTool ? () => setDeleting(selectedTool) : undefined}
+        onRefresh={() => void mutate(async () => {})} />
       <div className="ui-scroll-list settings-skill-tree" ref={tree}>
         {catalogNavigation && <nav className="settings-tool-navigation" aria-label={t('settings.tools_page')}>{catalogNavigation}</nav>}
-        <PackageSourceActions addLabel={t('custom_tools.add_directory')} refreshLabel={t('common.refresh')} disabled={busy}
-          moveUpLabel={t('common.move_up')} moveDownLabel={t('common.move_down')}
-          onMoveUp={!catalogView && root && rootIndex > 0 ? () => void mutate(() => window.gale.tools.moveDirectory(root.id, -1)) : undefined}
-          onMoveDown={!catalogView && root && rootIndex >= 0 && rootIndex < external.length - 1 ? () => void mutate(() => window.gale.tools.moveDirectory(root.id, 1)) : undefined}
-          onAdd={() => void mutate(async () => (await window.gale.tools.addDirectory()).status !== 'cancelled')}
-          onRefresh={() => void mutate(async () => {})} />
         <PackageTreeRoot name={t('custom_tools.all')} count={snapshot?.tools.length ?? 0} expanded={expanded.has('all')} selected={!catalogView && selection?.kind === 'all'} icon={<ListTree size={15} />}
           expandLabel={t(expanded.has('all') ? 'settings.package_group_collapse' : 'settings.package_group_expand', { name: t('custom_tools.all') })}
           onExpand={() => toggle('all')} onSelect={() => select({ kind: 'all' })}>{snapshot?.tools.map(tool => renderTool(tool, true))}</PackageTreeRoot>
@@ -238,15 +254,7 @@ export function CustomToolsGroup({ tools, onConfigChange, catalogNavigation, cat
     <div className="ui-editor settings-skill-viewer">
       {catalogView ?? <>
         {root && <>
-          <div className="settings-detail-heading ui-toolbar ui-toolbar-between"><div><button className="ui-link-button" type="button" disabled={Boolean(root.error)} data-tooltip={t('chat.show_in_folder')} onClick={() => void showItemInFolder(root.path)}>{rootLabel(root)}</button><small>{root.path}</small></div><div className="ui-toolbar">
-            {(root.source === 'user' || root.source === 'external') && <>
-              <button className="ui-icon-button" type="button" disabled={busy} aria-label={t('custom_tools.add')} data-tooltip={t('custom_tools.add')} onClick={() => setEditing({ rootId: root.id })}><Plus size={14} /></button>
-              <button className="ui-icon-button" type="button" disabled={busy} aria-label={t('custom_tools.import')} data-tooltip={t('custom_tools.import')} onClick={() => void mutate(() => importDirectories(root.id))}><FolderDown size={14} /></button>
-            </>}
-            {root.source === 'external' && <>
-              <button className="ui-button ui-button-compact ui-button-danger" disabled={busy} type="button" onClick={() => setRemoving(root)}><Trash2 size={14} />{t('custom_tools.remove_directory')}</button>
-            </>}
-          </div></div>
+          <div className="settings-detail-heading ui-toolbar ui-toolbar-between"><div><button className="ui-link-button" type="button" disabled={Boolean(root.error)} data-tooltip={t('chat.show_in_folder')} onClick={() => void showItemInFolder(root.path)}>{rootLabel(root)}</button><small>{root.path}</small></div></div>
           {root.error && renderLoadError(root.error)}
           {root.source === 'external' && <div key={root.id} className="settings-skill-root-editor">
             <label className="ui-form-row ui-form-row-wide"><span>{t('settings.skill_directory_display_name')}</span>
@@ -263,10 +271,7 @@ export function CustomToolsGroup({ tools, onConfigChange, catalogNavigation, cat
               onChange={enabled => void mutate(() => window.gale.tools.setEnabled(selected.id, enabled))} />
             {(selected.source === 'user' || selected.source === 'external') && <>
               <button className="ui-icon-button" disabled={busy || !selected.definition} type="button" aria-label={t('custom_tools.edit_information')} data-tooltip={t('custom_tools.edit_information')} onClick={() => setEditing(selected)}><Pencil size={14} /></button>
-              <button className="ui-icon-button ui-button-danger" disabled={busy} type="button" aria-label={t('custom_tools.delete')} data-tooltip={t('custom_tools.delete')} onClick={() => setDeleting(selected)}><Trash2 size={14} /></button>
             </>}
-            <button className="ui-icon-button" disabled={busy || index <= 0} type="button" aria-label={t('common.move_up')} data-tooltip={t('common.move_up')} onClick={() => void mutate(() => window.gale.config.moveCustomTool(selected.id, -1))}><ArrowUp size={14} /></button>
-            <button className="ui-icon-button" disabled={busy || index >= peers.length - 1} type="button" aria-label={t('common.move_down')} data-tooltip={t('common.move_down')} onClick={() => void mutate(() => window.gale.config.moveCustomTool(selected.id, 1))}><ArrowDown size={14} /></button>
           </div></div>
           <p>{selected.description}</p>
           {selected.error && renderLoadError(selected.error)}

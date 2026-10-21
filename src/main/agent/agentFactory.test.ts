@@ -1876,6 +1876,55 @@ describe('subagent definition snapshots', () => {
     } finally { database.close() }
   })
 
+  it.each([{ restrict: false, grant: false, enabled: true }, { restrict: true, grant: false, enabled: true }, { restrict: true, grant: true, enabled: true },
+    { restrict: false, grant: false, enabled: false }, { restrict: true, grant: true, enabled: false }])(
+    'keeps package resources private and applies capability choices and root grants ($restrict, $grant, $enabled)', async ({ restrict, grant, enabled }) => {
+      const snapshot = previewConfig()
+      snapshot.subagents = ['owner', 'other'].map((id, index) => ({ ...snapshot.subagents[0], id, index, name: id, preset: undefined, builtIn: false,
+        capabilities: { ...structuredClone(defaultCapabilities), skills: { mode: 'custom', project: false, entries: [], package: { guide: enabled } }, customTools: { mode: 'custom', project: false, entries: [], package: { query: enabled } } } }))
+      appConfigMocks.getAppConfigSnapshot.mockResolvedValue(snapshot)
+      const ownedTools = ['owner', 'other'].map(id => ({ ...toolPackageFixture({ ...customToolDefaults, id: `subagent:${id}:tool:query`, name: 'query', description: 'Private query', inputSchema: { type: 'object' } }), rootId: `subagent:${id}:tool`, source: 'subagent' as const }))
+      const ownedSkills = ['owner', 'other'].map(id => ({ id: `subagent:${id}:skill:guide`, rootId: `subagent:${id}:skill`, name: 'guide', description: 'Private guide', source: 'subagent' as const,
+        rootName: id, shortcutAlias: id, linked: false, modelAvailable: true, userAvailable: false, scriptAutoApprove: false, dirPath: `/${id}/skills/guide`, relativePath: 'guide' }))
+      vi.spyOn(toolsStore, 'listSubagentTools').mockImplementation(async ids => ownedTools.filter(tool => ids.some(id => tool.id.startsWith(`subagent:${id}:`))))
+      vi.spyOn(skillsStore, 'listSubagentSkills').mockImplementation(async ids => ({ roots: [], scriptAutoApprove: false, skills: ownedSkills.filter(skill => ids.some(id => skill.id.startsWith(`subagent:${id}:`))) }))
+      vi.spyOn(skillsStore, 'listSkillSnapshot').mockResolvedValue({ roots: [], skills: [], scriptAutoApprove: false })
+      vi.spyOn(skillsStore, 'buildSkillsPrompt').mockResolvedValue('')
+      projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), advancedSettings: true, restrictSubagents: restrict,
+        capabilities: { ...structuredClone(defaultCapabilities), subagents: { mode: 'default', names: [] },
+          skills: { mode: 'custom', project: false, entries: grant ? ownedSkills.map(s => ({ id: s.id, model: true, shortcut: false })) : [] },
+          customTools: { mode: 'custom', project: false, entries: grant ? ownedTools.map(t => t.id) : [] } } })
+      const database = AgentDatabase.open(':memory:')
+      const owner = configuredThread(database)
+      const resolved = vi.fn()
+      try {
+        const root = await createAgentInstance(owner, database, { prepareWorkspace: false, onConfigurationResolved: resolved })
+        await root.dispose()
+        const parentConfiguration = resolved.mock.lastCall![0]
+        expect(parentConfiguration.customTools).toEqual([])
+        expect(parentConfiguration.capabilities.skills.entries).toEqual([])
+        if (restrict && grant) {
+          expect(parentConfiguration.subagentLimit.customTools.entries).toHaveLength(2)
+          expect(parentConfiguration.subagentLimit.skills.entries.filter((s: { model: boolean }) => s.model)).toHaveLength(2)
+        }
+        const run = database.createRun(owner.id, 'package-parent')
+        const call = database.createSubagentCall({
+          id: '15959595-9595-8595-8595-959595959595', ownerThreadId: owner.id, parentThreadId: owner.id, parentRunId: run.id,
+          childThreadId: '16969696-9696-8696-8696-969696969696', childRunId: '17979797-9797-8797-8797-979797979797',
+          config: snapshot.subagents[0], description: 'Read own package.', childThread: { title: 'Child', projectId: owner.projectId }
+        })
+        expect(call.config.id).toBe('owner')
+        const child = await createAgentInstance(database.getThread(call.childThreadId)!, database, {
+          requestId: call.childRunId, subagentCall: call, parentConfiguration, prepareWorkspace: false, onConfigurationResolved: resolved
+        })
+        await child.dispose()
+        const configured = resolved.mock.lastCall![0]
+        const allowed = enabled && (!restrict || grant)
+        expect(configured.customTools.map((t: { id: string }) => t.id)).toEqual(allowed ? ['subagent:owner:tool:query'] : [])
+        expect(configured.capabilities.skills.entries.filter((s: { model: boolean }) => s.model).map((s: { id: string }) => s.id)).toEqual(allowed ? ['subagent:owner:skill:guide'] : [])
+      } finally { database.close() }
+    })
+
   it.each([false, true])('resolves subagent project skills before applying the root ceiling (%s)', async (restricted) => {
     const project = defaultWorkspaceProject()
     projectStoreMocks.getProject.mockResolvedValue(project)

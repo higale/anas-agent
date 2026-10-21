@@ -290,6 +290,10 @@ export function getToolExamplesDir(): string {
   return join(getExamplesDir(), 'tools')
 }
 
+export function getSubagentExamplesDir(): string {
+  return join(getExamplesDir(), 'subagents')
+}
+
 export function getSystemPluginsDir(): string {
   return join(getDataDir(), 'plugins', '_system')
 }

@@ -413,13 +413,13 @@ export function App() {
   })
   const {
     addSubagent,
+    refreshSubagents,
     deleteSubagent,
     draft: subagentDraft,
     editSubagent,
     editingIndex: editingSubagentIndex,
     listRef: subagentListRef,
     moveSubagent,
-    restoreSubagent,
     updateDraft: updateSubagentDraft
   } = useSubagentSettingsState({ config, openConfirmDialog, setConfig, t })
   const {
@@ -1290,6 +1290,7 @@ export function App() {
           storageUsageLoading={storageUsageLoading}
           onAddMcpServer={addMcpServer}
           onAddSubagent={addSubagent}
+          onRefreshSubagents={refreshSubagents}
           onAutosizeInput={handleAutosizeInput}
           onAvatarDragEnter={handleAvatarDragEnter}
           onAvatarDragLeave={handleAvatarDragLeave}
@@ -1323,7 +1324,6 @@ export function App() {
           onOpenRuntimeLogViewer={openRuntimeLogViewer}
           onRefreshModelCandidates={refreshModelCandidates}
           onRestoreDataDirectory={restoreDataDirectory}
-          onRestoreSubagent={restoreSubagent}
           onSaveLanguage={saveLanguage}
           onSaveProfile={saveProfile}
           onSaveSettings={saveSettings}

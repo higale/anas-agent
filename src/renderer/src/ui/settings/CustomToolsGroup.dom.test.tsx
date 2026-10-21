@@ -1,12 +1,12 @@
 import { toolPackageFixture, selectedTools } from '../../../../test/toolPackageFixture'
 import type { ToolLoadError, ToolPackage } from '@shared/toolPackages'
-import { useState } from 'react'
+import { useState, type ComponentProps } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { customToolDefaults, type CustomToolDefinition } from '@shared/customTools'
 import { defaultCapabilities, type AgentCapabilities } from '@shared/agentCapabilities'
-import { CustomToolsGroup } from './CustomToolsGroup'
+import { CustomToolsGroup as CustomToolsGroupContent } from './CustomToolsGroup'
 import { CustomToolEditor } from './CustomToolEditor'
 import { CapabilityEditor } from '../CapabilityEditor'
 import { notice } from '../notice'
@@ -26,6 +26,11 @@ beforeEach(() => { serverTools = []; vi.clearAllMocks(); vi.stubGlobal('gale', {
 function Harness() {
   const [tools, setTools] = useState<ToolPackage[]>([])
   return <CustomToolsGroup tools={tools} onConfigChange={(config) => setTools(config.customTools)} />
+}
+
+function CustomToolsGroup(props: ComponentProps<typeof CustomToolsGroupContent>) {
+  const [target, setTarget] = useState<HTMLDivElement | null>(null)
+  return <><header><div ref={setTarget} /></header><CustomToolsGroupContent {...props} actionsTarget={target} /></>
 }
 
 async function openGroup(button: HTMLElement): Promise<void> {
@@ -292,6 +297,43 @@ describe('custom tool settings', () => {
     expect(up).toBeDisabled(); expect(down).toBeDisabled()
   })
 
+  it('routes sidebar item actions by ID and disables them for files and catalog views', async () => {
+    serverTools = [toolPackageFixture(definition), toolPackageFixture({ ...definition, id: 'other', name: 'other_tool' })]
+    const moveCustomTool = vi.fn(async () => {}), deleteCustomTool = vi.fn(async () => {})
+    const file = { name: 'TOOL.json', relativePath: 'TOOL.json', path: '/fixture/tools/stable/TOOL.json', kind: 'text', size: 2 }
+    vi.stubGlobal('gale', { config: { moveCustomTool, deleteCustomTool }, tools: { ...toolApi,
+      listFiles: vi.fn(async () => [file]), readFile: vi.fn(async () => ({ ...file, content: '{}', editable: false })) } })
+    const props = { tools: serverTools, onConfigChange: vi.fn() }
+    const view = render(<CustomToolsGroup {...props} />)
+    const sidebar = within(view.container.querySelector('.ui-list-pane') as HTMLElement)
+    const up = sidebar.getByRole('button', { name: 'common.move_up' })
+    const down = sidebar.getByRole('button', { name: 'common.move_down' })
+    const remove = sidebar.getByRole('button', { name: 'custom_tools.delete' })
+    await openGroup(await sidebar.findByRole('button', { name: /^settings.skill_group_user/ }))
+    await userEvent.click(sidebar.getByRole('button', { name: 'submit_result' }))
+    await userEvent.click(down)
+    expect(moveCustomTool).toHaveBeenCalledExactlyOnceWith('stable', 1)
+    await waitFor(() => expect(remove).toBeEnabled())
+    await userEvent.click(sidebar.getByRole('button', { name: 'other_tool' }))
+    expect(up).toBeEnabled(); expect(down).toBeDisabled()
+    await userEvent.click(remove)
+    expect(screen.getByRole('alertdialog')).toBeVisible()
+    expect(deleteCustomTool).not.toHaveBeenCalled()
+    await userEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'common.confirm' }))
+    await waitFor(() => expect(deleteCustomTool).toHaveBeenCalledExactlyOnceWith('other'))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    await userEvent.click(sidebar.getByRole('button', { name: 'submit_result' }))
+    await userEvent.click(within(sidebar.getByRole('button', { name: 'submit_result' }).closest('.settings-skill-tree-row') as HTMLElement).getByRole('button', { name: 'custom_tools.expand' }))
+    await userEvent.click(await sidebar.findByRole('button', { name: 'TOOL.json' }))
+    expect(up).toBeDisabled(); expect(down).toBeDisabled(); expect(remove).toBeDisabled()
+    await userEvent.click(sidebar.getByRole('button', { name: 'submit_result' }))
+    expect(down).toBeEnabled(); expect(remove).toBeEnabled()
+    view.rerender(<CustomToolsGroup {...props} catalogView={<div>Built-in tools</div>} />)
+    expect(up).toBeDisabled(); expect(down).toBeDisabled(); expect(remove).toBeDisabled()
+    const detail = within(view.container.querySelector('.settings-skill-viewer') as HTMLElement)
+    expect(detail.queryByRole('button', { name: 'custom_tools.delete' })).not.toBeInTheDocument()
+  })
+
   it('lists each group and navigates to the exact tool even when names match', async () => {
     const user = userEvent.setup()
     const roots = [
@@ -315,7 +357,7 @@ describe('custom tool settings', () => {
       expect(list).toHaveTextContent(items[index].name)
       if (index === 2) {
         expect(list).toHaveTextContent('settings.error')
-        expect(detail.getByRole('button', { name: 'custom_tools.remove_directory' })).toBeEnabled()
+        expect(within(view.container.querySelector('.ui-list-pane') as HTMLElement).getByRole('button', { name: 'custom_tools.remove_directory' })).toBeEnabled()
       }
     }
     await openGroup(tree.getByRole('button', { name: /^custom_tools.all/ }))
@@ -350,7 +392,7 @@ describe('custom tool settings', () => {
     expect(detail.queryByText('custom_tools.group_empty')).not.toBeInTheDocument()
   })
 
-  it.each(['user', 'external'] as const)('shows creation and import in writable group headers only (%s)', async source => {
+  it.each(['user', 'external'] as const)('keeps page creation and import actions visible while browsing (%s)', async source => {
     const user = userEvent.setup()
     const tool = { ...toolPackageFixture(definition), source, rootId: source }
     const root = { id: source, source, name: 'Shared', path: '/tools' }
@@ -361,32 +403,30 @@ describe('custom tool settings', () => {
     } })
     const props = { tools: [tool], onConfigChange: vi.fn() }
     const view = render(<CustomToolsGroup {...props} />)
-    function expectActions(visible: boolean) {
+    function expectActions() {
       for (const name of ['custom_tools.add', 'custom_tools.import']) {
-        const button = screen.queryByRole('button', { name })
-        if (visible) expect(button).toBeVisible()
-        else expect(button).not.toBeInTheDocument()
+        expect(within(view.container.querySelector('header')!).getByRole('button', { name })).toBeVisible()
       }
     }
-    expectActions(false)
+    expectActions()
     const label = source === 'external' ? 'Shared' : `settings.skill_group_${source}`
     await openGroup(await screen.findByRole('button', { name: new RegExp(`^${label}`) }))
-    expectActions(true)
-    const header = within(view.container.querySelector('.settings-detail-heading') as HTMLElement)
+    expectActions()
+    const header = within(view.container.querySelector('header') as HTMLElement)
     expect(header.getByRole('button', { name: 'custom_tools.add' })).toBeVisible()
     expect(header.getByRole('button', { name: 'custom_tools.import' })).toBeVisible()
     expect(within(view.container.querySelector('.settings-skill-tree') as HTMLElement).queryByRole('button', { name: 'custom_tools.add' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'submit_result' }))
-    expectActions(false)
+    expectActions()
     await user.click(screen.getByRole('button', { name: 'custom_tools.expand' }))
     await user.click(await screen.findByRole('button', { name: 'asset.bin' }))
     await screen.findByText('settings.skill_binary_preview_unavailable')
-    expectActions(false)
+    expectActions()
     view.rerender(<CustomToolsGroup {...props} catalogView={<div>Catalog</div>} />)
-    expectActions(false)
+    expectActions()
     view.rerender(<CustomToolsGroup {...props} />)
     await openGroup(screen.getByRole('button', { name: /^custom_tools.all/ }))
-    expectActions(false)
+    expectActions()
   })
   it('opens source and tool directories from their titles and the tool location using the keyboard', async () => {
     const user = userEvent.setup()
@@ -418,16 +458,16 @@ describe('custom tool settings', () => {
     const importDirectories = vi.fn(async () => { serverTools = [imported]; return { status: 'imported', ids: [imported.id], names: [imported.name], config: { customTools: [imported] } } })
     vi.stubGlobal('gale', { tools: { ...toolApi, get, importDirectories } })
     render(<Harness />)
-    expect(screen.queryByRole('button', { name: 'custom_tools.import' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'custom_tools.import' })).toBeVisible()
     fireEvent.click(await screen.findByRole('button', { name: source === 'user' ? /^settings.skill_group_user/ : /^Shared/ }))
     fireEvent.click(screen.getByRole('button', { name: 'custom_tools.import' }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'submit_result', pressed: true })).toBeVisible())
     expect(importDirectories).toHaveBeenCalledExactlyOnceWith(source)
     expect(notice.success).toHaveBeenCalledWith('custom_tools.imported')
     expect(screen.getByRole('button', { name: 'custom_tools.edit_information' })).toBeEnabled()
-    expect(screen.queryByRole('button', { name: 'custom_tools.import' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'custom_tools.import' })).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: /^custom_tools.all/ }))
-    expect(screen.queryByRole('button', { name: 'custom_tools.import' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'custom_tools.import' })).toBeVisible()
   })
   it.each(['cancelled', 'error'])('preserves the current list when import is %s', async status => {
     const change = vi.fn()
@@ -554,8 +594,8 @@ describe('custom tool settings', () => {
     const edit = screen.getByRole('button', { name: 'custom_tools.edit_information' })
     expect(edit).toBeEnabled()
     expect(screen.getByRole('button', { name: 'custom_tools.delete' })).toBeEnabled()
-    expect(within(view.container.querySelector('.settings-skill-viewer') as HTMLElement).getByRole('button', { name: 'common.move_down' })).toBeEnabled()
-    expect(within(view.container.querySelector('.settings-skill-viewer') as HTMLElement).getByRole('button', { name: 'common.move_up' })).toBeDisabled()
+    expect(within(view.container.querySelector('.ui-list-pane') as HTMLElement).getByRole('button', { name: 'common.move_down' })).toBeEnabled()
+    expect(within(view.container.querySelector('.ui-list-pane') as HTMLElement).getByRole('button', { name: 'common.move_up' })).toBeDisabled()
     await user.click(edit)
     expect(screen.getByLabelText('custom_tools.name')).toHaveValue('submit_result')
     await user.click(screen.getByRole('button', { name: 'common.cancel' }))
@@ -648,7 +688,7 @@ it('browses external packages and removes only their source reference', async ()
   render(<CustomToolsGroup tools={[externalTool]} onConfigChange={vi.fn()} />)
   await openGroup(await screen.findByRole('button', { name: /^Shared/ }))
   await user.click(screen.getByRole('button', { name: 'submit_result' }))
-  expect(screen.queryByRole('button', { name: 'custom_tools.import' })).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'custom_tools.import' })).toBeVisible()
   expect(screen.getByRole('button', { name: 'custom_tools.edit_information' })).toBeEnabled()
   await user.click(screen.getByRole('button', { name: 'custom_tools.edit_information' }))
   expect(screen.getByLabelText('custom_tools.name')).toHaveValue('submit_result')
@@ -657,7 +697,7 @@ it('browses external packages and removes only their source reference', async ()
   await user.click(screen.getByRole('button', { name: 'custom_tools.expand' }))
   await user.click(await screen.findByRole('button', { name: 'TOOL.json' }))
   expect(await screen.findByText('manifest preview')).toBeVisible()
-  expect(screen.queryByRole('button', { name: 'custom_tools.import' })).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'custom_tools.import' })).toBeVisible()
   expect(readFile).toHaveBeenCalledWith('stable', 'TOOL.json')
   await openGroup(screen.getByRole('button', { name: /^Shared/ }))
   await user.click(screen.getByRole('button', { name: 'custom_tools.remove_directory' }))

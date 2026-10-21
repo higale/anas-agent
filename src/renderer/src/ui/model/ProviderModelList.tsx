@@ -1,8 +1,8 @@
-import { Pencil } from 'lucide-react'
+import { Pencil, Plus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { ModelProviderConfigDetail } from '@shared/types'
 import { NoFocusButton } from '../NoFocusButton'
-import { SettingsListActions } from '../settings/SettingsListActions'
+import { SettingsSelectionButtons } from '../settings/SettingsListActions'
 import { UI_ICON_SIZE_LARGE } from '../uiConstants'
 import { ModelListUrlPopover } from './ModelListUrlPopover'
 import { ModelListItemContent } from './ModelListItemContent'
@@ -30,30 +30,32 @@ export function ProviderModelList({
   onSelect
 }: ProviderModelListProps) {
   const { t } = useTranslation()
+  const selectedPosition = provider.models.findIndex(model => model.index === selectedIndex)
+  const selectedModel = provider.models[selectedPosition]
+  const selectedName = selectedModel ? selectedModel.displayName.trim() || selectedModel.model.trim() || t('settings.no_model_id') : undefined
 
   return (
     <div className="provider-model-list ui-field-stack">
-      <SettingsListActions
-        addLabel={t('settings.add_provider_model')}
-        canDelete={selectedIndex !== undefined}
-        canMoveDown={selectedIndex !== undefined && selectedIndex < provider.models.length - 1}
-        canMoveUp={selectedIndex !== undefined && selectedIndex > 0}
-        deleteLabel={t('settings.delete_model')}
-        onAdd={onAdd}
-        onDelete={onDelete}
-        onMove={onMove}
-        leading={(
-          <span className="provider-model-list-heading">
-            <strong>{t('settings.provider_models')}</strong>
-            <ModelListUrlPopover
-              baseUrl={provider.baseUrl}
-              modelListUrl={provider.modelListUrl}
-              protocol={provider.protocol}
-              onChange={onModelListSettingsChange}
-            />
-          </span>
-        )}
-      />
+      <div className="ui-toolbar ui-toolbar-between">
+        <span className="provider-model-list-heading">
+          <strong>{t('settings.provider_models')}</strong>
+          <ModelListUrlPopover
+            baseUrl={provider.baseUrl}
+            modelListUrl={provider.modelListUrl}
+            protocol={provider.protocol}
+            onChange={onModelListSettingsChange}
+          />
+        </span>
+        <div className="ui-row">
+          <button className="ui-icon-button" type="button" aria-label={t('settings.add_provider_model')}
+            data-tooltip={t('settings.add_provider_model')} onClick={() => void onAdd()}><Plus size={14} /></button>
+          <SettingsSelectionButtons moveUpLabel={t('common.move_up')} moveDownLabel={t('common.move_down')}
+            deleteLabel={t('settings.delete_model')} targetName={selectedName}
+            onMoveUp={selectedPosition > 0 ? () => void onMove(-1) : undefined}
+            onMoveDown={selectedPosition >= 0 && selectedPosition < provider.models.length - 1 ? () => void onMove(1) : undefined}
+            onDelete={selectedModel ? () => void onDelete() : undefined} />
+        </div>
+      </div>
       <div className="provider-model-options ui-list ui-list-compact ui-list-framed" role="listbox" aria-label={t('settings.provider_models')}>
         {provider.models.length === 0 && (
           <div className="ui-empty-state ui-empty-state-compact">{t('settings.no_models_configured')}</div>

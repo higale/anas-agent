@@ -6,7 +6,7 @@ import { CapabilitySection } from './CapabilitySection'
 
 export interface SubagentSelectionProps {
   value: SubagentSelection
-  definitions: readonly Pick<SubagentConfig, 'name' | 'description' | 'systemPrompt' | 'enabled'>[]
+  definitions: readonly Pick<SubagentConfig, 'id' | 'name' | 'description' | 'systemPrompt' | 'enabled'>[]
   onChange(value: SubagentSelection): void
 }
 

@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Box, ChevronRight, File, FileCode2, Folder, FolderInput, Link2, Pencil, Puzzle, RefreshCw, SquareChevronDown, SquareChevronRight, UserRound } from 'lucide-react'
+import { Box, ChevronRight, File, FileCode2, Folder, Link2, Pencil, Puzzle, SquareChevronDown, SquareChevronRight, UserRound } from 'lucide-react'
 import { useId, useRef, useState, type ReactNode, type Ref } from 'react'
 import type { PackageFileNode, PackageFilePreview, PackageFileUpdate } from '@shared/packageFiles'
 import { CodeFileEditor } from '../CodeFileEditor'
@@ -30,7 +30,7 @@ export function PackageList({ items, label, emptyLabel, onSelect }: {
 
 export function PackageTreeRoot({ name, count, expanded, selected, onSelect, onExpand, expandLabel, children, icon, source }: {
   name: string; count: number; expanded: boolean; selected: boolean; onSelect(): void; onExpand(): void; expandLabel: string; children?: ReactNode; icon?: ReactNode
-  source?: 'system' | 'user' | 'project' | 'external' | 'plugin'
+  source?: 'system' | 'user' | 'project' | 'external' | 'plugin' | 'subagent'
 }) {
   const SourceIcon = source === 'system' ? Box : source === 'user' ? UserRound : source === 'plugin' ? Puzzle : Folder
   return <div>
@@ -129,21 +129,5 @@ export function PackageMarkdownPreview({ preview, t }: { preview: Pick<PackageFi
         else await window.gale.app.openExternalUrl(href)
       }
     }} />
-  </div>
-}
-
-export function PackageSourceActions({ addLabel, refreshLabel, moveUpLabel, moveDownLabel, disabled, onAdd, onRefresh, onMoveUp, onMoveDown }: {
-  addLabel: string; refreshLabel: string; moveUpLabel: string; moveDownLabel: string; disabled?: boolean
-  onAdd(): void; onRefresh(): void; onMoveUp?: () => void; onMoveDown?: () => void
-}) {
-  return <div className="ui-list-pane-header">
-    <div className="ui-toolbar ui-toolbar-between">
-      <button className="ui-button ui-button-compact" type="button" disabled={disabled} onClick={onAdd}><FolderInput size={14} />{addLabel}</button>
-      <div className="ui-row">
-        <button className="ui-icon-button" type="button" disabled={disabled || !onMoveUp} aria-label={moveUpLabel} data-tooltip={moveUpLabel} onClick={onMoveUp}><ArrowUp size={14} /></button>
-        <button className="ui-icon-button" type="button" disabled={disabled || !onMoveDown} aria-label={moveDownLabel} data-tooltip={moveDownLabel} onClick={onMoveDown}><ArrowDown size={14} /></button>
-        <button className="ui-icon-button" type="button" disabled={disabled} aria-label={refreshLabel} data-tooltip={refreshLabel} onClick={onRefresh}><RefreshCw size={14} /></button>
-      </div>
-    </div>
   </div>
 }

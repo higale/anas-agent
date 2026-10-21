@@ -355,10 +355,9 @@ module.exports = {
     if (action === 'show_compact' || action === 'show_detailed') saveDisplayMode(action === 'show_compact' ? 'compact' : 'detailed')
     if (name === 'Bailian') return renderWidget(await bailian.read(model, language, action, context.signal), language, displayMode)
     const zh = language.startsWith('zh')
-    const providerName = model.providerName?.trim()
-    const defaultTitle = name === 'MiniMax' ? 'MiniMax Token Plan' : parse === parseGlmQuota ? `${name} Coding Plan`
+    const title = name === 'MiniMax' ? 'MiniMax Token Plan' : parse === parseGlmQuota ? `${name} Coding Plan`
       : name === 'OpenRouter' ? `OpenRouter ${zh ? '密钥额度' : 'Key credits'}` : `${name} ${zh ? '余额' : 'Balance'}`
-    const content = { title: (!providerName || providerName.toLowerCase() === name.toLowerCase() ? defaultTitle : `${name} · ${providerName}`).slice(0, 160), lines: [],
+    const content = { title, lines: [],
       emptyLabel: ['DeepSeek', 'Moonshot'].includes(name) || parse === parseGlmBalance ? (zh ? '暂无余额数据' : 'Balance unavailable') : (zh ? '暂无额度' : 'Quota unavailable') }
     if (!model.apiKey) return renderWidget({ ...content, error: messages[zh ? 'zh' : 'en'].auth }, language, displayMode)
     const cacheKey = createHash('sha256').update(JSON.stringify([model.providerId, url, model.apiKey])).digest('hex')

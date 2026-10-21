@@ -1,9 +1,12 @@
 import type { CustomToolDefinition } from './customTools'
+import { packageResourceEnabled, validatePackageResourceSelection, type PackageResourceSelection } from './packageResourceSelection'
 
 export interface ToolSelection {
   mode?: 'all' | 'custom' | 'off'
   project: boolean
   entries: string[]
+  /** Owning Agent package resources default on; omitted map means no overrides. */
+  package?: PackageResourceSelection
 }
 
 export interface ResolvedToolSelection extends ToolSelection { project: false }
@@ -20,7 +23,7 @@ export interface ToolRoot {
   id: string
   name: string
   path: string
-  source: 'user' | 'external' | 'project'
+  source: 'user' | 'external' | 'project' | 'subagent'
   error?: ToolLoadError
 }
 
@@ -58,7 +61,8 @@ export function validateToolSelection(value: unknown): ToolSelection {
   if (!v || typeof v.project !== 'boolean' || !Array.isArray(v.entries)
     || v.entries.some(id => typeof id !== 'string' || !id.trim())) throw new Error('Invalid custom tool selection.')
   if (v.mode !== undefined && !['all', 'custom', 'off'].includes(v.mode)) throw new Error('Invalid custom tool selection mode.')
-  return { ...(v.mode !== undefined ? { mode: v.mode } : {}), project: v.project, entries: [...new Set(v.entries)] }
+  const packageTools = validatePackageResourceSelection(v.package)
+  return { ...(v.mode !== undefined ? { mode: v.mode } : {}), project: v.project, entries: [...new Set(v.entries)], ...(Object.keys(packageTools).length ? { package: packageTools } : {}) }
 }
 
 export function normalizeToolSettings(value: unknown): ToolSettings {
@@ -93,7 +97,8 @@ export function resolveToolSelection(selection: ToolSelection, tools: readonly T
   const names = new Set<string>()
   const entries = tools.filter(tool => {
     const enabled = selection.mode !== 'off' && tool.enabled !== false && !tool.error && tool.definition
-      && (selection.mode === 'all' || (subagent && tool.source === 'project' ? selection.project : selection.entries.includes(tool.id)))
+      && (subagent && tool.source === 'subagent' ? packageResourceEnabled(selection.package, tool)
+        : selection.mode === 'all' || (subagent && tool.source === 'project' ? selection.project : selection.entries.includes(tool.id)))
     if (!enabled || (unique && names.has(tool.name.toLowerCase()))) return false
     names.add(tool.name.toLowerCase())
     return true

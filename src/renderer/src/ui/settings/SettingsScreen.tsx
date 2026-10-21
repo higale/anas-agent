@@ -1,5 +1,5 @@
 import { useState, type DragEvent, type FormEvent, type RefObject } from 'react'
-import { FolderDown, PanelLeftOpen } from 'lucide-react'
+import { PanelLeftOpen, Plus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type {
   AppAvatarImage,
@@ -32,6 +32,7 @@ import { MemorySettings } from './MemorySettings'
 import { SegmentedMultiSelect } from '../SegmentedMultiSelect'
 import { formatDateTime } from '../formatDateTime'
 import { SkillsSettings } from './SkillsSettings'
+import { PackageActions } from './PackageActions'
 import type { SubagentDraft } from '../subagent/subagentDraft'
 import { SubagentSettings } from '../subagent/SubagentSettings'
 import { settingsTabs, type SettingsTab } from './settingsTabs'
@@ -83,6 +84,7 @@ interface SettingsScreenProps {
   systemLanguage: string
   storageUsageLoading: boolean
   onAddMcpServer: () => void | Promise<void>
+  onRefreshSubagents: (importPackage?: boolean) => Promise<void>
   onAddSubagent: () => void | Promise<void>
   onAutosizeInput: (event: FormEvent<HTMLTextAreaElement>) => void
   onAvatarDragEnter: (event: DragEvent<HTMLButtonElement>) => void
@@ -117,7 +119,6 @@ interface SettingsScreenProps {
   onRefreshModelCandidates: () => void | Promise<void>
   onReloadFailedMcpServers: () => void | Promise<void>
   onRestoreDataDirectory: () => void | Promise<void>
-  onRestoreSubagent: () => void
   onSaveLanguage: (language: string) => void | Promise<void>
   onSaveProfile: (profile: AppProfileUpdate) => void | Promise<void>
   onSaveSettings: (settings: Partial<AppSettings>) => void | Promise<void>
@@ -183,6 +184,7 @@ export function SettingsScreen({
   storageUsageLoading,
   onAddMcpServer,
   onAddSubagent,
+  onRefreshSubagents,
   onAutosizeInput,
   onAvatarDragEnter,
   onAvatarDragLeave,
@@ -216,7 +218,6 @@ export function SettingsScreen({
   onRefreshModelCandidates,
   onReloadFailedMcpServers,
   onRestoreDataDirectory,
-  onRestoreSubagent,
   onSaveLanguage,
   onSaveProfile,
   onSaveSettings,
@@ -237,6 +238,7 @@ export function SettingsScreen({
 }: SettingsScreenProps) {
   const { t } = useTranslation()
   const [skillToReveal, setSkillToReveal] = useState<string>()
+  const [packageActionsTarget, setPackageActionsTarget] = useState<HTMLDivElement | null>(null)
   const sectionClass = (tab: SettingsTab, extra = ''): string => settingsSectionClass(activeTab, tab, extra)
   const sidebarLabel = t('chat.show_sidebar')
   const activeTabDefinition = settingsTabs.find((tab) => tab.id === activeTab)
@@ -265,12 +267,20 @@ export function SettingsScreen({
               <h1 className="settings-page-title">{activeTabDefinition ? t(activeTabDefinition.labelKey) : ''}</h1>
               {pageDescription && <div className="ui-field-hint">{pageDescription}</div>}
             </div>
+            {(activeTab === 'subagents' || activeTab === 'tools') && <div className="ui-toolbar" ref={setPackageActionsTarget} />}
+            {activeTab === 'mcp' && <div className="ui-toolbar">
+              <button className="ui-button" type="button" disabled={!config}
+                data-tooltip={t('settings.new_mcp_server')} onClick={() => void onAddMcpServer()}>
+                <Plus size={14} aria-hidden="true" />{t('settings.new_mcp_server')}
+              </button>
+            </div>}
             {activeTab === 'skills' && <div className="ui-toolbar">
-              <button className="ui-button" type="button" disabled={!skills} data-tooltip={t('settings.import_skill_to_user')}
-                onClick={async () => {
+              <PackageActions resource="skill" destination={t('settings.skill_group_user')} disabled={!skills}
+                addDirectory={{ label: t('settings.add_skill_directory'), onClick: () => void onAddSkillDirectory() }}
+                importLabel={t('settings.import_skill')} onImport={async () => {
                   const importedId = await onImportSkills()
                   if (importedId) setSkillToReveal(importedId)
-                }}><FolderDown size={14} aria-hidden="true" />{t('settings.import_skill')}</button>
+                }} />
               <SegmentedMultiSelect ariaLabel={t('settings.skill_scripts_auto_approve_all')}
                 disabled={!skills}
                 options={[{ value: 'scriptAutoApprove', label: t('settings.skill_scripts_auto_approve_all'), checked: skills?.scriptAutoApprove ?? false }]}
@@ -331,6 +341,7 @@ export function SettingsScreen({
           )}
           {activeTab === 'subagents' && (
             <SubagentSettings
+              actionsTarget={packageActionsTarget}
               config={config}
               draft={subagentDraft}
               editingIndex={editingSubagentIndex}
@@ -340,11 +351,11 @@ export function SettingsScreen({
               sectionClass={sectionClass('subagents', 'settings-workbench ui-workbench ui-grid-sidebar')}
               skills={skills}
               onAdd={onAddSubagent}
+              onRefresh={onRefreshSubagents}
               onAutosizeInput={onAutosizeInput}
               onDelete={onDeleteSubagent}
               onEdit={onEditSubagent}
               onMove={onMoveSubagent}
-              onRestore={onRestoreSubagent}
               onUpdate={onUpdateSubagentDraft}
             />
           )}
@@ -409,8 +420,8 @@ export function SettingsScreen({
               listRef={modelListRef}
               modelDraft={modelDraft}
               sectionClass={sectionClass('model', 'settings-workbench ui-workbench ui-grid-sidebar')}
-              onCreateModel={onCreateModel}
               onAddProviderModels={onAddProviderModels}
+              onCreateModel={onCreateModel}
               onDeleteModel={onDeleteModel}
               onDeleteProviderModel={onDeleteProviderModel}
               onEditModel={onEditModel}
@@ -433,7 +444,6 @@ export function SettingsScreen({
               runtimeEnabled={mcpRuntimeEnabled}
               sectionClass={sectionClass('mcp', 'settings-workbench ui-workbench ui-grid-sidebar')}
               status={mcpStatus}
-              onAddServer={onAddMcpServer}
               onAutosizeInput={onAutosizeInput}
               onDeleteServer={onDeleteMcpServer}
               onEditServer={onEditMcpServer}
@@ -448,6 +458,7 @@ export function SettingsScreen({
           {activeTab === 'tools' && (
             <section className={sectionClass('tools', 'settings-workbench ui-workbench ui-grid-sidebar')}>
               <ToolsSettings
+                actionsTarget={packageActionsTarget}
                 plugins={plugins}
                 pluginError={pluginError}
                 customTools={config?.customTools ?? []}
@@ -463,7 +474,6 @@ export function SettingsScreen({
             <SkillsSettings
               sectionClass={sectionClass('skills', 'settings-workbench ui-workbench ui-grid-sidebar')}
               skills={skills}
-              onAddDirectory={onAddSkillDirectory}
               revealSkillId={skillToReveal}
               onSkillRevealed={() => setSkillToReveal(undefined)}
               onMoveDirectory={onMoveSkillDirectory}

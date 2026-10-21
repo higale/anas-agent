@@ -10,11 +10,13 @@ Use **Settings > Skills** to manage global sources and browse skill instructions
 
 Markdown files open in rendered **Preview**, with a **Source** switch and collapsible metadata. Relative images load from the file's directory; same-page links jump to headings, and other local file links reveal their targets in your file manager.
 
-- **Install skills**: Click **Install skill** beside **Auto-approve all Skill scripts** at the top of the page. Select one or more skill directories containing `SKILL.md` to copy into `skills/` under application data. Name conflicts prevent installation without overwriting existing skills. The picker opens in the examples directory by default. On success, the **User** group expands and the first installed skill is selected and scrolled into view.
-- **Add directory**: Select an external directory containing skill subdirectories. Anas references its files without copying them. External sources can be renamed, assigned shortcut aliases, reordered, or removed. Removing a source only removes its reference, not its files.
+- **Import skills**: Click **Import skill** beside **Auto-approve all Skill scripts** at the top of the page. Select one or more skill directories containing `SKILL.md` to copy into `skills/` under application data. Name conflicts prevent import without overwriting existing skills. The picker opens in the examples directory by default. On success, the **User** group expands and the first imported skill is selected and scrolled into view.
+- **Add directory** (top right): Select an external directory containing skill subdirectories. Anas references its files without copying them. External sources can be renamed, assigned shortcut aliases, reordered, or removed. Removing a source only removes its reference, not its files.
 - **Project skills**: Place them in `.agents/skills/` under each project source folder. They appear in that project's capability choices and conversations, not on the global Skills page.
 
 `~/.agents/skills` is a default external source and can be removed. Refresh after editing files; unreadable skills show an error.
+
+Select an external directory, then use the left toolbar to move it up or down or remove its reference. Skill entries do not yet support deletion or reordering; these buttons are disabled when an entry or file is selected.
 
 ## Choose Who Can Use Skills
 
@@ -49,14 +51,14 @@ The application supplies these system skills in `skills/_system/` under applicat
 | `skill-manager` | Creates or modifies skills, or installs them from local directories and Git repositories. Requires file reading and writing; remote installation also needs Git and network access, and script testing needs the appropriate runtimes. |
 | `tool-manager` | Creates, modifies, and troubleshoots Anas custom tools, with a format reference and Python example template. Requires file reading and writing; testing also needs command execution and the appropriate runtime. |
 
-`examples/skills/` contains examples that are not loaded by default. Use **Install skill** to copy them into **User** before use:
+`examples/skills/` contains examples that are not loaded by default. Use **Import skill** to copy them into **User** before use:
 
 | Example | Purpose and main dependencies |
 | --- | --- |
 | `weather` | Weather queries; Python 3 and network access to wttr.in. |
 | `ip-location` | Public IP and approximate network location; Python 3.8+ and network access to ipinfo.io. |
 
-System skills are refreshed from bundled files at startup. The complete `examples/` tree is refreshed at startup and after restoring a backup, including documentation, skill examples, tool examples and plugin examples. Install a skill into User or copy it into a project skill directory before customizing it.
+System skills are refreshed from bundled files at startup. The complete `examples/` tree is refreshed at startup and after restoring a backup, including documentation and skill, tool, plugin, and subagent examples. Import a skill into User or copy it into a project skill directory before customizing it.
 
 ## Prepare To Run
 

@@ -1,0 +1,47 @@
+{
+  "version": 0,
+  "id": "project-analyst",
+  "name": "project-analyst",
+  "description": "Inspect and analyze project files, code, configuration, or documents without modifying them.",
+  "capabilities": {
+    "application_environment": true,
+    "background_tools": true,
+    "subagents": {
+      "mode": "default",
+      "names": []
+    },
+    "planning": true,
+    "tool_mode": "selected",
+    "tools": [
+      "read_file",
+      "read_multiple_files",
+      "list_directory",
+      "directory_tree",
+      "get_file_info",
+      "run_shell",
+      "http_request"
+    ],
+    "skills": {
+      "project": false,
+      "mode": "custom",
+      "entries": []
+    },
+    "profile": false,
+    "environment": true,
+    "workspace": true,
+    "memory": true,
+    "mcp": {
+      "default_mode": "selected",
+      "servers": []
+    },
+    "custom_tools": {
+      "project": false,
+      "entries": [],
+      "mode": "custom"
+    },
+    "plugin_mode": "custom",
+    "plugins": [],
+    "plugin_tools": [],
+    "plugin_prompts": []
+  }
+}

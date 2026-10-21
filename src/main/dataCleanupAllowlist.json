@@ -34,7 +34,7 @@
     },
     {
       "type": "tree",
-      "paths": ["skills", "tools", "plugins", "examples", "lang", "help"],
+      "paths": ["skills", "tools", "subagents", "plugins", "examples", "lang", "help"],
       "reason": "允许包内自由组织文件；包含 _system、用户包、插件事务 .replace-* / .remove-* 及各模块暂存。示例由自身刷新机制维护。"
     },
     {

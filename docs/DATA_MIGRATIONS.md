@@ -8,11 +8,15 @@
 
 插件目录统一是另一个经用户批准的例外：用户插件直接安装到 `plugins/<id>/`，不迁移或回退读取旧 `plugins/<id>/package/`。旧用户插件会显示加载错误，重新覆盖安装同 ID 插件即可；默认保留 `db/plugins/<id>/` 中的业务数据、通用设置及首页位置，内置插件布局不变。内置与用户插件的安装状态均使用 `db/plugins/<id>/anas-installation.json`，不读取或迁移旧 `plugins/<id>/installation.json`。新文件缺失时采用默认值（启用、不显示标题栏图标）。旧安装目录不自动删除，由覆盖安装或卸载整体处理；恢复含旧路径的受支持备份也遵循此规则。
 
+子 Agent 目录化是经用户明确批准的独立不兼容变更：读取 `subagents/<用户包>/` 和 `subagents/_system/<内置包>/` 下的 `AGENT.json`、`PROMPT.md`；`config/subagents.json` 改为 v1 的顺序、开关和外部目录引用配置。内置包由应用更新，定义和文件只读，能力全开并使用父 Agent 的模型，不保存内置定制。不提供 v0 数组迁移或回退读取，旧文件保留并报错；用户需保全旧文件后重新创建或导入目录包。包含旧数组配置的备份不转换，恢复校验会拒绝。其他配置和会话数据不受此变更影响。
+
 ## 当前数据版本
 
 | 数据 | 版本位置 |
 | --- | --- |
-| 六份核心配置：settings、models、subagents、mcp_servers、skills、tools | 顶层 `version: 0` |
+| 核心配置：settings、models、mcp_servers、skills、tools | 顶层 `version: 0` |
+| 子 Agent 管理配置 subagents | 顶层 `version: 1` |
+| Agent 包 `AGENT.json` | 顶层 `version: 0` |
 | 随包项目默认值、模型及参数模板 | 顶层 `version: 0` |
 | 项目存储、项目删除日志、输入历史、备份恢复事务日志 | 顶层 `version: 0` |
 | 工具包 `TOOL.json`、语言包、头像裁剪参数 | 顶层 `version: 0` |

@@ -30,6 +30,8 @@
 - 迁移须可安全重试，并通过备份、事务和暂存写入支持失败恢复。遇到不支持的新格式，应在修改数据前拒绝；不承诺降级读取。
 - 用已发布格式的样本验证升级及失败恢复。未经用户明确同意，不删除受支持的升级路径；大版本升级也不例外。
 
+- 经用户明确批准，子 Agent 改用 `subagents/<目录>/AGENT.json`、`PROMPT.md` 与可选 `skills/`、`tools/`。仅 `general-purpose` 内置于 `subagents/_system/`，由应用更新，定义和文件只读、能力全开，固定使用父 Agent 的模型，仅允许切换整体启用状态。`web-researcher` 和 `project-analyst` 位于 `examples/subagents/`，作为普通包按需导入。`config/subagents.json` 使用 v1 管理顺序、开关和外部目录引用；不迁移、不兼容原 v0 数组配置，不自动删除或覆盖旧文件。其他数据格式的兼容规则不变。
+
 ## 文档语言
 
 - `README.md` 默认中文，`README.en.md` 为英文，内容同步并提供互相切换的链接。

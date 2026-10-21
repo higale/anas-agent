@@ -33,8 +33,8 @@ async function writeJson(path: string, value: unknown): Promise<void> {
 async function loadRawConfig() {
   vi.resetModules()
   const root = await mkdtemp(join(tmpdir(), 'anas-config-store-'))
-  const bundledDir = join(root, 'bundled')
-  const configDir = join(root, 'user')
+  const bundledDir = join(root, 'bundled', 'config')
+  const configDir = join(root, 'user', 'config')
   tempDirs.push(root)
   const fileNames = {
     settings: 'settings.json',
@@ -53,10 +53,13 @@ async function loadRawConfig() {
     skillsConfigFileName: fileNames.skills,
     configFileNames: Object.values(fileNames),
     getBundledConfigFile: (fileName = fileNames.settings) => join(bundledDir, fileName),
+    getDataDir: () => dirname(configDir),
+    getBundledDataDir: () => dirname(bundledDir),
     getConfigDir: () => configDir,
     getConfigFile: (fileName = fileNames.settings) => join(configDir, fileName)
   }))
   await writeJson(join(bundledDir, fileNames.customTools), { tools: [] })
+  await mkdir(join(dirname(bundledDir), 'subagents/_system'), { recursive: true })
   return {
     bundledDir,
     configDir,
@@ -177,7 +180,7 @@ describe('domain config storage', () => {
       providers: [{ id: 'bundled', name: 'Bundled' }]
     })
     await writeJson(join(bundledDir, fileNames.subagents), {
-      subagents: [{ name: 'general-purpose' }]
+      version: 1, order: []
     })
     await writeJson(join(bundledDir, fileNames.mcpServers), {
       mcp_servers: []
@@ -236,8 +239,8 @@ describe('domain config storage', () => {
     expect(result.settings).not.toHaveProperty('persona_name')
     expect(result.settings).not.toHaveProperty('persona_description')
     expect(result.providers).toEqual([{ id: 'first', name: 'First' }, { id: 'selected', name: 'Selected' }])
-    expect(result.subagents).toEqual([{ name: 'general-purpose' }])
-    await expect(readFile(join(configDir, fileNames.subagents), 'utf8')).resolves.toContain('general-purpose')
+    expect(result.subagents).toEqual([])
+    await expect(readFile(join(configDir, fileNames.subagents), 'utf8')).resolves.toContain('"version": 1')
     expect(await rawConfig.readRawConfig()).not.toHaveProperty('capabilities')
   })
 
@@ -253,7 +256,7 @@ describe('domain config storage', () => {
         speech_reply: {}
       }),
       writeJson(join(bundledDir, fileNames.models), { providers: [] }),
-      writeJson(join(bundledDir, fileNames.subagents), { subagents: [] }),
+      writeJson(join(bundledDir, fileNames.subagents), { version: 1, order: [] }),
       writeJson(join(bundledDir, fileNames.mcpServers), { mcp_servers: [] }),
       writeJson(join(bundledDir, fileNames.skills), { external_directories: [], availability: {} })
     ])
@@ -329,7 +332,7 @@ describe('domain config storage', () => {
         speech_reply: {}
       }),
       writeJson(join(bundledDir, fileNames.models), { providers: [] }),
-      writeJson(join(bundledDir, fileNames.subagents), { subagents: [] }),
+      writeJson(join(bundledDir, fileNames.subagents), { version: 1, order: [] }),
       writeJson(join(bundledDir, fileNames.mcpServers), { mcp_servers: [] }),
       writeJson(join(bundledDir, fileNames.skills), { external_directories: [], availability: {} })
     ])

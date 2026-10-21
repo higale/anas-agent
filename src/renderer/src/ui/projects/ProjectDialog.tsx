@@ -36,6 +36,8 @@ import { CommitTextarea } from '../CommitTextField'
 import { compressionPromptError, COMPRESSION_PROMPT_MAX_LENGTH, summaryPromptForLanguage } from '@shared/summaryPrompt'
 import { getLanguageOptions, resolveLanguagePreference } from '../../i18n'
 import { UI_TEXTAREA_ROWS_COMPACT } from '../uiConstants'
+import type { ToolSnapshot } from '@shared/toolPackages'
+import { ProjectResources } from './ProjectResources'
 
 export type ProjectCreationKind = ProjectKind | 'coding'
 
@@ -56,7 +58,7 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
   const [name, setName] = useState('')
   const [icon, setIcon] = useState<ProjectIconName>()
   const [iconColor, setIconColor] = useState<ProjectIconColor>()
-  const [projectTools, setProjectTools] = useState<import('@shared/toolPackages').ToolPackage[]>([])
+  const [projectTools, setProjectTools] = useState<ToolSnapshot>()
   const [sourceFolders, setSourceFolders] = useState<string[]>([])
   const [prompt, setPrompt] = useState('')
   const [compressionPrompt, setCompressionPrompt] = useState('')
@@ -162,9 +164,9 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
   }, [open, simpleChat, project?.id, sourceFolders, t])
   useEffect(() => {
     let cancelled = false
-    setProjectTools([])
+    setProjectTools(undefined)
     if (open && !simpleChat) void window.gale.tools.get(project?.id, sourceFolders).then(snapshot => {
-      if (!cancelled) setProjectTools(snapshot.tools)
+      if (!cancelled) setProjectTools(snapshot)
     }).catch(error => { if (!cancelled) notice.error(t('custom_tools.update_failed'), { description: String(error) }) })
     return () => { cancelled = true }
   }, [open, simpleChat, project?.id, sourceFolders, config?.customTools, t])
@@ -437,16 +439,19 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
                       />
                     </div>
                   </div>
+                  {!simpleChat && !advancedSettings && <ProjectResources skills={skills} tools={projectTools} />}
                 </div>
               </div>
               {!simpleChat && advancedSettings && <section className="ui-dialog-pane ui-form-section" aria-label={t('settings.capabilities')}>
                 <h3 className="ui-dialog-title">{t('settings.capabilities')}</h3>
-                <CapabilityEditor customTools={projectTools} value={capabilities} skills={skills} mcpStatus={mcpStatus} mcpServers={config?.mcpServers} runtimeToolStatus={runtimeToolStatus} disabled={busy}
-                  subagents={config?.subagents ?? []}
+                <CapabilityEditor customTools={projectTools?.tools} value={capabilities} skills={skills} mcpStatus={mcpStatus} mcpServers={config?.mcpServers} runtimeToolStatus={runtimeToolStatus} disabled={busy}
+                  subagents={config?.subagents ?? []} restrictSubagents={restrictSubagents}
                   onChange={setCapabilities}
                   onEnableAll={(capabilities) => { setCapabilities(capabilities); setRestrictSubagents(false) }}
                   toolbarEnd={<CheckboxField className="ui-checkbox-field-inline" checked={restrictSubagents} disabled={busy} label={t('capabilities.restrict_subagents')}
-                    tooltip={t('capabilities.restrict_subagents_hint')} onChange={setRestrictSubagents} />} />
+                    tooltip={t('capabilities.restrict_subagents_hint')} onChange={setRestrictSubagents} />}>
+                  <ProjectResources skills={skills} tools={projectTools} />
+                </CapabilityEditor>
               </section>}
             </div>
 

@@ -113,7 +113,7 @@ describe('skillsStore', () => {
     const catalog = await h.store.listSkillSnapshot('project')
     const skill = catalog.skills.find(skill => skill.source === 'plugin')!
     expect(skill).toMatchObject({ id: 'skill-fixture:skill:guide', shortcutAlias: 'plugin:skill-fixture', modelShadowedBy: 'User', requiredTools: ['skill-fixture:tool:echo'], scriptAutoApprove: false })
-    expect(skill.dirPath).toBe(join(h.root, 'plugins', 'skill-fixture', 'skills', 'duplicate'))
+    expect(skill.dirPath).toBe(await realpath(join(h.root, 'plugins', 'skill-fixture', 'skills', 'duplicate')))
     expect((await h.store.readSkillFile('project', skill.id, 'SKILL.md')).editable).toBe(false)
     await expect(h.store.saveSkillFile('project', skill.id, 'SKILL.md', {} as never)).rejects.toThrow('read-only')
     expect(await h.store.buildUserSkillInvocation('project', 'duplicate', 'plugin:skill-fixture', 'check')).toMatchObject({ errorCode: 'user_unavailable' })

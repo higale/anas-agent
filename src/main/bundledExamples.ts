@@ -5,6 +5,7 @@ import { getBundledExamplesDir, getExamplesDir, getTempDir } from './config/data
 import { validateBundledPluginZip } from './plugins/pluginStore'
 import { validateBundledSkill } from './skillsStore'
 import { validateBundledTool } from './toolsStore'
+import { readSubagentPackage } from './subagentPackages'
 
 let initialization: Promise<void> | undefined
 
@@ -14,6 +15,9 @@ export function initializeBundledExamples(): Promise<void> {
     initialization = mirrorBundledDirectories(getBundledExamplesDir(), getExamplesDir(), undefined, async (directory, category) => {
       if (category === 'skills') await validateBundledDirectories(directory, validateBundledSkill)
       else if (category === 'tools') await validateBundledDirectories(directory, validateBundledTool)
+      else if (category === 'subagents') await validateBundledDirectories(directory, async path => {
+        if ((await readSubagentPackage(path)).preset) throw new Error(`Agent examples must be custom packages: ${path}`)
+      })
       else if (category === 'plugins') {
         for (const entry of await readdir(directory, { withFileTypes: true })) {
           const path = join(directory, entry.name)

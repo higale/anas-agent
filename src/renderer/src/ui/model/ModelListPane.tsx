@@ -6,8 +6,7 @@ import { modelTemplateTree } from '@shared/modelTemplates'
 import type { ModelTemplateTreeNode } from '@shared/modelTemplates'
 import type { AppConfigSnapshot } from '@shared/types'
 import { DropdownMenuContent, DropdownMenuRoot, DropdownMenuSubContent, DropdownMenuTrigger } from '../DropdownMenuShell'
-import { SettingsListActions } from '../settings/SettingsListActions'
-import { UI_ICON_SIZE_LARGE } from '../uiConstants'
+import { SettingsSelectionActions } from '../settings/SettingsListActions'
 import { ProviderIcon } from './ProviderIcon'
 import { providerProtocolLabel } from './providerProtocol'
 
@@ -71,6 +70,38 @@ function ModelTemplateMenuNodes({ nodes, depth = 0, onCreateModel }: ModelTempla
   })
 }
 
+function ModelProviderCreateButton({ disabled, onCreateModel }: {
+  disabled?: boolean
+  onCreateModel: (templateId?: string) => void | Promise<void>
+}) {
+  const { t } = useTranslation()
+  return (
+    <DropdownMenuRoot>
+      <DropdownMenuTrigger asChild>
+        <button className="ui-button" type="button" disabled={disabled} aria-label={t('settings.new_provider')} data-tooltip={t('settings.new_provider')}>
+          <Plus size={14} aria-hidden="true" />{t('common.new')}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenu.Portal>
+        <DropdownMenuContent
+          align="start"
+          className="model-template-menu ui-menu ui-menu-list"
+          collisionPadding={10}
+          side="bottom"
+          sideOffset={5}
+        >
+          <DropdownMenu.Item className="model-template-blank ui-menu-item ui-menu-item-row" onSelect={() => void onCreateModel()}>
+            <Plus size={14} />
+            {t('settings.blank_provider')}
+          </DropdownMenu.Item>
+          <DropdownMenu.Separator className="ui-menu-separator" />
+          <ModelTemplateMenuNodes nodes={modelTemplateTree} onCreateModel={onCreateModel} />
+        </DropdownMenuContent>
+      </DropdownMenu.Portal>
+    </DropdownMenuRoot>
+  )
+}
+
 export function ModelListPane({
   config,
   editingModelIndex,
@@ -81,51 +112,26 @@ export function ModelListPane({
   onMoveModel
 }: ModelListPaneProps) {
   const { t } = useTranslation()
+  const providers = config?.providers ?? []
+  const selectedPosition = providers.findIndex(provider => provider.index === editingModelIndex)
+  const selectedProvider = providers[selectedPosition]
 
   return (
     <div className="ui-list-pane">
-      <div className="ui-list-pane-header">
-        <SettingsListActions
-          addLabel={t('settings.new_provider')}
-          addControl={(
-            <DropdownMenuRoot>
-              <DropdownMenuTrigger asChild>
-                <button className="ui-icon-button" type="button" aria-label={t('settings.new_provider')} data-tooltip={t('settings.new_provider')}>
-                  <Plus size={UI_ICON_SIZE_LARGE} />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenu.Portal>
-                <DropdownMenuContent
-                  align="start"
-                  className="model-template-menu ui-menu ui-menu-list"
-                  collisionPadding={10}
-                  side="bottom"
-                  sideOffset={5}
-                >
-                  <DropdownMenu.Item className="model-template-blank ui-menu-item ui-menu-item-row" onSelect={() => void onCreateModel()}>
-                    <Plus size={14} />
-                    {t('settings.blank_provider')}
-                  </DropdownMenu.Item>
-                  <DropdownMenu.Separator className="ui-menu-separator" />
-                  <ModelTemplateMenuNodes nodes={modelTemplateTree} onCreateModel={onCreateModel} />
-                </DropdownMenuContent>
-              </DropdownMenu.Portal>
-            </DropdownMenuRoot>
-          )}
-          canDelete={editingModelIndex !== undefined}
-          canMoveDown={editingModelIndex !== undefined && !!config && editingModelIndex < config.providers.length - 1}
-          canMoveUp={editingModelIndex !== undefined && editingModelIndex > 0}
-          deleteLabel={t('settings.delete_provider')}
-          onAdd={() => onCreateModel()}
-          onDelete={onDeleteModel}
-          onMove={onMoveModel}
-        />
-      </div>
+      <SettingsSelectionActions
+        leading={<ModelProviderCreateButton disabled={!config} onCreateModel={onCreateModel} />}
+        moveUpLabel={t('common.move_up')} moveDownLabel={t('common.move_down')}
+        deleteLabel={t('settings.delete_provider')} targetName={selectedProvider?.name || (selectedProvider ? t('settings.provider_fallback_name', { index: selectedProvider.index }) : undefined)}
+        onMoveUp={selectedPosition > 0 ? () => void onMoveModel(-1) : undefined}
+        onMoveDown={selectedPosition >= 0 && selectedPosition < providers.length - 1 ? () => void onMoveModel(1) : undefined}
+        onDelete={selectedProvider ? () => void onDeleteModel() : undefined}
+      />
       <div className="ui-scroll-list ui-list" ref={listRef}>
         {config && config.providers.length === 0 && <div className="ui-empty-state ui-empty-state-compact">{t('settings.no_providers_configured')}</div>}
         {config?.providers.map((provider) => (
           <button
             className={provider.index === editingModelIndex ? 'ui-list-item-split ui-list-item ui-list-item-active active' : 'ui-list-item-split ui-list-item'}
+            aria-pressed={provider.index === editingModelIndex}
             data-model-index={provider.index}
             key={provider.id}
             type="button"

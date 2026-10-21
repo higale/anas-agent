@@ -42,10 +42,10 @@ export function useSubagentSettingsState({
 
   useEffect(() => {
     if (!config) return
-    const selected = editingIndex === undefined
-      ? undefined
-      : config.subagents.find((subagent) => subagent.index === editingIndex)
+    const selected = draftRef.current.id ? config.subagents.find(a => a.id === draftRef.current.id)
+      : config.subagents.find(a => a.index === editingIndex)
     if (selected) {
+      if (selected.index !== editingIndex) setEditingIndex(selected.index)
       if (draftRef.current.index !== selected.index) {
         const next = subagentToDraft(selected)
         draftRef.current = next
@@ -143,7 +143,7 @@ export function useSubagentSettingsState({
   async function editSubagent(index: number): Promise<void> {
     await additions.waitForIdle()
     await autosave.waitForIdle()
-    if (saveFailed.current) return
+    if (saveFailed.current) throw new Error(t('settings.subagent_failed_save'))
     const selected = configRef.current?.subagents.find((subagent) => subagent.index === index)
     if (!selected) return
     const next = subagentToDraft(selected)
@@ -165,7 +165,7 @@ export function useSubagentSettingsState({
         try {
           await additions.waitForIdle()
           await autosave.waitForIdle()
-          const nextConfig = await window.gale.config.deleteSubagent(selected.index)
+          const nextConfig = await window.gale.config.deleteSubagent(selected.id ?? selected.index)
           saveFailed.current = false
           notice.dismiss(noticeId)
           configRef.current = nextConfig
@@ -192,8 +192,10 @@ export function useSubagentSettingsState({
       await additions.waitForIdle()
       await autosave.waitForIdle()
       if (saveFailed.current) return
-      const nextConfig = await window.gale.config.moveSubagent(index, direction)
-      const nextIndex = index + direction
+      const id = configRef.current?.subagents.find(a => a.index === index)?.id
+      const nextConfig = await window.gale.config.moveSubagent(id ?? index, direction)
+      const nextIndex = nextConfig.subagents.find(a => a.id === id)?.index ?? index
+      configRef.current = nextConfig
       setConfig(nextConfig)
       setEditingIndex(nextConfig.subagents[nextIndex]?.index ?? index)
       setCreating(false)
@@ -205,38 +207,26 @@ export function useSubagentSettingsState({
     }
   }
 
-  function restoreSubagent(): void {
-    const selected = config?.subagents.find((subagent) => subagent.index === editingIndex)
-    if (!selected?.builtIn) return
-    openConfirmDialog({
-      title: t('settings.subagent_restore_title', { name: selected.name }),
-      description: t('settings.subagent_restore_description'),
-      confirmText: t('settings.restore_default'),
-      onConfirm: async () => {
-        try {
-          await additions.waitForIdle()
-          await autosave.waitForIdle()
-          const nextConfig = await window.gale.config.restoreSubagent(selected.index)
-          saveFailed.current = false
-          notice.dismiss(noticeId)
-          setConfig(nextConfig)
-          const restored = nextConfig.subagents[selected.index]
-          if (restored) {
-            const next = subagentToDraft(restored)
-            draftRef.current = next
-            setDraft(next)
-          }
-        } catch {
-          notice.error(
-            t('settings.subagent_failed_restore'),
-            { id: noticeId }
-          )
-        }
-      }
-    })
+  async function refreshSubagents(importPackage = false): Promise<void> {
+    await additions.waitForIdle()
+    await autosave.waitForIdle()
+    if (saveFailed.current) throw new Error(t('settings.subagent_failed_save'))
+    const currentId = draftRef.current.id
+    const previousIds = new Set(configRef.current?.subagents.map(a => a.id))
+    const nextConfig = importPackage ? await window.gale.config.importSubagentPackage() : await window.gale.config.get()
+    if (!nextConfig) return
+    configRef.current = nextConfig
+    setConfig(nextConfig)
+    const selected = (importPackage ? nextConfig.subagents.find(a => !previousIds.has(a.id)) : undefined)
+      ?? nextConfig.subagents.find(a => a.id === currentId) ?? nextConfig.subagents[0]
+    setEditingIndex(selected?.index)
+    draftRef.current = selected ? subagentToDraft(selected) : createSubagentDraft(nextConfig, t)
+    setDraft(draftRef.current)
+    if (importPackage) notice.success(t('settings.subagents_imported', { count: nextConfig.subagents.filter(a => !previousIds.has(a.id)).length }), { id: noticeId })
   }
 
   return {
+    refreshSubagents,
     addSubagent,
     deleteSubagent,
     draft,
@@ -244,7 +234,6 @@ export function useSubagentSettingsState({
     editingIndex,
     listRef,
     moveSubagent,
-    restoreSubagent,
     updateDraft
   }
 }

@@ -1,6 +1,6 @@
 import { resolvePluginTools, buildPluginPrompts, pluginRuntime } from '../plugins/pluginRuntime'
 import { createPluginTools } from './pluginToolRuntime'
-import { listToolSnapshot } from '../toolsStore'
+import { listToolSnapshot, listSubagentTools } from '../toolsStore'
 import { resolveToolSelection } from '@shared/toolPackages'
 import { createCustomTools } from './customToolRuntime'
 import { defaultSubagentSelection, selectedSubagents } from '@shared/subagentSelection'
@@ -51,7 +51,7 @@ import { getCachedMcpRuntime, getLoadedMcpRuntime } from '../mcpRuntimeService'
 import { resolveConfiguredLanguage } from '../languageStore'
 import { getProject } from '../projectStore'
 import { describeCommandShell, getCommandShell, prepareShellCommand, resultText, runShellCommand } from '../shellRuntime'
-import { buildSkillsPrompt, listSkillSnapshot } from '../skillsStore'
+import { buildSkillsPrompt, listSkillSnapshot, listSubagentSkills } from '../skillsStore'
 import { projectSkillMessages } from './messageMapper'
 import type { AgentDatabase, AgentSubagentCallRecord } from './agentDatabase'
 import {
@@ -502,14 +502,21 @@ async function prepareAgentInstanceFromConfig(
     const projectPolicy = project.kind === 'workspace' ? effectiveProjectCapabilitySettings(project) : undefined
     const ownCapabilities = resolvePluginCapabilities(activeSubagent ? activeSubagent.capabilities : projectPolicy?.capabilities ?? defaultCapabilities, await pluginRuntime().store.list(), Boolean(activeSubagent))
     const parentLimit = activeSubagent ? context.parentConfiguration?.subagentLimit : undefined
-    const catalog = project.kind === 'workspace' && capabilityFeatures(ownCapabilities).skills && (!parentLimit || capabilityFeatures(parentLimit).skills)
+    const skillsEnabled = project.kind === 'workspace' && capabilityFeatures(ownCapabilities).skills && (!parentLimit || capabilityFeatures(parentLimit).skills)
+    const globalCatalog = skillsEnabled
       ? await listSkillSnapshot(thread.projectId, project.sourceFolders)
       : { skills: [] }
-    const toolCatalog = project.kind === 'workspace' ? await listToolSnapshot(project.sourceFolders) : { tools: [] }
-    const resolve = (value: AgentCapabilities): ResolvedAgentCapabilities => ({ ...value, pluginMode: 'custom',
+    const globalToolCatalog = project.kind === 'workspace' ? await listToolSnapshot(project.sourceFolders) : { tools: [] }
+    const packageIds = activeSubagent?.id ? [activeSubagent.id] : []
+    const ownedSkills = skillsEnabled ? await listSubagentSkills(packageIds) : { skills: [] }
+    const ownedTools = project.kind === 'workspace' && ownCapabilities.customTools.mode !== 'off' && (!parentLimit || parentLimit.customTools.entries.length)
+      ? await listSubagentTools(packageIds) : []
+    const catalog = { skills: [...ownedSkills.skills, ...globalCatalog.skills] }
+    const toolCatalog = { tools: [...ownedTools, ...globalToolCatalog.tools] }
+    const resolve = (value: AgentCapabilities, skills = catalog.skills, tools = toolCatalog.tools, child = Boolean(activeSubagent), unique = false): ResolvedAgentCapabilities => ({ ...value, pluginMode: 'custom',
       subagents: { mode: value.subagents.mode === 'off' ? 'off' : 'custom', names: selectedSubagents(config.subagents, value.subagents).map((subagent) => subagent.name) },
-      customTools: resolveToolSelection(value.customTools, toolCatalog.tools.filter(tool => !tool.definition?.interactive || value.backgroundTools), Boolean(activeSubagent), false),
-      skills: resolveSkillSelection(value.skills, catalog.skills, true, Boolean(activeSubagent), value.pluginTools) })
+      customTools: resolveToolSelection(value.customTools, tools.filter(tool => !tool.definition?.interactive || value.backgroundTools), child, false),
+      skills: resolveSkillSelection(value.skills, skills, unique, child, value.pluginTools) })
     let capabilities = resolve(ownCapabilities)
     if (activeSubagent && parentLimit) {
       assertResolvedCapabilities(parentLimit)
@@ -517,7 +524,7 @@ async function prepareAgentInstanceFromConfig(
     }
     // Apply the root ceiling before resolving duplicate names, so an excluded
     // project override cannot hide an allowed tool from another source.
-    capabilities = { ...capabilities, customTools: resolveToolSelection(capabilities.customTools,
+    capabilities = { ...capabilities, skills: resolveSkillSelection(capabilities.skills, catalog.skills, true, false, capabilities.pluginTools), customTools: resolveToolSelection(capabilities.customTools,
       toolCatalog.tools.filter(tool => !tool.definition?.interactive || capabilities.backgroundTools)) }
     const rootSelection = activeSubagent
       ? context.parentConfiguration?.subagentSelectionLimit ?? context.parentConfiguration?.capabilities.subagents ?? defaultSubagentSelection
@@ -525,7 +532,14 @@ async function prepareAgentInstanceFromConfig(
     const rootSubagents = selectedSubagents(config.subagents, rootSelection)
     capabilities = { ...capabilities, subagents: { ...capabilities.subagents,
       names: selectedSubagents(rootSubagents, capabilities.subagents).map((subagent) => subagent.name) } }
-    const subagentLimit = activeSubagent ? parentLimit : projectPolicy?.restrictSubagents ? capabilities : undefined
+    let subagentLimit = activeSubagent ? parentLimit : projectPolicy?.restrictSubagents ? capabilities : undefined
+    if (!activeSubagent && subagentLimit) {
+      const ids = rootSubagents.flatMap(a => a.id ? [a.id] : [])
+      const resources = skillsEnabled ? await listSubagentSkills(ids) : { skills: [] }
+      const tools = ownCapabilities.customTools.mode !== 'off' ? await listSubagentTools(ids) : []
+      // These are grants to descendants only, never tools or Skills exposed to the main agent.
+      subagentLimit = resolve(ownCapabilities, [...catalog.skills, ...resources.skills], [...toolCatalog.tools, ...tools], false, false)
+    }
     runConfiguration = {
       customTools: structuredClone(project.kind === 'workspace'
         ? toolCatalog.tools.filter(tool => capabilities.customTools.entries.includes(tool.id)).map(tool => tool.definition!) : []),

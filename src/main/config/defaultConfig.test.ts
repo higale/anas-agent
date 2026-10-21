@@ -1,15 +1,19 @@
 import capabilities from '../../../data/config/capabilities.json'
-import { defaultCapabilities, serializeCapabilities, parseCapabilities } from '@shared/agentCapabilities'
+import { allCapabilities, capabilityFeatures, defaultCapabilities, serializeCapabilities, parseCapabilities } from '@shared/agentCapabilities'
 import settings from '../../../data/config/settings.json'
 import mcpServers from '../../../data/config/mcp_servers.json'
 import models from '../../../data/config/models.json'
 import subagents from '../../../data/config/subagents.json'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { defaultModelConfig, defaultModelProviderConfig } from '@shared/modelConfig'
 import { modelTemplates, modelTemplateTree } from '@shared/modelTemplates'
 import { defaultSubagentConfig } from '@shared/subagentConfig'
 import { normalizeAppConfigSnapshot } from './appConfig'
-import type { RawAppConfig } from './rawAppConfig'
+import type { RawAppConfig, RawSubagentConfig } from './rawAppConfig'
+import { readSubagentPackage, readSubagentPackages } from '../subagentPackages'
+import { join } from 'node:path'
+let bundledAgents: RawSubagentConfig[]
+beforeAll(async () => { bundledAgents = await readSubagentPackages(join(process.cwd(), 'data')) })
 
 describe('bundled configuration contract', () => {
   it('strictly maps every bundled model, subagent, setting, and enum', () => {
@@ -17,12 +21,12 @@ describe('bundled configuration contract', () => {
       settings,
       capabilities,
       providers: models.providers,
-      subagents: subagents.subagents,
+      subagents: bundledAgents,
       mcp_servers: mcpServers.mcp_servers
     } as RawAppConfig)
 
     expect(snapshot.providers).toHaveLength(models.providers.length)
-    expect(snapshot.subagents).toHaveLength(subagents.subagents.length)
+    expect(snapshot.subagents).toHaveLength(bundledAgents.length)
     expect(snapshot.defaultModel).toBeUndefined()
     expect(snapshot.settings.sidebarCollapsedSections).toEqual({
       projects: false,
@@ -54,13 +58,17 @@ describe('bundled configuration contract', () => {
     ))).toBe(true)
   })
 
-  it('enables profile context for the bundled general-purpose subagent', () => {
-    const general = subagents.subagents.find((subagent) => subagent.preset === 'general-purpose')
-    expect(parseCapabilities(general?.capabilities).profile).toBe(true)
+  it('ships only general-purpose as a built-in with every capability and the parent model', () => {
+    expect(bundledAgents.map(agent => agent.id)).toEqual(['general-purpose'])
+    const general = bundledAgents.find((subagent) => subagent.preset === 'general-purpose')
+    expect(parseCapabilities(general?.capabilities)).toEqual(allCapabilities)
+    expect(general?.model_config_id).toBeUndefined()
+    expect(general?.model_parameter_preset_id).toBeUndefined()
   })
 
-  it('gives the bundled web researcher shell, file reading, and network tools without delegation or planning', () => {
-    const researcher = subagents.subagents.find((subagent) => subagent.preset === 'web-researcher')
+  it('gives the example web researcher shell, file reading, and network tools without delegation or planning', async () => {
+    const researcher = await readSubagentPackage(join(process.cwd(), 'data/examples/subagents/web-researcher'))
+    expect(researcher.preset).toBeUndefined()
     expect(parseCapabilities(researcher?.capabilities)).toMatchObject({
       workspace: false,
       memory: false,
@@ -71,8 +79,9 @@ describe('bundled configuration contract', () => {
     })
   })
 
-  it('adds shell and network tools alongside the bundled project analyst file tools', () => {
-    const analyst = subagents.subagents.find((subagent) => subagent.preset === 'project-analyst')
+  it('adds shell and network tools alongside the example project analyst file tools', async () => {
+    const analyst = await readSubagentPackage(join(process.cwd(), 'data/examples/subagents/project-analyst'))
+    expect(analyst.preset).toBeUndefined()
     expect(analyst).toMatchObject({
  capabilities: serializeCapabilities({ ...structuredClone(defaultCapabilities), profile: false, toolMode: 'selected', tools: [
         'read_file',
@@ -86,8 +95,12 @@ describe('bundled configuration contract', () => {
     })
   })
 
-  it('keeps custom subagent defaults separate from built-in presets', () => {
-    expect(defaultSubagentConfig.capabilities.profile).toBe(true)
+  it('starts custom subagents disabled with every capability off', () => {
+    expect(defaultSubagentConfig.enabled).toBe(false)
+    expect(Object.values(capabilityFeatures(defaultSubagentConfig.capabilities)).every(enabled => !enabled)).toBe(true)
+    expect(defaultSubagentConfig.capabilities).toMatchObject({
+      subagents: { mode: 'off' }, skills: { mode: 'off' }, customTools: { mode: 'off' }, pluginMode: 'off'
+    })
     expect(defaultSubagentConfig).toEqual({
  capabilities: parseCapabilities(subagents.subagent_defaults.capabilities),
       enabled: subagents.subagent_defaults.enabled,

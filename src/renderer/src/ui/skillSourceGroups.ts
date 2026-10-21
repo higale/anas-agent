@@ -13,7 +13,7 @@ export function skillSourceGroups(roots: SkillRootSummary[], t: (key: string) =>
       label: t(`settings.skill_group_${kind}`),
       roots: roots.filter((root) => root.kind === kind)
     })),
-    ...roots.filter((root) => root.kind === 'external' || root.kind === 'plugin').map((root) => ({
+    ...roots.filter((root) => root.kind === 'external' || root.kind === 'plugin' || root.kind === 'subagent').map((root) => ({
       id: `${root.kind}:${root.id}`, label: root.name, roots: [root]
     }))
   ]

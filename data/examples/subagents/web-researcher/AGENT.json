@@ -1,0 +1,43 @@
+{
+  "version": 0,
+  "id": "web-researcher",
+  "name": "web-researcher",
+  "description": "Research current or external information, verify claims, compare sources, and return findings with source links.",
+  "capabilities": {
+    "application_environment": true,
+    "background_tools": true,
+    "subagents": {
+      "mode": "off",
+      "names": []
+    },
+    "planning": false,
+    "tool_mode": "selected",
+    "tools": [
+      "run_shell",
+      "read_file",
+      "http_request"
+    ],
+    "skills": {
+      "project": false,
+      "mode": "custom",
+      "entries": []
+    },
+    "profile": false,
+    "environment": true,
+    "workspace": false,
+    "memory": false,
+    "mcp": {
+      "default_mode": "selected",
+      "servers": []
+    },
+    "custom_tools": {
+      "project": false,
+      "entries": [],
+      "mode": "custom"
+    },
+    "plugin_mode": "custom",
+    "plugins": [],
+    "plugin_tools": [],
+    "plugin_prompts": []
+  }
+}

@@ -38,6 +38,7 @@ export function createSubagentDraft(
 export function subagentSavePayload(draft: SubagentDraft): SubagentConfigSave {
   return {
     index: draft.index,
+    id: draft.id,
     name: draft.name.trim(),
     enabled: draft.enabled,
     description: draft.description.trim(),

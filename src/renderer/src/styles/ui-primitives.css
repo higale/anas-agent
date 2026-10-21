@@ -376,6 +376,29 @@
   grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--ui-grid-min-width, 160px)), 1fr));
 }
 
+.ui-grid-auto.ui-resource-grid {
+  --ui-grid-min-width: 14em;
+  column-gap: 24px;
+  row-gap: 4px;
+  align-items: start;
+}
+
+.ui-resource-grid .ui-checkbox-field-label {
+  display: block;
+  overflow-wrap: anywhere;
+  line-height: var(--font-line-height-ui);
+}
+
+.ui-resource-item {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: var(--control-height);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: var(--font-line-height-ui);
+}
+
 .ui-grid-centered {
   place-items: center;
 }

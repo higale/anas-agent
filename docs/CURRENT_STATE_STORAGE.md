@@ -6,7 +6,7 @@ LangGraph checkpoint 是会话状态的唯一权威来源。框架负责模型�
 
 当前应用自有数据格式以显式 `v0` 为唯一兼容原点，包括 SQLite 的 `user_version = 0`；通过现有表结构区分空库与已初始化的 v0 库。此前无版本或旧编号的数据不提供升级路径，遇到不支持的格式拒绝读取，不自动清空数据。后续格式变更遵循[迁移规则](DATA_MIGRATIONS.md)。LangGraph checkpoint 的原生版本和通道版本保留框架定义。
 
-4.0 是经用户批准的会话存储兼容边界：旧 `sqlite/` 中的对话目录与全部记忆，以及根目录的 `projects.json`、`input_history.json` 弃用，不迁移、不回退读取、不自动删除旧文件；旧备份不能导入。全局配置仍使用原 v0，其他格式兼容规则不变。
+4.0 是经用户批准的会话存储兼容边界：旧 `sqlite/` 中的对话目录与全部记忆，以及根目录的 `projects.json`、`input_history.json` 弃用，不迁移、不回退读取、不自动删除旧文件；旧备份不能导入。除下述子 Agent 目录化例外，其他全局配置仍使用原 v0。
 
 项目、输入历史、插件数据和头像的手动恢复步骤见[4.x 升级数据说明](../data/help/UPGRADE_TO_4.zh-CN.md)。项目定义和输入历史仍使用现有 v0 格式；头像资源使用 `config/assets/`，旧根目录 `assets/` 不读取、迁移或纳入新备份，未恢复时初始化默认头像。手动恢复这些文件不恢复旧对话或记忆。
 
@@ -19,6 +19,12 @@ LangGraph checkpoint 是会话状态的唯一权威来源。框架负责模型�
   config/
     *.json
     assets/                       # 头像原图、裁剪参数及生成图标
+  subagents/_system/<内置包>/      # 应用维护、随版本更新，只读
+  subagents/<用户包>/
+    AGENT.json                    # 稳定 ID、名称、描述、模型选择与能力
+    PROMPT.md                     # 系统提示词
+    skills/<技能>/SKILL.md         # 可选，仅所属 Agent 使用
+    tools/<工具>/TOOL.json         # 可选，可携带脚本和资源
   db/
     catalog.sqlite
     projects.json
@@ -38,6 +44,16 @@ LangGraph checkpoint 是会话状态的唯一权威来源。框架负责模型�
 ```
 
 `db/projects.json` 保存项目定义与设置，`db/input_history.json` 保存全局输入历史和置顶输入，`db/plugins/<id>/` 保存所有插件的独立数据、通用设置和安装状态；`anas-installation.json` 记录启用状态和标题栏图标设置。用户插件代码直接位于 `plugins/<id>/`，内置插件位于 `plugins/_system/<id>/`，均无额外的 `package/` 层级。项目重置只删除项目元数据、catalog 及对话资源，保留输入历史和插件数据。项目修复保留同目录其他文件，并在切换前核对源数据未变化。
+
+子 Agent 定义只从目录包读取。`web-researcher` 和 `project-analyst` 放在 `examples/subagents/`，不自动加载，导入后作为普通用户包使用。仅 `general-purpose` 内置于 `subagents/_system/`，启动时镜像随包内容，不改动用户包；内置定义和全部文件只读，不可删除或改名，能力全开，固定使用父 Agent 的模型，仅允许切换整个 Agent 的启用状态。`config/subagents.json` v1 保存 `order`、`external_directories`（稳定 ID、显示名及绝对路径；缺失默认空列表）和整个 Agent 的 `disabled`，不再保存内置覆盖配置。包内文件不保存宿主启停状态。自定义提示词统一从文件树的 `PROMPT.md` 编辑；内置文件只可预览，定义和文件保存入口均拒绝写入。
+
+包内资源选择属于能力配置：`capabilities.skills.package` 和 `capabilities.custom_tools.package` 按包内 ID 保存布尔开关，未指定时默认启用；整体分组关闭仍优先。自定义 Agent 写入自己的 `AGENT.json`；内置包不提供资源开关。包内 ID 不包含 Agent ID，复制包后选择仍有效。运行时先解析为明确资源列表，再应用父级限制与同名规则。
+
+包 ID 不随名称和排序改变，私有资源使用 `subagent:<ID>:skill:<名称>` 和 `subagent:<ID>:tool:<工具ID>`，不进入全局目录。项目的包内资源选择仅用于子 Agent 能力上限，不向主 Agent 暴露资源。包内同名资源优先，先应用父级限制，再处理同名覆盖。
+
+外部目录直接引用其下的包，内置和用户包优先于外部来源；重复 ID／名称和无效包在来源中报告，缺失目录不阻塞其他包。移除来源只解除引用；不可用包的宿主开关和顺序保留。
+
+定义编辑和删除使用 `subagents/.transaction/` 保存事务记录，配置文件作为提交标记；外部包的暂存与旧目录保留在同一外部卷的 `.anas-subagent-<事务ID>/`，恢复后清理。再次读取前完成恢复，活动工具目录不能替换或删除。本地整包随备份保存，外部包只保存引用、文件需另行备份；未知文件清理保留整个 `subagents/`。此次改造经用户批准，不迁移或读取原 v0 数组配置；原文件保留并报错，需保全后重新创建或导入包。
 
 对话持久资源统一位于 `db/conversations/`，临时草稿仍在 `tmp/conversations/`。开发期间的根目录 `conversations/` 不读取、不迁移、不纳入备份，也不自动删除。
 

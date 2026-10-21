@@ -1,9 +1,15 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState, type ComponentProps } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { McpToolStatus, RuntimeToolStatus } from '@shared/types'
 import type { PluginSummary } from '@shared/plugins'
-import { ToolsSettings } from './ToolsSettings'
+import { ToolsSettings as ToolsSettingsContent } from './ToolsSettings'
+
+function ToolsSettings(props: ComponentProps<typeof ToolsSettingsContent>) {
+  const [target, setTarget] = useState<HTMLDivElement | null>(null)
+  return <><header><div ref={setTarget} /></header><ToolsSettingsContent {...props} actionsTarget={target} /></>
+}
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'en' } })
@@ -63,18 +69,18 @@ describe('tool catalog', () => {
     expect(screen.queryByRole('button', { name: /^run_shell:/ })).not.toBeInTheDocument()
   })
 
-  it('retains empty MCP server groups and hides import when returning from user tools to the catalogs', async () => {
+  it('retains empty MCP server groups and page import actions when returning to the catalogs', async () => {
     vi.stubGlobal('gale', { tools: { get: vi.fn(async () => ({ roots: [{ id: 'user', name: 'User', source: 'user', path: '/tools' }], tools: [] })) } })
     const view = render(<ToolsSettings {...props} />)
-    expect(screen.queryByRole('button', { name: 'custom_tools.import' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'custom_tools.import' })).toBeVisible()
     fireEvent.click(await screen.findByRole('button', { name: /^settings.skill_group_user/ }))
     expect(screen.getByRole('button', { name: 'custom_tools.import' })).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: /^settings\.mcp\s*0$/ }))
-    expect(screen.queryByRole('button', { name: 'custom_tools.import' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'custom_tools.import' })).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: /^settings.skill_group_user/ }))
     expect(screen.getByRole('button', { name: 'custom_tools.import' })).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: /^custom_tools.builtin/ }))
-    expect(screen.queryByRole('button', { name: 'custom_tools.import' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'custom_tools.import' })).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: /^settings\.mcp\s*0$/ }))
     expect(screen.getByRole('button', { name: /^custom_tools\.all\s*0$/ })).toBeVisible()
     expect(screen.getByText('settings.tools_mcp_empty')).toBeVisible()
@@ -112,7 +118,7 @@ describe('tool catalog', () => {
     expect(within(first).getByRole('button', { name: /^plugin__first__lookup:/ })).toBeEnabled()
     expect(within(second).getByText('settings.disabled')).toBeVisible()
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'custom_tools.import' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'custom_tools.import' })).toBeVisible()
     await user.click(within(second).getByRole('button', { name: /^plugin__second__lookup:/ }))
     const dialog = screen.getByRole('dialog')
     const expected = { name: 'plugin__second__lookup', description: 'Look up with second.', parameters: inputSchema }

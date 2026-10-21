@@ -16,6 +16,7 @@ import { pluginDisplayText, type PluginSummary } from '@shared/plugins'
 import { pluginToolName } from '@shared/pluginTools'
 
 interface ToolsSettingsProps {
+  actionsTarget?: HTMLElement | null
   plugins: PluginSummary[]
   pluginError?: string
   customTools: ToolPackage[]
@@ -94,7 +95,7 @@ export function toolDefinitionText(tool: RuntimeToolDefinition): string {
   }, null, 2)
 }
 
-export function ToolsSettings({ plugins, pluginError, customTools, onConfigChange, mcpServers, mcpStatus, runtimeToolStatus }: ToolsSettingsProps) {
+export function ToolsSettings({ actionsTarget, plugins, pluginError, customTools, onConfigChange, mcpServers, mcpStatus, runtimeToolStatus }: ToolsSettingsProps) {
   const { t, i18n } = useTranslation()
   const [selectedGroup, setSelectedGroup] = useState<'builtin' | 'mcp' | 'plugins' | 'customTools'>('builtin')
   const [selectedToolKey, setSelectedToolKey] = useState<string>()
@@ -158,7 +159,7 @@ export function ToolsSettings({ plugins, pluginError, customTools, onConfigChang
 
   return (
     <>
-      <CustomToolsGroup tools={customTools} onConfigChange={onConfigChange} onSelectCustom={() => setSelectedGroup('customTools')}
+      <CustomToolsGroup actionsTarget={actionsTarget} tools={customTools} onConfigChange={onConfigChange} onSelectCustom={() => setSelectedGroup('customTools')}
         catalogNavigation={<>{(['builtin', 'mcp', 'plugins'] as const).map(group => <button key={group} type="button"
           className={`ui-list-item ui-list-item-split${selectedGroup === group ? ' active' : ''}`} aria-pressed={selectedGroup === group}
           onClick={() => { setSelectedGroup(group); setSelectedToolKey(undefined) }}>

@@ -2,6 +2,7 @@ import { createRef } from 'react'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import type { AppConfigSnapshot } from '@shared/types'
 import { ModelListPane } from './ModelListPane'
 
 vi.mock('react-i18next', () => ({
@@ -11,7 +12,7 @@ vi.mock('react-i18next', () => ({
 function renderModelListPane(onCreateModel: (templateId?: string) => void) {
   render(
     <ModelListPane
-      config={undefined}
+      config={{ providers: [] } as unknown as AppConfigSnapshot}
       listRef={createRef<HTMLDivElement>()}
       onCreateModel={onCreateModel}
       onDeleteModel={vi.fn()}

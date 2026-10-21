@@ -1,3 +1,4 @@
+import { findSubagentPackage } from './subagentPackages'
 import { requireDataVersion } from '@shared/dataVersion'
 import { listPackageFiles, readPackageFile, savePackageFile } from './packageFiles'
 import { writeJsonFileAtomic } from './atomicJson'
@@ -33,7 +34,8 @@ import {
   skillsConfigFileName
 } from './config/dataDir'
 import { getProject } from './projectStore'
-import { resolveSkillSelection, skillSelectionEnabled, defaultCapabilities, effectiveProjectCapabilities, resolvePluginCapabilities, type SkillSelection } from '@shared/agentCapabilities'
+import { parseCapabilities, resolveSkillSelection, skillSelectionEnabled, defaultCapabilities, effectiveProjectCapabilities, resolvePluginCapabilities, type SkillSelection } from '@shared/agentCapabilities'
+import { packageResourceEnabled } from '@shared/packageResourceSelection'
 import { isSameOrInsideDirectory, samePath } from './pathContainment'
 
 
@@ -433,6 +435,7 @@ async function scanRoot(root: SkillRootSummary, config: SkillsConfigFile, declar
 }
 
 function precedence(kind: SkillRootKind): number {
+  if (kind === 'subagent') return -1
   return kind === 'project' ? 0 : kind === 'user' ? 1 : kind === 'external' ? 2 : kind === 'system' ? 3 : 4
 }
 
@@ -487,10 +490,32 @@ function resolveConflicts(scans: RootScan[]): LoadedSkill[] {
   })
 }
 
+export async function listSubagentSkills(ids: readonly string[]): Promise<SkillSnapshot> {
+  const scans: RootScan[] = []
+  for (const id of [...new Set(ids)]) {
+    const agent = await findSubagentPackage(id)
+    const root: SkillRootSummary = { id: `subagent:${id}:skill`, kind: 'subagent', name: agent.name!, shortcutAlias: `agent-${id}`,
+      path: join(agent.directory!, 'skills'), removable: false, available: true }
+    const scan = await scanRoot(root, { version: 0, script_auto_approve: false, script_auto_approve_skills: [], external_directories: [], availability: {} })
+    const selection = parseCapabilities(agent.capabilities).skills.package
+    for (const skill of scan.skills) {
+      skill.summary.modelAvailable = packageResourceEnabled(selection, skill.summary)
+      skill.summary.userAvailable = false
+    }
+    scans.push(scan)
+  }
+  return { roots: scans.map(s => s.root), skills: scans.flatMap(s => s.skills.map(s => s.summary)), scriptAutoApprove: false }
+}
+
 async function loadCatalog(projectId?: string, selection?: SkillSelection, sourceFolders?: string[], pluginTools?: readonly string[]): Promise<{ roots: SkillRootSummary[]; skills: LoadedSkill[]; scriptAutoApprove: boolean }> {
   const [roots, config] = await Promise.all([resolveSkillRoots(projectId, sourceFolders), readSkillsConfig()])
   const scans = await Promise.all(roots.map((root) => scanRoot(root, config)))
   scans.push(...await loadPluginSkills(config))
+  const agentIds = selection?.entries.filter(e => e.model).map(e => /^subagent:([^:]+):skill:/.exec(e.id)?.[1]).filter((id): id is string => !!id) ?? []
+  if (agentIds.length) {
+    const own = await listSubagentSkills(agentIds)
+    for (const root of own.roots) scans.unshift({ root, skills: own.skills.filter(s => s.rootId === root.id).map(summary => ({ summary })) })
+  }
   if (selection) {
     const resolved = resolveSkillSelection(selection, scans.flatMap(scan => scan.skills.map(skill => skill.summary)), false, false, pluginTools)
     const entries = new Map(resolved.entries.map(entry => [entry.id, entry]))

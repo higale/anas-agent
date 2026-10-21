@@ -198,7 +198,35 @@ Configure and enable subagents in **Settings > Subagents**. Projects and subagen
 
 Subagents use their own capability settings. Further delegation cannot exceed the original project’s allowed set. **Limit subagent capabilities** separately constrains context, tools, and skills at every level to the intersection of project and subagent choices. Otherwise each subagent uses its own configuration. It receives the delegated task, not the complete parent conversation automatically.
 
-Choose a model and parameter preset beside **Identifier**. **Follow parent Agent** uses the nearest ancestor's selected model and preset. An explicit selection applies to newly created subtasks; clear it to restore inheritance. Editing a subagent definition does not change existing subtasks' model bindings. Missing models or presets produce an error rather than switching to another model.
+For custom subagents, choose a model and parameter preset beside **Identifier**. **Use parent Agent's model** uses the nearest ancestor's selected model and preset. An explicit selection applies to newly created subtasks; clear it to restore inheritance. Editing a subagent definition does not change existing subtasks' model bindings. Missing models or presets produce an error rather than switching to another model.
+
+Subagents use directory packages:
+
+```text
+subagents/<folder>/
+  AGENT.json
+  PROMPT.md
+  skills/<skill>/SKILL.md
+  tools/<tool>/TOOL.json
+```
+
+New custom Agents start disabled with every capability turned off; enable capabilities as needed.
+
+`AGENT.json` contains `version: 0`, a stable `id`, `name`, `description`, `capabilities`, and optional model selection. `PROMPT.md` contains the system prompt. Create an Agent in Settings, then use **Show in folder** to add standard Skills, tools, and supporting files. **Import subagent** at the top right accepts multiple package folders. The entire selection is checked before import; a conflicting ID or name, or an invalid package, stops the batch. **Add directory** at the top right references external Agent directories. The left pane groups packages and their files under All, Built-in, User, and external directories; the right pane shows Agent settings or a file preview. Preview and edit custom prompts through `PROMPT.md` in the file tree; the Agent settings form no longer duplicates the prompt editor. Refresh after external changes.
+
+**Add external directory** selects a parent folder containing Agent packages and references the original files without copying them. Rename, reorder, or remove directory references; removing a reference preserves its files, while deleting an Agent deletes its package. Newly created and imported packages are saved in the user directory. Agents can be reordered within their source. Missing directories, invalid packages, and ID/name conflicts show errors without blocking other valid packages. Unavailable packages retain their enabled states. Backups include external directory references, not their files; back up those directories separately.
+
+The left toolbar's move-up, move-down, and delete buttons act on the selected external directory or Agent. These actions are unavailable for built-in Agents, fixed groups, and package files.
+
+Only `general-purpose` is built in under `subagents/_system/`, handling general execution tasks. Its definition and all package files are maintained by the app and can only be viewed, not edited, renamed, or deleted. It always uses the parent Agent’s model with all capabilities enabled, subject to global availability and the project’s subagent limits. Settings retain only the Agent’s enabled switch; there is no **Restore default** action. Custom Agent packages remain editable.
+
+`examples/subagents/` provides `web-researcher` (external research and source verification) and `project-analyst` (read-only project analysis). Examples are not loaded automatically. **Import subagent** opens this directory by default; select one or more packages to copy them into the user directory, where they can be edited, disabled, or deleted. App updates refresh the examples without overwriting imported copies.
+
+Custom package Skills and tools start enabled and can be disabled individually in that Agent's resource section. They are available only to their owning Agent and do not appear in global catalogs or the main Agent's resources. Turning a capability group off disables its package resources too. When **Restrict subagent capabilities** is enabled, the project must also allow these resources. Project sources labeled **Subagent only** grant access to subagents only. Within the allowed selection, package resources take precedence over resources with the same name. Skills still require file reading. Definition changes, package deletion, and file edits are rejected while a package tool is running; retry when it finishes.
+
+Package resource switches are part of capability settings: `capabilities.skills.package` and `capabilities.custom_tools.package` map package-local names or IDs to `true` or `false`; omitted entries default to enabled. Custom packages store these choices in `AGENT.json`, so copying or importing a package carries them along. Built-in packages do not expose resource switches.
+
+`config/subagents.json` now uses v1 for order, external directory references, and whole-Agent enabled states; it stores no built-in overrides. The previous v0 array format is not migrated or supported. Old files are retained with an error; backups containing that format cannot be restored directly. Quit the app, preserve the old file separately, then move `config/subagents.json` out of the data directory. Restart and recreate or import your Agent packages. Do not simply change the old file's version number.
 
 ### Skills
 
@@ -213,6 +241,8 @@ Explicit invocation sends the unchanged skill file and its source path, keeping 
 ## Models
 
 OpenAI-compatible and Anthropic-compatible services are supported. Manage models in Settings > Model and switch between them below the message input.
+
+**New** at the top left offers a blank provider configuration or a template. The same toolbar provides move-up, move-down, and delete actions for the selected provider. The model list on the right has its own actions. **Fetch available models** remains in the add/edit model dialogs and updates only the candidate list, preserving configured model capabilities and parameters.
 
 Click the icon before a provider’s name, or drop an SVG, PNG, JPEG, static WebP, or BMP onto it, to replace it; hover to reset it. SVG files must not exceed 1 MB and retain their original vector data. Raster images are automatically center-cropped to a square, reduced to at most 512 × 512 pixels, and saved as PNG, preserving transparency without enlarging small images. GIF and animated WebP are not supported. Templates include brand icons. Images are stored as Base64 in provider configuration and included in backups. An empty image displays the generic icon directly. Only clicking Reset looks up the current API URL in the templates and saves the matching brand icon, or clears the image if no match is found.
 
@@ -256,11 +286,11 @@ The bundled `tool-manager` Skill guides the model through creating, modifying, a
 
 In **Settings > Tools**, Built-in tools and MCP appear above a divider. Below it, the custom-tool tree lists all packages, user tools, and added directories. Select a group name to list its tools on the right; use the boxed arrow to expand or collapse it. Select a tool from the list to view its details. Click a detail title to locate its directory, or expand packages to browse and preview files. User and added-directory tools support creation, editing by double-click, deletion, and ordering; deletion moves the entire tool package to the trash.
 
-**Add directory** references an external source in place. Rename its display label, reorder it, or remove the reference without deleting files. Name changes save on Enter or focus loss. **Create** and **Import** appear in the selected user or added-directory group header and write packages into that source.
+**Add directory** at the top right references an external source in place. Rename its display label, reorder it, or remove the reference without deleting files. Name changes save on Enter or focus loss. The left toolbar provides refresh, plus move-up, move-down, and delete actions for the selected directory or tool. Tools can only move within their source. Fixed groups and package files cannot be deleted or reordered here.
 
 Each directory contains a `TOOL.json` manifest with explicit `"version": 0`, plus scripts or resources. User tools live in the application data directory's `tools/`; project tools live in `.agents/tools/` under source folders and are available only to that project. The editor configures names, descriptions, JSON parameter rules, and commands; it does not generate scripts or install dependencies.
 
-The **+** create and **Import tools** buttons appear in the right pane header while the User group or an added directory is selected. Import accepts multiple directories and opens the bundled examples by default. The examples provide text reading, Baidu AI Search, file SHA-256, and JSON formatting, all using the Python 3 standard library. Baidu AI Search also requires internet access and `BAIDU_SEARCH_API_KEY`; see its bundled README for setup. Imports copy into the selected source without overwriting existing tools.
+The **New tool**, **Import tools**, and **Add directory** icon-and-text buttons stay at the top right. They use the User directory by default, or the selected external directory when browsing that source, its tools, or its files. Button tooltips show the destination. Import accepts multiple directories and opens the bundled examples by default. The examples provide text reading, Baidu AI Search, file SHA-256, and JSON formatting, all using the Python 3 standard library. Baidu AI Search also requires internet access and `BAIDU_SEARCH_API_KEY`; see its bundled README for setup. Imports copy into the selected source without overwriting existing tools.
 
 **Edit information** and **Edit parameters** open the same editor on the corresponding section. Switching sections preserves the draft. The parameter section supports **Parameters / Source**, with controls for names, types, required status, descriptions, enums, limits, and nested object or array parameters. Edit each parameter within the same window and apply it to return to the list. Save the tool to apply all changes together; discarding unsaved changes requires confirmation. Update scripts separately. Use Source for advanced references and composed schemas; other untouched attributes are preserved. Defaults are annotations and are not automatically supplied during calls.
 
@@ -275,6 +305,8 @@ Commands run in the tool directory, where relative paths resolve, for example `s
 ## MCP Setup
 
 Add and edit servers in Settings > MCP using stdio, HTTP, or SSE. The server must be enabled and connected, the model must have Tool use enabled, and the project must allow the relevant tools.
+
+Use **New MCP server** at the top right to create a configuration. The top-left toolbar moves the selected server up or down or deletes it. The refresh icon checks running servers and restarts failed or unreachable ones.
 
 For stdio servers, leaving Working directory blank uses the current user's home directory. Enter an absolute path to run the server in another directory.
 
@@ -342,7 +374,7 @@ The built-in Usage Meter is enabled by default. Above Settings, it shows account
 
 Bailian / Qwen China supports `dashscope.aliyuncs.com` and `token-plan.cn-beijing.maas.aliyuncs.com`. Install `bl` first (`npm install -g bailian-cli`); the plugin uses its active profile. Use **Sign in to Bailian** for a missing/expired session or **Switch account** for a key mismatch, select the correct account in your browser, then refresh. Login updates bl configuration and may create an ordinary API key through the CLI; it does not change Anas model configuration. Pending login can be cancelled. Personal Token Plan keys are checked against the visible first and last 15 characters of the console’s masked key. Actual 5-hour, weekly or monthly remaining quotas, reset times, plan, status, expiry and auto-renew are displayed when provided. If no quota windows are returned, the meter states that quota data is unavailable and keeps the subscription details; it does not infer unlimited quota. Ordinary keys are matched exactly; the meter shows current-model free quota (not account balance) and the key’s online calls and usage over 7 days in its workspace. Statistics may be delayed. Missing CLI, access denial, query failures and key mismatches show errors; failed Bailian reads clear previous figures to avoid displaying another account’s cached data. International and dedicated team-plan endpoints are not yet supported.
 
-The expanded view keeps primary quotas, balances and reset timing visible. A details icon to the right of the update time contains account and subscription information, balance breakdowns and spending details. Bailian's ordinary API keeps current-model free quota and 7-day call counts visible, with workspace, quota expiry and usage breakdowns in details. GLM Coding Plan keeps reset countdowns visible and places exact dates in details. MiniMax keeps remaining quota and reset countdowns visible, with exact reset times on hover; total quota, usage and boost explanations appear in details. Hover over the icon to preview, or click to keep the popover open and select text for copying; click again, click outside or press Esc to close it. Viewing details does not query the service again, and the icon is omitted when no extra information is available. Query failures, confirmed insufficient balances and expired or inactive plans remain visible. The compact view's tooltip retains full information.
+The meter uses fixed titles for the detected provider and quota type, such as “DeepSeek Balance” and “MiniMax Token Plan”, regardless of the configured provider name. The expanded view keeps primary quotas, balances and reset timing visible. Hover over or focus the title to see the same complete details as compact mode, including account and subscription information, balance breakdowns, spending and update time; there is no separate details icon. Bailian's ordinary API keeps current-model free quota and 7-day call counts visible, with workspace, quota expiry and usage breakdowns in details. GLM Coding Plan and MiniMax keep reset countdowns visible and put exact dates in details, along with MiniMax's total quota, usage and boost explanations. Viewing details does not query the service again. Query failures, confirmed insufficient balances and expired or inactive plans remain visible.
 
 If Anas exits during plugin replacement or removal, the next startup rolls back unfinished operations and cleans up completed operations. Clearing caches or temporary files does not delete recovery material. If a journal is damaged, paths conflict, or recovery fails, the startup recovery screen reports where the files are preserved so you can resolve the problem and retry.
 
@@ -364,7 +396,7 @@ Deleting an entire conversation from its menu does not require repairing a missi
 
 | Path under the data directory | Contents |
 | --- | --- |
-| `config/` | Settings, providers/models, subagents, MCP, Skill sources/availability, and custom-tool sources/ordering |
+| `config/` | Settings, providers/models, subagent order and switches, MCP, Skill sources/availability, and custom-tool sources/ordering |
 | `db/catalog.sqlite` | Main conversation directory and shared memory |
 | `db/conversations/<threadId>/conversation.sqlite` | One main conversation and its subagents |
 | `db/projects.json` | Project definitions and source folders |
@@ -372,9 +404,10 @@ Deleting an entire conversation from its menu does not require repairing a missi
 | `.env` | Application environment variables |
 | `attachments/`, `file_edits/`, `tool_results/` under `db/conversations/<threadId>/` | Attachments, file-edit recovery material and long tool results inside the main conversation directory; removed with that conversation |
 | `skills/`, `tools/` | User-managed packages |
+| `subagents/` | Subagent definitions, prompts, and private Skills and tools |
 | `plugins/`, `db/plugins/` | Installed plugins and independent data; uninstalling retains data unless deletion is selected |
 | `skills/_system/`, `plugins/_system/` | Built-in packages refreshed by the app |
-| `examples/skills/`, `examples/tools/`, `examples/plugins/` | Examples refreshed by the app, with plugins supplied as individual ZIPs; import or install before use |
+| `examples/skills/`, `examples/tools/`, `examples/plugins/`, `examples/subagents/` | Examples refreshed by the app, with plugins supplied as individual ZIPs; import or install before use |
 | `help/`, `lang/` | Help and language packs |
 | `config/assets/` | Avatar source, crop settings, and generated icons |
 | `log/`, `cache/`, `tmp/`, `electron/` | Logs, cache, temporary files, and Electron profile |

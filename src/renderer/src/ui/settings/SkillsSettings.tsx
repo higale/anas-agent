@@ -1,19 +1,18 @@
-import { PackageList, PackageSourceActions, PackageTreeRoot, PackageTreeItem, PackageFileTree, PackageFileViewer, packageNodeKey as nodeKey } from './PackageTree'
+import { SettingsSelectionActions } from './SettingsListActions'
+import { PackageList, PackageTreeRoot, PackageTreeItem, PackageFileTree, PackageFileViewer, packageNodeKey as nodeKey } from './PackageTree'
 import { SettingsAvailabilityBadge } from './SettingsAvailabilityBadge'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ListTree, Trash2, Wand2 } from 'lucide-react'
+import { ListTree, Wand2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { SKILL_ROOT_DISPLAY_NAME_MAX_LENGTH, SKILL_SHORTCUT_ALIAS_MAX_LENGTH, SKILL_SHORTCUT_ALIAS_PATTERN } from '@shared/types'
 import type { SkillAvailabilityUpdate, SkillFileNode, SkillFilePreview, SkillRootSummary, SkillRootUpdate, SkillSnapshot, SkillSummary } from '@shared/types'
 import { SegmentedMultiSelect } from '../SegmentedMultiSelect'
 import { CommitTextInput } from '../CommitTextField'
 import { notice } from '../notice'
-import { UI_ICON_SIZE_SMALL } from '../uiConstants'
 
 interface Props {
   sectionClass: string
   skills?: SkillSnapshot
-  onAddDirectory: () => void | Promise<void>
   revealSkillId?: string
   onSkillRevealed?: () => void
   onMoveDirectory: (rootId: string, direction: -1 | 1) => void | Promise<void>
@@ -33,7 +32,6 @@ type Selection =
 export function SkillsSettings({
   sectionClass,
   skills,
-  onAddDirectory,
   revealSkillId,
   onSkillRevealed,
   onMoveDirectory,
@@ -236,11 +234,14 @@ export function SkillsSettings({
   return (
     <section className={sectionClass}>
       <div className="ui-list-pane">
-        <PackageSourceActions addLabel={t('settings.add_skill_directory')} refreshLabel={t('common.refresh')}
+        <SettingsSelectionActions refreshLabel={t('common.refresh')}
           moveUpLabel={t('common.move_up')} moveDownLabel={t('common.move_down')}
+          deleteLabel={t(selectedRoot?.removable ? 'settings.remove_skill_directory' : 'common.delete')}
+          targetName={selectedRoot ? rootLabel(selectedRoot) : selection?.kind === 'skill' ? selectedSkill?.name : undefined}
+          onDelete={selectedRoot?.removable ? () => onRemoveDirectory(selectedRoot) : undefined}
           onMoveUp={selectedRoot && selectedExternalIndex > 0 ? () => void onMoveDirectory(selectedRoot.id, -1) : undefined}
           onMoveDown={selectedRoot && selectedExternalIndex >= 0 && selectedExternalIndex < externalRoots.length - 1 ? () => void onMoveDirectory(selectedRoot.id, 1) : undefined}
-          onAdd={() => void onAddDirectory()} onRefresh={() => {
+          onRefresh={() => {
             clearPreview(); setChildren({}); setExpanded(current => new Set([...current].filter(key => !key.startsWith('files:'))))
             void onRefresh()
           }} />
@@ -265,13 +266,6 @@ export function SkillsSettings({
         {selectedRoot && <>
           <div className="settings-detail-heading ui-toolbar ui-toolbar-between">
             <div><div className="ui-row"><button className="ui-link-button" type="button" disabled={!selectedRoot.available} data-tooltip={t('chat.show_in_folder')} onClick={() => void showItemInFolder(selectedRoot.path)}>{rootLabel(selectedRoot)}</button><small>@{selectedRoot.shortcutAlias}</small></div><small>{selectedRoot.path}</small></div>
-            <div className="ui-toolbar">
-              {selectedRoot.removable && <>
-                <button className="ui-button ui-button-compact ui-button-danger" type="button" onClick={() => onRemoveDirectory(selectedRoot)}>
-                  <Trash2 size={UI_ICON_SIZE_SMALL} /> {t('settings.remove_skill_directory')}
-                </button>
-              </>}
-            </div>
           </div>
           {!selectedRoot.available && <div className="ui-note ui-note-danger">{rootIssue}</div>}
           {selectedRoot.removable && (

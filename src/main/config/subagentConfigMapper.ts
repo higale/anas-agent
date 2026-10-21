@@ -6,13 +6,10 @@ import type {
 import type { RawSubagentConfig } from './rawAppConfig'
 import { parseCapabilities, serializeCapabilities } from '@shared/agentCapabilities'
 import { validateSubagentModelSelection } from '@shared/subagentConfig'
+import { subagentPresetIds } from '@shared/subagentPackages'
 
 const subagentNamePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
-const presets = new Set<SubagentPreset>([
-  'general-purpose',
-  'web-researcher',
-  'project-analyst'
-])
+const presets = new Set<SubagentPreset>(subagentPresetIds)
 
 function preset(value: unknown, path: string): SubagentPreset | undefined {
   if (value === undefined) return undefined
@@ -49,6 +46,8 @@ export function normalizeSubagent(raw: RawSubagentConfig, index: number): Subage
   const normalizedPreset = preset(raw.preset, `${path}.preset`)
   return {
     index,
+    ...(raw.id ? { id: raw.id } : {}),
+    ...(raw.directory ? { directory: raw.directory } : {}),
     name: requireName(raw.name),
     enabled: boolean(raw.enabled, `${path}.enabled`),
     preset: normalizedPreset,
@@ -78,6 +77,8 @@ export function rawSubagentFromSave(
     requireEnabledText(systemPrompt, 'system prompt')
   }
   return {
+    ...(existing?.id || subagent.id ? { id: existing?.id ?? subagent.id } : {}),
+    ...(existing?.directory ? { directory: existing.directory } : {}),
     ...(existingPreset ? { preset: existingPreset } : {}),
     name,
     enabled,

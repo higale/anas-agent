@@ -1,0 +1,40 @@
+{
+  "version": 0,
+  "id": "general-purpose",
+  "preset": "general-purpose",
+  "name": "general-purpose",
+  "description": "A general-purpose agent for complex independent tasks that need broad reasoning, tools, or project work.",
+  "capabilities": {
+    "application_environment": true,
+    "background_tools": true,
+    "subagents": {
+      "mode": "default",
+      "names": []
+    },
+    "planning": true,
+    "tool_mode": "all",
+    "tools": [],
+    "skills": {
+      "project": true,
+      "mode": "default",
+      "entries": []
+    },
+    "profile": true,
+    "environment": true,
+    "workspace": true,
+    "memory": true,
+    "mcp": {
+      "default_mode": "all",
+      "servers": []
+    },
+    "custom_tools": {
+      "project": true,
+      "entries": [],
+      "mode": "all"
+    },
+    "plugin_mode": "default",
+    "plugins": [],
+    "plugin_tools": [],
+    "plugin_prompts": []
+  }
+}

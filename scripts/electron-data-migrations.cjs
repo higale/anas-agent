@@ -34,7 +34,7 @@ async function verifyCurrentData(launchApplication) {
     await closeElectronTestApplication(application)
     application = undefined
     for (const file of ['settings', 'models', 'subagents', 'mcp_servers', 'skills', 'tools']) {
-      assert.equal(JSON.parse(await readFile(join(root, `config/${file}.json`), 'utf8')).version, 0)
+      assert.equal(JSON.parse(await readFile(join(root, `config/${file}.json`), 'utf8')).version, file === 'subagents' ? 1 : 0)
     }
     await assert.rejects(readFile(join(root, 'config/capabilities.json')), { code: 'ENOENT' })
     assert.equal(JSON.parse(await readFile(join(root, 'db/projects.json'), 'utf8')).version, 0)

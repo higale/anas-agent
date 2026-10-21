@@ -10,12 +10,15 @@ import { builtinToolCatalog } from './toolRegistry'
 import { parseCustomTools, serializeCustomTool, validateCustomTools, type CustomToolDefinition } from './customTools'
 import { validateToolSelection, type ToolSelection, type ResolvedToolSelection } from './toolPackages'
 import type { AgentFeatures, SkillSummary, SkillSnapshot, WorkspaceProject } from './types'
+import { packageResourceEnabled, validatePackageResourceSelection, type PackageResourceSelection } from './packageResourceSelection'
 
 export interface SkillSelection {
   mode: 'default' | 'custom' | 'off'
   /** Include the current project's skills in custom subagent selections. */
   project: boolean
   entries: Array<{ id: string; shortcut: boolean; model: boolean }>
+  /** Owning Agent package resources default on; omitted map means no overrides. */
+  package?: PackageResourceSelection
 }
 
 export interface McpServerToolSelection {
@@ -126,6 +129,7 @@ export function validateCapabilities(value: unknown): AgentCapabilities {
     return { id: entry.id, shortcut: boolean(entry.shortcut), model: boolean(entry.model) }
   })
   if (new Set(entries.map((entry) => entry.id)).size !== entries.length) throw new Error('Duplicate skill ID.')
+  const packageSkills = validatePackageResourceSelection(skills.package)
   return {
     profile: boolean(raw.profile), environment: boolean(raw.environment), workspace: boolean(raw.workspace), memory: boolean(raw.memory),
     applicationEnvironment: boolean(raw.applicationEnvironment),
@@ -140,7 +144,7 @@ export function validateCapabilities(value: unknown): AgentCapabilities {
     pluginPrompts: validatePluginPromptSelection(raw.pluginPrompts),
     customTools: validateToolSelection(raw.customTools),
     mcp: { defaultMode: mcp.defaultMode, servers },
-    skills: { mode: skills.mode, project: boolean(skills.project), entries }
+    skills: { mode: skills.mode, project: boolean(skills.project), entries, ...(Object.keys(packageSkills).length ? { package: packageSkills } : {}) }
   }
 }
 
@@ -345,7 +349,8 @@ export function resolveSkillSelection(selection: SkillSelection, skills: readonl
     entries: skills.filter((skill) => !skill.loadError).map((skill) => {
       const plugin = skill.source === 'plugin'
       const enabled = plugin || selection.mode !== 'off'
-      const chosen = plugin ? selection.entries.find(entry => entry.id === skill.id) : selection.mode === 'default'
+      const chosen = plugin ? selection.entries.find(entry => entry.id === skill.id) : subagent && skill.source === 'subagent'
+        ? { shortcut: false, model: packageResourceEnabled(selection.package, skill) } : selection.mode === 'default'
         ? { shortcut: skill.source === 'project' || skill.userAvailable, model: skill.source === 'project' || skill.modelAvailable }
         : subagent && skill.source === 'project'
           ? { shortcut: false, model: selection.project }

@@ -1,3 +1,4 @@
+import { requireSubagentPackageId, subagentPresetIds } from '@shared/subagentPackages'
 import Database from 'better-sqlite3'
 import { validateSubagentModelSelection } from '@shared/subagentConfig'
 import { FileChangeLedger, fileChangeLedgerSchema } from './fileChangeLedger'
@@ -214,11 +215,7 @@ function parseSubagentActivityPayload(value: string | null): SubagentActivityPay
 }
 
 const subagentConfigNamePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
-const subagentConfigPresets = new Set<SubagentPreset>([
-  'general-purpose',
-  'web-researcher',
-  'project-analyst'
-])
+const subagentConfigPresets = new Set<SubagentPreset>(subagentPresetIds)
 
 function normalizeSubagentConfigSnapshot(value: unknown): SubagentConfig {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -252,6 +249,7 @@ function normalizeSubagentConfigSnapshot(value: unknown): SubagentConfig {
     throw new Error('Stored subagent config text must not be empty.')
   }
   return {
+    ...(raw.id === undefined ? {} : { id: requireSubagentPackageId(raw.id) }),
     index: raw.index as number,
     name,
     enabled: raw.enabled,

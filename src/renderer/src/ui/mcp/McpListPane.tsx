@@ -1,10 +1,8 @@
 import type { RefObject } from 'react'
-import { RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { AppConfigSnapshot, McpToolStatus } from '@shared/types'
-import { SettingsListActions } from '../settings/SettingsListActions'
+import { SettingsSelectionActions } from '../settings/SettingsListActions'
 import { SettingsAvailabilityBadge } from '../settings/SettingsAvailabilityBadge'
-import { UI_ICON_SIZE_LARGE } from '../uiConstants'
 import { mcpErrorStatus, mcpLoadedStatus, mcpServerRuntimeStatus } from './mcpDraft'
 
 interface McpListPaneProps {
@@ -15,7 +13,6 @@ interface McpListPaneProps {
   reloadingFailed: boolean
   runtimeEnabled: boolean
   status: McpToolStatus | undefined
-  onAddServer: () => void | Promise<void>
   onDeleteServer: () => void | Promise<void>
   onEditServer: (index: number) => void | Promise<void>
   onMoveServer: (direction: -1 | 1) => void | Promise<void>
@@ -30,41 +27,30 @@ export function McpListPane({
   reloadingFailed,
   runtimeEnabled,
   status,
-  onAddServer,
   onDeleteServer,
   onEditServer,
   onMoveServer,
   onReloadFailedServers
 }: McpListPaneProps) {
   const { t } = useTranslation()
+  const servers = config?.mcpServers ?? []
+  const selectedPosition = servers.findIndex(server => server.index === editingIndex)
+  const selectedServer = servers[selectedPosition]
+  const selectedName = selectedServer ? selectedServer.name || selectedServer.id || t('settings.mcp_server_fallback_name', { index: selectedServer.index }) : undefined
 
   return (
     <div className="ui-list-pane">
-      <div className="ui-list-pane-header">
-        <SettingsListActions
-          leading={(
-            <button
-              className="ui-icon-button"
-              type="button"
-              aria-label={t('settings.mcp_reload_failed_servers')}
-              data-tooltip={t('settings.mcp_reload_failed_servers_hint')}
-              disabled={disabled || !runtimeEnabled || reloadingFailed}
-              onClick={() => void onReloadFailedServers()}
-            >
-              <RefreshCw size={UI_ICON_SIZE_LARGE} />
-            </button>
-          )}
-          addLabel={t('settings.new_mcp_server')}
-          canDelete={editingIndex !== undefined}
-          canMoveDown={editingIndex !== undefined && !!config && editingIndex < config.mcpServers.length - 1}
-          canMoveUp={editingIndex !== undefined && editingIndex > 0}
-          deleteLabel={t('settings.delete_mcp_server')}
-          disabled={disabled}
-          onAdd={onAddServer}
-          onDelete={onDeleteServer}
-          onMove={onMoveServer}
-        />
-      </div>
+      <SettingsSelectionActions
+        refreshLabel={t('settings.mcp_reload_failed_servers')}
+        refreshTooltip={t('settings.mcp_reload_failed_servers_hint')}
+        refreshDisabled={!runtimeEnabled || reloadingFailed}
+        moveUpLabel={t('common.move_up')} moveDownLabel={t('common.move_down')}
+        deleteLabel={t('settings.delete_mcp_server')} targetName={selectedName} disabled={disabled}
+        onRefresh={() => void onReloadFailedServers()}
+        onMoveUp={selectedPosition > 0 ? () => void onMoveServer(-1) : undefined}
+        onMoveDown={selectedPosition >= 0 && selectedPosition < servers.length - 1 ? () => void onMoveServer(1) : undefined}
+        onDelete={selectedServer ? () => void onDeleteServer() : undefined}
+      />
       <div className="ui-scroll-list ui-list" ref={listRef}>
         {config && config.mcpServers.length === 0 && <div className="ui-empty-state ui-empty-state-compact">{t('settings.no_mcp_servers_configured')}</div>}
         {config?.mcpServers.map((server) => {
@@ -87,6 +73,7 @@ export function McpListPane({
               className={server.index === editingIndex ? 'ui-list-item-split ui-list-item ui-list-item-active active' : 'ui-list-item-split ui-list-item'}
               key={`${server.index}-${server.name}`}
               type="button"
+              aria-pressed={server.index === editingIndex}
               onClick={() => void onEditServer(server.index)}
             >
               <span>

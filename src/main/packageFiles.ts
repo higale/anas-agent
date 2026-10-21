@@ -165,11 +165,15 @@ export async function createPackageFile(directory: string, relativePath: string)
   }
 }
 
+export function validatePackageFileUpdate(update: PackageFileUpdate): void {
+  if (!update || typeof update.content !== 'string' || typeof update.revision !== 'string'
+    || typeof update.resolvedPath !== 'string' || update.content.includes('\0')
+    || Buffer.byteLength(update.content, 'utf8') > maxPreviewBytes) throw new Error('Invalid package file update.')
+}
+
 export function savePackageFile(directory: string, relativePath: string, update: PackageFileUpdate): Promise<PackageFilePreview> {
   const operation = saveTail.then(async () => {
-    if (!update || typeof update.content !== 'string' || typeof update.revision !== 'string'
-      || typeof update.resolvedPath !== 'string' || update.content.includes('\0')
-      || Buffer.byteLength(update.content, 'utf8') > maxPreviewBytes) throw new Error('Invalid package file update.')
+    validatePackageFileUpdate(update)
     const check = async () => {
       const current = await readPackageFile(directory, relativePath)
       if (current.kind !== 'text' || current.revision !== update.revision || current.resolvedPath !== update.resolvedPath) {

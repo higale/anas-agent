@@ -1,11 +1,14 @@
+import { initializeSubagentPackages, readSubagentPackages, writeSubagentPackages } from '../subagentPackages'
 import { requireDataVersion } from '@shared/dataVersion'
 import { writeJsonFileAtomic } from '../atomicJson'
 import { access, copyFile, mkdir, readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import type { RuntimeLogLevel } from '@shared/types'
 import {
   configFileNames,
   getBundledConfigFile,
+  getBundledDataDir,
+  getDataDir,
   getConfigDir,
   getConfigFile,
   mcpServersConfigFileName,
@@ -51,6 +54,8 @@ export interface RawModelProviderConfig {
 }
 
 export interface RawSubagentConfig {
+  id?: string
+  directory?: string
   model_config_id?: string
   model_parameter_preset_id?: string | null
   preset?: string
@@ -143,8 +148,7 @@ interface RawModelsConfigFile {
 }
 
 interface RawSubagentsConfigFile {
-  version: 0
-  subagents?: RawAppConfig['subagents']
+  version: 1
 }
 
 interface RawMcpServersConfigFile {
@@ -180,6 +184,7 @@ export async function userSettingsConfigExists(): Promise<boolean> {
 }
 
 async function ensureConfigFiles(): Promise<void> {
+  await initializeSubagentPackages()
   await mkdir(getConfigDir(), { recursive: true })
   for (const fileName of configFileNames) {
     if (fileName === settingsConfigFileName) continue
@@ -196,7 +201,7 @@ async function readJsonFile<T>(path: string): Promise<T> {
   const content = await readFile(path, 'utf8')
   try {
     const value: unknown = JSON.parse(content)
-    requireDataVersion(value, 0, path)
+    requireDataVersion(value, path.endsWith(subagentsConfigFileName) ? 1 : 0, path)
     return value as T
   } catch (cause) {
     throw new Error(`Could not read configuration file: ${path}\n${cause instanceof Error ? cause.message : String(cause)}`, { cause })
@@ -248,9 +253,6 @@ function mergeRawConfig(bundled: RawConfigFiles, parsed: RawConfigFiles): RawApp
   return {
     settings,
     providers: Array.isArray(parsed.models.providers) ? parsed.models.providers : bundled.models.providers,
-    subagents: Array.isArray(parsed.subagents.subagents)
-      ? parsed.subagents.subagents
-      : bundled.subagents.subagents,
     mcp_servers: Array.isArray(parsed.mcpServers.mcp_servers)
       ? parsed.mcpServers.mcp_servers
       : bundled.mcpServers.mcp_servers
@@ -263,7 +265,7 @@ export async function readRawConfig(): Promise<RawAppConfig> {
     readConfigFiles(true),
     readConfigFiles(false)
   ])
-  return mergeRawConfig(bundled, parsed)
+  return { ...mergeRawConfig(bundled, parsed), subagents: await readSubagentPackages(getDataDir()) }
 }
 
 export async function readRawConfigFromDirectory(configDir: string): Promise<RawAppConfig> {
@@ -271,12 +273,12 @@ export async function readRawConfigFromDirectory(configDir: string): Promise<Raw
     readConfigFiles(true),
     readConfigFilesFrom((fileName) => join(configDir, fileName))
   ])
-  return mergeRawConfig(bundled, parsed)
+  return { ...mergeRawConfig(bundled, parsed), subagents: await readSubagentPackages(dirname(configDir)) }
 }
 
 export async function readBundledRawConfig(): Promise<RawAppConfig> {
   const bundled = await readConfigFiles(true)
-  return mergeRawConfig(bundled, bundled)
+  return { ...mergeRawConfig(bundled, bundled), subagents: await readSubagentPackages(getBundledDataDir()) }
 }
 
 export async function writeRawSettingsConfig(config: RawAppConfig): Promise<void> {
@@ -297,11 +299,8 @@ export async function writeRawModelsConfig(config: RawAppConfig): Promise<void> 
   } satisfies RawModelsConfigFile)
 }
 
-export async function writeRawSubagentsConfig(config: RawAppConfig): Promise<void> {
-  await writeJsonFileAtomic(getConfigFile(subagentsConfigFileName), {
-    version: 0,
-    subagents: config.subagents ?? []
-  } satisfies RawSubagentsConfigFile)
+export async function writeRawSubagentsConfig(config: RawAppConfig, expected: readonly RawSubagentConfig[]): Promise<void> {
+  await writeSubagentPackages(config.subagents ?? [], expected)
 }
 
 export async function writeRawMcpServersConfig(config: RawAppConfig): Promise<void> {

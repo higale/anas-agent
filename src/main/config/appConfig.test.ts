@@ -91,7 +91,7 @@ async function loadAppConfig(raw: RawAppConfig, bundled: RawAppConfig = raw) {
   const readBundledRawConfig = vi.fn(async () => bundled)
   const writeRawSettingsConfig = vi.fn()
   const writeRawModelsConfig = vi.fn()
-  const writeRawSubagentsConfig = vi.fn()
+  const writeRawSubagentsConfig = vi.fn(async (next: RawAppConfig) => { raw.subagents = next.subagents })
   const writeRawMcpServersConfig = vi.fn()
   const userSettingsConfigExists = vi.fn(async () => true)
   const runtimeLog = vi.fn()
@@ -1051,26 +1051,14 @@ describe('subagent configuration', () => {
     })])
   })
 
-  it('restores a built-in by preset without changing its current list position', async () => {
+  it('saves a built-in enabled switch without changing its definition', async () => {
     const raw = rawConfig()
-    raw.subagents = [
-      { ...custom },
-      { ...builtIn, description: 'Locally changed.' }
-    ]
-    const bundled = rawConfig()
-    bundled.subagents = [{ ...builtIn }]
-    const { appConfig, readBundledRawConfig } = await loadAppConfig(raw, bundled)
-
-    const snapshot = await appConfig.restoreSubagent(1)
-    expect(readBundledRawConfig).toHaveBeenCalledTimes(1)
-    expect(snapshot.subagents).toEqual([
-      expect.objectContaining({ name: 'custom-agent' }),
-      expect.objectContaining({
-        name: 'general-purpose',
-        description: 'General work.',
-        builtIn: true
-      })
-    ])
+    raw.subagents = [{ ...builtIn }]
+    const { appConfig } = await loadAppConfig(raw)
+    const agent = (await appConfig.getAppConfigSnapshot()).subagents[0]
+    const snapshot = await appConfig.saveSubagent({ ...agent, enabled: false })
+    expect(snapshot.subagents[0]).toEqual({ ...agent, enabled: false })
+    expect(raw.subagents).toEqual([{ ...builtIn, enabled: false }])
   })
 
   it('rejects duplicate machine identifiers', async () => {
@@ -1087,5 +1075,19 @@ describe('subagent configuration', () => {
       systemPrompt: '',
     })).rejects.toThrow(/already used/)
     expect(writeRawSubagentsConfig).not.toHaveBeenCalled()
+  })
+})
+
+describe('subagent source ordering', () => {
+  it('moves an Agent only among siblings from its own directory', async () => {
+    const raw = rawConfig()
+    raw.subagents = [
+      ['first', '/external/first'], ['local', '/data/subagents/local'], ['second', '/external/second']
+    ].map(([id, directory]) => ({ id, directory, name: id, enabled: true, description: 'Task', system_prompt: 'Complete the task', capabilities: serializeCapabilities(defaultCapabilities) }))
+    const { appConfig, writeRawSubagentsConfig } = await loadAppConfig(raw)
+    expect((await appConfig.moveSubagent('second', -1)).subagents.map(agent => agent.id)).toEqual(['second', 'local', 'first'])
+    expect(writeRawSubagentsConfig).toHaveBeenCalledTimes(1)
+    expect((await appConfig.moveSubagent('local', 1)).subagents.map(agent => agent.id)).toEqual(['second', 'local', 'first'])
+    expect(writeRawSubagentsConfig).toHaveBeenCalledTimes(1)
   })
 })

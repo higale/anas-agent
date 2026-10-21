@@ -174,20 +174,39 @@ describe('field-level recovery', () => {
     expect(preserve).toHaveBeenCalledOnce()
   })
 
-  it('retains per-server MCP policies and only repairs missing domain defaults on explicit recovery', () => {
-    const raw: any = structuredClone(subagents)
-    const custom = { default_mode: 'selected', servers: [{ id: 'offline', mode: 'all', tools: ['remembered'] }] }
-    raw.subagents[0].capabilities.mcp = custom
-    delete raw.subagents[1].capabilities.mcp
-    const repaired = repairDocument('subagents.json', raw)
-    const agents = repaired.value.subagents as any[]
-    expect(agents[0].capabilities.mcp).toEqual(custom)
-    expect(agents[1].capabilities.mcp).toEqual(subagents.subagents[1].capabilities.mcp)
-    expect(repaired.fields.join('\n')).toContain('subagents[1].capabilities.mcp')
-    raw.subagents[0].capabilities.mcp.servers[0].mode = 'invalid'
-    const invalid: any = repairDocument('subagents.json', raw).value
-    expect(invalid.subagents[0].capabilities.mcp).toEqual({ default_mode: 'selected', servers: [] })
-    expect(invalid.subagents[0].name).toBe(raw.subagents[0].name)
+  it('rejects removed subagent arrays without changing the source', () => {
+    const old = { version: 0, subagents: [{ name: 'keep' }] }
+    expect(() => repairDocument('subagents.json', old)).toThrow('no longer supported')
+    expect(old).toEqual({ version: 0, subagents: [{ name: 'keep' }] })
+  })
+
+  it.each([false, true])('does not flag saved model configuration during another config failure (configured: %s)', async configured => {
+    const { data } = await fixture()
+    const path = join(data, 'config/models.json')
+    const raw = { version: 0, providers: configured ? [{
+      ...models.provider_defaults, id: 'provider', name: 'Custom', protocol: 'openai_chat_completions',
+      base_url: 'https://example.com', api_key: 'keep-key', model_list_url: '',
+      models: [{ ...models.model_defaults, id: 'model', name: 'Custom model', model: 'custom-model',
+        stream: false, max_output_tokens: 0, parameters: { temperature: 0 } }]
+    }] : [] }
+    const before = JSON.stringify(raw)
+    await writeFile(path, before)
+    await writeFile(join(data, 'config/subagents.json'), JSON.stringify({ version: 0, subagents: [] }))
+
+    expect(repairDocument('models.json', raw)).toEqual({ value: raw, fields: [] })
+    const plan = await inspectRecoveryRepair(data)
+    expect(plan.files.find(file => file.name === 'subagents.json')?.error).toContain('no longer supported')
+    expect(plan.files.find(file => file.name === 'models.json')).toMatchObject({ repairableFields: [] })
+    expect(plan.files.find(file => file.name === 'models.json')?.error).toBeUndefined()
+    expect(plan.candidates.some(candidate => candidate.file === 'models.json')).toBe(false)
+    const preserve = vi.fn(async () => '/unused')
+    expect(await repairRecoveryData(data, 'models.json', preserve)).toEqual({ repaired: [], unresolved: [] })
+    expect(preserve).not.toHaveBeenCalled()
+    expect(await readFile(path, 'utf8')).toBe(before)
+
+    // Real damage remains repairable without inserting template-only fields.
+    const damaged = { ...raw, version: 'broken' }
+    expect(repairDocument('models.json', damaged)).toEqual({ value: raw, fields: ['models.json: version'] })
   })
 
   it.each([undefined, 'strict_approval', 'read_only_allowed', 'full_access', 'unknown', null])('preserves optional project permissions and repairs only invalid choices: %s', accessMode => {
@@ -216,24 +235,23 @@ describe('field-level recovery', () => {
     expect(project.compression_prompt).toBe(compressionPrompt)
   })
 
-  it.each(['subagents.json', 'projects.json'])('preserves valid off choices and repairs only invalid capability fields in %s', (file) => {
+  it.each(['projects.json'])('preserves valid off choices and repairs only invalid capability fields in %s', (file) => {
     const selection = { ...structuredClone(capabilities),
       skills: { mode: 'off', project: true, entries: [{ id: 'user:kept', shortcut: false, model: true }] },
       subagents: { mode: 'off', names: ['web-researcher'] }, workspace: false }
     const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep project', pinned: false, collapsed: true,
       createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z', sourceFolders: ['/keep/path'],
       prompt: 'Keep prompt', coding_mode: true, advanced_settings: true, restrict_subagents: true, capabilities: selection }
-    const raw: any = file === 'subagents.json' ? { ...structuredClone(subagents), subagents: [{ ...subagents.subagents[0], capabilities: selection }] }
-        : { version: 0, projects: [project] }
+    const raw: any = { version: 0, projects: [project] }
     expect(repairDocument(file, raw)).toEqual({ value: raw, fields: [] })
     const broken = structuredClone(raw)
-    const target = file === 'subagents.json' ? broken.subagents[0].capabilities : broken.projects[0].capabilities
+    const target = broken.projects[0].capabilities
     target.mcp.default_mode = 'unknown'
     target.tool_mode = 'unknown'
     target.skills.project = 'invalid'
     const repaired = repairDocument(file, broken)
     const expected = structuredClone(raw)
-    const expectedSelection = file === 'subagents.json' ? expected.subagents[0].capabilities : expected.projects[0].capabilities
+    const expectedSelection = expected.projects[0].capabilities
     expectedSelection.skills.project = false
     expect(repaired.value).toEqual(expected)
     expect(repaired.fields).toHaveLength(3)
@@ -242,8 +260,12 @@ describe('field-level recovery', () => {
   })
 
   function repairScope(capabilities: unknown) {
-    const result = repairDocument('subagents.json', { ...structuredClone(subagents), subagents: [{ ...subagents.subagents[0], capabilities }] })
-    return { ...result, value: (result.value as any).subagents[0].capabilities }
+    const result = repairDocument('projects.json', { version: 0, projects: [{
+      id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep', pinned: false, collapsed: false,
+      createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z', sourceFolders: [],
+      prompt: '', coding_mode: false, advanced_settings: false, restrict_subagents: false, capabilities
+    }] })
+    return { ...result, value: (result.value as any).projects[0].capabilities }
   }
 
   it('repairs rejected values with current defaults without converting old choices or discarding sibling settings', () => {
@@ -258,7 +280,7 @@ describe('field-level recovery', () => {
     const repaired = repairScope(raw)
     expect(repaired.value).toEqual({ ...raw, subagents: capabilities.subagents,
       skills: { mode: 'off', project: false, entries: raw.skills.entries } })
-    expect(repaired.fields).toEqual(expect.arrayContaining(['subagents.json: subagents[0].capabilities.subagents', 'subagents.json: subagents[0].capabilities.skills.enabled']))
+    expect(repaired.fields).toEqual(expect.arrayContaining(['projects.json: projects[0].capabilities.subagents', 'projects.json: projects[0].capabilities.skills.enabled']))
     expect(raw.subagents).toBe(false)
     expect(raw.skills.enabled).toBe(false)
   })
@@ -294,32 +316,15 @@ describe('field-level recovery', () => {
     expect(project.coding_mode).toBe(codingMode)
   })
 
-  it('repairs missing nested capabilities with each built-in subagent’s own defaults', () => {
-    const raw: any = structuredClone(subagents)
-    delete raw.subagents[1].capabilities.skills
-    raw.subagents[1].capabilities.background_tools = 'true'
-    raw.subagents[1].capabilities.environment = false
-    raw.subagents[1].description = 'Keep custom description'
-    const repaired = repairDocument('subagents.json', raw)
-    const agent = (repaired.value.subagents as any[])[1]
-    expect(agent.capabilities.skills).toEqual(subagents.subagents[1].capabilities.skills)
-    expect(agent.capabilities.background_tools).toBe(true)
-    expect(agent.capabilities.profile).toBe(false)
-    expect(agent.capabilities.environment).toBe(false)
-    expect(agent.description).toBe('Keep custom description')
-    expect(repaired.fields.join('\n')).toContain('subagents[1].capabilities.skills')
-    expect(raw.subagents[1].capabilities.skills).toBeUndefined()
+  it('keeps Agent ordering, disabled state and external sources during explicit settings repair', () => {
+    const raw = { version: 1, order: ['custom', 'general-purpose'], disabled: ['general-purpose'],
+      external_directories: [{ id: 'team', name: 'Team', path: '/agents' }] }
+    expect(repairDocument('subagents.json', raw)).toEqual({ value: raw, fields: [] })
   })
 
-  it('repairs an invalid capability object and enums without widening a valid custom selection', () => {
-    const raw: any = structuredClone(subagents)
-    raw.subagents[0].capabilities = false
-    raw.subagents[1].capabilities.skills.mode = 'invalid'
-    raw.subagents[1].capabilities.tools = ['read_file']
-    const repaired: any = repairDocument('subagents.json', raw).value
-    expect(repaired.subagents[0].capabilities).toEqual(subagents.subagents[0].capabilities)
-    expect(repaired.subagents[1].capabilities.skills.mode).toBe('custom')
-    expect(repaired.subagents[1].capabilities.tools).toEqual(['read_file'])
+  it('accepts persisted Agent settings without creation defaults or optional settings groups', () => {
+    const raw = { version: 1, order: [], disabled: [] }
+    expect(repairDocument('subagents.json', raw)).toEqual({ value: raw, fields: [] })
   })
 
   it('keeps valid false, zero, empty strings, custom parameters and empty lists', () => {
@@ -378,14 +383,14 @@ describe('field-level recovery', () => {
   it('preserves raw files before writing and leaves unparseable files and database untouched', async () => {
     const { root, data } = await fixture()
     const raw: any = structuredClone(subagents)
-    delete raw.subagents[0].capabilities
+    raw.order = 'invalid'
     const before = JSON.stringify(raw)
     await writeFile(join(data, 'config/subagents.json'), before)
     await writeFile(join(data, 'db/projects.json'), '{broken')
     await mkdir(join(data, 'sqlite'))
     await writeFile(join(data, 'sqlite/agent.sqlite'), 'leave database untouched')
     const result = await repairRecoveryData(data, 'subagents.json', () => preserveRecoveryData(data, root))
-    expect(result.repaired.join('\n')).toContain('capabilities')
+    expect(result.repaired.join('\n')).toContain('order')
     expect(result.unresolved).toEqual([])
     expect((await inspectRecoveryRepair(data)).files.find((file) => file.name === 'projects.json')?.error).toBeTruthy()
     expect(await readFile(join(result.preservationPath!, 'data/config/subagents.json'), 'utf8')).toBe(before)
