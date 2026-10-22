@@ -164,6 +164,37 @@ describe('AgentMessageList tool disclosure', () => {
     fireEvent(details, new Event('toggle'))
   }
 
+  it('labels native patch calls in the live timeline and reopened history', () => {
+    const run = activity('running')
+    run.tools[0].call = { id: 'tool-1', name: 'apply_patch', args: { input: '*** Begin Patch\n*** End Patch' } }
+    const props = { title: 'Thread', messages, panelRef: { current: null }, followOutputRef: { current: true },
+      speech: { status: 'idle' as const }, onSpeak: vi.fn() }
+    const view = render(<AgentMessageList {...props} run={{ ...run, status: 'running', interrupts: [] }} activities={[]} />)
+    const verifyLabel = () => {
+      const label = screen.getByText('agent.tool_call_freeform')
+      expect(label.closest('summary')).toHaveTextContent('apply_patch')
+      expect(label).toHaveAttribute('data-tooltip', 'agent.tool_call_freeform_hint')
+    }
+    verifyLabel()
+    view.unmount()
+    render(<AgentMessageList {...props} activities={[{ ...run, status: 'completed',
+      tools: [{ ...run.tools[0], status: 'completed', output: 'patched' }] }]} />)
+    verifyLabel()
+  })
+
+  it.each([
+    { name: 'apply_patch', args: { patch: 'patch text', dry_run: true } },
+    { name: 'apply_patch', args: { input: 'patch text', summary: 'Extra JSON field' } },
+    { name: 'apply_patch', args: { input: null } },
+    { name: 'another_tool', args: { input: 'text' } }
+  ])('does not label ordinary JSON calls as freeform: $name $args', (call) => {
+    const run = activity('completed')
+    run.tools[0].call = { id: 'tool-1', ...call }
+    render(<AgentMessageList title="Thread" messages={messages} activities={[run]} panelRef={{ current: null }}
+      followOutputRef={{ current: true }} speech={{ status: 'idle' }} onSpeak={vi.fn()} />)
+    expect(screen.queryByText('agent.tool_call_freeform')).toBeNull()
+  })
+
   it('shows the complete submitted Skill prompt during a run and after reopening history', () => {
     const promptText = '用户输入\n\n<skill>\n<name>summarize</name>\n<path>/skills/summarize/SKILL.md</path>\n---\nname: summarize\ndescription: Summarize documents.\n---\nRead references/style.md.\nLiteral text: $ARGUMENTS $0 <example>\n</skill>'
     const skillMessages: AgentMessage[] = [{ ...messages[0],
@@ -365,6 +396,7 @@ describe('AgentMessageList tool disclosure', () => {
     const summary = card.querySelector('summary')!
     expect(summary).toHaveAttribute('aria-disabled', 'true')
     expect(card.textContent).toContain('agent.tool_arguments_generating')
+    expect(screen.queryByText('agent.tool_call_freeform')).toBeNull()
     expand(card)
     for (const key of ['Enter', ' ']) {
       expect(fireEvent.keyDown(summary, { key })).toBe(false)
@@ -382,11 +414,12 @@ describe('AgentMessageList tool disclosure', () => {
     expect(card.querySelector('pre')).toBeNull()
     run.models[0].status = 'completed'
     run.models[0].toolCallIds = ['tool-1']
-    run.tools = [{ call: { id: 'tool-1', name: 'apply_patch', args: { patch: 'FULL_ARGUMENT_BODY' } }, sequence: 1, status: 'running' }]
+    run.tools = [{ call: { id: 'tool-1', name: 'apply_patch', args: { input: 'FULL_ARGUMENT_BODY' } }, sequence: 1, status: 'running' }]
     view.rerender(<AgentMessageList {...props} activities={[{ ...run }]} />)
     expect(view.container.querySelectorAll('.agent-activity-tool')).toHaveLength(1)
     expect(view.container.querySelector('.agent-activity-tool')).toBe(card)
     expect(summary).not.toHaveAttribute('aria-disabled')
+    expect(summary).toHaveTextContent('agent.tool_call_freeform')
     expect(card.open).toBe(false)
     expect(card.querySelector('pre')).toBeNull()
     expand(card)

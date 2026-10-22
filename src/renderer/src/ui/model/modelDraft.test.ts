@@ -218,6 +218,25 @@ describe('model draft configuration', () => {
     })
   })
 
+  it.each(modelTemplates.filter(template => template.protocol === 'openai_responses'))(
+    'preserves the selected $templateId connection when creating a provider', template => {
+      const draft = modelTemplateToDraft(template)
+      expect(buildProviderPayload(draft)).toMatchObject({
+        name: template.name,
+        protocol: 'openai_responses',
+        baseUrl: template.baseUrl,
+        modelListUrl: template.modelListUrl,
+        iconData: template.iconData,
+        parameters: {},
+      })
+      expect(buildModelListRequest(draft)).toMatchObject({
+        protocol: 'openai_responses',
+        baseUrl: template.baseUrl,
+        modelListUrl: template.modelListUrl,
+      })
+    }
+  )
+
   it('copies MiniMax OpenAI provider parameters without applying them to Anthropic', () => {
     const openAiTemplate = getModelTemplate('china/minimax/openai')
     const anthropicTemplate = getModelTemplate('china/minimax/anthropic')

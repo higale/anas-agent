@@ -1,5 +1,5 @@
 import { ChatModelStream } from '@langchain/core/language_models/stream'
-import { HumanMessage } from '@langchain/core/messages'
+import { HumanMessage, ToolMessage, mapStoredMessageToChatMessage } from '@langchain/core/messages'
 import type OpenAI from 'openai'
 import { describe, expect, it } from 'vitest'
 import {
@@ -81,6 +81,31 @@ function envelope(output: OpenAI.Responses.Response): unknown[] {
     }
   ]
 }
+
+it('streams a native freeform patch and replays its result after checkpoint serialization', async () => {
+  const patch = '*** Begin Patch\n*** Add File: 你好.txt\n+hello\n*** End Patch'
+  const item = { type: 'custom_tool_call' as const, id: 'ct_1', call_id: 'call_patch', name: 'apply_patch', input: patch }
+  const output = { ...response({ reasoningSummary: '' }), output: [item] } as OpenAI.Responses.Response
+  const [, , message] = await assembled([
+    ...envelope(output),
+    { type: 'response.output_item.added', output_index: 0, sequence_number: 1, item: { ...item, input: '' } },
+    { type: 'response.custom_tool_call_input.delta', output_index: 0, item_id: item.id, sequence_number: 2, delta: patch.slice(0, 25) },
+    { type: 'response.custom_tool_call_input.delta', output_index: 0, item_id: item.id, sequence_number: 3, delta: patch.slice(25) },
+    { type: 'response.custom_tool_call_input.done', output_index: 0, item_id: item.id, sequence_number: 4, input: patch },
+    { type: 'response.output_item.done', output_index: 0, sequence_number: 5, item },
+    { type: 'response.completed', sequence_number: 6, response: output }
+  ])
+  expect(message.tool_calls).toMatchObject([{ id: 'call_patch', name: 'apply_patch', args: { input: patch } }])
+  const restored = mapStoredMessageToChatMessage(message.toDict())
+  for (const zdrEnabled of [false, true]) {
+    const replay = convertOpenAICompatibleMessagesToResponsesInput({ model: 'gpt-5', zdrEnabled,
+      messages: [new HumanMessage('Edit'), restored, new ToolMessage({ tool_call_id: 'call_patch', content: 'Done' })] })
+    expect(replay).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'custom_tool_call', call_id: 'call_patch', input: patch }),
+      { type: 'custom_tool_call_output', call_id: 'call_patch', output: 'Done' }
+    ]))
+  }
+})
 
 function textEvents(): unknown[] {
   return [

@@ -3,7 +3,12 @@ import type { FilePatchPlan } from './filePatch'
 // Transaction fixtures describe expected operations, then enter through the
 // same text-patch protocol as model calls before resolving their targets.
 export function asPatchInput({ operations, ...options }: Omit<FilePatchPlan, 'operations'> & {
-  operations: Exclude<FilePatchPlan['operations'][number], { type: 'write' }>[]
+  operations: Array<
+    | { type: 'create'; path: string; content: string }
+    | { type: 'delete'; path: string }
+    | { type: 'update'; path: string; patch: string }
+    | { type: 'move'; path: string; destination: string; patch: string }
+  >
 }) {
   const lines = ['*** Begin Patch']
   for (const operation of operations) {
@@ -14,7 +19,6 @@ export function asPatchInput({ operations, ...options }: Omit<FilePatchPlan, 'op
         const finalNewline = operation.content.endsWith('\n')
         if (finalNewline) contentLines.pop()
         lines.push(...contentLines.map((line) => `+${line}`))
-        if (!finalNewline) lines.push('\\ No newline at end of file')
       }
     } else if (operation.type === 'delete') {
       lines.push(`*** Delete File: ${operation.path}`)

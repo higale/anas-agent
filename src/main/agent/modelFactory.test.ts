@@ -10,7 +10,9 @@ import type { ResolvedModelConfig } from '@shared/types'
 import { z } from 'zod'
 import { OpenAICompatibleChatModel } from './openAiCompatibleChatModel'
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
-import { filePatchSchema } from '../filePatch'
+import { filePatchDescription, filePatchSchema, parseFilePatch } from '../filePatch'
+import { createFileTools } from '../llm/fileTools'
+import codexPatchSpec from '../codexPatchSpec.json'
 import { ModelSelectionError } from './modelSelection'
 import { assertModelInputFits, assertModelInputSupported, ModelRequestChangedError } from './modelRequestValidation'
 import { toAgentMessage } from './messageMapper'
@@ -238,7 +240,7 @@ describe('createChatModel', () => {
   })
 
   it.each(['openai_chat_completions', 'openai_responses', 'anthropic_messages'] as const)(
-    'carries one strict JSON patch schema and preserves the batch through %s', async (protocol) => {
+    'uses the Codex freeform definition on Responses and the JSON adapter on %s', async (protocol) => {
       const { createChatModel } = await import('./modelFactory')
       const args = { summary: '更新中文文件并移动说明', patch: [
         '*** Begin Patch',
@@ -248,6 +250,8 @@ describe('createChatModel', () => {
         '+after',
         '*** Update File: old.md',
         '*** Move to: docs/new.md',
+        '@@',
+        ' unchanged',
         '*** End Patch'
       ].join('\n') }
       let sent: Record<string, unknown> | undefined
@@ -258,7 +262,7 @@ describe('createChatModel', () => {
               content: [{ type: 'tool_use', id: 'call_patch', name: 'apply_patch', input: args }], usage: { input_tokens: 10, output_tokens: 20 } }
           : protocol === 'openai_responses'
             ? { id: 'resp_patch', object: 'response', created_at: 1, status: 'completed', model: 'fixture',
-                output: [{ type: 'function_call', id: 'fc_patch', call_id: 'call_patch', name: 'apply_patch', arguments: JSON.stringify(args), status: 'completed' }],
+                output: [{ type: 'custom_tool_call', id: 'ct_patch', call_id: 'call_patch', name: 'apply_patch', input: args.patch, status: 'completed' }],
                 usage: { input_tokens: 10, output_tokens: 20, total_tokens: 30 } }
             : { id: 'chat_patch', object: 'chat.completion', created: 1, model: 'fixture', choices: [{ index: 0, finish_reason: 'tool_calls',
                 message: { role: 'assistant', content: null, tool_calls: [{ id: 'call_patch', type: 'function', function: { name: 'apply_patch', arguments: JSON.stringify(args) } }] } }],
@@ -266,13 +270,27 @@ describe('createChatModel', () => {
         return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
       }
       const model = createChatModel({ ...baseModel, protocol, stream: false }, { providerFetch }) as BaseChatModel
-      const bound = model.bindTools!([tool(async () => 'unused', { name: 'apply_patch', description: 'Edit a complete batch.', schema: filePatchSchema })])
+      const patchTool = createFileTools({ maxReadBytes: 1_000_000, primaryFolder: process.cwd() }).find(item => item.name === 'apply_patch')!
+      const bound = model.bindTools!([patchTool])
       const response = await bound.invoke([new HumanMessage('Edit both files')])
-      expect(response.tool_calls).toMatchObject([{ name: 'apply_patch', args }])
+      expect(response.tool_calls).toMatchObject([{ name: 'apply_patch', args: protocol === 'openai_responses' ? { input: args.patch } : args }])
+      expect(parseFilePatch(response.tool_calls![0].args).operations.map(operation => operation.type)).toEqual(['update', 'move'])
       const tools = sent?.tools as Array<Record<string, unknown>>
       expect(tools).toHaveLength(1)
+      if (protocol === 'openai_responses') {
+        expect(tools[0]).toEqual(codexPatchSpec)
+        expect(filePatchSchema.parse(response.tool_calls![0].args)).toEqual({ patch: args.patch })
+        const restored = mapStoredMessageToChatMessage(response.toDict())
+        await bound.invoke([new HumanMessage('Edit both files'), restored, new ToolMessage({ tool_call_id: 'call_patch', content: 'Success' })])
+        expect(sent?.input).toEqual(expect.arrayContaining([
+          expect.objectContaining({ type: 'custom_tool_call', call_id: 'call_patch', input: args.patch }),
+          { type: 'custom_tool_call_output', call_id: 'call_patch', output: 'Success' }
+        ]))
+        return
+      }
       const definition = protocol === 'openai_chat_completions' ? tools[0].function as Record<string, unknown> : tools[0]
       expect(definition.name).toBe('apply_patch')
+      expect(definition.description).toBe(filePatchDescription)
       const schema = (definition.parameters ?? definition.input_schema) as {
         additionalProperties: boolean
         properties: Record<string, unknown>
@@ -284,6 +302,52 @@ describe('createChatModel', () => {
       expect(schema.required).toContain('patch')
       expect(filePatchSchema.parse(response.tool_calls![0].args)).toEqual(args)
     })
+
+  it.each(['data', 'patch', 'function'])('continues a previous %s call with streamed freeform patch text', async (field) => {
+    const { createChatModel } = await import('./modelFactory')
+    const patch = '*** Begin Patch\n*** Update File: src/main.ts\n@@\n-before\n+const text = `你好中国 "quoted" C:\\temp`;\n*** End Patch'
+    const wrapped = JSON.stringify({ [field]: patch })
+    const oldCall = field === 'function'
+      ? { type: 'function_call', id: 'fc_old', call_id: 'call_old', name: 'apply_patch', arguments: JSON.stringify({ patch }) }
+      : { type: 'custom_tool_call', id: 'ct_old', call_id: 'call_old', name: 'apply_patch', input: wrapped }
+    const historical = mapStoredMessageToChatMessage(new AIMessage({
+      content: '',
+      tool_calls: [{ id: 'call_old', name: 'apply_patch', args: field === 'function' ? { patch } : { input: wrapped }, type: 'tool_call' }],
+      response_metadata: { output: [oldCall] }
+    }).toDict())
+    const output = { type: 'custom_tool_call', id: 'ct_new', call_id: 'call_new', name: 'apply_patch', input: patch, status: 'completed' }
+    const response = { id: 'resp_patch', object: 'response', created_at: 1, model: 'test-model', status: 'completed', output: [output],
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } }
+    let sent: Record<string, unknown> | undefined
+    const model = createChatModel({ ...baseModel, protocol: 'openai_responses', stream: true }, { providerFetch: async (_url, init) => {
+      sent = JSON.parse(String(init?.body))
+      const events = [
+        { type: 'response.created', response: { ...response, status: 'in_progress', output: [] } },
+        { type: 'response.output_item.added', output_index: 0, item: { ...output, status: 'in_progress', input: '' } },
+        { type: 'response.custom_tool_call_input.delta', item_id: output.id, output_index: 0, delta: output.input.slice(0, 20) },
+        { type: 'response.custom_tool_call_input.delta', item_id: output.id, output_index: 0, delta: output.input.slice(20) },
+        { type: 'response.custom_tool_call_input.done', item_id: output.id, output_index: 0, input: output.input },
+        { type: 'response.output_item.done', output_index: 0, item: output },
+        { type: 'response.completed', response }
+      ]
+      return new Response(events.map((event, sequence_number) => `event: ${event.type}\ndata: ${JSON.stringify({ ...event, sequence_number })}\n\n`).join(''),
+        { headers: { 'content-type': 'text/event-stream' } })
+    } }) as OpenAICompatibleChatModel
+    const configured = model.withConfig({}) as OpenAICompatibleChatModel
+    const patchTool = createFileTools({ maxReadBytes: 1_000_000, primaryFolder: process.cwd() }).find(item => item.name === 'apply_patch')!
+    const bound = configured.bindTools([patchTool]) as OpenAICompatibleChatModel
+    const result = await bound.streamEvents([
+      new HumanMessage('Update the file'), historical,
+      new ToolMessage({ tool_call_id: 'call_old', status: 'error', content: "NOT EXECUTED: invalid patch: The first line of the patch must be '*** Begin Patch'" })
+    ]).output
+    expect(sent?.tools).toEqual([codexPatchSpec])
+    expect(sent?.input).toEqual(expect.arrayContaining([
+      expect.objectContaining(oldCall),
+      expect.objectContaining({ type: field === 'function' ? 'function_call_output' : 'custom_tool_call_output', call_id: 'call_old' })
+    ]))
+    expect(result.tool_calls).toMatchObject([{ name: 'apply_patch', args: { input: patch } }])
+    expect(parseFilePatch(result.tool_calls![0].args).operations).toMatchObject([{ type: 'update', path: 'src/main.ts' }])
+  })
 
   it('keeps request image encoding stable when called again', () => {
     const original = new ToolMessage({ tool_call_id: 'image', content: [

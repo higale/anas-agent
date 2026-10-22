@@ -52,7 +52,7 @@ describe('patch target preimages', () => {
     const text = '\ufeff中文\r\n原文\r\n'
     await writeFile(join(root, 'old.txt'), text)
     const resolved = await resolveFilePatchTargets(asPatchInput({ operations: [
-      { type: 'move', path: 'old.txt', destination: 'new/moved.txt' },
+      { type: 'move', path: 'old.txt', destination: 'new/moved.txt', patch: '@@\n \ufeff中文' },
       { type: 'create', path: 'empty.txt', content: '' }
     ] }), root)
     const preimages = await captureFilePatchPreimages(resolved.targets)

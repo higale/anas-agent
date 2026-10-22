@@ -152,13 +152,15 @@ Creates, changes, moves, or deletes local files without requiring **Command exec
 
 | Tool | Function |
 | --- | --- |
-| `apply_patch` | Locate and edit content using surrounding text; supports a preview without writing. |
+| `apply_patch` | Edit files by context using the Codex patch format; the JSON tool interface supports a preview without writing. |
 | `write_file` | Create a text file or explicitly replace the entire contents of an existing file. |
 | `restore_file_edit` | Undo a complete recorded `apply_patch` or `write_file` operation. Recovery data must still be available; conflicting edits are not overwritten. |
 | `get_file_edit_diff` | Inspect recorded Agent file changes, rather than Git working-tree changes. This tool itself is read-only. |
 | `create_directory` | Create a directory and missing parents. |
 | `move_file` | Move or rename files and directories. |
 | `delete_file` | Delete files or directories. |
+
+OpenAI Responses uses the native Codex freeform patch call and requires provider support for `custom` tools; other interfaces wrap the patch in JSON arguments, with no separate tool-format setting. Matching tolerates the whitespace and punctuation differences defined upstream. Updated nonempty files receive a trailing newline. Use `write_file` when complete text and its trailing-newline state must be preserved exactly.
 
 ### Memory
 
@@ -243,6 +245,12 @@ Explicit invocation sends the unchanged skill file and its source path, keeping 
 OpenAI-compatible and Anthropic-compatible services are supported. Manage models in Settings > Model and switch between them below the message input.
 
 **New** at the top left offers a blank provider configuration or a template. The same toolbar provides move-up, move-down, and delete actions for the selected provider. The model list on the right has its own actions. **Fetch available models** remains in the add/edit model dialogs and updates only the candidate list, preserving configured model capabilities and parameters.
+
+Provider menus offer separate OpenAI Responses, OpenAI Chat Completions, and Anthropic Messages templates for confirmed endpoints, with Responses listed first where available. Each template fills in its protocol, Base URL, and model list URL separately. When changing an existing provider's protocol, check its Base URL as well. Template updates do not overwrite saved configurations. Endpoint availability and tool support still depend on the provider, model, and local server version.
+
+As specified in the [official Zhipu documentation](https://docs.bigmodel.cn/cn/guide/develop/responses/introduction), the GLM Responses template uses `https://open.bigmodel.cn/api/v1`, while Chat Completions uses `https://open.bigmodel.cn/api/paas/v4`; both fetch models from `/api/paas/v4/models`.
+
+The Responses protocol currently sends `apply_patch` as a custom/freeform tool. [MiMo requires Responses Lite for these tools](https://mimo.mi.com/docs/tokenplan/integration/codex-configuration), which Anas does not yet implement. Selecting the MiMo Responses template does not remove this limitation; use its Chat Completions or Anthropic Messages template when you need the patch tool.
 
 Click the icon before a provider’s name, or drop an SVG, PNG, JPEG, static WebP, or BMP onto it, to replace it; hover to reset it. SVG files must not exceed 1 MB and retain their original vector data. Raster images are automatically center-cropped to a square, reduced to at most 512 × 512 pixels, and saved as PNG, preserving transparency without enlarging small images. GIF and animated WebP are not supported. Templates include brand icons. Images are stored as Base64 in provider configuration and included in backups. An empty image displays the generic icon directly. Only clicking Reset looks up the current API URL in the templates and saves the matching brand icon, or clears the image if no match is found.
 

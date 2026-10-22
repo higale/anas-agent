@@ -147,6 +147,7 @@ describe('durable file change ledger', () => {
     expect(value.database.fileChanges.listRounds({ threadId: value.run.threadId, selectedRunId: compression.id }).selectedRound).toBeNull()
   })
 
+  // These 25 transactions sync both files and directories; allow for disk latency.
   it('paginates whole files while retaining all writes across operation-page boundaries', async () => {
     const value = await fixture(), path = join(value.root, 'a')
     await value.execute([{ type: 'create', path: 'a', content: 'v0\n' }])
@@ -163,7 +164,7 @@ describe('durable file change ledger', () => {
     expect(next).toMatchObject({ hasMore: false, files: [{ path: join(value.root, 'z'), continuity: 'recorded' }] })
     await value.execute([{ type: 'update', path: 'a', patch: '@@\n-v22\n+changed\n' }])
     expect(() => value.database.fileChanges.queryRoundFiles({ runId: value.run.id, version: first.version })).toThrow('restart pagination')
-  })
+  }, 30_000)
 
   it('keeps an external gap visible while comparing the first and final recorded images once per file', async () => {
     const value = await fixture(), path = join(value.root, 'one')
@@ -420,7 +421,7 @@ describe('durable file change ledger', () => {
     await writeFile(join(value.root, '中文 空格.txt'), 'later user edit')
     value.reopen()
     const archived = await value.database.fileChanges.load(value.run.id, record.operationId)
-    expect(archived?.transaction.entries[0].after?.text).toBe('\ufeff内容\r\n')
+    expect(archived?.transaction.entries[0].after?.text).toBe('\ufeff内容\n')
     expect(archived?.transaction.entries[0].before.text).toBeNull()
     const events = value.database.fileChanges.events(value.run.id, record.operationId)
     expect(events.map((item) => [item.phase, item.observed])).toEqual([['intent', 0], ['applied', 0]])
@@ -472,7 +473,7 @@ describe('durable file change ledger', () => {
   it('backs up metadata and all required content together without recovery files', async () => {
     const value = await fixture()
     await writeFile(join(value.root, 'old'), 'old\n')
-    const record = await value.execute([{ type: 'move', path: 'old', destination: 'new' }])
+    const record = await value.execute([{ type: 'move', path: 'old', destination: 'new', patch: '@@\n old' }])
     await value.scope(() => value.store.deleteFileEditRecordsForRequest(value.run.id), true)
     const backupPath = join(value.root, 'backup.sqlite')
     await snapshotAgentDatabase(value.databasePath, backupPath)
@@ -514,7 +515,7 @@ describe('durable file change ledger', () => {
     const before = value.database.fileChanges.events(inverseRun.id, inverse!.operationId)
     await value.scope(() => value.store.finalizePatchRestore(source.operationId, source.requestId, async () => {}))
     expect(value.database.fileChanges.events(inverseRun.id, inverse!.operationId)).toEqual(before)
-    expect((await value.database.fileChanges.load(source.requestId, source.operationId))?.transaction.entries[0].afterText).toBe('one')
+    expect((await value.database.fileChanges.load(source.requestId, source.operationId))?.transaction.entries[0].afterText).toBe('one\n')
     expect((await value.database.fileChanges.load(inverseRun.id, inverse!.operationId))?.transaction.restores?.operationId).toBe(source.operationId)
   })
 

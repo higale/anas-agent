@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { FileEditStore } from './fileEditStore'
-import { resolveFilePatchTargets } from './filePatch'
+import { parseFilePatch, resolveFilePatchTargets } from './filePatch'
 import { asPatchInput } from './filePatchTestFixtures'
 import { captureFilePatchPreimages } from './filePatchState'
 import { executeFilePatchTransaction, type FilePatchTransaction } from './filePatchTransaction'
@@ -155,7 +155,7 @@ describe('durable batch operation records', () => {
       const initial = await preparedRecord({ ...value, operationId: result.operationId,
         preimages: await captureFilePatchPreimages((await resolveFilePatchTargets(asPatchInput({ operations: [
           { type: 'update', path: 'old.txt', patch: '@@\n-after\n+again\n' }
-        ] }), value.workspace)).targets), input: { operations: [{ type: 'update', path: join(value.workspace, 'old.txt'), patch: '@@\n-after\n+again\n' }] } })
+        ] }), value.workspace)).targets), input: parseFilePatch(asPatchInput({ operations: [{ type: 'update', path: join(value.workspace, 'old.txt'), patch: '@@\n-after\n+again\n' }] })) })
       await writer.persist(initial)
     })).rejects.toThrow('already exists')
     expect(arm).toHaveBeenCalledTimes(1)

@@ -12,7 +12,9 @@ const server = await createServer({
   configFile: false,
   appType: 'custom',
   logLevel: 'error',
-  server: { middlewareMode: true },
+  // This process loads a fixed test snapshot and then exits. File watching and
+  // HMR would scan ignored build artifacts and contend across crash fixtures.
+  server: { middlewareMode: true, watch: null, hmr: false },
   resolve: {
     alias: {
       '@shared': resolve('src/shared'),

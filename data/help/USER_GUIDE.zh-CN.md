@@ -152,13 +152,15 @@ Anas 是一个本地桌面 Agent。你可以为不同项目配置上下文、工
 
 | 工具 | 功能 |
 | --- | --- |
-| `apply_patch` | 按原文上下文定位并修改文件，支持只预览不写入。 |
+| `apply_patch` | 使用 Codex 补丁格式按上下文修改文件；JSON 工具接口支持只预览不写入。 |
 | `write_file` | 创建文本文件，或明确选择覆盖整个已有文件。 |
 | `restore_file_edit` | 撤销有记录的整次 `apply_patch` 或 `write_file` 操作；恢复资料必须仍可用，遇到冲突不会直接覆盖。 |
 | `get_file_edit_diff` | 查看 Agent 记录的文件改动，不等同于查看 Git 工作区差异；该工具本身只读。 |
 | `create_directory` | 创建目录及所需的父目录。 |
 | `move_file` | 移动或重命名文件、目录。 |
 | `delete_file` | 删除文件或目录。 |
+
+OpenAI Responses 使用 Codex 原生 freeform 补丁调用，供应商需支持 `custom` 工具；其他接口使用 JSON 参数封装，无需单独设置工具格式。补丁匹配允许上游定义的空白与标点差异；更新后的非空文件会带末尾换行。需要精确保留完整文本及末尾换行状态时可使用 `write_file`。
 
 ### 记忆
 
@@ -243,6 +245,12 @@ subagents/<目录>/
 支持 OpenAI 兼容和 Anthropic 兼容服务。在“设置 > 模型”中管理模型，在消息输入框底部切换使用。
 
 左上角“新建”可选择空白供应商配置或模板，同一按钮区的上移、下移和删除作用于当前供应商；右侧模型列表有各自的操作按钮。“获取可用模型”保留在添加、编辑模型的窗口中，只更新候选模型列表，不修改已配置模型的能力和参数。
+
+供应商菜单将 OpenAI Responses、OpenAI Chat Completions 和 Anthropic Messages 列为独立模板项，按已确认的接口提供；提供 Responses 的供应商将其放在首项。每个模板分别填写协议、Base URL 和模型列表地址。已有供应商切换协议时须同时核对 Base URL；模板更新不会覆盖已保存的配置。接口可用性和工具支持范围仍取决于供应商、模型及本地服务版本。
+
+GLM 的 Responses 模板按[智谱官方说明](https://docs.bigmodel.cn/cn/guide/develop/responses/introduction)使用 `https://open.bigmodel.cn/api/v1`，Chat Completions 使用 `https://open.bigmodel.cn/api/paas/v4`；模型列表均从 `/api/paas/v4/models` 获取。
+
+当前 Responses 协议下的 `apply_patch` 使用 custom/freeform 格式。[MiMo 要求这类工具使用 Responses Lite](https://mimo.mi.com/docs/tokenplan/integration/codex-configuration)，Anas 尚未适配 Lite；选择 MiMo Responses 模板不会消除这一限制，需要补丁工具时可选 Chat Completions 或 Anthropic Messages 模板。
 
 供应商名称前的图标可点击或拖入 SVG、PNG、JPEG、静态 WebP 或 BMP 更换，悬停后可恢复默认。SVG 不超过 1 MB，保留原始矢量；位图自动居中裁成正方形，并缩小到最大 512 × 512 像素，统一保存为 PNG，小图不放大，保留透明背景。不支持 GIF 和动态 WebP。模板自带品牌图标；图片以 Base64 保存在供应商配置中，随配置备份。图标为空时直接显示通用图标。只有点击恢复默认时才按当前 API URL 查找模板，并保存匹配的品牌图标；找不到则清空。
 

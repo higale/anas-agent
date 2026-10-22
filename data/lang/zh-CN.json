@@ -1088,6 +1088,8 @@
     "task_plan_completed": "计划已完成",
     "task_plan_progress": "{{completed}}/{{total}}",
     "tool_call": "工具调用",
+    "tool_call_freeform": "Freeform",
+    "tool_call_freeform_hint": "直接传入补丁文本，未使用 JSON 参数。",
     "sleep_remaining": "剩余 {{seconds}} 秒",
     "sleep_finishing": "等待返回",
     "user_input_title": "需要你的选择",

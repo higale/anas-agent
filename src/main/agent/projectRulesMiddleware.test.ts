@@ -148,7 +148,7 @@ describe('project rules graph middleware', () => {
     const set = rules(root)
     const patch = vi.fn(async (input: unknown) => ({ status: 'applied', input }))
     const prompts: string[] = []
-    const args = { summary: 'Edit together', patch: '*** Begin Patch\n*** Add File: new.txt\n+new\n*** Update File: child/a\n*** Move to: target/b\n*** End Patch' }
+    const args = { summary: 'Edit together', patch: '*** Begin Patch\n*** Add File: new.txt\n+new\n*** Update File: child/a\n*** Move to: target/b\n@@\n before\n*** End Patch' }
     const agent = createAgent({ model: new FakeToolCallingModel({ toolCalls: [
       [{ id: 'discover', name: 'apply_patch', args }], [{ id: 'decided', name: 'apply_patch', args }], []
     ] }), tools: [tool(patch, { name: 'apply_patch', description: 'Patch files', schema: filePatchSchema })],
@@ -173,7 +173,7 @@ describe('project rules graph middleware', () => {
     const set = rules(root, 2500)
     const patch = vi.fn(async () => 'must not run')
     const agent = createAgent({ model: new FakeToolCallingModel({ toolCalls: [[{ id: 'large', name: 'apply_patch',
-      args: { summary: 'Move together', patch: '*** Begin Patch\n*** Update File: child/a\n*** Move to: target/b\n*** End Patch' } }], []] }),
+      args: { summary: 'Move together', patch: '*** Begin Patch\n*** Update File: child/a\n*** Move to: target/b\n@@\n before\n*** End Patch' } }], []] }),
       tools: [tool(patch, { name: 'apply_patch', description: 'Patch files', schema: filePatchSchema })],
       middleware: [set.middleware, set.guard] })
     await expect(agent.invoke({ messages: [new HumanMessage('Move')] })).rejects.toThrow('indivisible apply_patch')

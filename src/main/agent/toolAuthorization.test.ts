@@ -41,7 +41,7 @@ describe('tool authorization', () => {
   it.each(['strict_approval', 'read_only_allowed', 'full_access'] as const)('checks every patch target in %s without rewriting lexical arguments', async (accessMode) => {
     const primary = await temporaryDirectory('anas-auth-primary-')
     const outside = await temporaryDirectory('anas-auth-outside-')
-    const args = { summary: 'Edit files', patch: `*** Begin Patch\n*** Add File: 新建 file.txt\n*** Update File: update.txt\n@@\n-before\n+after\n*** Delete File: delete.txt\n*** Update File: source.txt\n*** Move to: ${join(outside, 'target.txt')}\n*** End Patch` }
+    const args = { summary: 'Edit files', patch: `*** Begin Patch\n*** Add File: 新建 file.txt\n*** Update File: update.txt\n@@\n-before\n+after\n*** Delete File: delete.txt\n*** Update File: source.txt\n*** Move to: ${join(outside, 'target.txt')}\n@@\n before\n*** End Patch` }
     const original = structuredClone(args)
     const result = await prepareToolPathAuthorization({ toolName: 'apply_patch', args,
       primaryFolder: primary, trustedFolders: [primary], accessMode })
@@ -64,7 +64,7 @@ describe('tool authorization', () => {
     await writeFile(join(outside, 'target'), 'before\n')
     await symlink(join(outside, 'target'), join(primary, 'link'), 'file')
     const body = type === 'create' ? '*** Add File: link\n+text' : type === 'delete' ? '*** Delete File: link'
-      : type === 'move' ? '*** Update File: link\n*** Move to: moved' : '*** Update File: link\n@@\n-before\n+after'
+      : type === 'move' ? '*** Update File: link\n*** Move to: moved\n@@\n before' : '*** Update File: link\n@@\n-before\n+after'
     const args = { summary: 'Edit link', patch: `*** Begin Patch\n${body}\n*** End Patch` }
     const result = await prepareToolPathAuthorization({ toolName: 'apply_patch', args,
       primaryFolder: primary, trustedFolders: [primary], accessMode: 'strict_approval' })
@@ -76,7 +76,7 @@ describe('tool authorization', () => {
   it('rejects malformed and overlapping patch batches even with full access', async () => {
     const primary = await temporaryDirectory('anas-auth-primary-')
     for (const patch of ['*** Begin Patch\n*** End Patch', '*** Begin Patch\n*** Unknown File: a\n*** End Patch',
-      '*** Begin Patch\n*** Update File: a\n*** Move to: a\n*** End Patch',
+      '*** Begin Patch\n*** Update File: a\n*** Move to: a\n@@\n before\n*** End Patch',
       '*** Begin Patch\n*** Delete File: parent\n*** Add File: parent/child\n*** End Patch']) {
       await expect(prepareToolPathAuthorization({ toolName: 'apply_patch', args: { summary: 'Edit', patch },
         primaryFolder: primary, trustedFolders: [primary], accessMode: 'full_access' })).rejects.toThrow()
@@ -85,7 +85,7 @@ describe('tool authorization', () => {
 
   it.each(['strict_approval', 'read_only_allowed', 'full_access'] as const)('authorizes a dry run as a read in %s', async (accessMode) => {
     const primary = await temporaryDirectory('anas-auth-primary-'), outside = await temporaryDirectory('anas-auth-outside-')
-    const args = { dry_run: true, patch: `*** Begin Patch\n*** Update File: ${join(outside, 'source.txt')}\n*** Move to: ${join(outside, 'target.txt')}\n@@\n-before\n+after\n*** End Patch` }
+    const args = { dry_run: true, patch: `*** Begin Patch\n*** Update File: ${join(outside, 'source.txt')}\n*** Move to: ${join(outside, 'target.txt')}\n@@\n-before\n+after\n@@\n before\n*** End Patch` }
     const result = await prepareToolPathAuthorization({ toolName: 'apply_patch', args,
       primaryFolder: primary, trustedFolders: [primary], accessMode })
     expect(result.requiresApproval).toBe(accessMode === 'strict_approval')

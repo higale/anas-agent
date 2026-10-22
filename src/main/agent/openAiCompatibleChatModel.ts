@@ -18,6 +18,7 @@ import { encodeOpenAiToolImages } from './toolImageTransport'
 import { approximateContentTokens } from './localTokenCounting'
 import { invokeModelWithRetry, type ModelRetryOptions } from './modelRetryPolicy'
 import { isModelRequestChangedError } from './modelRequestValidation'
+import codexPatchSpec from '../codexPatchSpec.json'
 import {
   convertOpenAICompatibleMessagesToResponsesInput,
   convertOpenAICompatibleResponsesStream,
@@ -163,6 +164,15 @@ export class OpenAICompatibleChatModel extends ChatOpenAI {
 
   protected override _useResponsesApi(_options: this['ParsedCallOptions'] | undefined): boolean {
     return this.anasUseResponsesApi
+  }
+
+  override bindTools(tools: Parameters<ChatOpenAI['bindTools']>[0], kwargs?: Parameters<ChatOpenAI['bindTools']>[1]) {
+    return super.bindTools(this.anasUseResponsesApi ? tools.map((tool) => {
+      if ('metadata' in tool && tool.metadata?.codexApplyPatch === true) {
+        return codexPatchSpec
+      }
+      return tool
+    }) : tools, kwargs)
   }
 
   override get profile(): ModelProfile {

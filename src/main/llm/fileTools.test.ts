@@ -12,6 +12,7 @@ import { createFileTools } from './fileTools'
 import { ManagedCallService } from '../agent/managedCallService'
 import { withManagedToolExecution } from '../agent/managedToolExecution'
 import { ToolMessage } from '@langchain/core/messages'
+import { convertToOpenAITool } from '@langchain/core/utils/function_calling'
 import { directoryTreePages } from '../directoryTree'
 
 const tempDirs: string[] = []
@@ -252,7 +253,7 @@ describe('file tools', () => {
     await expect(reader(dir, controller.signal).invoke({ path, format: 'raw' })).rejects.toThrow('Read cancelled')
   })
 
-  it('edits raw CRLF context through apply_patch without changing surrounding line endings', async () => {
+  it('edits raw CRLF context using the upstream preferred ending and final newline', async () => {
     const dir = await tempDir(), path = join(dir, 'source.txt')
     await writeFile(path, '\ufeffheader\nold\r\ntail')
     const context = await reader(dir).invoke({ path, start_line: 2, max_lines: 1, format: 'raw' })
@@ -260,7 +261,7 @@ describe('file tools', () => {
       patch: '*** Begin Patch\n*** Update File: source.txt\n@@\n-' + context + '+new\n*** End Patch'
     }, dir)
     expect(result.ok).toBe(true)
-    expect(await readFile(path, 'utf8')).toBe('\ufeffheader\nnew\r\ntail')
+    expect(await readFile(path, 'utf8')).toBe('\ufeffheader\nnew\ntail\n')
   })
 
   it.each(['', '#Requires -Version 5.1\r\n\r\n+literal\r\n  indented', '\ufeff中文\n'])('writes exact content with automatic parents and supports diff and undo: %j', async (content) => {
@@ -568,16 +569,11 @@ describe('file tools', () => {
     })
 
     for (const fileTool of tools) {
-      const schema = fileTool.schema as unknown as {
-        shape: {
-          summary?: {
-            description?: string
-            safeParse: (value: unknown) => { success: boolean }
-          }
-        }
+      const schema = convertToOpenAITool(fileTool).function.parameters as {
+        properties: { summary?: { description?: string } }; required?: string[]
       }
-      expect(schema.shape.summary?.description).toContain("user's language")
-      expect(schema.shape.summary?.safeParse(undefined).success).toBe(true)
+      expect(schema.properties.summary?.description).toContain("user's language")
+      expect(schema.required ?? []).not.toContain('summary')
     }
   })
 

@@ -1,6 +1,7 @@
 :root {
   color-scheme: light;
-  font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  font-family: var(--font-ui);
+  --font-ui: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
   --font-mono: Consolas, "Cascadia Mono", monospace;
   --font-size-base: 14px;
   --resize-handle-gutter: 6px;

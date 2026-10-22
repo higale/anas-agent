@@ -1,5 +1,5 @@
 import type { ChatModelStreamEvent } from '@langchain/core/language_models/event'
-import { AIMessage, type BaseMessage } from '@langchain/core/messages'
+import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages'
 import {
   convertMessagesToResponsesInput,
   convertOpenAIResponsesStream,
@@ -30,6 +30,7 @@ interface StreamNormalizationState {
   blockOutputIndices: Map<number, number>
   response?: OpenAI.Responses.Response
   reasoning: Map<number, ReasoningState>
+  customCalls: Map<string, OpenAI.Responses.ResponseCustomToolCall>
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -70,8 +71,37 @@ export function convertOpenAICompatibleMessagesToResponsesInput(options: {
 
 /** Select the SDK's raw-output replay path for requests without changing checkpoint messages. */
 export function prepareOpenAICompatibleResponsesMessages(messages: BaseMessage[], zdrEnabled: boolean): BaseMessage[] {
+  const customCallIds = new Set<string>()
+  for (const message of messages) {
+    for (const item of responseOutput(message) ?? []) {
+      if (item.type === 'custom_tool_call') customCallIds.add(item.call_id)
+    }
+    if (AIMessage.isInstance(message)) {
+      for (const call of message.tool_calls ?? []) {
+        if ('isCustomTool' in call && call.isCustomTool === true && call.id) customCallIds.add(call.id)
+      }
+    }
+  }
   return messages.map((message) => {
+    // Execution and recovery use ordinary LangChain ToolMessages. Mark the
+    // outbound transport from the originating call, including error results.
+    if (ToolMessage.isInstance(message) && customCallIds.has(message.tool_call_id)) {
+      const { output_version: _version, ...responseMetadata } = message.response_metadata
+      return new ToolMessage({ ...message, content: message.content,
+        response_metadata: responseMetadata, additional_kwargs: { ...message.additional_kwargs, customTool: true } })
+    }
     const metadata = message.response_metadata as Record<string, unknown>
+    if (zdrEnabled && AIMessage.isInstance(message) && metadata.output_version === 'v1') {
+      const calls = new Map((responseOutput(message) ?? []).flatMap((item) =>
+        item.type === 'custom_tool_call' ? [[item.call_id, item] as const] : []))
+      if (calls.size) return new AIMessage({ ...message, tool_calls: [],
+        content: message.contentBlocks.map((block) => {
+          const call = block.type === 'tool_call' && block.id ? calls.get(block.id) : undefined
+          if (!call) return block
+          const { id: _id, ...value } = call
+          return { type: 'non_standard', value }
+        }) })
+    }
     if (zdrEnabled || !responseOutput(message) || metadata.output_version !== 'v1') return message
     const { output_version: _version, ...responseMetadata } = metadata
     return new AIMessage({
@@ -162,6 +192,9 @@ async function *normalizedResponsesEvents(
   }
 
   for await (const event of source) {
+    if (event.type === 'response.output_item.done' && event.item.type === 'custom_tool_call') {
+      state.customCalls.set(event.item.call_id, event.item)
+    }
     if (event.type === 'response.output_item.added' && isReasoningItem(event.item)) {
       const current = reasoningState(state, event.output_index)
       current.id = event.item.id ?? current.id
@@ -247,12 +280,22 @@ export async function *convertOpenAICompatibleResponsesStream(
 ): AsyncGenerator<ChatModelStreamEvent> {
   const state: StreamNormalizationState = {
     blockOutputIndices: new Map(),
-    reasoning: new Map()
+    reasoning: new Map(),
+    customCalls: new Map()
   }
   const normalized = normalizedResponsesEvents(source, state)
   let nextBlockIndex = 0
   for await (const event of convertOpenAIResponsesStream(normalized, options)) {
     if ('index' in event) nextBlockIndex = Math.max(nextBlockIndex, event.index + 1)
+    if (event.event === 'content-block-finish' && 'id' in event.content && typeof event.content.id === 'string') {
+      const call = state.customCalls.get(event.content.id)
+      if (call) {
+        // The SDK streams freeform text but finalizes it with its JSON parser.
+        // Keep native block allocation/progress and adapt only the final args.
+        yield { ...event, content: { type: 'tool_call', id: call.call_id, name: call.name, args: { input: call.input } } }
+        continue
+      }
+    }
     if (
       event.event === 'content-block-start'
       && event.content.type === 'reasoning'

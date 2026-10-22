@@ -31,9 +31,9 @@ function endpoint(baseUrl) {
     if (url.hostname === 'openrouter.ai') return { name: 'OpenRouter', url: 'https://openrouter.ai/api/v1/key', parse: parseOpenRouter }
     if (['open.bigmodel.cn', 'api.z.ai'].includes(url.hostname)) {
       // Plan entitlement alone does not mean the selected endpoint bills the plan.
-      // The ordinary /api/paas/v4 endpoint uses resource packages or cash balance.
+      // Ordinary Chat Completions and Responses use resource packages or cash balance.
       const path = url.pathname.replace(/\/+$/, '')
-      if (url.hostname === 'open.bigmodel.cn' && path === '/api/paas/v4') return {
+      if (url.hostname === 'open.bigmodel.cn' && ['/api/paas/v4', '/api/v1'].includes(path)) return {
         name: 'GLM', url: 'https://open.bigmodel.cn/api/biz/account/query-customer-account-report', rawKey: true, parse: parseGlmBalance
       }
       if (!['/api/coding/paas/v4', '/api/anthropic'].includes(path)) return null

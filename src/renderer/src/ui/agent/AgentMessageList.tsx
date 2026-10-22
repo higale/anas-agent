@@ -666,6 +666,10 @@ function ToolActivityDisclosure({
 }) {
   const { t } = useTranslation()
   const presentation = toolPresentation(tool.call)
+  // Native freeform calls retain LangChain's { input: string } envelope.
+  const args = tool.call.args
+  const freeform = tool.call.name === 'apply_patch' && args !== null && typeof args === 'object'
+    && !Array.isArray(args) && Object.keys(args).length === 1 && 'input' in args && typeof args.input === 'string'
   const summary = toolArgumentSummary(tool.call.args)
   const duration = activityDuration(tool.startedAt, tool.completedAt)
   const waitingForApproval = tool.approval?.status === 'pending_approval'
@@ -690,6 +694,7 @@ function ToolActivityDisclosure({
           {!presentation.title ? <span>{t('agent.tool_call')}</span> : presentation.codeTitle
             ? <code>{presentation.title}</code>
             : <span>{presentation.title}</span>}
+          {freeform && <span className="ui-badge ui-badge-inline" data-tooltip={t('agent.tool_call_freeform_hint')}>{t('agent.tool_call_freeform')}</span>}
           {showSummary && <span className="agent-activity-argument">{summary}</span>}
           {duration && <small>· {duration}</small>}
           {progress && <small>· {t(progress.complete ? 'agent.tool_arguments_ready' : 'agent.tool_arguments_generating', { count: progress.characterCount })}</small>}

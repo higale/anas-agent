@@ -1090,6 +1090,8 @@
     "task_plan_completed": "Plan completed",
     "task_plan_progress": "{{completed}}/{{total}}",
     "tool_call": "Tool call",
+    "tool_call_freeform": "Freeform",
+    "tool_call_freeform_hint": "Patch text passed directly, without JSON arguments.",
     "sleep_remaining": "{{seconds}} s remaining",
     "sleep_finishing": "Waiting for result",
     "user_input_title": "Your input is needed",

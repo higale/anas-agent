@@ -1062,6 +1062,17 @@ button.ui-icon-box:focus-visible {
   color: var(--purple);
 }
 
+.ui-badge-inline {
+  display: inline-block;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-family: var(--font-ui);
+  font-size: max(10px, calc(var(--font-size-small) - 1px));
+  font-weight: 500;
+  line-height: 1.4;
+  vertical-align: middle;
+}
+
 .ui-title {
   color: var(--text);
   font-weight: 700;

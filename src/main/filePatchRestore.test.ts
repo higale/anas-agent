@@ -37,7 +37,7 @@ async function fixture(external = false) {
     { type: 'update', path: 'old.txt', patch: '@@\n-old.txt\n+changed\n' },
     { type: 'create', path: external ? join(root, 'outside', 'empty.txt') : 'nested/empty.txt', content: '' },
     { type: 'delete', path: 'delete.txt' },
-    { type: 'move', path: 'move.txt', destination: 'moved.txt' }
+    { type: 'move', path: 'move.txt', destination: 'moved.txt', patch: '@@\n move.txt' }
   ] }), workspace)
   const record = await store.executePatch(resolved.input, await captureFilePatchPreimages(resolved.targets), requestId, { operationId })
   return { root, workspace, store, requestId, operationId, record }

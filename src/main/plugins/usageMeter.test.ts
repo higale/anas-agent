@@ -478,6 +478,7 @@ it('shows OpenRouter key limits and spend without presenting them as account bal
 const glm = { ...model, providerName: 'GLM', baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4', model: 'glm-5.3' }
 const glmPayload = (limits: unknown[]) => ({ code: 200, success: true, data: { limits } })
 const glmOrdinary = { ...glm, baseUrl: 'https://open.bigmodel.cn/api/paas/v4' }
+const glmResponses = { ...glm, baseUrl: 'https://open.bigmodel.cn/api/v1' }
 const glmBalancePayload = (changes = {}) => ({ code: 200, success: true, data: {
   availableBalance: 0.123456789, balance: 99, rechargeAmount: 20, totalSpendAmount: 18.5, frozenBalance: .25, ...changes
 } })
@@ -510,8 +511,8 @@ it.each(['open.bigmodel.cn', 'api.z.ai'])('reads GLM quotas from %s with raw-key
 })
 
 it.each(['open.bigmodel.cn', 'api.z.ai'])('hides unsupported %s API paths without a request', async host => {
-  for (const path of [...(host === 'api.z.ai' ? ['/api/paas/v4', '/api/paas/v4/'] : []), '/', '/api',
-    '/api/paas/v40', '/api/paas/v4-other',
+  for (const path of [...(host === 'api.z.ai' ? ['/api/paas/v4', '/api/paas/v4/', '/api/v1', '/api/v1/'] : []), '/', '/api',
+    '/api/paas/v40', '/api/paas/v4-other', '/api/v10', '/api/v1-other', '/proxy/api/v1',
     '/api/coding/paas/v40', '/api/anthropic-other', '/proxy/api/coding/paas/v4']) {
     expect(await call({ model: { ...glm, baseUrl: `https://${host}${path}` }, action: 'refresh' })).toBeNull()
   }
@@ -529,16 +530,17 @@ it('keeps balance and plan caches separate when switching paths with the same ke
   expect(balance?.dom.querySelector('progress')).toBeNull()
   expect((await call({ model: glm }))?.lines).toEqual(plan?.lines)
   expect((await call({ model: glmOrdinary }))?.html).toBe(balance?.html)
+  expect((await call({ model: glmResponses }))?.html).toBe(balance?.html)
   expect(fetcher).toHaveBeenCalledTimes(2)
   fetcher.mockResolvedValueOnce(Response.json(glmBalancePayload({ availableBalance: 8 })))
   expect((await call({ model: { ...glmOrdinary, apiKey: 'replacement' } }))?.dom.textContent).toContain('8')
   expect(fetcher).toHaveBeenCalledTimes(3)
 })
 
-it('queries the domestic GLM wallet with a raw key and preserves small balances in both display modes', async () => {
+it.each([glmOrdinary, glmResponses])('queries the domestic GLM wallet for $baseUrl with a raw key and preserves small balances in both display modes', async provider => {
   fetcher.mockImplementation(async () => Response.json(glmBalancePayload()))
   for (const suffix of ['', '/', '?route=/api/coding/paas/v4']) {
-    const result = await call({ model: { ...glmOrdinary, baseUrl: glmOrdinary.baseUrl + suffix }, action: 'refresh' })
+    const result = await call({ model: { ...provider, baseUrl: provider.baseUrl + suffix }, action: 'refresh' })
     expect(fetcher).toHaveBeenLastCalledWith('https://open.bigmodel.cn/api/biz/account/query-customer-account-report', expect.objectContaining({
       headers: expect.objectContaining({ Authorization: 'test-secret' }), redirect: 'error'
     }))
@@ -552,7 +554,7 @@ it('queries the domestic GLM wallet with a raw key and preserves small balances 
     expect(result?.dom.querySelector('progress')).toBeNull()
     expect(result?.error).toBeUndefined()
   }
-  const compact = await call({ model: glmOrdinary, action: 'show_compact', language: 'en' })
+  const compact = await call({ model: provider, action: 'show_compact', language: 'en' })
   expect(compact?.title).toBe('GLM Balance')
   expect(compact?.dom.textContent).toContain('CNY 0.123456789')
   expect(compact?.dom.querySelector('[tabindex="0"]')?.getAttribute('title')).toContain('Total top-ups: CNY 20')

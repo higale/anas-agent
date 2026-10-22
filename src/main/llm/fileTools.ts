@@ -12,7 +12,7 @@ import { directoryTreePages, maximumTreeDepth } from '../directoryTree'
 import { createTextPatch, defaultPatchMaxChars, defaultRequestPatchMaxChars, maxPatchMaxChars, patchFormat, type TextPatchResult } from '../fileEditDiff'
 import { pathExists, type FileEditStore, type FileOperationRecord } from '../fileEditStore'
 import { resolveWorkspacePath } from '../workspacePath'
-import { filePatchLinePrefixInstructions, filePatchSchema, planFilePatch, resolveFilePatchTargets, resolveWriteFileTargets, writeFileSchema, type FilePatchChange } from '../filePatch'
+import { filePatchDescription, filePatchSchema, planFilePatch, resolveFilePatchTargets, resolveWriteFileTargets, writeFileSchema, type FilePatchChange } from '../filePatch'
 import { captureFilePatchPreimages } from '../filePatchState'
 import { FilePatchTransactionError } from '../filePatchTransaction'
 import { patchCompensationComplete } from '../filePatchRecord'
@@ -326,20 +326,10 @@ export function createFileTools(options: FileToolOptions): StructuredToolInterfa
       description: 'Create a UTF-8 text file or replace its entire content. Prefer this tool for complete new files; send ordinary source text without patch prefixes or Markdown fences. For local changes to an existing file, use apply_patch. overwrite defaults to false: fail if the file already exists. To replace an existing file, first read it, then send its complete intended content with overwrite: true; omitted text will be lost. Missing parent directories are created automatically. Returns operationId/recoveryRequestId and a diff for get_file_edit_diff or restore_file_edit.',
       schema: writeFileSchema
     }),
-    tool((input) => executeEdit(input.dry_run === true, () => resolveFilePatchTargets(input, primaryFolder)), { name: 'apply_patch', description: [
-      'Apply one bounded UTF-8 file batch using a patch string enclosed by *** Begin Patch and *** End Patch.',
-      'For a local edit: read_file first, copy exact old lines with - prefixes, then supply replacement lines with + prefixes under @@. Include unchanged context only as needed for a unique match. Prefer write_file for complete new files.',
-      'Use *** Add File: path with +content lines (an empty body creates an empty file), *** Delete File: path, or *** Update File: path.',
-      filePatchLinePrefixInstructions,
-      'An update may include *** Move to: destination immediately after its file header, with optional edit blocks.',
-      'Start each edit block with @@ or @@ followed by an exact anchor line. No line numbers are needed.',
-      'Blocks follow source order and all match the original file. An anchor is a unique complete source line before the edit; do not repeat it inside that block. A block with only additions appends at EOF, or inserts immediately after its anchor.',
-      'Copy enough exact current context to match one unique location. Whitespace is significant; missing or ambiguous matches reject the entire batch. Re-read the file and add context before retrying.',
-      'Use *** End of File after a block to require its context at the end of the file. Paths are absolute or relative to the primary folder.',
-      'Existing line endings are preserved. Added lines normally end with a newline; place \\ No newline at end of file after the final old or new content line to explicitly assert or produce an unterminated final line.',
-      'Complete call example: {"patch":"*** Begin Patch\\n*** Update File: example.txt\\n@@\\n-old text\\n+new text\\n*** End Patch"}. Send only the tool arguments; no shell command or Markdown fences.',
-      'dry_run validates the complete batch and returns its diff without writes or recovery records. A recorded edit returns operationId/recoveryRequestId for get_file_edit_diff or restore_file_edit.'
-    ].join('\n'), schema: filePatchSchema }),
+    tool((input) => {
+      const parsed = filePatchSchema.parse(input)
+      return executeEdit(parsed.dry_run === true, () => resolveFilePatchTargets(parsed, primaryFolder))
+    }, { name: 'apply_patch', description: filePatchDescription, schema: filePatchSchema, metadata: { codexApplyPatch: true } }),
 
     tool(async (input) => {
       let reference: { requestId: string; operationId: string } | undefined

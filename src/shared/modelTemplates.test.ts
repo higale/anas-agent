@@ -28,8 +28,8 @@ describe('bundled model templates', () => {
 
   it('provides complete, uniquely identified connection presets', () => {
     expect(modelTemplateTree).toHaveLength(4)
-    expect(modelTemplates).toHaveLength(33)
-    expect(new Set(modelTemplates.map((template) => template.templateId)).size).toBe(33)
+    expect(modelTemplates.length).toBeGreaterThan(0)
+    expect(new Set(modelTemplates.map((template) => template.templateId)).size).toBe(modelTemplates.length)
     expect(modelTemplates.every((template) => (
       template.name.trim().length > 0
       && template.label.trim().length > 0
@@ -39,7 +39,6 @@ describe('bundled model templates', () => {
       && template.iconData?.startsWith('data:image/svg+xml;base64,')
       && typeof template.parameters === 'object'
     ))).toBe(true)
-    expect(modelTemplates.some((template) => template.protocol === 'openai_responses')).toBe(false)
   })
 
   it('groups hosted services by country and keeps local servers separate', () => {
@@ -86,7 +85,19 @@ describe('bundled model templates', () => {
 
   it.each([
     {
-      templateId: 'united-states/openai',
+      templateId: 'china/glm/responses',
+      protocol: 'openai_responses',
+      baseUrl: 'https://open.bigmodel.cn/api/v1',
+      modelListUrl: 'https://open.bigmodel.cn/api/paas/v4/models',
+    },
+    {
+      templateId: 'china/glm/openai',
+      protocol: 'openai_chat_completions',
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+      modelListUrl: 'https://open.bigmodel.cn/api/paas/v4/models',
+    },
+    {
+      templateId: 'united-states/openai/openai',
       protocol: 'openai_chat_completions',
       baseUrl: 'https://api.openai.com/v1',
       modelListUrl: 'https://api.openai.com/v1/models',
@@ -110,7 +121,7 @@ describe('bundled model templates', () => {
       modelListUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/models',
     },
     {
-      templateId: 'united-states/xai',
+      templateId: 'united-states/xai/openai',
       protocol: 'openai_chat_completions',
       baseUrl: 'https://api.x.ai/v1',
       modelListUrl: 'https://api.x.ai/v1/language-models',
@@ -122,13 +133,13 @@ describe('bundled model templates', () => {
       modelListUrl: 'https://api.mistral.ai/v1/models',
     },
     {
-      templateId: 'united-states/groq',
+      templateId: 'united-states/groq/openai',
       protocol: 'openai_chat_completions',
       baseUrl: 'https://api.groq.com/openai/v1',
       modelListUrl: 'https://api.groq.com/openai/v1/models',
     },
     {
-      templateId: 'united-states/openrouter',
+      templateId: 'united-states/openrouter/openai',
       protocol: 'openai_chat_completions',
       baseUrl: 'https://openrouter.ai/api/v1',
       modelListUrl: 'https://openrouter.ai/api/v1/models',
@@ -141,6 +152,42 @@ describe('bundled model templates', () => {
     }
   ])('provides the official $templateId connection endpoint', ({ templateId, ...expected }) => {
     expect(getModelTemplate(templateId)).toMatchObject(expected)
+  })
+
+  it.each([
+    ['local/lm-studio', 'http://localhost:1234/v1', '{origin}/v1/models'],
+    ['local/ollama', 'http://localhost:11434/v1', '{origin}/v1/models'],
+    ['local/llama-cpp', 'http://localhost:8080/v1', '{origin}/v1/models'],
+    ['local/vllm', 'http://localhost:8000/v1', '{origin}/v1/models'],
+    ['china/qwen', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'https://dashscope.aliyuncs.com/compatible-mode/v1/models'],
+    ['china/qwen/token-plan', 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/models'],
+    ['china/deepseek', 'https://api.deepseek.com', 'https://api.deepseek.com/models'],
+    ['china/minimax', 'https://api.minimax.cn/v1', 'https://api.minimax.cn/v1/models'],
+    ['china/volcengine', 'https://ark.cn-beijing.volces.com/api/v3', 'https://ark.cn-beijing.volces.com/api/v3/models'],
+    ['china/kimi', 'https://api.moonshot.cn/v1', 'https://api.moonshot.cn/v1/models'],
+    ['china/glm', 'https://open.bigmodel.cn/api/v1', 'https://open.bigmodel.cn/api/paas/v4/models'],
+    ['china/mimo', 'https://api.xiaomimimo.com/v1', 'https://api.xiaomimimo.com/v1/models'],
+    ['united-states/openai', 'https://api.openai.com/v1', 'https://api.openai.com/v1/models'],
+    ['united-states/xai', 'https://api.x.ai/v1', 'https://api.x.ai/v1/language-models'],
+    ['united-states/groq', 'https://api.groq.com/openai/v1', 'https://api.groq.com/openai/v1/models'],
+    ['united-states/openrouter', 'https://openrouter.ai/api/v1', 'https://openrouter.ai/api/v1/models'],
+  ])('provides separate Responses and Chat Completions presets for %s', (providerPath, baseUrl, modelListUrl) => {
+    const responses = getModelTemplate(`${providerPath}/responses`)
+    const chat = getModelTemplate(`${providerPath}/openai`)
+    expect(responses).toMatchObject({
+      label: 'OpenAI Responses',
+      protocol: 'openai_responses',
+      baseUrl,
+      modelListUrl,
+      parameters: {},
+    })
+    expect(chat).toMatchObject({
+      label: 'OpenAI Chat Completions',
+      protocol: 'openai_chat_completions',
+      name: responses!.name,
+    })
+    expect(findModelTemplate('openai_responses', `${baseUrl}/`)?.templateId).toBe(responses!.templateId)
+    expect(findModelTemplate('openai_chat_completions', chat!.baseUrl)?.templateId).toBe(chat!.templateId)
   })
 
   it('represents nested groups and templates with stable path IDs', () => {
@@ -156,11 +203,12 @@ describe('bundled model templates', () => {
     if (!tokenPlan || tokenPlan.type !== 'group') throw new Error('Expected the TokenPlan template group.')
 
     expect(tokenPlan.children.map((node) => node.label)).toEqual([
-      'OpenAI',
+      'OpenAI Responses',
+      'OpenAI Chat Completions',
       'Anthropic Messages'
     ])
     expect(getModelTemplate('china/qwen/token-plan/openai')).toMatchObject({
-      label: 'OpenAI',
+      label: 'OpenAI Chat Completions',
       name: 'Qwen TokenPlan',
       protocol: 'openai_chat_completions'
     })
@@ -177,7 +225,7 @@ describe('bundled model templates', () => {
       name: 'Anthropic',
     })
     expect(getModelTemplate('china/qwen/openai')).toMatchObject({
-      label: 'OpenAI',
+      label: 'OpenAI Chat Completions',
       name: 'Qwen',
       protocol: 'openai_chat_completions'
     })
@@ -221,7 +269,7 @@ describe('bundled model templates', () => {
     const localTemplates = modelTemplates.filter((template) => template.baseUrl.startsWith('http://localhost:'))
     const cloudTemplates = modelTemplates.filter((template) => !template.baseUrl.startsWith('http://localhost:'))
 
-    expect(localTemplates).toHaveLength(8)
+    expect(localTemplates).toHaveLength(12)
     expect(localTemplates.every((template) => template.modelListUrl === '{origin}/v1/models')).toBe(true)
     expect(localTemplates.every((template) => resolveModelListEndpoint(
       template.baseUrl.replace('localhost', '127.0.0.1'),

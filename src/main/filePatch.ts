@@ -4,13 +4,19 @@ import { samePath, isSameOrInsideDirectory } from './pathContainment'
 import { resolveCanonicalWorkspacePath, type CanonicalWorkspacePath, type WorkspacePathSemantics } from './workspacePath'
 import { maxPatchInputBytes } from './fileEditDiff'
 import { toolSummarySchema } from './llm/toolSummary'
-import { applyContextTextPatch, parseContextHunks, parseContextPatchDocument } from './contextPatch'
+import { deriveNewContents, parsePatch } from './codexPatch'
+import codexPatchSpec from './codexPatchSpec.json'
 
 export const maxFilePatchOperations = 20
 export const maxFilePatchBatchBytes = 4_000_000
 const pathSchema = z.string().trim().min(1).max(32_768).refine((value) => !value.includes('\0'), 'Path contains NUL.')
 const textSchema = z.string().max(maxPatchInputBytes)
-const patchSchema = textSchema.min(1)
+const chunksSchema = z.array(z.object({
+  changeContext: z.string().optional(),
+  oldLines: z.array(z.string()), newLines: z.array(z.string()),
+  contextLineIndices: z.array(z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative()])),
+  isEndOfFile: z.boolean()
+}).strict()).min(1)
 
 export const writeFileSchema = z.object({
   summary: toolSummarySchema,
@@ -19,25 +25,23 @@ export const writeFileSchema = z.object({
   overwrite: z.boolean().optional().default(false).describe('Allow replacing an existing file. Default false: fail if the file already exists. Set true explicitly to replace its entire content.')
 }).strict()
 
-export const filePatchLinePrefixInstructions = [
-  'Put each content line\'s patch prefix in column 1, BEFORE its original indentation. The prefix is not part of the file content.',
-  'Add File: EVERY content line must start with +, including comments and blank lines. An added blank line is + alone. Never paste unprefixed source code after an Add File header.',
-  'For an added source line that itself starts with +, add another +: source +value becomes patch ++value. Preserve all source indentation after the patch prefix.',
-  'Update File: use a space for unchanged context, - for removed lines, and + for added lines. A blank context line is " ", a removed blank line is "-", and an added blank line is "+". Do not insert empty separator lines between blocks.',
-  'Do not add content prefixes to patch control lines such as *** Begin Patch, *** Add File:, @@, or *** End Patch.'
-].join('\n')
-
-export const filePatchSchema = z.object({
+// LangChain represents native freeform calls as { input: string }. Normalize
+// only the transport envelope; the patch always enters the same parser.
+export const filePatchSchema = z.preprocess((value) => {
+  if (value && typeof value === 'object' && Object.keys(value).length === 1 && 'input' in value) {
+    return { patch: value.input }
+  }
+  return value
+}, z.object({
   summary: toolSummarySchema,
-  patch: z.string().min(1).max(maxFilePatchBatchBytes).describe([
-    '*** Begin Patch / *** End Patch document with Add, Update, Delete File sections. Use @@ context blocks without numeric line ranges; copy exact, unique source context.',
-    filePatchLinePrefixInstructions,
-    'Minimal update example (replace one complete line):',
-    '*** Begin Patch\n*** Update File: example.txt\n@@\n-old text\n+new text\n*** End Patch',
-    'The patch value contains real line breaks (JSON encodes them as \\n). Do not double-escape line breaks or wrap the patch in Markdown fences.'
-  ].join('\n')),
+  patch: z.string().min(1).max(maxFilePatchBatchBytes).describe('The entire contents of the apply_patch command.'),
   dry_run: z.boolean().optional().describe('Set true to validate and preview the diff without changing files. Omit or set false to apply.')
-}).strict()
+}).strict())
+
+// JSON provider adapter. The grammar and upstream freeform description themselves
+// are copied verbatim from the pinned Codex revision in codexPatchSpec.json.
+export const filePatchDescription = 'The apply_patch tool can be used to edit files. Supply the patch as the patch string in the JSON arguments. The patch follows this Lark grammar:\n'
+  + codexPatchSpec.format.definition
 
 // Private transaction plan, not an alternate model-facing input format.
 const filePatchPlanSchema = z.object({
@@ -45,9 +49,9 @@ const filePatchPlanSchema = z.object({
   operations: z.array(z.discriminatedUnion('type', [
     z.object({ type: z.literal('create'), path: pathSchema, content: textSchema }).strict(),
     z.object({ type: z.literal('write'), path: pathSchema, content: textSchema, overwrite: z.boolean() }).strict(),
-    z.object({ type: z.literal('update'), path: pathSchema, patch: patchSchema }).strict(),
+    z.object({ type: z.literal('update'), path: pathSchema, chunks: chunksSchema }).strict(),
     z.object({ type: z.literal('delete'), path: pathSchema }).strict(),
-    z.object({ type: z.literal('move'), path: pathSchema, destination: pathSchema, patch: patchSchema.optional() }).strict()
+    z.object({ type: z.literal('move'), path: pathSchema, destination: pathSchema, chunks: chunksSchema }).strict()
   ])).min(1).max(maxFilePatchOperations),
   dry_run: z.boolean().optional()
 }).strict()
@@ -95,7 +99,16 @@ export function parseFilePatch(input: unknown): FilePatchPlan {
   const buffer = Buffer.from(parsed.patch, 'utf8')
   if (buffer.length > maxFilePatchBatchBytes) throw new Error(`Patch batch exceeds ${maxFilePatchBatchBytes} bytes.`)
   if (parsed.patch.includes('\0') || buffer.toString('utf8') !== parsed.patch) throw new Error('Patch requires valid UTF-8 text without NUL.')
-  return validateFilePatchPlan({ summary: parsed.summary, dry_run: parsed.dry_run, operations: parseContextPatchDocument(parsed.patch) })
+  const document = parsePatch(parsed.patch)
+  if (document.environmentId !== undefined) throw new Error('apply_patch environment selection is not supported by this host.')
+  const operations = document.hunks.map((hunk) => {
+    if (hunk.type === 'add') return { type: 'create', path: hunk.path, content: hunk.contents }
+    if (hunk.type === 'delete') return hunk
+    return hunk.movePath === undefined
+      ? { type: 'update', path: hunk.path, chunks: hunk.chunks }
+      : { type: 'move', path: hunk.path, destination: hunk.movePath, chunks: hunk.chunks }
+  })
+  return validateFilePatchPlan({ summary: parsed.summary, dry_run: parsed.dry_run, operations })
 }
 
 export function parseWriteFile(input: unknown): FilePatchPlan {
@@ -108,9 +121,11 @@ function validateFilePatchPlan(input: unknown): FilePatchPlan {
   let bytes = 0
   for (const operation of parsed.operations) {
     if ('content' in operation) bytes += textBytes(operation.content)
-    if ('patch' in operation && operation.patch !== undefined) {
-      bytes += textBytes(operation.patch)
-      parseContextHunks(operation.patch)
+    if ('chunks' in operation) {
+      for (const chunk of operation.chunks) {
+        bytes += textBytes([...chunk.oldLines, ...chunk.newLines].join('\n'))
+        if (chunk.changeContext !== undefined) bytes += textBytes(chunk.changeContext)
+      }
     }
     if (bytes > maxFilePatchBatchBytes) throw new Error(`Patch batch exceeds ${maxFilePatchBatchBytes} bytes.`)
   }
@@ -185,11 +200,7 @@ export function planFilePatch(input: unknown, snapshots: ReadonlyMap<string, str
       if (operation.type === 'delete') {
         changes.push({ operationIndex, path: operation.path, beforeText: before, afterText: null })
       } else {
-        let after = before
-        if (operation.patch !== undefined) {
-          try { after = applyContextTextPatch(before, operation.patch) }
-          catch (error) { throw new Error(`File ${JSON.stringify(operation.path)} (operation ${operationIndex + 1}): ${error instanceof Error ? error.message : String(error)}`) }
-        }
+        const after = deriveNewContents(before, operation.chunks, operation.path)
         if (operation.type === 'move') {
           if (read(operation.destination) !== null) throw new Error(`Patch move destination already exists: ${operation.destination}`)
           changes.push({ operationIndex, path: operation.path, beforeText: before, afterText: null })

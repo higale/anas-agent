@@ -1,6 +1,6 @@
 {
     "name": "anas",
-    "version": "4.0.5",
+    "version": "4.0.6",
     "productName": "Anas",
     "description": "Anas, short for Ananas: a local desktop agent with project-scoped context, tools, and skills customization.",
     "main": "out/main/index.js",
@@ -20,6 +20,7 @@
         "pack:win:release": "npm run build && npm run clean:pack && electron-builder --win --x64 --dir --publish never && npm run verify:packaged:normal && node scripts/archive-windows-release.cjs",
         "portable": "npm run build && npm run clean:portable && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --config electron-builder.portable.yml && npm run verify:packaged:portable",
         "verify:dependencies": "node scripts/verify-dependencies.cjs",
+        "verify:codex-patch": "node scripts/verify-codex-patch.cjs",
         "verify:audit": "npm audit --omit=dev --audit-level=high",
         "verify:reproducible-build": "node scripts/verify-reproducible-build.cjs",
         "verify:release-packages": "npm run verify:dependencies && npm run verify:reproducible-build && npm run pack && npm run portable && node scripts/verify-packaged-app.cjs compare release-build/win-unpacked release-portable/win-unpacked",

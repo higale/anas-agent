@@ -23,7 +23,10 @@ function renderModelListPane(onCreateModel: (templateId?: string) => void) {
 }
 
 describe('model template menu', () => {
-  it('creates a hosted-service template from its country submenu', async () => {
+  it.each([
+    ['OpenAI Responses', 'responses'],
+    ['OpenAI Chat Completions', 'openai'],
+  ])('creates the hosted-service %s template from its provider submenu', async (label, templateId) => {
     const user = userEvent.setup()
     const onCreateModel = vi.fn<(templateId?: string) => void>()
     renderModelListPane(onCreateModel)
@@ -36,10 +39,17 @@ describe('model template menu', () => {
     await waitFor(() => expect(screen.getAllByRole('menu')).toHaveLength(2))
     const unitedStatesMenu = screen.getAllByRole('menu').at(-1)
     const openAi = within(unitedStatesMenu!).getByRole('menuitem', { name: 'OpenAI' })
-    expect(openAi).toHaveClass('model-template-option')
-    await user.click(openAi)
+    expect(openAi).toHaveClass('model-template-group')
+    openAi.focus()
+    await user.keyboard('{ArrowRight}')
 
-    expect(onCreateModel).toHaveBeenCalledWith('united-states/openai')
+    await waitFor(() => expect(screen.getAllByRole('menu')).toHaveLength(3))
+    const protocolMenu = screen.getAllByRole('menu').at(-1)
+    expect(within(protocolMenu!).getAllByRole('menuitem').map(item => item.textContent))
+      .toEqual(['OpenAI Responses', 'OpenAI Chat Completions'])
+    await user.click(within(protocolMenu!).getByRole('menuitem', { name: label }))
+
+    expect(onCreateModel).toHaveBeenCalledWith(`united-states/openai/${templateId}`)
   })
 
   it('creates an official Anthropic protocol template from its provider submenu', async () => {
@@ -86,14 +96,18 @@ describe('model template menu', () => {
 
     await waitFor(() => expect(screen.getAllByRole('menu')).toHaveLength(3))
     const qwenMenu = screen.getAllByRole('menu').at(-1)
-    const openAi = within(qwenMenu!).getByRole('menuitem', { name: 'OpenAI' })
+    const openAi = within(qwenMenu!).getByRole('menuitem', { name: 'OpenAI Chat Completions' })
     expect(openAi).toHaveClass('model-template-option')
+    openAi.focus()
     await user.keyboard('{Enter}')
 
     expect(onCreateModel).toHaveBeenCalledWith('china/qwen/openai')
   })
 
-  it('creates a template from an arbitrarily nested submenu', async () => {
+  it.each([
+    ['OpenAI Responses', 'responses'],
+    ['Anthropic Messages', 'anthropic'],
+  ])('creates a %s template from an arbitrarily nested submenu', async (label, templateId) => {
     const user = userEvent.setup()
     const onCreateModel = vi.fn<(templateId?: string) => void>()
     renderModelListPane(onCreateModel)
@@ -117,9 +131,9 @@ describe('model template menu', () => {
     const submenus = screen.getAllByRole('menu')
     const tokenPlanMenu = submenus.at(-1)
     expect(tokenPlanMenu).toHaveClass('model-template-submenu')
-    within(tokenPlanMenu!).getByRole('menuitem', { name: 'Anthropic Messages' }).focus()
+    within(tokenPlanMenu!).getByRole('menuitem', { name: label }).focus()
     await user.keyboard('{Enter}')
 
-    expect(onCreateModel).toHaveBeenCalledWith('china/qwen/token-plan/anthropic')
+    expect(onCreateModel).toHaveBeenCalledWith(`china/qwen/token-plan/${templateId}`)
   })
 })

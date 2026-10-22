@@ -168,7 +168,7 @@ describe('durable patch resumption', { timeout: 20_000 }, () => {
     resolved.input.operations[0].path = join(value.root, 'outside.txt')
     preimages[0].target.canonicalPath = join(value.root, 'outside.txt')
     expect((await pending).transaction.state).toBe('applied')
-    expect(await readFile(join(value.workspace, 'new.txt'), 'utf8')).toBe('authorized')
+    expect(await readFile(join(value.workspace, 'new.txt'), 'utf8')).toBe('authorized\n')
     await expect(stat(join(value.root, 'outside.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 

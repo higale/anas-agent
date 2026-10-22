@@ -73,7 +73,7 @@ describe('batch patch transaction execution', () => {
     const { input, preimages } = await prepare(root, [
       { type: 'update', path: 'update.txt', patch },
       { type: 'delete', path: 'delete.txt' },
-      { type: 'move', path: 'source.txt', destination: 'nested/moved.txt' },
+      { type: 'move', path: 'source.txt', destination: 'nested/moved.txt', patch: '@@\n \ufeff中文' },
       { type: 'create', path: 'nested/deep/empty.txt', content: '' }
     ])
     const history: FilePatchTransaction[] = []
@@ -317,9 +317,9 @@ describe('batch patch transaction execution', () => {
       preimages[0].target.canonicalPath = join(root, 'wrong.txt')
       input.operations[0].path = join(root, 'wrong.txt')
     })
-    expect(result.entries[0].afterText).toBe('new')
+    expect(result.entries[0].afterText).toBe('new\n')
     expect(await readdir(root)).toEqual(['new.txt'])
-    expect(await readFile(join(root, 'new.txt'), 'utf8')).toBe('new')
+    expect(await readFile(join(root, 'new.txt'), 'utf8')).toBe('new\n')
   })
 
   it('rejects dry-run execution, mismatched target sets and stale preimages before saving', async () => {
@@ -359,7 +359,7 @@ describe('batch patch transaction execution', () => {
     await chmod(join(root, 'move.sh'), 0o750)
     const { input, preimages } = await prepare(root, [
       { type: 'update', path: 'update.sh', patch },
-      { type: 'move', path: 'move.sh', destination: 'nested/moved.sh' }
+      { type: 'move', path: 'move.sh', destination: 'nested/moved.sh', patch: '@@\n before' }
     ])
     await executeFilePatchTransaction(input, preimages, async () => {})
     expect((await lstat(join(root, 'update.sh'))).mode & 0o777).toBe(0o751)
