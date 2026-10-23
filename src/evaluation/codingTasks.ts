@@ -499,16 +499,23 @@ const coreCodingTasks: CodingTask[] = [
     calls: [[read('work.txt')], [patch(update('work.txt', 'before\n', 'after\n'))]]
   },
   {
-    id: 'ambiguous-context', category: 'boundary',
-    prompt: 'Attempt the supplied ambiguous one-line patch and report the failure. Do not guess a location or alter any file.',
-    files: { 'duplicate.txt': 'same\nsame\n' }, expected: {}, expectedToolErrors: 1,
+    id: 'repeated-context-first-match', category: 'boundary',
+    prompt: 'Apply the supplied one-line patch. The first matching occurrence must change; preserve the second occurrence.',
+    files: { 'duplicate.txt': 'same\nsame\n' }, expected: { 'duplicate.txt': 'changed\nsame\n' },
     calls: [[patch('*** Update File: duplicate.txt\n@@\n-same\n+changed\n')]]
+  },
+  {
+    id: 'repeated-context-with-anchor', category: 'boundary',
+    prompt: 'Use the supplied surrounding context to change only the occurrence after second. Preserve the occurrence after first.',
+    files: { 'duplicate.txt': 'first\nsame\nsecond\nsame\n' }, expected: { 'duplicate.txt': 'first\nsame\nsecond\nchanged\n' },
+    calls: [[patch('*** Update File: duplicate.txt\n@@\n second\n-same\n+changed\n')]]
   },
   {
     id: 'batch-preflight', category: 'boundary',
     prompt: 'Attempt this batch with a missing context in its second file. Confirm the batch fails without modifying either file.',
     files: { 'first.txt': 'before\n', 'second.txt': 'actual\n' }, expected: {}, expectedToolErrors: 1,
-    calls: [[patch(update('first.txt', 'before\n', 'after\n') + update('second.txt', 'missing\n', 'changed\n'))]]
+    calls: [[patch(update('first.txt', 'before\n', 'after\n') + update('second.txt', 'missing\n', 'changed\n'))]],
+    outputChecks: [{ name: 'apply_patch', includes: ['Failed to find expected lines', 'second.txt'] }]
   },
   ...capabilityTasks
 ]

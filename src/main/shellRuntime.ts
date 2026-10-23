@@ -54,6 +54,8 @@ interface CommandShellResolutionOptions {
 
 export interface ShellRunResult {
   ok: boolean
+  /** Confirms independent launch, not command completion or service readiness. */
+  detached?: { pid: number; stdoutPath: string; stderrPath: string }
   command: string
   workingDir: string
   timeoutSec: number
@@ -102,7 +104,7 @@ export interface ShellRunCallbacks {
 type ShellSupervisorMessage =
   | { type: 'ready'; pid: number }
   | { type: 'dispatching' }
-  | { type: 'started'; pid: number }
+  | { type: 'started'; pid: number; outputFiles?: { stdoutPath: string; stderrPath: string } }
   | { type: 'termination_started'; reason: 'timeout' }
   | { type: 'force_required'; reason: 'cancel' | 'timeout' }
   | { type: 'release_ready' }
@@ -143,6 +145,8 @@ export const shellSupervisorProgram = String.raw`
 'use strict'
 const { spawn } = require('node:child_process')
 const net = require('node:net')
+const fs = require('node:fs')
+const path = require('node:path')
 const forceKillDelayMs = ${forceKillDelayMs}
 const coordinationTimeoutMs = ${supervisorStartupTimeoutMs}
 let child
@@ -164,6 +168,8 @@ let forceKillTimer
 let terminationAckTimer
 let outputBackpressure = 0
 let releaseAccepted = false
+let independent = false
+let outputFiles
 let pipeSocket
 const pipePath = process.env.ANAS_SHELL_SUPERVISOR_PIPE
 const pipeToken = process.env.ANAS_SHELL_SUPERVISOR_TOKEN
@@ -284,6 +290,11 @@ function scheduleForcedTermination() {
 
 function requestTermination(reason) {
   if (settled) return
+  if (releaseAccepted) {
+    releaseAccepted = false
+    if (forceKillTimer) clearTimeout(forceKillTimer)
+    forceKillTimer = undefined
+  }
   if (!terminationReason || reason === 'cancel') terminationReason = reason
   if (!terminationRequested) {
     terminationRequested = true
@@ -311,6 +322,15 @@ function beginTimeoutTermination() {
 
 function closeSupervisor() {
   closing = true
+  if (releaseAccepted) {
+    settled = true
+    if (forceKillTimer) clearTimeout(forceKillTimer)
+    // libuv places non-detached Windows children in its own kill-on-close
+    // Job. Keep this independent guardian alive until the command exits;
+    // DETACHED_PROCESS cannot be used for PowerShell's console host. The
+    // application IPC and managed call end now, with no later cancellation.
+    if (child && process.platform !== 'win32') child.unref()
+  }
   process.exitCode = 0
   disconnectTransport()
 }
@@ -401,24 +421,31 @@ function cancelForParentDisconnect() {
 function startCommand(message) {
   if (settled || child) return
   dispatchAccepted = true
+  independent = message.independent === true
+  const outputHandles = []
   try {
+    if (independent) {
+      const directory = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'anas-shell-'))
+      outputFiles = { stdoutPath: path.join(directory, 'stdout.log'), stderrPath: path.join(directory, 'stderr.log') }
+      outputHandles.push(fs.openSync(outputFiles.stdoutPath, 'ax', 0o600))
+      outputHandles.push(fs.openSync(outputFiles.stderrPath, 'ax', 0o600))
+    }
     child = spawn(message.executable, message.args, {
       cwd: message.cwd,
       windowsHide: message.windowsHide === true,
       shell: false,
       detached: false,
       env: message.environment,
-      stdio: terminalMode ? ['inherit', 'inherit', 'inherit'] : ['ignore', 'pipe', 'pipe']
+      stdio: independent ? ['ignore', ...outputHandles]
+        : terminalMode ? ['inherit', 'inherit', 'inherit'] : ['ignore', 'pipe', 'pipe']
     })
   } catch (error) {
     finish({ error: error instanceof Error ? error.message : String(error) })
     return
+  } finally {
+    for (const handle of outputHandles) fs.closeSync(handle)
   }
-  if (child.pid) {
-    spawned = true
-    send({ type: 'started', pid: child.pid })
-  }
-  if (!terminalMode) {
+  if (!terminalMode && !independent) {
     child.stdout.setEncoding('utf8')
     child.stderr.setEncoding('utf8')
     child.stdout.on('data', (chunk) => forward('stdout', chunk))
@@ -427,7 +454,7 @@ function startCommand(message) {
   child.once('spawn', () => {
     if (!spawned) {
       spawned = true
-      send({ type: 'started', pid: child.pid })
+      send({ type: 'started', pid: child.pid, ...(outputFiles ? { outputFiles } : {}) })
     }
     const timeoutMs = Math.max(0, Math.floor(Number(message.timeoutMs) || 0))
     if (timeoutMs > 0) timeoutTimer = setTimeout(beginTimeoutTermination, timeoutMs)
@@ -436,6 +463,9 @@ function startCommand(message) {
     childError = error instanceof Error ? error.message : String(error)
   })
   child.once('close', (exitCode, signal) => {
+    // Independent launch is acknowledged at spawn. An early command exit is
+    // not permission to reclaim descendants before ownership is handed off.
+    if (independent && spawned && !terminationRequested && !parentDisconnected) return
     finish({ exitCode, signal, ...(childError ? { error: childError } : {}) })
   })
 }
@@ -443,7 +473,7 @@ function startCommand(message) {
 function handleParentMessage(message) {
   if (!message || typeof message !== 'object') return
   if (message.type === 'prepare_release') {
-    if (!settled || !spawned || releaseAccepted) return
+    if (!independent || !spawned || settled || terminationRequested || releaseAccepted) return
     releaseAccepted = true
     if (forceKillTimer) {
       clearTimeout(forceKillTimer)
@@ -590,6 +620,7 @@ export async function prepareShellCommand(
 export function resultText(result: ShellRunResult): string {
   const truncated = Boolean(result.truncated?.stdout || result.truncated?.stderr)
   const needsStatusEnvelope = !result.ok
+    || Boolean(result.detached)
     || result.stdout.length === 0
     || result.stderr.length > 0
     || truncated
@@ -863,6 +894,7 @@ export function runPreparedProcess(
   const maxStdoutChars = prepared.maxStdoutChars ?? maxShellOutputChars
   if (!Number.isSafeInteger(maxStdoutChars) || maxStdoutChars <= 0) throw new Error('stdout limit must be a positive safe integer.')
   if (prepared.pty && prepared.keepProcesses) throw new Error('PTY sessions cannot keep processes after the command ends. Use non-interactive execution for detached services.')
+  if (prepared.keepProcesses && prepared.timeoutSec > 0) throw new Error('Independent processes cannot have a managed execution timeout. Omit timeout or set it to 0 when keep_processes is true.')
   if (prepared.pty) terminalSizeSchema.parse(prepared.pty)
   if (signal?.aborted) {
     return Promise.resolve(resultText({
@@ -1222,6 +1254,7 @@ export function runPreparedProcess(
             cwd: prepared.workingDir,
             windowsHide: prepared.invocation.windowsHide,
             environment,
+            independent: prepared.keepProcesses === true,
             timeoutMs: prepared.timeoutSec * 1000
           }, (error) => {
             if (!error || settled) return
@@ -1365,6 +1398,10 @@ export function runPreparedProcess(
       }
       if (message.type === 'release_ready') {
         if (!releasePendingResult || settled) return
+        if (aborted || terminationRequested) {
+          requestSupervisorTermination('cancel')
+          return
+        }
         if (handshakeTimer.current) {
           clearTimeout(handshakeTimer.current)
           handshakeTimer.current = undefined
@@ -1380,8 +1417,9 @@ export function runPreparedProcess(
           finish({
             ...releasePendingResult,
             ok: false,
+            detached: undefined,
             error: outcomeUncertainReason
-              ?? 'The command completed, but its child processes could not be kept running.'
+              ?? 'The command started, but independent process ownership could not be handed off.'
           })
           return
         }
@@ -1402,6 +1440,35 @@ export function runPreparedProcess(
           handshakeTimer.current = undefined
         }
         started = true
+        if (prepared.keepProcesses) {
+          if (aborted || terminationRequested) {
+            requestSupervisorTermination('cancel')
+            return
+          }
+          if (!message.outputFiles || typeof message.outputFiles.stdoutPath !== 'string'
+            || typeof message.outputFiles.stderrPath !== 'string') {
+            requestSupervisorTermination()
+            markOutcomeUncertain('The independent command started without confirmed output files.')
+            return
+          }
+          releasePendingResult = {
+            ok: true, command: prepared.command, workingDir: prepared.workingDir,
+            timeoutSec: prepared.timeoutSec, stdout, stderr,
+            detached: { pid: message.pid, ...message.outputFiles }
+          }
+          armHandshakeDeadline('Command supervisor did not hand off the independent process.')
+          try {
+            supervisor.send({ type: 'prepare_release' }, (error) => {
+              if (!error || settled) return
+              requestSupervisorTermination()
+              markOutcomeUncertain('The independent command ownership handoff failed.')
+            })
+          } catch {
+            requestSupervisorTermination()
+            markOutcomeUncertain('The independent command ownership handoff failed.')
+          }
+          return
+        }
         if (supervisor instanceof PtyShellSupervisor || supervisor instanceof WindowsPtyShellSupervisor) {
           try { callbacks.onTerminal?.(supervisor) } catch (error) {
             requestSupervisorTermination()
@@ -1492,29 +1559,6 @@ export function runPreparedProcess(
         )
       }
       resultReceived = true
-      if (cleanSuccess && prepared.keepProcesses === true) {
-        releasePendingResult = result
-        try {
-          armHandshakeDeadline('Command supervisor did not accept the request to keep child processes running.')
-          supervisor.send({ type: 'prepare_release' }, (error) => {
-            if (!error || settled) return
-            requestSupervisorTermination()
-            finish({
-              ...result,
-              ok: false,
-              error: 'The command completed, but its child processes could not be kept running.'
-            })
-          })
-        } catch {
-          requestSupervisorTermination()
-          finish({
-            ...result,
-            ok: false,
-            error: 'The command completed, but its child processes could not be kept running.'
-          })
-        }
-        return
-      }
       const contained = forceSupervisorTermination()
       clearForceKillTimer()
       if (!contained) {

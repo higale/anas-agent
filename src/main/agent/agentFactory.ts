@@ -651,6 +651,7 @@ async function prepareAgentInstanceFromConfig(
       onTerminal: control?.setTerminal,
       onResult: (result) => control?.setOutcome({
         ok: result.ok,
+        ...(result.detached ? { local_commit_completed: true, detached: result.detached } : {}),
         ...(result.exitCode === undefined ? {} : { exit_code: result.exitCode }),
         ...(result.signal === undefined ? {} : { signal: result.signal }),
         ...(result.timedOut === undefined ? {} : { timed_out: result.timedOut }),

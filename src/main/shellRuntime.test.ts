@@ -236,14 +236,13 @@ describe('shell runtime result text', () => {
     }
   })
 
-  it.each([false, true])(
-    'enforces the command timeout inside the supervisor process when keepProcesses is %s',
-    async (keepProcesses) => {
+  it(
+    'enforces the command timeout inside the supervisor process',
+    async () => {
       const output = await runPreparedProcess({
         command: 'supervisor timeout probe',
         workingDir: process.cwd(),
         timeoutSec: 0.05,
-        keepProcesses,
         invocation: {
           executable: process.execPath,
           args: ['-e', 'setTimeout(() => process.stdout.write("too late"), 1000)'],
@@ -463,93 +462,6 @@ describe('shell runtime result text', () => {
       })
 
       expect(JSON.parse(output)).toMatchObject({ ok: true, exitCode: 0 })
-      await new Promise((resolve) => setTimeout(resolve, 1_500))
-      await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' })
-    } finally {
-      await rm(root, { recursive: true, force: true })
-    }
-  })
-
-  it('keeps descendants after a successful command only when explicitly requested', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'anas-shell-result-keep-'))
-    const marker = join(root, 'descendant-survived.txt')
-    try {
-      const invocation = process.platform === 'win32'
-        ? {
-            executable: 'powershell.exe',
-            args: [
-              '-NoProfile',
-              '-Command',
-              `Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-EncodedCommand','${Buffer.from(
-                `Start-Sleep -Milliseconds 1200; [IO.File]::WriteAllText(${JSON.stringify(marker)}, 'survived')`,
-                'utf16le'
-              ).toString('base64')}')`
-            ],
-            windowsHide: true
-          }
-        : {
-            executable: process.execPath,
-            args: ['-e', [
-              `const { spawn } = require('node:child_process')`,
-              `spawn(process.execPath, ['-e', ${JSON.stringify(
-                `setTimeout(() => require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'survived'), 1200)`
-              )}], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: 'ignore' }).unref()`
-            ].join(';')],
-            windowsHide: true,
-            env: { ELECTRON_RUN_AS_NODE: '1' }
-          }
-      const output = await runPreparedProcess({
-        command: 'completed command descendant keep probe',
-        workingDir: root,
-        timeoutSec: 10,
-        keepProcesses: true,
-        invocation,
-        logScope: 'test',
-        successMessage: 'Descendant keep probe finished.',
-        failureMessage: 'Descendant keep probe failed.',
-        abortBeforeStartError: 'Descendant keep probe was cancelled before it started.',
-        abortError: 'Descendant keep probe was cancelled.',
-        timeoutError: 'Descendant keep probe timed out.'
-      })
-
-      expect(JSON.parse(output)).toMatchObject({ ok: true, exitCode: 0 })
-      await new Promise((resolve) => setTimeout(resolve, 3_000))
-      await expect(access(marker)).resolves.toBeUndefined()
-    } finally {
-      await rm(root, { recursive: true, force: true })
-    }
-  }, 10_000)
-
-  it('cleans up descendants after a failed command even when keeping was requested', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'anas-shell-failed-keep-'))
-    const marker = join(root, 'descendant-survived.txt')
-    try {
-      const output = await runPreparedProcess({
-        command: 'failed command descendant cleanup probe',
-        workingDir: root,
-        timeoutSec: 10,
-        keepProcesses: true,
-        invocation: {
-          executable: process.execPath,
-          args: ['-e', [
-            `const { spawn } = require('node:child_process')`,
-            `spawn(process.execPath, ['-e', ${JSON.stringify(
-              `setTimeout(() => require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'survived'), 1200)`
-            )}], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: 'ignore' }).unref()`,
-            `process.exitCode = 1`
-          ].join(';')],
-          windowsHide: true,
-          env: { ELECTRON_RUN_AS_NODE: '1' }
-        },
-        logScope: 'test',
-        successMessage: 'Failed descendant cleanup probe finished.',
-        failureMessage: 'Failed descendant cleanup probe failed.',
-        abortBeforeStartError: 'Failed descendant cleanup probe was cancelled before it started.',
-        abortError: 'Failed descendant cleanup probe was cancelled.',
-        timeoutError: 'Failed descendant cleanup probe timed out.'
-      })
-
-      expect(JSON.parse(output)).toMatchObject({ ok: false, exitCode: 1 })
       await new Promise((resolve) => setTimeout(resolve, 1_500))
       await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' })
     } finally {
@@ -905,7 +817,7 @@ describe.skipIf(process.platform !== 'win32')('PowerShell output encoding', () =
       .toBe('中文测试\n单引号 \' 双引号 " 与 $变量保持原样\n')
   })
 
-  it.each([false, true])('streams delayed UTF-8 output with keepProcesses=%s', async (keepProcesses) => {
+  it('streams delayed UTF-8 output for managed commands', async () => {
     const streamed: string[] = []
     const result = await runShellCommand({
       command: [
@@ -913,7 +825,7 @@ describe.skipIf(process.platform !== 'win32')('PowerShell output encoding', () =
         'Start-Sleep -Milliseconds 300',
         "[Console]::Out.Write('读取完成')"
       ].join('\n'),
-      workingDir: process.cwd(), timeoutSec: 15, keepProcesses
+      workingDir: process.cwd(), timeoutSec: 15, keepProcesses: false
     }, shell, undefined, {
       onOutput: (_stream, text) => streamed.push(text)
     })

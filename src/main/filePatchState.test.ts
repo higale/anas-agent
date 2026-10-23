@@ -140,7 +140,7 @@ describe('patch target preimages', () => {
     await writeFile(path, bytes)
     const resolved = await resolveFilePatchTargets(asPatchInput({ operations: [{ type: 'delete', path }] }), root)
     await expect(captureFilePatchPreimages(resolved.targets)).rejects.toThrow()
-    expect(await readFile(path)).toEqual(bytes)
+    expect((await readFile(path)).equals(bytes)).toBe(true)
   })
 
   it('rejects directory targets and invalid target counts', async () => {

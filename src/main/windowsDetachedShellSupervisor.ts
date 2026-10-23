@@ -3,14 +3,12 @@ import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { createServer, type Server, type Socket } from 'node:net'
 
-function powershellSingleQuoted(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`
-}
-
 export function windowsDetachedProcessCreateScript(): string {
   return [
     `$startup = ([wmiclass]'Win32_ProcessStartup').CreateInstance()`,
     `$startup.ShowWindow = 0`,
+    `$startup.CreateFlags = 16`,
+    `$startup.EnvironmentVariables = [string[]]@([Environment]::GetEnvironmentVariables().GetEnumerator() | Where-Object { $_.Key -ne 'ANAS_DETACHED_SUPERVISOR_COMMAND' } | ForEach-Object { "$($_.Key)=$($_.Value)" })`,
     `$result = ([wmiclass]'Win32_Process').Create($env:ANAS_DETACHED_SUPERVISOR_COMMAND, $null, $startup)`,
     `if ($result.ReturnValue -ne 0) { throw "Win32_Process.Create failed with code $($result.ReturnValue)." }`,
     `[Console]::Out.Write($result.ProcessId)`
@@ -145,16 +143,10 @@ export class DetachedWindowsShellSupervisor extends EventEmitter {
 
   private launch(program: string): void {
     const bootstrap = `eval(Buffer.from('${Buffer.from(program, 'utf8').toString('base64')}','base64').toString('utf8'))`
-    const detachedScript = [
-      `$env:ELECTRON_RUN_AS_NODE='1'`,
-      `$env:ANAS_SHELL_SUPERVISOR_PIPE=${powershellSingleQuoted(this.pipePath)}`,
-      `$env:ANAS_SHELL_SUPERVISOR_TOKEN=${powershellSingleQuoted(this.token)}`,
-      `& ${powershellSingleQuoted(process.execPath)} '-e' ${powershellSingleQuoted(bootstrap)}`
-    ].join('; ')
-    const commandLine = [
-      'powershell.exe -NoLogo -NoProfile -NonInteractive -Command',
-      `"${detachedScript}"`
-    ].join(' ')
+    // WMI supplies a hidden, independent console and the environment directly.
+    // Avoid retaining a second PowerShell host for the independent guardian's
+    // lifetime. The command can use this console without DETACHED_PROCESS.
+    const commandLine = `"${process.execPath}" -e "${bootstrap}"`
     const launcher = spawn('powershell.exe', [
       '-NoLogo',
       '-NoProfile',
@@ -165,6 +157,9 @@ export class DetachedWindowsShellSupervisor extends EventEmitter {
       windowsHide: true,
       env: {
         ...process.env,
+        ELECTRON_RUN_AS_NODE: '1',
+        ANAS_SHELL_SUPERVISOR_PIPE: this.pipePath,
+        ANAS_SHELL_SUPERVISOR_TOKEN: this.token,
         ANAS_DETACHED_SUPERVISOR_COMMAND: commandLine
       },
       stdio: ['ignore', 'pipe', 'pipe']

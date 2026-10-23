@@ -435,6 +435,10 @@ describe('subagent runtime tool scopes', () => {
       workingDir: undefined,
       keepProcesses: true
     })
+    const independentCalls = shellRunner.mock.calls.length
+    await expect(shellTool!.invoke({ command: 'npm run dev', keep_processes: true, timeout: 30 }))
+      .rejects.toThrow('Independent processes cannot have a managed execution timeout')
+    expect(shellRunner.mock.calls).toHaveLength(independentCalls)
     await expect(shellTool!.invoke({ command: 'pwd' })).resolves.toBe('ok')
     const original = '\n  # original comment\n rg -n needle .  \n'
     await expect(shellTool!.invoke({ command: original })).resolves.toBe('ok')

@@ -14,7 +14,9 @@ npm run eval:coding -- -t empty-sum
 
 评测使用独立的 [Vitest 配置](../vitest.evaluation.config.ts)，不随普通后端测试运行。应用数据目录是进程级状态，因此样本使用单 worker 串行执行，不要与 build、打包或原生依赖重建同时运行。每个样本使用独立的临时工作区、配置和 SQLite 数据库；脚本基线不读取日常配置或模型凭据。
 
-报告写入 `out/evaluations/<时间戳-UUID>/`，包含样本 JSON 和汇总 `results.json`。`out` 会被下一次 build 清理，需保留的报告应另行保存。超时或取消交由 runtime shutdown 排空，清理和结果落盘完成后才开始下一样本。评测不会自动批准 interrupt，意外授权请求使样本失败。
+桌面插件运行时入口为每个样本提供绑定其临时数据目录的真实 `PluginStore` 和 `PluginBackends`，清理前停止后端，避免进程单例沿用前一样本的目录；不替换文件工具、包资源锁或补丁实现。
+
+报告写入 Git 忽略的 `tmp/evaluations/<时间戳-UUID>/`，包含样本 JSON 和汇总 `results.json`；需长期保留的报告应另行保存。每个样本线程显式绑定评测选定的模型，不依赖已有对话的默认模型回退。超时或取消交由 runtime shutdown 排空，清理和结果落盘完成后才开始下一样本。评测不会自动批准 interrupt，意外授权请求使样本失败。
 
 接受全量结果时，同时检查命令退出码和汇总字段：
 
@@ -35,19 +37,19 @@ npm run eval:coding -- -t empty-sum
 | 项目规则 | `nested-rules`、`new-rule-redecision`、`directory-move-rules`、`rule-budget-terminal` |
 | 压缩及接续 | `automatic-compression-rules`、`compression-resume`、`compression-rules`、`compression-scoped-redecision` |
 | 审核 | `review-regression`、`review-clean` |
-| 文件操作及失败边界 | `file-tool-roundtrip`、`invalid-path-recovery`、`external-edit`、`ambiguous-context`、`batch-preflight` |
+| 文件操作及匹配边界 | `file-tool-roundtrip`、`invalid-path-recovery`、`external-edit`、`repeated-context-first-match`、`repeated-context-with-anchor`、`batch-preflight` |
 | 主子能力组合 | `subagent-independent-writer`、`subagent-restricted-writer`、`subagent-child-reader`、`subagent-shared-writer` |
 | 子任务文件往返 | `subagent-file-roundtrip-independent`、`subagent-file-roundtrip-restricted` |
 
-脚本基线有 28 个场景，对照普通/编码模式和三种访问模式。Windows 共 168 个样本；当前评测入口在所有非 Windows 平台将 `large-rg-owner` 限为完整访问，因此共 164 个样本，其余组合列入 `excludedCombinations`。这是评测矩阵的限制，不能据此判断产品缺少 macOS 只读 Shell 分析能力。另有 1 项取消隔离诊断，不计入质量样本；每个组合只运行一次。
+脚本基线有 29 个场景，对照普通/编码模式和三种访问模式。Windows 共 174 个样本；当前评测入口在所有非 Windows 平台将 `large-rg-owner` 限为完整访问，因此共 170 个样本，其余组合列入 `excludedCombinations`。这是评测矩阵的限制，不能据此判断产品缺少 macOS 只读 Shell 分析能力。另有 1 项取消隔离诊断，不计入质量样本；每个组合只运行一次。
 
 理解覆盖范围时需保留以下区别：
 
 - 功能任务通过独立的 Node 行为测试接受等价实现，同时核对无关文件的内容哈希及新增、删除。`evaluatorTests` 是判定器执行测试的证据，不是 Agent 主动运行测试的证据。
 - 规则和压缩场景检查实际模型请求、文件写入时序及 checkpoint。脚本摘要不包含规则正文，用于验证产品重新注入完整规则；不证明真实模型的压缩质量或规则遵循能力。
 - `large-rg-owner` 在有界合成仓库中实际执行内置 rg，按调用 ID 校验完整工具结果中的文件集合、路径、行号和原文；它不是大仓库性能或模型自主搜索评测。
-- 文件往返场景只覆盖夹具选定的 11 个文件工具。子任务经真实 `start_subagent` / `wait_subagent` 执行，检查实际工具归属、能力交集和 checkpoint 重开；不能推断所有文件工具、嵌套子任务或全部失败边界均已覆盖。
-- 边界任务必须同时出现预期的未执行结果并保持要求的文件状态；空操作、提前失败或任意 `run_failed` 不能冒充通过。意外错误仍使样本失败。
+- 文件往返场景只覆盖夹具选定的 11 个文件工具。子任务经真实 `start_subagent` / `wait_subagent` 执行，检查实际工具归属、能力交集和 checkpoint 重开；技能隔离检查解析后的授权条目，父子交集产生的空 `custom` 列表同样表示没有技能授权。不能推断所有文件工具、嵌套子任务或全部失败边界均已覆盖。
+- 失败边界任务必须同时出现预期的未执行结果并保持要求的文件状态；重复上下文任务分别验证同级首个匹配和用上下文定位后续匹配。空操作、提前失败或任意 `run_failed` 不能冒充通过，意外错误仍使样本失败。
 
 ## 结果解释
 

@@ -15,6 +15,9 @@ import { createProject } from '../main/projectStore'
 import { AgentDatabase } from '../main/agent/agentDatabase'
 import { AgentRuntime } from '../main/agent/agentRuntime'
 import * as modelFactory from '../main/agent/modelFactory'
+import * as plugins from '../main/plugins/pluginRuntime'
+import { PluginStore } from '../main/plugins/pluginStore'
+import { PluginBackends } from '../main/plugins/pluginBackend'
 import { invokeWithCompressionTracking } from '../main/agent/compressionTracking'
 import { captureCodeReview } from '../main/agent/codeReview'
 import { codeReviewResponseFormat } from '../main/agent/codeReviewMiddleware'
@@ -54,7 +57,7 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
     settings: await readFile(join(options.configDirectory, 'settings.json'), 'utf8')
   } : undefined
   const configuredModelId = options.kind === 'provider-runtime'
-    ? options.modelId ?? JSON.parse(providerSource!.settings).default_model_id : undefined
+    ? options.modelId ?? JSON.parse(providerSource!.settings).default_model_id : 'eval-model'
   if (providerSource && (!configuredModelId || !JSON.parse(providerSource.models).providers
     .some((provider: { models: Array<{ id: string }> }) => provider.models.some((model) => model.id === configuredModelId)))) {
     throw new Error('Select an existing model in the explicitly supplied evaluation configuration.')
@@ -71,7 +74,7 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
   // or describe unexecuted permission combinations as successful search samples.
   const taskAccessModes = (task: CodingTask) => task.tools?.includes('run_shell') && process.platform !== 'win32'
     ? accessModes.filter((mode) => mode === 'full_access') : accessModes
-  const reportRoot = resolve('out/evaluations', `${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID()}`)
+  const reportRoot = resolve('tmp/evaluations', `${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID()}`)
   const suiteStartedAt = new Date().toISOString()
   const revision = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
   const dirty = Boolean(execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim())
@@ -99,7 +102,7 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
     }]
     await writeFile(join(configDir, 'models.json'), JSON.stringify(models))
     const settings = JSON.parse(await readFile(join(configDir, 'settings.json'), 'utf8'))
-    settings.default_model_id = configuredModelId ?? 'eval-model'
+    settings.default_model_id = configuredModelId
     settings.language = 'en'
     settings.max_model_calls_per_run = 16
     settings.environment_context = {
@@ -128,6 +131,7 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
     const expectation = task.modeExpectations?.[result.mode]
     const expectedRunFailures: string[] = []
     let root: string | undefined
+    let pluginBackends: PluginBackends | undefined
     let searchWorkspace: string | undefined
     let runtime: AgentRuntime | undefined
     let database: AgentDatabase | undefined
@@ -172,7 +176,12 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
       searchWorkspace = workspace
       signal.throwIfAborted()
       await prepareConfig(root, task)
-      if (configuredModelId) {
+      // A desktop process keeps one plugin runtime. Each isolated sample instead
+      // owns a real store/backend pair bound to its temporary application data.
+      const pluginStore = new PluginStore(getDataDir())
+      pluginBackends = new PluginBackends(pluginStore, () => {})
+      vi.spyOn(plugins, 'pluginRuntime').mockReturnValue({ store: pluginStore, backends: pluginBackends })
+      if (options.kind === 'provider-runtime') {
         const model = await getResolvedModelConfig(configuredModelId)
         if (!model) throw new Error('The evaluation model cannot be resolved.')
         result.model = { name: model.model, protocol: model.protocol, parameters: {
@@ -205,7 +214,7 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
       const databaseFile = join(getDataDir(), 'eval.sqlite')
       const attachments = join(getDataDir(), 'attachments')
       database = AgentDatabase.open(databaseFile, attachments)
-      const thread = database.createThread({ title: task.id, projectId: project.id, accessMode })
+      const thread = database.createThread({ title: task.id, projectId: project.id, accessMode, modelConfigId: configuredModelId })
       signal.throwIfAborted()
       runtime = new AgentRuntime(database, undefined, join(root, 'temporary'))
       const modelSpy = options.kind === 'scripted-runtime' ? vi.spyOn(modelFactory, 'createChatModel') : undefined
@@ -448,7 +457,11 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
           result.checks.push({ name: 'subagent-run-configuration-matches', passed:
             configuration?.codingMode === codingMode && configuration.capabilities.toolMode === 'selected'
             && fingerprint([...configuration.capabilities.tools].sort()) === fingerprint([...task.subagent.expectedTools].sort())
-            && configuration.capabilities.subagents.mode === 'off' && configuration.capabilities.skills.mode === 'off'
+            && configuration.capabilities.subagents.mode === 'off'
+            // A parent intersection can represent no permitted Skills as an
+            // empty custom selection; verify the grants, not the mode spelling.
+            && !configuration.capabilities.skills.project
+            && !configuration.capabilities.skills.entries.some(entry => entry.model || entry.shortcut)
             && !configuration.capabilities.applicationEnvironment
             && database.getThread(call.childThreadId)?.accessMode === accessMode
             && database.getRun(call.childRunId)?.status === 'completed' })
@@ -481,6 +494,7 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
       try {
         await cancellation
         if (runtime) await runtime.shutdown()
+        await pluginBackends?.stopAll()
         database?.close()
         if (root) await rm(root, { recursive: true, force: true })
       } catch (error) {

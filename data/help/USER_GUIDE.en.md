@@ -100,6 +100,8 @@ Runs programs, scripts, searches, tests, and builds through the system command i
 
 Bundled rg supports file and text searches without a separate installation. Script runtimes such as Python or Node.js must still be installed as needed. Follow-up terminal input requires **Background tools**; application `.env` variables are controlled separately by **.env**. Commands follow the conversation's access mode.
 
+To run an application or service independently, the Agent can set `keep_processes: true` and execute the service command directly, without a launcher such as `Start-Process`. Once startup ownership is handed off, the tool returns a PID and stdout/stderr log paths in the system temporary directory; readiness needs a separate check. The process continues after later messages, conversation cancellation, and exiting Anas, and must be stopped explicitly. This mode cannot use an interactive terminal or a positive execution timeout. Cancellation before handoff still reclaims the process. Copy the logs elsewhere if you need to retain them long term.
+
 ### Network Access
 
 Provides `http_request` for HTTP/HTTPS requests, API calls, uploads, and downloads. The destination must be reachable and any required authentication must be supplied. This is not browser automation.

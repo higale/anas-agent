@@ -54,7 +54,8 @@ async function fixture(purpose: 'file_edit' | 'file_restore' = 'file_edit') {
     get database() { return database }, input: resolved.input, preimages }
 }
 
-describe('patch preparation and durable unarmed proof', () => {
+// Preparation writes durable metadata, matching the restore/resume suites' disk budget.
+describe('patch preparation and durable unarmed proof', { timeout: 20_000 }, () => {
   it.each(['file_edit', 'file_restore'] as const)('discards only unpublished %s preparation after reopening an unarmed journal', async (purpose) => {
     const value = await fixture(purpose)
     await value.partial()

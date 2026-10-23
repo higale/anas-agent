@@ -1,28 +1,24 @@
-## Anas v4.0.6
+## Anas v4.0.7
 
 **升级提醒：从 4.0 之前的版本升级到 4.x，旧对话和长期记忆不再可用；项目、输入历史、插件数据和头像可手动恢复。升级前请备份，详见 [4.x 升级数据说明](https://github.com/higale/anas-agent/blob/main/data/help/UPGRADE_TO_4.zh-CN.md)。** 此提醒针对跨入 4.x 的升级，并非每次 4.x 升级都会丢失数据。
 
 **子 Agent 配置提醒（4.0.5 起）：** `config/subagents.json` 使用 v1，不兼容、不迁移原 v0 数组配置；旧文件保留并在启动时提示错误，含旧格式的备份不能直接恢复。请完全退出应用，把旧文件移到数据目录之外保留，再启动并重新创建或导入子 Agent 包。不要只修改版本号。已有 v1 配置不受影响。[子 Agent 使用与处理说明](https://github.com/higale/anas-agent/blob/main/data/help/USER_GUIDE.zh-CN.md#子-agent)
 
-- 按固定版本的 Codex 上游实现补丁解析与文本匹配，统一上下文、空白、Unicode 标点和换行处理；保留宿主的路径授权、事务、并发冲突检查、撤销和故障恢复，并补充上游授权声明及参考用例对照验证。
-- OpenAI Responses 使用原生 Freeform 补丁调用，Chat Completions 和 Anthropic Messages 使用 JSON 参数；两者进入同一补丁处理流程。完善 Freeform 流式参数接收，以及历史 JSON／Freeform 调用的恢复和结果回传。
-- 工具调用标题新增紧凑的 `Freeform` 标签，实时与历史记录均可查看，支持中英文说明和明暗主题。
-- 供应商模板按 Responses、Chat Completions、Anthropic Messages 分开显示，各自使用对应的 API 地址；补充 GLM Responses 等模板，并完善使用说明。模板更新不覆盖已保存的供应商配置。
-- 修复 GLM Responses 的用量面板被隐藏的问题，识别普通 API 的 `/api/v1` 地址并显示账户余额。
+- 修复 Shell 的 `keep_processes` 生命周期：现在可以直接独立启动前台服务命令，启动交接后即结束受管调用；后续消息、取消、轮次清理和应用退出不会终止已交接的进程。交接前仍支持取消和回收。
+- 独立启动返回 PID 和 stdout/stderr 日志文件路径，可另行检查服务就绪与输出；已确认的启动结果恢复时不会重复执行。补充 Windows、macOS／POSIX 交接及取消边界的回归覆盖，并更新工具说明和中英文用户指南。
+- 修复编码评测的模型绑定与插件数据隔离，按 Codex 的首个匹配和上下文定位规则校正重复文本评测及失败断言；评测报告统一写入忽略的 `tmp/` 目录，并说明符号链接目标的授权与执行规则。
 
-**补丁与接口说明：** `apply_patch` 更新后的非空文件会带末尾换行，旧的自定义补丁扩展不再支持；需要精确保留完整文本和末尾换行状态时可使用 `write_file`。JSON 调用支持 `dry_run` 预览，Freeform 调用不携带此参数。Responses 供应商须支持 `custom` 工具；MiMo 的这类工具需要 Responses Lite，本版尚未适配，可选 Chat Completions 或 Anthropic Messages 模板。[模型与工具说明](https://github.com/higale/anas-agent/blob/main/data/help/USER_GUIDE.zh-CN.md)
+**独立进程行为变更：** `keep_processes: true` 改为独立启动整个命令，无需手动加后台操作；成功返回只表示完成启动交接，不表示命令成功退出或服务就绪。输出保存在系统临时目录，由用户管理进程及日志；此模式不能与 PTY 或正数 `timeout` 同用。[命令执行说明](https://github.com/higale/anas-agent/blob/main/data/help/USER_GUIDE.zh-CN.md)
 
 **Upgrade notice: when upgrading from a pre-4.0 version to 4.x, previous conversations and long-term memory become unavailable. Projects, input history, plugin data, and avatars can be recovered manually. Back up first and read the [4.x upgrade data guide](https://github.com/higale/anas-agent/blob/main/data/help/UPGRADE_TO_4.en.md).** This notice concerns crossing into 4.x, not data loss on every 4.x update.
 
 **Subagent configuration notice (since 4.0.5):** `config/subagents.json` uses v1; the previous v0 array format is neither supported nor migrated. Old files are preserved and reported as a startup error, and backups containing that format cannot be restored directly. Fully quit the app, move the old file outside the data directory for safekeeping, then restart and recreate or import subagent packages. Do not just change the version number. Existing v1 configurations are unaffected. [Subagent setup and recovery instructions](https://github.com/higale/anas-agent/blob/main/data/help/USER_GUIDE.en.md#subagents)
 
-- Align patch parsing and text matching with a pinned Codex revision, including context, whitespace, Unicode punctuation, and newline handling. Retain host path authorization, transactions, conflict checks, undo, and failure recovery, with upstream attribution and reference-case verification.
-- Use native Freeform patch calls for OpenAI Responses and JSON arguments for Chat Completions and Anthropic Messages, sharing the same patch processing. Improve streamed Freeform input handling and restore/replay of historical JSON and Freeform tool calls and results.
-- Add a compact `Freeform` badge to live and historical tool-call titles, with bilingual hints and support for light and dark themes.
-- Separate provider templates by Responses, Chat Completions, and Anthropic Messages, each with the corresponding API endpoints. Add GLM Responses and other templates and clarify usage guidance. Template updates do not overwrite saved provider configurations.
-- Fix the hidden Usage Meter for GLM Responses: recognize the ordinary `/api/v1` endpoint and show the account balance.
+- Fix the Shell `keep_processes` lifecycle: foreground service commands can now launch independently, completing the managed call after ownership handoff. Later messages, cancellation, turn cleanup, and application exit do not stop a handed-off process. Cancellation and cleanup remain available before handoff.
+- Return the PID and stdout/stderr log paths so readiness and output can be checked separately; replaying a confirmed launch result does not execute it again. Add Windows and macOS/POSIX handoff and cancellation regression coverage, and update tool descriptions and both user guides.
+- Fix model binding and plugin data isolation in coding evaluations. Align repeated-text cases and failure assertions with Codex first-match and context-anchor behavior, store evaluation reports under ignored `tmp/`, and document authorization and execution rules for symbolic-link targets.
 
-**Patch and API notes:** Non-empty files updated with `apply_patch` end with a newline, and previous custom patch extensions are no longer supported. Use `write_file` when exact full-text and final-newline preservation is needed. JSON calls support `dry_run` previews; Freeform calls do not carry that parameter. Responses providers must support `custom` tools. MiMo requires Responses Lite for these tools, which this release does not support; use its Chat Completions or Anthropic Messages template instead. [Model and tool guidance](https://github.com/higale/anas-agent/blob/main/data/help/USER_GUIDE.en.md)
+**Independent-process behavior change:** `keep_processes: true` now launches the entire command independently without a manual background operator. Success confirms ownership handoff, not successful command completion or service readiness. Output is stored in the system temporary directory; users manage the process and logs. This mode cannot be combined with a PTY or a positive `timeout`. [Command execution guidance](https://github.com/higale/anas-agent/blob/main/data/help/USER_GUIDE.en.md)
 
 ## 下载与安装 / Downloads & installation
 
