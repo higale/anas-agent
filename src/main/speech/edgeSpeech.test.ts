@@ -36,15 +36,16 @@ afterEach(() => vi.useRealTimers())
 
 describe('Edge speech transport', () => {
   it('escapes SSML, maps speed, and returns only audio bytes after turn.end', async () => {
+    vi.setSystemTime(1792914600 * 1000)
     const { socket, result } = start()
     socket.emit('open')
     const url = new URL(socket.url)
-    expect(url.origin).toBe('wss://api.msedgeservices.com')
-    expect(url.pathname).toBe('/tts/cognitiveservices/websocket/v1')
-    expect(url.searchParams.get('Ocp-Apim-Subscription-Key')).toBe('6A5AA1D4EAFF4E9FB37E23D68491D6F4')
-    expect(url.searchParams.has('TrustedClientToken')).toBe(false)
-    expect(url.searchParams.get('Sec-MS-GEC')).toMatch(/^[A-F0-9]{64}$/)
-    expect(url.searchParams.get('Sec-MS-GEC-Version')).toMatch(/^1-/)
+    expect(url.origin).toBe('wss://speech.platform.bing.com')
+    expect(url.pathname).toBe('/consumer/speech/synthesize/readaloud/edge/v1')
+    expect(url.searchParams.get('TrustedClientToken')).toBe('6A5AA1D4EAFF4E9FB37E23D68491D6F4')
+    expect(url.searchParams.has('Ocp-Apim-Subscription-Key')).toBe(false)
+    expect(url.searchParams.get('Sec-MS-GEC')).toBe('C32D80A8FFBCFACD-443BFC0B127D09B4B99A55B7C0DC29B1AC1B88977667D2B179412BF205234B41')
+    expect(url.searchParams.get('Sec-MS-GEC-Version')).toMatch(/^2-/)
     const ssml = socket.send.mock.calls[1][0]
     expect(ssml).toContain('rate="+50%"')
     expect(ssml).toContain('你好 &lt;world&gt; &amp; goodbye')

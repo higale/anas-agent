@@ -1,6 +1,11 @@
 The Edge speech protocol implementation is based on node-edge-tts:
 https://github.com/SchneeHertz/node-edge-tts
 
+The Sec-MS-GEC v2 implementation in src/main/speech/edgeSpeechToken.ts is
+adapted from src/drm.ts at commit 5fd566bbc30e305a605fc0afc99c98bfbad9d8be.
+Changes: retain only v2, use the literal hash prefix and Node.js crypto,
+and adapt naming and formatting to Anas. The MIT license below applies.
+
 MIT License
 
 Copyright (c) 2022 SchneeHertz

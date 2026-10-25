@@ -7,6 +7,55 @@ const { expect } = require('playwright/test')
 const { closeElectronTestApplication } = require('./electron-test-close.cjs')
 const settingsDefaults = require('../data/config/settings.json')
 
+// Opt-in: npm run test:e2e -- --speech-live-only. Uses an isolated profile,
+// sends only this fixed probe to Microsoft, and plays the real MP3 muted.
+async function verifyLiveSpeech(launchApplication) {
+  const home = await mkdtemp(join(tmpdir(), 'anas-speech-live-'))
+  if (dirname(home) !== tmpdir() || !basename(home).startsWith('anas-speech-live-')) {
+    throw new Error('Unexpected live speech test directory.')
+  }
+  let application
+  try {
+    application = await launchApplication(home)
+    const page = await application.firstWindow()
+    await page.locator('[data-agent-composer-input]').waitFor()
+    const result = await page.evaluate(async () => {
+      const config = await globalThis.gale.config.get()
+      const bytes = await globalThis.gale.speech.generate({
+        requestId: globalThis.crypto.randomUUID(),
+        text: '你好，这是语音播放测试。Hello from Anas.',
+        voice: config.settings.speechReply.voice,
+        speed: 1.25
+      })
+      const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'audio/mpeg' }))
+      const player = new globalThis.Audio(url)
+      player.muted = true
+      let timeout
+      try {
+        return await new Promise((resolve, reject) => {
+          timeout = setTimeout(() => reject(new Error('Live speech playback timed out.')), 15000)
+          player.onended = () => resolve({ bytes: bytes.byteLength, duration: player.duration, playedRanges: player.played.length })
+          player.onerror = () => reject(new Error(`Live speech decoding failed: ${player.error?.code}`))
+          void player.play().catch(reject)
+        })
+      } finally {
+        clearTimeout(timeout)
+        player.pause()
+        player.removeAttribute('src')
+        player.load()
+        URL.revokeObjectURL(url)
+      }
+    })
+    assert.ok(result.bytes > 0, 'The real service must return audio.')
+    assert.ok(Number.isFinite(result.duration) && result.duration > 0, 'The real MP3 must have a valid duration.')
+    assert.ok(result.playedRanges > 0, 'Native playback must reach the end of the audio.')
+    console.log(`Live speech passed: real IPC synthesis, MP3 decoding and muted playback (${result.bytes} bytes, ${result.duration.toFixed(2)}s).`)
+  } finally {
+    await closeElectronTestApplication(application)
+    await rm(home, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+  }
+}
+
 async function verifySpeechReply(launchApplication) {
   const home = await mkdtemp(join(tmpdir(), 'anas-speech-reply-'))
   if (dirname(home) !== tmpdir() || !basename(home).startsWith('anas-speech-reply-')) {
@@ -188,4 +237,4 @@ async function verifySpeechReply(launchApplication) {
   }
 }
 
-module.exports = { verifySpeechReply }
+module.exports = { verifySpeechReply, verifyLiveSpeech }

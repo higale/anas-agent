@@ -31,7 +31,7 @@ const { verifyCurrentData } = require('./electron-data-migrations.cjs')
 const { verifyDataCleanup } = require('./electron-data-cleanup.cjs')
 const { verifyPluginTransactions } = require('./electron-plugin-transactions.cjs')
 const { verifyModelSelection } = require('./electron-model-selection.cjs')
-const { verifySpeechReply } = require('./electron-speech-reply.cjs')
+const { verifySpeechReply, verifyLiveSpeech } = require('./electron-speech-reply.cjs')
 const { verifyAttachmentPreviews } = require('./electron-attachment-previews.cjs')
 
 const repositoryRoot = resolve(__dirname, '..')
@@ -1156,6 +1156,10 @@ async function main() {
   }
   if (process.argv.includes('--speech-only')) {
     await verifySpeechReply(launchApplication)
+    return
+  }
+  if (process.argv.includes('--speech-live-only')) {
+    await verifyLiveSpeech(launchApplication)
     return
   }
   if (process.argv.includes('--custom-tools-only')) {

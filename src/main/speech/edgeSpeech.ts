@@ -1,12 +1,11 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { WebSocket, type RawData } from 'ws'
+import { edgeSpeechClientToken, generateEdgeSpeechToken } from './edgeSpeechToken'
 
 // Edge Read Aloud wire protocol, also implemented by SchneeHertz/node-edge-tts.
-const clientToken = '6A5AA1D4EAFF4E9FB37E23D68491D6F4'
 const browserVersion = '143.0.3650.75'
-// Synthesis moved to this endpoint; the voice list still uses speech.platform.bing.com.
-// https://github.com/rany2/edge-tts/pull/491
-const endpoint = 'wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1'
+// The Read Aloud endpoint requires the v2 token; the alternate v1 endpoint is obsolete.
+const endpoint = 'wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1'
 const maxAudioBytes = 8 * 1024 * 1024
 
 export interface EdgeSpeechRequest {
@@ -25,14 +24,11 @@ function escapeXml(value: string): string {
 }
 
 function requestUrl(): string {
-  const ticks = (BigInt(Math.floor(Date.now() / 1000)) + 11644473600n) * 10000000n
-  const roundedTicks = ticks - ticks % 3000000000n
-  const hash = createHash('sha256').update(`${roundedTicks}${clientToken}`).digest('hex').toUpperCase()
   const params = new URLSearchParams({
-    'Ocp-Apim-Subscription-Key': clientToken,
+    TrustedClientToken: edgeSpeechClientToken,
     ConnectionId: randomUUID().replaceAll('-', ''),
-    'Sec-MS-GEC': hash,
-    'Sec-MS-GEC-Version': `1-${browserVersion}`
+    'Sec-MS-GEC': generateEdgeSpeechToken(),
+    'Sec-MS-GEC-Version': `2-${browserVersion}`
   })
   return `${endpoint}?${params}`
 }
