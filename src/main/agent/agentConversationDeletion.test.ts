@@ -3,15 +3,12 @@ import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { HumanMessage } from '@langchain/core/messages'
-import { emptyCheckpoint } from '@langchain/langgraph-checkpoint'
 import { afterEach, expect, it, vi } from 'vitest'
 import { saveToolResultFile } from './toolResultFile'
 import { archiveAgentAttachments } from './agentAttachmentStore'
 import { AgentStorage } from './agentStorage'
-import { AgentDatabase } from './agentDatabase'
-import { AgentRuntime } from './agentRuntime'
-import { AgentRuntimeCoordinator } from './agentRuntimeCoordinator'
+import { NativeConversationDatabase } from './nativeConversationDatabase'
+import { NativeRuntimeCoordinator } from './nativeRuntimeCoordinator'
 import { snapshotAgentStorage } from './agentDatabaseBackup'
 import { getAgentConversationDatabaseFile, getAgentConversationDir, getAgentConversationTempDir, getAgentAttachmentsDir } from '../config/dataDir'
 
@@ -40,17 +37,18 @@ vi.mock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
 vi.mock('../projectStore', () => ({ getProject: vi.fn(async (id: string) => ({ id, kind: 'workspace', sourceFolders: [] })) }))
 
 const roots: string[] = []
-let storage: AgentStorage | undefined
-let coordinator: AgentRuntimeCoordinator | undefined
-function route(current: AgentStorage, root: string) {
-  return new AgentRuntimeCoordinator(current, undefined, database => new AgentRuntime(database,
-    async () => { throw new Error('No model in deletion test') }, root, async () => {}))
+type NativeStorage = ReturnType<typeof AgentStorage.openNative>
+let storage: NativeStorage | undefined
+let coordinator: NativeRuntimeCoordinator | undefined
+function route(current: NativeStorage) {
+  return new NativeRuntimeCoordinator(current, { push: vi.fn() }, { prepareWorkspace: false,
+    providerFetch: async () => { throw new Error('No model in deletion test') } })
 }
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'anas-conversation-deletion-'))
   roots.push(root)
-  storage = AgentStorage.open(root)
-  coordinator = route(storage, root)
+  storage = AgentStorage.openNative(root)
+  coordinator = route(storage)
   return { root, storage, coordinator }
 }
 afterEach(async () => {
@@ -114,8 +112,8 @@ it('keeps a missing-database deletion retryable if removing its remaining resour
   faults.failRm = ''
   await current.coordinator.shutdown()
   current.storage.close()
-  storage = AgentStorage.open(current.root)
-  coordinator = route(storage, current.root)
+  storage = AgentStorage.openNative(current.root)
+  coordinator = route(storage)
   await coordinator.deleteThread(thread.id)
   expect(storage.listThreads()).toEqual([])
 })
@@ -186,8 +184,8 @@ it.each(['conversation', 'temporary', 'partial conversation'] as const)('retries
   faults.failRm = ''
   await current.coordinator.shutdown()
   current.storage.close()
-  storage = AgentStorage.open(current.root)
-  coordinator = route(storage, current.root)
+  storage = AgentStorage.openNative(current.root)
+  coordinator = route(storage)
   await coordinator.deleteThread(thread.id)
   expect(storage.listThreads()).toEqual([])
   expect(storage.isConversationDeleting(thread.id)).toBe(false)
@@ -197,7 +195,10 @@ it.each(['conversation', 'temporary', 'partial conversation'] as const)('retries
 it('keeps cleanup failure retryable after the main thread row has been deleted', async () => {
   const { root, storage, coordinator } = await fixture()
   const thread = storage.createThread({ title: 'Attachment cleanup' })
-  await storage.conversationForThread(thread.id).deleteThreadTree(thread.id)
+  // Simulate an incomplete external cleanup while the catalog still owns the directory.
+  const damaged = new Database(getAgentConversationDatabaseFile(thread.id, root))
+  try { damaged.pragma('foreign_keys=ON'); damaged.prepare('DELETE FROM agent_threads WHERE id=?').run(thread.id) }
+  finally { damaged.close() }
   faults.failRm = getAgentConversationDir(thread.id, root)
   await expect(coordinator.deleteThread(thread.id)).rejects.toThrow('File temporarily in use')
   expect(storage.openedConversation(thread.id)).toBeUndefined()
@@ -208,7 +209,7 @@ it('keeps cleanup failure retryable after the main thread row has been deleted',
   expect(existsSync(getAgentConversationDatabaseFile(thread.id, root))).toBe(false)
 })
 
-it('keeps online backups restorable while deletion waits and ordinary checkpoint appends continue', async () => {
+it('keeps online backups restorable while deletion waits and ordinary execution commits continue', async () => {
   const { root, storage, coordinator } = await fixture()
   const thread = storage.createThread({ title: 'Delete during backup' })
   const database = storage.conversationForThread(thread.id)
@@ -228,16 +229,17 @@ it('keeps online backups restorable while deletion waits and ordinary checkpoint
   await catalogReady
   const deleting = coordinator.deleteThread(thread.id)
   try {
-    await database.checkpointer.put({ configurable: { thread_id: thread.id } }, {
-      ...emptyCheckpoint(), channel_values: { messages: [new HumanMessage({ id: 'message', content: 'Completed while backing up' })] },
-      channel_versions: { messages: 1 }
-    }, { source: 'input', step: 0, parents: {} }, { messages: 1 })
+    const owner = { threadId: thread.id, runId: 'backup-run' }, id = 'message'
+    database.runs.createRun({ ...owner, operation: 'agent', message: { id, value: { id, kind: 'user', content: 'Completed while backing up', context: { runId: owner.runId } } } })
+    await database.runs.enter('input', owner)
+    database.runs.store.finish({ ...owner, expectedRevisionId: database.runs.store.load(thread.id)!.revisionId }, 'completed')
+    expect(database.messages.window(thread.id).messages[0].content).toEqual([{ type: 'text', text: 'Completed while backing up' }])
     expect(database.getThread(thread.id)?.title).toBe('Delete during backup')
     expect(storage.isConversationDeleting(thread.id)).toBe(false)
   } finally { releaseCatalog() }
   await expect(copying).resolves.toHaveLength(2)
   await deleting
-  expect(() => AgentDatabase.validateBackup(getAgentConversationDatabaseFile(thread.id, destination),
+  expect(() => NativeConversationDatabase.validateBackup(getAgentConversationDatabaseFile(thread.id, destination),
     getAgentAttachmentsDir(thread.id, destination), new Set([thread.projectId]), thread.id)).not.toThrow()
   expect(storage.listThreads()).toEqual([])
 })
@@ -254,7 +256,7 @@ it('omits accepted pending deletions from the backup catalog without changing th
   const files = await snapshotAgentStorage(root, destination)
   expect(files.map(file => file.relPath)).toEqual(['db/catalog.sqlite', `db/conversations/${retained.id}/conversation.sqlite`])
   expect(storage.isConversationDeleting(deleted.id)).toBe(true)
-  const copied = AgentStorage.open(destination)
+  const copied = AgentStorage.openNative(destination)
   try { expect(copied.listThreads().map(thread => thread.id)).toEqual([retained.id]) } finally { copied.close() }
 })
 
@@ -267,13 +269,13 @@ it('deletes the whole conversation and its temporary drafts while preserving oth
   await writeFile(source, 'attachment')
   const attachments = await archiveAgentAttachments([{ path: source, name: 'original.txt', size: 10,
     mimeType: 'text/plain', kind: 'text', contextPolicy: 'conversation' }],
-    { threadId: first.id, runId: 'run', messageId: 'message' }, database.attachmentRoot)
-  const result = await saveToolResultFile('long tool output', database.toolResultsRoot)
-  const otherResult = await saveToolResultFile('long tool output', other.toolResultsRoot)
+    { threadId: first.id, runId: 'run', messageId: 'message' }, getAgentAttachmentsDir(first.id, root))
+  const result = await saveToolResultFile('long tool output', database.resources.toolResultsRoot)
+  const otherResult = await saveToolResultFile('long tool output', other.resources.toolResultsRoot)
   expect(result).not.toBe(otherResult)
-  expect(await saveToolResultFile('long tool output', database.toolResultsRoot)).toBe(result)
-  const recovery = join(database.fileEditStore.root, 'retained-evidence')
-  const draft = join(database.temporaryRoot, 'message_edit', 'draft')
+  expect(await saveToolResultFile('long tool output', database.resources.toolResultsRoot)).toBe(result)
+  const recovery = join(database.resources.fileEditStore.root, 'retained-evidence')
+  const draft = join(getAgentConversationTempDir(first.id, root), 'message_edit', 'draft')
   await mkdir(recovery, { recursive: true }); await mkdir(draft, { recursive: true })
   await writeFile(join(recovery, 'record.json'), 'recovery evidence')
   await mkdir(join(root, 'db', 'plugins', 'test-plugin'), { recursive: true })

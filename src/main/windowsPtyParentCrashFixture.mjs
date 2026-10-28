@@ -3,8 +3,10 @@ import { existsSync } from 'node:fs'
 import { createServer } from 'vite'
 
 const options = JSON.parse(process.argv[2])
+// This fixed SSR probe has no client entries or hot reload; do not scan ignored fixture trees.
 const server = await createServer({ root: process.cwd(), cacheDir: options.cache, configFile: false,
-  appType: 'custom', logLevel: 'error', server: { middlewareMode: true }, resolve: { alias: { '@shared': resolve('src/shared') } },
+  appType: 'custom', logLevel: 'error', optimizeDeps: { noDiscovery: true, include: [] },
+  server: { middlewareMode: true, watch: null, hmr: false }, resolve: { alias: { '@shared': resolve('src/shared') } },
   plugins: [{ name: 'isolated-probe-logger', enforce: 'pre',
     resolveId(id) { if (/[/\\]runtimeLogger(?:\.ts)?$/.test(id)) return '\0probe-logger' },
     load(id) { if (id === '\0probe-logger') return 'export function runtimeLog() {}' }

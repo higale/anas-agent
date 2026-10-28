@@ -1,15 +1,16 @@
 import { BrowserWindow } from 'electron'
-import type { StructuredToolInterface } from '@langchain/core/tools'
-import type { MultiServerMCPClient } from '@langchain/mcp-adapters'
+import type { ToolDefinition } from '../runtime/toolDefinition'
+import { McpToolResultError } from '../mcp/toolResult'
 import { getMcpRuntimeConfigSnapshot, type McpServerConfig } from './config/appConfig'
 import {
   createMcpClientForServer,
   mcpErrorMessage,
   type McpConnectionIdentity,
+  type McpRuntimeConnection,
   type McpToolLoadResult
 } from './mcpTools'
 import { runtimeChannelLog, runtimeLog } from './runtimeLogger'
-import { serializeStructuredTool } from './toolSchemaSerialization'
+import { serializeToolDefinition } from './toolSchemaSerialization'
 import type { McpMaintenanceResult, McpToolStatus, McpServerType } from '@shared/types'
 import { armCurrentAgentToolEffect } from './agent/toolEffectScope'
 import { currentToolExecution } from './agent/toolExecutionContext'
@@ -18,7 +19,7 @@ import type { ManagedCallControl } from './agent/managedCallService'
 type McpRuntimeState = 'idle' | 'starting' | 'ready' | 'degraded' | 'recovering' | 'failed' | 'stopped'
 type McpManagerLifecycle = 'open' | 'opening' | 'quiescing' | 'closed'
 type McpStartReason = 'startup' | 'config_changed' | 'manual_reload' | 'recovery' | 'tools_changed'
-type McpRecoverReason = 'startup_failed' | 'ping_failed' | 'tool_failed' | 'tools_changed' | 'manual_maintenance'
+type McpRecoverReason = 'startup_failed' | 'ping_failed' | 'tool_failed' | 'tools_changed' | 'connection_closed' | 'manual_maintenance'
 
 interface McpServerRuntimeStatus {
   id: string
@@ -100,7 +101,7 @@ function mcpServerLog(level: Parameters<typeof runtimeLog>[0], server: McpServer
   })
 }
 
-function asMcpToolLoadResult(tools: StructuredToolInterface[], loaded: McpToolLoadResult['loaded'], errors: McpToolLoadResult['errors']): McpToolLoadResult {
+function asMcpToolLoadResult(tools: ToolDefinition[], loaded: McpToolLoadResult['loaded'], errors: McpToolLoadResult['errors']): McpToolLoadResult {
   return {
     tools,
     loaded,
@@ -115,41 +116,31 @@ function asMcpToolLoadResult(tools: StructuredToolInterface[], loaded: McpToolLo
 }
 
 function wrapMcpTool(
-  tool: StructuredToolInterface,
+  tool: ToolDefinition,
   onFailure: (error: unknown) => void,
   enter: () => () => void
-): StructuredToolInterface {
-  return new Proxy(tool as object, {
-    get(target, property, receiver) {
-      const value = Reflect.get(target, property, receiver)
-      if (property !== 'invoke' || typeof value !== 'function') return value
-      return async (...args: unknown[]) => {
-        const leave = enter()
-        try {
-          return await value.apply(target, args)
-        } catch (error) {
-          const signal = (args[1] as { signal?: AbortSignal } | undefined)?.signal
-          // The adapter exposes isError responses as ToolException, not as a
-          // ToolMessage. Its explicit server-error response confirms an outcome;
-          // transport failures and cancellation do not make that guarantee.
-          if (error instanceof Error && error.name === 'ToolException'
-            && /^MCP tool '.+' on server '.+' returned an error:/s.test(error.message)) {
-            currentToolExecution()?.setOutcome({ remote_failure_confirmed: true })
-          }
-          if (!signal?.aborted) onFailure(error)
-          throw error
-        } finally {
-          leave()
-        }
+): ToolDefinition {
+  return { ...tool, async execute(args, context) {
+    const leave = enter()
+    try {
+      return await tool.execute(args, context)
+    } catch (error) {
+      // Only a typed, confirmed server result establishes the outcome.
+      if (error instanceof McpToolResultError) {
+        currentToolExecution()?.setOutcome({ remote_failure_confirmed: true })
       }
+      if (!context.signal?.aborted) onFailure(error)
+      throw error
+    } finally {
+      leave()
     }
-  }) as StructuredToolInterface
+  } }
 }
 
 class McpServerRuntime {
-  private client?: MultiServerMCPClient
-  private clients = new Set<MultiServerMCPClient>()
-  private clientCloseOperations = new Map<MultiServerMCPClient, Promise<void>>()
+  private client?: McpRuntimeConnection
+  private clients = new Set<McpRuntimeConnection>()
+  private clientCloseOperations = new Map<McpRuntimeConnection, Promise<void>>()
   private configKey: string
   private generation = 0
   private healthTimer?: ReturnType<typeof setTimeout>
@@ -159,7 +150,7 @@ class McpServerRuntime {
   private recoveryAttempt = 0
   private recoveryTimer?: ReturnType<typeof setTimeout>
   private state: McpRuntimeState = 'idle'
-  private tools: StructuredToolInterface[] = []
+  private tools: ToolDefinition[] = []
   private toolNames: string[] = []
   private lastCheckedAt?: string
   private lastError?: string
@@ -302,9 +293,7 @@ class McpServerRuntime {
 
     const generation = this.generation
     try {
-      const client = await this.client.getClient(this.server.id)
-      if (!client) throw new Error('MCP server client is not connected.')
-      await client.ping({ timeout: mcpPingTimeoutMs })
+      await this.client.ping({ timeout: mcpPingTimeoutMs })
       if (!this.isCurrentGeneration(generation)) return
       this.lastCheckedAt = statusTime()
       this.lastError = undefined
@@ -338,21 +327,23 @@ class McpServerRuntime {
     await this.closeClient()
     if (!this.isCurrentGeneration(generation)) return
 
-    let client: MultiServerMCPClient | undefined
+    let client: McpRuntimeConnection | undefined
     try {
-      const connectionErrors: Array<{ id: string; name: string; error: string }> = []
-      // The adapter preserves each invocation's args object in its progress closure.
+      // Each invocation preserves its args object in the SDK progress closure.
       // Object identity keeps simultaneous identical calls separate without changing MCP.
       const progressOwners = new WeakMap<object, ManagedCallControl>()
       // eslint-disable-next-line prefer-const -- The hooks close over identity before client construction returns it.
       let connectionIdentity: McpConnectionIdentity | undefined
       const created = createMcpClientForServer(this.server, {
         onConnectionError: ({ serverName, error }) => {
-          connectionErrors.push({
-            id: serverName,
-            name: this.server.name,
-            error: mcpErrorMessage(error, this.server.apiKey)
-          })
+          if (!this.isCurrentGeneration(generation)) return
+          mcpServerLog('debug', this.server, 'MCP protocol error.', { serverName, error: mcpErrorMessage(error, this.server.apiKey) })
+          if (this.state === 'ready') this.handleToolFailure(error, generation)
+        },
+        onConnectionClosed: () => {
+          if (!this.isCurrentGeneration(generation) || this.state !== 'ready') return
+          this.markDegraded('MCP connection closed.', new Error('MCP server connection closed.'))
+          this.scheduleRecovery('connection_closed')
         },
         onMessage: (message) => {
           mcpServerLog('debug', this.server, 'MCP server log message.', message)
@@ -371,7 +362,7 @@ class McpServerRuntime {
           this.scheduleRecovery('tools_changed', 0)
         },
         beforeToolCall: ({ name, args }) => {
-          if (!this.isCurrentGeneration(generation)) {
+          if (!this.isCurrentGeneration(generation) || this.state !== 'ready') {
             throw new Error(`MCP server ${this.server.name} runtime changed before tool ${name} could start.`)
           }
           if (!connectionIdentity) {
@@ -385,27 +376,23 @@ class McpServerRuntime {
           if (owner && args && typeof args === 'object') progressOwners.set(args, owner)
           mcpServerLog('debug', this.server, 'MCP tool call started.', { tool: name, args })
         },
-        afterToolCall: ({ name, args }) => {
+        afterToolCall: ({ name, args, failed }) => {
           if (args && typeof args === 'object') progressOwners.delete(args)
           if (!this.isCurrentGeneration(generation)) return
           this.lastCheckedAt = statusTime()
-          mcpServerLog('debug', this.server, 'MCP tool call completed.', { tool: name })
+          mcpServerLog('debug', this.server, failed ? 'MCP tool call failed.' : 'MCP tool call completed.', { tool: name })
         }
       })
       connectionIdentity = created.connectionIdentity
       client = created.client
       this.clients.add(client)
       this.client = client
-      const byServer = await client.initializeConnections()
+      const tools = await client.initialize()
       if (!this.isCurrentGeneration(generation)) {
         await this.closeClient(client)
         return
       }
-      const tools = byServer[this.server.id] ?? []
-      if (connectionErrors.length > 0) {
-        throw new Error(connectionErrors.map((item) => item.error).join('\n'))
-      }
-      this.tools = tools.map((tool) => wrapMcpTool(tool as StructuredToolInterface,
+      this.tools = tools.map((tool) => wrapMcpTool(tool,
         (error) => this.handleToolFailure(error, generation),
         () => {
           this.activeInvocations += 1
@@ -501,7 +488,7 @@ class McpServerRuntime {
 
   private scheduleRecovery(reason: McpRecoverReason, overrideDelayMs?: number): boolean {
     if (this.state === 'stopped' || this.recoveryTimer) return false
-    const waitForInvocations = reason === 'tools_changed' || reason === 'ping_failed' || reason === 'tool_failed'
+    const waitForInvocations = reason === 'tools_changed' || reason === 'ping_failed' || reason === 'tool_failed' || reason === 'connection_closed'
     if (waitForInvocations && this.activeInvocations > 0) {
       this.pendingRecoveryReason = reason
       return true
@@ -574,7 +561,7 @@ class McpServerRuntime {
     }
   }
 
-  private async closeClients(clients: Iterable<MultiServerMCPClient>): Promise<unknown[]> {
+  private async closeClients(clients: Iterable<McpRuntimeConnection>): Promise<unknown[]> {
     const closed = await Promise.allSettled(Array.from(clients).map((client) => (
       this.closeClient(client, true)
     )))
@@ -893,7 +880,7 @@ class McpRuntimeManager {
       servers: Array.from(this.runtimes.values()).map((runtime) => runtime.status()),
       loaded: result.loaded,
       errors: result.errors,
-      tools: result.tools.map(serializeStructuredTool),
+      tools: result.tools.map(serializeToolDefinition),
       toolNames: result.tools.map((tool) => tool.name)
     }
   }

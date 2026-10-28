@@ -1,4 +1,4 @@
-import { tool, type StructuredToolInterface } from '@langchain/core/tools'
+import { defineContentTool, type ToolDefinition } from '../../runtime/toolDefinition'
 import { resolve } from 'node:path'
 import { z } from 'zod/v3'
 import { assistantNewAvatarPathKey, updateConfigValue } from '../config/appConfig'
@@ -74,12 +74,12 @@ async function applyConfigValue(input: {
   })
 }
 
-export function createConfigTools(primaryFolder: string): StructuredToolInterface[] {
+export function configToolDefinitions(primaryFolder: string): ToolDefinition[] {
   return [
-    tool((input) => applyConfigValue(input, primaryFolder), {
+    defineContentTool({
       name: 'update_config',
       description: 'Update one supported application configuration value only when the user explicitly asks to change it. Most values persist; profile.assistant.new_avatar_path submits a one-time avatar request and is cleared after the attempt. Set it to an image path to replace the avatar or to "default" to restore the default avatar. The only supported config document is settings. Use a dot-separated snake_case key from settings.json. Pass the new value itself in value; never serialize it into JSON text. Arrays and objects replace the complete value atomically.',
-      schema: z.object({
+      inputSchema: z.object({
         summary: toolSummarySchema,
         config: z.enum(['settings']).describe('Configuration document to update. Currently only settings is supported.'),
         key: z.string().trim().min(1).describe('Existing dot-separated snake_case path inside settings.json. profile.assistant.new_avatar_path is a one-time avatar request: use an image path to replace the avatar or "default" to restore it, and Anas clears the value after the attempt. Other examples include theme, profile.user.preferred_name, speech_reply.enabled, and environment_context.custom_information.'),
@@ -90,7 +90,8 @@ export function createConfigTools(primaryFolder: string): StructuredToolInterfac
           + 'an object uses value: {"enabled": true}. '
           + 'Do not add quote characters around a string, and do not pass an array or object as a string.'
         )
-      })
+      }),
+      execute: (input) => applyConfigValue(input, primaryFolder)
     })
   ]
 }

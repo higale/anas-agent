@@ -1,17 +1,15 @@
+import { AgentStorage } from './agentStorage'
 import { describe, expect, it, vi } from 'vitest'
-import { HumanMessage, AIMessage, mapStoredMessageToChatMessage } from '@langchain/core/messages'
-import { Command, interrupt, MemorySaver } from '@langchain/langgraph'
-import { createAgent, createMiddleware, FakeToolCallingModel } from 'langchain'
 import { createPatch } from 'diff'
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { captureCodeReview, codeReviewPrompt, validateCodeReviewSnapshot } from './codeReview'
-import { codeReviewResponseFormat, createCodeReviewMiddleware, reviewSnapshotForIntent } from './codeReviewMiddleware'
-import { reviewLocations, type CodeReviewReport } from '@shared/codeReview'
-import { toAgentMessage } from './messageMapper'
-import type { AgentDatabase } from './agentDatabase'
-import { isModelSelectionError } from './modelSelection'
+import { captureCodeReview, codeReviewPrompt } from './codeReview'
+import { validateCodeReviewSnapshot } from '../../runtime/codeReviewReport'
+import { reviewLocations } from '@shared/codeReview'
+import type { AgentApplicationReadModel } from './agentApplicationTypes'
+import { encodeConversationMessage, decodeConversationMessage } from '../../runtime/conversationStorage'
+import { presentConversationMessage } from './conversationPresentation'
 
 const mocks = vi.hoisted(() => ({ project: vi.fn(), git: vi.fn() }))
 vi.mock('../projectStore', () => ({ getProject: mocks.project }))
@@ -26,7 +24,7 @@ function source(overrides: Record<string, unknown> = {}) {
       readRoundContent: vi.fn(() => ({ status: 'ready', path: '/project/a.ts', before: 'const a = 1\n', after: 'const a = 2\n', beforeExists: true, afterExists: true }))
     }
 
-  } as unknown as AgentDatabase
+  } as unknown as AgentApplicationReadModel
 }
 const snapshot = () => captureCodeReview(source(), request, 'project')
 
@@ -79,116 +77,32 @@ describe('code review scope capture', () => {
     expect(value.description).toContain(`${'b'.repeat(40)} → ${'c'.repeat(40)}`)
     expect(mocks.git).toHaveBeenLastCalledWith(expect.objectContaining({ after: 20, version }), expect.any(AbortSignal))
   })
-  it('regeneration uses the original checkpoint scope, not today’s files', async () => {
-    const value = await snapshot()
-    const message = new HumanMessage({ content: codeReviewPrompt(value), additional_kwargs: { anas_code_review_scope: value } })
-    expect(reviewSnapshotForIntent({ kind: 'regeneration', message: message.toDict() })).toEqual(value)
+  it('regenerates with the saved review scope instead of recapturing current files', async () => {
+    const value = await snapshot(), root = await mkdtemp(join(tmpdir(), 'anas-native-review-regenerate-'))
+    const storage = AgentStorage.openNative(root), thread = storage.createThread()
+    const database = storage.conversationForThread(thread.id), owner = { threadId: thread.id, runId: 'review' }
+    try {
+      database.runs.createRun({ ...owner, operation: 'agent', message: { id: 'review:input', value: { id: 'review:input', kind: 'user',
+        content: codeReviewPrompt(value), context: { runId: owner.runId, reviewScope: value } } } })
+      await database.runs.enter('input', owner)
+      const scope = () => ({ ...owner, expectedRevisionId: database.runs.store.load(thread.id)!.revisionId })
+      database.runs.store.acceptModel(scope(), { id: 'answer', value: { kind: 'assistant', content: 'Saved review' } }, [], { modelCalls: 1, todos: [] })
+      database.runs.store.finish(scope(), 'completed')
+      database.history.commit(database.history.prepare({ threadId: thread.id, messageId: 'review:input', kind: 'regenerate', runId: 'regenerated' }))
+      const input = database.runs.readRunInput({ threadId: thread.id, runId: 'regenerated' })!
+      expect(validateCodeReviewSnapshot(input.value.context?.reviewScope)).toEqual(value)
+      expect(input.value.content).toBe(codeReviewPrompt(value))
+    } finally { storage.close(); await rm(root, { recursive: true, force: true }) }
   })
 
-  it('projects the full review user message from checkpoint content without substituting a display title', async () => {
+  it('projects the full review user message without substituting a display title', async () => {
     const value = await snapshot(), prompt = codeReviewPrompt(value)
-    const stored = new HumanMessage({ content: prompt,
-      additional_kwargs: { anas_display_text: '代码审核', anas_code_review_scope: value } }).toDict()
-    const message = mapStoredMessageToChatMessage(stored)
-    const projected = toAgentMessage(message, 'review-input')
-    expect(projected.content).toEqual([{ type: 'text', text: message.text }])
+    const message = decodeConversationMessage(encodeConversationMessage({ kind: 'user', content: prompt,
+      context: { displayText: '代码审核', reviewScope: value } }))
+    const projected = presentConversationMessage(message, 'review-input')
     expect(projected.content).toEqual([{ type: 'text', text: prompt }])
     expect(prompt).toContain(value.files[0].patch)
     expect(projected.skillInvocation).toBeUndefined()
-  })
-})
-
-describe('framework-native structured review', () => {
-  it('resumes after the model checkpoint without regenerating the report or relying on ephemeral output', async () => {
-    const scope = await snapshot(), format = codeReviewResponseFormat(scope), checkpointer = new MemorySaver()
-    const report = { scope_id: scope.id, summary: 'Stored review', findings: [], limitations: [] }
-    const finalization = createMiddleware({ name: 'FinalizeReview', afterAgent: () => { interrupt('Pause after the report checkpoint'); return undefined } })
-    const model = new FakeToolCallingModel({ toolCalls: [[{ id: 'report', name: format[0].name, args: report }]] })
-    const config = { configurable: { thread_id: 'resume-review' } }
-    const first = createAgent({ model, checkpointer, responseFormat: format,
-      middleware: [finalization, createCodeReviewMiddleware(scope, 'run', () => 100_000, () => ({ protocol: 'openai_chat_completions' }))] })
-    await first.invoke({ messages: [new HumanMessage(codeReviewPrompt(scope))] }, config)
-    const pending = await first.getState(config) as { tasks: Array<{ interrupts?: unknown[] }> }
-    expect(pending.tasks.some((task) => task.interrupts?.length)).toBe(true)
-    const unusedModel = new FakeToolCallingModel({ toolCalls: [[]] })
-    const resumed = createAgent({ model: unusedModel, checkpointer, responseFormat: codeReviewResponseFormat(scope),
-      middleware: [finalization, createCodeReviewMiddleware(scope, 'run', () => 100_000, () => ({ protocol: 'openai_chat_completions' }))] })
-    const result = await resumed.invoke(new Command({ resume: true }), config)
-    expect(unusedModel.index).toBe(0)
-    expect(result.messages.filter((message) => message.id === 'run:review-report')).toHaveLength(1)
-    expect(toAgentMessage(result.messages.at(-1)!, 'final').codeReview?.report).toEqual(report)
-  })
-  it('does not checkpoint an unanswered investigation call beside a final report', async () => {
-    const scope = await snapshot(), format = codeReviewResponseFormat(scope)
-    const model = new FakeToolCallingModel({ toolCalls: [[
-      { name: format[0].name, id: 'report', args: { scope_id: scope.id, summary: 'Done', findings: [], limitations: [] } },
-      { name: 'read_file', id: 'read', args: { path: '/repo/a' } }
-    ]] })
-    const agent = createAgent({ model, responseFormat: format, middleware: [createCodeReviewMiddleware(scope, 'run', () => 100_000, () => ({ protocol: 'openai_chat_completions' }))] })
-    await expect(agent.invoke({ messages: [new HumanMessage('Review')] })).rejects.toThrow('separately')
-  })
-  it('does not mistake a plain answer for a completed structured review', async () => {
-    const scope = await snapshot()
-    const agent = createAgent({ model: new FakeToolCallingModel({ toolCalls: [[]] }), responseFormat: codeReviewResponseFormat(scope), middleware: [createCodeReviewMiddleware(scope, 'run', () => 100_000, () => ({ protocol: 'openai_chat_completions' }))] })
-    await expect(agent.invoke({ messages: [new HumanMessage('Review')] })).rejects.toThrow('without the required structured report')
-  })
-  it('keeps a framework v1 report readable after adding the review presentation', async () => {
-    const scope = await snapshot(), format = codeReviewResponseFormat(scope)
-    const report = { scope_id: scope.id, summary: 'No regressions.', findings: [], limitations: [] }
-    const model = new FakeToolCallingModel({ toolCalls: [[{ id: 'report', name: format[0].name, args: report }]] })
-    const nativeBlocks = createMiddleware({ name: 'StandardReportContent', wrapModelCall: async (request, handler) => {
-      const response = await handler(request)
-      if (response && typeof response === 'object' && 'messages' in response && Array.isArray(response.messages)) {
-        const last = response.messages.at(-1)
-        if (AIMessage.isInstance(last)) {
-          last.content = [{ type: 'text', text: last.text }]
-          last.response_metadata = { ...last.response_metadata, output_version: 'v1' }
-        }
-      }
-      return response
-    } })
-    const agent = createAgent({ model, responseFormat: format,
-      middleware: [createCodeReviewMiddleware(scope, 'run', () => 100_000, () => ({ protocol: 'openai_chat_completions' })), nativeBlocks] })
-    const result = await agent.invoke({ messages: [new HumanMessage('Review')] })
-    expect(result.messages.at(-1)!.text).toBe('No regressions.')
-    expect(toAgentMessage(result.messages.at(-1)!, 'final').codeReview?.report).toEqual(report)
-  })
-  it('checkpoints the report with its final model message and keeps normal later replies ordinary', async () => {
-    const scope = await snapshot(), format = codeReviewResponseFormat(scope)
-    const report: CodeReviewReport = { scope_id: scope.id, summary: 'No confirmed defects.', findings: [], limitations: ['Tests not run.'] }
-    const model = new FakeToolCallingModel({ toolCalls: [[{ name: format[0].name, id: 'report', args: report }]] })
-    const checkpointer = new MemorySaver(), config = { configurable: { thread_id: 'review' } }
-    const agent = createAgent({ model, checkpointer, responseFormat: format,
-      middleware: [createCodeReviewMiddleware(scope, 'review-run', () => 100_000, () => ({ protocol: 'openai_chat_completions' }))] })
-    await agent.invoke({ messages: [new HumanMessage(codeReviewPrompt(scope))] }, config)
-    const state = await agent.getState(config) as { values: { messages: AIMessage[] } }
-    const final = (state.values.messages as AIMessage[]).at(-1)!
-    expect(final.id).toBe('review-run:review-report')
-    expect(toAgentMessage(final, 'fallback').codeReview?.report).toEqual(report)
-    expect(toAgentMessage(final, 'fallback').content).toEqual([{ type: 'text', text: 'No confirmed defects.\n\nTests not run.' }])
-    const normal = createAgent({ model: new FakeToolCallingModel({ toolCalls: [[]] }), checkpointer })
-    const next = await normal.invoke({ messages: [new HumanMessage('Thanks')] }, config)
-    expect(toAgentMessage(next.messages.at(-1)!, 'next').codeReview).toBeUndefined()
-    expect(next.messages.filter((message) => message.id === final.id)).toHaveLength(1)
-  })
-  it('rejects a scope that leaves insufficient model context before making a model call', async () => {
-    const scope = await snapshot(), model = new FakeToolCallingModel({ toolCalls: [[]] })
-    const agent = createAgent({ model, responseFormat: codeReviewResponseFormat(scope), middleware: [createCodeReviewMiddleware(scope, 'run', () => 20, () => ({ protocol: 'openai_chat_completions' }))] })
-    const failure = await agent.invoke({ messages: [new HumanMessage('Review')] }).catch((error: unknown) => error)
-    expect(failure).toBeInstanceOf(Error)
-    expect((failure as Error).message).toContain('too large')
-    expect(isModelSelectionError(failure)).toBe(true)
-    expect(model.index).toBe(0)
-  })
-  it('reserves configured Responses instructions before accepting the review scope', async () => {
-    const scope = await snapshot(), model = new FakeToolCallingModel({ toolCalls: [[]] })
-    const agent = createAgent({ model, responseFormat: codeReviewResponseFormat(scope), middleware: [
-      createCodeReviewMiddleware(scope, 'run', () => 100_000,
-        () => ({ protocol: 'openai_responses', parameters: { instructions: 'x'.repeat(260_000) } }))
-    ] })
-    const failure = await agent.invoke({ messages: [new HumanMessage('Review')] }).catch((error: unknown) => error)
-    expect(isModelSelectionError(failure)).toBe(true)
-    expect(model.index).toBe(0)
   })
   it('validates file identity and hunk line ranges without converting uncertainty into clickable locations', async () => {
     const scope = await snapshot()

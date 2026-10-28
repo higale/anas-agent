@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { mkdtemp, realpath, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, parse } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -121,6 +121,23 @@ describe('physical program name resolution', () => {
 })
 
 describe('application data directory', () => {
+  it.each(['win32', 'darwin', 'linux'] as const)('leaves old application data untouched on %s', async (platform) => {
+    const { dataDir, home, appMock } = await loadDataDir({ platform })
+    const originalRoots = ['.galeAnas', '.galeAnas Work', '.anas-next']
+    for (const name of originalRoots) {
+      await mkdir(join(home, name, 'config'), { recursive: true })
+      await writeFile(join(home, name, 'config', 'models.json'), 'old configuration sentinel')
+    }
+    dataDir.configureDataRuntime(['Anas'])
+    expect(dataDir.getDataDir()).toBe(join(home, '.anas'))
+    expect(appMock.setPath).toHaveBeenCalledWith('userData', join(home, '.anas', 'electron'))
+    expect(existsSync(dataDir.getConfigFile('models.json'))).toBe(false)
+    for (const name of originalRoots) {
+      expect(await readFile(join(home, name, 'config', 'models.json'), 'utf8')).toBe('old configuration sentinel')
+      expect(existsSync(join(home, name, 'electron'))).toBe(false)
+    }
+  })
+
   it('keeps catalog and conversation paths within the selected data directory', async () => {
     const { dataDir, home } = await loadDataDir()
     const selected = join(home, 'profile')
@@ -135,36 +152,36 @@ describe('application data directory', () => {
     expect(existsSync(selected)).toBe(false)
   })
 
-  it('stores packaged app data directly under .gale plus the physical program name', async () => {
+  it('keeps packaged app data under .anas even when the program is renamed', async () => {
     const { appMock, dataDir, home } = await loadDataDir({
       executablePath: '/Applications/Anas Work.app/Contents/MacOS/Anas'
     })
 
-    expect(dataDir.getDataDir()).toBe(join(home, '.galeAnas Work'))
-    expect(dataDir.getConfigFile()).toBe(join(home, '.galeAnas Work', 'config', 'settings.json'))
-    expect(dataDir.getSystemSkillsDir()).toBe(join(home, '.galeAnas Work', 'skills', '_system'))
-    expect(dataDir.getSystemPluginsDir()).toBe(join(home, '.galeAnas Work', 'plugins', '_system'))
-    expect(dataDir.getSkillExamplesDir()).toBe(join(home, '.galeAnas Work', 'examples', 'skills'))
-    expect(dataDir.getToolExamplesDir()).toBe(join(home, '.galeAnas Work', 'examples', 'tools'))
-    expect(dataDir.getPluginExamplesDir()).toBe(join(home, '.galeAnas Work', 'examples', 'plugins'))
-    expect(dataDir.getFileEditRecordsDir('conversation-1')).toBe(join(home, '.galeAnas Work', 'db', 'conversations', 'conversation-1', 'file_edits'))
-    expect(dataDir.getFileEditRecordsDir('conversation-1')).not.toContain(join('.galeAnas Work', 'tmp'))
+    expect(dataDir.getDataDir()).toBe(join(home, '.anas'))
+    expect(dataDir.getConfigFile()).toBe(join(home, '.anas', 'config', 'settings.json'))
+    expect(dataDir.getSystemSkillsDir()).toBe(join(home, '.anas', 'skills', '_system'))
+    expect(dataDir.getSystemPluginsDir()).toBe(join(home, '.anas', 'plugins', '_system'))
+    expect(dataDir.getSkillExamplesDir()).toBe(join(home, '.anas', 'examples', 'skills'))
+    expect(dataDir.getToolExamplesDir()).toBe(join(home, '.anas', 'examples', 'tools'))
+    expect(dataDir.getPluginExamplesDir()).toBe(join(home, '.anas', 'examples', 'plugins'))
+    expect(dataDir.getFileEditRecordsDir('conversation-1')).toBe(join(home, '.anas', 'db', 'conversations', 'conversation-1', 'file_edits'))
+    expect(dataDir.getFileEditRecordsDir('conversation-1')).not.toContain(join('.anas', 'tmp'))
     expect(existsSync(dataDir.getDataDir())).toBe(false)
 
     dataDir.configureDataRuntime(['Anas'])
 
     expect(existsSync(dataDir.getDataDir())).toBe(true)
     expect(existsSync(join(dataDir.getDataDir(), 'electron'))).toBe(true)
-    expect(appMock.setPath).toHaveBeenCalledWith('userData', join(home, '.galeAnas Work', 'electron'))
+    expect(appMock.setPath).toHaveBeenCalledWith('userData', join(home, '.anas', 'electron'))
   })
 
-  it('uses the logical product name in development instead of Electron', async () => {
+  it('uses the same isolated data directory during development', async () => {
     const { dataDir, home } = await loadDataDir({
       executablePath: '/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron',
       isPackaged: false
     })
 
-    expect(dataDir.getDataDir()).toBe(join(home, '.galeAnas'))
+    expect(dataDir.getDataDir()).toBe(join(home, '.anas'))
   })
 
   it('uses generated examples in development and distributed resources when packaged', async () => {

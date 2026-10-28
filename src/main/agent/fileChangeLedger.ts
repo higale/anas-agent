@@ -80,7 +80,8 @@ export interface FileChangeEvent {
 }
 
 export class FileChangeLedger {
-  constructor(private readonly database: Database.Database, private readonly onChange?: (runId: string) => void) {}
+  constructor(private readonly database: Database.Database, private readonly onChange?: (runId: string) => void,
+    private readonly readRoundSummary?: (threadId: string, runId: string) => string) {}
 
   notifyChanged(runId: string): void { this.onChange?.(runId) }
 
@@ -224,7 +225,8 @@ export class FileChangeLedger {
   }
 
   private roundSummary(threadId: string, runId: string): string {
-    // Extract only a short user-facing label. Never hydrate the checkpoint or
+    if (this.readRoundSummary) return this.readRoundSummary(threadId, runId)
+    // Extract only a short user-facing label. Never load execution history or
     // transfer attachments, tool arguments, or complete message bodies to UI.
     const body = this.database.prepare(`WITH candidate AS (SELECT entry.thread_id, entry.record_id FROM agent_message_index entry
       WHERE entry.thread_id = ? AND entry.run_id = ? AND entry.visible = 1 ORDER BY entry.position LIMIT 1)

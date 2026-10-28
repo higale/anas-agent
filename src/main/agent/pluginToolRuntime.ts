@@ -1,4 +1,4 @@
-import { DynamicStructuredTool } from '@langchain/core/tools'
+import { defineContentTool, type ToolDefinition } from '../../runtime/toolDefinition'
 import { requirePluginJson } from '@shared/plugins'
 import type { ResolvedPluginTool } from '@shared/pluginTools'
 import { invokePluginTool } from '../plugins/pluginRuntime'
@@ -6,16 +6,15 @@ import { PluginCallError } from '../plugins/pluginBackend'
 import { currentToolExecution } from './toolExecutionContext'
 import { armCurrentAgentToolEffect } from './toolEffectScope'
 
-export function createPluginTools(definitions: readonly ResolvedPluginTool[], options: {
+export function pluginToolDefinitions(definitions: readonly ResolvedPluginTool[], options: {
   preview: boolean
-}) {
-  return definitions.map(definition => new DynamicStructuredTool({
+}): ToolDefinition[] {
+  return definitions.map(definition => defineContentTool({
     name: definition.name,
     description: definition.description,
-    schema: definition.inputSchema,
-    verboseParsingErrors: true,
+    inputSchema: definition.inputSchema,
     metadata: { anasPluginTool: { pluginId: definition.pluginId, id: definition.id, effect: definition.effect } },
-    func: async (args: Record<string, unknown>) => {
+    execute: async (args: Record<string, unknown>) => {
       if (options.preview) throw new Error('Plugin tool execution is unavailable in a preview.')
       requirePluginJson(args)
       const control = currentToolExecution()

@@ -1,11 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ToolMessage } from '@langchain/core/messages'
-import { createAgent, FakeToolCallingModel } from 'langchain'
 import { UserInputService, userInputService } from './userInputService'
-import { createRuntimeTools } from '../llm/runtimeTools'
-import { supportsManagedTool } from './managedToolExecution'
+import { runtimeToolDefinitions } from '../llm/runtimeTools'
+import { nativeCapabilityFixture } from '../../test/nativeCapabilityFixture'
+import { supportsManagedTool } from './managedToolRuntime'
 import { userInputSchema } from '@shared/userInput'
-import { createToolInputErrorMiddleware } from './toolInputErrors'
 
 const questions = [{ id: 'format', question: 'Choose output', options: [{ label: 'PDF' }, { label: 'Text' }] }]
 const context = { threadId: 'thread', runId: 'run', source: { projectName: 'Project', threadTitle: 'Conversation' } }
@@ -134,20 +132,20 @@ describe('user input waiting', () => {
     { label: 'question IDs', invalid: [questions[0], { ...questions[0], id: ' format ' }], path: ['questions', 1, 'id'] },
     { label: 'option labels', invalid: [{ ...questions[0], options: [{ label: 'PDF' }, { label: ' PDF ', description: 'A duplicate choice' }] }], path: ['questions', 0, 'options', 1, 'label'] }
   ])('returns duplicate $label as a tool input error and accepts a corrected call', async ({ invalid, path }) => {
+    const h = nativeCapabilityFixture()
     vi.useFakeTimers()
     const parsed = userInputSchema.safeParse({ questions: invalid })
     expect(parsed.success).toBe(false)
     if (!parsed.success) expect(parsed.error.issues[0].path).toEqual(path)
     const controller = new AbortController()
-    const tools = await createRuntimeTools({ enabled: true, primaryFolder: '.', threadId: 'thread', runId: 'run',
+    const tools = await runtimeToolDefinitions({ enabled: true, primaryFolder: '.', threadId: h.thread.id, runId: h.run.id,
       userInputSource: async () => context.source,
       memory: false, network: false, shell: false, mcp: false, signal: controller.signal })
     const ask = tools.find(tool => tool.name === 'request_user_input')!
-    const agent = createAgent({ model: new FakeToolCallingModel({ toolCalls: [
+    const run = h.executeCalls([ask], [
       [{ id: 'invalid', name: ask.name, args: { questions: invalid } }],
       [{ id: 'corrected', name: ask.name, args: { questions } }], []
-    ] }), tools: [ask], middleware: [createToolInputErrorMiddleware()] })
-    const run = agent.invoke({ messages: [{ role: 'user', content: 'Ask me' }] })
+    ])
     // Observe rejection immediately so a regression fails without an unhandled promise.
     const settled = run.then(output => ({ output }), error => ({ error }))
     try {
@@ -158,14 +156,14 @@ describe('user input waiting', () => {
       userInputService.shown(id)
       userInputService.respond(id, answered)
       const output = await run
-      const results = output.messages.filter(ToolMessage.isInstance)
-      expect(results.map(result => result.tool_call_id)).toEqual(['invalid', 'corrected'])
-      expect(results[0].status).toBe('error')
+      const results = output.messages.filter(message => message.value.kind === 'tool').map(message => message.value)
+      expect(results.map(result => result.resultFor)).toEqual(['invalid', 'corrected'])
+      expect(results[0].resultStatus).toBe('error')
       expect(results[0].content).toContain('unique')
       expect(JSON.parse(String(results[1].content))).toEqual(answered)
-      expect(output.messages.at(-1)?.type).toBe('ai')
+      expect(output.messages.at(-1)?.value.kind).toBe('assistant')
       expect(userInputService.snapshot().requests).toEqual([])
-    } finally { controller.abort(); await settled }
+    } finally { controller.abort(); await settled; vi.useRealTimers(); await h.close() }
   })
 
   it('preserves queued questions until they can be displayed', async () => {
@@ -188,19 +186,18 @@ describe('user input waiting', () => {
   })
 
   it.each(['answered', 'timed_out'] as const)('returns %s to the native model loop without detaching', async status => {
+    const h = nativeCapabilityFixture()
     vi.useFakeTimers()
     const controller = new AbortController()
-    const tools = await createRuntimeTools({ enabled: true, primaryFolder: '.', threadId: 'thread', runId: 'run',
+    const tools = await runtimeToolDefinitions({ enabled: true, primaryFolder: '.', threadId: h.thread.id, runId: h.run.id,
       userInputSource: async () => context.source,
       memory: false, network: false, shell: false, mcp: false, signal: controller.signal, backgroundTools: true })
     const ask = tools.find(tool => tool.name === 'request_user_input')!
     expect(supportsManagedTool(ask)).toBe(false)
-    const agent = createAgent({ model: new FakeToolCallingModel({
-      toolCalls: [[{ id: 'ask-1', name: ask.name, args: { questions, timeout_seconds: 30 } }], []]
-    }), tools: [ask] })
     try {
       let finished = false
-      const run = agent.invoke({ messages: [{ role: 'user', content: 'Ask me' }] }).then(value => { finished = true; return value })
+      const run = h.executeCalls([ask], [[{ id: 'ask-1', name: ask.name, args: { questions, timeout_seconds: 30 } }]], true)
+        .then(value => { finished = true; return value })
       for (let i = 0; i < 30 && !userInputService.snapshot().requests.length; i++) await vi.advanceTimersByTimeAsync(0)
       const id = userInputService.snapshot().requests[0].id
       expect(userInputService.snapshot().requests[0].source).toEqual(context.source)
@@ -210,11 +207,13 @@ describe('user input waiting', () => {
       if (status === 'answered') userInputService.respond(id, answered)
       else await vi.advanceTimersByTimeAsync(19_000)
       const output = await run
-      const toolResult = output.messages.find(ToolMessage.isInstance)!
-      expect(toolResult.tool_call_id).toBe('ask-1')
+      const toolResult = output.messages.find(message => message.value.kind === 'tool')!.value
+      expect(toolResult.resultFor).toBe('ask-1')
       expect(JSON.parse(String(toolResult.content)).status).toBe(status)
-      expect(output.messages.at(-1)?.type).toBe('ai')
+      expect(output.messages.at(-1)?.value.kind).toBe('assistant')
+      expect(h.database.execution.store.load(h.thread.id)!.context.modelCalls).toBe(2)
+      expect(h.database.managed.listUnresolvedManagedCalls(h.run.id)).toEqual([])
       expect(userInputService.snapshot().requests).toEqual([])
-    } finally { controller.abort() }
+    } finally { controller.abort(); vi.useRealTimers(); await h.close() }
   })
 })

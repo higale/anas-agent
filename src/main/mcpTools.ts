@@ -1,5 +1,8 @@
-import { MultiServerMCPClient, type ClientConfig, type Connection } from '@langchain/mcp-adapters'
-import type { StructuredToolInterface } from '@langchain/core/tools'
+import { defineTool, type ToolDefinition } from '../runtime/toolDefinition'
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { CallToolResultSchema, type LoggingMessageNotification, type Progress, type Tool } from '@modelcontextprotocol/sdk/types.js'
+import { McpSession, listMcpTools, type McpConnection } from '../mcp/session'
+import { projectMcpToolResult } from '../mcp/toolResult'
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { processEnvironment } from './config/apiKeys'
@@ -7,7 +10,7 @@ import type { McpServerConfig } from './config/appConfig'
 import type { McpServerType } from '@shared/types'
 
 export interface McpToolLoadResult {
-  tools: StructuredToolInterface[]
+  tools: ToolDefinition[]
   loaded: Array<{ id: string; index: number; name: string; toolCount: number; toolNames: string[] }>
   errors: Array<{ id: string; index: number; name: string; error: string }>
   ping(): Promise<void>
@@ -30,30 +33,34 @@ export interface McpConnectionIdentity {
 }
 
 export interface McpConnectionSnapshot {
-  readonly connection: Connection
+  readonly connection: McpConnection
   readonly identity: McpConnectionIdentity
 }
 
 export interface McpClientForServer {
-  readonly client: MultiServerMCPClient
+  readonly client: McpRuntimeConnection
   readonly connectionIdentity: McpConnectionIdentity
 }
 
-type McpClientHooks = Partial<Pick<
-  ClientConfig,
-  'afterToolCall' | 'beforeToolCall' | 'onConnectionError' | 'onMessage' | 'onProgress' | 'onToolsListChanged'
->>
-
-const stdioMcpRestart = {
-  enabled: true,
-  maxAttempts: 3,
-  delayMs: 1000
+export interface McpRuntimeConnection {
+  initialize(): Promise<ToolDefinition[]>
+  ping(options: { timeout: number }): Promise<unknown>
+  close(): Promise<void>
 }
 
-const remoteMcpReconnect = {
-  enabled: true,
-  maxAttempts: 5,
-  delayMs: 2000
+interface McpToolInvocation {
+  name: string
+  args: Record<string, unknown>
+}
+
+export interface McpClientHooks {
+  beforeToolCall?(call: McpToolInvocation): void | Promise<void>
+  afterToolCall?(call: McpToolInvocation & { failed?: boolean }): void | Promise<void>
+  onProgress?(progress: Progress, source: McpToolInvocation & { type: 'tool'; server: string }): void
+  onConnectionError?(failure: { serverName: string; error: Error }): void
+  onConnectionClosed?(): void
+  onMessage?(message: LoggingMessageNotification): void
+  onToolsListChanged?(): void
 }
 
 function processEnv(): Record<string, string> {
@@ -114,10 +121,7 @@ export function mcpConnectionSnapshotForServer(server: McpServerConfig): McpConn
         ...processEnv(),
         ...server.env
       },
-      stderr: 'inherit',
-      restart: stdioMcpRestart,
-      defaultToolTimeout: server.timeoutMs
-    } satisfies Connection
+    } satisfies McpConnection
     const endpoint = Object.freeze({
       command: connection.command,
       argumentCount: connection.args.length,
@@ -134,7 +138,7 @@ export function mcpConnectionSnapshotForServer(server: McpServerConfig): McpConn
           arguments: connection.args,
           workingDirectory: connection.cwd,
           environment: connection.env,
-          defaultToolTimeout: connection.defaultToolTimeout
+          defaultToolTimeout: server.timeoutMs
         })
       })
     })
@@ -143,12 +147,9 @@ export function mcpConnectionSnapshotForServer(server: McpServerConfig): McpConn
   if (!server.url) return undefined
   const connection = {
     transport: server.type,
-    automaticSSEFallback: false,
     url: server.url,
-    headers: authHeaders(server.apiKey),
-    reconnect: remoteMcpReconnect,
-    defaultToolTimeout: server.timeoutMs
-  } satisfies Connection
+    headers: authHeaders(server.apiKey)
+  } satisfies McpConnection
   let endpoint: McpConnectionEndpoint
   try {
     const parsed = new URL(connection.url)
@@ -169,10 +170,11 @@ export function mcpConnectionSnapshotForServer(server: McpServerConfig): McpConn
       endpoint,
       fingerprint: connectionFingerprint({
         transport: connection.transport,
-        automaticSSEFallback: connection.automaticSSEFallback,
+        // Preserve the existing durable identity: explicit transport never falls back.
+        automaticSSEFallback: false,
         url: connection.url,
         headers: connection.headers ?? {},
-        defaultToolTimeout: connection.defaultToolTimeout
+        defaultToolTimeout: server.timeoutMs
       })
     })
   })
@@ -184,17 +186,53 @@ export function createMcpClientForServer(server: McpServerConfig, hooks: McpClie
     throw new Error(server.type === 'stdio' ? 'Missing command.' : 'Missing URL.')
   }
 
+  const session = new McpSession(snapshot.connection, {
+    onError: error => hooks.onConnectionError?.({ serverName: server.id, error }),
+    onClose: hooks.onConnectionClosed,
+    onMessage: hooks.onMessage,
+    onToolsChanged: hooks.onToolsListChanged
+  })
   return Object.freeze({
-    client: new MultiServerMCPClient({
-      mcpServers: {
-        [server.id]: snapshot.connection
+    client: {
+      initialize: async () => {
+        await session.connect()
+        return mcpToolDefinitions(server.id, session.client, await listMcpTools(session.client), { ...hooks, timeoutMs: server.timeoutMs })
       },
-      throwOnLoadError: false,
-      prefixToolNameWithServerName: true,
-      additionalToolNamePrefix: 'mcp',
-      useStandardContentBlocks: true,
-      ...hooks
-    }),
+      ping: (options: { timeout: number }) => session.client.ping(options),
+      close: () => session.close()
+    },
     connectionIdentity: snapshot.identity
   })
+}
+
+/** Native MCP capabilities share the host tool result and cancellation contract. */
+export function mcpToolDefinitions(server: string, client: Pick<Client, 'callTool' | 'readResource'>, definitions: Tool[],
+  options: McpClientHooks & { timeoutMs?: number; imageFormat?: 'native' | 'data_url' } = {}): ToolDefinition[] {
+  return definitions.map(definition => defineTool({
+    name: `mcp__${server}__${definition.name}`,
+    description: definition.description ?? '',
+    inputSchema: definition.inputSchema,
+    metadata: { annotations: definition.annotations },
+    execute: async (args, context) => {
+      context.signal?.throwIfAborted()
+      const invocation = { name: definition.name, args }
+      let failed = true
+      try {
+        await options.beforeToolCall?.(invocation)
+        context.signal?.throwIfAborted()
+        const timeout = context.timeoutMs ?? options.timeoutMs
+        const result = await client.callTool({ name: definition.name, arguments: args }, undefined, {
+          signal: context.signal,
+          ...(typeof timeout === 'number' && timeout > 0 ? { timeout } : {}),
+          onprogress: progress => options.onProgress?.(progress, { ...invocation, type: 'tool', server })
+        })
+        const output = await projectMcpToolResult(CallToolResultSchema.parse(result), { server, tool: definition.name, client,
+          signal: context.signal, imageFormat: options.imageFormat })
+        failed = false
+        return { content: output.content, artifact: output.artifacts }
+      } finally {
+        await options.afterToolCall?.({ ...invocation, failed })
+      }
+    }
+  }))
 }

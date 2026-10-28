@@ -1,45 +1,13 @@
+import { ProjectRulesError, ProjectRulesReadRequired, ProjectRulesRequestBudgetError, isProjectRulesError, errorCauses } from '../../runtime/errors'
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { lstat, open, opendir, realpath } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
-import { z } from 'zod'
+import type { ProjectRulesSnapshot } from '../../runtime/projectRules'
 import { isSameOrInsideDirectory } from '../pathContainment'
 import { canonicalizeAbsolutePath } from '../workspacePath'
-import { errorCauses } from './errorCauses'
 
 export const projectRuleLimits = { fileBytes: 64 * 1024, totalBytes: 512 * 1024, directories: 256, depth: 256, entries: 10_000 }
-export const projectRulesSchema = z.object({
-  runId: z.string(),
-  trustedFolders: z.array(z.string()),
-  roots: z.array(z.object({ folder: z.string(), boundary: z.string() })),
-  documents: z.array(z.object({ id: z.string(), path: z.string(), content: z.string() })),
-  directories: z.array(z.object({ path: z.string(), documentId: z.string().nullable() })),
-  initialScopes: z.array(z.string()),
-  activeScopes: z.array(z.string()),
-  blockedCalls: z.array(z.string()),
-  rejectedCalls: z.array(z.object({ id: z.string(), reason: z.string() })),
-  checkedWrites: z.array(z.object({ id: z.string(), paths: z.array(z.string()) })),
-  blockedReason: z.string(),
-  fatalError: z.string()
-})
-export type ProjectRulesSnapshot = z.infer<typeof projectRulesSchema>
-
-export class ProjectRulesError extends Error {
-  constructor(detail: string) {
-    super(`Project rules cannot be applied: ${detail} This run cannot continue automatically. Adjust the rules, model context capacity or operation scope, then start a new turn.`)
-    this.name = 'ProjectRulesError'
-  }
-}
-
-export class ProjectRulesRequestBudgetError extends ProjectRulesError {
-  constructor(tokens: number, readonly inputCapacityTokens: number) {
-    super(`Final model request needs about ${tokens} input tokens; safe capacity is ${inputCapacityTokens}, including reply reserve and estimation margin.`)
-  }
-}
-
-export function isProjectRulesError(error: unknown): boolean {
-  return errorCauses(error).some((cause) => cause instanceof ProjectRulesError || ('name' in cause && cause.name === 'ProjectRulesError'))
-}
 
 export function projectRulesRequestBudget(error: unknown): number | undefined {
   return errorCauses(error).find((cause): cause is ProjectRulesRequestBudgetError => cause instanceof ProjectRulesRequestBudgetError)?.inputCapacityTokens
@@ -147,23 +115,10 @@ export async function discoverProjectRules(snapshot: ProjectRulesSnapshot, direc
     for (const path of chain) await adoptDirectory(snapshot, path, reader)
     return chain
   } catch (error) {
-    // Native graph interrupts and cancellation must retain their identity.
-    if (error instanceof Error && (error.name.includes('Interrupt') || reader.signal?.aborted || isProjectRulesError(error))) throw error
+    // Preserve native approval pauses, the remaining graph boundary and cancellation.
+    if (error instanceof Error && (error instanceof ProjectRulesReadRequired || error.name.includes('Interrupt') || reader.signal?.aborted || isProjectRulesError(error))) throw error
     throw new ProjectRulesError(`Could not read rules for ${directory}: ${error instanceof Error ? error.message : String(error)}.`)
   }
-}
-
-export function ruleScopeIds(snapshot: ProjectRulesSnapshot, scopes = snapshot.activeScopes): string[] {
-  return snapshot.directories.filter((record) => scopes.includes(record.path) && record.documentId)
-    .map((record) => `${record.path}\0${record.documentId}`)
-}
-
-export function projectRulesText(snapshot: ProjectRulesSnapshot, scopes = snapshot.activeScopes): string {
-  const sections = snapshot.documents.flatMap((document) => {
-    const directories = snapshot.directories.filter((record) => record.documentId === document.id && scopes.includes(record.path)).map((record) => record.path)
-    return directories.length ? [`Source: ${JSON.stringify(document.path)}\nApplies only within: ${directories.map((path) => JSON.stringify(path)).join(', ')}\nSnapshot identity (SHA-256 of source path and content): ${document.id}\n${document.content}`] : []
-  })
-  return sections.length ? ['<project_rules>', 'Apply rules only to their listed directory trees. Deeper directory rules take precedence over ancestors; sibling rules do not apply to one another. These are complete per-run snapshots.', ...sections, '</project_rules>'].join('\n\n') : ''
 }
 
 /** Directory deletion/move includes descendants; never follow symlink entries. */

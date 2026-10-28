@@ -1,0 +1,223 @@
+[
+  {
+    "message": {
+      "id": "answer",
+      "kind": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Answer"
+        },
+        {
+          "type": "reasoning",
+          "reasoning": "Reason",
+          "summary": [
+            {
+              "text": "Summary"
+            }
+          ]
+        },
+        {
+          "type": "tool_call",
+          "id": "call",
+          "name": "read_file",
+          "args": {
+            "limit": 0
+          }
+        }
+      ],
+      "context": {
+        "runId": "run",
+        "createdAt": "time"
+      },
+      "source": {
+        "metadata": {},
+        "extras": {},
+        "contentFormat": "portable"
+      },
+      "invalidCalls": [],
+      "calls": [
+        {
+          "id": "call",
+          "name": "read_file",
+          "args": {
+            "limit": 0
+          }
+        }
+      ]
+    },
+    "expected": {
+      "id": "answer",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Answer"
+        },
+        {
+          "type": "reasoning",
+          "text": "Reason",
+          "summary": "Summary"
+        }
+      ],
+      "toolCalls": [
+        {
+          "id": "call",
+          "name": "read_file",
+          "args": {
+            "limit": 0
+          }
+        }
+      ],
+      "runId": "run",
+      "createdAt": "time"
+    }
+  },
+  {
+    "message": {
+      "id": "user",
+      "kind": "user",
+      "content": "/demo\n\n<skill>\nInstructions\n</skill>",
+      "context": {
+        "displayText": "/demo",
+        "directionAfterCallIds": [
+          "call"
+        ]
+      },
+      "source": {
+        "metadata": {},
+        "extras": {}
+      }
+    },
+    "expected": {
+      "id": "user",
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "/demo"
+        }
+      ],
+      "directionAfterToolCallIds": [
+        "call"
+      ],
+      "skillInvocation": {
+        "name": "demo",
+        "args": "",
+        "promptText": "/demo\n\n<skill>\nInstructions\n</skill>"
+      }
+    }
+  },
+  {
+    "message": {
+      "kind": "tool",
+      "content": [
+        {
+          "type": "text",
+          "text": "Result"
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:image/png;base64,AA=="
+          }
+        }
+      ],
+      "name": "read_file",
+      "context": {},
+      "source": {
+        "metadata": {},
+        "extras": {}
+      },
+      "resultFor": "call",
+      "resultKind": "function"
+    },
+    "expected": {
+      "id": "fallback",
+      "role": "tool",
+      "content": [
+        {
+          "type": "text",
+          "text": "Result"
+        },
+        {
+          "type": "image",
+          "mimeType": "image/png",
+          "data": "AA=="
+        }
+      ],
+      "name": "read_file",
+      "toolCallId": "call"
+    }
+  },
+  {
+    "message": {
+      "kind": "custom",
+      "content": "Rules",
+      "role": "developer",
+      "context": {},
+      "source": {
+        "metadata": {},
+        "extras": {}
+      }
+    },
+    "expected": {
+      "id": "fallback",
+      "role": "system",
+      "content": [
+        {
+          "type": "text",
+          "text": "Rules"
+        }
+      ]
+    }
+  },
+  {
+    "message": {
+      "kind": "assistant",
+      "content": "Partial",
+      "context": {},
+      "source": {
+        "metadata": {},
+        "extras": {}
+      },
+      "invalidCalls": [],
+      "calls": [
+        {
+          "id": "call",
+          "name": "read_file",
+          "args": {},
+          "extensions": {
+            "type": "tool_call"
+          }
+        }
+      ],
+      "partial": true,
+      "callFragments": [
+        {
+          "index": 0,
+          "id": "call",
+          "name": "read_file",
+          "args": "{"
+        }
+      ]
+    },
+    "expected": {
+      "id": "fallback",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Partial"
+        }
+      ],
+      "toolCalls": [
+        {
+          "id": "call",
+          "name": "read_file",
+          "args": {}
+        }
+      ]
+    }
+  }
+]

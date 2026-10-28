@@ -21,14 +21,14 @@ GitHub 目标仓库：`higale/anas-agent`。日常开发仓库与公开仓库拥
 
 ## 后续发布的升级提醒
 
-后续每份 Release 说明的中英文部分都保留简短的跨版本提醒，分别链接 [4.x 升级数据说明](../data/help/UPGRADE_TO_4.zh-CN.md)和[英文版](../data/help/UPGRADE_TO_4.en.md)。说明从 4.0 之前直接升级到当前 4.x 时，旧对话和长期记忆不再可用，其他可恢复的数据按文档手动处理；不要将其写成每次 4.x 更新都会丢失数据。本次发布另有兼容性影响时，单独说明，不能用历史提醒代替。
+后续每份 Release 说明的中英文部分都保留简短的跨版本提醒，分别链接 [4.x 升级数据说明](../data/help/UPGRADE_TO_4.zh-CN.md)和[英文版](../data/help/UPGRADE_TO_4.en.md)。说明 4.0 的历史布局变化和跨入 4.x 时的影响；不要将其写成每次更新都会丢失数据，也不要用 4.x 的手动恢复范围承诺 5.0 兼容旧数据库。5.0 的全新数据库边界保留简短提醒，手动复制步骤集中在 [5.0 升级数据说明](../data/help/UPGRADE_TO_5.zh-CN.md)和[英文版](../data/help/UPGRADE_TO_5.en.md)，Release 只引用文档。本次发布另有兼容性影响时，单独说明，不能用历史提醒代替。
 
 GitHub Release 正文使用完整链接，避免相对路径落到 Release 页面下：
 
 - 中文：`https://github.com/higale/anas-agent/blob/main/data/help/UPGRADE_TO_4.zh-CN.md`
 - 英文：`https://github.com/higale/anas-agent/blob/main/data/help/UPGRADE_TO_4.en.md`
 
-维护这两个固定路径；同步源码时一并发布文档。无需每次复制完整恢复步骤，也不再让用户到旧 Release 中查找说明。
+5.0 文档使用同一公开路径前缀，文件名分别为 `UPGRADE_TO_5.zh-CN.md` 和 `UPGRADE_TO_5.en.md`。维护上述固定路径；同步源码时一并发布文档。无需每次复制完整恢复步骤，也不再让用户到旧 Release 中查找说明。
 
 ## 开发标记
 

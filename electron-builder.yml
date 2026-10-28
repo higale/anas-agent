@@ -26,10 +26,6 @@ files:
     to: licenses/marked
     filter:
       - LICENSE.md
-  - from: node_modules/@langchain/langgraph-sdk/dist/node_modules/.pnpm
-    to: node_modules/@langchain/langgraph-sdk/dist/node_modules/.pnpm
-    filter:
-      - "**/*"
 asar: true
 # Native preparation is owned by this hook for every package target. Do not
 # use beforeBuild=false: that also bypasses production dependency collection.

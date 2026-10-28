@@ -98,7 +98,7 @@ export async function prepareToolPathAuthorization(options: {
     const resolve = options.toolName === 'write_file' ? resolveWriteFileTargets : resolveFilePatchTargets
     const { targets } = await resolve(options.args, options.primaryFolder)
     // The locator identifies the parsed operation, not a public JSON property.
-    // Keep patch text unchanged so checkpoints retain lexical paths and cannot
+    // Keep patch text unchanged so persisted calls retain lexical paths and cannot
     // hide a link retargeted after rule discovery.
     return authorizeCanonicalTargets(targets.map((target) => ({ ...target,
       locator: ['operations', target.operationIndex, target.field]

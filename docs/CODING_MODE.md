@@ -82,7 +82,7 @@ repo/
 ## 实现与验证入口
 
 - [编码工作指令](../src/main/agent/systemPrompt.ts)
-- [规则查找与快照](../src/main/agent/projectRules.ts)、[系统消息注入与工具边界检查](../src/main/agent/projectRulesMiddleware.ts)
+- [规则查找与快照](../src/main/agent/projectRules.ts)、[系统消息注入与工具边界检查](../src/main/agent/conversationRules.ts)
 - [压缩提示词](../src/shared/summaryPrompt.ts)、[上下文预算](../src/shared/contextWindow.ts)
-- [主 Agent 与子 Agent 配置](../src/main/agent/agentFactory.ts)
+- [主 Agent 与子 Agent 配置](../src/main/agent/conversationInstance.ts)
 - [编程能力评估](CODING_EVALUATION.md)、[用户指南](../data/help/USER_GUIDE.zh-CN.md)

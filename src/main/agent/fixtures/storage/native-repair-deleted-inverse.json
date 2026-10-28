@@ -1,0 +1,121 @@
+{
+  "name": "native-repair-deleted-inverse",
+  "schemaVersion": 1,
+  "format": "directory",
+  "bytes": 978849,
+  "sha256": "cbffb7300388030ef7065c781b526617743a983ee69dc5f423f97c21a195cfa5",
+  "metadata": {
+    "version": 1,
+    "value": [
+      "object",
+      [
+        [
+          "inverseRunId",
+          "c80d5a68-ee97-4369-a47d-d2be9fdbd055"
+        ],
+        [
+          "operationId",
+          "5c72ec0e-4099-416d-a19c-e3eede85273d"
+        ],
+        [
+          "run",
+          [
+            "object",
+            [
+              [
+                "createdAt",
+                "2026-10-27T14:10:50.241Z"
+              ],
+              [
+                "id",
+                "f9851b58-6a68-4557-8920-bfe8e1cbd7b1"
+              ],
+              [
+                "operation",
+                "agent"
+              ],
+              [
+                "status",
+                "running"
+              ],
+              [
+                "threadId",
+                "f29be88f-e599-49e9-ad23-97dbb9aa019d"
+              ],
+              [
+                "updatedAt",
+                "2026-10-27T14:10:50.241Z"
+              ]
+            ]
+          ]
+        ],
+        [
+          "thread",
+          [
+            "object",
+            [
+              [
+                "accessMode",
+                "read_only_allowed"
+              ],
+              [
+                "createdAt",
+                "2026-10-27T14:10:50.178Z"
+              ],
+              [
+                "id",
+                "f29be88f-e599-49e9-ad23-97dbb9aa019d"
+              ],
+              [
+                "modelConfigId",
+                [
+                  "undefined"
+                ]
+              ],
+              [
+                "modelParameterPresetId",
+                [
+                  "undefined"
+                ]
+              ],
+              [
+                "pinned",
+                false
+              ],
+              [
+                "projectId",
+                "default-workspace"
+              ],
+              [
+                "status",
+                "idle"
+              ],
+              [
+                "title",
+                "Keep conversation"
+              ],
+              [
+                "updatedAt",
+                "2026-10-27T14:10:50.178Z"
+              ],
+              [
+                "userTurnCount",
+                0
+              ]
+            ]
+          ]
+        ]
+      ]
+    ]
+  },
+  "provenance": {
+    "description": "Frozen native execution v1 repair fixture; no runtime upgrade code required.",
+    "sourceFixture": "repair-project-deleted-inverse",
+    "sourceSha256": "7b257589ad69c9282454f47fe886708e84370408e5f1a81c37e1b67cbf2021de",
+    "converterSource": "anas-next 553fded with portable file-history path validation",
+    "pathSanitization": {
+      "description": "Replace the Windows fixture username with user and recalculate affected definition hashes and references; all other rows, identities, content and recovery state are unchanged.",
+      "sourceSha256": "364124a83797a696052f19eca3dd09b9430db47d50d22b0d1c083a9bdd6e27e5"
+    }
+  }
+}

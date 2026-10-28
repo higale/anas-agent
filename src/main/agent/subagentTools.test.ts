@@ -1,21 +1,18 @@
+import { invokeCapability } from '../../runtime/toolInvocation'
+import type { ToolDefinition } from '../../runtime/toolDefinition'
+import { ToolInputError } from '../../runtime/errors'
 import { defaultCapabilities, } from '@shared/agentCapabilities'
 import { describe, expect, it, vi } from 'vitest'
-import { interrupt } from '@langchain/langgraph'
-import { ToolMessage } from '@langchain/core/messages'
-import { createAgent, FakeToolCallingModel } from 'langchain'
-import { createToolInputErrorMiddleware } from './toolInputErrors'
 import type { SubagentConfig } from '@shared/types'
-import type { AgentSubagentCallRecord } from './agentDatabase'
-import { createSubagentTools, type SubagentProcessSnapshot, type SubagentToolRuntime } from './subagentTools'
+import type { AgentSubagentCallRecord } from './subagentTaskStore'
+import { subagentToolDefinitions, type SubagentProcessSnapshot, type SubagentToolRuntime } from './subagentTools'
 import { runWithCurrentAgentToolEffect } from './toolEffectScope'
 
-vi.mock('@langchain/langgraph', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@langchain/langgraph')>(),
-  interrupt: vi.fn(() => ({
-    decisions: [{ type: 'approve' }],
-    __anas_interrupt_generation: 'generation-1'
-  }))
-}))
+const requestApproval = vi.fn((_request: unknown): unknown => ({ decisions: [{ type: 'approve' }], __anas_interrupt_generation: 'generation-1' }))
+async function invokeContent(tool: ToolDefinition | undefined, input: unknown): Promise<string> {
+  if (!tool) throw new Error('Required subagent tool is missing')
+  return String((await invokeCapability(tool, input, {})).content)
+}
 
 const reviewer: SubagentConfig = {
  capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: true, memory: true, toolMode: 'all', tools: [], skills: { mode: 'default', project: false, entries: [] } },
@@ -74,8 +71,27 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
 }
 
 describe('subagent tools', () => {
+  it('awaits the host approval service before resuming the same child generation', async () => {
+    const pending = { ...snapshot({ status: 'interrupted' }), interrupts: [{ id: 'approval-native', approvalGeneration: 'generation-1',
+      value: { actionRequests: [{ name: 'write_file', args: { path: 'result.txt' } }] } }] }
+    const service = runtime(pending)
+    service.wait = vi.fn().mockResolvedValueOnce(pending).mockResolvedValueOnce(snapshot({ status: 'completed' }))
+    const gate = deferred<unknown>()
+    const requestApproval = vi.fn(() => gate.promise)
+    const wait = subagentToolDefinitions({ runtime: service, subagents: [reviewer], requestApproval })
+      .find(tool => tool.name === 'wait_subagent')!
+    const result = wait.execute({ subagent_id: pending.call.id }, {})
+    await vi.waitFor(() => expect(requestApproval).toHaveBeenCalledOnce())
+    expect(service.resume).not.toHaveBeenCalled()
+    gate.resolve({ decisions: [{ type: 'approve' }], __anas_interrupt_generation: 'generation-1' })
+    await expect(result).resolves.toMatchObject({ content: expect.stringContaining('"status":"completed"') })
+    expect(service.resume).toHaveBeenCalledExactlyOnceWith(pending.call.id, [{
+      interruptId: 'approval-native', decisions: [{ type: 'approve' }], expectedGeneration: 'generation-1'
+    }])
+  })
+
   it('exposes only the asynchronous subagent lifecycle', () => {
-    expect(createSubagentTools({
+    expect(subagentToolDefinitions({ requestApproval,
       subagents: [reviewer]
     }).map((tool) => tool.name)).toEqual([
       'start_subagent',
@@ -88,12 +104,12 @@ describe('subagent tools', () => {
   it.each([true, false])('starts a selected subagent independently of global default enabled (%s)', async (enabled) => {
     const current = snapshot()
     const service = runtime(current)
-    const start = createSubagentTools({
+    const start = subagentToolDefinitions({ requestApproval,
       runtime: service,
       subagents: [{ ...reviewer, enabled }]
     }).find((tool) => tool.name === 'start_subagent')!
 
-    const result = JSON.parse(await start.invoke({
+    const result = JSON.parse(await invokeContent(start, {
       agent: 'reviewer',
       description: 'Review the code.'
     }) as string) as Record<string, unknown>
@@ -119,7 +135,7 @@ describe('subagent tools', () => {
 
   it('lets the runtime arm start and cancel only after their pure validation', async () => {
     const service = runtime(snapshot())
-    const tools = createSubagentTools({
+    const tools = subagentToolDefinitions({ requestApproval,
       runtime: service,
       subagents: [reviewer]
     })
@@ -127,11 +143,11 @@ describe('subagent tools', () => {
     const cancel = tools.find((tool) => tool.name === 'cancel_subagent')!
     const arm = vi.fn()
 
-    await runWithCurrentAgentToolEffect({ arm }, () => start.invoke({
+    await runWithCurrentAgentToolEffect({ arm }, () => invokeContent(start, {
       agent: 'reviewer',
       description: 'Review the code.'
     }))
-    await runWithCurrentAgentToolEffect({ arm }, () => cancel.invoke({
+    await runWithCurrentAgentToolEffect({ arm }, () => invokeContent(cancel, {
       subagent_id: '11111111-1111-8111-8111-111111111111'
     }))
 
@@ -163,7 +179,7 @@ describe('subagent tools', () => {
 
   it('keeps a durable start replay reachable without a currently configured agent', async () => {
     const service = runtime(snapshot())
-    const tools = createSubagentTools({
+    const tools = subagentToolDefinitions({ requestApproval,
       runtime: service,
       subagents: [],
       includeStartForRecovery: true
@@ -174,7 +190,7 @@ describe('subagent tools', () => {
       'wait_subagent',
       'cancel_subagent'
     ])
-    await tools.find((tool) => tool.name === 'start_subagent')?.invoke({
+    await invokeContent(tools.find((tool) => tool.name === 'start_subagent'), {
       agent: 'reviewer',
       description: 'Resume the durable launch.'
     })
@@ -203,7 +219,7 @@ describe('subagent tools', () => {
       .mockResolvedValueOnce(completed)
       .mockResolvedValueOnce(completed)
     service.resume = vi.fn(() => resumeGate.promise)
-    const wait = createSubagentTools({
+    const wait = subagentToolDefinitions({ requestApproval,
       runtime: service,
       subagents: [reviewer]
     }).find((tool) => tool.name === 'wait_subagent')!
@@ -212,25 +228,20 @@ describe('subagent tools', () => {
       timeout: 10
     }
 
-    const first = wait.invoke(input)
+    const first = invokeContent(wait, input)
     await vi.waitFor(() => expect(service.resume).toHaveBeenCalledOnce())
 
-    const agent = createAgent({ model: new FakeToolCallingModel({ toolCalls: [[
-      { id: 'duplicate-wait', name: wait.name, args: input }
-    ], []] }), tools: [wait], middleware: [createToolInputErrorMiddleware()] })
-    const result = await agent.invoke({ messages: [{ role: 'user', content: 'Wait again.' }] })
-    expect(result.messages.filter(ToolMessage.isInstance)).toMatchObject([{
-      tool_call_id: 'duplicate-wait', status: 'error', content: expect.stringContaining('already has an active wait')
-    }])
+    await expect(invokeContent(wait, input)).rejects.toBeInstanceOf(ToolInputError)
+    await expect(invokeContent(wait, input)).rejects.toThrow('already has an active wait')
     expect(service.wait).toHaveBeenCalledOnce()
-    expect(interrupt).toHaveBeenCalledOnce()
+    expect(requestApproval).toHaveBeenCalledOnce()
 
     resumeGate.resolve()
     await expect(first).resolves.toContain('"status":"completed"')
     expect(service.wait).toHaveBeenCalledTimes(2)
     expect(service.resume).toHaveBeenCalledOnce()
 
-    await expect(wait.invoke(input)).resolves.toContain('"status":"completed"')
+    await expect(invokeContent(wait, input)).resolves.toContain('"status":"completed"')
     expect(service.wait).toHaveBeenCalledTimes(3)
   })
 
@@ -258,22 +269,22 @@ describe('subagent tools', () => {
     service.wait = vi.fn()
       .mockResolvedValueOnce(waitingForApproval)
       .mockResolvedValueOnce(completed)
-    vi.mocked(interrupt).mockReturnValueOnce({
+    requestApproval.mockReturnValueOnce({
       decisions: [{ type: 'approve' }, { type: 'reject', message: 'Skip command.' }],
       __anas_interrupt_generation: 'generation-1'
     } as never)
-    const wait = createSubagentTools({
+    const wait = subagentToolDefinitions({ requestApproval,
       runtime: service,
       subagents: [reviewer]
     }).find((tool) => tool.name === 'wait_subagent')!
 
-    await expect(wait.invoke({
+    await expect(invokeContent(wait, {
       subagent_id: '11111111-1111-8111-8111-111111111111',
       timeout: 10
     })).resolves.toContain('"status":"completed"')
 
-    expect(interrupt).toHaveBeenCalledOnce()
-    expect(interrupt).toHaveBeenCalledWith({
+    expect(requestApproval).toHaveBeenCalledOnce()
+    expect(requestApproval).toHaveBeenCalledWith({
       actionRequests: [
         { name: 'apply_patch', args: { path: 'first.txt' } },
         { name: 'pwsh', args: { command: 'npm test' } }
@@ -283,7 +294,7 @@ describe('subagent tools', () => {
         { actionName: 'pwsh', allowedDecisions: ['approve', 'reject'] }
       ],
       anasSubagentApproval: { generation: 'generation-1' }
-    })
+    }, { subagentId: waitingForApproval.call.id, callId: undefined })
     expect(service.resume).toHaveBeenCalledOnce()
     expect(service.resume).toHaveBeenCalledWith(
       '11111111-1111-8111-8111-111111111111',
@@ -314,7 +325,7 @@ describe('subagent tools', () => {
     service.wait = vi.fn()
       .mockResolvedValueOnce(waitingForApproval)
       .mockResolvedValueOnce(completed)
-    vi.mocked(interrupt)
+    requestApproval
       .mockReturnValueOnce({
         decisions: [{ type: 'approve' }],
         __anas_interrupt_generation: 'generation-1'
@@ -323,17 +334,17 @@ describe('subagent tools', () => {
         decisions: [{ type: 'reject', message: 'Review the new request.' }],
         __anas_interrupt_generation: 'generation-2'
       } as never)
-    const wait = createSubagentTools({
+    const wait = subagentToolDefinitions({ requestApproval,
       runtime: service,
       subagents: [reviewer]
     }).find((tool) => tool.name === 'wait_subagent')!
 
-    await expect(wait.invoke({
+    await expect(invokeContent(wait, {
       subagent_id: waitingForApproval.call.id,
       timeout: 10
     })).resolves.toContain('"status":"completed"')
 
-    expect(interrupt).toHaveBeenCalledTimes(2)
+    expect(requestApproval).toHaveBeenCalledTimes(2)
     expect(service.resume).toHaveBeenCalledWith(waitingForApproval.call.id, [{
       interruptId: 'approval-2',
       decisions: [{ type: 'reject', message: 'Review the new request.' }],

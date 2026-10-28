@@ -1,3 +1,6 @@
+import type { ExecutionToolCall } from '../runtime/executionState'
+import type { NativeConversationDatabase } from './agent/nativeConversationDatabase'
+import { toolEffectArtifactPurposes } from '../runtime/toolEffectIdentity'
 import { defaultCapabilities, } from '@shared/agentCapabilities'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -26,18 +29,35 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true })
 })
 
+async function busyRun(database: NativeConversationDatabase, threadId: string, status: 'running' | 'interrupted') {
+  const runId = 'busy-run', id = 'busy-input'
+  database.runs.createRun({ threadId, runId, operation: 'agent', message: { id, value: { id, kind: 'user', content: 'Question', context: { runId } } } })
+  await database.runs.enter('input', { threadId, runId })
+  if (status === 'running') return
+  const { store } = database.runs
+  const scope = () => ({ threadId, runId, expectedRevisionId: store.load(threadId)!.revisionId })
+  const call = { id: 'pending-call', providerCallId: 'provider-call', name: 'update_config', args: {}, artifacts: Object.fromEntries(toolEffectArtifactPurposes.map(purpose => [purpose, `pending-call:${purpose}`])) as ExecutionToolCall['artifacts'] }
+  store.acceptModel(scope(), { id: 'response', value: { kind: 'assistant', content: '', calls: [{ id: call.providerCallId, name: call.name, args: call.args }] } }, [call], { modelCalls: 1, todos: [] })
+  store.prepareTools(scope(), [{ callId: call.id, args: call.args, authorization: { approval: 'pending' } }], [{
+    id: 'approval', generation: 'generation', kind: 'tool', callIds: [call.id], request: {
+      actionRequests: [{ name: call.name, args: call.args, description: 'Approve fixture' }],
+      reviewConfigs: [{ actionName: call.name, allowedDecisions: ['approve', 'reject'] }] }
+  }])
+  expect(database.getThread(threadId)?.status).toBe('interrupted')
+}
+
 describe('project deletion lifecycle', () => {
   it.each(['simple_chat', 'default'] as const)('clears %s conversations while preserving the project, memories, and other projects', async (kind) => {
-    const [{ AgentStorage }, { AgentRuntimeCoordinator }, projectStore] = await Promise.all([
+    const [{ AgentStorage }, { NativeRuntimeCoordinator }, projectStore] = await Promise.all([
       import('./agent/agentStorage'),
-      import('./agent/agentRuntimeCoordinator'),
+      import('./agent/nativeRuntimeCoordinator'),
       import('./projectStore')
     ])
     const project = kind === 'default'
       ? await projectStore.getProject(DEFAULT_WORKSPACE_PROJECT_ID)
       : await projectStore.createProject({ kind: 'simple_chat', name: 'Chat', prompt: '' })
-    const storage = AgentStorage.open(root)
-    const runtime = new AgentRuntimeCoordinator(storage)
+    const storage = AgentStorage.openNative(root)
+    const runtime = new NativeRuntimeCoordinator(storage, { push: vi.fn() }, { prepareWorkspace: false })
     try {
       const first = storage.createThread({ projectId: project.id })
       const second = storage.createThread({ projectId: project.id })
@@ -65,16 +85,16 @@ describe('project deletion lifecycle', () => {
   }, 15_000)
 
   it.each(['running', 'interrupted'] as const)('keeps all project conversations when one is %s', async (status) => {
-    const [{ AgentStorage }, { AgentRuntimeCoordinator }, projectStore] = await Promise.all([
-      import('./agent/agentStorage'), import('./agent/agentRuntimeCoordinator'), import('./projectStore')
+    const [{ AgentStorage }, { NativeRuntimeCoordinator }, projectStore] = await Promise.all([
+      import('./agent/agentStorage'), import('./agent/nativeRuntimeCoordinator'), import('./projectStore')
     ])
     const project = await projectStore.createProject({ kind: 'simple_chat', name: 'Chat', prompt: '' })
-    const storage = AgentStorage.open(root)
-    const runtime = new AgentRuntimeCoordinator(storage)
+    const storage = AgentStorage.openNative(root)
+    const runtime = new NativeRuntimeCoordinator(storage, { push: vi.fn() }, { prepareWorkspace: false })
     try {
       const idle = storage.createThread({ projectId: project.id })
       const busy = storage.createThread({ projectId: project.id })
-      storage.conversationForThread(busy.id).updateThread(busy.id, { status })
+      await busyRun(storage.conversationForThread(busy.id), busy.id, status)
       storage.refreshConversation(busy.id)
       await expect(runtime.deleteProjectThreads(project.id)).rejects.toThrow('is busy')
       expect(storage.getThread(idle.id)).not.toBeNull()
@@ -86,17 +106,17 @@ describe('project deletion lifecycle', () => {
   }, 15_000)
 
   it('removes every conversation database before removing the project metadata', async () => {
-    const [{ AgentStorage }, { AgentRuntimeCoordinator }, projectStore] = await Promise.all([
+    const [{ AgentStorage }, { NativeRuntimeCoordinator }, projectStore] = await Promise.all([
       import('./agent/agentStorage'),
-      import('./agent/agentRuntimeCoordinator'),
+      import('./agent/nativeRuntimeCoordinator'),
       import('./projectStore')
     ])
     const source = join(root, 'source')
     await mkdir(source)
     const project = await projectStore.createProject({
  capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, advancedSettings: true, prompt: '', kind: 'workspace', name: 'Project', sourceFolders: [source] })
-    const storage = AgentStorage.open(root)
-    const runtime = new AgentRuntimeCoordinator(storage)
+    const storage = AgentStorage.openNative(root)
+    const runtime = new NativeRuntimeCoordinator(storage, { push: vi.fn() }, { prepareWorkspace: false })
     try {
       const first = storage.createThread({ projectId: project.id })
       const second = storage.createThread({ projectId: project.id })
@@ -119,20 +139,20 @@ describe('project deletion lifecycle', () => {
   }, 15_000)
 
   it('rejects the whole deletion while any project thread is active or interrupted', async () => {
-    const [{ AgentStorage }, { AgentRuntimeCoordinator }, projectStore] = await Promise.all([
+    const [{ AgentStorage }, { NativeRuntimeCoordinator }, projectStore] = await Promise.all([
       import('./agent/agentStorage'),
-      import('./agent/agentRuntimeCoordinator'),
+      import('./agent/nativeRuntimeCoordinator'),
       import('./projectStore')
     ])
     const source = join(root, 'source')
     await mkdir(source)
     const project = await projectStore.createProject({
  capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, advancedSettings: true, prompt: '', kind: 'workspace', name: 'Project', sourceFolders: [source] })
-    const storage = AgentStorage.open(root)
-    const runtime = new AgentRuntimeCoordinator(storage)
+    const storage = AgentStorage.openNative(root)
+    const runtime = new NativeRuntimeCoordinator(storage, { push: vi.fn() }, { prepareWorkspace: false })
     try {
       const thread = storage.createThread({ projectId: project.id })
-      storage.conversationForThread(thread.id).updateThread(thread.id, { status: 'interrupted' })
+      await busyRun(storage.conversationForThread(thread.id), thread.id, 'interrupted')
       storage.refreshConversation(thread.id)
 
       await expect(runtime.deleteProject(project.id)).rejects.toThrow('is busy')

@@ -1,0 +1,71 @@
+{
+  "name": "legacy-catalog",
+  "producerCommit": "cc54775162a83792945fd2956ded33c5058ee54c",
+  "schemaVersion": 0,
+  "sha256": "ba0d20c1db296937b539b041d5c180c20f159c24fd24a78ecb77c606a33f3dc2",
+  "bytes": 102400,
+  "metadata": {
+    "version": 1,
+    "value": [
+      "object",
+      [
+        [
+          "thread",
+          [
+            "object",
+            [
+              [
+                "accessMode",
+                "read_only_allowed"
+              ],
+              [
+                "createdAt",
+                "2026-10-27T13:56:48.177Z"
+              ],
+              [
+                "id",
+                "f60eec9a-a0a5-4f39-9990-c04ae6bc208c"
+              ],
+              [
+                "modelConfigId",
+                [
+                  "undefined"
+                ]
+              ],
+              [
+                "modelParameterPresetId",
+                [
+                  "undefined"
+                ]
+              ],
+              [
+                "pinned",
+                false
+              ],
+              [
+                "projectId",
+                "default-workspace"
+              ],
+              [
+                "status",
+                "idle"
+              ],
+              [
+                "title",
+                "New Thread"
+              ],
+              [
+                "updatedAt",
+                "2026-10-27T13:56:48.177Z"
+              ],
+              [
+                "userTurnCount",
+                0
+              ]
+            ]
+          ]
+        ]
+      ]
+    ]
+  }
+}

@@ -54,7 +54,8 @@ describe.skipIf(process.platform !== 'win32')('Windows Shell read authorization'
     expect(await analyzer.requiresApproval(args)).toBe(true)
   })
 
-  it('does not use Skill approval for sequences, expansions, preloads or other execution modes', async () => {
+  it.each(['sequence', 'pipeline', 'redirect', 'and', 'subexpression', 'splat', 'environment', 'inline', 'preload', 'directory', 'pty', 'keep-processes', 'no-skill'] as const)(
+    'does not use Skill approval for the %s execution mode', async mode => {
     const h = await fixture()
     const nodeExecutable = (await execFileAsync('node', ['-p', 'process.execPath'], { encoding: 'utf8', windowsHide: true })).stdout.trim()
     const script = join(h.outside, 'query.js')
@@ -63,21 +64,18 @@ describe.skipIf(process.platform !== 'win32')('Windows Shell read authorization'
       skillId: 'user:query', root: h.outside, script })
     const analyzer = createShellCommandAuthorization({ ...h, skills: { selection: defaultCapabilities.skills, allowUserInvocation: false } })
     const call = `& '${nodeExecutable}' '${script}'`
-    for (const command of [
-      `${call}; Get-Date`, `${call} | Select-Object -First 1`, `${call} > result.txt`, `${call} && Get-Date`,
-      `${call} $(Get-Date)`, `${call} @args`, `${call} $env:HOME`,
-      `& '${nodeExecutable}' -e 'console.log(1)' '${script}'`,
-      `& '${nodeExecutable}' --require other.js '${script}'`,
-      `Set-Location '${h.outside}'; ${call}`
-    ]) {
-      const args = Object.freeze({ command })
-      expect(await analyzer.requiresApproval(args), command).toBe(true)
-      expect(args.command).toBe(command)
+    const commands: Record<string, string> = {
+      sequence: `${call}; Get-Date`, pipeline: `${call} | Select-Object -First 1`, redirect: `${call} > result.txt`, and: `${call} && Get-Date`,
+      subexpression: `${call} $(Get-Date)`, splat: `${call} @args`, environment: `${call} $env:HOME`,
+      inline: `& '${nodeExecutable}' -e 'console.log(1)' '${script}'`, preload: `& '${nodeExecutable}' --require other.js '${script}'`,
+      directory: `Set-Location '${h.outside}'; ${call}`
     }
+    const command = commands[mode] ?? call
+    const args = Object.freeze({ command, ...(mode === 'pty' ? { pty: { columns: 80, rows: 24 } } : {}),
+      ...(mode === 'keep-processes' ? { keep_processes: true } : {}) })
+    expect(await (mode === 'no-skill' ? h.authorization : analyzer).requiresApproval(args), command).toBe(true)
+    expect(args.command).toBe(command)
     expect(exemption).not.toHaveBeenCalled()
-    expect(await analyzer.requiresApproval({ command: call, pty: { columns: 80, rows: 24 } })).toBe(true)
-    expect(await analyzer.requiresApproval({ command: call, keep_processes: true })).toBe(true)
-    expect(await h.authorization.requiresApproval({ command: call })).toBe(true)
   })
 
   it.each([null, [], 'wrong', 3])('leaves malformed arguments %j to tool validation without crashing preflight', async args => {

@@ -1,3 +1,4 @@
+import { isFileEditTool, type PatchAuthorizationReceipt } from '../../runtime/authorizationReceipts'
 import { isAbsolute } from 'node:path'
 import type {
   AgentApprovalPathPreview,
@@ -9,7 +10,9 @@ import {
 } from '../workspacePath'
 import { toolPathArguments } from './toolPathArguments'
 import { isCommandShellToolName } from '@shared/commandShell'
-import { isFileEditTool, patchAuthorizationFor } from './patchAuthorization'
+
+export type ApprovalPatchTargets = (action: { name: string; args: unknown },
+  context: { interrupt: AgentInterrupt; actionIndex: number }) => PatchAuthorizationReceipt['targets'] | undefined
 
 export function interruptActionRequests(
   interrupt: Pick<AgentInterrupt, 'value'>
@@ -63,11 +66,11 @@ async function actionPathPreviews(
   args: Record<string, unknown>,
   actionIndex: number,
   primaryFolder: string,
-  state?: unknown
+  targets?: PatchAuthorizationReceipt['targets']
 ): Promise<AgentApprovalPathPreview[]> {
   if (isFileEditTool(name)) {
     const paths = name !== 'restore_file_edit' ? toolPathArguments(name, args) : undefined
-    return patchAuthorizationFor(state, { name, args })?.targets.map((target) => {
+    return targets?.map((target) => {
       const raw = paths?.find((path) => JSON.stringify(path.locator) === JSON.stringify(target.locator))?.value
       return { actionIndex, locator: name === 'write_file' ? ['path'] : target.locator, absolutePath: target.path,
         source: name === 'restore_file_edit' || raw === target.path ? 'resolved' as const
@@ -105,7 +108,7 @@ async function actionPathPreviews(
 export async function projectInterruptPathPreviews(
   interrupts: AgentInterrupt[],
   primaryFolder: string | undefined,
-  state?: unknown
+  patchTargets?: ApprovalPatchTargets
 ): Promise<AgentInterrupt[]> {
   if (!primaryFolder) return interrupts
   return Promise.all(interrupts.map(async (interrupt) => {
@@ -115,7 +118,7 @@ export async function projectInterruptPathPreviews(
         asRecord(action.args),
         actionIndex,
         primaryFolder,
-        state
+        patchTargets?.(action, { interrupt, actionIndex })
       )
     ))).flat()
     return pathPreviews.length > 0 ? { ...interrupt, pathPreviews } : interrupt

@@ -1,3 +1,4 @@
+import type { AgentThreadCreate } from '../shared/agentTypes'
 import { defaultCapabilities, serializeCapabilities } from '@shared/agentCapabilities'
 import { cp, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -5,7 +6,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { AgentStorage } from './agent/agentStorage'
 import { configFileNames, getAgentCatalogFile, getAgentConversationDatabaseFile } from './config/dataDir'
-import { validateRestoredDataDirectory } from './dataRestoreValidation'
+import { validateRestoredDataDirectory as validateDirectory } from './dataRestoreValidation'
 
 const temporaryDirectories: string[] = []
 
@@ -27,7 +28,15 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })))
 })
 
-describe('restored data validation', () => {
+describe('restored native data validation', () => {
+  const validateRestoredDataDirectory = validateDirectory
+  async function seedStorage(root: string, kind: 'empty' | 'default' | 'paired' | 'projects' | 'missing-project') {
+    const storage = AgentStorage.openNative(root)
+    const options: AgentThreadCreate[] = kind === 'empty' ? [] : kind === 'paired' ? [{}, {}]
+      : kind === 'projects' ? [{ projectId: 'project-1', title: 'Project conversation' }, { title: 'Default conversation' }]
+        : kind === 'missing-project' ? [{ projectId: 'missing-project' }] : [{}]
+    try { return options.map(option => storage.createThread(option)) } finally { storage.close() }
+  }
   it('validates Agent packages and rejects the removed array format without converting it', async () => {
     const root = await fixture()
     await expect(validateRestoredDataDirectory(root)).resolves.toBeUndefined()
@@ -134,10 +143,7 @@ describe('restored data validation', () => {
     await writeText(join(root, 'skills', 'sample', 'SKILL.md'), '---\nname: sample\ndescription: Sample skill\n---\nBody\n')
     await cp(join(process.cwd(), 'data/examples/tools/read_text_raw'), join(root, 'tools/read_text_raw'), { recursive: true })
     await writeText(join(root, 'config/tools.json'), JSON.stringify({ version: 0, order: ['user:example-read-text-raw'], external_directories: [] }))
-    const storage = AgentStorage.open(root)
-    storage.createThread({ projectId: 'project-1', title: 'Project conversation' })
-    storage.createThread({ title: 'Default conversation' })
-    storage.close()
+    await seedStorage(root, 'projects')
 
     await expect(validateRestoredDataDirectory(root)).resolves.toBeUndefined()
   })
@@ -175,9 +181,7 @@ describe('restored data validation', () => {
 
   it('rejects a corrupt conversation from the otherwise valid catalog', async () => {
     const root = await fixture()
-    const storage = AgentStorage.open(root)
-    const thread = storage.createThread()
-    storage.close()
+    const [thread] = await seedStorage(root, 'default')
     await writeText(getAgentConversationDatabaseFile(thread.id, root), 'not a sqlite database')
 
     await expect(validateRestoredDataDirectory(root)).rejects.toThrow()
@@ -185,9 +189,7 @@ describe('restored data validation', () => {
 
   it('rejects a missing conversation instead of restoring an incomplete catalog', async () => {
     const root = await fixture()
-    const storage = AgentStorage.open(root)
-    const thread = storage.createThread()
-    storage.close()
+    const [thread] = await seedStorage(root, 'default')
     await rm(getAgentConversationDatabaseFile(thread.id, root))
 
     await expect(validateRestoredDataDirectory(root)).rejects.toMatchObject({ code: 'ENOENT' })
@@ -195,8 +197,7 @@ describe('restored data validation', () => {
 
   it('rejects conversation files absent from the catalog', async () => {
     const root = await fixture()
-    const storage = AgentStorage.open(root)
-    storage.close()
+    await seedStorage(root, 'empty')
     await writeText(getAgentConversationDatabaseFile('unlisted', root), 'unlisted content')
 
     await expect(validateRestoredDataDirectory(root)).rejects.toThrow('Unexpected conversation storage entry: unlisted')
@@ -204,10 +205,7 @@ describe('restored data validation', () => {
 
   it('rejects valid conversation databases exchanged between catalog entries', async () => {
     const root = await fixture()
-    const storage = AgentStorage.open(root)
-    const first = storage.createThread()
-    const second = storage.createThread()
-    storage.close()
+    const [first, second] = await seedStorage(root, 'paired')
     const firstFile = getAgentConversationDatabaseFile(first.id, root)
     const secondFile = getAgentConversationDatabaseFile(second.id, root)
     const temporary = join(root, 'swap.sqlite')
@@ -220,9 +218,7 @@ describe('restored data validation', () => {
 
   it('rejects a thread whose project is absent from the restored project store', async () => {
     const root = await fixture()
-    const storage = AgentStorage.open(root)
-    storage.createThread({ projectId: 'missing-project' })
-    storage.close()
+    await seedStorage(root, 'missing-project')
 
     await expect(validateRestoredDataDirectory(root)).rejects.toThrow(
       'references missing project missing-project'

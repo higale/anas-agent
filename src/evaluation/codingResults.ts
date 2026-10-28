@@ -1,20 +1,14 @@
+import type { codingDiagnostic } from './codingEvidence'
 import { createHash } from 'node:crypto'
 import { lstat, readdir, readFile, mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join, posix, relative, resolve, sep } from 'node:path'
 import type { AgentAccessMode } from '@shared/agentTypes'
-import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages'
+import type { ConversationMessage } from '../runtime/conversationMessage'
 import { reviewLocations, type CodeReviewPresentation, type CodeReviewReport, type CodeReviewSnapshot } from '@shared/codeReview'
 import type { CodingTask, ModelRequestCheck, ReviewTarget } from './codingTasks'
 import { runBehaviorTests, type BehaviorResult } from './codingBehavior'
 import type { CodingModelTrace, CodingTokenUsage } from './codingModelTrace'
 import type { checkSearchOutput } from './codingSearch'
-
-export const fingerprint = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex')
-
-export function codingDiagnostic(value: unknown) {
-  const text = JSON.stringify(value)
-  return { fingerprint: fingerprint(value), characters: text.length, excerpt: text.slice(0, 4000), truncated: text.length > 4000 }
-}
 
 export async function sourceFingerprints(root: string, files: string[]): Promise<Record<string, string>> {
   const entries = await Promise.all(files.map(async (file) => {
@@ -39,20 +33,20 @@ export function parseToolOutput(output: unknown): unknown {
 }
 
 /** Resolve references only from this model's native input, never another run's events. */
-export function toolResultsFromMessages(messages: BaseMessage[]) {
+export function toolResultsFromMessages(messages: readonly ConversationMessage[]) {
   const names = new Map<string, string>()
   return messages.flatMap((message) => {
-    if (AIMessage.isInstance(message)) for (const call of message.tool_calls ?? []) {
+    if (message.kind === 'assistant') for (const call of message.calls ?? []) {
       if (call.id) names.set(call.id, call.name)
     }
-    if (!ToolMessage.isInstance(message)) return []
-    const name = names.get(message.tool_call_id)
+    if (message.kind !== 'tool' || !message.resultFor) return []
+    const name = names.get(message.resultFor)
     if (!name || (message.name !== undefined && message.name !== name)) return []
-    return [{ id: message.tool_call_id, name, output: message.content, failed: message.status === 'error' }]
+    return [{ id: message.resultFor, name, output: message.content, failed: message.resultStatus === 'error' }]
   })
 }
 
-export function scriptBinding(messages: BaseMessage[], binding: 'patch' | 'subagent'): Record<string, string> {
+export function scriptBinding(messages: readonly ConversationMessage[], binding: 'patch' | 'subagent'): Record<string, string> {
   const name = binding === 'patch' ? 'apply_patch' : 'start_subagent'
   const result = toolResultsFromMessages(messages).reverse().find((result) =>
     result.name === name && !result.failed && !toolOutputFailed(result.output))
@@ -67,7 +61,7 @@ export function scriptBinding(messages: BaseMessage[], binding: 'patch' | 'subag
 
 export function toolOutputFailed(output: unknown): boolean {
   const value = parseToolOutput(output)
-  // Project/tool preflight uses an error ToolMessage with this plain-text
+  // Project/tool preflight uses an error tool message with this plain-text
   // prefix. Successful read contents remain inside their JSON result envelope.
   if (typeof value === 'string') return value.startsWith('NOT EXECUTED:')
   if (!value || typeof value !== 'object') return false
@@ -218,8 +212,8 @@ export interface CodingEvaluationResult {
   reviewScore: ReturnType<typeof scoreReview> | null
   reviewReport?: CodeReviewPresentation
   compression: 'not-requested' | 'completed' | 'failed'
-  checkpointReopened: boolean
-  toolOutputs: Array<{ name: string; excerpt: string; source: 'tool-event' | 'checkpoint' }>
+  historyReopened: boolean
+  toolOutputs: Array<{ name: string; excerpt: string; source: 'tool-event' | 'history' }>
   searchOutputs: Array<ReturnType<typeof checkSearchOutput> & { callId: string; name: string }>
   checks: Array<{ name: string; passed: boolean }>
   unrelatedChanges: string[]

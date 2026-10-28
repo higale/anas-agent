@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { parseProjectStore } from './projectStore'
 import { AgentStorage } from './agent/agentStorage'
-import { AgentDatabase } from './agent/agentDatabase'
+import { NativeConversationDatabase } from './agent/nativeConversationDatabase'
 import { replaceProjectData } from './backupService'
 import { repairArchivedFileChangeVersions } from './recoveryFileChanges'
 import { getProjectStoreFile } from './config/dataDir'
@@ -77,7 +77,11 @@ async function stageProjectRepair(root: string, staged: string, before: string, 
   let conversationIds: string[] | undefined
   const probeRoot = join(staged, 'validation')
   await mkdir(probeRoot)
-  for (const [relative, signature] of files) {
+  let unsupportedConversations = false
+  // Inspect each conversation's schema first. Repair cannot trust a damaged
+  // version field, nor force native content into the old execution format.
+  const databaseFiles = [...files].sort(([a], [b]) => Number(a === 'db/catalog.sqlite') - Number(b === 'db/catalog.sqlite'))
+  for (const [relative, signature] of databaseFiles) {
     if (!(relative === 'db/catalog.sqlite' || /^db\/conversations\/[^/]+\/conversation\.sqlite$/.test(relative))) continue
     if (!signature.startsWith('file:') || ['', '-wal', '-shm', '-journal'].some(suffix => files.get(`${relative}${suffix}`)?.startsWith('link:'))) {
       issues.push(`${relative}: linked or invalid database family preserved without modification.`)
@@ -94,18 +98,30 @@ async function stageProjectRepair(root: string, staged: string, before: string, 
       const database = new Database(probe, { fileMustExist: true })
       try {
         version = database.pragma('user_version', { simple: true }) as number
-        database.pragma('user_version = 0')
+        if (relative === 'db/catalog.sqlite') {
+          if (unsupportedConversations) throw new Error('Unsupported conversation schema; catalog preserved without conversion.')
+        } else {
+          const native = Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='execution_state'").get())
+          const legacy = Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='current_state'").get())
+          if (!native || legacy) {
+            unsupportedConversations = true
+            throw new Error('Unsupported execution schema; original database preserved without conversion.')
+          }
+        }
+        database.pragma('user_version = 1')
         if (relative !== 'db/catalog.sqlite') repairedFields = await repairArchivedFileChangeVersions(database, join(root, dirname(relative)))
         const checkpoint = database.pragma('wal_checkpoint(TRUNCATE)') as Array<{ busy: number }>
         if (checkpoint.some((result) => result.busy)) throw new Error('SQLite snapshot is busy.')
         database.pragma('journal_mode = DELETE')
       } finally { database.close() }
       if (relative === 'db/catalog.sqlite') conversationIds = AgentStorage.validateCatalogBackup(probe, projectIds)
-      else AgentDatabase.validateBackup(probe, join(root, dirname(relative), 'attachments'), projectIds, relative.split('/')[2])
-      if (version !== 0 || repairedFields.length) {
+      else {
+        NativeConversationDatabase.validateBackup(probe, join(root, dirname(relative), 'attachments'), projectIds, relative.split('/')[2])
+      }
+      if (version !== 1 || repairedFields.length) {
         await copyFile(probe, original)
         for (const suffix of ['-wal', '-shm', '-journal']) await rm(`${original}${suffix}`, { force: true })
-        if (version !== 0) fields.push(`${relative}: user_version (${version} → 0)`)
+        if (version !== 1) fields.push(`${relative}: user_version (${version} → 1)`)
         fields.push(...repairedFields.map(field => `${relative}: ${field}`))
       }
     } catch (error) {

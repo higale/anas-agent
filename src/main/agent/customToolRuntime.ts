@@ -1,4 +1,5 @@
-import { DynamicStructuredTool, ToolInputParsingException } from '@langchain/core/tools'
+import { serializeToolInput } from '../../runtime/toolInput'
+import { defineContentTool, type ToolDefinition } from '../../runtime/toolDefinition'
 import { stat } from 'node:fs/promises'
 import { extname, resolve } from 'node:path'
 import { maxCustomToolInputBytes, maxCustomToolOutputChars, parseCustomToolCommand, type CustomToolDefinition } from '@shared/customTools'
@@ -7,24 +8,22 @@ import { withToolPackageDirectory } from '../toolsStore'
 import { currentToolExecution } from './toolExecutionContext'
 import { discoverPython3 } from '../runtimeDiscovery'
 
-export function createCustomTools(definitions: readonly CustomToolDefinition[], options: {
+export function customToolDefinitions(definitions: readonly CustomToolDefinition[], options: {
   env: NodeJS.ProcessEnv
   backgroundTools: boolean
   signal?: AbortSignal
   preview?: boolean
-}) {
-  return definitions.filter((definition) => !definition.interactive || options.backgroundTools).map((definition) => new DynamicStructuredTool({
+}): ToolDefinition[] {
+  return definitions.filter((definition) => !definition.interactive || options.backgroundTools).map((definition) => defineContentTool({
     name: definition.name,
     description: definition.description + (definition.interactive
       ? ' Starts an interactive terminal. stdout/stderr are merged terminal text and may contain control sequences. If still running after 10 seconds, use read_call to obtain terminal_id and read_call_output to read prompts, then write_call to send input. The configured timeout includes time waiting for input.'
       : ''),
-    schema: definition.inputSchema,
-    verboseParsingErrors: true,
+    inputSchema: definition.inputSchema,
     metadata: { anasCustomToolId: definition.id },
-    func: async (args: Record<string, unknown>) => {
+    execute: async (args: Record<string, unknown>) => {
       if (options.preview) throw new Error('Custom tool execution is unavailable in a preview.')
-      const json = JSON.stringify(args)
-      if (Buffer.byteLength(json, 'utf8') > maxCustomToolInputBytes) throw new ToolInputParsingException('Custom tool arguments exceed 1 MiB. Reduce the submitted data.')
+      const json = serializeToolInput(args, maxCustomToolInputBytes)
       return withToolPackageDirectory(definition, async directory => {
         const command = parseCustomToolCommand(definition.command)
         const packagePath = (value: string) => value.replaceAll('{{tool_dir}}', directory)

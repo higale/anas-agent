@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { cp, mkdtemp, rm, writeFile, readFile, mkdir } from 'node:fs/promises'
+import { cp, mkdtemp, realpath, rm, writeFile, readFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
@@ -24,7 +24,7 @@ const { prepareExamples } = createRequire(import.meta.url)('../../../scripts/pre
 }
 beforeEach(async () => {
   vi.resetModules()
-  state.root = await mkdtemp(join(tmpdir(), 'anas-plugin-runtime-'))
+  state.root = await realpath(await mkdtemp(join(tmpdir(), 'anas-plugin-runtime-')))
   state.bundled = join(state.root, 'bundled')
   await cp(resolve('data/plugins/_system'), join(state.bundled, 'plugins/_system'), { recursive: true })
   await prepareExamples(resolve('data/examples'), join(state.root, 'examples'))

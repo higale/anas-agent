@@ -1,36 +1,38 @@
+import { codingDiagnostic, fingerprint } from './codingEvidence'
 import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { FakeListChatModel } from '@langchain/core/utils/testing'
-import { AIMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages'
-import { FakeToolCallingModel } from 'langchain'
+import type { ConversationMessage } from '../runtime/conversationMessage'
 import { afterAll, describe, expect, it, vi, type TestContext } from 'vitest'
 import type { AgentAccessMode, AgentRuntimeEvent } from '@shared/agentTypes'
 import { defaultCapabilities } from '@shared/agentCapabilities'
 import { isCommandShellToolName } from '@shared/commandShell'
 import { configureDataRuntime, getDataDir } from '../main/config/dataDir'
 import { createProject } from '../main/projectStore'
-import { AgentDatabase } from '../main/agent/agentDatabase'
-import { AgentRuntime } from '../main/agent/agentRuntime'
-import * as modelFactory from '../main/agent/modelFactory'
+import { AgentStorage } from '../main/agent/agentStorage'
+import type { NativeConversationDatabase } from '../main/agent/nativeConversationDatabase'
+import { NativeRuntimeCoordinator } from '../main/agent/nativeRuntimeCoordinator'
+import type { NativeRunSubmission } from '../main/agent/nativeRunHost'
+import * as conversationModel from '../main/agent/conversationModel'
+import * as compressionModel from '../main/agent/compressionModel'
 import * as plugins from '../main/plugins/pluginRuntime'
 import { PluginStore } from '../main/plugins/pluginStore'
 import { PluginBackends } from '../main/plugins/pluginBackend'
-import { invokeWithCompressionTracking } from '../main/agent/compressionTracking'
+import { trackCompressionSummary } from '../runtime/compression'
 import { captureCodeReview } from '../main/agent/codeReview'
-import { codeReviewResponseFormat } from '../main/agent/codeReviewMiddleware'
+import { codeReviewToolDeclaration } from '../runtime/codeReviewReport'
 import { queryGitChanges } from '../main/gitChanges'
 import { codingTasks, pendingCodingEvaluations, type CodingTask } from './codingTasks'
-import { changedSources, checkModelRequest, checkTaskFiles, codingDiagnostic, fingerprint, fixturePath, scriptBinding, scoreReview, toolResultsFromMessages, snapshotFiles, sourceFingerprints, toolOutputFailed, writeFixture, type CodingEvaluationResult } from './codingResults'
+import { changedSources, checkModelRequest, checkTaskFiles, fixturePath, scriptBinding, scoreReview, toolResultsFromMessages, snapshotFiles, sourceFingerprints, toolOutputFailed, writeFixture, type CodingEvaluationResult } from './codingResults'
 import packageInfo from '../../package.json'
 import { getResolvedModelConfig, saveSubagent } from '../main/config/appConfig'
 import { CodingModelTraceCollector } from './codingModelTrace'
 import { checkSearchOutput, type SearchExpectation } from './codingSearch'
 
 // The desktop host is substituted; only scripted suites substitute the model.
-// Both entries use production configuration, graph, tools and SQLite code.
+// Both entries use production configuration, native executor, tools and SQLite code.
 const desktop = vi.hoisted(() => ({ documents: '' }))
 vi.mock('electron', () => ({ app: {
   isPackaged: false,
@@ -80,7 +82,7 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
   const dirty = Boolean(execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim())
   function evaluationSourceFiles(): string[] {
     return execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z', '--',
-      'src/evaluation', 'src/main', 'src/shared', 'data/config', 'data/lang', 'patches',
+      'src/evaluation', 'src/main', 'src/shared', 'src/runtime', 'src/providers', 'data/config', 'data/lang', 'patches',
       'vitest.config.ts', 'vitest.evaluation.config.ts', 'vitest.evaluation.live.config.ts', 'package.json', 'package-lock.json'
     ], { encoding: 'utf8' }).split('\0').filter(Boolean)
   }
@@ -120,12 +122,12 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
       taskId: task.id, category: task.category, taskFingerprint: fingerprint(task),
       mode: codingMode ? 'coding' : 'ordinary', accessMode, sample,
       status: 'failed', evidence: options.kind,
-      model: { name: 'langchain/FakeToolCallingModel', parameters: {}, protocol: null },
+      model: { name: 'scripted-conversation-model', parameters: {}, protocol: null },
       shellEnabled: task.tools?.includes('run_shell') ?? false, startedAt: new Date().toISOString(), elapsedMs: 0,
       modelCalls: 0, toolCalls: 0, toolErrors: 0, approvalRequests: 0, interruptions: [],
       tokens: null, modelTrace: null, modelQuality: null, agentExecutedTests: null,
       evaluatorTests: null, reviewScore: null,
-      compression: task.compression ? 'failed' : 'not-requested', checkpointReopened: false,
+      compression: task.compression ? 'failed' : 'not-requested', historyReopened: false,
       toolOutputs: [], searchOutputs: [], checks: [], unrelatedChanges: [], errors: []
     }
     const expectation = task.modeExpectations?.[result.mode]
@@ -133,15 +135,17 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
     let root: string | undefined
     let pluginBackends: PluginBackends | undefined
     let searchWorkspace: string | undefined
-    let runtime: AgentRuntime | undefined
-    let database: AgentDatabase | undefined
+    let runtime: NativeRuntimeCoordinator | undefined
+    let storage: AgentStorage<NativeConversationDatabase> | undefined
+    let database: NativeConversationDatabase | undefined
+    let eventWork = Promise.resolve()
     const modelTrace = options.kind === 'provider-runtime' ? new CodingModelTraceCollector() : undefined
     const observedRuns = new Map<string, string>()
     const recordedToolResults = new Set<string>()
     const failedToolResults = new Set<string>()
     const searchCalls = new Map<string, SearchExpectation>()
     const executedToolsByActor = new Map<string, Set<string>>()
-    function recordToolResult(id: string, name: string, output: unknown, source: 'tool-event' | 'checkpoint', failed = false) {
+    function recordToolResult(id: string, name: string, output: unknown, source: 'tool-event' | 'history', failed = false) {
       if ((failed || toolOutputFailed(output)) && !failedToolResults.has(id)) {
         failedToolResults.add(id)
         result.toolErrors += 1
@@ -163,7 +167,7 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
     let cancellation: Promise<unknown> | undefined
     const abort = () => {
       result.errors.push(`Evaluation cancelled: ${String(signal.reason)}`)
-      // The runtime owns cancellation and drains its graph/tools. Observe the
+      // The runtime owns cancellation and drains its executor/tools. Observe the
       // promise immediately, including errors while the sample is unwinding.
       cancellation = runtime?.shutdown().catch((error) => { result.errors.push(`Cancellation: ${String(error)}`) })
     }
@@ -211,162 +215,138 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
         codingMode, advancedSettings: true, restrictSubagents: task.subagent?.restrict ?? false, prompt: '',
         capabilities: capabilities(enabledTools, Boolean(task.subagent))
       })
-      const databaseFile = join(getDataDir(), 'eval.sqlite')
-      const attachments = join(getDataDir(), 'attachments')
-      database = AgentDatabase.open(databaseFile, attachments)
-      const thread = database.createThread({ title: task.id, projectId: project.id, accessMode, modelConfigId: configuredModelId })
+      storage = AgentStorage.openNative(getDataDir())
+      const thread = storage.createThread({ title: task.id, projectId: project.id, accessMode, modelConfigId: configuredModelId })
+      database = storage.conversationForThread(thread.id)
       signal.throwIfAborted()
-      runtime = new AgentRuntime(database, undefined, join(root, 'temporary'))
-      const modelSpy = options.kind === 'scripted-runtime' ? vi.spyOn(modelFactory, 'createChatModel') : undefined
-      if (modelTrace) {
-        const { createChatModel, createCompressionChatModel } = modelFactory
-        vi.spyOn(modelFactory, 'createChatModel').mockImplementation((config, overrides) =>
-          createChatModel(config, { ...overrides, callbacks: modelTrace.callbacks(overrides, overrides?.callbacks) }))
-        vi.spyOn(modelFactory, 'createCompressionChatModel').mockImplementation((config, overrides) =>
-          createCompressionChatModel(config, { ...overrides,
-            callbacks: modelTrace.callbacks({ requestRole: 'compression', ...overrides }, overrides?.callbacks) }))
-      }
-      if (modelSpy) vi.spyOn(modelFactory, 'createCompressionChatModel').mockImplementation((_config, overrides) => {
-        const model = new FakeListChatModel({ responses: [
-          `Task: ${task.prompt} Resume from the retained tool results. Preserve unrelated files.`
-        ] })
-        const invoke = model.invoke.bind(model)
-        vi.spyOn(model, 'invoke').mockImplementation((input, options) => invokeWithCompressionTracking(
-          input, options, overrides?.compressionTracking ?? {}, (trackedOptions) => invoke(input, trackedOptions)
-        ))
-        return model
+      const listChildCalls = () => database!.listThreadIds().flatMap(id => {
+        const call = database!.resources.getSubagentCallByChildThreadId(id)
+        return call?.parentThreadId === thread.id ? [call] : []
       })
-      const modelRoles = new WeakMap<FakeToolCallingModel['toolCalls'], 'main' | 'subagent'>()
-      const makeScript = (calls: CodingTask['calls'], role: 'main' | 'subagent') => {
-        const scriptedCalls = structuredClone(calls).map((batch, batchIndex) => batch.map((call, index) => {
+      const events = { push: (event: AgentRuntimeEvent) => {
+        eventWork = eventWork.then(() => observeEvent(event))
+        // Keep asynchronous evidence failures visible without an unhandled rejection.
+        void eventWork.catch(() => {})
+      } }
+      runtime = new NativeRuntimeCoordinator(storage, events)
+      const { createConversationModel } = conversationModel
+      const modelSpy = vi.spyOn(conversationModel, 'createConversationModel')
+      if (modelTrace) {
+        modelSpy.mockImplementation((config, overrides) => modelTrace.observeModel(createConversationModel(config, overrides), overrides))
+        const { createCompressionModel } = compressionModel
+        vi.spyOn(compressionModel, 'createCompressionModel').mockImplementation((config, overrides) =>
+          createCompressionModel(config, { ...overrides,
+            observe: (prompt, generate) => modelTrace.observeSummary({ requestRole: 'compression', ...overrides }, prompt, generate) }))
+      } else vi.spyOn(compressionModel, 'createCompressionModel').mockImplementation((_config, overrides) =>
+        (prompt, _signal, preparation) => trackCompressionSummary(prompt, overrides?.compressionTracking,
+          async () => ({ text: `Task: ${task.prompt} Resume from the retained tool results. Preserve unrelated files.` }), { beforePrepare: overrides?.beforeRequest, preparation }))
+      const makeScript = (calls: CodingTask['calls']) => ({ index: 0,
+        calls: structuredClone(calls).map((batch, batchIndex) => batch.map((call, index) => {
           const id = `eval-${randomUUID()}-${batchIndex}-${index}`
           if (call.binding) bindings.set(id, call.binding)
           if (call.search) searchCalls.set(id, call.search)
           return { name: call.name, args: call.args, id }
-        }))
-        const model = new FakeToolCallingModel({ toolCalls: [...scriptedCalls, []] })
-        // bindTools clones the framework fake while retaining this script and index.
-        modelRoles.set(model.toolCalls, role)
-        return model
-      }
-      const useScript = (calls: CodingTask['calls']) => {
-        if (!modelSpy) return
-        const mainModel = makeScript(calls, 'main')
-        const childModels = new Map<string, FakeToolCallingModel>()
-        modelSpy.mockImplementation((_config, overrides) => {
-          if (overrides?.requestRole === 'main') return mainModel
-          if (overrides?.requestRole !== 'subagent' || !task.subagent || !overrides.requestId) {
-            throw new Error('Unexpected model role or missing subagent evaluation script.')
-          }
-          let model = childModels.get(overrides.requestId)
-          if (!model) {
-            model = makeScript(task.subagent.calls, 'subagent')
-            childModels.set(overrides.requestId, model)
-          }
-          return model
-        })
-      }
-      const boundToolNames = new WeakMap<object, string[]>()
-      const bindTools = FakeToolCallingModel.prototype.bindTools
-      if (modelSpy) vi.spyOn(FakeToolCallingModel.prototype, 'bindTools').mockImplementation(function (this: FakeToolCallingModel, tools) {
-        const bound = bindTools.call(this, tools)
-        boundToolNames.set(bound, [...(boundToolNames.get(this) ?? []), ...tools.map((tool) => tool.name)])
-        return bound
-      })
-      // The framework fake numbers messages from zero on each binding/run;
-      // replayed IDs replace checkpoint history instead of appending new messages.
-      const generate = FakeToolCallingModel.prototype._generate
+        })) })
       const modelChecks = (task.modelChecks ?? []).filter((check) => check.mode === result.mode)
       const observedModelChecks = new Set<number>()
       const scriptedModelCalls = { main: 0, subagent: 0 }
-      if (modelSpy) vi.spyOn(FakeToolCallingModel.prototype, '_generate').mockImplementation(async function (this: FakeToolCallingModel, ...args) {
-        await beforeGenerate?.()
-        signal.throwIfAborted()
-        const role = modelRoles.get(this.toolCalls)
-        if (!role) throw new Error('The active model is not a registered evaluation script.')
-        const names = boundToolNames.get(this)
-        const actualToolName = (name: string) => {
-          if (name !== 'run_shell') return name
-          const shells = names?.filter(isCommandShellToolName) ?? []
-          if (shells.length !== 1) throw new Error('Expected exactly one bound command shell for the search script.')
-          if (result.shellToolName && result.shellToolName !== shells[0]) throw new Error('Bound command shell changed during the evaluation.')
-          result.shellToolName = shells[0]
-          return shells[0]
-        }
-        scriptedModelCalls[role] += 1
-        // Observe the actual model input before generating another write. Runtime
-        // event delivery can lag this boundary, so it cannot provide this counter.
-        for (const [index, check] of modelChecks.entries()) if ((check.role ?? 'main') === role && check.call === scriptedModelCalls[role]) {
-          const systemText = args[0].filter(SystemMessage.isInstance).map((message) => message.text).join('\n\n')
-          const conversationText = args[0].filter((message) => !SystemMessage.isInstance(message)).map((message) => message.text).join('\n\n')
-          result.checks.push(...await checkModelRequest({ ...check,
-            toolsInclude: check.toolsInclude?.map(actualToolName),
-            toolsExclude: check.toolsExclude?.flatMap((name) => name === 'run_shell'
-              ? [name, ...names?.filter(isCommandShellToolName) ?? []] : [name])
-          }, workspace, { systemText, conversationText, toolNames: names }))
-          observedModelChecks.add(index)
-        }
-        const response = await generate.apply(this, args)
-        for (const generation of response.generations) {
-          generation.message.id = randomUUID()
-          // The framework fake echoes all input, which otherwise doubles history
-          // on every tool step and measures synthetic echo growth instead of tools.
-          generation.message.content = 'Scripted evaluation step.'
-          generation.text = 'Scripted evaluation step.'
-          for (const call of AIMessage.isInstance(generation.message) ? generation.message.tool_calls ?? [] : []) {
-            call.name = actualToolName(call.name)
-            const binding = call.id ? bindings.get(call.id) : undefined
-            if (binding) call.args = { ...call.args, ...scriptBinding(args[0], binding) }
+      const messageText = (message: ConversationMessage) => typeof message.content === 'string' ? message.content
+        : message.content.map(block => block && typeof block === 'object' && 'text' in block ? String(block.text) : '').join('')
+      const useScript = (calls: CodingTask['calls']) => {
+        if (options.kind !== 'scripted-runtime') return
+        const main = makeScript(calls), children = new Map<string, ReturnType<typeof makeScript>>()
+        modelSpy.mockImplementation((_config, overrides) => ({ invoke: async request => {
+          await eventWork
+          await beforeGenerate?.()
+          signal.throwIfAborted()
+          request.signal.throwIfAborted()
+          const role = overrides?.requestRole
+          if (role !== 'main' && (role !== 'subagent' || !task.subagent || !overrides?.requestId)) {
+            throw new Error('Unexpected model role or missing subagent evaluation script.')
           }
-        }
-        return response
-      })
-      async function collect(events: AsyncIterable<AgentRuntimeEvent>): Promise<void> {
-        for await (const event of events) {
-          if ('run' in event) observedRuns.set(event.run.id, event.run.status)
-          if (event.type === 'model_started') result.modelCalls += 1
-          if (event.type === 'tool_started') result.toolCalls += 1
-          if (event.type === 'tool_approval_requested') result.approvalRequests += 1
-          if (event.type === 'run_interrupted') for (const interrupt of event.interrupts) result.interruptions.push({
-            runId: event.run.id, interruptId: interrupt.id, value: codingDiagnostic(interrupt.value),
-            pathPreviews: codingDiagnostic(interrupt.pathPreviews ?? [])
+          let script = main
+          if (role === 'subagent') {
+            script = children.get(overrides!.requestId!) ?? makeScript(task.subagent!.calls)
+            children.set(overrides!.requestId!, script)
+          }
+          const names = request.tools.map(value => {
+            const tool = value as { name?: string; function?: { name?: string } }
+            return tool.name ?? tool.function?.name
+          }).filter((name): name is string => typeof name === 'string')
+          const actualToolName = (name: string) => {
+            if (name !== 'run_shell') return name
+            const shells = names.filter(isCommandShellToolName)
+            if (shells.length !== 1) throw new Error('Expected exactly one bound command shell for the search script.')
+            if (result.shellToolName && result.shellToolName !== shells[0]) throw new Error('Bound command shell changed during the evaluation.')
+            result.shellToolName = shells[0]
+            return shells[0]
+          }
+          scriptedModelCalls[role] += 1
+          for (const [index, check] of modelChecks.entries()) if ((check.role ?? 'main') === role && check.call === scriptedModelCalls[role]) {
+            result.checks.push(...await checkModelRequest({ ...check,
+              toolsInclude: check.toolsInclude?.map(actualToolName),
+              toolsExclude: check.toolsExclude?.flatMap(name => name === 'run_shell' ? [name, ...names.filter(isCommandShellToolName)] : [name])
+            }, workspace, {
+              systemText: request.messages.filter(message => message.kind === 'system').map(messageText).join('\n\n'),
+              conversationText: request.messages.filter(message => message.kind !== 'system').map(messageText).join('\n\n'), toolNames: names
+            }))
+            observedModelChecks.add(index)
+          }
+          const batch = script.calls[script.index++] ?? []
+          const responseCalls = batch.map(call => {
+            const binding = bindings.get(call.id)
+            return { ...call, name: actualToolName(call.name), args: { ...call.args, ...(binding ? scriptBinding(request.messages, binding) : {}) } }
           })
-          if (event.type === 'tool_completed') {
-            // Forwarded child events carry the parent thread/run IDs for UI
-            // delivery; subagentId identifies the actual executing actor.
-            const actor = event.subagentId ?? 'main'
-            const executed = executedToolsByActor.get(actor) ?? new Set<string>()
-            executed.add(event.call.name)
-            executedToolsByActor.set(actor, executed)
-            recordToolResult(event.call.id, event.call.name, event.output, 'tool-event')
-            if (task.externalChange && !externalChangeInjected && result.toolOutputs.length === task.externalChange.afterTool) {
-              for (const [name, content] of Object.entries(task.externalChange.files)) await writeFile(fixturePath(workspace, name), content)
-              externalChangeInjected = true
-            }
+          return { text: 'Scripted evaluation step.', message: { id: randomUUID(), kind: 'assistant',
+            content: 'Scripted evaluation step.', calls: responseCalls }, observationErrors: [] }
+        } }))
+      }
+      async function observeEvent(event: AgentRuntimeEvent): Promise<void> {
+        if ('run' in event) observedRuns.set(event.run.id, event.run.status)
+        if (event.type === 'model_started') result.modelCalls += 1
+        if (event.type === 'tool_started') result.toolCalls += 1
+        if (event.type === 'tool_approval_requested') result.approvalRequests += 1
+        if (event.type === 'run_interrupted') for (const interrupt of event.interrupts) result.interruptions.push({
+          runId: event.run.id, interruptId: interrupt.id, value: codingDiagnostic(interrupt.value),
+          pathPreviews: codingDiagnostic(interrupt.pathPreviews ?? [])
+        })
+        if (event.type === 'tool_completed') {
+          // Forwarded child events carry the parent thread/run IDs for UI
+          // delivery; subagentId identifies the actual executing actor.
+          const actor = event.subagentId ?? 'main'
+          const executed = executedToolsByActor.get(actor) ?? new Set<string>()
+          executed.add(event.call.name)
+          executedToolsByActor.set(actor, executed)
+          recordToolResult(event.call.id, event.call.name, event.output, 'tool-event')
+          if (task.externalChange && !externalChangeInjected && result.toolOutputs.length === task.externalChange.afterTool) {
+            for (const [name, content] of Object.entries(task.externalChange.files)) await writeFile(fixturePath(workspace, name), content)
+            externalChangeInjected = true
           }
-          if (event.type === 'context_compression_completed') result.compression = 'completed'
-          if (event.type === 'run_failed' && expectation?.ruleFailure && event.error.includes(expectation.ruleFailure)) {
-            expectedRunFailures.push(event.error)
-          } else if (event.type === 'run_failed' || event.type === 'run_recovery_failed') result.errors.push(event.error)
-          if (event.type === 'run_interrupted' || event.type === 'run_cancelled') result.errors.push(`Unexpected ${event.type}; no evaluation approvals are granted automatically.`)
         }
+        if (event.type === 'context_compression_completed') result.compression = 'completed'
+        if (event.type === 'run_failed' && expectation?.ruleFailure && event.error.includes(expectation.ruleFailure)) {
+          expectedRunFailures.push(event.error)
+        } else if (event.type === 'run_failed' || event.type === 'run_recovery_failed') result.errors.push(event.error)
+        if (event.type === 'run_interrupted' || event.type === 'run_cancelled') result.errors.push(`Unexpected ${event.type}; no evaluation approvals are granted automatically.`)
+      }
+      async function collect(submission: Promise<Pick<NativeRunSubmission, 'handle'>>): Promise<void> {
+        const { handle } = await submission
+        if (!handle) throw new Error('A new evaluation run must have a native execution handle.')
+        await handle.drained
+        await eventWork
         signal.throwIfAborted()
-        // Preflight errors are native ToolMessages produced before tool dispatch;
-        // they have no tool-completed event. Capture their checkpoint evidence
-        // after each run, before a later compression can remove old messages.
-        for (const threadId of [thread.id, ...database!.listSubagentCalls(thread.id).map((call) => call.childThreadId)]) {
+        // Include committed preflight failures before compression removes them
+        // from the next model request; observations are not the state owner.
+        for (const threadId of [thread.id, ...listChildCalls().map((call) => call.childThreadId)]) {
           const snapshot = await runtime!.getSnapshot(threadId)
           for (const activity of snapshot.activities) for (const tool of activity.tools) {
             if (tool.status === 'completed' && tool.output !== undefined) {
-              recordToolResult(tool.call.id, tool.call.name, tool.output, 'checkpoint')
+              recordToolResult(tool.call.id, tool.call.name, tool.output, 'history')
             }
           }
-          const checkpoint = await database!.checkpointer.getTuple({ configurable: {
-            thread_id: threadId, checkpoint_ns: ''
-          } })
-          const messages = checkpoint?.checkpoint.channel_values.messages as BaseMessage[] | undefined
+          const messages = database!.runs.store.readHistory(threadId)!.messages.map(record => record.value)
           for (const tool of toolResultsFromMessages(messages ?? [])) {
-            recordToolResult(tool.id, tool.name, tool.output, 'checkpoint', tool.failed)
+            recordToolResult(tool.id, tool.name, tool.output, 'history', tool.failed)
           }
         }
       }
@@ -379,7 +359,7 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
         git(['-c', 'user.name=Anas Evaluation', '-c', 'user.email=evaluation@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'Fixed review baseline'])
         for (const [name, content] of Object.entries(task.files)) await writeFile(fixturePath(workspace, name), content)
         const changes = await queryGitChanges({ sourceFolder: workspace, scope: 'workspace' })
-        const scope = await captureCodeReview(database, {
+        const scope = await captureCodeReview(database.readModel, {
           kind: 'git', projectId: project.id, sourceFolder: workspace, scope: 'workspace', version: changes.version
         }, project.id)
         const report = {
@@ -389,8 +369,8 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
             impact: 'An empty input throws TypeError instead of returning zero.',
             evidence: 'reduce has no initial accumulator and an empty array has no first element.' }] : [], limitations: []
         }
-        useScript([[{ name: codeReviewResponseFormat(scope)[0].name, args: report }]])
-        await collect(runtime.startRun({ threadId: thread.id, runId: randomUUID(), text: task.prompt, codeReview: scope }))
+        useScript([[{ name: codeReviewToolDeclaration(scope.id).function.name, args: report }]])
+        await collect(runtime.submitRunWithAttachments({ submissionId: randomUUID(), threadId: thread.id, runId: randomUUID(), text: task.prompt, codeReview: scope }))
         const snapshot = await runtime.getSnapshot(thread.id)
         const review = snapshot.messages.flatMap((message) => message.codeReview ? [message.codeReview] : []).at(-1)
         result.checks.push({ name: 'structured-review-persisted', passed: review?.report.scope_id === scope.id
@@ -403,14 +383,14 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
         }
       } else if (task.compression === 'manual') {
         useScript(task.calls.slice(0, 1))
-        await collect(runtime.startRun({ threadId: thread.id, runId: randomUUID(), text: task.prompt }))
+        await collect(runtime.submitRunWithAttachments({ submissionId: randomUUID(), threadId: thread.id, runId: randomUUID(), text: task.prompt }))
         result.checks.push({ name: 'compression-preparation-read-only', passed: fingerprint(await snapshotFiles(workspace)) === fingerprint(before) })
         await collect(runtime.startCompression(thread.id))
         useScript(task.calls.slice(1))
-        await collect(runtime.startRun({ threadId: thread.id, runId: randomUUID(), text: 'Continue and implement the previously requested fix.' }))
+        await collect(runtime.submitRunWithAttachments({ submissionId: randomUUID(), threadId: thread.id, runId: randomUUID(), text: 'Continue and implement the previously requested fix.' }))
       } else {
         useScript(task.calls)
-        await collect(runtime.startRun({ threadId: thread.id, runId: randomUUID(), text: task.prompt }))
+        await collect(runtime.submitRunWithAttachments({ submissionId: randomUUID(), threadId: thread.id, runId: randomUUID(), text: task.prompt }))
       }
       const oracle = await checkTaskFiles(expectation ? { ...task, expected: expectation.expected } : task, workspace, before, signal)
       if (task.compression) result.checks.push({ name: 'compression-completed', passed: result.compression === 'completed' })
@@ -438,7 +418,7 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
         passed: observedRuns.size > 0 && [...observedRuns.values()].every((status) => status === (expectation?.ruleFailure ? 'failed' : 'completed'))
           && (!expectation?.ruleFailure || expectedRunFailures.length === 1) })
       result.checks.push({ name: 'run-configuration-matches', passed: [...observedRuns.keys()].every((runId) => {
-        const configuration = database!.getRunConfiguration(runId)
+        const configuration = database!.runs.getRunConfiguration({ threadId: thread.id, runId })
         return configuration?.codingMode === codingMode
           && configuration.capabilities.toolMode === 'selected'
           && fingerprint(configuration.capabilities.tools) === fingerprint(enabledTools)
@@ -446,14 +426,14 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
       }) })
       const childSnapshots = new Map<string, string>()
       if (task.subagent) {
-        const calls = database.listSubagentCalls(thread.id)
+        const calls = listChildCalls()
         result.checks.push({ name: 'one-subagent-completed-and-observed', passed: calls.length === 1
           && calls[0].agentName === task.subagent.name && calls[0].status === 'completed'
-          && database.listUnresolvedSubagentCallsForRun(calls[0].parentRunId).length === 0 })
+          && database.resources.listUnresolvedSubagentCallsForRun(calls[0].parentRunId).length === 0 })
         for (const call of calls) {
           if (task.subagent.requireAllSelectedTools) result.checks.push({ name: 'all-subagent-selected-tools-executed',
             passed: task.subagent.expectedTools.every((name) => executedToolsByActor.get(call.id)?.has(name)) })
-          const configuration = database.getRunConfiguration(call.childRunId)
+          const configuration = database.runs.getRunConfiguration({ threadId: call.childThreadId, runId: call.childRunId })
           result.checks.push({ name: 'subagent-run-configuration-matches', passed:
             configuration?.codingMode === codingMode && configuration.capabilities.toolMode === 'selected'
             && fingerprint([...configuration.capabilities.tools].sort()) === fingerprint([...task.subagent.expectedTools].sort())
@@ -464,28 +444,26 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
             && !configuration.capabilities.skills.entries.some(entry => entry.model || entry.shortcut)
             && !configuration.capabilities.applicationEnvironment
             && database.getThread(call.childThreadId)?.accessMode === accessMode
-            && database.getRun(call.childRunId)?.status === 'completed' })
+            && database.readModel.getRun(call.childRunId)?.status === 'completed' })
           childSnapshots.set(call.childThreadId, fingerprint((await runtime.getSnapshot(call.childThreadId)).messages))
         }
       }
       await runtime.shutdown()
       signal.throwIfAborted()
       runtime = undefined
-      database.close()
-      database = AgentDatabase.open(databaseFile, attachments)
-      runtime = new AgentRuntime(database, undefined, join(root, 'temporary'))
+      storage.close()
+      storage = AgentStorage.openNative(getDataDir())
+      database = storage.conversationForThread(thread.id)
+      runtime = new NativeRuntimeCoordinator(storage, events)
       const reopened = await runtime.getSnapshot(thread.id)
       signal.throwIfAborted()
-      result.checkpointReopened = fingerprint(reopened.messages) === fingerprint(snapshot.messages) && reopened.messages.length > 0
-      result.checks.push({ name: 'checkpoint-reopened', passed: result.checkpointReopened })
-      for (const [childThreadId, messages] of childSnapshots) result.checks.push({ name: 'subagent-checkpoint-reopened',
+      result.historyReopened = fingerprint(reopened.messages) === fingerprint(snapshot.messages) && reopened.messages.length > 0
+      result.checks.push({ name: 'history-reopened', passed: result.historyReopened })
+      for (const [childThreadId, messages] of childSnapshots) result.checks.push({ name: 'subagent-history-reopened',
         passed: fingerprint((await runtime.getSnapshot(childThreadId)).messages) === messages })
       if (expectation?.ruleFailure) {
-        const checkpoint = await database.checkpointer.getTuple({ configurable: {
-          thread_id: thread.id, checkpoint_ns: ''
-        } })
-        const rules = checkpoint?.checkpoint.channel_values.anasProjectRules as { fatalError?: string } | undefined
-        result.checks.push({ name: 'rule-failure-checkpointed', passed: typeof rules?.fatalError === 'string'
+        const rules = database.runs.store.readHistory(thread.id)!.context.projectRules
+        result.checks.push({ name: 'rule-failure-persisted', passed: typeof rules?.fatalError === 'string'
           && rules.fatalError.includes(expectation.ruleFailure) })
       }
     } catch (error) {
@@ -495,7 +473,8 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
         await cancellation
         if (runtime) await runtime.shutdown()
         await pluginBackends?.stopAll()
-        database?.close()
+        await eventWork.catch(error => { result.errors.push(`Event evidence: ${String(error)}`) })
+        storage?.close()
         if (root) await rm(root, { recursive: true, force: true })
       } catch (error) {
         result.errors.push(`Cleanup: ${String(error)}`)
@@ -543,7 +522,7 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
     const sourcesAtEnd = await sourceFingerprints(process.cwd(), evaluationSourceFiles())
     const changedSourceFiles = changedSources(sourcesAtStart, sourcesAtEnd)
     const report = {
-      schemaVersion: 5, startedAt: suiteStartedAt, completedAt: new Date().toISOString(),
+      schemaVersion: 6, startedAt: suiteStartedAt, completedAt: new Date().toISOString(),
       appVersion: packageInfo.version, revision, dirty,
       environment: { platform: process.platform, architecture: process.arch, node: process.version, electron: process.versions.electron },
       suiteFingerprint: fingerprint(tasks), sourceFingerprints: sourcesAtStart,
@@ -583,7 +562,7 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
         AbortSignal.any([controller.signal, context.signal]), () => { controller.abort(new Error('Injected evaluation cancellation')) }))
       expect(cancelled.status).toBe('failed')
       expect(cancelled.errors.join('\n')).toContain('Injected evaluation cancellation')
-      await expect(readFile(join(getDataDir(), 'eval.sqlite'))).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(readFile(join(getDataDir(), 'db', 'catalog.sqlite'))).rejects.toMatchObject({ code: 'ENOENT' })
       const next = await settledSample(context, () => evaluate(cancellationTask, false, 'strict_approval', context.signal))
       expect(next.status, JSON.stringify(next)).toBe('passed')
       cancellationDiagnostic = 'passed'

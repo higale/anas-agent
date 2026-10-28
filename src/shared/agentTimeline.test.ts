@@ -104,6 +104,24 @@ describe('projectTurnTimeline', () => {
     expect(projectRunActivityItems(run, new Map(), [], 'subagent-1').filter((item) => item.type === 'tool')).toEqual([])
   })
 
+  it('replaces a provider-ID preview with the native call without duplicating its card', () => {
+    const run = completedRun()
+    run.status = 'running'
+    run.models[0].status = 'running'
+    run.models[0].toolCallIds = []
+    run.models[0].toolCallProgress = [{ index: 0, callId: 'provider-id', name: 'search', characterCount: 2, complete: true }]
+    run.tools = []
+    const preview = projectRunActivityItems(run, new Map(), []).filter(item => item.type === 'tool')
+    expect(preview).toHaveLength(1)
+    run.models[0].status = 'completed'
+    run.models[0].toolCallIds = ['native-id']
+    run.tools = [{ call: { id: 'native-id', name: 'search', args: { query: 'Anas' } }, status: 'running', sequence: 2 }]
+    const executed = projectRunActivityItems(run, new Map(), []).filter(item => item.type === 'tool')
+    expect(executed).toHaveLength(1)
+    expect(executed[0].key).toBe(preview[0].key)
+    expect(executed[0].tool.call).toEqual(run.tools[0].call)
+  })
+
   it('places one collapsible activity range between the user and final message', () => {
     const timeline = projectTurnTimeline(messages, [completedRun()])
     expect(timeline.entries.map((entry) => entry.type)).toEqual([

@@ -1,0 +1,123 @@
+{
+  "name": "native-repair-forward",
+  "schemaVersion": 1,
+  "format": "directory",
+  "bytes": 978849,
+  "sha256": "056c5c2f898417c6e920d8b158685a8bd2126c6535c6bd874a0eed5e5188dfc2",
+  "metadata": {
+    "version": 1,
+    "value": [
+      "object",
+      [
+        [
+          "inverseRunId",
+          [
+            "undefined"
+          ]
+        ],
+        [
+          "run",
+          [
+            "object",
+            [
+              [
+                "createdAt",
+                "2026-10-27T14:10:59.933Z"
+              ],
+              [
+                "id",
+                "8071a15d-5e9b-42fe-afda-c4a373f8bc45"
+              ],
+              [
+                "operation",
+                "agent"
+              ],
+              [
+                "status",
+                "running"
+              ],
+              [
+                "threadId",
+                "d5b073ce-2f66-4e4f-b5c9-c6582fa695f4"
+              ],
+              [
+                "updatedAt",
+                "2026-10-27T14:10:59.933Z"
+              ]
+            ]
+          ]
+        ],
+        [
+          "target",
+          "C:\\Users\\user\\AppData\\Local\\Temp\\anas-project-repair-lZJrJl\\edited.txt"
+        ],
+        [
+          "thread",
+          [
+            "object",
+            [
+              [
+                "accessMode",
+                "read_only_allowed"
+              ],
+              [
+                "createdAt",
+                "2026-10-27T14:10:59.883Z"
+              ],
+              [
+                "id",
+                "d5b073ce-2f66-4e4f-b5c9-c6582fa695f4"
+              ],
+              [
+                "modelConfigId",
+                [
+                  "undefined"
+                ]
+              ],
+              [
+                "modelParameterPresetId",
+                [
+                  "undefined"
+                ]
+              ],
+              [
+                "pinned",
+                false
+              ],
+              [
+                "projectId",
+                "default-workspace"
+              ],
+              [
+                "status",
+                "idle"
+              ],
+              [
+                "title",
+                "Keep conversation"
+              ],
+              [
+                "updatedAt",
+                "2026-10-27T14:10:59.883Z"
+              ],
+              [
+                "userTurnCount",
+                0
+              ]
+            ]
+          ]
+        ]
+      ]
+    ]
+  },
+  "provenance": {
+    "description": "Frozen native execution v1 repair fixture; no runtime upgrade code required.",
+    "sourceFixture": "repair-project-forward",
+    "sourceSha256": "32f89e953cd6a3800c7781688c6d885be2958906eaa0d47e0d4c844d0b8b7127",
+    "converterSource": "anas-next 553fded with portable file-history path validation",
+    "pathSanitization": {
+      "description": "Replace the Windows fixture username with user and recalculate affected definition hashes and references; all other rows, identities, content and recovery state are unchanged.",
+      "sourceSha256": "d2be8d405b382ade3254732975c4eaaed3fc34d74cfbffdffa8b7cc569897c9d"
+    }
+  }
+}

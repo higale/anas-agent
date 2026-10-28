@@ -1,11 +1,10 @@
-import type { ServerTool } from '@langchain/core/tools'
 import type { ResolvedModelConfig } from '@shared/types'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-export function configuredServerTools(model: ResolvedModelConfig): ServerTool[] {
+export function configuredServerTools(model: ResolvedModelConfig): Record<string, unknown>[] {
   const value = model.parameters.tools
   if (value === undefined) return []
   if (model.protocol !== 'openai_responses') {

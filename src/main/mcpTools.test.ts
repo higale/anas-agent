@@ -1,9 +1,36 @@
 import { createServer } from 'node:http'
 import { homedir } from 'node:os'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { McpServerConfig } from './config/appConfig'
 import { mcpServerConfigDetail, normalizeMcpServer, rawMcpServerFromSave } from './config/mcpServerConfigMapper'
-import { createMcpClientForServer, mcpConnectionSnapshotForServer, mcpErrorMessage } from './mcpTools'
+import { createMcpClientForServer, mcpConnectionSnapshotForServer, mcpErrorMessage, mcpToolDefinitions } from './mcpTools'
+
+describe('native MCP capabilities', () => {
+  it.each([undefined, 0, 250])('preserves the invocation timeout override %s and explicit result data', async timeoutMs => {
+    const callTool = vi.fn(async () => ({ content: [{ type: 'text', text: 'done' }], structuredContent: { enabled: false, count: 0 } }))
+    const client = { callTool, readResource: vi.fn() } as unknown as Parameters<typeof mcpToolDefinitions>[1]
+    const afterToolCall = vi.fn()
+    const [tool] = mcpToolDefinitions('local', client, [{ name: 'read', inputSchema: { type: 'object' } }], { timeoutMs: 1000, afterToolCall })
+    const controller = new AbortController()
+    const result = await tool.execute({}, { signal: controller.signal, timeoutMs })
+    const options = callTool.mock.calls[0] as unknown as [unknown, unknown, { timeout?: number; signal: AbortSignal }]
+    expect(options[2].signal).toBe(controller.signal)
+    expect(options[2].timeout).toBe(timeoutMs === 0 ? undefined : timeoutMs ?? 1000)
+    expect(result.artifact).toEqual([{ type: 'mcp_structured_content', data: { enabled: false, count: 0 } }])
+    expect(afterToolCall).toHaveBeenCalledExactlyOnceWith({ name: 'read', args: {}, failed: false })
+  })
+
+  it('does not dispatch or save a new intent when already cancelled', async () => {
+    const callTool = vi.fn(), beforeToolCall = vi.fn()
+    const client = { callTool, readResource: vi.fn() } as unknown as Parameters<typeof mcpToolDefinitions>[1]
+    const [tool] = mcpToolDefinitions('local', client, [{ name: 'read', inputSchema: { type: 'object' } }], { beforeToolCall })
+    const controller = new AbortController()
+    controller.abort(new Error('Stopped'))
+    await expect(tool.execute({}, { signal: controller.signal })).rejects.toThrow('Stopped')
+    expect(beforeToolCall).not.toHaveBeenCalled()
+    expect(callTool).not.toHaveBeenCalled()
+  })
+})
 
 const stdioServer: McpServerConfig = {
   index: 0,
@@ -41,7 +68,7 @@ describe('MCP connection snapshots', () => {
       url: 'https://example.test/mcp'
     })
 
-    expect(snapshot?.connection).toMatchObject({ transport: type, automaticSSEFallback: false })
+    expect(snapshot?.connection).toMatchObject({ transport: type })
     expect(snapshot?.identity.transport).toBe(type)
     expect(mcpConnectionSnapshotForServer(stdioServer)?.connection).not.toHaveProperty('automaticSSEFallback')
   })
@@ -55,20 +82,15 @@ describe('MCP connection snapshots', () => {
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
     const address = server.address()
     if (!address || typeof address === 'string') throw new Error('Missing test server address')
-    const errors: string[] = []
     const { client } = createMcpClientForServer({
       ...stdioServer,
       type: 'http',
       command: undefined,
       url: `http://127.0.0.1:${address.port}/sse`
-    }, {
-      onConnectionError: ({ error }) => { errors.push(String(error)) }
     })
 
     try {
-      expect(await client.getTools()).toEqual([])
-      expect(errors).toHaveLength(1)
-      expect(errors[0]).toContain('Method not allowed')
+      await expect(client.initialize()).rejects.toThrow('Method not allowed')
       expect(methods).toEqual(['POST'])
     } finally {
       await client.close()

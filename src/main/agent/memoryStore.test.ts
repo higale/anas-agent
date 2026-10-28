@@ -1,19 +1,19 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { BaseStore } from '@langchain/langgraph-checkpoint'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import Database from 'better-sqlite3'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { AgentDatabase } from './agentDatabase'
 import { AgentStorage } from './agentStorage'
 import { getAgentCatalogFile } from '../config/dataDir'
+import { SqliteMemoryStore } from './memoryStore'
 
 const openDatabases: Array<{close():void}> = []
 const temporaryRoots: string[] = []
 
-function openDatabase(): AgentDatabase {
-  const database = AgentDatabase.open(':memory:')
+function openMemoryStore(): SqliteMemoryStore {
+  const database = new Database(':memory:')
   openDatabases.push(database)
-  return database
+  return new SqliteMemoryStore(database)
 }
 
 afterEach(async () => {
@@ -22,23 +22,52 @@ afterEach(async () => {
 })
 
 describe('SqliteMemoryStore', () => {
-  it('is the persistent LangGraph store attached to the agent database', async () => {
-    const store = openDatabase().memoryStore
-
-    expect(store).toBeInstanceOf(BaseStore)
-    await store.put(['custom', 'namespace'], 'key-1', { content: 'value' })
-
-    await expect(store.get(['custom', 'namespace'], 'key-1')).resolves.toMatchObject({
-      key: 'key-1',
-      namespace: ['custom', 'namespace'],
-      value: { content: 'value' }
+  it('rolls back the record and search index together when a write fails', async () => {
+    const database = new Database(':memory:')
+    openDatabases.push(database)
+    const store = new SqliteMemoryStore(database)
+    const original = await store.saveMemory({ scope: 'global', kind: 'fact', content: 'Original searchable memory',
+      keywords: ['original'], importance: 3 }, { origin: 'user' })
+    // Fail after replacing the record and removing its previous search entry.
+    // The transaction must restore both representations.
+    const prepare = database.prepare.bind(database)
+    const fault = vi.spyOn(database, 'prepare').mockImplementation(sql => {
+      if (sql.includes('INSERT INTO agent_memory_fts')) throw new Error('Injected index failure')
+      return prepare(sql)
     })
+    try {
+      await expect(store.saveMemory({ id: original.id, scope: 'global', kind: 'fact', content: 'Replacement memory',
+        keywords: [], importance: 1 }, { origin: 'user' })).rejects.toThrow('Injected index failure')
+    } finally { fault.mockRestore() }
+    await expect(store.searchMemories({ query: 'original' })).resolves.toMatchObject({ total: 1,
+      items: [{ id: original.id, content: original.content, updatedAt: original.updatedAt }] })
+    expect(database.prepare('SELECT content FROM agent_memory_fts').all()).toEqual([{ content: original.content }])
+    await store.deleteMemory(original.id)
+    expect(database.prepare('SELECT content FROM agent_memory_fts').all()).toEqual([])
+    await expect(store.searchMemories()).resolves.toEqual({ total: 0, items: [] })
+  })
+
+  it('reads existing stored memory rows without rewriting their identity or provenance', async () => {
+    const database = new Database(':memory:')
+    openDatabases.push(database)
+    const store = new SqliteMemoryStore(database)
+    const id = '11111111-1111-4111-8111-111111111111'
+    const timestamp = '2026-09-01T08:00:00.000Z'
+    const value = JSON.stringify({ kind: 'fact', content: 'Existing memory', keywords: [], importance: 3,
+      origin: 'agent', sourceThreadId: 'thread', sourceRunId: 'run' })
+    database.prepare('INSERT INTO agent_store_items VALUES (?, ?, ?, ?, ?)')
+      .run(JSON.stringify(['memories', 'global']), id, value, timestamp, timestamp)
+    await expect(store.searchMemories()).resolves.toMatchObject({ total: 1, items: [{
+      id, content: 'Existing memory', origin: 'agent', sourceThreadId: 'thread', sourceRunId: 'run',
+      createdAt: timestamp, updatedAt: timestamp
+    }] })
+    expect(database.prepare('SELECT value_json FROM agent_store_items').get()).toEqual({ value_json: value })
   })
 
   it('persists shared memory records in catalog.sqlite across restarts', async () => {
     const root = await mkdtemp(join(tmpdir(), 'anas-memory-store-'))
     temporaryRoots.push(root)
-    const first = AgentStorage.open(root)
+    const first = AgentStorage.openNative(root)
     await first.memoryStore.saveMemory({
       scope: 'global',
       kind: 'fact',
@@ -48,7 +77,7 @@ describe('SqliteMemoryStore', () => {
     }, { origin: 'user' })
     first.close()
 
-    const reopened = AgentStorage.open(root)
+    const reopened = AgentStorage.openNative(root)
     openDatabases.push(reopened)
 
     await expect(reopened.memoryStore.searchMemories({ query: 'restart' })).resolves.toMatchObject({
@@ -57,9 +86,13 @@ describe('SqliteMemoryStore', () => {
     })
   })
 
-  it('clears all memories without deleting other LangGraph store namespaces', async () => {
-    const store = openDatabase().memoryStore
-    await store.put(['custom', 'namespace'], 'keep', { content: 'Keep this value' })
+  it('clears all memories without deleting retained non-memory rows', async () => {
+    const database = new Database(':memory:')
+    openDatabases.push(database)
+    const store = new SqliteMemoryStore(database)
+    const retained = JSON.stringify({ content: 'Keep this value' })
+    database.prepare('INSERT INTO agent_store_items VALUES (?, ?, ?, ?, ?)')
+      .run(JSON.stringify(['custom', 'namespace']), 'keep', retained, '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')
     await store.saveMemory({
       scope: 'global',
       kind: 'fact',
@@ -79,16 +112,14 @@ describe('SqliteMemoryStore', () => {
     expect(store.clearMemories()).toBe(2)
     await expect(store.searchMemories()).resolves.toMatchObject({ total: 0, items: [] })
     await expect(store.searchMemories({ query: 'remove' })).resolves.toMatchObject({ total: 0, items: [] })
-    await expect(store.get(['custom', 'namespace'], 'keep')).resolves.toMatchObject({
-      value: { content: 'Keep this value' }
-    })
+    expect(database.prepare('SELECT value_json FROM agent_store_items WHERE key = ?').get('keep')).toEqual({ value_json: retained })
   })
 
   it('returns freed database pages to disk when compacted after cleanup', async () => {
     const root = await mkdtemp(join(tmpdir(), 'anas-memory-compact-'))
     temporaryRoots.push(root)
     const file = getAgentCatalogFile(root)
-    const database = AgentStorage.open(root)
+    const database = AgentStorage.openNative(root)
     openDatabases.push(database)
     for (let index = 0; index < 32; index += 1) {
       await database.memoryStore.saveMemory({
@@ -109,7 +140,7 @@ describe('SqliteMemoryStore', () => {
   })
 
   it('searches English and Chinese memory text without an embedding model', async () => {
-    const store = openDatabase().memoryStore
+    const store = openMemoryStore()
     await store.saveMemory({
       scope: 'global',
       kind: 'preference',
@@ -144,7 +175,7 @@ describe('SqliteMemoryStore', () => {
   })
 
   it('requires lexical matches instead of accepting trigram fragments or metadata fields', async () => {
-    const store = openDatabase().memoryStore
+    const store = openMemoryStore()
     await store.saveMemory({
       scope: 'global',
       kind: 'fact',
@@ -171,7 +202,7 @@ describe('SqliteMemoryStore', () => {
   })
 
   it('extracts Latin search terms next to CJK text without requiring spaces', async () => {
-    const store = openDatabase().memoryStore
+    const store = openMemoryStore()
     await store.saveMemory({
       scope: 'global',
       kind: 'fact',
@@ -189,7 +220,7 @@ describe('SqliteMemoryStore', () => {
   })
 
   it('recalls only global and current-project records', async () => {
-    const store = openDatabase().memoryStore
+    const store = openMemoryStore()
     for (const [scope, projectId, content] of [
       ['global', undefined, 'The build command is npm run build.'],
       ['project', 'project-1', 'Project one build command uses npm run build.'],
@@ -213,7 +244,7 @@ describe('SqliteMemoryStore', () => {
   })
 
   it('prevents agent writes and deletion from crossing project scope', async () => {
-    const store = openDatabase().memoryStore
+    const store = openMemoryStore()
     const memory = await store.saveMemory({
       scope: 'project',
       projectId: 'project-2',
@@ -240,7 +271,7 @@ describe('SqliteMemoryStore', () => {
   })
 
   it('updates, moves, filters, and deletes individual records', async () => {
-    const store = openDatabase().memoryStore
+    const store = openMemoryStore()
     const created = await store.saveMemory({
       scope: 'global',
       kind: 'fact',

@@ -1,0 +1,77 @@
+{
+  "name": "native-repair-base",
+  "schemaVersion": 1,
+  "format": "directory",
+  "bytes": 978849,
+  "sha256": "9abb6edb6988daa2c1f6f9376ee70173f9fdecdf745c5386aeafe225f3d518d6",
+  "metadata": {
+    "version": 1,
+    "value": [
+      "object",
+      [
+        [
+          "thread",
+          [
+            "object",
+            [
+              [
+                "accessMode",
+                "read_only_allowed"
+              ],
+              [
+                "createdAt",
+                "2026-10-27T14:11:06.549Z"
+              ],
+              [
+                "id",
+                "c6892dd9-cb69-4c8e-8c49-049a72a866c9"
+              ],
+              [
+                "modelConfigId",
+                [
+                  "undefined"
+                ]
+              ],
+              [
+                "modelParameterPresetId",
+                [
+                  "undefined"
+                ]
+              ],
+              [
+                "pinned",
+                false
+              ],
+              [
+                "projectId",
+                "default-workspace"
+              ],
+              [
+                "status",
+                "idle"
+              ],
+              [
+                "title",
+                "Keep conversation"
+              ],
+              [
+                "updatedAt",
+                "2026-10-27T14:11:06.549Z"
+              ],
+              [
+                "userTurnCount",
+                0
+              ]
+            ]
+          ]
+        ]
+      ]
+    ]
+  },
+  "provenance": {
+    "description": "Frozen native execution v1 repair fixture; no runtime upgrade code required.",
+    "sourceFixture": "repair-project-base",
+    "sourceSha256": "c86cc7db76d120c6840f3268d72cdc7558fe6654a8b94348e8010d2119655285",
+    "converterSource": "anas-next 553fded with portable file-history path validation"
+  }
+}

@@ -1,10 +1,12 @@
+import { toolEffectArtifactPurposes, type ToolEffectArtifactIdentity } from '../runtime/toolEffectIdentity'
+import { invokeCapability } from '../runtime/toolInvocation'
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { configureDataRuntime, getDataDir, getFileEditRecordsDir } from './config/dataDir'
 import { FileEditStore, pathExists } from './fileEditStore'
-import { createFileTools } from './llm/fileTools'
+import { fileToolDefinitions } from './llm/fileTools'
 import { runWithCurrentAgentToolEffect } from './agent/toolEffectScope'
 import { withApplicationDataSnapshot } from './applicationDataSnapshot'
 import { AgentStorage } from './agent/agentStorage'
@@ -30,17 +32,20 @@ function selectProfile(name: string): string {
 }
 
 function writeTool(primaryFolder: string, requestId: string, fileEditStore?: FileEditStore) {
-  return createFileTools({ primaryFolder, requestId, maxReadBytes: 1_000_000,
+  return fileToolDefinitions({ primaryFolder, requestId, maxReadBytes: 1_000_000,
     toolNames: ['write_file'], authorizePatch: async () => {}, fileEditStore })[0]
+}
+
+function effectIdentity(runId: string): ToolEffectArtifactIdentity {
+  return { runId, artifacts: Object.fromEntries(toolEffectArtifactPurposes.map(purpose => [purpose, randomUUID()])) as ToolEffectArtifactIdentity['artifacts'] }
 }
 
 async function write(tool: ReturnType<typeof writeTool>, requestId: string, name: string) {
   const result = await runWithCurrentAgentToolEffect({
-    effectKey: { runId: requestId, checkpointId: 'profile-checkpoint', checkpointNs: 'tools:profile-task',
-      taskId: 'profile-task', callKey: randomUUID(), inputHash: 'a'.repeat(64) },
+    identity: effectIdentity(requestId),
     isUnarmed: () => true, arm: () => {}
-  }, () => tool.invoke({ path: name, content: name, summary: 'Write profile fixture' }))
-  const output = JSON.parse(result as string) as { ok: boolean; operationId: string }
+  }, () => invokeCapability(tool, { path: name, content: name, summary: 'Write profile fixture' }, {}))
+  const output = JSON.parse(result.content as string) as { ok: boolean; operationId: string }
   expect(output).toMatchObject({ ok: true, operationId: expect.any(String) })
   return output.operationId
 }
@@ -50,27 +55,26 @@ describe('file edit store profile binding', () => {
     const profile = selectProfile('cross-conversation')
     const workspace = join(home, 'cross-conversation-workspace')
     await mkdir(workspace)
-    const storage = AgentStorage.open(profile)
+    const storage = AgentStorage.openNative(profile)
     try {
       const source = storage.createThread(), target = storage.createThread()
       const sourceDatabase = storage.conversationForThread(source.id)
       const targetDatabase = storage.conversationForThread(target.id)
       const sourceRun = randomUUID(), targetRun = randomUUID()
-      sourceDatabase.createRun(source.id, sourceRun, 'agent', [])
-      targetDatabase.createRun(target.id, targetRun, 'agent', [])
+      sourceDatabase.runs.createRun({ threadId: source.id, runId: sourceRun, operation: 'agent', message: { id: `${sourceRun}:input`, value: { id: `${sourceRun}:input`, kind: 'user', content: 'Edit file', context: { runId: sourceRun } } } })
+      targetDatabase.runs.createRun({ threadId: target.id, runId: targetRun, operation: 'agent', message: { id: `${targetRun}:input`, value: { id: `${targetRun}:input`, kind: 'user', content: 'Edit file', context: { runId: targetRun } } } })
       storage.refreshConversation(source.id)
       storage.refreshConversation(target.id)
-      const sourceStore = sourceDatabase.fileEditStore, targetStore = targetDatabase.fileEditStore
+      const sourceStore = sourceDatabase.resources.fileEditStore, targetStore = targetDatabase.resources.fileEditStore
       const operation = await write(writeTool(workspace, sourceRun, sourceStore), sourceRun, 'cross.txt')
       await sourceStore.deleteFileEditRecordsForRequest(sourceRun, [operation])
       expect((await targetStore.listRetainedEditRecords()).map(record => record.operationId)).toEqual([operation])
       expect(targetStore.editRecordDir(sourceRun, operation)).toBe(sourceStore.editRecordDir(sourceRun, operation))
       let blockedDeletion = false
       const inverse = await runWithCurrentAgentToolEffect({
-        effectKey: { runId: targetRun, checkpointId: 'restore-checkpoint', checkpointNs: 'tools:restore',
-          taskId: 'restore', callKey: randomUUID(), inputHash: 'b'.repeat(64) },
+        identity: effectIdentity(targetRun),
         isUnarmed: () => true,
-        persistFileChange: (record, observed) => targetDatabase.fileChanges.persist(record, observed || record.requestId !== targetRun),
+        persistFileChange: (record, observed) => targetDatabase.resources.fileChanges.persist(record, observed || record.requestId !== targetRun),
         arm: () => {
           expect(() => storage.beginConversationDeletion(source.id)).toThrow('file recovery material is in use')
           blockedDeletion = true

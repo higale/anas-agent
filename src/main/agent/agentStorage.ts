@@ -11,16 +11,17 @@ import type {
 } from '@shared/agentTypes'
 import { DEFAULT_WORKSPACE_PROJECT_ID } from '@shared/types'
 import {
-  getAgentCatalogFile, getAgentConversationDatabaseFile, getAgentConversationDir, getAgentConversationsDir, getAgentAttachmentsDir, getAgentConversationTempDir, getFileEditRecordsDir, getDataDir
+  getAgentCatalogFile, getAgentConversationDatabaseFile, getAgentConversationDir, getAgentConversationsDir, getAgentAttachmentsDir, getAgentConversationTempDir, getFileEditRecordsDir
 } from '../config/dataDir'
 import { measureDirectorySize } from '../dataStorageUsage'
 import { runtimeLog } from '../runtimeLogger'
-import { AgentDatabase } from './agentDatabase'
+import { NativeConversationDatabase } from './nativeConversationDatabase'
+import { completeProjectCatalogDeletion, readConversationCatalogSnapshot, writeConversationCatalogSnapshot } from './conversationCatalog'
 import { SqliteMemoryStore } from './memoryStore'
 import { FileEditStore, managedDirectChildPath } from '../fileEditStore'
 import { AgentThreadLockedError } from './agentErrors'
 
-const catalogVersion = 0
+const catalogVersion = 1
 const nativeDependency = createRequire(import.meta.url)
 const requiredCatalogColumns: Record<string, string[]> = {
   agent_conversations: ['id', 'title', 'project_id', 'model_config_id', 'model_parameter_preset_id', 'pinned', 'access_mode', 'status', 'user_turn_count', 'has_queued_inputs', 'created_at', 'updated_at'],
@@ -87,17 +88,38 @@ function runStorageWorker<T>(body: string, data: Record<string, unknown>): Promi
   })
 }
 
-export class AgentStorage {
-  private readonly conversations = new Map<string, AgentDatabase>()
+/** Physical directory ownership depends on product resources, not execution tables. */
+export interface ConversationStorageConnection {
+  getThread(threadId: string): AgentThread | null
+  createThread(options?: AgentThreadCreate, threadId?: string): AgentThread
+  updateThread(threadId: string, update: AgentThreadUpdate): AgentThread
+  setAccessMode(threadId: string, mode: AgentAccessMode): AgentThread
+  listThreadIds(): string[]
+  readCatalogSnapshot(ownerThreadId: string): ReturnType<typeof readConversationCatalogSnapshot>
+  close(): void
+}
+interface ConversationConnectionOptions<T> {
+  attachmentRoot: string
+  temporaryRoot: string
+  memoryStore: SqliteMemoryStore
+  fileEditStore: FileEditStore
+  onFileChanges?(runId: string): void
+  onChanged?(database: T): void
+}
+
+export class AgentStorage<T extends ConversationStorageConnection = NativeConversationDatabase> {
+  private readonly conversations = new Map<string, T>()
   private readonly unregisteredCreations = new Set<string>()
-  private preview?: AgentDatabase
+  private preview?: T
   private closed = false
   private maintaining = false
   private sharedMemoryStore: SqliteMemoryStore
   private catalog: Database.Database
   readonly dataDir: string
 
-  private constructor(dataDir: string, private readonly onFileChanges?: (ownerThreadId: string, runId: string) => void) {
+  private constructor(dataDir: string, private readonly onFileChanges: ((ownerThreadId: string, runId: string) => void) | undefined,
+    private readonly openDatabase: (file: string, options: ConversationConnectionOptions<T>) => T,
+    private readonly openPreview: (memory: SqliteMemoryStore) => T) {
     this.dataDir = resolve(dataDir)
     mkdirSync(dirname(getAgentCatalogFile(this.dataDir)), { recursive: true })
     this.catalog = new Database(getAgentCatalogFile(this.dataDir))
@@ -110,8 +132,14 @@ export class AgentStorage {
     }
   }
 
-  static open(dataDir = getDataDir(), onFileChanges?: (ownerThreadId: string, runId: string) => void): AgentStorage {
-    return new AgentStorage(dataDir, onFileChanges)
+  /** Explicit native format. No inference, migration or legacy database opening. */
+  static openNative(dataDir: string, onFileChanges?: (ownerThreadId: string, runId: string) => void): AgentStorage<NativeConversationDatabase> {
+    return new AgentStorage<NativeConversationDatabase>(dataDir, onFileChanges,
+      (file, options) => NativeConversationDatabase.open(file, options), memoryStore => {
+        const root = getAgentConversationTempDir(randomUUID(), dataDir)
+        return NativeConversationDatabase.open(':memory:', { attachmentRoot: resolve(root, 'attachments'),
+          fileEditStore: new FileEditStore(resolve(root, 'file_edits')), memoryStore })
+      })
   }
 
   get memoryStore(): SqliteMemoryStore { return this.sharedMemoryStore }
@@ -219,13 +247,13 @@ export class AgentStorage {
     return (this.catalog.prepare('SELECT owner_thread_id FROM agent_thread_locations WHERE thread_id = ?').get(threadId) as { owner_thread_id: string } | undefined)?.owner_thread_id
   }
 
-  conversationForThread(threadId: string): AgentDatabase {
+  conversationForThread(threadId: string): T {
     const owner = this.ownerForThread(threadId)
     if (!owner) throw new Error(`Thread ${threadId} was not found.`)
     return this.openConversation(owner)
   }
 
-  conversationForRun(runId: string): AgentDatabase | undefined {
+  conversationForRun(runId: string): T | undefined {
     this.requireOpen()
     const location = this.catalog.prepare('SELECT owner_thread_id FROM agent_run_locations WHERE run_id = ?').get(runId) as { owner_thread_id: string } | undefined
     return location ? this.openConversation(location.owner_thread_id) : undefined
@@ -266,7 +294,7 @@ export class AgentStorage {
     })
   }
 
-  openConversation(ownerThreadId: string, options: { create?: boolean; deleting?: boolean } = {}): AgentDatabase {
+  openConversation(ownerThreadId: string, options: { create?: boolean; deleting?: boolean } = {}): T {
     this.requireOpen()
     const deleting = this.isConversationDeleting(ownerThreadId)
     if (deleting && !options.deleting) throw new Error('Conversation deletion is pending; retry deleting this conversation to finish cleanup.')
@@ -280,7 +308,10 @@ export class AgentStorage {
     if (existsSync(directory) && !lstatSync(directory).isDirectory()) throw new Error(`Conversation storage is not a directory: ${ownerThreadId}`)
     if (thread && !existsSync(file)) throw new Error(`Conversation database is missing: ${ownerThreadId}`)
     if (existsSync(file) && !lstatSync(file).isFile()) throw new Error(`Conversation database is not a regular file: ${ownerThreadId}`)
-    const database = AgentDatabase.open(file, getAgentAttachmentsDir(ownerThreadId, this.dataDir), (runId) => this.onFileChanges?.(ownerThreadId, runId), {
+    mkdirSync(dirname(file), { recursive: true })
+    const database = this.openDatabase(file, {
+      attachmentRoot: getAgentAttachmentsDir(ownerThreadId, this.dataDir),
+      onFileChanges: (runId) => this.onFileChanges?.(ownerThreadId, runId),
       memoryStore: this.sharedMemoryStore,
       temporaryRoot: getAgentConversationTempDir(ownerThreadId, this.dataDir),
       fileEditStore: this.fileEditStore(ownerThreadId),
@@ -323,52 +354,9 @@ export class AgentStorage {
   refreshConversation(ownerThreadId: string): void {
     this.requireOpen()
     const database = this.conversations.get(ownerThreadId)
-    const thread = database?.getThread(ownerThreadId)
-    if (!database || !thread) return
-    const threadIds = database.listThreadIds()
-    const runs = database.listRunLocators()
-    this.catalog.transaction(() => {
-      this.catalog.prepare(`
-        INSERT INTO agent_conversations VALUES (@id, @title, @projectId, @modelConfigId, @modelParameterPresetId,
-          @pinned, @accessMode, @status, @userTurnCount, @queued, @createdAt, @updatedAt)
-        ON CONFLICT(id) DO UPDATE SET title=excluded.title, project_id=excluded.project_id,
-          model_config_id=excluded.model_config_id, model_parameter_preset_id=excluded.model_parameter_preset_id,
-          pinned=excluded.pinned, access_mode=excluded.access_mode, status=excluded.status,
-          user_turn_count=excluded.user_turn_count, has_queued_inputs=excluded.has_queued_inputs,
-          updated_at=excluded.updated_at
-      `).run({ ...thread, modelConfigId: thread.modelConfigId ?? null,
-        modelParameterPresetId: thread.modelParameterPresetId ?? null, pinned: Number(thread.pinned),
-        queued: Number(database.hasQueuedInputs()) })
-      const localThreads = new Set(threadIds)
-      for (const row of this.catalog.prepare('SELECT thread_id FROM agent_thread_locations WHERE owner_thread_id = ?').all(ownerThreadId) as Array<{ thread_id: string }>) {
-        if (!localThreads.has(row.thread_id)) this.catalog.prepare('DELETE FROM agent_thread_locations WHERE thread_id = ?').run(row.thread_id)
-      }
-      const insertThread = this.catalog.prepare('INSERT OR IGNORE INTO agent_thread_locations VALUES (?, ?)')
-      for (const id of threadIds) {
-        const existing = this.ownerForThread(id)
-        if (existing && existing !== ownerThreadId) throw new Error(`Thread ${id} already belongs to another conversation.`)
-        insertThread.run(id, ownerThreadId)
-      }
-      const localRuns = new Set(runs.map(({ id }) => id))
-      for (const row of this.catalog.prepare('SELECT run_id FROM agent_run_locations WHERE owner_thread_id = ?').all(ownerThreadId) as Array<{ run_id: string }>) {
-        if (!localRuns.has(row.run_id)) this.catalog.prepare('DELETE FROM agent_run_locations WHERE run_id = ?').run(row.run_id)
-      }
-      const insertRun = this.catalog.prepare(`
-        INSERT INTO agent_run_locations VALUES (@id, @threadId, @ownerThreadId, @submissionId)
-        ON CONFLICT(run_id) DO UPDATE SET submission_id=excluded.submission_id
-        WHERE agent_run_locations.owner_thread_id = excluded.owner_thread_id
-          AND agent_run_locations.thread_id = excluded.thread_id
-          AND agent_run_locations.submission_id IS NOT excluded.submission_id
-      `)
-      const runLocation = this.catalog.prepare('SELECT owner_thread_id, thread_id FROM agent_run_locations WHERE run_id = ?')
-      for (const run of runs) {
-        const existing = runLocation.get(run.id) as { owner_thread_id: string; thread_id: string } | undefined
-        if (existing && (existing.owner_thread_id !== ownerThreadId || existing.thread_id !== run.threadId)) {
-          throw new Error(`Run ${run.id} already belongs to another conversation.`)
-        }
-        insertRun.run({ ...run, ownerThreadId, submissionId: run.submissionId ?? null })
-      }
-    })()
+    const snapshot = database?.readCatalogSnapshot(ownerThreadId)
+    if (!snapshot) return
+    writeConversationCatalogSnapshot(this.catalog, snapshot)
     this.unregisteredCreations.delete(ownerThreadId)
   }
 
@@ -423,17 +411,17 @@ export class AgentStorage {
       .run(state.projectId, state.modelConfigId ?? null, state.modelParameterPresetId)
   }
 
-  previewDatabase(): AgentDatabase {
+  previewDatabase(): T {
     this.requireOpen()
-    return this.preview ??= AgentDatabase.open(':memory:', undefined, undefined, { memoryStore: this.sharedMemoryStore })
+    return this.preview ??= this.openPreview(this.sharedMemoryStore)
   }
 
-  openedConversations(): Array<{ ownerId: string; database: AgentDatabase }> {
+  openedConversations(): Array<{ ownerId: string; database: T }> {
     this.requireOpen()
     return [...this.conversations].map(([ownerId, database]) => ({ ownerId, database }))
   }
 
-  openedConversation(ownerThreadId: string): AgentDatabase | undefined {
+  openedConversation(ownerThreadId: string): T | undefined {
     this.requireOpen()
     return this.conversations.get(ownerThreadId)
   }
@@ -460,7 +448,7 @@ export class AgentStorage {
     this.catalog.prepare('INSERT OR IGNORE INTO agent_conversation_deletions VALUES (?)').run(ownerThreadId)
   }
 
-  conversationForCleanup(ownerThreadId: string): AgentDatabase | undefined {
+  conversationForCleanup(ownerThreadId: string): T | undefined {
     this.requireOpen()
     // A live handle still owns its work even if its file has disappeared.
     const existing = this.conversations.get(ownerThreadId)
@@ -496,17 +484,7 @@ export class AgentStorage {
 
   completeProjectDeletion(projectId: string): void {
     this.requireOpen()
-    requireText(projectId, 'Project ID')
-    this.catalog.transaction(() => {
-      if (this.catalog.prepare('SELECT 1 FROM agent_conversations WHERE project_id = ? LIMIT 1').get(projectId)) {
-        throw new Error('Cannot complete project deletion while project conversations still exist.')
-      }
-      this.sharedMemoryStore.deleteProjectMemories(projectId)
-      this.catalog.prepare(`
-        UPDATE agent_workspace_state SET draft_project_id = ?, draft_model_config_id = NULL,
-          draft_model_parameter_preset_id = NULL WHERE draft_project_id = ?
-      `).run(DEFAULT_WORKSPACE_PROJECT_ID, projectId)
-    })()
+    completeProjectCatalogDeletion(this.catalog, projectId)
   }
 
   async getStorageUsage(): Promise<AgentStorageUsageSnapshot> {

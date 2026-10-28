@@ -1,0 +1,71 @@
+{
+  "name": "legacy-conversation",
+  "producerCommit": "cc54775162a83792945fd2956ded33c5058ee54c",
+  "schemaVersion": 0,
+  "sha256": "69959d577fa84ce89db8f0cad7ca7f3155beb0df7225ec904340ee9fe8928d4c",
+  "bytes": 548864,
+  "metadata": {
+    "version": 1,
+    "value": [
+      "object",
+      [
+        [
+          "thread",
+          [
+            "object",
+            [
+              [
+                "accessMode",
+                "read_only_allowed"
+              ],
+              [
+                "createdAt",
+                "2026-10-27T13:56:48.177Z"
+              ],
+              [
+                "id",
+                "f60eec9a-a0a5-4f39-9990-c04ae6bc208c"
+              ],
+              [
+                "modelConfigId",
+                [
+                  "undefined"
+                ]
+              ],
+              [
+                "modelParameterPresetId",
+                [
+                  "undefined"
+                ]
+              ],
+              [
+                "pinned",
+                false
+              ],
+              [
+                "projectId",
+                "default-workspace"
+              ],
+              [
+                "status",
+                "idle"
+              ],
+              [
+                "title",
+                "New Thread"
+              ],
+              [
+                "updatedAt",
+                "2026-10-27T13:56:48.177Z"
+              ],
+              [
+                "userTurnCount",
+                0
+              ]
+            ]
+          ]
+        ]
+      ]
+    ]
+  }
+}

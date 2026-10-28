@@ -93,7 +93,7 @@ export function getBundledExamplesDir(): string {
 }
 
 function getDefaultDataDir(): string {
-  return join(homedir(), `.gale${getProgramName()}`)
+  return join(homedir(), '.anas')
 }
 
 export function resolveDataDirArgument(

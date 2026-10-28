@@ -6,8 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ShellTerminalControl } from './ptyShellSupervisor'
-import { AgentDatabase } from './agent/agentDatabase'
-import { ManagedCallService } from './agent/managedCallService'
+import { nativeCapabilityFixture } from '../test/nativeCapabilityFixture'
 
 vi.mock('./runtimeLogger', () => ({ runtimeLog: vi.fn() }))
 
@@ -67,10 +66,7 @@ describe('PTY command supervision', () => {
     }
   }, 20000)
   it('drains the real PTY executor through managed-service shutdown', async () => {
-    const database = AgentDatabase.open(':memory:')
-    const service = new ManagedCallService(database)
-    const thread = database.createThread({ title: 'PTY shutdown' })
-    const run = database.createRun(thread.id, 'pty-shutdown')
+    const h = nativeCapabilityFixture(), { database, service, thread, run } = h
     let result: ShellRunResult | undefined
     const starting = service.start({ kind: 'shell', threadId: thread.id, runId: run.id, summary: 'interactive shutdown',
       execute: (control) => runPreparedProcess({
@@ -89,10 +85,10 @@ describe('PTY command supervision', () => {
       expect(JSON.parse(service.read({ callId, threadId: thread.id }))).toHaveProperty('pty')
       const stopped = await service.shutdown()
       await starting
-      expect(stopped, JSON.stringify(database.getManagedCall(callId, thread.id))).toEqual({ uncertainCallIds: [], lingeringCallIds: [] })
+      expect(stopped, JSON.stringify(database.managed.getManagedCall(callId, thread.id))).toEqual({ uncertainCallIds: [], lingeringCallIds: [] })
       expect(service.activeCallIds()).toEqual([])
       expect(result).toMatchObject({ ok: false, aborted: true })
-    } finally { await service.shutdown(); await starting; await service.waitForIdle(); database.close() }
+    } finally { await service.shutdown(); await starting; await service.waitForIdle(); await h.close() }
   }, 15_000)
   it.skipIf(process.platform === 'win32').each(['direct', 'foreground', 'background'] as const)('contains a SIGHUP-ignoring %s job after the application is hard-killed', async (mode) => {
     const root = mkdtempSync(join(tmpdir(), 'anas-pty-parent-crash-'))

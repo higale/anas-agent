@@ -408,7 +408,7 @@ describe('field-level recovery', () => {
     const raw = { projects: [project, { ...structuredClone(project), id: 'second-project', name: 'Keep second project' }] }
     const before = JSON.stringify(raw)
     await writeFile(join(data, 'db/projects.json'), before)
-    const storage = AgentStorage.open(data)
+    const storage = AgentStorage.openNative(data)
     const thread = storage.createThread({ title: 'Keep conversation' })
     storage.close()
     const plan = await inspectRecoveryRepair(data)
@@ -420,7 +420,7 @@ describe('field-level recovery', () => {
     expect(JSON.parse(await readFile(join(data, 'db/projects.json'), 'utf8'))).toEqual({ ...raw, version: 0,
       projects: raw.projects.map((entry) => ({ ...entry, capabilities: { ...entry.capabilities, subagents: capabilities.subagents } })) })
     expect(await readFile(join(result.preservationPath!, 'data/db/projects.json'), 'utf8')).toBe(before)
-    const reopened = AgentStorage.open(data)
+    const reopened = AgentStorage.openNative(data)
     try { expect(reopened.getThread(thread.id)?.title).toBe('Keep conversation') } finally { reopened.close() }
     const preserve = vi.fn(async () => '/unused')
     expect((await repairRecoveryData(data, 'projects.json', preserve)).repaired).toEqual([])

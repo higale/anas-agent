@@ -1,3 +1,4 @@
+import { invokeCapability } from '../../runtime/toolInvocation'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { resolve } from 'node:path'
 
@@ -15,7 +16,7 @@ vi.mock('../avatarConfigService', () => ({
   consumePendingAvatarUpdate: configMocks.consumePendingAvatarUpdate
 }))
 
-import { createConfigTools } from './configTools'
+import { configToolDefinitions } from './configTools'
 
 beforeEach(() => {
   configMocks.updateConfigValue.mockReset()
@@ -29,11 +30,14 @@ beforeEach(() => {
   })
 })
 
+async function invokeConfig(input: Record<string, unknown>) {
+  return String((await invokeCapability(configToolDefinitions('/workspace')[0], input, {})).content)
+}
+
 describe('update_config tool', () => {
   it('passes native JSON values to the settings config service without exposing the snapshot', async () => {
-    const updateConfig = createConfigTools('/workspace')[0]
 
-    const result = await updateConfig.invoke({
+    const result = await invokeConfig({
       summary: 'Enable speech replies',
       config: 'settings',
       key: 'speech_reply.enabled',
@@ -65,9 +69,8 @@ describe('update_config tool', () => {
         snapshot: {},
         value: 'dark'
       })
-    const updateConfig = createConfigTools('/workspace')[0]
 
-    const result = await updateConfig.invoke({
+    const result = await invokeConfig({
       summary: 'Change the application theme',
       config: 'settings',
       key: 'theme',
@@ -92,9 +95,8 @@ describe('update_config tool', () => {
 
   it('returns configuration errors as tool output instead of failing the agent run', async () => {
     configMocks.updateConfigValue.mockRejectedValue(new Error('Config key settings.unknown does not exist.'))
-    const updateConfig = createConfigTools('/workspace')[0]
 
-    const result = await updateConfig.invoke({
+    const result = await invokeConfig({
       summary: 'Update an application setting',
       config: 'settings',
       key: 'unknown',
@@ -109,9 +111,8 @@ describe('update_config tool', () => {
 
   it('does not retry JSON text after a persistence failure', async () => {
     configMocks.updateConfigValue.mockRejectedValue(new Error('Failed to write config.'))
-    const updateConfig = createConfigTools('/workspace')[0]
 
-    const result = await updateConfig.invoke({
+    const result = await invokeConfig({
       summary: 'Change the application theme',
       config: 'settings',
       key: 'theme',
@@ -123,11 +124,10 @@ describe('update_config tool', () => {
   })
 
   it('rejects unsupported config documents and non-JSON values at the schema boundary', async () => {
-    const updateConfig = createConfigTools('/workspace')[0]
 
-    await expect(updateConfig.invoke({ summary: 'Change the application theme', config: 'models', key: 'theme', value: 'dark' }))
+    await expect(invokeConfig({ summary: 'Change the application theme', config: 'models', key: 'theme', value: 'dark' }))
       .rejects.toThrow()
-    await expect(updateConfig.invoke({ summary: 'Change the application theme', config: 'settings', key: 'theme' }))
+    await expect(invokeConfig({ summary: 'Change the application theme', config: 'settings', key: 'theme' }))
       .rejects.toThrow()
     expect(configMocks.updateConfigValue).not.toHaveBeenCalled()
   })
@@ -141,10 +141,9 @@ describe('update_config tool', () => {
       value: '/workspace/images/avatar.png'
     })
     configMocks.consumePendingAvatarUpdate.mockResolvedValue({ applied: true })
-    const updateConfig = createConfigTools('/workspace')[0]
     const avatarPath = resolve('/workspace/images/avatar.png')
 
-    const result = await updateConfig.invoke({
+    const result = await invokeConfig({
       summary: 'Replace the assistant avatar',
       config: 'settings',
       key: 'profile.assistant.new_avatar_path',
@@ -176,9 +175,8 @@ describe('update_config tool', () => {
       value: '/workspace/missing.png'
     })
     configMocks.consumePendingAvatarUpdate.mockRejectedValue(new Error('Avatar image could not be loaded.'))
-    const updateConfig = createConfigTools('/workspace')[0]
 
-    const result = await updateConfig.invoke({
+    const result = await invokeConfig({
       summary: 'Replace the assistant avatar',
       config: 'settings',
       key: 'profile.assistant.new_avatar_path',
@@ -197,9 +195,8 @@ describe('update_config tool', () => {
       value: 'default'
     })
     configMocks.consumePendingAvatarUpdate.mockResolvedValue({ applied: true })
-    const updateConfig = createConfigTools('/workspace')[0]
 
-    const result = await updateConfig.invoke({
+    const result = await invokeConfig({
       summary: 'Restore the default assistant avatar',
       config: 'settings',
       key: 'profile.assistant.new_avatar_path',

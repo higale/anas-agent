@@ -17,8 +17,6 @@ const requiredEntries = [
   '/licenses/dompurify/LICENSE',
   '/licenses/dompurify/LICENSE-MPL',
   '/licenses/marked/LICENSE.md',
-  '/node_modules/@langchain/langgraph/dist/index.cjs',
-  '/node_modules/@langchain/langgraph-checkpoint/dist/index.cjs',
   '/node_modules/image-dimensions/index.js',
   '/node_modules/mediainfo.js/dist/cjs/index.cjs',
   '/node_modules/mediainfo.js/dist/MediaInfoModule.wasm',
@@ -136,13 +134,8 @@ function packageManifest(unpackedDirectory) {
       throw new Error(`Packaged PTY binary must exist outside ASAR: ${entry}`)
     }
   }
-  for (const dependency of ['p-queue', 'p-retry']) {
-    if (!entries.some((entry) => (
-      entry.includes('/@langchain/langgraph-sdk/dist/node_modules/.pnpm/')
-      && entry.includes(`/node_modules/${dependency}/`)
-      && entry.endsWith('.cjs')
-    ))) throw new Error(`Packaged LangGraph SDK dependency is missing: ${dependency}`)
-  }
+  const retiredFramework = entries.find(entry => /\/node_modules\/(?:@langchain\/|(?:langchain|deepagents)\/)/.test(entry))
+  if (retiredFramework) throw new Error(`Packaged application contains a retired execution framework: ${retiredFramework}`)
   const koffiNativeEntries = entries.filter((entry) => (
     /^\/node_modules\/@koromix\/koffi-[^/]+\/[^/]+\/koffi\.node$/.test(entry)
   ))

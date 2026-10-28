@@ -26,7 +26,7 @@ import { initializeToolsStore } from './toolsStore'
 import { initializePluginsStore } from './plugins/pluginRuntime'
 import { initializeBundledExamples } from './bundledExamples'
 import { getInputHistory } from './inputHistoryStore'
-import { migrateDataDirectory } from './migrations'
+import { validateExecutionStorageDirectory } from './executionStorageValidation'
 import { recoverInterruptedDataRestore } from './backupService'
 import { reportStartupFailure } from './startupFailure'
 import { registerSpeechReplyIpc } from './speech/speechReplyIpc'
@@ -86,7 +86,7 @@ function startApplication(): void {
     registerAttachmentPreviewProtocol()
     registerPluginProtocol()
     const recoveredInterruptedRestore = await recoverInterruptedDataRestore()
-    await migrateDataDirectory(getDataDir())
+    await validateExecutionStorageDirectory(getDataDir())
     await initializeBundledExamples()
     await initializePluginsStore()
     await recoverPendingProjectDeletion()

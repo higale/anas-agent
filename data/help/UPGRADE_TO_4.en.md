@@ -24,7 +24,7 @@ Old files may remain on disk. Upgrading does not delete them automatically, but 
 
 Fully quit Anas and copy the entire old data directory to a safe location outside that directory. Do not rely only on an application backup made after upgrading: it excludes old-layout residues.
 
-Standard Anas uses `~/.galeAnas/` by default, usually `%USERPROFILE%\.galeAnas\` on Windows. If you renamed the application or use `--data-dir`, use the actual data directory instead. All paths below are relative to that root.
+The original standard Anas uses `~/.galeAnas/` by default, usually `%USERPROFILE%\.galeAnas\` on Windows. Anas 5.0 always defaults to `~/.anas/` and does not automatically read or migrate the old directory or the previous `~/.anas-next/` directory. An explicit `--data-dir` selects a different root. The following retains the original 4.x upgrade guidance; all paths are relative to the actual data root.
 
 Application backup ZIPs made before 4.0 cannot be imported through Restore backup in 4.x. Keep them as original records; do not change version markers to force an import.
 

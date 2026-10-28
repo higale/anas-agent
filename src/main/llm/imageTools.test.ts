@@ -2,8 +2,8 @@ import { mkdtemp, rm, writeFile, truncate } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it } from 'vitest'
-import { createImageTools } from './imageTools'
-import type { StructuredToolInterface } from '@langchain/core/tools'
+import { imageToolDefinitions } from './imageTools'
+import { invokeCapability } from '../../runtime/toolInvocation'
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
 const webp = Buffer.from('UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA', 'base64')
@@ -14,8 +14,10 @@ beforeEach(async () => {
 })
 afterEach(() => rm(root, { recursive: true, force: true }))
 const invoke = async (name: string, args: Record<string, unknown>, signal?: AbortSignal) => {
-  const tool: StructuredToolInterface = createImageTools({ primaryFolder: root, signal }).find((tool) => tool.name === name)!
-  return await tool.invoke({ type: 'tool_call', id: 'image-call', name, args })
+  const tool = imageToolDefinitions({ primaryFolder: root, signal }).find((tool) => tool.name === name)!
+  const result = await invokeCapability(tool, args, { callId: 'image-call', signal })
+  if (!Array.isArray(result.content)) throw new Error('Expected image tool content blocks')
+  return { ...result, content: result.content }
 }
 
 it('returns original image blocks, with labels and per-file errors in input order', async () => {

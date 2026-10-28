@@ -1,6 +1,5 @@
 import { pluginToolMetadata } from '@shared/pluginTools'
 import { isCustomToolMetadata } from '@shared/customTools'
-import type { StructuredToolInterface } from '@langchain/core/tools'
 import type { builtinToolCatalog } from '@shared/toolRegistry'
 import type { AgentToolEffectRecoveryMode } from './toolEffectScope'
 import { isCommandShellMetadata } from '@shared/commandShell'
@@ -47,7 +46,9 @@ type McpAnnotations = {
   idempotentHint?: unknown
 }
 
-function toolMetadata(tool: StructuredToolInterface | undefined): Record<string, unknown> | undefined {
+type EffectTool = { name: string; metadata?: unknown }
+
+function toolMetadata(tool: EffectTool | undefined): Record<string, unknown> | undefined {
   const metadata = (tool as { metadata?: unknown } | undefined)?.metadata
   return metadata && typeof metadata === 'object' && !Array.isArray(metadata)
     ? metadata as Record<string, unknown>
@@ -56,7 +57,7 @@ function toolMetadata(tool: StructuredToolInterface | undefined): Record<string,
 
 function mcpAnnotations(
   toolName: string,
-  tool: StructuredToolInterface | undefined
+  tool: EffectTool | undefined
 ): McpAnnotations | undefined {
   const metadata = toolMetadata(tool)
   const isMcpTool = toolName.startsWith('mcp_')
@@ -103,7 +104,7 @@ function classifyHttpRequest(args: Record<string, unknown>): AgentToolEffectClas
 export function classifyAgentToolEffect(
   toolName: string,
   args: Record<string, unknown>,
-  tool?: StructuredToolInterface
+  tool?: EffectTool
 ): AgentToolEffectClassification | undefined {
   if (toolName === 'start_subagent' || toolName === 'cancel_subagent') {
     return { recoveryMode: 'idempotent' }

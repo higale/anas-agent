@@ -114,9 +114,10 @@ async function installRoundChangesFixture(application, directory) {
         const after = input.target === 'current' ? await process.getBuiltinModule('node:fs/promises').readFile(input.filePath, 'utf8') : body[1]
         return { status: 'ready', path: input.filePath, beforeExists: true, afterExists: true, before: body[0], after }
       }],
-      ['agent:panels:review', (_event, input) => {
-        probe.submission = { review: input }
-        return { thread, run: { id: 'round-review-run', threadId: thread.id, operation: 'agent', status: 'completed', createdAt: now, updatedAt: now } }
+      ['agent:panels:review', (_event, pageId, input, navigationId) => {
+        if (typeof pageId !== 'string' || !pageId || typeof navigationId !== 'string' || !navigationId) throw new Error('Review must retain its panel identity')
+        if (input.threadId !== thread.id) throw new Error('Unexpected conversation in panel review')
+        probe.submission = { pageId, navigationId, review: input }
       }]
     ]) { ipcMain.removeHandler(channel); ipcMain.handle(channel, handler) }
   }, { paths, fixture })

@@ -25,7 +25,7 @@ export const writeFileSchema = z.object({
   overwrite: z.boolean().optional().default(false).describe('Allow replacing an existing file. Default false: fail if the file already exists. Set true explicitly to replace its entire content.')
 }).strict()
 
-// LangChain represents native freeform calls as { input: string }. Normalize
+// Responses freeform calls use an { input: string } envelope. Normalize
 // only the transport envelope; the patch always enters the same parser.
 export const filePatchSchema = z.preprocess((value) => {
   if (value && typeof value === 'object' && Object.keys(value).length === 1 && 'input' in value) {

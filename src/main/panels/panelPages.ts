@@ -31,6 +31,9 @@ function deferred<T>(): Deferred<T> {
   void promise.catch(() => undefined)
   return { promise, resolve, reject }
 }
+function panelCancellation(signal?: AbortSignal): Error {
+  return new Error(signal?.reason === 'PANEL_LOAD_FAILED' ? 'PANEL_LOAD_FAILED' : 'PANEL_CLOSED')
+}
 interface Page {
   id: string
   entry: Entry
@@ -152,7 +155,7 @@ export class PanelPages {
   pageFailed(event: IpcMainInvokeEvent, pageId: unknown): void {
     const page = this.page(event, pageId)
     page.ready.reject(new Error('PANEL_LOAD_FAILED'))
-    if (page.entry.candidate === page) page.entry.transfer?.abort()
+    if (page.entry.candidate === page) page.entry.transfer?.abort('PANEL_LOAD_FAILED')
   }
   private shellState(shell: Shell): PanelWindowShellState {
     return { view: { ...shell.entry.state, loading: !!shell.entry.state.loading || shell.entry.source?.owner !== shell.window },
@@ -181,6 +184,8 @@ export class PanelPages {
       return this.open(definition)
     }
     if (existing) {
+      // A later open must not abort the first page before it can become active.
+      if (!existing.source) { await existing.operation; return this.open(definition) }
       this.updateContent(existing.state.viewId, definition.content, definition)
       if (existing.source?.location === 'window') { existing.source.owner.show(); existing.source.owner.focus() }
       else if (existing.source) await this.prepareSidebar(existing)
@@ -415,7 +420,7 @@ export class PanelPages {
     if (request?.page === page) request.finish(failed ? null : requirePanelJson(result), failed ? new Error('PANEL_ACTION_FAILED') : undefined)
   }
   private command(page: Page, kind: PanelPageCommand['kind'], payload: PanelJson, signal?: AbortSignal, timeoutMs = 15000, settled?: () => void): Promise<PanelJson> {
-    if (signal?.aborted || !this.pages.has(page.id)) return Promise.reject(new Error('PANEL_CLOSED'))
+    if (signal?.aborted || !this.pages.has(page.id)) return Promise.reject(panelCancellation(signal))
     return new Promise((resolve, reject) => {
       const requestId = randomUUID()
       const finish = (value: PanelJson, error?: Error) => {
@@ -425,7 +430,7 @@ export class PanelPages {
       }
       const cancel = () => {
         if (!page.owner.isDestroyed()) page.owner.webContents.send('panel-page:cancel', requestId)
-        finish(null, new Error('PANEL_CLOSED'))
+        finish(null, panelCancellation(signal))
       }
       const timer = setTimeout(() => {
         if (kind === 'action') { reject(new Error('PANEL_ACTION_TIMEOUT')); return }
@@ -463,7 +468,7 @@ export class PanelPages {
   private waitReady(page: Page, signal: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
       const finish = (error?: unknown) => { clearTimeout(timer); signal.removeEventListener('abort', cancel); if (error) reject(error); else resolve() }
-      const cancel = () => finish(new Error('PANEL_CLOSED'))
+      const cancel = () => finish(panelCancellation(signal))
       const timer = setTimeout(() => finish(new Error('PANEL_LOAD_FAILED')), 30000)
       signal.addEventListener('abort', cancel, { once: true })
       if (signal.aborted) cancel()
@@ -475,7 +480,7 @@ export class PanelPages {
     if (!entry) throw new Error('PANEL_CLOSED')
     return entry
   }
-  private check(entry: Entry, signal: AbortSignal): void { if (signal.aborted || !this.entries.has(entry.state.viewId)) throw new Error('PANEL_CLOSED') }
+  private check(entry: Entry, signal: AbortSignal): void { if (signal.aborted || !this.entries.has(entry.state.viewId)) throw panelCancellation(signal) }
   private enqueue(entry: Entry, action: () => Promise<void>): Promise<void> {
     const result = entry.operation.catch(() => undefined).then(() => { this.require(entry.state.viewId); if (entry.closing) throw new Error('PANEL_CLOSED'); return action() })
     entry.operation = result; return result
@@ -491,7 +496,7 @@ export class PanelPages {
         clearTimeout(timer); signal?.removeEventListener('abort', cancel)
         if (error) reject(error); else resolve(owner)
       }
-      const cancel = () => finish(new Error('PANEL_CLOSED'))
+      const cancel = () => finish(panelCancellation(signal))
       const timer = setTimeout(() => finish(new Error('PANEL_TARGET_UNAVAILABLE')), 15000)
       this.requests.set(requestId, { entry, owner, finish })
       signal?.addEventListener('abort', cancel, { once: true })

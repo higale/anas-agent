@@ -189,7 +189,7 @@ export function projectRunActivityItems(
     model.toolCallIds.forEach((callId, index) => toolKeys.set(callId, modelToolKey(model, index)))
   }
   models.forEach((model) => {
-    // A checkpoint message owns its visible body even if later supervision or
+    // A persisted message owns its visible body even if later supervision or
     // cleanup fails the run. Activity retains reasoning and uncommitted text.
     const messageVisible = !agentId && messages.some((message) =>
       message.id === model.messageId
@@ -225,8 +225,8 @@ export function projectRunActivityItems(
     : run.status === 'running') {
     for (const model of models) {
       for (const [index, progress] of (model.toolCallProgress ?? []).entries()) {
-        if (run.tools.some((tool) => tool.subagentId === agentId && tool.call.id === progress.callId)) continue
-        const callId = progress.callId ?? `${model.id}:draft:${progress.index}`
+        const callId = model.toolCallIds[index] ?? progress.callId ?? `${model.id}:draft:${progress.index}`
+        if (run.tools.some((tool) => tool.subagentId === agentId && tool.call.id === callId)) continue
         items.push({
           type: 'tool',
           key: modelToolKey(model, index),

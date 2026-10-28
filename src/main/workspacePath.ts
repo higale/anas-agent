@@ -9,6 +9,9 @@ export type WorkspacePathSemantics = 'follow' | 'entry'
 export async function resolveShellOperandPath(value: string, workingDir: string): Promise<string> {
   if (!value || !isAbsolute(workingDir)) throw new Error('Shell path and absolute working directory are required.')
   const absolute = isAbsolute(value) ? value : `${workingDir}${workingDir.endsWith(sep) ? '' : sep}${value}`
+  // Check the literal operand first: some realpath implementations simplify
+  // file/../target even though the OS cannot traverse that file as a directory.
+  await lstat(absolute)
   return realpath(absolute)
 }
 

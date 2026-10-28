@@ -1,3 +1,10 @@
+import { toolEffectArtifactPurposes, type ToolEffectArtifactIdentity } from '../../runtime/toolEffectIdentity'
+import { invokeCapability } from '../../runtime/toolInvocation'
+import type { ToolDefinition } from '../../runtime/toolDefinition'
+import { toolJsonSchema } from '../../runtime/toolSchema'
+import Database from 'better-sqlite3'
+import { NativeConversationDatabase } from '../agent/nativeConversationDatabase'
+import { SqliteMemoryStore } from '../agent/memoryStore'
 import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
@@ -5,33 +12,35 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enabledBuiltinFileToolNames } from '@shared/toolRegistry'
 import type { AgentFeatures } from '@shared/types'
-import { AgentDatabase, type AgentToolEffectKey } from '../agent/agentDatabase'
 import { runWithCurrentAgentToolEffect, type AgentToolEffectArm } from '../agent/toolEffectScope'
 import { FileEditStore, pathExists } from '../fileEditStore'
-import { createFileTools } from './fileTools'
+import { fileToolDefinitions } from './fileTools'
 import { ManagedCallService } from '../agent/managedCallService'
-import { withManagedToolExecution } from '../agent/managedToolExecution'
-import { ToolMessage } from '@langchain/core/messages'
-import { convertToOpenAITool } from '@langchain/core/utils/function_calling'
+import { createManagedToolRuntime } from '../agent/managedToolRuntime'
 import { directoryTreePages } from '../directoryTree'
 
 const tempDirs: string[] = []
 const defaultRequestId = '00000000-0000-4000-8000-000000000001'
 let fileEditStore: FileEditStore
 let fileEditStoreRoot: string
-let database: AgentDatabase
+let database: NativeConversationDatabase
+let memoryDatabase: Database.Database
 
 function ensureRun(requestId: string): void {
-  if (!database.getRun(requestId)) database.createRun(database.createThread().id, requestId, 'agent', [], { kind: 'user', text: 'File test' })
+  if (!database.messages.activities.getRun(requestId)) {
+    const id = requestId + ':input'
+    database.runs.createRun({ threadId: database.createThread().id, runId: requestId, operation: 'agent',
+      message: { id, value: { id, kind: 'user', content: 'File test', context: { runId: requestId } } } })
+  }
 }
 
-const stableFileEffectKey: AgentToolEffectKey = {
-  runId: defaultRequestId,
-  checkpointId: 'checkpoint-file-edit',
-  checkpointNs: 'tools:file-edit-task',
-  taskId: 'file-edit-task',
-  callKey: 'id:file-edit-call',
-  inputHash: 'a'.repeat(64)
+function effectIdentity(runId: string): ToolEffectArtifactIdentity {
+  return { runId, artifacts: Object.fromEntries(toolEffectArtifactPurposes.map(purpose => [purpose, randomUUID()])) as ToolEffectArtifactIdentity['artifacts'] }
+}
+async function invokeText(tool: ToolDefinition, input: unknown) {
+  const result = await invokeCapability(tool, input, {})
+  if (typeof result.content !== 'string') throw new Error('Expected file tool text output')
+  return result.content
 }
 
 async function tempDir(): Promise<string> {
@@ -51,17 +60,17 @@ async function invokeRequestTool(
   primaryFolder = process.cwd()
 ): Promise<Record<string, unknown>> {
   ensureRun(requestId)
-  const selected = createFileTools({ maxReadBytes: 1_000_000,
+  const selected = fileToolDefinitions({ maxReadBytes: 1_000_000,
     primaryFolder,
     requestId,
-    fileEditStore, fileChanges: database.fileChanges, authorizePatch: async () => {}
+    fileEditStore, fileChanges: database.resources.fileChanges, authorizePatch: async () => {}
   }).find((item) => item.name === name)
   expect(selected, `tool ${name} should exist`).toBeTruthy()
   const effects: AgentToolEffectArm[] = []
-  const output = await runWithCurrentAgentToolEffect({ effectKey: { ...stableFileEffectKey, runId: requestId, callKey: randomUUID() },
-    persistFileChange: (record, observed) => database.fileChanges.persist(record, observed),
+  const output = await runWithCurrentAgentToolEffect({ identity: effectIdentity(requestId),
+    persistFileChange: (record, observed) => database.resources.fileChanges.persist(record, observed),
     isUnarmed: () => effects.length === 0, previousEffect: () => effects.at(-1), arm: (effect) => effects.push(effect)
-  }, () => selected!.invoke({ summary: 'Run the file tool test', ...input }))
+  }, () => invokeText(selected!, { summary: 'Run the file tool test', ...input }))
   expect(typeof output).toBe('string')
   const result = JSON.parse(output as string) as Record<string, unknown>
   return result
@@ -73,18 +82,18 @@ async function invokeToolWithEffects(
   primaryFolder = process.cwd()
 ): Promise<{ effects: AgentToolEffectArm[]; result: Record<string, unknown> }> {
   ensureRun(defaultRequestId)
-  const selected = createFileTools({ maxReadBytes: 1_000_000,
+  const selected = fileToolDefinitions({ maxReadBytes: 1_000_000,
     primaryFolder,
     requestId: defaultRequestId,
-    fileEditStore, fileChanges: database.fileChanges, authorizePatch: async () => {}
+    fileEditStore, fileChanges: database.resources.fileChanges, authorizePatch: async () => {}
   }).find((item) => item.name === name)
   expect(selected, `tool ${name} should exist`).toBeTruthy()
   const effects: AgentToolEffectArm[] = []
   const output = await runWithCurrentAgentToolEffect({
-    persistFileChange: (record, observed) => database.fileChanges.persist(record, observed),
-    effectKey: { ...stableFileEffectKey, callKey: randomUUID() }, isUnarmed: () => effects.length === 0,
+    persistFileChange: (record, observed) => database.resources.fileChanges.persist(record, observed),
+    identity: effectIdentity(defaultRequestId), isUnarmed: () => effects.length === 0,
     previousEffect: () => effects.at(-1), arm: (effect) => effects.push(effect)
-  }, () => selected!.invoke({ summary: 'Run the file tool test', ...input }))
+  }, () => invokeText(selected!, { summary: 'Run the file tool test', ...input }))
   expect(typeof output).toBe('string')
   return {
     effects,
@@ -96,12 +105,15 @@ beforeEach(async () => {
   const directory = await tempDir()
   fileEditStoreRoot = join(directory, 'file_edits')
   fileEditStore = new FileEditStore(fileEditStoreRoot)
-  database = AgentDatabase.open(':memory:', join(directory, 'attachments'))
+  memoryDatabase = new Database(':memory:')
+  database = NativeConversationDatabase.open(':memory:', { attachmentRoot: join(directory, 'attachments'),
+    memoryStore: new SqliteMemoryStore(memoryDatabase), fileEditStore })
 })
 
 afterEach(async () => {
   await directoryTreePages.closeIdleCursors()
   database.close()
+  memoryDatabase.close()
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
@@ -112,69 +124,69 @@ describe('file tools', () => {
     await writeFile(path, content)
     await writeFile(extra, 'x')
     await writeFile(empty, '')
-    const tools = createFileTools({ primaryFolder: dir, maxReadBytes })
+    const tools = fileToolDefinitions({ primaryFolder: dir, maxReadBytes })
     const read = tools.find(tool => tool.name === 'read_file')!
     const batch = tools.find(tool => tool.name === 'read_multiple_files')!
-    expect(await read.invoke({ path, format: 'raw' })).toBe(content)
-    expect(JSON.parse(await read.invoke({ path }))).toMatchObject({ ok: true, content, byteLimit: maxReadBytes, returnedBytes: maxReadBytes })
-    expect(JSON.parse(await batch.invoke({ paths: [path, empty, extra] }))).toMatchObject({
+    expect(await invokeText(read, { path, format: 'raw' })).toBe(content)
+    expect(JSON.parse(await invokeText(read, { path }))).toMatchObject({ ok: true, content, byteLimit: maxReadBytes, returnedBytes: maxReadBytes })
+    expect(JSON.parse(await invokeText(batch, { paths: [path, empty, extra] }))).toMatchObject({
       byteLimit: maxReadBytes, returnedBytes: maxReadBytes, truncated: true,
       files: [{ ok: true, content }, { ok: true, content: '' }, { ok: false }]
     })
     await writeFile(path, content + 'tail\n')
-    expect(JSON.parse(await read.invoke({ path }))).toMatchObject({ ok: false, error: expect.stringContaining(String(maxReadBytes)) })
-    await expect(read.invoke({ path, format: 'raw' })).rejects.toThrow(String(maxReadBytes))
-    expect(JSON.parse(await read.invoke({ path, max_lines: 2 }))).toMatchObject({ content, byteLimit: maxReadBytes, truncated: true })
-    expect(await read.invoke({ path, max_lines: 1, format: 'raw' })).toBe(content)
-    await expect(read.invoke({ path, max_lines: 2, format: 'raw' })).rejects.toThrow('no partial raw content')
+    expect(JSON.parse(await invokeText(read, { path }))).toMatchObject({ ok: false, error: expect.stringContaining(String(maxReadBytes)) })
+    await expect(invokeText(read, { path, format: 'raw' })).rejects.toThrow(String(maxReadBytes))
+    expect(JSON.parse(await invokeText(read, { path, max_lines: 2 }))).toMatchObject({ content, byteLimit: maxReadBytes, truncated: true })
+    expect(await invokeText(read, { path, max_lines: 1, format: 'raw' })).toBe(content)
+    await expect(invokeText(read, { path, max_lines: 2, format: 'raw' })).rejects.toThrow('no partial raw content')
   })
 
   it('keeps metadata line counting independent of the model read budget', async () => {
     const dir = await tempDir(), path = join(dir, 'lines.txt')
     await writeFile(path, 'first\nsecond\n')
-    const tools = createFileTools({ primaryFolder: dir, maxReadBytes: 1 })
-    expect(JSON.parse(await tools.find(tool => tool.name === 'get_file_info')!.invoke({ path }))).toMatchObject({ ok: true, lineCount: 2 })
+    const tools = fileToolDefinitions({ primaryFolder: dir, maxReadBytes: 1 })
+    expect(JSON.parse(await invokeText(tools.find(tool => tool.name === 'get_file_info')!, { path }))).toMatchObject({ ok: true, lineCount: 2 })
   })
 
   it('reads the current model budget on every file operation and rejects an invalid updated budget', async () => {
     const dir = await tempDir(), path = join(dir, 'dynamic.txt')
     await writeFile(path, '12345678')
     let currentBudget = 16
-    const tools = createFileTools({ primaryFolder: dir, maxReadBytes: async () => currentBudget })
+    const tools = fileToolDefinitions({ primaryFolder: dir, maxReadBytes: async () => currentBudget })
     const read = tools.find(tool => tool.name === 'read_file')!
     const batch = tools.find(tool => tool.name === 'read_multiple_files')!
-    expect(await read.invoke({ path, format: 'raw' })).toBe('12345678')
+    expect(await invokeText(read, { path, format: 'raw' })).toBe('12345678')
     currentBudget = 4
-    await expect(read.invoke({ path, format: 'raw' })).rejects.toThrow('max 4')
-    expect(JSON.parse(await batch.invoke({ paths: [path] }))).toMatchObject({ byteLimit: 4, truncated: true })
+    await expect(invokeText(read, { path, format: 'raw' })).rejects.toThrow('max 4')
+    expect(JSON.parse(await invokeText(batch, { paths: [path] }))).toMatchObject({ byteLimit: 4, truncated: true })
     currentBudget = 32
-    expect(JSON.parse(await batch.invoke({ paths: [path] }))).toMatchObject({ byteLimit: 32, returnedBytes: 8 })
+    expect(JSON.parse(await invokeText(batch, { paths: [path] }))).toMatchObject({ byteLimit: 32, returnedBytes: 8 })
     currentBudget = NaN
-    await expect(read.invoke({ path, format: 'raw' })).rejects.toThrow('positive safe integer')
+    await expect(invokeText(read, { path, format: 'raw' })).rejects.toThrow('positive safe integer')
   })
 
   it('does not execute model-free catalog reads or accept invalid budgets', async () => {
     const dir = await tempDir(), path = join(dir, 'file.txt')
     await writeFile(path, 'text')
-    const tools = createFileTools({ primaryFolder: dir, maxReadBytes: null })
-    await expect(tools.find(tool => tool.name === 'read_file')!.invoke({ path, format: 'raw' })).rejects.toThrow('configured model')
-    expect(JSON.parse(await tools.find(tool => tool.name === 'read_multiple_files')!.invoke({ paths: [path] }))).toMatchObject({ ok: false })
+    const tools = fileToolDefinitions({ primaryFolder: dir, maxReadBytes: null })
+    await expect(invokeText(tools.find(tool => tool.name === 'read_file')!, { path, format: 'raw' })).rejects.toThrow('configured model')
+    expect(JSON.parse(await invokeText(tools.find(tool => tool.name === 'read_multiple_files')!, { paths: [path] }))).toMatchObject({ ok: false })
     for (const maxReadBytes of [0, -1, 1.5, NaN, Infinity]) {
-      expect(() => createFileTools({ primaryFolder: dir, maxReadBytes })).toThrow('positive safe integer')
+      expect(() => fileToolDefinitions({ primaryFolder: dir, maxReadBytes })).toThrow('positive safe integer')
     }
   })
 
-  const reader = (primaryFolder: string, signal?: AbortSignal) => createFileTools({ maxReadBytes: 1_000_000, primaryFolder, signal, toolNames: ['read_file'] })[0]
+  const reader = (primaryFolder: string, signal?: AbortSignal) => fileToolDefinitions({ maxReadBytes: 1_000_000, primaryFolder, signal, toolNames: ['read_file'] })[0]
 
   it.each(['', 'last', 'last\n', 'last\r\n', '\ufeff中文\r\n\t"quoted"\\path\n\nlast\r', '\n\n'])('preserves exact whole-file text in both formats: %j', async (content) => {
     const dir = await tempDir(), path = join(dir, 'source.txt')
     await writeFile(path, content)
     const read = reader(dir)
-    expect(await read.invoke({ path, format: 'raw' })).toBe(content)
-    const result = JSON.parse(await read.invoke({ path }))
+    expect(await invokeText(read, { path, format: 'raw' })).toBe(content)
+    const result = JSON.parse(await invokeText(read, { path }))
     expect(result).toMatchObject({ ok: true, content, truncated: false, returnedBytes: Buffer.byteLength(content) })
     expect(result.lineCount).toBe(content ? (content.match(/\n/g)?.length ?? 0) + Number(!content.endsWith('\n')) : 0)
-    expect(JSON.parse(await read.invoke({ path, format: 'json' }))).toEqual(result)
+    expect(JSON.parse(await invokeText(read, { path, format: 'json' }))).toEqual(result)
     const batch = await invokeTool('read_multiple_files', { paths: [path] })
     expect(batch.files).toEqual([{ ok: true, path, size: Buffer.byteLength(content), content }])
   })
@@ -183,12 +195,12 @@ describe('file tools', () => {
     const dir = await tempDir(), path = join(dir, 'slice.txt')
     await writeFile(path, '\ufefffirst\r\nsecond\n' + last)
     const read = reader(dir)
-    expect(await read.invoke({ path, start_line: 1, max_lines: 1, format: 'raw' })).toBe('\ufefffirst\r\n')
-    expect(await read.invoke({ path, start_line: 2, max_lines: 1, format: 'raw' })).toBe('second\n')
-    expect(await read.invoke({ path, start_line: 3, max_lines: 5, format: 'raw' })).toBe(last)
-    expect(await read.invoke({ path, start_line: 3, format: 'raw' })).toBe(last)
-    expect(await read.invoke({ path, start_line: 4, format: 'raw' })).toBe('')
-    expect(JSON.parse(await read.invoke({ path, start_line: 3, max_lines: 5 })))
+    expect(await invokeText(read, { path, start_line: 1, max_lines: 1, format: 'raw' })).toBe('\ufefffirst\r\n')
+    expect(await invokeText(read, { path, start_line: 2, max_lines: 1, format: 'raw' })).toBe('second\n')
+    expect(await invokeText(read, { path, start_line: 3, max_lines: 5, format: 'raw' })).toBe(last)
+    expect(await invokeText(read, { path, start_line: 3, format: 'raw' })).toBe(last)
+    expect(await invokeText(read, { path, start_line: 4, format: 'raw' })).toBe('')
+    expect(JSON.parse(await invokeText(read, { path, start_line: 3, max_lines: 5 })))
       .toMatchObject({ content: last, lineCount: 3, returnedLineCount: 1, truncated: false })
   })
 
@@ -198,31 +210,31 @@ describe('file tools', () => {
     const second = 'a'.repeat(65534) + '中文🙂\r\n'
     await writeFile(path, first + second)
     const read = reader(dir)
-    expect(await read.invoke({ path, format: 'raw' })).toBe(first + second)
-    expect(await read.invoke({ path, start_line: 2, max_lines: 1, format: 'raw' })).toBe(second)
+    expect(await invokeText(read, { path, format: 'raw' })).toBe(first + second)
+    expect(await invokeText(read, { path, start_line: 2, max_lines: 1, format: 'raw' })).toBe(second)
   })
 
   it('returns complete lines with JSON truncation metadata but never silently truncates a raw range', async () => {
     const dir = await tempDir(), path = join(dir, 'limit.txt')
     await writeFile(path, 'first\r\n' + '中'.repeat(400_000) + '\r\nlast\n')
     const read = reader(dir)
-    expect(JSON.parse(await read.invoke({ path, max_lines: 3 }))).toMatchObject({
+    expect(JSON.parse(await invokeText(read, { path, max_lines: 3 }))).toMatchObject({
       ok: true, content: 'first\r\n', lineCount: 3, returnedLineCount: 1, truncated: true
     })
-    await expect(read.invoke({ path, max_lines: 3, format: 'raw' })).rejects.toThrow('no partial raw content')
-    await expect(read.invoke({ path, format: 'raw' })).rejects.toThrow('too large')
-    expect(await read.invoke({ path, start_line: 3, max_lines: 1, format: 'raw' })).toBe('last\n')
+    await expect(invokeText(read, { path, max_lines: 3, format: 'raw' })).rejects.toThrow('no partial raw content')
+    await expect(invokeText(read, { path, format: 'raw' })).rejects.toThrow('too large')
+    expect(await invokeText(read, { path, start_line: 3, max_lines: 1, format: 'raw' })).toBe('last\n')
     await writeFile(path, 'x'.repeat(999_998) + '\r\n')
-    expect((await read.invoke({ path, format: 'raw' })).length).toBe(1_000_000)
+    expect((await invokeText(read, { path, format: 'raw' })).length).toBe(1_000_000)
   })
 
   it.each([Buffer.from([0xc3, 0x28]), Buffer.from([0xe4, 0xb8]), Buffer.concat([Buffer.alloc(9000, 97), Buffer.from([0])])])('rejects invalid UTF-8 and binary data without returning replacement text', async (bytes) => {
     const dir = await tempDir(), path = join(dir, 'invalid.txt')
     await writeFile(path, bytes)
     const read = reader(dir)
-    await expect(read.invoke({ path, format: 'raw' })).rejects.toThrow(/UTF-8|binary/)
-    await expect(read.invoke({ path, max_lines: 1, format: 'raw' })).rejects.toThrow(/UTF-8|binary/)
-    expect(JSON.parse(await read.invoke({ path }))).toMatchObject({ ok: false })
+    await expect(invokeText(read, { path, format: 'raw' })).rejects.toThrow(/UTF-8|binary/)
+    await expect(invokeText(read, { path, max_lines: 1, format: 'raw' })).rejects.toThrow(/UTF-8|binary/)
+    expect(JSON.parse(await invokeText(read, { path }))).toMatchObject({ ok: false })
     expect((await invokeTool('read_multiple_files', { paths: [path] })).files).toMatchObject([{ ok: false }])
   })
 
@@ -231,13 +243,13 @@ describe('file tools', () => {
     const content = '{"ok":false,"error":"file data"}\r\n'
     await writeFile(path, content)
     ensureRun(defaultRequestId)
-    const threadId = database.getRun(defaultRequestId)!.threadId
-    const service = new ManagedCallService(database)
+    const threadId = database.messages.activities.getRun(defaultRequestId)!.threadId
+    const service = new ManagedCallService(database.managed, database.results)
     try {
-      const read = withManagedToolExecution(reader(dir), { database, service, threadId, runId: defaultRequestId, allowBackground: false })
-      const invoke = (path: string) => read.invoke({ type: 'tool_call', id: randomUUID(), name: 'read_file', args: { path, format: 'raw' } }) as Promise<ToolMessage>
-      expect(await invoke(path)).toMatchObject({ status: 'success', content })
-      expect(await invoke(join(dir, 'missing.txt'))).toMatchObject({ status: 'error' })
+      const read = createManagedToolRuntime(reader(dir), { results: database.results, service, threadId, runId: defaultRequestId, allowBackground: false })
+      const invoke = (path: string) => invokeCapability(read, { path, format: 'raw' }, { callId: randomUUID() })
+      expect(await invoke(path)).toMatchObject({ resultStatus: 'success', content })
+      expect(await invoke(join(dir, 'missing.txt'))).toMatchObject({ resultStatus: 'error' })
     } finally { await service.shutdown() }
   })
 
@@ -246,17 +258,17 @@ describe('file tools', () => {
     await writeFile(path, 'text\n')
     const read = reader(dir)
     for (const args of [{ start_line: 0 }, { start_line: 1.5 }, { max_lines: 5001 }, { max_lines: 0 }, { format: 'xml' }]) {
-      await expect(read.invoke({ path, ...args })).rejects.toThrow()
+      await expect(invokeText(read, { path, ...args })).rejects.toThrow()
     }
     const controller = new AbortController()
     controller.abort(new Error('Read cancelled'))
-    await expect(reader(dir, controller.signal).invoke({ path, format: 'raw' })).rejects.toThrow('Read cancelled')
+    await expect(invokeText(reader(dir, controller.signal), { path, format: 'raw' })).rejects.toThrow('Read cancelled')
   })
 
   it('edits raw CRLF context using the upstream preferred ending and final newline', async () => {
     const dir = await tempDir(), path = join(dir, 'source.txt')
     await writeFile(path, '\ufeffheader\nold\r\ntail')
-    const context = await reader(dir).invoke({ path, start_line: 2, max_lines: 1, format: 'raw' })
+    const context = await invokeText(reader(dir), { path, start_line: 2, max_lines: 1, format: 'raw' })
     const result = await invokeRequestTool('apply_patch', defaultRequestId, {
       patch: '*** Begin Patch\n*** Update File: source.txt\n@@\n-' + context + '+new\n*** End Patch'
     }, dir)
@@ -328,8 +340,8 @@ describe('file tools', () => {
 
   it('rejects invalid write content and obsolete options before creating parents', async () => {
     const dir = await tempDir(), path = join(dir, 'missing', 'file.txt')
-    const tool = createFileTools({ maxReadBytes: 1_000_000, primaryFolder: dir, fileEditStore }).find((item) => item.name === 'write_file')!
-    await expect(tool.invoke({ path, content: 'text', create_parents: true })).rejects.toThrow()
+    const tool = fileToolDefinitions({ maxReadBytes: 1_000_000, primaryFolder: dir, fileEditStore }).find((item) => item.name === 'write_file')!
+    await expect(invokeText(tool, { path, content: 'text', create_parents: true })).rejects.toThrow()
     const result = await invokeTool('write_file', { path, content: 'binary\0content' })
     expect(result.ok).toBe(false)
     expect(await pathExists(join(dir, 'missing'))).toBe(false)
@@ -338,9 +350,11 @@ describe('file tools', () => {
   it('queries old run history after recovery cleanup without pretending it remains restorable', async () => {
     const dir = await tempDir()
     const edit = await invokeRequestTool('apply_patch', defaultRequestId, { patch: '*** Begin Patch\n*** Add File: old.txt\n+old\n*** End Patch' }, dir)
-    database.finishRun(defaultRequestId, 'cancelled')
+    const owner = { threadId: database.messages.activities.getRun(defaultRequestId)!.threadId, runId: defaultRequestId }
+    database.runs.requestCancellation(owner)
+    database.runs.completeCancellation(owner)
     await fileEditStore.deleteFileEditRecordsForRequest(defaultRequestId)
-    database.acknowledgeFileEditCleanup(defaultRequestId)
+    database.resourceCleanup.acknowledgeFileEditCleanup(defaultRequestId)
     expect(await pathExists(fileEditStore.editRecordsDir(defaultRequestId))).toBe(false)
     const current = randomUUID()
     const result = await invokeRequestTool('get_file_edit_diff', current, { request_id: defaultRequestId, operation_id: edit.operationId }, dir)
@@ -353,12 +367,12 @@ describe('file tools', () => {
     expect(wrongRun.ok).toBe(false)
   })
   it('exposes only the batch editing entry and rejects obsolete model arguments', async () => {
-    const tools = createFileTools({ maxReadBytes: 1_000_000, primaryFolder: process.cwd(), fileEditStore })
+    const tools = fileToolDefinitions({ maxReadBytes: 1_000_000, primaryFolder: process.cwd(), fileEditStore })
     expect(tools.map((item) => item.name)).toContain('write_file')
     expect(tools.map((item) => item.name)).not.toContain('replace_text')
-    await expect(tools.find((item) => item.name === 'apply_patch')!.invoke({ path: 'a.txt', content: 'old contract' })).rejects.toThrow()
-    await expect(tools.find((item) => item.name === 'apply_patch')!.invoke({ operations: [{ type: 'create', path: 'a.txt', content: 'old contract' }] })).rejects.toThrow()
-    await expect(tools.find((item) => item.name === 'restore_file_edit')!.invoke({ operation_id: randomUUID(), force: true })).rejects.toThrow()
+    await expect(invokeText(tools.find((item) => item.name === 'apply_patch')!, { path: 'a.txt', content: 'old contract' })).rejects.toThrow()
+    await expect(invokeText(tools.find((item) => item.name === 'apply_patch')!, { operations: [{ type: 'create', path: 'a.txt', content: 'old contract' }] })).rejects.toThrow()
+    await expect(invokeText(tools.find((item) => item.name === 'restore_file_edit')!, { operation_id: randomUUID(), force: true })).rejects.toThrow()
   })
 
   it.each(['change', 'delete'])('does not overwrite a concurrent %s after reading the batch', async (action) => {
@@ -434,8 +448,8 @@ describe('file tools', () => {
     }, dir)
     await rm(path)
     const load = fileEditStore.loadOperationRecord.bind(fileEditStore)
-    const persist = database.fileChanges.persist.bind(database.fileChanges)
-    vi.spyOn(database.fileChanges, 'persist').mockImplementation((record, observed) => {
+    const persist = database.resources.fileChanges.persist.bind(database.resources.fileChanges)
+    vi.spyOn(database.resources.fileChanges, 'persist').mockImplementation((record, observed) => {
       if (record.operationId === edit.operationId && record.transaction.recovery) {
         throw new Error('Failed to persist the finalized source in the file-change ledger.')
       }
@@ -465,12 +479,12 @@ describe('file tools', () => {
     expect(await pathExists(path)).toBe(false)
   })
 
-  it('requires durable identity and checkpointed authorization in production calls', async () => {
+  it('requires durable identity and persisted authorization in production calls', async () => {
     const dir = await tempDir(), path = join(dir, 'new.txt')
-    const selected = createFileTools({ maxReadBytes: 1_000_000, primaryFolder: dir, requestId: defaultRequestId, fileEditStore }).find((item) => item.name === 'apply_patch')!
+    const selected = fileToolDefinitions({ maxReadBytes: 1_000_000, primaryFolder: dir, requestId: defaultRequestId, fileEditStore }).find((item) => item.name === 'apply_patch')!
     const input = { patch: `*** Begin Patch\n*** Add File: ${path}\n+new\n*** End Patch` }
-    expect(JSON.parse(String(await selected.invoke(input)))).toMatchObject({ ok: false, error: expect.stringContaining('durable effect identity') })
-    expect(JSON.parse(String(await selected.invoke({ ...input, dry_run: true })))).toMatchObject({ ok: false, error: expect.stringContaining('checkpointed path authorization') })
+    expect(JSON.parse(String(await invokeText(selected, input)))).toMatchObject({ ok: false, error: expect.stringContaining('durable effect identity') })
+    expect(JSON.parse(String(await invokeText(selected, { ...input, dry_run: true })))).toMatchObject({ ok: false, error: expect.stringContaining('persisted path authorization') })
     expect(await pathExists(path)).toBe(false)
   })
 
@@ -510,14 +524,14 @@ describe('file tools', () => {
 
   it('replays the historical operation without overwriting later user changes', async () => {
     const dir = await tempDir(), path = join(dir, 'new.txt')
-    const selected = createFileTools({ maxReadBytes: 1_000_000, primaryFolder: dir, requestId: defaultRequestId, fileEditStore, authorizePatch: async () => {} }).find((item) => item.name === 'apply_patch')!
+    const selected = fileToolDefinitions({ maxReadBytes: 1_000_000, primaryFolder: dir, requestId: defaultRequestId, fileEditStore, authorizePatch: async () => {} }).find((item) => item.name === 'apply_patch')!
     const effects: AgentToolEffectArm[] = []
-    const scope = { effectKey: stableFileEffectKey, isUnarmed: () => effects.length === 0, previousEffect: () => effects.at(-1), arm: (effect: AgentToolEffectArm) => { effects.push(effect) } }
+    const scope = { identity: effectIdentity(defaultRequestId), isUnarmed: () => effects.length === 0, previousEffect: () => effects.at(-1), arm: (effect: AgentToolEffectArm) => { effects.push(effect) } }
     const input = { patch: `*** Begin Patch\n*** Add File: ${path}\n+original\n*** End Patch` }
-    const first = JSON.parse(String(await runWithCurrentAgentToolEffect(scope, () => selected.invoke(input))))
+    const first = JSON.parse(String(await runWithCurrentAgentToolEffect(scope, () => invokeText(selected, input))))
     expect(first.ok).toBe(true)
     await writeFile(path, 'later user changes')
-    const next = JSON.parse(String(await runWithCurrentAgentToolEffect(scope, () => selected.invoke(input))))
+    const next = JSON.parse(String(await runWithCurrentAgentToolEffect(scope, () => invokeText(selected, input))))
     expect(next).toEqual(first)
     expect(await readFile(path, 'utf8')).toBe('later user changes')
     expect(await fileEditStore.listEditRecordsForRequest(defaultRequestId)).toHaveLength(1)
@@ -543,11 +557,11 @@ describe('file tools', () => {
   })
 
   it('creates every file tool by default and honors a subagent tool scope', () => {
-    const allTools = createFileTools({ maxReadBytes: 1_000_000,
+    const allTools = fileToolDefinitions({ maxReadBytes: 1_000_000,
       primaryFolder: process.cwd(),
       fileEditStore
     }).map((item) => item.name)
-    const scopedTools = createFileTools({ maxReadBytes: 1_000_000,
+    const scopedTools = fileToolDefinitions({ maxReadBytes: 1_000_000,
       primaryFolder: process.cwd(),
       fileEditStore,
       toolNames: ['apply_patch', 'restore_file_edit', 'get_file_edit_diff']
@@ -563,13 +577,13 @@ describe('file tools', () => {
   })
 
   it('offers an optional localized display summary on every file tool', () => {
-    const tools = createFileTools({ maxReadBytes: 1_000_000,
+    const tools = fileToolDefinitions({ maxReadBytes: 1_000_000,
       primaryFolder: process.cwd(),
       fileEditStore
     })
 
     for (const fileTool of tools) {
-      const schema = convertToOpenAITool(fileTool).function.parameters as {
+      const schema = toolJsonSchema(fileTool.inputSchema) as {
         properties: { summary?: { description?: string } }; required?: string[]
       }
       expect(schema.properties.summary?.description).toContain("user's language")
@@ -595,7 +609,7 @@ describe('file tools', () => {
       fileRead: true,
       fileWrite: false
     }
-    const readOnlyTools = createFileTools({ maxReadBytes: 1_000_000,
+    const readOnlyTools = fileToolDefinitions({ maxReadBytes: 1_000_000,
       primaryFolder: process.cwd(),
       fileEditStore,
       toolNames: enabledBuiltinFileToolNames(features)

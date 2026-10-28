@@ -1,3 +1,4 @@
+import { invokeCapability } from '../runtime/toolInvocation'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { constants } from 'node:fs'
@@ -332,11 +333,11 @@ describe('directory tool packages', () => {
     const original = (await store.listToolSnapshot()).tools[0]
     await writeFile(join(original.directory, 'script.cjs'), 'process.stdout.write(require("node:fs").readFileSync("data.txt"))')
     await writeFile(join(original.directory, 'data.txt'), 'package resource')
-    const { createCustomTools } = await import('./agent/customToolRuntime')
-    const [tool] = createCustomTools([original.definition!], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, backgroundTools: false })
+    const { customToolDefinitions } = await import('./agent/customToolRuntime')
+    const [tool] = customToolDefinitions([original.definition!], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, backgroundTools: false })
     await store.saveToolPackage({ ...original.definition!, name: 'renamed' })
     expect(tool.name).toBe('original')
-    expect(await tool.invoke({})).toBe('package resource')
+    expect((await invokeCapability(tool, {}, {})).content).toBe('package resource')
   })
   it('does not expose a new package when saving the source index fails', async () => {
     await store.listToolSnapshot()
@@ -489,13 +490,11 @@ describe('directory tool packages', () => {
 })
 
 describe('tool source settings', () => {
-  it('still rejects invalid current settings after the migration version check skips them', async () => {
+  it('rejects invalid current settings without rewriting them', async () => {
     await mkdir(join(root, 'config'), { recursive: true })
     const path = join(root, 'config/tools.json')
     const raw = '{"version":0,"order":"invalid","external_directories":[]}'
     await writeFile(path, raw)
-    const { migrateDataDirectory } = await import('./migrations')
-    await migrateDataDirectory(root)
     await expect(store.listToolSnapshot()).rejects.toThrow('Invalid tool settings')
     expect(await readFile(path, 'utf8')).toBe(raw)
     await expect(readFile(`${path}.v0.bak`)).rejects.toMatchObject({ code: 'ENOENT' })

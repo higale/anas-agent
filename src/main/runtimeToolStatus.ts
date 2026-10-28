@@ -1,24 +1,22 @@
 import { selectedSubagents } from '@shared/subagentSelection'
 import { DEFAULT_WORKSPACE_PROJECT_ID, type AppConfigSnapshot, type RuntimeToolStatus } from '@shared/types'
-import { todoListMiddleware } from 'langchain'
-import { createFileTools } from './llm/fileTools'
-import { createRuntimeTools } from './llm/runtimeTools'
-import { serializeStructuredTool } from './toolSchemaSerialization'
-import { createSubagentTools } from './agent/subagentTools'
+import { planningToolSpec } from '../runtime/planning'
+import { fileToolDefinitions } from './llm/fileTools'
+import { runtimeToolDefinitions } from './llm/runtimeTools'
+import { serializeToolDefinition } from './toolSchemaSerialization'
+import { subagentToolDefinitions } from './agent/subagentTools'
 import { runtimeToolSelectionId, sortToolDefinitions } from '@shared/toolRegistry'
 
-export function frameworkToolDefinitions(
+export function agentToolDefinitions(
   subagents: AppConfigSnapshot['subagents'] = []
 ): RuntimeToolStatus['tools'] {
-  const todoTools = todoListMiddleware().tools ?? []
-  const subagentTools = createSubagentTools({ subagents })
-  return [...todoTools, ...subagentTools].map(serializeStructuredTool)
+  return [serializeToolDefinition(planningToolSpec), ...subagentToolDefinitions({ subagents }).map(serializeToolDefinition)]
 }
 
 export async function getRuntimeToolStatus(
   config: AppConfigSnapshot
 ): Promise<RuntimeToolStatus> {
-  const runtimeTools = await createRuntimeTools({
+  const runtimeTools = await runtimeToolDefinitions({
     enabled: true,
     primaryFolder: process.cwd(),
     configuration: true,
@@ -36,22 +34,20 @@ export async function getRuntimeToolStatus(
     network: true,
     shell: true,
     backgroundTools: true,
-    mcp: false,
     shellRunner: async () => JSON.stringify({
       ok: false,
       error: 'The command shell is not connected in the settings preview.'
     })
   })
   const tools = sortToolDefinitions([
-    ...frameworkToolDefinitions(
+    ...agentToolDefinitions(
       selectedSubagents(config.subagents)
     ),
-    ...runtimeTools.map(serializeStructuredTool),
-    ...createFileTools({
+    ...runtimeTools.map(serializeToolDefinition),
+    ...fileToolDefinitions({
       maxReadBytes: null,
       primaryFolder: process.cwd()
-    })
-      .map(serializeStructuredTool)
+    }).map(serializeToolDefinition)
   ], runtimeToolSelectionId)
   return {
     checkedAt: new Date().toISOString(),

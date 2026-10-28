@@ -21,6 +21,7 @@ async function verifyUnifiedPanels() {
       const { app, dialog, ipcMain } = require('electron')
       const handle = ipcMain.handle.bind(ipcMain)
       ipcMain.handle = (channel, callback) => handle(channel, async (...args) => {
+        if (channel === 'app:readHelp' && globalThis.__failHelp) throw new Error('Controlled help read failure')
         if (channel === 'app:readHelp' && globalThis.__pauseHelp) {
           globalThis.__pauseHelp = false
           globalThis.__helpPending = true
@@ -58,23 +59,43 @@ async function verifyUnifiedPanels() {
       if (result.status !== 'ok') throw new Error(JSON.stringify(result))
     }, join(root, 'alternate'))
     await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1440, 800))
+    await application.evaluate(() => { globalThis.__failHelp = true })
+    await main.locator('.sidebar-settings').click()
+    await main.getByRole('menuitem', { name: 'Help', exact: true }).click()
+    const loadFailure = main.locator('[data-sonner-toast][data-type="error"]').filter({ hasText: 'Panel operation failed.' })
+    await expect(loadFailure).toBeVisible()
+    await expect.poll(() => main.evaluate(() => globalThis.gale.panels.list())).toEqual([])
+    await application.evaluate(() => { globalThis.__failHelp = false; globalThis.__pauseHelp = true })
+    await loadFailure.getByRole('button', { name: 'Close', exact: true }).click()
+    await main.locator('.sidebar-settings').click()
+    await main.getByRole('menuitem', { name: 'Help', exact: true }).click()
+    await expect.poll(() => application.evaluate(() => Boolean(globalThis.__helpPending))).toBe(true)
+    await main.evaluate(() => {
+      globalThis.__repeatedHelpOpen = globalThis.gale.panels.open({ kind: 'document', documentId: 'USER_GUIDE.en.md', anchor: 'retry' }).then(() => 'ok', String)
+    })
+    await application.evaluate(() => { globalThis.__releaseHelp(); globalThis.__helpPending = false })
+    assert.equal(await main.evaluate(() => globalThis.__repeatedHelpOpen), 'ok')
+    await panelPage(application, 'document')
+    await expect(loadFailure).toHaveCount(0)
+    await expect.poll(() => main.evaluate(async () => (await globalThis.gale.panels.list()).length)).toBe(1)
+    await main.evaluate(async () => {
+      for (const view of await globalThis.gale.panels.list()) await globalThis.gale.panels.close(view.viewId)
+    })
     const fixture = await application.evaluate(async () => {
       const { currentStorage } = globalThis.__panelFixture
       const storage = currentStorage()
       const thread = storage.createThread({ title: 'Panel origin', projectId: 'default-workspace' })
       const other = storage.createThread({ title: 'Another conversation', projectId: 'default-workspace' })
       const db = storage.conversationForThread(thread.id)
-      const run = db.createRun(thread.id)
-      const { emptyCheckpoint } = globalThis.__panelFixture.nativeRequire('@langchain/langgraph-checkpoint')
-      db.checkpointer.retainRun(run.id, thread.id)
-      const checkpoint = emptyCheckpoint()
-      checkpoint.channel_values = { messages: [], anasRunLifecycle: { runId: run.id, status: 'completed' } }
-      checkpoint.channel_versions = { messages: 1, anasRunLifecycle: 1 }
-      await db.checkpointer.put({ configurable: { thread_id: thread.id } }, checkpoint, { source: 'loop', step: 0, parents: {} })
-      db.finishRun(run.id, 'completed')
-      await db.checkpointer.releaseRun(run.id)
-      db.recordSubagentActivity(run.id, 'child', 'Panel child', 'completed')
-      for (let index = 0; index < 120; index++) db.recordSubagentActivity(run.id, `other-${index}`, `Other child ${index}`, 'completed')
+      const runId = globalThis.__panelFixture.nativeRequire('node:crypto').randomUUID()
+      const message = { id: runId + ':input', value: { id: runId + ':input', kind: 'user', content: 'Panel fixture', context: { runId } } }
+      const run = db.runs.createRun({ threadId: thread.id, runId, operation: 'agent', message })
+      const store = db.runs.store
+      const revisionId = store.start({ threadId: thread.id, runId, expectedRevisionId: store.readHistory(thread.id).revisionId,
+        messages: [message], context: { modelCalls: 0, todos: [] } })
+      store.finish({ threadId: thread.id, runId, expectedRevisionId: revisionId }, 'completed')
+      db.runs.subagents.activity(run.id, 'child', 'Panel child', 'completed')
+      for (let index = 0; index < 120; index++) db.runs.subagents.activity(run.id, 'other-' + index, 'Other child ' + index, 'completed')
       storage.refreshConversation(thread.id)
       return { threadId: thread.id, otherId: other.id, runId: run.id, projectId: thread.projectId }
     })
@@ -211,7 +232,7 @@ async function verifyUnifiedPanels() {
     assert.equal((await main.evaluate(() => globalThis.gale.panels.list())).find(item => item.viewId === view.viewId).location, 'sidebar')
     await main.evaluate(id => globalThis.gale.panels.close(id), view.viewId)
     assert.deepEqual(errors, [])
-    console.log('Panel handoffs passed: built-ins, reading position, isolated iframe, drafts, retained tabs, DOM tooltip/menu, failure rollback, repeated moves and window cleanup.')
+    console.log('Panel handoffs passed: visible initial load failure, clean retry and repeated open, built-ins, reading position, isolated iframe, drafts, retained tabs, DOM tooltip/menu, failure rollback, repeated moves and window cleanup.')
   } finally {
     await closeElectronTestApplication(application)
     await rm(root, { recursive: true, force: true })

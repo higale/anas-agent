@@ -1,0 +1,56 @@
+import Database from 'better-sqlite3'
+import { copyFile, lstat, mkdtemp, readdir, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+async function info(path: string) {
+  return lstat(path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined
+    throw error
+  })
+}
+
+/** Inspect a raw catalog copy, including WAL. Even a read-only SQLite open can
+ * create shared-memory bookkeeping, so the original is never opened here. */
+async function executionVersion(root: string): Promise<number | undefined> {
+  const file = join(root, 'db', 'catalog.sqlite'), catalog = await info(file)
+  const directory = await info(join(root, 'db'))
+  if (directory && !directory.isDirectory()) throw new Error('Execution storage must be in a real database directory.')
+  const assertEmpty = async () => {
+    const conversations = join(root, 'db', 'conversations'), entries = await info(conversations)
+    if (entries && (!entries.isDirectory() || (await readdir(conversations)).length)
+      || await info(join(root, 'db', 'project-deletion.json'))) throw new Error('Execution storage has no catalog; repair the saved data before opening it.')
+  }
+  if (!catalog) {
+    await assertEmpty()
+    for (const suffix of ['-wal', '-shm', '-journal']) if (await info(`${file}${suffix}`)) throw new Error('Execution catalog is missing but its recovery files remain; repair the saved data before opening it.')
+    return undefined
+  }
+  if (!catalog.isFile()) throw new Error('Execution catalog must be a regular file.')
+  const temporary = await mkdtemp(join(tmpdir(), 'anas-execution-version-'))
+  try {
+    const copy = join(temporary, 'catalog.sqlite')
+    for (const suffix of ['', '-wal', '-shm', '-journal']) {
+      const entry = await info(`${file}${suffix}`)
+      if (!entry) continue
+      if (!entry.isFile()) throw new Error('Execution catalog family must contain regular files.')
+      await copyFile(`${file}${suffix}`, `${copy}${suffix}`)
+    }
+    const database = new Database(copy, { fileMustExist: true })
+    try {
+      const version = database.pragma('user_version', { simple: true }) as number
+      const tables = database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' LIMIT 1").get()
+      if (!tables && version === 0) { await assertEmpty(); return undefined }
+      return version
+    } finally { database.close() }
+  } finally { await rm(temporary, { recursive: true, force: true }) }
+}
+
+
+/** Startup preflight reads a copied catalog and never upgrades saved execution data. */
+export async function validateExecutionStorageDirectory(root: string): Promise<void> {
+  const version = await executionVersion(root)
+  if (version !== undefined && version !== 1) {
+    throw new Error(`Unsupported execution storage version ${version}; expected 1. Anas 5 requires a new database and does not migrate legacy execution data.`)
+  }
+}

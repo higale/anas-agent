@@ -2,6 +2,8 @@
 
 [简体中文](README.md) · [English](README.en.md)
 
+**Anas 5.0：** 本仓库保留旧 Anas 的界面、操作与配置，执行、会话存储和恢复改用自有实现，已移除 LangChain、LangGraph 和 Deep Agents。默认数据目录为 `~/.anas`。5.0 使用全新数据库，不迁移旧对话、记忆或运行记录；只复制兼容配置和扩展资源，见 [复制说明](data/help/UPGRADE_TO_5.zh-CN.md)。安装包以 [GitHub Releases](https://github.com/higale/anas-agent/releases) 中实际发布的版本为准；当前验证范围见[交接文档](docs/HANDOFF.md)。
+
 **升级提醒：从 4.0 之前的版本升级到 4.x，旧对话和长期记忆不再可用；项目、输入历史、插件数据和头像可手动恢复。升级前请备份，详见 [4.x 升级数据说明](data/help/UPGRADE_TO_4.zh-CN.md)。** 此提醒针对跨入 4.x 的升级，并非每次 4.x 升级都会丢失数据。
 
 Anas 是本地桌面 AI Agent，支持多模型、项目、工具、技能和子 Agent。每个项目可以选择自己的工作目录、上下文和能力。配置与会话保存在本地；请求模型时，会将任务所需的内容发送给所选模型供应商。
@@ -38,7 +40,7 @@ macOS 首次启动若提示无法验证开发者，可在“系统设置 > 隐�
 
 ## 本地数据
 
-默认数据目录为 `~/.galeAnas/`。可通过 `--data-dir <路径>` 指定其他目录；项目源码目录与应用数据相互独立。应用支持备份与恢复，项目源文件夹和外部引用的技能需另行备份。目录位置、内容及备份范围见[用户指南](data/help/USER_GUIDE.zh-CN.md#本地数据与备份)。
+默认数据目录为 `~/.anas/`。可通过 `--data-dir <路径>` 指定其他目录；项目源码目录与应用数据相互独立。应用支持备份与恢复，项目源文件夹和外部引用的技能需另行备份。目录位置、内容及备份范围见[用户指南](data/help/USER_GUIDE.zh-CN.md#本地数据与备份)。
 
 ## 文档
 
@@ -50,7 +52,7 @@ macOS 首次启动若提示无法验证开发者，可在“系统设置 > 隐�
 - [插件示例](data/examples/plugins/README.md)
 - [当前状态存储](docs/CURRENT_STATE_STORAGE.md)
 - [安全与审批模型](docs/SECURITY_MODEL.md)
-- [框架补丁](docs/FRAMEWORK_PATCHES.md)
+- [依赖补丁](docs/DEPENDENCY_PATCHES.md)
 - [编程能力评估](docs/CODING_EVALUATION.md)
 - [开发规则](AGENTS.md)
 

@@ -97,7 +97,7 @@ describe('read-only Git changes', () => {
     await expect(readGitContents({ projectId: 'test', sourceFolder: root, scope: 'workspace', filePath: join(root, 'empty.ts') }, AbortSignal.abort())).rejects.toThrow()
     await writeFile(join(root, 'empty.ts'), 'changed')
     await expect(read('empty.ts')).resolves.toMatchObject({ status: 'ready', after: 'changed' })
-  })
+  }, 20_000) // Repository setup and six real Git reads need process-startup headroom.
 
   it.each(['workspace', 'unstaged', 'staged'] as const)('isolates %s file reads from unrelated working and index changes', async (scope) => {
     const root = await repository(), path = join(root, 'one.txt')

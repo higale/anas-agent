@@ -6,7 +6,7 @@ import { withApplicationDataMutation } from '../applicationDataSnapshot'
 
 const rename = fs.retry.rename({ timeout: 2_000, interval: 25 })
 
-/** A conversation-owned readable copy of a tool result; the complete checkpoint message remains authoritative. */
+/** A conversation-owned readable copy of a tool result; the persisted native message remains authoritative. */
 export async function saveToolResultFile(content: string, root: string): Promise<string> {
   return withApplicationDataMutation(async () => {
     await mkdir(root, { recursive: true })

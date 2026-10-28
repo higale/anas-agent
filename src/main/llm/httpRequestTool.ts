@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream, openAsBlob } from 'node:fs'
 import { access, mkdir, open, rename, stat } from 'node:fs/promises'
 import { basename, dirname } from 'node:path'
-import { tool, type StructuredToolInterface } from '@langchain/core/tools'
+import { defineContentTool, type ToolDefinition } from '../../runtime/toolDefinition'
 import { z } from 'zod/v3'
 import { armCurrentAgentToolEffect, currentAgentToolEffectArtifactId } from '../agent/toolEffectScope'
 import { registerExternalTemporaryFile, releaseExternalTemporaryFile } from '../tempCleanupService'
@@ -481,30 +481,11 @@ export async function executeHttpRequest(
   }
 }
 
-export function createHttpRequestTool(options: HttpRequestToolOptions): StructuredToolInterface {
-  return tool(async (input) => {
-    const control = currentToolExecution()
-    if (!control) return executeHttpRequest(input, options)
-    const method = requestMethod(input)
-    const writesFile = typeof input.output_path === 'string' && input.output_path.trim().length > 0
-    const uncertainAfterDispatch = writesFile || !safeMethods.has(method)
-    return executeHttpRequest(input, {
-      primaryFolder: options.primaryFolder,
-      signal: control.signal,
-      onDispatched: () => {
-        control.markRunning()
-        control.output('progress', 'HTTP request dispatched.\n')
-      },
-      onProgress: (current, total) => control.progress(current, 'bytes', total),
-      onResult: control.setOutcome,
-      ...(uncertainAfterDispatch
-        ? { onOutcomeUncertain: control.markUncertain }
-        : {})
-    })
-  }, {
+export function httpRequestDefinition(options: HttpRequestToolOptions): ToolDefinition {
+  return defineContentTool({
     name: 'http_request',
     description: 'Make a common HTTP(S) request. Supports text or file bodies, multipart form uploads, bounded text responses, and atomic downloads.',
-    schema: z.object({
+    inputSchema: z.object({
       summary: toolSummarySchema,
       url: z.string().describe('Absolute HTTP(S) URL; may use local ${ENV_NAME} placeholders.'),
       method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']).optional().describe('Request method. Defaults to GET without a body and POST with a body.'),
@@ -524,6 +505,26 @@ export function createHttpRequestTool(options: HttpRequestToolOptions): Structur
       timeout: z.number().int().min(0).max(2_147_483).optional().describe('Maximum execution time in seconds. Omit or use 0 for no time limit; use a positive value only when an execution deadline is needed.'),
       max_bytes: z.number().int().min(1).max(100_000_000_000).optional().describe('Response limit in bytes. Text defaults to 200000 and allows at most 1000000; downloads default to 1000000000 and allow at most 100000000000.'),
       include_metadata: z.boolean().optional().describe('For text responses, return status, headers, size, truncation, and body as JSON. Download results always return JSON.')
-    })
+    }),
+    execute: async (input) => {
+      const control = currentToolExecution()
+      if (!control) return executeHttpRequest(input, options)
+      const method = requestMethod(input)
+      const writesFile = typeof input.output_path === 'string' && input.output_path.trim().length > 0
+      const uncertainAfterDispatch = writesFile || !safeMethods.has(method)
+      return executeHttpRequest(input, {
+        primaryFolder: options.primaryFolder,
+        signal: control.signal,
+        onDispatched: () => {
+          control.markRunning()
+          control.output('progress', 'HTTP request dispatched.\n')
+        },
+        onProgress: (current, total) => control.progress(current, 'bytes', total),
+        onResult: control.setOutcome,
+        ...(uncertainAfterDispatch
+          ? { onOutcomeUncertain: control.markUncertain }
+          : {})
+      })
+    }
   })
 }

@@ -1,9 +1,15 @@
+import { restoreFrozenStorageDirectory } from '../test/frozenStorage'
+import type { AgentThread, AgentRun, AgentRuntimeEvent } from '../shared/agentTypes'
+import { NativeConversationDatabase } from './agent/nativeConversationDatabase'
+import { NativeMessageReader } from './agent/nativeMessageReader'
+import { NativeRuntimeCoordinator } from './agent/nativeRuntimeCoordinator'
+import { conversationExecution } from '../runtime/conversationExecution'
+import { FileChangeLedger } from './agent/fileChangeLedger'
+import { SqliteMemoryStore } from './agent/memoryStore'
+import { readThreadRecord } from './agent/conversationThreads'
 import Database from 'better-sqlite3'
-import { HumanMessage } from '@langchain/core/messages'
-import { createDeepAgent } from 'deepagents'
-import { FakeToolCallingModel } from 'langchain'
 import { randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -14,103 +20,52 @@ import { AgentStorage } from './agent/agentStorage'
 import { getAgentCatalogFile, getAgentConversationDatabaseFile } from './config/dataDir'
 import { inspectRecoveryRepair, repairRecoveryData } from './recoveryRepair'
 import { preserveRecoveryData } from './recoveryData'
-import { AgentDatabase } from './agent/agentDatabase'
-import { AgentRuntime } from './agent/agentRuntime'
-import { AgentRuntimeCoordinator } from './agent/agentRuntimeCoordinator'
-import { createAgentRunLifecycleMiddleware } from './agent/runLifecycleMiddleware'
-import { runWithCurrentAgentToolEffect } from './agent/toolEffectScope'
-import { FileEditStore } from './fileEditStore'
-import { resolveFilePatchTargets } from './filePatch'
-import { captureFilePatchPreimages } from './filePatchState'
-import { asPatchInput } from './filePatchTestFixtures'
 import { patchTextHash } from './filePatchRecord'
 
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 
-async function fixture(projectVersion = 4) {
-  const root = await mkdtemp(join(tmpdir(), 'anas-project-repair-'))
+interface FrozenRepair { thread: AgentThread; run?: AgentRun; target?: string; inverseRunId?: string; operationId?: string }
+
+async function fixture(projectVersion = 4, variant = 'base') {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'anas-project-repair-')))
   roots.push(root)
   const data = join(root, 'data')
-  await mkdir(join(data, 'config'), { recursive: true })
-  await mkdir(join(data, 'db'))
-  for (const name of ['settings', 'models', 'tools', 'skills', 'subagents', 'mcp_servers', 'capabilities']) {
-    await writeFile(join(data, `config/${name}.json`), await readFile(join(process.cwd(), `data/config/${name}.json`)))
-  }
+  const metadata = await restoreFrozenStorageDirectory<FrozenRepair>('native-repair-' + variant, data)
+  const { thread } = metadata
   const { version: _version, ...defaults } = projectDefaults
   const project = { ...defaults, id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep project',
     pinned: false, collapsed: false, sourceFolders: ['/keep/source'], restrict_subagents: false,
     capabilities, createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z' }
   const projects = { version: projectVersion, projects: [project] }
   await writeFile(join(data, 'db/projects.json'), JSON.stringify(projects))
-  const storage = AgentStorage.open(data)
-  const thread = storage.createThread({ title: 'Keep conversation' })
-  const conversation = storage.conversationForThread(thread.id)
-  const run = conversation.createRun(thread.id, 'kept-run')
-  await conversation.checkpointer.put({ configurable: { thread_id: thread.id, checkpoint_ns: '' } }, {
-    v: 4, id: 'kept-checkpoint', ts: '2026-09-01T00:00:00Z', channel_values: { anasRunLifecycle: { runId: run.id, status: 'completed' } },
-    channel_versions: {}, versions_seen: {}
-  }, { source: 'loop', step: 0, parents: {} })
-  conversation.finishRun(run.id, 'completed')
-  await storage.memoryStore.saveMemory({ scope: 'global', kind: 'fact', content: 'Preserve this memory', keywords: ['keep'], importance: 3 }, { origin: 'user' })
-  storage.refreshConversation(thread.id)
-  storage.close()
   await mkdir(join(data, 'sqlite'), { recursive: true })
   await writeFile(join(data, 'sqlite/agent.sqlite'), 'unrelated historical data, preserved verbatim')
   const databases = [getAgentCatalogFile(data), getAgentConversationDatabaseFile(thread.id, data)]
   for (const path of databases) {
     const db = new Database(path)
-    db.pragma('user_version = 1')
+    db.pragma('user_version = 99')
     db.close()
   }
-  return { root, data, projects, databases, thread }
+  return { root, data, projects, databases, thread, metadata }
 }
 
-async function archivedChangeFixture(version: number | undefined, databaseVersion = 1, restore = false) {
-  const value = await fixture(0)
+async function archivedChangeFixture(version: number | undefined, databaseVersion = 1, restore = false, deletedInverse = false) {
+  const value = await fixture(0, deletedInverse ? 'deleted-inverse' : restore ? 'reversed' : 'forward')
   for (const file of value.databases) {
     const raw = new Database(file)
-    raw.pragma('user_version = 0')
+    raw.pragma('user_version = 1')
     raw.close()
   }
-  const storage = AgentStorage.open(value.data)
-  const database = storage.conversationForThread(value.thread.id)
-  const run = database.createRun(value.thread.id, randomUUID())
-  const store = new FileEditStore(join(value.data, 'db', 'conversations', value.thread.id, 'file_edits'))
+  const { run, inverseRunId, target: archivedTarget } = value.metadata
+  if (!run) throw new Error('Frozen repair run is missing.')
+  // Archived targets stay historical evidence. User content lives only in this fresh workspace.
   const target = join(value.root, 'edited.txt')
-  let inverseRunId: string | undefined
-  const finishRun = async (runId: string) => {
-    await database.checkpointer.put({ configurable: { thread_id: value.thread.id, checkpoint_ns: '' } }, {
-      v: 4, id: randomUUID(), ts: new Date().toISOString(), channel_versions: {}, versions_seen: {},
-      channel_values: { messages: [new HumanMessage({ id: 'original-message', content: 'Keep my original message',
-        additional_kwargs: { anas_run_id: run.id } })], anasRunLifecycle: { runId, status: 'completed' } }
-    }, { source: 'loop', step: 1, parents: {} })
-    database.finishRun(runId, 'completed')
+  await writeFile(target, restore ? 'before\n' : 'after\n')
+  if (deletedInverse) {
+    if (version !== 0 || databaseVersion !== 1 || !value.metadata.operationId) throw new Error('Deleted inverse fixture must retain its valid saved evidence.')
+    return { ...value, run, target, archivedTarget, inverseRunId, operationId: value.metadata.operationId }
   }
-  try {
-    await writeFile(target, 'before\n')
-    const resolved = await resolveFilePatchTargets(asPatchInput({ operations: [
-      { type: 'update', path: target, patch: '@@\n-before\n+after\n' }
-    ] }), value.root)
-    const images = await captureFilePatchPreimages(resolved.targets)
-    await runWithCurrentAgentToolEffect({
-      persistFileChange: (record, observed) => database.fileChanges.persist(record, observed), arm: () => undefined
-    }, async () => {
-      const source = await store.executePatch(resolved.input, images, run.id, { operationId: randomUUID() })
-      if (restore) {
-        await finishRun(run.id)
-        inverseRunId = database.createRun(value.thread.id, randomUUID()).id
-        const inverse = await store.restorePatch(source.operationId, run.id, inverseRunId, async () => {}, { operationId: randomUUID() })
-        await store.finalizePatchRestore(source.operationId, run.id, async () => {}, {
-          inverse: { requestId: inverseRunId, operationId: inverse!.operationId }
-        })
-        await finishRun(inverseRunId)
-        await store.deleteFileEditRecordsForRequest(inverseRunId)
-      }
-      await store.deleteFileEditRecordsForRequest(run.id)
-    })
-    if (!restore) await finishRun(run.id)
-  } finally { storage.close() }
   const raw = new Database(value.databases[1])
   try {
     const rows = raw.prepare('SELECT operation_id, definition_json, metadata_json FROM agent_file_changes').all() as Array<{
@@ -133,7 +88,7 @@ async function archivedChangeFixture(version: number | undefined, databaseVersio
         .run(definition, JSON.stringify(metadata), row.operation_id)
     }
     raw.pragma(`user_version = ${databaseVersion}`)
-    return { ...value, run, target, inverseRunId, operationId: rows[0].operation_id }
+    return { ...value, run, target, archivedTarget, inverseRunId, operationId: rows[0].operation_id }
   } finally { raw.close() }
 }
 
@@ -156,13 +111,12 @@ describe('project version metadata recovery', () => {
     expect(JSON.parse(await readFile(join(data, 'db/projects.json'), 'utf8')).version).toBe(0)
     for (const [name, bytes] of Object.entries(files)) expect(await readFile(join(pluginData, name))).toEqual(bytes)
     for (const name of preservedFiles) expect(await readFile(join(data, name), 'utf8')).toBe(`keep ${name}`)
-    const storage = AgentStorage.open(data)
-    try { expect(storage.conversationForThread(thread.id).getThread(thread.id)?.title).toBe('Keep conversation') }
-    finally { storage.close() }
+    const database = new Database(getAgentConversationDatabaseFile(thread.id, data), { readonly: true })
+    try { expect(readThreadRecord(database, thread.id)?.title).toBe('Keep conversation') } finally { database.close() }
   })
 
   it.each([undefined, 7])('repairs archived file records with version %s and preserves a usable conversation', async version => {
-    const { root, data, databases, thread, run, target } = await archivedChangeFixture(version, version === undefined ? 1 : 0)
+    const { root, data, databases, thread, run, target, archivedTarget } = await archivedChangeFixture(version, version === undefined ? 1 : 0)
     const original = await readFile(databases[1])
     await writeFile(target, 'Later user edit; do not replay the old patch.\n')
     const plan = await inspectRecoveryRepair(data)
@@ -172,30 +126,35 @@ describe('project version metadata recovery', () => {
     const result = await repairRecoveryData(data, 'projects.json', () => preserveRecoveryData(data, root))
     expect(result.unresolved).toEqual([])
     expect(await readFile(join(result.preservationPath!, 'data/db/conversations', thread.id, 'conversation.sqlite'))).toEqual(original)
-    AgentDatabase.validateBackup(databases[1], join(data, 'db', 'conversations', thread.id, 'attachments'), new Set([thread.projectId]), thread.id)
+    NativeConversationDatabase.validateBackup(databases[1], join(data, 'db', 'conversations', thread.id, 'attachments'), new Set([thread.projectId]), thread.id)
     const preserve = vi.fn(async () => '/unused')
     expect((await repairRecoveryData(data, 'projects.json', preserve)).repaired).toEqual([])
     expect(preserve).not.toHaveBeenCalled()
 
-    const storage = AgentStorage.open(data)
-    const coordinator = new AgentRuntimeCoordinator(storage, undefined, database => new AgentRuntime(database,
-      async (_thread, _database, context) => ({
-        agent: createDeepAgent({ model: new FakeToolCallingModel({ toolCalls: [[]] }), checkpointer: database.checkpointer,
-          middleware: [createAgentRunLifecycleMiddleware(context?.requestId)] }) as never,
-        dispose: async () => {}
-      }), join(root, 'tmp'), async () => {}))
+    const storage = AgentStorage.openNative(data), events: AgentRuntimeEvent[] = []
+    const coordinator = new NativeRuntimeCoordinator(storage, { push: event => { events.push(event) } }, { prepareWorkspace: false })
     try {
       const snapshot = await coordinator.getSnapshot(thread.id)
       expect(snapshot.messages.some(message => JSON.stringify(message.content).includes('Keep my original message'))).toBe(true)
       const database = storage.conversationForThread(thread.id)
-      const tuple = await database.checkpointer.getTuple({ configurable: { thread_id: thread.id, checkpoint_ns: '' } })
-      expect(tuple?.checkpoint.v).toBe(4)
-      const changes = database.fileChanges.queryRoundFiles({ runId: run.id })
-      expect(database.fileChanges.readRoundContent({ runId: run.id, version: changes.version, filePath: target }))
+      expect(database.runs.store.readHistory(thread.id)?.messages.some(message => message.value.content === 'Keep my original message')).toBe(true)
+      const changes = database.resources.fileChanges.queryRoundFiles({ runId: run.id })
+      expect(database.resources.fileChanges.readRoundContent({ runId: run.id, version: changes.version, filePath: archivedTarget! }))
         .toMatchObject({ status: 'ready', before: 'before\n', after: 'after\n' })
-      const events = []
-      for await (const event of coordinator.forThread(thread.id).startRun({ runId: randomUUID(), threadId: thread.id, text: 'Continue this conversation' })) events.push(event)
-      expect(events.at(-1)).toMatchObject({ type: 'run_completed' })
+      const submission = await coordinator.forThread(thread.id).submitRunWithAttachments({
+        submissionId: randomUUID(), runId: randomUUID(), threadId: thread.id, text: 'Continue this conversation'
+      }, async () => ({ execution: conversationExecution({
+        store: database.runs.store, enter: database.execution.enter,
+        prepareModel: async state => ({ kind: 'model', invoke: async () => ({
+          message: { id: 'new-answer', value: { id: 'new-answer', kind: 'assistant', content: 'Continued', context: { runId: state.runId } } },
+          calls: [], context: { ...state.context, modelCalls: state.context.modelCalls + 1 } }) }),
+        afterModel: async () => ({ kind: 'complete' }), prepareTools: async () => ({ calls: [] }),
+        executeTool: async () => { throw new Error('No previous file effect may execute') },
+        directions: async () => [], drain: async () => {}, retry: { maxRetries: 0 }
+      }), dispose: async () => {} }))
+      expect((await submission.handle!.completed).status).toBe('completed')
+      await submission.handle!.drained
+      expect(events.some(event => event.type === 'run_completed')).toBe(true)
       expect((await coordinator.getSnapshot(thread.id)).messages.length).toBeGreaterThan(snapshot.messages.length)
       await coordinator.deleteThread(thread.id)
       expect(storage.getThread(thread.id)).toBeNull()
@@ -205,16 +164,16 @@ describe('project version metadata recovery', () => {
   })
 
   it('keeps archived forward and reverse operations linked without replaying either', async () => {
-    const { root, data, databases, thread, run, target, operationId } = await archivedChangeFixture(undefined, 1, true)
+    const { root, data, databases, run, target, operationId } = await archivedChangeFixture(undefined, 1, true)
     await writeFile(target, 'Keep the current user content')
     const result = await repairRecoveryData(data, 'projects.json', () => preserveRecoveryData(data, root))
     expect(result.unresolved).toEqual([])
-    const database = AgentDatabase.open(databases[1], join(data, 'db', 'conversations', thread.id, 'attachments'))
+    const database = new Database(databases[1], { readonly: true })
     try {
-      database.fileChanges.validateIntegrity()
-      const source = (await database.fileChanges.load(run.id, operationId))!
+      new FileChangeLedger(database).validateIntegrity()
+      const source = (await new FileChangeLedger(database).load(run.id, operationId))!
       const inverseReference = source.transaction.recovery!.inverse!
-      const inverse = (await database.fileChanges.load(inverseReference.requestId, inverseReference.operationId))!
+      const inverse = (await new FileChangeLedger(database).load(inverseReference.requestId, inverseReference.operationId))!
       expect(source.transaction.state).toBe('resolved')
       expect(inverse.transaction.state).toBe('resolved')
       expect(inverse.transaction.restores?.definitionHash).toBe(source.definitionHash)
@@ -225,14 +184,8 @@ describe('project version metadata recovery', () => {
   })
 
   it.each(['metadata', 'definition'])('handles a deleted inverse round during %s version repair', async field => {
-    const { root, data, databases, thread, run, inverseRunId, operationId } = await archivedChangeFixture(0, 0, true)
-    const storage = AgentStorage.open(data)
-    try {
-      const database = storage.conversationForThread(thread.id)
-      await database.replaceMessageHistory(thread.id, [new HumanMessage({ id: 'original-message', content: 'Keep my original message',
-        additional_kwargs: { anas_run_id: run.id } })], inverseRunId!)
-    } finally { storage.close() }
-    AgentDatabase.validateBackup(databases[1], join(data, 'db', 'conversations', thread.id, 'attachments'), new Set([thread.projectId]), thread.id)
+    const { root, data, databases, thread, run, operationId } = await archivedChangeFixture(0, 1, true, true)
+    NativeConversationDatabase.validateBackup(databases[1], join(data, 'db', 'conversations', thread.id, 'attachments'), new Set([thread.projectId]), thread.id)
     const raw = new Database(databases[1])
     let row: { definition_json: string; metadata_json: string }
     try {
@@ -254,7 +207,7 @@ describe('project version metadata recovery', () => {
       return
     }
     expect(result.unresolved).toEqual([])
-    AgentDatabase.validateBackup(databases[1], join(data, 'db', 'conversations', thread.id, 'attachments'), new Set([thread.projectId]), thread.id)
+    NativeConversationDatabase.validateBackup(databases[1], join(data, 'db', 'conversations', thread.id, 'attachments'), new Set([thread.projectId]), thread.id)
     const repaired = new Database(databases[1], { readonly: true })
     try {
       const current = repaired.prepare('SELECT definition_json, metadata_json FROM agent_file_changes WHERE operation_id = ?').get(operationId) as typeof row
@@ -262,18 +215,21 @@ describe('project version metadata recovery', () => {
       expect(JSON.parse(current.metadata_json)).toEqual(JSON.parse(row.metadata_json))
       expect(repaired.prepare('SELECT count(*) AS count FROM agent_file_changes').get()).toEqual({ count: 1 })
     } finally { repaired.close() }
-    const database = AgentDatabase.open(databases[1], join(data, 'db', 'conversations', thread.id, 'attachments'))
+    const database = new Database(databases[1], { readonly: true })
     try {
-      expect((await database.fileChanges.load(run.id, operationId))?.transaction.state).toBe('resolved')
-      const tuple = await database.checkpointer.getTuple({ configurable: { thread_id: thread.id, checkpoint_ns: '' } })
-      expect(JSON.stringify(tuple?.checkpoint.channel_values.messages)).toContain('Keep my original message')
-      await database.deleteThread(thread.id)
-      expect(database.getThread(thread.id)).toBeNull()
+      expect((await new FileChangeLedger(database).load(run.id, operationId))?.transaction.state).toBe('resolved')
+      expect(JSON.stringify(new NativeMessageReader(database).window(thread.id).messages)).toContain('Keep my original message')
     } finally { database.close() }
+    const storage = AgentStorage.openNative(data), coordinator = new NativeRuntimeCoordinator(storage, { push: () => {} })
+    try {
+      await coordinator.deleteThread(thread.id)
+      expect(storage.getThread(thread.id)).toBeNull()
+      await expect(readFile(databases[1])).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally { await coordinator.shutdown(); storage.close() }
   })
 
   it('preserves an absent source reference when repairing only inverse metadata', async () => {
-    const { root, data, databases, thread, run, inverseRunId, operationId } = await archivedChangeFixture(0, 0, true)
+    const { root, data, databases, run, inverseRunId, operationId } = await archivedChangeFixture(0, 0, true)
     const raw = new Database(databases[1])
     let definition: string
     let inverseId: string
@@ -286,9 +242,9 @@ describe('project version metadata recovery', () => {
     } finally { raw.close() }
     const result = await repairRecoveryData(data, 'projects.json', () => preserveRecoveryData(data, root))
     expect(result.unresolved).toEqual([])
-    const database = AgentDatabase.open(databases[1], join(data, 'db', 'conversations', thread.id, 'attachments'))
+    const database = new Database(databases[1], { readonly: true })
     try {
-      const inverse = (await database.fileChanges.load(inverseRunId!, inverseId))!
+      const inverse = (await new FileChangeLedger(database).load(inverseRunId!, inverseId))!
       expect(inverse.definitionHash).toBe(patchTextHash(definition))
       expect(inverse.transaction.restores).toEqual(JSON.parse(definition).restores)
       expect(inverse.transaction.sourceFinalized).toBe(true)
@@ -364,8 +320,8 @@ describe('project version metadata recovery', () => {
     expect(await readFile(stagePath, 'utf8')).toBe(stage)
     expect(await readFile(join(result.preservationPath!, 'data/db/project-deletion.stage.json'), 'utf8')).toBe(stage)
     expect(JSON.parse(await readFile(join(data, 'db/projects.json'), 'utf8'))).toEqual({ ...projects, version: 0 })
-    const storage = AgentStorage.open(data)
-    try { expect(storage.getThread(thread.id)?.title).toBe('Keep conversation') } finally { storage.close() }
+    const database = new Database(getAgentConversationDatabaseFile(thread.id, data), { readonly: true })
+    try { expect(readThreadRecord(database, thread.id)?.title).toBe('Keep conversation') } finally { database.close() }
   })
 
   it('leaves a journaled deletion transaction intact instead of treating it as an orphan stage', async () => {
@@ -395,7 +351,7 @@ describe('project version metadata recovery', () => {
     expect(result.unresolved.join('\n')).toContain('Catalog database is missing')
     await expect(readFile(databases[0])).rejects.toMatchObject({ code: 'ENOENT' })
     const db = new Database(databases[1], { readonly: true })
-    try { expect(db.pragma('user_version', { simple: true })).toBe(0) } finally { db.close() }
+    try { expect(db.pragma('user_version', { simple: true })).toBe(1) } finally { db.close() }
   })
 
   it('validates a copied WAL without checkpointing or changing the original database', async () => {
@@ -409,7 +365,7 @@ describe('project version metadata recovery', () => {
       const plan = await inspectRecoveryRepair(data)
       const status = plan.files.find(file => file.name === 'projects.json')!
       expect(status.error).toBeUndefined()
-      expect(status.repairableFields.some(field => field.endsWith('user_version (9 → 0)'))).toBe(true)
+      expect(status.repairableFields.some(field => field.endsWith('user_version (9 → 1)'))).toBe(true)
       expect(await readFile(databases[1])).toEqual(before)
       expect(await readFile(`${databases[1]}-wal`)).toEqual(wal)
     } finally { db.close() }
@@ -417,6 +373,10 @@ describe('project version metadata recovery', () => {
 
   it.each([0, 4])('repairs catalog and every conversation together with project version %s', async version => {
     const { root, data, projects, databases, thread } = await fixture(version)
+    const originalConversation = new Database(databases[1], { readonly: true })
+    let originalMessages: ReturnType<NativeMessageReader['window']>['messages']
+    try { originalMessages = new NativeMessageReader(originalConversation).window(thread.id).messages }
+    finally { originalConversation.close() }
     const history = '{"version":0,"maxHistory":100,"items":[]}'
     await writeFile(join(data, 'db/input_history.json'), history)
     const before = await Promise.all(databases.map(path => readFile(path)))
@@ -433,18 +393,17 @@ describe('project version metadata recovery', () => {
     expect(JSON.parse(await readFile(join(result.preservationPath!, 'data/db/projects.json'), 'utf8'))).toEqual(projects)
     for (const [index, path] of databases.entries()) {
       const db = new Database(path, { readonly: true })
-      try { expect(db.pragma('user_version', { simple: true })).toBe(0) } finally { db.close() }
+      try { expect(db.pragma('user_version', { simple: true })).toBe(1) } finally { db.close() }
       const saved = join(result.preservationPath!, 'data', path.slice(data.length + 1))
       expect(await readFile(saved)).toEqual(before[index])
     }
-    const storage = AgentStorage.open(data)
+    const conversation = new Database(databases[1], { readonly: true }), catalog = new Database(databases[0], { readonly: true })
     try {
-      expect(storage.getThread(thread.id)?.title).toBe('Keep conversation')
-      const conversation = storage.conversationForThread(thread.id)
-      expect(conversation.getRun('kept-run')?.status).toBe('completed')
-      expect((await conversation.checkpointer.getTuple({ configurable: { thread_id: thread.id, checkpoint_ns: '' } }))?.checkpoint.id).toBe('kept-checkpoint')
-      expect((await storage.memoryStore.searchMemories({ scope: 'global' })).items[0].content).toBe('Preserve this memory')
-    } finally { storage.close() }
+      expect(readThreadRecord(conversation, thread.id)?.title).toBe('Keep conversation')
+      expect(conversation.prepare('SELECT status FROM agent_runs WHERE id = ?').get('kept-run')).toEqual({ status: 'completed' })
+      expect(new NativeMessageReader(conversation).window(thread.id).messages).toEqual(originalMessages)
+      expect((await new SqliteMemoryStore(catalog).searchMemories({ scope: 'global' })).items[0].content).toBe('Preserve this memory')
+    } finally { conversation.close(); catalog.close() }
     const preserve = vi.fn(async () => '/unused')
     expect((await repairRecoveryData(data, 'projects.json', preserve)).repaired).toEqual([])
     expect(preserve).not.toHaveBeenCalled()
@@ -461,7 +420,7 @@ describe('project version metadata recovery', () => {
     const preserve = vi.fn(() => preserveRecoveryData(data, root))
     const result = await repairRecoveryData(data, 'projects.json', preserve)
     expect(result.repaired).toHaveLength(2)
-    expect(result.unresolved.join('\n')).toContain(fault === 'schema' ? 'missing column' : 'missing project')
+    expect(result.unresolved.join('\n')).toContain(fault === 'schema' ? 'Invalid native conversation schema' : 'missing project')
     expect(preserve).toHaveBeenCalledOnce()
     const damagedIndex = fault === 'schema' ? 1 : 0
     expect(await readFile(databases[damagedIndex])).toEqual(before[damagedIndex + 1])

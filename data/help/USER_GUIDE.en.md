@@ -394,7 +394,9 @@ Application backups include plugins and their data. Backups stop plugin backends
 
 **When upgrading from a pre-4.0 version to 4.x, previous conversations and all long-term memory, including project memory, become unavailable. Projects, input history, plugin data, and avatars can be recovered manually.** Back up the entire data directory first. See the [4.x upgrade data guide](UPGRADE_TO_4.en.md) for affected data, old and new paths, manual recovery, and cleanup.
 
-The default data directory is `~/.gale<program-name>/`; standard Anas uses `~/.galeAnas/`. Copying and renaming the application gives it a separate data directory.
+Anas 5.0 uses `~/.anas/` in both development and packaged builds; renaming the application does not change it. Data in the previous `~/.anas-next/` directory or older Anas directories is not automatically read or migrated. To use a different isolated directory, specify `--data-dir <path>` explicitly.
+
+**Version 5.0 uses a fresh database.** Do not copy the old `db/` or restore a legacy full backup. Previous conversations, memory and execution records are not migrated. After quitting and backing up, you may copy supported settings, `.env`, user skills, tools, subagents and plugin code; external references must remain accessible. Recreate projects and database contents in the new version. Backup and repair of current 5.0 data remain supported. See the [5.0 upgrade data guide](UPGRADE_TO_5.en.md) for detailed steps.
 
 You can also specify a directory at launch, for example `Anas.exe "D:\Anas Data\Research"` or `--data-dir <path>`. Relative paths use the launch directory; filesystem roots are not allowed.
 

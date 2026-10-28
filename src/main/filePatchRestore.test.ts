@@ -1,3 +1,4 @@
+import { toolEffectArtifactPurposes, type ToolEffectArtifactIdentity } from '../runtime/toolEffectIdentity'
 import { randomUUID } from 'node:crypto'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -11,7 +12,7 @@ import { asPatchInput } from './filePatchTestFixtures'
 import { captureFilePatchPreimages } from './filePatchState'
 import { prepareFilePatchRestoreAuthorization } from './agent/toolAuthorization'
 import { executeFilePatchRestoreTransaction, planFilePatchRestore, type AuthorizeFilePatchRestore } from './filePatchRestore'
-import { agentToolEffectArtifactId, runWithCurrentAgentToolEffect } from './agent/toolEffectScope'
+import { runWithCurrentAgentToolEffect } from './agent/toolEffectScope'
 import { validatePatchTransition } from './filePatchRecord'
 
 vi.mock('node:fs/promises', async (importOriginal) => {
@@ -81,11 +82,13 @@ describe('internal batch reverse execution', { timeout: 20_000 }, () => {
   it('uses a distinct stable effect identity and registers every changed target once', async () => {
     const value = await fixture()
     const requestId = randomUUID()
-    const key = { runId: requestId, checkpointId: 'checkpoint', checkpointNs: '', taskId: 'task', callKey: 'restore', inputHash: 'input' }
+    const identity: ToolEffectArtifactIdentity = { runId: requestId, artifacts: Object.fromEntries(
+      toolEffectArtifactPurposes.map(purpose => [purpose, randomUUID()])
+    ) as ToolEffectArtifactIdentity['artifacts'] }
     const arm = vi.fn()
-    const result = await runWithCurrentAgentToolEffect({ effectKey: key, arm }, () =>
+    const result = await runWithCurrentAgentToolEffect({ identity, arm }, () =>
       value.store.restorePatch(value.operationId, value.requestId, requestId, async () => {}))
-    expect(result?.operationId).toBe(agentToolEffectArtifactId(key, 'file_restore'))
+    expect(result?.operationId).toBe(identity.artifacts.file_restore)
     expect(arm).toHaveBeenCalledExactlyOnceWith({ kind: 'file_patch', recoveryMode: 'confirm', target: {
       requestId, operationId: result!.operationId, paths: result!.transaction.entries.map((entry) => entry.before.target.canonicalPath)
     } })
@@ -292,7 +295,7 @@ describe('internal batch reverse execution', { timeout: 20_000 }, () => {
 
   it.each(['prepared', 'intent', 'partial', 'applied'] as const)('retains both durable operations after a reverse %s hard exit without replay', async (phase) => {
     const value = await fixture(), operationId = randomUUID(), requestId = randomUUID()
-    const crashed = spawnSync(process.execPath, [fileURLToPath(new URL('./agent/toolEffectHardCrashFixture.mjs', import.meta.url)), JSON.stringify({
+    const crashed = spawnSync(process.execPath, [fileURLToPath(new URL('./filePatchRecordCrashFixture.mjs', import.meta.url)), JSON.stringify({
       scenario: 'file_patch_store', phase, workspace: value.workspace, recordsRoot: value.store.root, requestId, operationId,
       sourceRequestId: value.requestId, sourceOperationId: value.operationId, viteCacheDirectory: join(value.root, 'reverse-cache')
     })], { cwd: process.cwd(), env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 20_000 })
@@ -465,7 +468,7 @@ describe('batch restore preflight', () => {
     await writeFile(join(workspace, 'old.txt'), 'before\n')
     const store = new FileEditStore(join(root, 'records'))
     const requestId = randomUUID(), operationId = randomUUID()
-    const crashed = spawnSync(process.execPath, [fileURLToPath(new URL('./agent/toolEffectHardCrashFixture.mjs', import.meta.url)), JSON.stringify({
+    const crashed = spawnSync(process.execPath, [fileURLToPath(new URL('./filePatchRecordCrashFixture.mjs', import.meta.url)), JSON.stringify({
       scenario: 'file_patch_store', phase, workspace, recordsRoot: store.root, requestId, operationId, viteCacheDirectory: join(root, 'cache')
     })], { cwd: process.cwd(), env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 20_000 })
     expect(crashed.status, crashed.stderr).toBe(83)

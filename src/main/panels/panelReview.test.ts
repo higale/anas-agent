@@ -11,7 +11,8 @@ describe('review from an independent file panel', () => {
       ? { draft: { modelConfigId: 'draft-model', modelParameterPresetId: null, accessMode: 'full_access' } }
       : { threadId: 'origin-thread' }) }
     const thread = { id: 'origin-thread', projectId: 'origin-project', modelConfigId: 'thread-model' }
-    const database = { getThread: vi.fn(() => thread) }
+    const readModel = { getThread: vi.fn(() => thread) }
+    const database = { readModel }
     const storage = { conversationForThread: () => database, previewDatabase: () => database }
     const submit = vi.fn(async () => ({ thread, run: { id: 'review-run' } }))
     const runtime = { getRunSubmission: vi.fn(), submitRunWithAttachments: submit,
@@ -29,8 +30,8 @@ describe('review from an independent file panel', () => {
     vi.doMock('./panelRegistry', () => ({ panelLabel: () => 'Code review', panelPages: {
       fromPage: () => ({ ...view }), pageState: () => ({ view, language: 'en' }), pageContent: () => view.content, updateContent
     } }))
-    vi.doMock('../agent/agentStorage', () => ({ AgentStorage: { open: () => storage } }))
-    vi.doMock('../agent/agentRuntimeCoordinator', () => ({ AgentRuntimeCoordinator: vi.fn(function () { return runtime }) }))
+    vi.doMock('../agent/agentStorage', () => ({ AgentStorage: { openNative: () => storage } }))
+    vi.doMock('../agent/nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: vi.fn(function () { return runtime }) }))
     vi.doMock('../projectStore', () => ({ getProject: async () => ({ id: 'origin-project', kind: 'workspace', modelConfigId: 'project-model', accessMode: 'read_only_allowed' }) }))
     vi.doMock('../agent/codeReview', () => ({ captureCodeReview: capture, codeReviewPrompt: () => 'Captured review prompt' }))
     vi.doMock('../config/appConfig', () => ({ getAppConfigSnapshot: async () => ({ defaultModelId: 'global-model' }),
@@ -44,7 +45,7 @@ describe('review from an independent file panel', () => {
     await expect(review({ sender: {} }, 'page-id', request, 'obsolete-navigation')).rejects.toThrow('Panel context changed')
     expect(capture).not.toHaveBeenCalled()
     await review({ sender: {} }, 'page-id', request, content.navigationId)
-    expect(capture).toHaveBeenCalledExactlyOnceWith(database, request, 'origin-project')
+    expect(capture).toHaveBeenCalledExactlyOnceWith(readModel, request, 'origin-project')
     expect(submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       text: 'Captured review prompt', codeReview: { id: 'captured-scope' },
       ...(draft ? { newThread: expect.objectContaining({ projectId: 'origin-project', modelConfigId: 'draft-model', modelParameterPresetId: null, accessMode: 'full_access' }) }

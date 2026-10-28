@@ -1,17 +1,21 @@
+import { toolEffectArtifactPurposes, type ToolEffectArtifactIdentity } from '../runtime/toolEffectIdentity'
+import type { ExecutionToolCall } from '../runtime/executionState'
+import { encodeExecutionValue, decodeExecutionValue } from '../runtime/executionValue'
+import Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { AgentDatabase } from './agent/agentDatabase'
-import { agentToolEffectArtifactId, runWithCurrentAgentToolEffect, type CurrentAgentToolEffectScope } from './agent/toolEffectScope'
+import { NativeExecutionStore, nativeExecutionSchema } from './agent/nativeExecutionStore'
+import { runWithCurrentAgentToolEffect, type CurrentAgentToolEffectScope } from './agent/toolEffectScope'
 import { FileEditStore } from './fileEditStore'
 import { resolveFilePatchTargets } from './filePatch'
 import { asPatchInput } from './filePatchTestFixtures'
 import { captureFilePatchPreimages } from './filePatchState'
 import { executeFilePatchTransaction, type FilePatchTransaction } from './filePatchTransaction'
 
-const roots: string[] = [], databases = new Set<AgentDatabase>()
+const roots: string[] = [], databases = new Set<Database.Database>()
 afterEach(async () => {
   for (const database of databases) database.close()
   databases.clear()
@@ -21,27 +25,36 @@ afterEach(async () => {
 async function fixture(purpose: 'file_edit' | 'file_restore' = 'file_edit') {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'anas-patch-preparation-')))
   roots.push(root)
-  const workspace = join(root, 'workspace'), databasePath = join(root, 'agent.sqlite'), attachments = join(root, 'attachments')
+  const workspace = join(root, 'workspace'), databasePath = join(root, 'agent.sqlite')
   await mkdir(workspace)
   await writeFile(join(workspace, 'old.txt'), 'before\n')
-  let database = AgentDatabase.open(databasePath, attachments)
-  databases.add(database)
-  const thread = database.createThread(), run = database.createRun(thread.id, randomUUID(), 'agent', [], { kind: 'user', text: 'Edit the requested file.' })
-  const key = { runId: run.id, checkpointId: 'checkpoint', checkpointNs: 'tools:task', taskId: 'task', callKey: 'call', inputHash: 'input' }
-  const operationId = agentToolEffectArtifactId(key, purpose), store = new FileEditStore(join(root, 'records'))
-  database.prepareToolEffect({ ...key, threadId: thread.id, writeCheckpointNs: '', callIndex: 0,
-    toolCallId: 'call', toolName: purpose === 'file_edit' ? 'apply_patch' : 'restore_file_edit', argsJson: '{}', recoveryMode: 'confirm' })
+  let raw = new Database(databasePath)
+  raw.exec(nativeExecutionSchema)
+  databases.add(raw)
+  let database = new NativeExecutionStore(raw)
+  const thread = { id: randomUUID() }, run = { id: randomUUID() }
+  const key = { threadId: thread.id, runId: run.id, callId: 'call' }
+  const identity: ToolEffectArtifactIdentity = { runId: run.id,
+    artifacts: Object.fromEntries(toolEffectArtifactPurposes.map(purpose => [purpose, randomUUID()])) as ToolEffectArtifactIdentity['artifacts'] }
+  const call: ExecutionToolCall = { id: key.callId, providerCallId: key.callId, name: purpose === 'file_edit' ? 'apply_patch' : 'restore_file_edit', args: {}, artifacts: identity.artifacts }
+  const operationId = identity.artifacts[purpose], store = new FileEditStore(join(root, 'records'))
+  const context = { modelCalls: 0, todos: [] }
+  database.start({ threadId: thread.id, runId: run.id, messages: [{ id: 'input', value: { kind: 'user', content: 'Edit the requested file.' } }], context })
+  const commitScope = () => ({ ...key, expectedRevisionId: database.load(thread.id)!.revisionId })
+  database.acceptModel(commitScope(), { id: 'response', value: { kind: 'assistant', content: '', calls: [{ id: call.id, name: call.name, args: call.args }] } }, [call], context)
+  database.prepareTools(commitScope(), [{ callId: call.id, args: call.args }])
+  database.prepareEffect(key, 'confirm')
   const scope: CurrentAgentToolEffectScope = {
-    effectKey: key,
-    isUnarmed: () => { const row = database.loadToolEffect(key); return row?.state === 'prepared' && row.effectAttempt === 0 },
-    arm: (effect) => { database.armToolEffect(key, { effectKind: effect.kind, targetJson: JSON.stringify(effect.target), recoveryMode: effect.recoveryMode }) }
+    identity,
+    isUnarmed: () => { const row = database.loadEffect(key); return row?.state === 'prepared' && row.effectAttempt === 0 },
+    arm: (effect) => { database.armEffect(key, effect) }
   }
   const resolved = await resolveFilePatchTargets(asPatchInput({ operations: [{ type: 'update', path: 'old.txt', patch: '@@\n-before\n+after\n' }] }), workspace)
   const preimages = await captureFilePatchPreimages(resolved.targets)
   const directory = store.editRecordDir(run.id, operationId)
   const partial = async () => { await mkdir(directory, { recursive: true }); await writeFile(join(directory, 'partial'), 'keep until proved unarmed') }
   const lookup = () => store.loadPatchForExecution(operationId, run.id, purpose)
-  const reopen = () => { database.close(); databases.delete(database); database = AgentDatabase.open(databasePath, attachments); databases.add(database) }
+  const reopen = () => { raw.close(); databases.delete(raw); raw = new Database(databasePath); databases.add(raw); database = new NativeExecutionStore(raw) }
   const prepared = async () => {
     let record!: FilePatchTransaction
     await expect(executeFilePatchTransaction(operationId, resolved.input, preimages, async (snapshot) => {
@@ -50,7 +63,7 @@ async function fixture(purpose: 'file_edit' | 'file_restore' = 'file_edit') {
     })).rejects.toThrow('prepared only')
     await store.createPatchPersistence(run.id, operationId).persist(record)
   }
-  return { root, workspace, key, run, store, scope, operationId, directory, partial, lookup, reopen, prepared,
+  return { root, workspace, key, run, store, scope, operationId, directory, partial, lookup, reopen, prepared, databasePath,
     get database() { return database }, input: resolved.input, preimages }
 }
 
@@ -68,7 +81,7 @@ describe('patch preparation and durable unarmed proof', { timeout: 20_000 }, () 
     expect(await runWithCurrentAgentToolEffect(value.scope, value.lookup)).toBeUndefined()
     expect(await readFile(join(sibling, 'keep'), 'utf8')).toBe('other operation')
     expect(await readFile(join(value.workspace, 'old.txt'), 'utf8')).toBe('before\n')
-    expect(value.database.loadToolEffect(value.key)).toMatchObject({ state: 'prepared', effectAttempt: 0 })
+    expect(value.database.loadEffect(value.key)).toMatchObject({ state: 'prepared', effectAttempt: 0 })
   })
 
   it('creates a fresh edit using the same stable identity only after certified preparation cleanup', async () => {
@@ -82,7 +95,7 @@ describe('patch preparation and durable unarmed proof', { timeout: 20_000 }, () 
       expect(result.transaction.state).toBe('applied')
       expect(await value.lookup()).toEqual(result)
     })
-    expect(value.database.loadToolEffect(value.key)).toMatchObject({ state: 'intent', effectAttempt: 1 })
+    expect(value.database.loadEffect(value.key)).toMatchObject({ state: 'intent', effectAttempt: 1 })
     expect(await readFile(join(value.workspace, 'old.txt'), 'utf8')).toBe('after\n')
   })
 
@@ -101,32 +114,51 @@ describe('patch preparation and durable unarmed proof', { timeout: 20_000 }, () 
       definitionHash: source.definitionHash, transaction: { entries: source.transaction.entries }
     })
     expect(await readFile(join(value.workspace, 'old.txt'), 'utf8')).toBe('before\n')
-    expect(value.database.loadToolEffect(value.key)).toMatchObject({ state: 'intent', effectAttempt: 1 })
+    expect(value.database.loadEffect(value.key)).toMatchObject({ state: 'intent', effectAttempt: 1 })
   })
 
   it.each(['absent', 'partial'] as const)('refuses %s preparation after an effect boundary, including a confirmed retry', async (kind) => {
     const value = await fixture()
     if (kind === 'partial') await value.partial()
-    value.database.armToolEffect(value.key, { effectKind: 'file_patch', targetJson: '{}' })
+    value.database.armEffect(value.key, { kind: 'file_patch', target: {} })
     value.reopen()
     await expect(runWithCurrentAgentToolEffect(value.scope, value.lookup)).rejects.toThrow('unarmed effect journal')
-    value.database.retryToolEffect(value.key, { kind: 'approved', expectedConfirmationCount: 0 })
+    value.database.retryEffect(value.key, { kind: 'approved', expectedConfirmationCount: 0 })
     value.reopen()
-    expect(value.database.loadToolEffect(value.key)).toMatchObject({ state: 'prepared', effectAttempt: 1 })
+    expect(value.database.loadEffect(value.key)).toMatchObject({ state: 'prepared', effectAttempt: 1 })
     await expect(runWithCurrentAgentToolEffect(value.scope, value.lookup)).rejects.toThrow('unarmed effect journal')
     if (kind === 'partial') expect(await readFile(join(value.directory, 'partial'), 'utf8')).toBe('keep until proved unarmed')
     expect(await readFile(join(value.workspace, 'old.txt'), 'utf8')).toBe('before\n')
   })
 
-  it.each(['no-scope', 'no-journal', 'wrong-input', 'wrong-purpose', 'wrong-run'] as const)('preserves unpublished evidence with %s', async (kind) => {
+  it.each(['no-scope', 'no-journal', 'wrong-artifact', 'wrong-purpose', 'wrong-run'] as const)('preserves unpublished evidence with %s', async (kind) => {
     const value = await fixture()
     await value.partial()
-    if (kind === 'no-journal') value.database.discardPreparedToolEffect(value.key)
-    const scope = { ...value.scope, effectKey: { ...value.key,
-      ...(kind === 'wrong-input' ? { inputHash: 'changed' } : kind === 'wrong-run' ? { runId: randomUUID() } : {}) } }
+    if (kind === 'no-journal') value.database.discardUnarmedEffect(value.key)
+    const scope = { ...value.scope, identity: { ...value.scope.identity!,
+      ...(kind === 'wrong-artifact' ? { artifacts: { ...value.scope.identity!.artifacts, file_edit: randomUUID() } }
+        : kind === 'wrong-run' ? { runId: randomUUID() } : {}) } }
     const lookup = kind === 'wrong-purpose' ? () => value.store.loadPatchForExecution(value.operationId, value.run.id, 'file_restore') : value.lookup
     await expect(kind === 'no-scope' ? lookup() : runWithCurrentAgentToolEffect(scope, lookup)).rejects.toThrow('unarmed effect journal')
     expect(await readFile(join(value.directory, 'partial'), 'utf8')).toBe('keep until proved unarmed')
+  })
+
+  it('rejects changed saved input before treating existing preparation as unarmed', async () => {
+    const value = await fixture()
+    await value.partial()
+    const raw = new Database(value.databasePath)
+    try {
+      const saved = raw.prepare('SELECT call_value FROM execution_calls WHERE thread_id = ? AND call_id = ?')
+        .get(value.key.threadId, value.key.callId) as { call_value: Uint8Array }
+      const call = decodeExecutionValue(saved.call_value) as Record<string, unknown>
+      raw.prepare('UPDATE execution_calls SET call_value = ? WHERE thread_id = ? AND call_id = ?')
+        .run(encodeExecutionValue({ ...call, args: { changed: true } }), value.key.threadId, value.key.callId)
+    } finally { raw.close() }
+    value.reopen()
+    expect(() => value.database.prepareEffect(value.key, 'confirm')).toThrow('immutable call identity')
+    expect(value.database.loadEffect(value.key)).toMatchObject({ argsJson: '{}', state: 'prepared', effectAttempt: 0 })
+    expect(await readFile(join(value.directory, 'partial'), 'utf8')).toBe('keep until proved unarmed')
+    expect(await readFile(join(value.workspace, 'old.txt'), 'utf8')).toBe('before\n')
   })
 
   it.each(['metadata', 'definition', 'snapshot'] as const)('does not reset damaged published %s even before an effect boundary', async (kind) => {

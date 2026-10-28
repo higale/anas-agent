@@ -93,6 +93,22 @@ beforeEach(() => {
 afterEach(() => { manager.closeAll(); vi.useRealTimers() })
 
 describe('page handoff', () => {
+  it.each(['ready', 'activate'])('reports an initial page load failure during %s and permits a clean retry', async phase => {
+    if (phase === 'ready') ready = (owner, id) => manager.pageFailed(event(owner), id)
+    else respond = async command => {
+      if (command.kind === 'activate') manager.pageFailed(event(main), command.pageId)
+      return null
+    }
+    await expect(open()).rejects.toThrow('PANEL_LOAD_FAILED')
+    expect(manager.list()).toEqual([])
+    expect(manager.ownedPages(event(main))).toEqual([])
+    ready = (owner, id) => manager.pageReady(event(owner), id)
+    respond = async () => null
+    await open()
+    expect(manager.list()).toHaveLength(1)
+    expect(manager.ownedPages(event(main))[0].phase).toBe('active')
+  })
+
   it('fits a hidden candidate before showing it and rejects sizing the suspended source', async () => {
     await open()
     const sidebar = manager.ownedPages(event(main))[0]
@@ -346,7 +362,7 @@ describe('page handoff', () => {
     const original = manager.ownedPages(event(main))[0]
     if (phase === 'ready') ready = (owner, id) => manager.pageFailed(event(owner), id)
     else respond = async command => { if (command.kind === phase) throw new Error('failed'); return { draft: 'retained' } }
-    await expect(manager.move(original.panelId, 'window')).rejects.toThrow()
+    await expect(manager.move(original.panelId, 'window')).rejects.toThrow(phase === 'ready' ? 'PANEL_LOAD_FAILED' : 'PANEL_ACTION_FAILED')
     expect(manager.ownedPages(event(main))[0]).toMatchObject({ pageId: original.pageId, phase: 'active' })
     expect(windows.slice(1).every(window => window.destroyed)).toBe(true)
     expect(commands.at(-1)?.kind).toBe('resume')
@@ -360,7 +376,7 @@ describe('page handoff', () => {
     const move = manager.move(original.panelId, 'window').catch(error => error)
     await vi.waitFor(() => expect(pending).toBeDefined())
     await manager.close(original.panelId)
-    expect(await move).toBeInstanceOf(Error)
+    expect(await move).toMatchObject({ message: 'PANEL_CLOSED' })
     expect(manager.list()).toEqual([])
     expect(windows[1].destroyed).toBe(true)
     expect(() => manager.pageReady(event(pending!.owner), pending!.pageId)).toThrow()
@@ -462,6 +478,35 @@ it('concurrent closes both wait for disposal and share a failure without losing 
   fail = false
   await manager.close(id)
   expect(manager.list()).toHaveLength(0)
+})
+
+it.each(['ready', 'failed'])('settles repeated opens against the initial page when it becomes %s', async outcome => {
+  let pending: { owner: Window; pageId: string } | undefined
+  ready = (owner, pageId) => { pending = { owner, pageId } }
+  const openFiles = (navigationId: string) => manager.open({ ownerId: 'builtin', name: () => 'Files',
+    content: { kind: 'files', projectId: 'project', navigationId }, location: 'sidebar', locations: ['sidebar', 'window'] })
+  const first = openFiles('first')
+  await vi.waitFor(() => expect(pending).toBeDefined())
+  let secondSettled = false
+  const second = openFiles('second').finally(() => { secondSettled = true })
+  const results = Promise.allSettled([first, second])
+  await Promise.resolve()
+  expect(secondSettled).toBe(false)
+  if (outcome === 'ready') manager.pageReady(event(pending!.owner), pending!.pageId)
+  else manager.pageFailed(event(pending!.owner), pending!.pageId)
+  const settled = await results
+  if (outcome === 'ready') {
+    expect(settled.map(result => result.status)).toEqual(['fulfilled', 'fulfilled'])
+    expect(manager.list()).toHaveLength(1)
+    expect(manager.ownedPages(event(main))).toHaveLength(1)
+    expect(manager.ownedPages(event(main))[0]).toMatchObject({ pageId: pending!.pageId, phase: 'active',
+      view: { content: { navigationId: 'second' } } })
+  } else {
+    expect(settled).toEqual([expect.objectContaining({ status: 'rejected', reason: new Error('PANEL_LOAD_FAILED') }),
+      expect.objectContaining({ status: 'rejected', reason: new Error('PANEL_LOAD_FAILED') })])
+    expect(manager.list()).toEqual([])
+    expect(manager.ownedPages(event(main))).toEqual([])
+  }
 })
 
 it('waits for pending disposal before reopening the same identity', async () => {

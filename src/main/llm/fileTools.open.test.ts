@@ -1,10 +1,11 @@
+import { invokeCapability } from '../../runtime/toolInvocation'
 import { constants } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { mkdtemp, open, rm, stat, symlink, writeFile, type FileHandle } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createFileTools } from './fileTools'
+import { fileToolDefinitions } from './fileTools'
 
 vi.mock('node:fs/promises', async importOriginal => {
   const original = await importOriginal<typeof import('node:fs/promises')>()
@@ -20,8 +21,8 @@ beforeEach(async () => {
 })
 afterEach(async () => { await rm(root, { recursive: true, force: true }) })
 
-function invoke(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
-  return createFileTools({ primaryFolder: root, maxReadBytes: 1_000_000, signal, toolNames: [name] })[0].invoke(args)
+async function invoke(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
+  return String((await invokeCapability(fileToolDefinitions({ primaryFolder: root, maxReadBytes: 1_000_000, signal, toolNames: [name] })[0], args, { signal })).content)
 }
 
 async function boundedFifoRead(pipe: string, run: Promise<unknown>) {

@@ -1,4 +1,4 @@
-// Isolated hard-exit fixture, loaded only by toolEffectHardCrashFixture.mjs.
+// Isolated hard-exit fixture, loaded only by filePatchRecordCrashFixture.mjs.
 import { FileEditStore } from './fileEditStore'
 import { resolveFilePatchTargets } from './filePatch'
 import { asPatchInput } from './filePatchTestFixtures'

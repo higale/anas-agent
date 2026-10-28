@@ -1,15 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type Database from 'better-sqlite3'
-import {
-  BaseStore,
-  type Item,
-  type ListNamespacesOperation,
-  type Operation,
-  type OperationResults,
-  type PutOperation,
-  type SearchItem,
-  type SearchOperation
-} from '@langchain/langgraph-checkpoint'
+
 import type {
   MemoryItem,
   MemoryKind,
@@ -68,7 +59,7 @@ function namespacePath(namespace: readonly string[]): string {
 function parseNamespace(path: string): string[] {
   const value = JSON.parse(path) as unknown
   if (!Array.isArray(value) || value.some((part) => typeof part !== 'string')) {
-    throw new Error('Stored LangGraph namespace is invalid.')
+    throw new Error('Stored memory namespace is invalid.')
   }
   return value
 }
@@ -76,48 +67,6 @@ function parseNamespace(path: string): string[] {
 function startsWithNamespace(namespace: readonly string[], prefix: readonly string[]): boolean {
   return prefix.length <= namespace.length
     && prefix.every((part, index) => namespace[index] === part)
-}
-
-function asStoreItem(row: StoreRow, score?: number): SearchItem {
-  return {
-    namespace: parseNamespace(row.namespace_path),
-    key: row.key,
-    value: JSON.parse(row.value_json) as Record<string, unknown>,
-    createdAt: new Date(row.created_at),
-    updatedAt: new Date(row.updated_at),
-    ...(score === undefined ? {} : { score })
-  }
-}
-
-function valueAtPath(value: Record<string, unknown>, path: string): unknown {
-  return path.split('.').reduce<unknown>((current, part) => (
-    current && typeof current === 'object' && !Array.isArray(current)
-      ? (current as Record<string, unknown>)[part]
-      : undefined
-  ), value)
-}
-
-function compareFilter(actual: unknown, expected: unknown): boolean {
-  if (!expected || typeof expected !== 'object' || Array.isArray(expected)) {
-    return actual === expected
-  }
-  return Object.entries(expected as Record<string, unknown>).every(([operator, operand]) => {
-    if (operator === '$eq') return actual === operand
-    if (operator === '$ne') return actual !== operand
-    if (operator === '$gt') return typeof actual === 'number' && typeof operand === 'number' && actual > operand
-    if (operator === '$gte') return typeof actual === 'number' && typeof operand === 'number' && actual >= operand
-    if (operator === '$lt') return typeof actual === 'number' && typeof operand === 'number' && actual < operand
-    if (operator === '$lte') return typeof actual === 'number' && typeof operand === 'number' && actual <= operand
-    return false
-  })
-}
-
-function matchesFilter(row: StoreRow, filter: Record<string, unknown> | undefined): boolean {
-  if (!filter) return true
-  const value = JSON.parse(row.value_json) as Record<string, unknown>
-  return Object.entries(filter).every(([path, expected]) => (
-    compareFilter(valueAtPath(value, path), expected)
-  ))
 }
 
 function normalizedText(value: string): string {
@@ -214,36 +163,21 @@ function memoryRankingBoost(row: StoreRow): number {
   return importance * 0.02 + recency * 0.05
 }
 
-function matchNamespacePath(path: readonly string[], pattern: readonly (string | '*')[]): boolean {
-  return path.length >= pattern.length
-    && pattern.every((part, index) => part === '*' || path[index] === part)
-}
-
-function matchesNamespaceConditions(
-  namespace: readonly string[],
-  operation: ListNamespacesOperation
-): boolean {
-  return (operation.matchConditions ?? []).every((condition) => {
-    if (condition.matchType === 'prefix') return matchNamespacePath(namespace, condition.path)
-    const suffix = namespace.slice(Math.max(0, namespace.length - condition.path.length))
-    return suffix.length === condition.path.length && matchNamespacePath(suffix, condition.path)
-  })
-}
-
 function memoryNamespaceFor(scope: MemoryScope, projectId?: string): string[] {
   if (scope === 'global') return [memoryNamespace, 'global']
   if (!projectId?.trim()) throw new Error('Project memories require a project ID.')
   return [memoryNamespace, 'project', projectId.trim()]
 }
 
-function memoryFromItem(item: SearchItem): MemoryItem {
-  const value = item.value as StoredMemoryValue
-  const scope = item.namespace[1]
+function memoryFromRow(row: StoreRow, score?: number): MemoryItem {
+  const value = JSON.parse(row.value_json) as StoredMemoryValue
+  const namespace = parseNamespace(row.namespace_path)
+  const scope = namespace[1]
   if (scope !== 'global' && scope !== 'project') throw new Error('Stored memory scope is invalid.')
   return {
-    id: item.key,
+    id: row.key,
     scope,
-    ...(scope === 'project' ? { projectId: item.namespace[2] } : {}),
+    ...(scope === 'project' ? { projectId: namespace[2] } : {}),
     kind: value.kind,
     content: value.content,
     keywords: value.keywords,
@@ -251,9 +185,9 @@ function memoryFromItem(item: SearchItem): MemoryItem {
     origin: value.origin,
     ...(value.sourceThreadId ? { sourceThreadId: value.sourceThreadId } : {}),
     ...(value.sourceRunId ? { sourceRunId: value.sourceRunId } : {}),
-    createdAt: item.createdAt.toISOString(),
-    updatedAt: item.updatedAt.toISOString(),
-    ...(item.score === undefined ? {} : { score: item.score })
+    createdAt: new Date(row.created_at).toISOString(),
+    updatedAt: new Date(row.updated_at).toISOString(),
+    ...(score === undefined ? {} : { score })
   }
 }
 
@@ -338,9 +272,8 @@ function validatedSearchRequest(request: MemorySearchRequest): MemorySearchReque
   return request
 }
 
-export class SqliteMemoryStore extends BaseStore {
+export class SqliteMemoryStore {
   constructor(private readonly database: Database.Database) {
-    super()
     this.initialize()
   }
 
@@ -368,57 +301,38 @@ export class SqliteMemoryStore extends BaseStore {
     `)
   }
 
-  override async batch<Op extends Operation[]>(operations: Op): Promise<OperationResults<Op>> {
-    const execute = this.database.transaction((items: Operation[]) => (
-      items.map((operation) => {
-        if ('value' in operation) return this.putOperation(operation)
-        if ('namespacePrefix' in operation) return this.searchOperation(operation)
-        if ('matchConditions' in operation || 'maxDepth' in operation) {
-          return this.listNamespacesOperation(operation as ListNamespacesOperation)
-        }
-        if ('namespace' in operation) return this.getOperation(operation.namespace, operation.key)
-        return this.listNamespacesOperation(operation)
-      })
-    ))
-    return execute(operations) as OperationResults<Op>
-  }
-
-  private getOperation(namespace: string[], key: string): Item | null {
+  private readMemory(namespace: string[], key: string): MemoryItem | undefined {
     const row = this.database.prepare(`
       SELECT namespace_path, key, value_json, created_at, updated_at
-      FROM agent_store_items
-      WHERE namespace_path = ? AND key = ?
+      FROM agent_store_items WHERE namespace_path = ? AND key = ?
     `).get(namespacePath(namespace), key) as StoreRow | undefined
-    return row ? asStoreItem(row) : null
+    return row ? memoryFromRow(row) : undefined
   }
 
-  private putOperation(operation: PutOperation): void {
-    const path = namespacePath(operation.namespace)
-    if (operation.value === null) {
-      this.database.prepare('DELETE FROM agent_memory_fts WHERE namespace_path = ? AND key = ?')
-        .run(path, operation.key)
-      this.database.prepare('DELETE FROM agent_store_items WHERE namespace_path = ? AND key = ?')
-        .run(path, operation.key)
-      return
-    }
-    const valueJson = JSON.stringify(operation.value)
-    const now = new Date().toISOString()
-    this.database.prepare(`
-      INSERT INTO agent_store_items (namespace_path, key, value_json, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT (namespace_path, key) DO UPDATE SET
-        value_json = excluded.value_json,
-        updated_at = excluded.updated_at
-    `).run(path, operation.key, valueJson, now, now)
-    this.database.prepare('DELETE FROM agent_memory_fts WHERE namespace_path = ? AND key = ?')
-      .run(path, operation.key)
-    if (operation.namespace[0] !== memoryNamespace || operation.index === false) return
-    const indexed = indexedText(operation.value)
-    if (!indexed) return
-    this.database.prepare(`
-      INSERT INTO agent_memory_fts (namespace_path, key, content, keywords)
-      VALUES (?, ?, ?, ?)
-    `).run(path, operation.key, indexed.content, indexed.keywords)
+  private writeMemory(namespace: string[], key: string, value: StoredMemoryValue | null): void {
+    this.database.transaction(() => {
+      const path = namespacePath(namespace)
+      if (value === null) {
+        this.database.prepare('DELETE FROM agent_memory_fts WHERE namespace_path = ? AND key = ?').run(path, key)
+        this.database.prepare('DELETE FROM agent_store_items WHERE namespace_path = ? AND key = ?').run(path, key)
+        return
+      }
+      const valueJson = JSON.stringify(value)
+      const now = new Date().toISOString()
+      this.database.prepare(`
+        INSERT INTO agent_store_items (namespace_path, key, value_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT (namespace_path, key) DO UPDATE SET
+          value_json = excluded.value_json,
+          updated_at = excluded.updated_at
+      `).run(path, key, valueJson, now, now)
+      this.database.prepare('DELETE FROM agent_memory_fts WHERE namespace_path = ? AND key = ?').run(path, key)
+      const indexed = indexedText(value)
+      if (!indexed) return
+      this.database.prepare(`
+        INSERT INTO agent_memory_fts (namespace_path, key, content, keywords) VALUES (?, ?, ?, ?)
+      `).run(path, key, indexed.content, indexed.keywords)
+    })()
   }
 
   private ftsRanks(query: string): Map<string, number> {
@@ -443,16 +357,16 @@ export class SqliteMemoryStore extends BaseStore {
     return matches
   }
 
-  private searchOperation(operation: SearchOperation): SearchItem[] {
+  private queryMemories(namespacePrefix: readonly string[], text?: string, kind?: MemoryKind): MemoryItem[] {
     const rows = this.database.prepare(`
       SELECT namespace_path, key, value_json, created_at, updated_at
       FROM agent_store_items
     `).all() as StoreRow[]
-    const query = normalizedText(operation.query ?? '').slice(0, maximumQueryLength)
+    const query = normalizedText(text ?? '').slice(0, maximumQueryLength)
     const ranks = query ? this.ftsRanks(query) : new Map<string, number>()
     const candidates = rows
-      .filter((row) => startsWithNamespace(parseNamespace(row.namespace_path), operation.namespacePrefix))
-      .filter((row) => matchesFilter(row, operation.filter))
+      .filter((row) => startsWithNamespace(parseNamespace(row.namespace_path), namespacePrefix))
+      .filter((row) => !kind || (JSON.parse(row.value_json) as StoredMemoryValue).kind === kind)
       .flatMap((row): Array<{ row: StoreRow; score?: number }> => {
         if (!query) return [{ row }]
         const textScore = memorySearchScore(row, query)
@@ -467,25 +381,7 @@ export class SqliteMemoryStore extends BaseStore {
         }
         return right.row.updated_at.localeCompare(left.row.updated_at)
       })
-    const offset = Math.max(0, operation.offset ?? 0)
-    const limit = Math.max(0, operation.limit ?? 10)
-    return candidates.slice(offset, offset + limit).map(({ row, score }) => asStoreItem(row, score))
-  }
-
-  private listNamespacesOperation(operation: ListNamespacesOperation): string[][] {
-    const rows = this.database.prepare(`
-      SELECT DISTINCT namespace_path
-      FROM agent_store_items
-      ORDER BY namespace_path
-    `).all() as Array<{ namespace_path: string }>
-    const namespaces = rows
-      .map((row) => parseNamespace(row.namespace_path))
-      .filter((namespace) => matchesNamespaceConditions(namespace, operation))
-      .map((namespace) => operation.maxDepth ? namespace.slice(0, operation.maxDepth) : namespace)
-      .filter((namespace, index, all) => (
-        all.findIndex((candidate) => namespacePath(candidate) === namespacePath(namespace)) === index
-      ))
-    return namespaces.slice(operation.offset, operation.offset + operation.limit)
+    return candidates.map(({ row, score }) => memoryFromRow(row, score))
   }
 
   async searchMemories(request: MemorySearchRequest = {}): Promise<MemorySearchResult> {
@@ -496,13 +392,8 @@ export class SqliteMemoryStore extends BaseStore {
       : scope === 'project'
         ? [memoryNamespace, 'project', ...(request.projectId ? [request.projectId] : [])]
         : [memoryNamespace]
-    const all = this.searchOperation({
-      namespacePrefix,
-      query: request.query?.trim() || undefined,
-      filter: request.kind && request.kind !== 'all' ? { kind: request.kind } : undefined,
-      limit: Number.MAX_SAFE_INTEGER,
-      offset: 0
-    }).map(memoryFromItem)
+    const all = this.queryMemories(namespacePrefix, request.query?.trim() || undefined,
+      request.kind && request.kind !== 'all' ? request.kind : undefined)
     const offset = Math.max(0, request.offset ?? 0)
     const limit = Math.min(maximumSearchLimit, Math.max(1, request.limit ?? defaultSearchLimit))
     return { items: all.slice(offset, offset + limit), total: all.length }
@@ -522,12 +413,9 @@ export class SqliteMemoryStore extends BaseStore {
   }
 
   async relevantMemories(query: string, projectId: string, limit = 8): Promise<MemoryItem[]> {
-    const [global, project] = await Promise.all([
-      this.search([memoryNamespace, 'global'], { query, limit }),
-      this.search([memoryNamespace, 'project', projectId], { query, limit })
-    ])
+    const global = this.queryMemories([memoryNamespace, 'global'], query).slice(0, Math.max(0, limit))
+    const project = this.queryMemories([memoryNamespace, 'project', projectId], query).slice(0, Math.max(0, limit))
     return [...global, ...project]
-      .map(memoryFromItem)
       .sort((left, right) => {
         const score = (right.score ?? 0) - (left.score ?? 0)
         if (score !== 0) return score
@@ -568,13 +456,8 @@ export class SqliteMemoryStore extends BaseStore {
             : {})
         }
         const move = this.database.transaction(() => {
-          this.putOperation({ namespace: oldNamespace, key: existing.id, value: null })
-          this.putOperation({
-            namespace,
-            key: existing.id,
-            value: storedValue,
-            index: ['content', 'keywords']
-          })
+          this.writeMemory(oldNamespace, existing.id, null)
+          this.writeMemory(namespace, existing.id, storedValue)
           this.database.prepare(`
             UPDATE agent_store_items
             SET created_at = ?
@@ -582,13 +465,13 @@ export class SqliteMemoryStore extends BaseStore {
           `).run(existing.createdAt, namespacePath(namespace), existing.id)
         })
         move()
-        const moved = await this.get(namespace, existing.id)
+        const moved = this.readMemory(namespace, existing.id)
         if (!moved) throw new Error(`Memory ${existing.id} was not stored.`)
-        return memoryFromItem(moved)
+        return moved
       }
     }
     const id = existing?.id ?? newId ?? randomUUID()
-    await this.put(namespace, id, {
+    this.writeMemory(namespace, id, {
       kind: value.kind,
       content: value.content,
       keywords: value.keywords,
@@ -600,10 +483,10 @@ export class SqliteMemoryStore extends BaseStore {
       ...(existing?.sourceRunId || context.sourceRunId
         ? { sourceRunId: existing?.sourceRunId ?? context.sourceRunId }
         : {})
-    }, ['content', 'keywords'])
-    const stored = await this.get(namespace, id)
+    })
+    const stored = this.readMemory(namespace, id)
     if (!stored) throw new Error(`Memory ${id} was not stored.`)
-    return memoryFromItem(stored)
+    return stored
   }
 
   async deleteMemory(id: string, accessProjectId?: string): Promise<void> {
@@ -617,18 +500,11 @@ export class SqliteMemoryStore extends BaseStore {
     ) {
       throw new Error(`Memory ${id} is not available to the current project.`)
     }
-    await this.delete(memoryNamespaceFor(existing.scope, existing.projectId), id)
+    this.writeMemory(memoryNamespaceFor(existing.scope, existing.projectId), id, null)
   }
 
   deleteProjectMemories(projectId: string): number {
-    if (typeof projectId !== 'string' || !projectId.trim() || projectId.length > 200) {
-      throw new Error('Project memory cleanup requires a valid project ID.')
-    }
-    const path = namespacePath(memoryNamespaceFor('project', projectId))
-    return this.database.transaction(() => {
-      this.database.prepare('DELETE FROM agent_memory_fts WHERE namespace_path = ?').run(path)
-      return this.database.prepare('DELETE FROM agent_store_items WHERE namespace_path = ?').run(path).changes
-    })()
+    return deleteProjectMemoryRecords(this.database, projectId)
   }
 
   private async findMemory(id: string): Promise<MemoryItem | undefined> {
@@ -638,6 +514,17 @@ export class SqliteMemoryStore extends BaseStore {
       WHERE key = ?
     `).all(id) as StoreRow[]
     const row = rows.find((candidate) => parseNamespace(candidate.namespace_path)[0] === memoryNamespace)
-    return row ? memoryFromItem(asStoreItem(row)) : undefined
+    return row ? memoryFromRow(row) : undefined
   }
+}
+
+export function deleteProjectMemoryRecords(database: Database.Database, projectId: string): number {
+  if (typeof projectId !== 'string' || !projectId.trim() || projectId.length > 200) {
+    throw new Error('Project memory cleanup requires a valid project ID.')
+  }
+  const path = namespacePath(memoryNamespaceFor('project', projectId))
+  return database.transaction(() => {
+    database.prepare('DELETE FROM agent_memory_fts WHERE namespace_path = ?').run(path)
+    return database.prepare('DELETE FROM agent_store_items WHERE namespace_path = ?').run(path).changes
+  })()
 }

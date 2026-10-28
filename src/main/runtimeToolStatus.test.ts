@@ -1,9 +1,9 @@
 import { defaultCapabilities, } from '@shared/agentCapabilities'
 import { describe, expect, it } from 'vitest'
 import type { AppConfigSnapshot } from '@shared/types'
-import { frameworkToolDefinitions, getRuntimeToolStatus } from './runtimeToolStatus'
-import { createFileTools } from './llm/fileTools'
-import { serializeStructuredTool } from './toolSchemaSerialization'
+import { agentToolDefinitions, getRuntimeToolStatus } from './runtimeToolStatus'
+import { fileToolDefinitions } from './llm/fileTools'
+import { serializeToolDefinition } from './toolSchemaSerialization'
 
 const subagents = [{
  capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: true,
@@ -17,13 +17,13 @@ const subagents = [{
   systemPrompt: 'Complete the task.',
 }]
 
-describe('framework tool status', () => {
+describe('agent tool status', () => {
   it.each([undefined, 256_000, 1_000_000])('shows the dynamic read contract independently of the default model: %s', async (maxContextTokens) => {
     const status = await getRuntimeToolStatus({ settings: {}, subagents: [],
       ...(maxContextTokens === undefined ? {} : { defaultModel: { maxContextTokens } })
     } as unknown as AppConfigSnapshot)
-    const runtimeTools = createFileTools({ primaryFolder: process.cwd(), maxReadBytes: async () => 64000 })
-      .map(serializeStructuredTool)
+    const runtimeTools = fileToolDefinitions({ primaryFolder: process.cwd(), maxReadBytes: async () => 64000 })
+      .map(serializeToolDefinition)
     for (const name of ['read_file', 'read_multiple_files']) {
       expect(status.tools.find(tool => tool.name === name)).toEqual(runtimeTools.find(tool => tool.name === name))
     }
@@ -95,8 +95,8 @@ describe('framework tool status', () => {
     })
   })
 
-  it('reads the original framework tool descriptions and schemas', () => {
-    const tools = frameworkToolDefinitions(subagents)
+  it('retains the original tool descriptions and schemas', () => {
+    const tools = agentToolDefinitions(subagents)
     expect(tools.map((tool) => tool.name)).toEqual([
       'write_todos',
       'start_subagent',
@@ -118,7 +118,7 @@ describe('framework tool status', () => {
   })
 
   it('keeps control tools but omits start when there is no configured subagent', () => {
-    expect(frameworkToolDefinitions([]).map((tool) => tool.name))
+    expect(agentToolDefinitions([]).map((tool) => tool.name))
       .toEqual(['write_todos', 'read_subagent', 'wait_subagent', 'cancel_subagent'])
   })
 
@@ -137,7 +137,7 @@ describe('framework tool status', () => {
   })
 
   it('exposes configured subagent selection descriptions', () => {
-    const start = frameworkToolDefinitions([
+    const start = agentToolDefinitions([
       subagents[0],
       {
         ...subagents[0],

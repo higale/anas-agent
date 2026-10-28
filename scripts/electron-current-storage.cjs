@@ -30,7 +30,7 @@ async function verifyCurrentStorage(repositoryRoot, executablePath) {
       const originalCompile = Module.prototype._compile
       Module.prototype._compile = function(content, filename) {
         if (filename.startsWith(compiledRoot) && content.includes('function currentStorage()')) {
-          content += '\\n;globalThis.__anasStorageAccess = { currentStorage, currentDatabase };'
+          content += '\\n;globalThis.__anasStorageAccess = { currentStorage, currentRuntime };'
         }
         return originalCompile.call(this, content, filename)
       }
@@ -70,11 +70,10 @@ async function verifyCurrentStorage(repositoryRoot, executablePath) {
     await expect(page.locator('[data-agent-composer-input]')).toBeVisible({ timeout: 15000 })
     phase = 'seed complete native messages'
     const seeded = await application.evaluate(async (_electron, count) => {
-      const { currentStorage } = globalThis.__anasStorageAccess || {}
+      const { currentStorage, currentRuntime } = globalThis.__anasStorageAccess || {}
       if (!currentStorage) throw new Error('The built main module did not expose current storage; rebuild the current tree.')
       const probe = globalThis.__anasStorageProbe
-      const { HumanMessage, AIMessage } = probe.nativeRequire('@langchain/core/messages')
-      const { emptyCheckpoint } = probe.nativeRequire('@langchain/langgraph-checkpoint')
+      const { randomUUID } = probe.nativeRequire('node:crypto')
       const storage = currentStorage()
       const started = performance.now()
       const threads = []
@@ -82,20 +81,36 @@ async function verifyCurrentStorage(repositoryRoot, executablePath) {
       for (const [title, length] of [['Storage long conversation', count], ['Storage short conversation', 2]]) {
         const thread = storage.createThread({ title })
         const database = storage.conversationForThread(thread.id)
-        if (typeof database.checkpointer.saveReferencedValue !== 'function') throw new Error('Expected the current normalized Saver in the built app.')
-        const run = database.createRun(thread.id)
-        database.checkpointer.retainRun(run.id, thread.id)
+        const runId = randomUUID()
         const messages = Array.from({ length }, (_, index) => {
-          const fields = { id: `${thread.id}:seed:${index}`, content: `Storage fixture ${index}. ${'x'.repeat(768)}`,
-            additional_kwargs: { anas_run_id: run.id } }
-          return index % 2 ? new AIMessage(fields) : new HumanMessage(fields)
+          const id = index === 0 ? runId + ':input' : thread.id + ':seed:' + index
+          return { id, value: { id, kind: index % 2 ? 'assistant' : 'user',
+            content: 'Storage fixture ' + index + '. ' + 'x'.repeat(768), context: { runId } } }
         })
-        const checkpoint = emptyCheckpoint()
-        checkpoint.channel_values = { messages, anasRunLifecycle: { runId: run.id, status: 'completed' } }
-        checkpoint.channel_versions = { messages: 1, anasRunLifecycle: 1 }
-        await database.checkpointer.put({ configurable: { thread_id: thread.id } }, checkpoint, { source: 'loop', step: 0, parents: {} })
-        database.finishRun(run.id, 'completed')
-        await database.checkpointer.releaseRun(run.id)
+        const run = database.runs.createRun({ threadId: thread.id, runId, operation: 'agent', message: messages[0] })
+        const store = database.runs.store
+        const revisionId = store.start({ threadId: thread.id, runId, expectedRevisionId: store.readHistory(thread.id).revisionId,
+          messages, context: { modelCalls: length / 2, todos: [] } })
+        if (length === count) {
+          // A controlled executor owns the live run while the benchmark writes
+          // native model commits. Real UI recovery sees this same owner;
+          // no model provider or second execution is started by snapshot reads.
+          const host = currentRuntime().runtimeForDatabase(database)
+          let ready
+          const started = new Promise(resolve => { ready = resolve })
+          probe.handle = host.start({ threadId: thread.id, runId }, 'continue', async ({ signal }) => ({
+            dispose: async () => {}, execution: { execute: async () => {
+              await new Promise(resolve => {
+                probe.releaseExecution = resolve
+                signal.addEventListener('abort', resolve, { once: true })
+                if (signal.aborted) resolve()
+                ready()
+              })
+              return { result: { status: 'fulfilled', value: undefined }, interrupted: false, observationErrors: [] }
+            } }
+          }))
+          await started
+        } else store.finish({ threadId: thread.id, runId, expectedRevisionId: revisionId }, 'completed')
         storage.refreshConversation(thread.id)
         threads.push(thread.id)
         runs.push(run)
@@ -139,9 +154,8 @@ async function verifyCurrentStorage(repositoryRoot, executablePath) {
     })
     await application.evaluate(() => {
       const probe = globalThis.__anasStorageProbe
-      const { currentDatabase } = globalThis.__anasStorageAccess
-      const { AIMessage } = probe.nativeRequire('@langchain/core/messages')
-      const { emptyCheckpoint } = probe.nativeRequire('@langchain/langgraph-checkpoint')
+      const { currentStorage } = globalThis.__anasStorageAccess
+      const { randomUUID } = probe.nativeRequire('node:crypto')
       probe.stop = false
       probe.completed = false
       probe.appendMs = []
@@ -150,40 +164,30 @@ async function verifyCurrentStorage(repositoryRoot, executablePath) {
       let last = performance.now()
       const monitor = setInterval(() => { const now = performance.now(); probe.delays.push(Math.max(0, now - last - 10)); last = now }, 10)
       probe.job = (async () => {
-        const database = currentDatabase(probe.threads[0])
-        // This is a persistence workload, not a recoverable model execution.
-        // Keep the seeded product run terminal so a real UI read cannot start
-        // a model provider while the probe writes its completed native items.
-        const run = probe.runs[0]
-        const retentionId = `${run.id}:storage-probe`
-        database.checkpointer.retainRun(retentionId, run.threadId)
+        const database = currentStorage().conversationForThread(probe.threads[0])
+        const run = probe.runs[0], store = database.runs.store
+        let revisionId
+        const scope = () => ({ threadId: run.threadId, runId: run.id, expectedRevisionId: revisionId })
         try {
           const started = performance.now()
-          let tuple = await database.checkpointer.getTuple({ configurable: { thread_id: run.threadId } })
+          const history = store.readHistory(run.threadId)
+          revisionId = history.revisionId
           probe.hydrateMs = performance.now() - started
-          let messages = tuple.checkpoint.channel_values.messages
           for (let index = 0; index < 500 && (!probe.stop || index < 10); index += 1) {
-            const appendStarted = performance.now()
-            const message = new AIMessage({ id: `${run.id}:${index}`, content: `Live complete result ${index}. ${'y'.repeat(2048)}`,
-              additional_kwargs: { anas_run_id: run.id } })
-            await database.checkpointer.putWrites(tuple.config, [['messages', [message]]], `task-${index}`)
-            messages = [...messages, message]
-            const checkpoint = emptyCheckpoint()
-            checkpoint.channel_values = { messages, anasRunLifecycle: { runId: run.id, status: 'completed' } }
-            checkpoint.channel_versions = { messages: index + 2, anasRunLifecycle: index + 2 }
-            const config = await database.checkpointer.put(tuple.config, checkpoint, { source: 'loop', step: index + 1, parents: {} })
-            tuple = { config, checkpoint }
+            const appendStarted = performance.now(), id = randomUUID()
+            const context = { modelCalls: history.context.modelCalls + index + 1, todos: [] }
+            revisionId = store.acceptModel(scope(), { id, value: { id, kind: 'assistant', content: 'Live complete result ' + index + '. ' + 'y'.repeat(2048),
+              context: { runId: run.id } } }, [], context)
+            revisionId = store.continueAfterModel(scope(), [], context)
             probe.appendMs.push(performance.now() - appendStarted)
-            await new Promise((resolve) => setTimeout(resolve, 25))
+            await new Promise(resolve => setTimeout(resolve, 25))
           }
-          const checkpoint = emptyCheckpoint()
-          checkpoint.channel_values = { messages, anasRunLifecycle: { runId: run.id, status: 'completed' } }
-          checkpoint.channel_versions = { messages: 10000, anasRunLifecycle: 10000 }
-          await database.checkpointer.put(tuple.config, checkpoint, { source: 'loop', step: 10000, parents: {} })
-          probe.finalCount = database.checkpointer.countMessages(run.threadId)
+          store.finish(scope(), 'completed')
+          probe.finalCount = store.readHistory(run.threadId).messages.length
         } catch (error) { probe.error = String(error); throw error }
         finally {
-          await database.checkpointer.releaseRun(retentionId)
+          probe.releaseExecution()
+          await probe.handle.drained
           clearInterval(monitor)
           probe.completed = true
         }
@@ -194,7 +198,9 @@ async function verifyCurrentStorage(repositoryRoot, executablePath) {
     phase = 'interact during current state writes'
     const interactionMs = []
     for (const [width, height] of [[1120, 820], [1380, 950]]) {
-      assert.equal(await application.evaluate(() => globalThis.__anasStorageProbe.completed), false, 'Storage writes must still be active during interactions.')
+      const writing = await application.evaluate(() => ({ completed: globalThis.__anasStorageProbe.completed, error: globalThis.__anasStorageProbe.error }))
+      assert.equal(writing.error, undefined, 'The native persistence workload must not fail.')
+      assert.equal(writing.completed, false, 'Storage writes must still be active during interactions.')
       const started = performance.now()
       await application.evaluate(({ BrowserWindow }, size) => { const window = BrowserWindow.getAllWindows()[0]; window.unmaximize(); window.setContentSize(...size) }, [width, height])
       await expect.poll(() => page.evaluate(() => Math.round(globalThis.document.querySelector('.app-shell').getBoundingClientRect().width)), { timeout: 3000 }).toBe(width)
@@ -224,6 +230,7 @@ async function verifyCurrentStorage(repositoryRoot, executablePath) {
         activityPages: probe.activityPages, error: probe.error }
     })
     const frameMaxMs = await page.evaluate(() => { const probe = globalThis.__anasStorageFrames; probe.running = false; return Math.max(0, ...probe.gaps) })
+    console.log('Native storage timings:', JSON.stringify({ ...result, frameMaxMs, interactionMs }))
     assert.equal(result.error, undefined)
     assert.equal(result.finalCount, count + result.appendCount)
     assert.ok(result.appendCount >= 10)
@@ -265,6 +272,7 @@ async function verifyCurrentStorage(repositoryRoot, executablePath) {
     await closeElectronTestApplication(application, () => application.evaluate(async () => {
       const probe = globalThis.__anasStorageProbe
       if (probe?.job) { probe.stop = true; await probe.job.catch(() => undefined) }
+      else probe?.releaseExecution?.()
     }))
     await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }).catch((error) => {
       console.error(`Could not remove isolated storage fixture ${root}:`, error.message)

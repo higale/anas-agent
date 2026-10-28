@@ -1,16 +1,17 @@
+import { invokeCapability } from '../runtime/toolInvocation'
 import { copyFile, mkdtemp, open, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileContentInfo } from './fileMetadata'
-import { createFileTools } from './llm/fileTools'
+import { fileToolDefinitions } from './llm/fileTools'
 
 const fixtures = join(import.meta.dirname, 'testFixtures/media')
 let root: string
 beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'anas-metadata-')) })
 afterEach(async () => { await rm(root, { recursive: true, force: true }) })
 async function info(path: string, signal?: AbortSignal) {
-  return JSON.parse(await createFileTools({ primaryFolder: root, maxReadBytes: 1, toolNames: ['get_file_info'], signal })[0].invoke({ path }))
+  return JSON.parse(String((await invokeCapability(fileToolDefinitions({ primaryFolder: root, maxReadBytes: 1, toolNames: ['get_file_info'], signal })[0], { path }, { signal })).content))
 }
 async function inspect(path: string, options: Parameters<typeof readFileContentInfo>[3] = {}) {
   const file = await open(path, 'r')

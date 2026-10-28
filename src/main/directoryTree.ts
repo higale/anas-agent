@@ -60,7 +60,7 @@ function errorCode(error: unknown): string {
 
 /** Incremental breadth-first enumeration. Only one directory handle is open per
  * cursor; both the retained frontier and the number of idle cursors are bounded.
- * Cursors are transient product resources, not conversation/checkpoint state. */
+ * Cursors are transient product resources, not conversation execution state. */
 export class DirectoryTreePages {
   private readonly sessions = new Map<string, TreeSession>()
 

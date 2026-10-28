@@ -1,27 +1,14 @@
+import { ModelSelectionError } from '../../runtime/errors'
 import type { AgentThread } from '@shared/agentTypes'
 import type { AppConfigSnapshot, ResolvedModelConfig, SubagentConfig } from '@shared/types'
 import { validateSubagentModelSelection } from '@shared/subagentConfig'
 import { applyModelParameterPreset } from '@shared/modelConfig'
 import { findResolvedModelConfig, getAppConfigSnapshot } from '../config/appConfig'
-import type { AgentDatabase } from './agentDatabase'
-import { errorCauses } from './errorCauses'
-
-export class ModelSelectionError extends Error {
-  readonly code = 'MODEL_SELECTION_INVALID'
-
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options)
-    this.name = 'ModelSelectionError'
-  }
-}
-
-export function isModelSelectionError(error: unknown): boolean {
-  return errorCauses(error).some((cause) => cause instanceof ModelSelectionError)
-}
+import type { ConversationResourceAccess } from './conversationResourceReader'
 
 type ModelSelection = Pick<AgentThread, 'modelConfigId' | 'modelParameterPresetId'>
 type ModelConfiguration = Pick<AppConfigSnapshot, 'providers' | 'defaultModel'>
-type ModelSelectionDatabase = Pick<AgentDatabase, 'getThread' | 'getSubagentCallByChildThreadId'>
+type ModelSelectionDatabase = Pick<ConversationResourceAccess, 'getThread' | 'getSubagentCallByChildThreadId'>
 
 /** Bind explicit definition choices once, when creating the child conversation. */
 export function resolveSubagentModelSelection(subagent: SubagentConfig, config: ModelConfiguration): ModelSelection {

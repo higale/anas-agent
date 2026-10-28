@@ -1,9 +1,10 @@
-import { createRequire } from 'node:module'
-import { ChatAnthropic } from '@langchain/anthropic'
-import { AIMessageChunk } from '@langchain/core/messages'
+import type { ResolvedModelConfig } from '@shared/types'
+import { createConversationModel } from './conversationModel'
+import type { ConversationProgress } from '../../providers/conversationStream'
 import { describe, expect, it, vi } from 'vitest'
 
-const commonjs: typeof import('@langchain/anthropic') = createRequire(import.meta.url)('@langchain/anthropic')
+vi.mock('../config/apiKeys', () => ({ resolveModelApiKey: (model: ResolvedModelConfig) => model.apiKey }))
+vi.mock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
 
 function events(inputAtStart: number) {
   return [
@@ -18,32 +19,28 @@ function events(inputAtStart: number) {
   ]
 }
 
-describe.each([['ESM', ChatAnthropic], ['CommonJS', commonjs.ChatAnthropic]] as const)('%s Anthropic usage', (_name, Model) => {
-  function model(inputAtStart: number, streamUsage = true) {
+describe('Application Anthropic usage', () => {
+  function model(inputAtStart: number) {
     const fetch = vi.fn(async () => new Response(events(inputAtStart).map((event) =>
       `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''), { headers: { 'content-type': 'text/event-stream' } }))
-    return new Model({ model: 'test', apiKey: 'test-only', maxRetries: 0, streamUsage, clientOptions: { fetch } })
+    const instance = createConversationModel({
+      id: 'fixture', displayName: '', providerId: 'fixture', providerName: 'Fixture', protocol: 'anthropic_messages',
+      baseUrl: 'https://fixture.invalid', model: 'test', apiKey: 'test-only', parameters: {}, parameterPresetMode: 'none',
+      capabilities: { vision: true, toolUse: true }, stream: true, maxContextTokens: 128000, maxOutputTokens: 16000,
+      contextCompressionThreshold: 0.8, contextCompressionEnabled: true
+    }, { providerFetch: fetch })
+    return instance
   }
 
-  it.each([0, 10])('reconciles late and repeated cumulative usage from initial input %i in chunks', async (inputAtStart) => {
-    let result: AIMessageChunk | undefined
-    for await (const chunk of await model(inputAtStart).stream('read')) result = result ? result.concat(chunk) : chunk
-    expect(result?.text).toBe('OK')
-    expect(result?.usage_metadata).toMatchObject({ input_tokens: 18, output_tokens: 5, total_tokens: 23,
+  it.each([0, 10])('reconciles late and repeated cumulative usage from initial input %i without changing streamed text', async (inputAtStart) => {
+    const progress: ConversationProgress[] = []
+    const result = await model(inputAtStart).invoke({ messages: [{ kind: 'user', content: 'read' }], tools: [],
+      signal: new AbortController().signal, observe: event => progress.push(event) })
+    expect(result.text).toBe('OK')
+    expect(progress.filter(event => event.kind === 'delta' && event.channel === 'text')).toEqual([
+      { kind: 'delta', channel: 'text', text: 'OK' }
+    ])
+    expect(result.message.usage).toMatchObject({ input_tokens: 18, output_tokens: 5, total_tokens: 23,
       input_token_details: { cache_read: 8, cache_creation: 0 } })
-  })
-
-  it.each([0, 10])('reconciles initial input %i in the native content event stream', async (inputAtStart) => {
-    const stream = model(inputAtStart).streamEvents('read')
-    const result = await stream
-    expect(result.usage_metadata).toMatchObject({ input_tokens: 18, output_tokens: 5, total_tokens: 23,
-      input_token_details: { cache_read: 8, cache_creation: 0 } })
-  })
-
-  it('keeps usage disabled without losing text', async () => {
-    let result: AIMessageChunk | undefined
-    for await (const chunk of await model(10, false).stream('read')) result = result ? result.concat(chunk) : chunk
-    expect(result?.text).toBe('OK')
-    expect(result?.usage_metadata).toBeUndefined()
   })
 })

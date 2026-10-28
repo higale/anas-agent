@@ -1,18 +1,21 @@
-import { interrupt } from '@langchain/langgraph'
+import { ToolInputError } from '../../runtime/errors'
 import { randomUUID } from 'node:crypto'
-import { tool, ToolInputParsingException, type StructuredToolInterface } from '@langchain/core/tools'
+import { defineContentTool, type ToolDefinition } from '../../runtime/toolDefinition'
 import { z } from 'zod/v3'
 import type {
   AgentInterrupt,
   AgentInterruptResponse
 } from '@shared/agentTypes'
 import type { SubagentConfig } from '@shared/types'
-import type { AgentSubagentCallRecord } from './agentDatabase'
+import type { AgentSubagentCallRecord } from './subagentTaskStore'
 import { armCurrentAgentToolEffect, currentAgentToolEffectArtifactId } from './toolEffectScope'
 import {
   subagentApprovalGenerationFromResponse,
   subagentApprovalInterruptMetadata
-} from './approvalGeneration'
+} from '../../runtime/approvalRecovery'
+
+export const maximumConcurrentSubagents = 8
+export const maximumSubagentDepth = 8
 
 export interface SubagentStartIdentity {
   subagentId: string
@@ -102,7 +105,9 @@ function parseApprovalResponse(value: unknown): AgentInterruptResponse['decision
 
 async function resumeInterruptedSubagent(
   runtime: SubagentToolRuntime,
-  snapshot: SubagentProcessSnapshot
+  snapshot: SubagentProcessSnapshot,
+  requestApproval?: SubagentToolOptions['requestApproval'],
+  callId?: string
 ): Promise<boolean> {
   if (snapshot.call.status !== 'interrupted' || snapshot.interrupts.length === 0) return false
   if (!snapshot.approvalGeneration) {
@@ -129,9 +134,10 @@ async function resumeInterruptedSubagent(
     reviewConfigs: pending.flatMap((item) => item.reviewConfigs),
     ...subagentApprovalInterruptMetadata(approvalGeneration)
   }
+  if (!requestApproval) throw new Error('Subagent approval is not connected to an executor.')
   let response: unknown
   do {
-    response = interrupt(request)
+    response = await requestApproval(request, { subagentId: snapshot.call.id, callId })
   } while (
     subagentApprovalGenerationFromResponse(response) !== approvalGeneration
   )
@@ -156,12 +162,16 @@ async function resumeInterruptedSubagent(
   return true
 }
 
-export function createSubagentTools(options: {
+export interface SubagentToolOptions {
   runtime?: SubagentToolRuntime
   subagents: readonly SubagentConfig[]
   signal?: AbortSignal
   includeStartForRecovery?: boolean
-}): StructuredToolInterface[] {
+  requestApproval?: (request: { actionRequests: unknown[]; reviewConfigs: unknown[] } & ReturnType<typeof subagentApprovalInterruptMetadata>,
+    owner: { subagentId: string; callId?: string }) => Promise<unknown> | unknown
+}
+
+export function subagentToolDefinitions(options: SubagentToolOptions): ToolDefinition[] {
   const names = options.subagents.map((subagent) => subagent.name)
   const choices = options.subagents
     .map((subagent) => `- ${subagent.name}: ${subagent.description}`)
@@ -172,102 +182,106 @@ export function createSubagentTools(options: {
   }
   const activeWaits = new Set<string>()
   const startTool = names.length > 0 || options.includeStartForRecovery
-    ? [tool(async (input) => {
-      const configured = options.subagents.find(
-        (subagent) => subagent.name === input.agent
-      )
-      const identity = {
-        subagentId: currentAgentToolEffectArtifactId('subagent') ?? randomUUID(),
-        childThreadId: currentAgentToolEffectArtifactId('subagent-thread') ?? randomUUID(),
-        childRunId: currentAgentToolEffectArtifactId('subagent-run') ?? randomUUID()
-      }
-      const snapshot = await requireRuntime().start(
-        {
-          agentName: input.agent,
-          ...(configured ? { config: configured } : {})
-        },
-        input.description,
-        identity,
-        () => armCurrentAgentToolEffect({
-          kind: 'subagent-start',
-          target: identity,
-          recoveryMode: 'idempotent'
-        })
-      )
-      return JSON.stringify(serializedSnapshot(snapshot))
-    }, {
+    ? [defineContentTool({
       name: 'start_subagent',
       description: `Start one configured subagent in an independent background run and return its subagent_id immediately. Use wait_subagent when its result is required. Run subagents in parallel only for independent work; do not assign overlapping writes to the same files. Available subagents:\n${choices}`,
-      schema: z.object({
+      inputSchema: z.object({
         agent: z.string().trim().regex(
           /^[a-z0-9]+(?:-[a-z0-9]+)*$/
         ).max(64).describe(
           `Configured subagent to start. Currently available: ${names.join(', ') || 'none'}.`
         ),
         description: z.string().trim().min(1).describe('Complete, self-contained instruction for the subagent.')
-      })
+      }),
+      execute: async (input) => {
+        const configured = options.subagents.find(
+          (subagent) => subagent.name === input.agent
+        )
+        const identity = {
+          subagentId: currentAgentToolEffectArtifactId('subagent') ?? randomUUID(),
+          childThreadId: currentAgentToolEffectArtifactId('subagent-thread') ?? randomUUID(),
+          childRunId: currentAgentToolEffectArtifactId('subagent-run') ?? randomUUID()
+        }
+        const snapshot = await requireRuntime().start(
+          {
+            agentName: input.agent,
+            ...(configured ? { config: configured } : {})
+          },
+          input.description,
+          identity,
+          () => armCurrentAgentToolEffect({
+            kind: 'subagent-start',
+            target: identity,
+            recoveryMode: 'idempotent'
+          })
+        )
+        return JSON.stringify(serializedSnapshot(snapshot))
+      }
     })]
     : []
   return [
     ...startTool,
-    tool(async (input) => {
-      const result = await requireRuntime().read(input.subagent_id)
-      return JSON.stringify(Array.isArray(result)
-        ? { ok: true, subagents: result.map(serializedSnapshot) }
-        : serializedSnapshot(result))
-    }, {
+    defineContentTool({
       name: 'read_subagent',
       description: 'Read current subagent status and structured process details without waiting. Pass subagent_id for one direct child, or omit it to list every subagent in the current run that still requires attention, including terminal results not yet observed.',
-      schema: z.object({
+      inputSchema: z.object({
         subagent_id: z.string().uuid().optional().describe('Exact subagent ID. Omit to list all subagents in this conversation.')
-      })
-    }),
-    tool(async (input) => {
-      const runtime = requireRuntime()
-      if (activeWaits.has(input.subagent_id)) {
-        throw new ToolInputParsingException(`Subagent ${input.subagent_id} already has an active wait. Wait for that call to return, or use read_subagent to inspect status.`)
+      }),
+      execute: async (input) => {
+        const result = await requireRuntime().read(input.subagent_id)
+        return JSON.stringify(Array.isArray(result)
+          ? { ok: true, subagents: result.map(serializedSnapshot) }
+          : serializedSnapshot(result))
       }
-      activeWaits.add(input.subagent_id)
-      try {
-        let snapshot = await runtime.wait(
-          input.subagent_id,
-          (input.timeout ?? 30) * 1_000,
-          options.signal
-        )
-        if (await resumeInterruptedSubagent(runtime, snapshot)) {
-          snapshot = await runtime.wait(
+    }),
+    defineContentTool({
+      name: 'wait_subagent',
+      description: 'Wait until a subagent changes state, completes, fails, needs approval, or the requested timeout expires. Approval is surfaced to the user and resumes the same subagent run.',
+      inputSchema: z.object({
+        subagent_id: z.string().uuid().describe('Exact subagent ID.'),
+        timeout: z.number().int().min(10).max(300).optional().describe('Maximum wait in seconds. Default 30; range 10 through 300.')
+      }),
+      execute: async (input, context) => {
+        const runtime = requireRuntime()
+        if (activeWaits.has(input.subagent_id)) {
+          throw new ToolInputError(`Subagent ${input.subagent_id} already has an active wait. Wait for that call to return, or use read_subagent to inspect status.`)
+        }
+        activeWaits.add(input.subagent_id)
+        try {
+          let snapshot = await runtime.wait(
             input.subagent_id,
             (input.timeout ?? 30) * 1_000,
             options.signal
           )
+          if (await resumeInterruptedSubagent(runtime, snapshot, options.requestApproval, context.callId)) {
+            snapshot = await runtime.wait(
+              input.subagent_id,
+              (input.timeout ?? 30) * 1_000,
+              options.signal
+            )
+          }
+          return JSON.stringify(serializedSnapshot(snapshot))
+        } finally {
+          activeWaits.delete(input.subagent_id)
         }
-        return JSON.stringify(serializedSnapshot(snapshot))
-      } finally {
-        activeWaits.delete(input.subagent_id)
       }
-    }, {
-      name: 'wait_subagent',
-      description: 'Wait until a subagent changes state, completes, fails, needs approval, or the requested timeout expires. Approval is surfaced to the user and resumes the same subagent run.',
-      schema: z.object({
-        subagent_id: z.string().uuid().describe('Exact subagent ID.'),
-        timeout: z.number().int().min(10).max(300).optional().describe('Maximum wait in seconds. Default 30; range 10 through 300.')
-      })
     }),
-    tool(async (input) => {
-      const runtime = requireRuntime()
-      return JSON.stringify(serializedSnapshot(
-        await runtime.cancel(input.subagent_id, () => armCurrentAgentToolEffect({
-          kind: 'subagent-cancel',
-          target: { subagentId: input.subagent_id },
-          recoveryMode: 'idempotent'
-        }))
-      ))
-    }, {
+    defineContentTool({
       name: 'cancel_subagent',
       description: 'Cancel one exact background subagent owned by the current conversation. Cancellation is idempotent.',
-      schema: z.object({
+      inputSchema: z.object({
         subagent_id: z.string().uuid().describe('Exact subagent ID to cancel.')
-      })
+      }),
+      execute: async (input) => {
+        const runtime = requireRuntime()
+        return JSON.stringify(serializedSnapshot(
+          await runtime.cancel(input.subagent_id, () => armCurrentAgentToolEffect({
+            kind: 'subagent-cancel',
+            target: { subagentId: input.subagent_id },
+            recoveryMode: 'idempotent'
+          }))
+        ))
+      }
     })
   ]
 }

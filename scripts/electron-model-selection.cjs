@@ -188,7 +188,7 @@ async function verifyModelSelection(launchApplication) {
     await page.locator('.project-thread-group[data-default-workspace] .project-thread-more').click()
     await page.locator('.project-details-action').filter({ hasText: 'Edit' }).click()
     const projectDialog = page.locator('.project-dialog')
-    await projectDialog.getByRole('textbox', { name: 'Prompt', exact: true })
+    await projectDialog.getByRole('textbox', { name: 'Project prompt', exact: true })
       .fill('Keep this project instruction in the next request.\n'.repeat(600))
     await projectDialog.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(projectDialog).toHaveCount(0)
@@ -200,7 +200,7 @@ async function verifyModelSelection(launchApplication) {
       'The idle preview must include the newly saved project prompt.')
     assert.equal(requests.length, 2, 'Refreshing an idle context preview must not invoke the provider.')
 
-    // A framework approval disposes the old instance but keeps the same run ID.
+    // An approval keeps the same persisted run ID across resumed execution.
     // Changing the profile while waiting must preview the resumed prompt now.
     await page.keyboard.press('Escape')
     await page.evaluate((threadId) => globalThis.gale.agent.threads.setAccessMode(threadId, 'strict_approval'), snapshot.thread.id)

@@ -1,6 +1,7 @@
+import { patchAuthorizationFor } from '../../runtime/authorizationReceipts'
 import { realpath } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
-import { canonicalAgentToolEffectJson } from './toolEffectMiddleware'
+import { canonicalToolEffectJson } from '../../runtime/toolEffects'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { projectInterruptPathPreviews } from './approvalPathPreview'
@@ -93,10 +94,10 @@ describe('approval path previews', () => {
       id: 'approval',
       value,
       approvalGeneration: 'generation'
-    }], primaryFolder, { anasPatchAuthorization: { runId: 'run', calls: [{
-      id: 'call', name: 'restore_file_edit', inputHash: createHash('sha256').update(canonicalAgentToolEffectJson(value.actionRequests[0].args)).digest('hex'),
+    }], primaryFolder, action => patchAuthorizationFor({ anasPatchAuthorization: { runId: 'run', calls: [{
+      id: 'call', name: 'restore_file_edit', inputHash: createHash('sha256').update(canonicalToolEffectJson(value.actionRequests[0].args)).digest('hex'),
       targets: [{ path: resolvedPath, lexicalPath: resolvedPath, locator: ['targets', 0, 'path'], kind: 'file', access: 'write' }], requiresApproval: true, humanApproved: false
-    }] } })
+    }] } }, action)?.targets)
 
     expect(interrupt.value).toBe(value)
     expect(interrupt.pathPreviews).toEqual([{
@@ -113,10 +114,10 @@ describe('approval path previews', () => {
       : { patch: '*** Begin Patch\n*** Add File: src/new.txt\n+new\n*** End Patch' }
     const value = { actionRequests: [{ name, args }] }
     const [interrupt] = await projectInterruptPathPreviews([{ id: 'approval', approvalGeneration: 'generation', value }], primaryFolder,
-      { anasPatchAuthorization: { runId: 'run', calls: [{ id: 'call', name,
-        inputHash: createHash('sha256').update(canonicalAgentToolEffectJson(args)).digest('hex'), requiresApproval: true, humanApproved: false,
+      action => patchAuthorizationFor({ anasPatchAuthorization: { runId: 'run', calls: [{ id: 'call', name,
+        inputHash: createHash('sha256').update(canonicalToolEffectJson(args)).digest('hex'), requiresApproval: true, humanApproved: false,
         targets: [{ path: resolvedPath, lexicalPath: resolvedPath, locator: ['operations', 0, 'path'], kind: 'file', access: 'write' }]
-      }] } })
+      }] } }, action)?.targets)
     expect(interrupt.value).toBe(value)
     expect(interrupt.pathPreviews).toEqual([{ actionIndex: 0, locator: name === 'write_file' ? ['path'] : ['operations', 0, 'path'], absolutePath: resolvedPath, source: 'relative' }])
     expect(args).not.toHaveProperty('operations')

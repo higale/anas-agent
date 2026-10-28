@@ -2,10 +2,8 @@ import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  createProjectRulesSnapshot, discoverProjectRules, mutationDirectories,
-  projectRuleLimits, projectRulesText, ruleScopeIds
-} from './projectRules'
+import { projectRulesText, ruleScopeIds } from '../../runtime/projectRules'
+import { createProjectRulesSnapshot, discoverProjectRules, mutationDirectories, projectRuleLimits } from './projectRules'
 
 const roots: string[] = []
 async function fixture() {

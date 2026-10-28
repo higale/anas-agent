@@ -2,7 +2,7 @@ import { lstat, opendir } from 'node:fs/promises'
 import { isDeepStrictEqual } from 'node:util'
 import { samePath } from './pathContainment'
 import { canonicalizeAbsolutePath } from './workspacePath'
-import { validatePatchTransaction, type FilePatchEditRecord } from './filePatchRecord'
+import { assertLocalPatchTransaction, validatePatchTransaction, type FilePatchEditRecord } from './filePatchRecord'
 import { captureFilePatchPreimages, sameFilePatchIdentity, verifyFilePatchPreimages, type FilePatchPreimage } from './filePatchState'
 import type { FilePatchTarget } from './filePatch'
 import { executePreparedFilePatchTransaction, type FilePatchTransaction, type PersistFilePatchTransaction } from './filePatchTransaction'
@@ -43,6 +43,7 @@ export type AuthorizeFilePatchRestore = (targets: readonly FilePatchRestoreTarge
 
 export function filePatchRestoreTargets(record: FilePatchEditRecord): FilePatchRestoreTarget[] {
   validatePatchTransaction(record.transaction)
+  assertLocalPatchTransaction(record.transaction)
   return [
     ...record.transaction.entries.map((entry, index) => ({ path: entry.before.target.canonicalPath, kind: 'file' as const, index })),
     ...record.transaction.temporary.map((entry, index) => ({ path: entry.path, kind: 'temporary' as const, index })),
@@ -196,6 +197,7 @@ export async function executeFilePatchRestoreTransaction(
   const evidence = recoveryEvidence && structuredClone(recoveryEvidence)
   if (evidence) validatePatchRestoreEvidence(record, evidence)
   validatePatchTransaction(record.transaction)
+  assertLocalPatchTransaction(record.transaction)
   if (record.transaction.restores) throw new Error('Restoring a reverse operation is not supported.')
   if (plan.status !== 'ready' || plan.requestId !== record.requestId || plan.operationId !== record.operationId
     || plan.revision !== record.revision || plan.definitionHash !== record.definitionHash

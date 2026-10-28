@@ -11,10 +11,8 @@ export default defineConfig({
   test: {
     coverage: {
       include: [
-        'src/main/agent/agentDatabase.ts',
         'src/main/agent/toolAuthorization.ts',
         'src/main/agent/toolEffectClassification.ts',
-        'src/main/agent/toolEffectMiddleware.ts',
         'src/main/inputHistoryStore.ts',
         'src/main/pathContainment.ts'
       ],
@@ -25,12 +23,6 @@ export default defineConfig({
         functions: 90,
         lines: 85,
         statements: 80,
-        'src/main/agent/agentDatabase.ts': {
-          branches: 75,
-          functions: 95,
-          lines: 88,
-          statements: 85
-        },
         'src/main/agent/toolAuthorization.ts': {
           branches: 70,
           functions: 100,
@@ -42,12 +34,6 @@ export default defineConfig({
           functions: 100,
           lines: 95,
           statements: 90
-        },
-        'src/main/agent/toolEffectMiddleware.ts': {
-          branches: 70,
-          functions: 95,
-          lines: 85,
-          statements: 80
         },
         'src/main/inputHistoryStore.ts': {
           branches: 80,

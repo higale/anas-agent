@@ -1,3 +1,4 @@
+const { panelPage } = require('./electron-panel-helpers.cjs')
 const { verifyPluginTools } = require('./electron-plugin-tools.cjs')
 const { verifyPluginWidgets } = require('./electron-plugin-widgets.cjs')
 const { verifyUnifiedPanels } = require('./electron-panels.cjs')
@@ -27,7 +28,7 @@ const { verifyGlobalSettings } = require('./electron-global-settings.cjs')
 const { verifyControlLayout } = require('./electron-control-layout.cjs')
 const { verifySkillApproval } = require('./electron-skill-approval.cjs')
 const { verifyCustomTools } = require('./electron-custom-tools.cjs')
-const { verifyCurrentData } = require('./electron-data-migrations.cjs')
+const { verifyCurrentData } = require('./electron-current-data.cjs')
 const { verifyDataCleanup } = require('./electron-data-cleanup.cjs')
 const { verifyPluginTransactions } = require('./electron-plugin-transactions.cjs')
 const { verifyModelSelection } = require('./electron-model-selection.cjs')
@@ -155,10 +156,12 @@ async function verifyApplication(electronApplication, verifyRestart = false) {
   await page.locator('[data-settings-tab="dev"]').click()
   await expect(page.getByRole('checkbox', { name: /^(后台工具|Background tools)$/ })).toHaveCount(0)
   await page.locator('[data-settings-tab="subagents"]').click()
+  await expect(page.locator('.settings-subagent-editor')).toHaveCount(0)
+  await page.getByRole('button', { name: /^(新建子 Agent|New subagent)$/ }).click()
   const subagentCapabilities = page.locator('.settings-subagent-editor').getByRole('group', { name: /^(能力|Capabilities)$/ })
   await expect(subagentCapabilities.locator('.ui-section-title')).toHaveText(/^(能力|Capabilities)$/)
   await expect(subagentCapabilities.getByRole('button', { name: /^(全开|Enable all)$/ })).toBeVisible()
-  await expect(subagentCapabilities.getByRole('radiogroup', { name: /^(技能选择|Skill selection)$/ })).toHaveCount(1)
+  await expect(subagentCapabilities.getByRole('radiogroup', { name: /^(技能|Skills)$/ })).toHaveCount(1)
   await subagentCapabilities.scrollIntoViewIfNeeded()
   assert.equal(await subagentCapabilities.evaluate((element) => globalThis.getComputedStyle(element).borderTopStyle), 'solid', 'The full capability editor must have a visible shared boundary.')
   if (process.env.ANAS_E2E_SUBAGENT_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_SUBAGENT_SCREENSHOT })
@@ -271,23 +274,21 @@ async function verifyApplication(electronApplication, verifyRestart = false) {
   await capabilityDialog.locator('summary').filter({ hasText: /File read|文件读/ }).click()
   await capabilityDialog.getByRole('checkbox', { name: 'read_multiple_files', exact: true }).uncheck()
   await expect(capabilityDialog.getByRole('checkbox', { name: 'read_file', exact: true })).toBeChecked()
-  const skillPicker = capabilityDialog.getByRole('radiogroup', { name: /^(技能选择|Skill selection)$/ })
-  await skillPicker.getByText(/^(自定义|Custom)$/, { exact: true }).click()
+  const skillPicker = capabilityDialog.getByRole('radiogroup', { name: /^(技能|Skills)$/ })
+  await skillPicker.getByText(/^(定制|Custom)$/, { exact: true }).click()
   const skillToggleBounds = await capabilityDialog.getByText(/^(技能|Skills)$/, { exact: true }).boundingBox()
   const skillPickerBounds = await skillPicker.boundingBox()
   assert.ok(Math.abs(skillToggleBounds.y + skillToggleBounds.height / 2 - skillPickerBounds.y - skillPickerBounds.height / 2) < 3, `Skill mode must align with its label: ${JSON.stringify({ skillToggleBounds, skillPickerBounds })}`)
   assert.ok(skillPickerBounds.x > skillToggleBounds.x + skillToggleBounds.width, 'Skill mode must be on the right of its label.')
-  const skillSearch = capabilityDialog.getByRole('searchbox', { name: /^(搜索技能|Search skills)$/ })
-  await skillSearch.fill('search')
+  const skillSection = capabilityDialog.getByRole('region', { name: /^(技能|Skills)$/ })
+  const skillDisclosure = skillSection.getByRole('button', { name: /^(技能|Skills)$/ })
+  await expect(skillDisclosure).toHaveAttribute('aria-expanded', 'false')
+  await skillDisclosure.click()
+  await expect(skillDisclosure).toHaveAttribute('aria-expanded', 'true')
+  await expect(skillSection.getByRole('searchbox')).toHaveCount(0)
   await expect(skillPicker).toHaveClass('ui-segmented-control')
-  await expect(skillSearch).toHaveClass('ui-input')
-  const searchStyle = await skillSearch.evaluate((element) => {
-    const style = globalThis.getComputedStyle(element)
-    return { radius: parseFloat(style.borderRadius), height: element.getBoundingClientRect().height }
-  })
-  assert.ok(searchStyle.radius > 0 && searchStyle.height >= 30, 'Skill search must use the shared rounded input styling.')
   if (process.env.ANAS_E2E_CAPABILITY_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_CAPABILITY_SCREENSHOT })
-  await skillPicker.getByText(/^(默认|Default)$/, { exact: true }).click()
+  await skillPicker.getByText(/^(全部|All)$/, { exact: true }).click()
   await capabilityDialog.locator('button[type="submit"]').click()
   await expect(capabilityDialog).not.toBeVisible()
   const scopedProject = await page.evaluate(async (id) => (await globalThis.gale.projects.list()).find((project) => project.id === id), editableProject.id)
@@ -399,8 +400,12 @@ async function verifySkillSourceLayout(electronApplication) {
   await expect(systemRoot).toHaveClass(/active/)
   if (process.env.ANAS_E2E_SKILL_SOURCES_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_SKILL_SOURCES_SCREENSHOT })
   await page.locator('[data-settings-tab="subagents"]').click()
+  await page.getByRole('button', { name: /^(新建子 Agent|New subagent)$/ }).click()
   const editor = page.locator('.settings-subagent-editor')
-  await editor.getByRole('radiogroup', { name: /^(技能选择|Skill selection)$/ }).getByText(/^(自定义|Custom)$/, { exact: true }).click()
+  await editor.getByRole('radiogroup', { name: /^(技能|Skills)$/ }).getByText(/^(定制|Custom)$/, { exact: true }).click()
+  const skillsSection = editor.getByRole('region', { name: /^(技能|Skills)$/ })
+  await skillsSection.getByRole('button', { name: /^(技能|Skills)$/ }).click()
+  const editedAgentName = await editor.getByRole('textbox').first().inputValue()
   for (const label of [/^(系统|System)\s/, /^(用户|User)\s/]) {
     await expect(editor.locator('strong').filter({ hasText: label })).toBeVisible()
   }
@@ -408,9 +413,9 @@ async function verifySkillSourceLayout(electronApplication) {
   await expect(editor.getByText('project-search', { exact: true })).toHaveCount(0)
   const projectSkills = editor.getByRole('checkbox', { name: /^(项目技能|Project skills)$/ })
   await projectSkills.check()
-  await expect.poll(() => page.evaluate(async () => (await globalThis.gale.config.get()).subagents[0].capabilities.skills.project)).toBe(true)
+  await expect.poll(() => page.evaluate(async name => (await globalThis.gale.config.get()).subagents.find(agent => agent.name === name).capabilities.skills.project, editedAgentName)).toBe(true)
   await projectSkills.scrollIntoViewIfNeeded()
-  const checkboxColumns = await editor.locator('.ui-capability-skill input[type="checkbox"]').evaluateAll((inputs) => inputs.map((input) => input.getBoundingClientRect().x))
+  const checkboxColumns = await skillsSection.locator('input[type="checkbox"]').evaluateAll((inputs) => inputs.map((input) => input.getBoundingClientRect().x))
   assert.equal(checkboxColumns.length, 3)
   assert.ok(checkboxColumns.every((x) => Math.abs(x - checkboxColumns[0]) < 1), 'Project skills and individual skill checkboxes must share the same column.')
   await page.mouse.move(0, 0)
@@ -443,12 +448,15 @@ async function verifyCapabilityToolListLayout(electronApplication) {
 
   async function verifyLists(editor, context) {
     for (const count of [24, 100]) {
-      const group = editor.locator('[data-mcp-server-id]').filter({ hasText: `Layout MCP ${count}` })
+      const group = editor.getByRole('region', { name: `Layout MCP ${count}`, exact: true })
       const toggle = group.getByRole('button', { name: `Layout MCP ${count}`, exact: true })
-      const useAll = group.getByRole('checkbox', { name: /全部工具|All tools/ })
-      await expect(useAll).toBeChecked()
+      const picker = group.getByRole('radiogroup')
+      const useAll = picker.getByRole('radio', { name: /^(全部|All)$/ })
+      await expect(picker.getByRole('radio', { name: /^(关闭|Off)$/ })).toBeChecked()
       await expect(toggle).toHaveCount(0)
-      await useAll.uncheck()
+      await picker.getByText(/^(全部|All)$/, { exact: true }).click()
+      await expect(useAll).toBeChecked()
+      await picker.getByText(/^(定制|Custom)$/, { exact: true }).click()
       await expect(toggle).toBeVisible()
       if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click()
       const list = group.locator('.ui-capability-list')
@@ -488,7 +496,7 @@ async function verifyCapabilityToolListLayout(electronApplication) {
       await toggle.click()
       await expect(list).not.toBeVisible()
       await expect(useAll).toBeVisible()
-      await useAll.check()
+      await picker.getByText(/^(全部|All)$/, { exact: true }).click()
       await expect(toggle).toHaveCount(0)
       await expect(list).not.toBeVisible()
     }
@@ -498,6 +506,7 @@ async function verifyCapabilityToolListLayout(electronApplication) {
   await page.locator('.sidebar-footer button').click()
   await page.locator('.app-menu-item').first().click()
   await page.locator('[data-settings-tab="subagents"]').click()
+  await page.getByRole('button', { name: /^(新建子 Agent|New subagent)$/ }).click()
   await verifyLists(page.locator('.settings-subagent-editor'), 'subagent')
 }
 
@@ -876,7 +885,9 @@ async function verifyRecordedChanges(electronApplication) {
   const directory = await mkdtemp(join(tmpdir(), 'anas-recorded-panel-e2e-'))
   try {
     await verifyRoundChangesInApplication(electronApplication, directory)
-    const page = await electronApplication.firstWindow(), panel = page.getByRole('tabpanel')
+    const page = await electronApplication.firstWindow()
+    const contentPage = await panelPage(electronApplication, 'files')
+    const panel = contentPage.locator('.panel-content-root')
     const geometry = await panel.evaluate((element) => {
       const rect = element.getBoundingClientRect()
       return { fits: rect.left >= -1 && rect.top >= -1 && rect.right <= globalThis.innerWidth + 1 && rect.bottom <= globalThis.innerHeight + 1,
@@ -888,9 +899,11 @@ async function verifyRecordedChanges(electronApplication) {
     assert.equal(geometry.overflow, false, 'Recorded changes panel must not overflow horizontally.')
     await verifyWorkspacePanelTitlebar(electronApplication)
     if (process.env.ANAS_E2E_CHANGES_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_CHANGES_SCREENSHOT })
-    await page.getByRole('tablist').getByRole('button', { name: /^(关闭|Close) / }).click()
+    await page.getByRole('tablist').getByRole('tab').press('Delete')
     await expect(panel).not.toBeVisible()
+    await expect(page.getByRole('tablist').getByRole('tab')).toHaveCount(0)
     await page.evaluate(() => globalThis.gale.config.updateSettings({ diffFoldUnchanged: true, diffWordWrap: false }))
+    await verifyCodeReview(electronApplication)
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
@@ -940,9 +953,10 @@ async function verifyWorkspacePanelTitlebar(electronApplication) {
   try {
     await electronApplication.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(2100, 1000))
     await page.evaluate(() => globalThis.gale.config.updateSettings({ fontSize: 14 }))
-    const collapsedActivities = page.locator('.agent-activity-range-toggle[aria-expanded="false"]')
-    if (await collapsedActivities.count()) await collapsedActivities.last().click()
-    await page.locator('[data-agent-subagent-trigger][data-agent-subagent-id="fixture-child"]').first().click()
+    // Use a real second panel; the round-change fixture's child is only an activity projection.
+    await page.locator('.sidebar-settings').click()
+    await page.getByRole('menuitem', { name: /^(帮助|Help)$/ }).click()
+    await panelPage(electronApplication, 'document')
     await page.getByRole('button', { name: /^(工作区菜单|Workspace menu)$/ }).click()
     await page.getByRole('menuitem', { name: /^(文件改动|File changes)$/ }).click()
     await expect(tabs.getByRole('tab')).toHaveCount(2)
@@ -954,17 +968,19 @@ async function verifyWorkspacePanelTitlebar(electronApplication) {
       const wide = await measure()
       verifySafeArea(wide)
       await resize.press('Home')
-      await expect.poll(async () => { const m = await measure(); return m.tabs.y >= m.actions.bottom - 1 }).toBe(true)
+      await expect.poll(async () => { const m = await measure(); return m.tabs.right <= m.actions.x + 1 || m.tabs.y >= m.actions.bottom - 1 }).toBe(true)
       const narrow = await measure()
       verifySafeArea(narrow)
       const resizeBounds = await resize.boundingBox()
       const panelBounds = await page.locator('.workspace-panels').boundingBox()
       const scrollBounds = await page.locator('.agent-message-panel').boundingBox()
-      assert.ok(Math.abs(resizeBounds.x + 2 - panelBounds.x) < 1
-        && Math.abs(resizeBounds.x + resizeBounds.width - panelBounds.x - 11) < 1
+      // Borders snap to device pixels at non-default zoom levels.
+      const pixelTolerance = 1 / zoom
+      assert.ok(Math.abs(resizeBounds.x + 2 - panelBounds.x) <= pixelTolerance
+        && Math.abs(resizeBounds.x + resizeBounds.width - panelBounds.x - 11) <= pixelTolerance
         && scrollBounds.x + scrollBounds.width <= resizeBounds.x + 1,
-      'The panel resize target must extend 2px left and 10px right of the divider, leaving the conversation scrollbar available.')
-      assert.ok(Math.abs(narrow.actions.x - wide.actions.x) < 1 && Math.abs(narrow.actions.y - wide.actions.y) < 1, 'Panel actions must not move when tabs wrap.')
+      `The panel resize target must extend 2px left and 10px right of the divider, leaving the conversation scrollbar available: ${JSON.stringify({ zoom, resizeBounds, panelBounds, scrollBounds })}`)
+      assert.ok(Math.abs(narrow.actions.x - wide.actions.x) < 1 && Math.abs(narrow.actions.y - wide.actions.y) < 1, 'Panel actions must not move when the tab strip shrinks or wraps.')
       await expect(tabs.getByRole('tab', { name: /文件改动|File changes/ })).toHaveAttribute('aria-selected', 'true')
       if (zoom === 1 && process.env.ANAS_E2E_TITLEBAR_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_TITLEBAR_SCREENSHOT })
     }
@@ -973,7 +989,7 @@ async function verifyWorkspacePanelTitlebar(electronApplication) {
     await expect.poll(async () => { const m = await measure(); return Math.abs(m.tabs.y - m.actions.y) < 1 }).toBe(true)
     verifySafeArea(await measure())
     await header.getByRole('button', { name: /^(还原右栏宽度|Restore right workspace width)$/ }).click()
-    await expect.poll(async () => { const m = await measure(); return m.tabs.y >= m.actions.bottom - 1 }).toBe(true)
+    await expect.poll(async () => { const m = await measure(); return m.tabs.right <= m.actions.x + 1 || m.tabs.y >= m.actions.bottom - 1 }).toBe(true)
     await expect(page.getByRole('button', { name: /^(收起右侧工作区|Hide right workspace)$/ })).toHaveCount(1)
     await header.getByRole('button', { name: /^(收起右侧工作区|Hide right workspace)$/ }).click()
     await expect(header).not.toBeVisible()
@@ -987,10 +1003,10 @@ async function verifyWorkspacePanelTitlebar(electronApplication) {
     await opener.click()
     await expect(header).toBeVisible()
     await expect(opener).toHaveCount(0)
-    await tabs.getByRole('tab', { name: /Fixture child/ }).focus()
+    await tabs.getByRole('tab', { name: /用户手册|User Guide/ }).focus()
     await page.keyboard.press('ArrowLeft')
     await expect(tabs.getByRole('tab').first()).toHaveAttribute('aria-selected', 'true')
-    await tabs.getByRole('button', { name: /^(关闭|Close) Fixture child/ }).click()
+    await tabs.getByRole('tab', { name: /用户手册|User Guide/ }).press('Delete')
     await expect(tabs.getByRole('tab')).toHaveCount(1)
   } finally {
     await page.evaluate((settings) => globalThis.gale.config.updateSettings(settings), originalSettings)
@@ -1011,7 +1027,8 @@ async function verifyGitChanges(electronApplication) {
   await editor.focus()
   await page.getByRole('button', { name: /^(工作区菜单|Workspace menu)$/ }).click()
   await page.getByRole('menuitem', { name: /^(文件改动|File changes)$/ }).click()
-  const panel = page.getByRole('tabpanel')
+  const contentPage = await panelPage(electronApplication, 'files')
+  const panel = contentPage.locator('.panel-content-root')
   await expect(panel.locator('.monaco-diff-editor')).toBeVisible({ timeout: 20000 })
   await expect(panel.locator('.monaco-diff-editor .view-lines').last()).toContainText('Working tree edit')
   await expect(panel.locator('.ui-diff-file')).toContainText('greeting.txt')
@@ -1025,10 +1042,11 @@ async function verifyGitChanges(electronApplication) {
   assert.equal(geometry.overflow, false, 'Git changes panel must not overflow horizontally.')
   if (process.env.ANAS_E2E_GIT_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_GIT_SCREENSHOT })
   await panel.getByRole('button', { name: /^(比较方式|Comparison)$/ }).click()
-  await page.getByRole('menuitemradio', { name: /^(比较基准 → 当前提交|Base → current commit)$/ }).click()
+  await contentPage.getByRole('menuitemradio', { name: /^(比较基准 → 当前提交|Base → current commit)$/ }).click()
   await expect(panel).toContainText(/此范围内没有 Git 改动|No Git changes in this scope/)
-  await page.getByRole('tablist').getByRole('button', { name: /^(关闭|Close) / }).click()
+  await page.getByRole('tablist').getByRole('tab').press('Delete')
   await expect(panel).not.toBeVisible()
+  await expect(page.getByRole('tablist').getByRole('tab')).toHaveCount(0)
   await expect(editor).toBeFocused()
 }
 
@@ -1036,9 +1054,19 @@ async function verifyCodeReview(electronApplication) {
   const page = await electronApplication.firstWindow()
   const modelConfigId = await page.evaluate(async () => (await globalThis.gale.config.get()).providers.flatMap((provider) => provider.models).find((model) => model.capabilities.toolUse)?.id)
   assert.ok(modelConfigId, 'The review fixture requires an explicit tool-capable model.')
-  await electronApplication.evaluate(({ ipcMain }, modelConfigId) => {
+  const currentThread = await page.evaluate(async () => {
+    const api = globalThis.gale
+    const thread = (await api.agent.threads.list())[0]
+    const projects = await api.projects.list()
+    const project = projects.find(item => item.id === thread.projectId)
+    const sourceFolders = projects.find(item => item.id === 'default-workspace').sourceFolders
+    const updated = await api.projects.update(project.id, { ...project, sourceFolders })
+    if (updated.status !== 'ok') throw new Error(JSON.stringify(updated))
+    return thread
+  })
+  await electronApplication.evaluate(({ ipcMain }, { modelConfigId, currentThread }) => {
     const now = new Date().toISOString(), version = 'a'.repeat(64)
-    const thread = { id: 'review-ui', projectId: 'default-workspace', modelConfigId, title: 'Code review', status: 'idle', accessMode: 'read_only_allowed',
+    const thread = { id: currentThread.id, projectId: currentThread.projectId, modelConfigId, title: 'Code review', status: 'idle', accessMode: 'read_only_allowed',
       pinned: false, userTurnCount: 1, createdAt: now, updatedAt: now }
     const scope = { id: 'b'.repeat(64), projectId: thread.projectId, capturedAt: now, description: 'Recorded changes / 已记录改动 · greeting.ts',
       request: { kind: 'recorded', threadId: thread.id, runId: 'changes-run', version, target: 'recorded' }, limitations: [],
@@ -1069,12 +1097,12 @@ async function verifyCodeReview(electronApplication) {
         snapshot.messageWindow = { startIndex: 0, shown: 0, total: 0, remaining: 0 }
         return { snapshot, attachments: [] }
       }],
-      ['agent:runs:submit', (_event, input) => {
-        globalThis.__anasReviewSubmission = input
-        return { thread, run: { id: 'next-review', threadId: thread.id, operation: 'agent', status: 'completed', createdAt: now, updatedAt: now } }
+      ['agent:panels:review', (_event, pageId, review, navigationId) => {
+        if (!pageId || !navigationId || review.projectId !== thread.projectId) throw new Error('Unexpected panel review scope')
+        globalThis.__anasReviewSubmission = { pageId, navigationId, review }
       }]
     ]) { ipcMain.removeHandler(channel); ipcMain.handle(channel, handler) }
-  }, modelConfigId)
+  }, { modelConfigId, currentThread })
   await page.reload()
   const prompt = await electronApplication.evaluate(() => globalThis.__anasReviewPrompt)
   const userMessage = page.locator('[data-message-id="review-input"]')
@@ -1097,7 +1125,8 @@ async function verifyCodeReview(electronApplication) {
   await editor.fill('保留的草稿')
   await page.getByRole('button', { name: /^(工作区菜单|Workspace menu)$/ }).click()
   await page.getByRole('menuitem', { name: /^(文件改动|File changes)$/ }).click()
-  const panel = page.getByRole('tabpanel')
+  const contentPage = await panelPage(electronApplication, 'files')
+  const panel = contentPage.locator('.panel-content-root')
   await expect(panel.getByRole('button', { name: /^(审核所选范围|Review selected scope)$/ })).toBeEnabled()
   await panel.getByRole('button', { name: /^(审核所选范围|Review selected scope)$/ }).click()
   await expect(panel).toBeVisible()
@@ -1106,7 +1135,8 @@ async function verifyCodeReview(electronApplication) {
   assert.equal(submission.review.kind, 'git')
   assert.equal(submission.review.scope, 'workspace')
   assert.match(submission.review.version, /^[a-f0-9]{64}$/)
-  assert.equal(submission.attachments.length, 0)
+  assert.ok(submission.pageId)
+  assert.ok(submission.navigationId)
   await expect(editor).toHaveValue('保留的草稿')
   await userMessage.locator('.bubble').hover()
   await userMessage.getByRole('button', { name: /^(编辑|Edit)$/ }).click()
@@ -1269,16 +1299,16 @@ async function main() {
     await git('commit', '-m', 'Initial fixture')
     await writeFile(join(workspace, 'greeting.txt'), 'Working tree edit\n')
     if (process.argv.includes('--changes-only')) {
-      await verifyRecordedChanges(electronApplication)
       await verifyGitChanges(electronApplication)
-      await verifyCodeReview(electronApplication)
-      console.log('Unified changes Electron E2E passed: round/current contents, shared tabs with subagents, native titlebar geometry, Git diff controls, and review targets.')
+      await verifyRecordedChanges(electronApplication)
+      console.log('Unified changes Electron E2E passed: round/current contents, shared document/file tabs, native titlebar geometry, Git diff controls, and review targets.')
       return
     }
     await verifyApplication(electronApplication)
     await electronApplication.close()
     electronApplication = await launchApplication(testHome)
     await verifyApplication(electronApplication, true)
+    await verifyGitChanges(electronApplication)
     await verifyProjectModelSelection(electronApplication)
     await verifyProjectPreviews(electronApplication)
     await verifyThreadListLayout(electronApplication)
@@ -1287,8 +1317,6 @@ async function main() {
     await verifyCodingMode(electronApplication)
     await verifyPatchRestoreApproval(electronApplication)
     await verifyRecordedChanges(electronApplication)
-    await verifyGitChanges(electronApplication)
-    await verifyCodeReview(electronApplication)
     console.log('Electron E2E smoke passed: sandbox, CSP, navigation guards, startup, speech input focus/IPC, menu focus, settings, thread entry, sidebar resize, restart, and project model/reasoning preferences.')
   } finally {
     await electronApplication?.close().catch(() => undefined)

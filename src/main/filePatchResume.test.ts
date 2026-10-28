@@ -31,7 +31,7 @@ async function fixture(reverse = false) {
   }
   const operationId = reverse ? randomUUID() : sourceOperationId, requestId = reverse ? randomUUID() : sourceRequestId
   const crash = (phase: string, resume = false, attempt?: { requestId: string; operationId: string }) => {
-    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./agent/toolEffectHardCrashFixture.mjs', import.meta.url)), JSON.stringify({
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./filePatchRecordCrashFixture.mjs', import.meta.url)), JSON.stringify({
       scenario: 'file_patch_store', phase, resume, workspace, recordsRoot: store.root, requestId, operationId,
       ...attempt,
       ...(reverse ? { sourceRequestId, sourceOperationId } : {}), viteCacheDirectory: join(root, 'cache')

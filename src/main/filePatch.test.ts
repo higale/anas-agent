@@ -2,8 +2,8 @@ import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { tool } from '@langchain/core/tools'
-import { convertToOpenAITool } from '@langchain/core/utils/function_calling'
+import { defineContentTool } from '../runtime/toolDefinition'
+import { modelToolDeclaration } from './agent/modelToolDeclarations'
 import { filePatchSchema, parseFilePatch, planFilePatch, resolveFilePatchTargets } from './filePatch'
 import { asPatchInput } from './filePatchTestFixtures'
 
@@ -120,8 +120,8 @@ describe('patch transaction adapter', () => {
   })
 
   it('exposes the patch document, not the private transaction plan', () => {
-    const definition = convertToOpenAITool(tool(async () => 'unused', { name: 'apply_patch', description: 'Apply text edits.', schema: filePatchSchema }))
-    const schema = JSON.stringify(definition.function.parameters)
+    const definition = modelToolDeclaration(defineContentTool({ name: 'apply_patch', description: 'Apply text edits.', inputSchema: filePatchSchema, execute: async () => 'unused' }))
+    const schema = JSON.stringify(definition)
     expect(schema).toContain('patch')
     expect(schema).not.toContain('"operations"')
     expect(schema).not.toContain('"chunks"')

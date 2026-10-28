@@ -77,7 +77,7 @@ export function contextStatusForModel(
   const budget = contextBudgetForModel(model, status?.includeProjectRules)
   if (!status || !model || !budget) return undefined
   // A different protocol or parameter set changes the request projection.
-  // Only the runtime can recalculate it from the complete checkpoint history.
+  // Only the runtime can recalculate it from the complete native history.
   if (status.modelContextKey !== modelContextKey(model)) return undefined
   return { ...status, ...budget }
 }

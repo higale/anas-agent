@@ -1,17 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ToolArgumentProgress } from './toolArgumentProgress'
 
-describe('native tool argument reception progress', () => {
+describe('application tool argument reception progress', () => {
   afterEach(() => vi.useRealTimers())
 
   it('publishes the first tool immediately, batches snapshots, and binds late IDs by block index', () => {
     vi.useFakeTimers()
     const publish = vi.fn()
     const progress = new ToolArgumentProgress(publish)
-    progress.accept({ event: 'content-block-start', index: 2, content: { type: 'tool_call_chunk', name: 'apply_patch', args: '' } })
+    progress.accept({ index: 2, name: 'apply_patch', characterCount: 0, streamed: true, complete: false })
     expect(publish).toHaveBeenCalledTimes(1)
-    progress.accept({ event: 'content-block-delta', index: 2, delta: { type: 'block-delta', fields: { type: 'tool_call_chunk', args: '{"patch":' } } })
-    progress.accept({ event: 'content-block-delta', index: 2, delta: { type: 'block-delta', fields: { type: 'tool_call_chunk', id: 'patch-id', args: '{"patch":"hello"}' } } })
+    progress.accept({ index: 2, characterCount: 9, streamed: true, complete: false })
+    progress.accept({ index: 2, callId: 'patch-id', characterCount: 17, streamed: true, complete: false })
     vi.advanceTimersByTime(249)
     expect(publish).toHaveBeenCalledTimes(1)
     vi.advanceTimersByTime(1)
@@ -19,35 +19,44 @@ describe('native tool argument reception progress', () => {
     expect(publish.mock.lastCall?.[0]).toMatchObject([
       { index: 2, callId: 'patch-id', name: 'apply_patch', characterCount: 17, complete: false }
     ])
-    progress.accept({ event: 'content-block-start', index: 3, content: { type: 'tool_call_chunk', id: 'read-id', name: 'read_file', args: '' } })
+    progress.accept({ index: 3, callId: 'read-id', name: 'read_file', characterCount: 0, streamed: true, complete: false })
     expect(publish.mock.lastCall?.[0][1]).toMatchObject({ index: 3, callId: 'read-id', name: 'read_file', characterCount: 0 })
-    progress.accept({ event: 'content-block-finish', index: 2, content: { type: 'tool_call', id: 'patch-id', name: 'apply_patch', args: { patch: 'hello' } } })
+    progress.accept({ index: 2, callId: 'patch-id', name: 'apply_patch', streamed: false, complete: true })
     expect(publish.mock.lastCall?.[0][0]).toEqual({ index: 2, callId: 'patch-id', name: 'apply_patch', characterCount: 17, complete: true })
     progress.dispose()
     vi.runAllTimers()
     expect(publish).toHaveBeenCalledTimes(4)
   })
 
-  it('never retains or publishes argument contents, even for large arguments', () => {
+  it('reports large character counts as metadata without allocating argument content', () => {
     const publish = vi.fn()
     const progress = new ToolArgumentProgress(publish)
-    const args = 'HEAD' + 'x'.repeat(100_000) + 'TAIL'
-    progress.accept({ event: 'content-block-start', index: 0, content: { type: 'tool_call_chunk', name: 'apply_patch', args } })
-    const value = publish.mock.lastCall?.[0][0]
-    expect(value).toEqual({ index: 0, callId: undefined, name: 'apply_patch', characterCount: args.length, complete: false })
-    expect(JSON.stringify(publish.mock.calls)).not.toContain('HEAD')
+    progress.accept({ index: 0, name: 'apply_patch', characterCount: 100008, streamed: true, complete: false })
+    expect(publish.mock.lastCall?.[0][0]).toEqual({ index: 0, callId: undefined, name: 'apply_patch', characterCount: 100008, complete: false })
+    expect(publish.mock.lastCall?.[0][0]).not.toHaveProperty('args')
     progress.dispose()
   })
 
-  it('ignores text, server-side tools and late events after cancellation', () => {
+  it('drops pending snapshots and ignores late events after cancellation', () => {
     vi.useFakeTimers()
     const publish = vi.fn()
     const progress = new ToolArgumentProgress(publish)
-    progress.accept({ event: 'content-block-delta', index: 0, delta: { type: 'text-delta', text: 'Hello' } })
-    progress.accept({ event: 'content-block-delta', index: 1, delta: { type: 'block-delta', fields: { type: 'server_tool_call_chunk', args: '{}' } } })
+    progress.accept({ index: 0, name: 'read_file', characterCount: 0, streamed: true, complete: false })
+    progress.accept({ index: 0, characterCount: 10, streamed: true, complete: false })
     progress.dispose()
-    progress.accept({ event: 'content-block-start', index: 2, content: { type: 'tool_call_chunk', name: 'apply_patch', args: '' } })
+    progress.accept({ index: 1, name: 'apply_patch', characterCount: 0, streamed: true, complete: false })
     vi.runAllTimers()
-    expect(publish).not.toHaveBeenCalled()
+    expect(publish).toHaveBeenCalledOnce()
+  })
+
+  it('preserves an explicit zero snapshot and ignores atomic calls without stream progress', () => {
+    const publish = vi.fn()
+    const progress = new ToolArgumentProgress(publish)
+    progress.accept({ index: 1, name: 'read_file', characterCount: 100, streamed: true, complete: false })
+    progress.accept({ index: 1, callId: 'read', characterCount: 0, streamed: true, complete: true })
+    expect(publish.mock.lastCall?.[0]).toEqual([{ index: 1, callId: 'read', name: 'read_file', characterCount: 0, complete: true }])
+    progress.accept({ index: 2, callId: 'atomic', name: 'read_file', streamed: false, complete: true })
+    expect(publish).toHaveBeenCalledTimes(2)
+    progress.dispose()
   })
 })

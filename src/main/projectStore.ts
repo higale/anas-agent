@@ -3,6 +3,7 @@ import type { AgentAccessMode, AgentThread } from '@shared/agentTypes'
 import { orderProjectThreads, reorderSidebarItems, type SidebarReorderRequest } from '@shared/sidebarOrder'
 import { ProjectOperationFailure } from '@shared/projectOperation'
 import { randomUUID } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import { app } from 'electron'
 import { renameSync } from 'node:fs'
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
@@ -538,28 +539,36 @@ export async function recoverProjectDeletion(
   completeDatabaseCommit: (projectId: string) => void
 ): Promise<boolean> {
   return serializeProjectMutation(async () => {
+    const storePath = getProjectStoreFile()
+    const journalPath = join(dirname(storePath), 'project-deletion.json'), stagePath = join(dirname(storePath), 'project-deletion.stage.json')
     let journal: ProjectDeletionJournal
     try {
-      journal = JSON.parse(await readFile(projectDeletionJournalPath(), 'utf8')) as ProjectDeletionJournal
+      journal = JSON.parse(await readFile(journalPath, 'utf8')) as ProjectDeletionJournal
     } catch (reason) {
       if ((reason as NodeJS.ErrnoException).code === 'ENOENT') return false
       throw reason
     }
     if (
       journal.version !== 0
-      || typeof journal.projectId !== 'string'
+      || typeof journal.projectId !== 'string' || !journal.projectId.trim() || journal.projectId === DEFAULT_WORKSPACE_PROJECT_ID
       || !Array.isArray(journal.threadIds)
-      || journal.threadIds.some((id) => typeof id !== 'string')
+      || journal.threadIds.some((id) => typeof id !== 'string' || !id.trim())
+      || new Set(journal.threadIds).size !== journal.threadIds.length
     ) throw new Error('Project deletion journal has an invalid format.')
+    // Validate both outcomes before any database cleanup.
+    const previous = parseProjectStore(journal.previous), next = parseProjectStore(journal.next)
+    if (!previous.projects.some(project => project.id === journal.projectId)
+      || !isDeepStrictEqual(serializeProjectStore(next), serializeProjectStore({ ...previous,
+        projects: previous.projects.filter(project => project.id !== journal.projectId) }))) throw new Error('Project deletion journal changes unrelated project settings.')
     const current = await readStore()
     const databaseCommitted = journal.threadIds.length > 0
       ? journal.threadIds.every((threadId) => !threadExists(threadId))
       : !current.projects.some((project) => project.id === journal.projectId)
     if (databaseCommitted) completeDatabaseCommit(journal.projectId)
-    await writeStore(parseProjectStore(databaseCommitted ? journal.next : journal.previous))
+    await writeJsonFileAtomic(storePath, serializeProjectStore(databaseCommitted ? next : previous))
     await Promise.all([
-      rm(projectDeletionJournalPath(), { force: true }),
-      rm(projectDeletionStagePath(), { force: true })
+      rm(journalPath, { force: true }),
+      rm(stagePath, { force: true })
     ])
     return true
   })

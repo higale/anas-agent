@@ -5,9 +5,9 @@
 ## 实现与调用
 
 - [codexPatch.ts](../src/main/codexPatch.ts) 移植 `parser.rs`、`streaming_parser.rs` 的整批解析路径、`seek_sequence.rs`、`file_update.rs` 的 `compute_replacements` 和 `text_file.rs`。解析器直接产生修改块，事务层使用这些块计算结果，不再串行化并重新解析补丁。
-- [codexPatchSpec.json](../src/main/codexPatchSpec.json) 原样保存该版本的 freeform 工具说明与 Lark 语法。OpenAI Responses 使用这份工具定义，模型直接生成补丁正文，LangChain 将原始输入表示为 `{ input }`。Chat Completions 与 Anthropic 接口使用 `{ patch, summary?, dry_run? }` 封装，并在说明中提供同一份语法。两种输入进入同一解析器；Responses 的 freeform 调用不携带预览或摘要参数，不增加模型设置。供应商需支持 Responses 的 `custom` 工具，接收该字段也不代表支持 Lark 约束；不支持时直接报告接口错误，不自动切换为 JSON。
+- [codexPatchSpec.json](../src/main/codexPatchSpec.json) 原样保存该版本的 freeform 工具说明与 Lark 语法。OpenAI Responses 使用这份工具定义，模型直接生成补丁正文，协议转换将原始输入表示为 `{ input }`。Chat Completions 与 Anthropic 接口使用 `{ patch, summary?, dry_run? }` 封装，并在说明中提供同一份语法。两种输入进入同一解析器；Responses 的 freeform 调用不携带预览或摘要参数，不增加模型设置。供应商需支持 Responses 的 `custom` 工具，接收该字段也不代表支持 Lark 约束；不支持时直接报告接口错误，不自动切换为 JSON。
 - 匹配顺序、重复文本选择、空白与 Unicode 归一化、上下文保留、EOF 和换行行为均跟随上游。删除了旧实现的唯一匹配要求、候选片段诊断、锚点后纯插入扩展和 `\ No newline at end of file` 输入扩展。更新后的非空文件有末尾换行；插入行使用原文件首次出现的换行形式。新增文件的内容行使用 LF。
-- LangChain 原生执行循环、checkpoint 和调度不变。Responses 转换边界处理 freeform 的流式完成参数及结果回传，已有 checkpoint 中的 JSON 与 freeform 调用均按原格式恢复与回传。不会尝试从补丁正文中猜测并剥离 `data`、`patch` 等额外 JSON 外壳。
+- 原生执行内核统一持有调用、持久结果和调度。Responses 转换边界处理 freeform 的流式完成参数及结果回传，历史消息中的 JSON 与 freeform 调用均按原格式恢复与回传。不会尝试从补丁正文中猜测并剥离 `data`、`patch` 等额外 JSON 外壳。
 
 ## 宿主边界
 

@@ -1,26 +1,13 @@
-import { createHash } from 'node:crypto'
+import { maximumReviewBytes, codeReviewSnapshotId, validateCodeReviewSnapshot } from '../../runtime/codeReviewReport'
 import { parsePatch } from 'diff'
-import { codeReviewPriorityGuidance, codeReviewRequestSchema, codeReviewSnapshotSchema, type CodeReviewRequest, type CodeReviewSnapshot } from '@shared/codeReview'
-import type { AgentDatabase } from './agentDatabase'
+import { codeReviewPriorityGuidance, codeReviewRequestSchema, type CodeReviewRequest, type CodeReviewSnapshot } from '@shared/codeReview'
+import type { AgentApplicationReadModel } from './agentApplicationTypes'
 import { getProject } from '../projectStore'
 import { queryGitChanges } from '../gitChanges'
 import { readRoundContents } from './roundChanges'
 import { createTextPatch } from '../fileEditDiff'
 
-const maximumReviewBytes = 120_000
-function snapshotId(value: Omit<CodeReviewSnapshot, 'id'>): string {
-  return createHash('sha256').update(JSON.stringify(codeReviewSnapshotSchema.omit({ id: true }).parse(value))).digest('hex')
-}
-
-export function validateCodeReviewSnapshot(value: unknown): CodeReviewSnapshot {
-  const snapshot = codeReviewSnapshotSchema.parse(value)
-  const { id, ...content } = snapshot
-  if (snapshotId(content) !== id) throw new Error('Code review snapshot identity is invalid.')
-  if (Buffer.byteLength(JSON.stringify(snapshot), 'utf8') > maximumReviewBytes) throw new Error('Code review snapshot exceeds its input budget.')
-  return snapshot
-}
-
-export async function captureCodeReview(database: AgentDatabase, input: CodeReviewRequest, projectId: string): Promise<CodeReviewSnapshot> {
+export async function captureCodeReview(database: Pick<AgentApplicationReadModel, 'getRun' | 'getThread' | 'fileChanges'>, input: CodeReviewRequest, projectId: string): Promise<CodeReviewSnapshot> {
   const request = codeReviewRequestSchema.parse(input)
   const signal = AbortSignal.timeout(30_000)
   const files: Array<{ path: string; patch: string }> = [], limitations: string[] = []
@@ -80,7 +67,7 @@ export async function captureCodeReview(database: AgentDatabase, input: CodeRevi
         after: hunks.filter((hunk) => hunk.newLines > 0).map((hunk) => ({ start: hunk.newStart, end: hunk.newStart + hunk.newLines - 1 })) }
     })
   }
-  return validateCodeReviewSnapshot({ id: snapshotId(value), ...value })
+  return validateCodeReviewSnapshot({ id: codeReviewSnapshotId(value), ...value })
 }
 
 export function codeReviewPrompt(snapshot: CodeReviewSnapshot): string {

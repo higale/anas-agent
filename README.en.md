@@ -2,6 +2,8 @@
 
 [简体中文](README.md) · [English](README.en.md)
 
+**Anas 5.0:** This repository preserves the existing Anas interface, interactions, and configuration while replacing execution, conversation storage, and recovery with native implementations. LangChain, LangGraph, and Deep Agents have been removed. The default data directory is `~/.anas`. Version 5.0 uses a fresh database and does not migrate previous conversations, memory or execution records. Copy only compatible settings and extensions; see the [copying instructions](data/help/UPGRADE_TO_5.en.md). Available packages are listed in [GitHub Releases](https://github.com/higale/anas-agent/releases); see the [handoff document](docs/HANDOFF.md) for the current validation scope.
+
 **Upgrade notice: when upgrading from a pre-4.0 version to 4.x, previous conversations and long-term memory become unavailable. Projects, input history, plugin data, and avatars can be recovered manually. Back up first and read the [4.x upgrade data guide](data/help/UPGRADE_TO_4.en.md).** This notice concerns crossing into 4.x, not data loss on every 4.x update.
 
 Anas is a local desktop AI agent with support for multiple models, projects, tools, skills, and subagents. Each project can choose its working folders, context, and capabilities. Configuration and conversations are stored locally; model requests send the required task content to the selected provider.
@@ -38,7 +40,7 @@ The built-in Usage Meter shows the selected model provider's quota, balance, or 
 
 ## Local Data
 
-The default data directory is `~/.galeAnas/`. Use `--data-dir <path>` to choose another directory. Project source folders are separate from application data. Anas supports backups and restores; back up project source folders and externally referenced skills separately. See the [user guide](data/help/USER_GUIDE.en.md#local-data-and-backups) for directory locations, contents, and backup coverage.
+The default data directory is `~/.anas/`. Use `--data-dir <path>` to choose another directory. Project source folders are separate from application data. Anas supports backups and restores; back up project source folders and externally referenced skills separately. See the [user guide](data/help/USER_GUIDE.en.md#local-data-and-backups) for directory locations, contents, and backup coverage.
 
 ## Documentation
 
@@ -50,7 +52,7 @@ The default data directory is `~/.galeAnas/`. Use `--data-dir <path>` to choose 
 - [Plugin examples](data/examples/plugins/README.en.md)
 - [Current state storage](docs/CURRENT_STATE_STORAGE.md)
 - [Security and approval model](docs/SECURITY_MODEL.md)
-- [Framework patches](docs/FRAMEWORK_PATCHES.md)
+- [Dependency patches](docs/DEPENDENCY_PATCHES.md)
 - [Coding evaluation](docs/CODING_EVALUATION.md)
 - [Development rules](AGENTS.md)
 

@@ -1,3 +1,4 @@
+import Database from 'better-sqlite3'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -7,21 +8,24 @@ import { defaultCapabilities } from '@shared/agentCapabilities'
 import { DEFAULT_WORKSPACE_PROJECT_ID } from '@shared/types'
 import { getAgentCatalogFile, getAgentConversationDatabaseFile, getAgentConversationDir, getAgentConversationsDir } from '../config/dataDir'
 import { AgentStorage } from './agentStorage'
+import { writeConversationCatalogSnapshot } from './conversationCatalog'
+
+type NativeStorage = ReturnType<typeof AgentStorage.openNative>
 
 const roots: string[] = []
-const storages = new Set<AgentStorage>()
+const storages = new Set<NativeStorage>()
 
-async function fixture(): Promise<{ root: string; storage: AgentStorage }> {
+async function fixture(): Promise<{ root: string; storage: NativeStorage }> {
   const root = await mkdtemp(join(tmpdir(), 'anas-agent-storage-'))
   roots.push(root)
-  const storage = AgentStorage.open(root)
+  const storage = AgentStorage.openNative(root)
   storages.add(storage)
   return { root, storage }
 }
 
-function reopen(root: string, previous: AgentStorage): AgentStorage {
+function reopen(root: string, previous: NativeStorage): NativeStorage {
   previous.close()
-  const storage = AgentStorage.open(root)
+  const storage = AgentStorage.openNative(root)
   storages.add(storage)
   return storage
 }
@@ -33,6 +37,25 @@ afterEach(async () => {
 })
 
 describe('agent conversation storage', () => {
+  it('rolls sidebar metadata and lookup changes back when a run belongs to another conversation', async () => {
+    const { root, storage } = await fixture()
+    const first = storage.createThread({ title: 'First' }), second = storage.createThread({ title: 'Second' })
+    const database = storage.conversationForThread(first.id)
+    database.runs.createRun({ threadId: first.id, runId: 'owned-run', operation: 'agent', submissionId: 'saved-submission', message: { id: 'owned-input', value: { id: 'owned-input', kind: 'user', content: 'Question', context: { runId: 'owned-run' } } } })
+    storage.refreshConversation(first.id)
+    const snapshot = storage.conversationForThread(second.id).readCatalogSnapshot(second.id)!
+    const catalog = new Database(getAgentCatalogFile(root)); catalog.pragma('foreign_keys=ON')
+    try {
+      expect(() => writeConversationCatalogSnapshot(catalog, { ...snapshot,
+        thread: { ...snapshot.thread, title: 'Must roll back' }, threadIds: [...snapshot.threadIds, 'new-child'],
+        runs: [{ id: 'owned-run', threadId: 'new-child' }] })).toThrow('already belongs to another conversation')
+      expect(storage.getThread(second.id)?.title).toBe('Second')
+      expect(storage.ownerForThread('new-child')).toBeUndefined()
+      expect(storage.submissionOwner('saved-submission')).toBe(first.id)
+      expect(storage.conversationForRun('owned-run')).toBe(database)
+    } finally { catalog.close() }
+  })
+
   it('starts with empty conversations and memories while leaving the old layout intact', async () => {
     const { root, storage } = await fixture()
     const oldThread = storage.createThread({ title: 'Old conversation' })
@@ -61,7 +84,7 @@ describe('agent conversation storage', () => {
     const second = storage.createThread({ title: 'Second' })
     storage.close()
     await writeFile(getAgentConversationDatabaseFile(first.id, root), 'not sqlite', 'utf8')
-    const current = AgentStorage.open(root)
+    const current = AgentStorage.openNative(root)
     storages.add(current)
 
     expect(new Set(current.listThreads().map(({ id }) => id))).toEqual(new Set([first.id, second.id]))
@@ -80,8 +103,8 @@ describe('agent conversation storage', () => {
     const { root, storage } = await fixture()
     const parent = storage.createThread()
     const database = storage.conversationForThread(parent.id)
-    const run = database.createRun(parent.id, 'parent-run', 'agent', [], undefined, 'submission-1')
-    database.createSubagentCall({
+    const run = database.runs.createRun({ threadId: parent.id, runId: 'parent-run', operation: 'agent', submissionId: 'submission-1', message: { id: 'parent-input', value: { id: 'parent-input', kind: 'user', content: 'Question', context: { runId: 'parent-run' } } } })
+    database.runs.createSubagentCall({
       id: 'child-call', ownerThreadId: parent.id, parentThreadId: parent.id, parentRunId: run.id,
       childThreadId: 'child-thread', childRunId: 'child-run', description: 'Inspect this project',
       childThread: { projectId: parent.projectId },
@@ -89,7 +112,7 @@ describe('agent conversation storage', () => {
         description: 'Inspect a project.', systemPrompt: 'Inspect the selected project.',
         capabilities: structuredClone(defaultCapabilities) }
     })
-    database.createQueuedInput({ id: 'queued-1', threadId: parent.id, text: 'Next request' }, [])
+    database.queue.createQueuedInput({ id: 'queued-1', threadId: parent.id, text: 'Next request' }, [])
     await Promise.resolve()
 
     expect(storage.conversationForThread('child-thread')).toBe(database)
@@ -106,15 +129,15 @@ describe('agent conversation storage', () => {
     const { root, storage } = await fixture()
     const first = storage.createThread()
     const second = storage.createThread()
-    await storage.conversationForThread(first.id).memoryStore.saveMemory({
+    await storage.conversationForThread(first.id).resources.memoryStore.saveMemory({
       scope: 'global', kind: 'fact', content: 'Shared project fact', keywords: ['shared'], importance: 3
     }, { origin: 'user' })
-    storage.conversationForThread(first.id).createRun(first.id, 'first-run')
+    storage.conversationForThread(first.id).runs.createRun({ threadId: first.id, runId: 'first-run', operation: 'agent', message: { id: 'first-input', value: { id: 'first-input', kind: 'user', content: 'Question', context: { runId: 'first-run' } } } })
 
-    expect(storage.conversationForThread(second.id).getRun('first-run')).toBeNull()
-    expect((await storage.conversationForThread(second.id).memoryStore.searchMemories({ scope: 'global' })).total).toBe(1)
+    expect(storage.conversationForThread(second.id).readModel.getRun('first-run')).toBeNull()
+    expect((await storage.conversationForThread(second.id).resources.memoryStore.searchMemories({ scope: 'global' })).total).toBe(1)
     storage.closeConversation(first.id)
-    expect((await storage.previewDatabase().memoryStore.searchMemories({ scope: 'global' })).total).toBe(1)
+    expect((await storage.previewDatabase().resources.memoryStore.searchMemories({ scope: 'global' })).total).toBe(1)
     const current = reopen(root, storage)
     expect((await current.memoryStore.searchMemories({ scope: 'global' })).total).toBe(1)
     expect(current.listThreads()).toHaveLength(2)
@@ -140,7 +163,7 @@ describe('agent conversation storage', () => {
     const first = storage.createThread()
     const second = storage.createThread()
     storage.setWorkspaceState({ mode: 'thread', threadId: first.id })
-    await storage.conversationForThread(first.id).deleteThreadTree(first.id)
+    storage.beginConversationDeletion(first.id)
     await storage.removeConversation(first.id)
 
     expect(storage.getThread(first.id)).toBeNull()
@@ -175,7 +198,7 @@ describe('agent conversation storage', () => {
     await storage.memoryStore.saveMemory({ scope: 'project', projectId: 'project', kind: 'fact',
       content: 'Project fact', keywords: ['project'], importance: 3 }, { origin: 'user' })
     expect(() => storage.completeProjectDeletion('project')).toThrow('while project conversations still exist')
-    await storage.conversationForThread(thread.id).deleteThreadTree(thread.id)
+    storage.beginConversationDeletion(thread.id)
     await storage.removeConversation(thread.id)
     storage.setWorkspaceState({ mode: 'new_thread', projectId: 'project', modelParameterPresetId: null })
     storage.completeProjectDeletion('project')

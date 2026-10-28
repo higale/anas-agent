@@ -1,16 +1,28 @@
-## Anas v4.0.9
+## Anas v5.0.0
 
-**升级提醒：从 4.0 之前的版本升级到 4.x，旧对话和长期记忆不再可用；项目、输入历史、插件数据和头像可手动恢复。升级前请备份，详见 [4.x 升级数据说明](https://github.com/higale/anas-agent/blob/main/data/help/UPGRADE_TO_4.zh-CN.md)。** 此提醒针对跨入 4.x 的升级，并非每次 4.x 升级都会丢失数据。
+- 执行、消息、工具、审批、压缩、子 Agent 和恢复改用自有原生运行时，移除 LangChain、LangGraph、Deep Agents 及其适配依赖，保留现有聊天、设置和插件界面。
+- 会话与执行状态使用全新的 v1 数据库；移除旧执行库 v0 → v1 转换，旧对话、记忆和运行记录不迁移，旧版整包备份不能恢复。
+- 工具活动、审批和追加指令统一使用应用调用 ID，修复供应商重复 ID 导致记录覆盖及流式工具卡片重复；现有 v1 展示索引可从持久记录重建。
+- 修复面板加载失败的错误保留和重试，以及连续打开同一面板时取消首次创建的问题。
+- 当前格式的文件修改历史按原平台路径语义校验，跨平台不自动映射或执行原机器的文件操作。
+- 修复 macOS 恢复事务对同一目录不同路径写法的识别，以及 Shell 路径中非法中间组件的校验。
+- 默认数据目录统一为 `~/.anas`，开发和打包一致；保留 `--data-dir`，旧目录不会自动导入。
 
-**子 Agent 配置提醒（4.0.5 起）：** `config/subagents.json` 使用 v1，不兼容、不迁移原 v0 数组配置；旧文件保留并在启动时提示错误，含旧格式的备份不能直接恢复。请完全退出应用，把旧文件移到数据目录之外保留，再启动并重新创建或导入子 Agent 包。不要只修改版本号。已有 v1 配置不受影响。[子 Agent 使用与处理说明](https://github.com/higale/anas-agent/blob/main/data/help/USER_GUIDE.zh-CN.md#子-agent)
+- Replace execution, messages, tools, approvals, compression, subagents and recovery with the native runtime. Remove LangChain, LangGraph, Deep Agents and their adapters while preserving the existing chat, settings and plugin interfaces.
+- Use a fresh v1 database for conversation and execution state. Remove v0-to-v1 conversion; previous conversations, memory and execution records are not migrated, and legacy full backups cannot be restored.
+- Use application call IDs for tool activity, approvals and queued directions. Prevent reused provider IDs from overwriting activity or duplicating streamed tool cards, and rebuild existing v1 display indexes from durable records.
+- Preserve panel loading errors for retry and prevent repeated opens from cancelling the initial panel creation.
+- Validate current-format file-edit history using its original platform’s path semantics, without automatically mapping or executing file operations from another platform.
+- Recognize equivalent directory paths when recovering transactions on macOS, and reject invalid intermediate components in Shell operand paths.
+- Use `~/.anas` as the default data directory in development and packaged builds. Keep `--data-dir`; old directories are not imported automatically.
 
-- 修复手动朗读和自动朗读无声的问题：更新 Edge Read Aloud 服务地址与 Sec-MS-GEC v2 认证，恢复语音合成；保留现有音色、语速和自动朗读设置。
+**5.0 升级提醒：** 旧数据库和旧版整包备份不兼容；配置与扩展资源的手动复制方法见 [5.0 升级数据说明](https://github.com/higale/anas-agent/blob/main/data/help/UPGRADE_TO_5.zh-CN.md)。
 
-**Upgrade notice: when upgrading from a pre-4.0 version to 4.x, previous conversations and long-term memory become unavailable. Projects, input history, plugin data, and avatars can be recovered manually. Back up first and read the [4.x upgrade data guide](https://github.com/higale/anas-agent/blob/main/data/help/UPGRADE_TO_4.en.md).** This notice concerns crossing into 4.x, not data loss on every 4.x update.
+**历史升级提醒：** 4.0 曾调整数据布局，跨入 4.x 的影响见 [4.x 升级数据说明](https://github.com/higale/anas-agent/blob/main/data/help/UPGRADE_TO_4.zh-CN.md)，该说明只适用于 4.x。
 
-**Subagent configuration notice (since 4.0.5):** `config/subagents.json` uses v1; the previous v0 array format is neither supported nor migrated. Old files are preserved and reported as a startup error, and backups containing that format cannot be restored directly. Fully quit the app, move the old file outside the data directory for safekeeping, then restart and recreate or import subagent packages. Do not just change the version number. Existing v1 configurations are unaffected. [Subagent setup and recovery instructions](https://github.com/higale/anas-agent/blob/main/data/help/USER_GUIDE.en.md#subagents)
+**5.0 upgrade notice:** Legacy databases and full backups are incompatible. See the [5.0 upgrade data guide](https://github.com/higale/anas-agent/blob/main/data/help/UPGRADE_TO_5.en.md) for copying compatible settings and extensions manually.
 
-- Fix silent manual and automatic read-aloud by updating the Edge Read Aloud endpoint and Sec-MS-GEC v2 authentication to restore speech synthesis. Existing voice, speed and automatic read-aloud settings are preserved.
+**Historical upgrade notice:** Version 4.0 changed the data layout. See the [4.x upgrade data guide](https://github.com/higale/anas-agent/blob/main/data/help/UPGRADE_TO_4.en.md) for its impact; that guide applies only to 4.x.
 
 ## 下载与安装 / Downloads & installation
 

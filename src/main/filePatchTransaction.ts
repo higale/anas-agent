@@ -5,7 +5,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { filePatchOperationSemantics, planFilePatch, type FilePatchPlan } from './filePatch'
 import { captureFilePatchPreimages, sameFilePatchIdentity, verifyFilePatchPreimages, type FilePatchPreimage } from './filePatchState'
 import { samePath } from './pathContainment'
-import { validatePatchTransaction } from './filePatchRecord'
+import { assertLocalPatchTransaction, validatePatchTransaction } from './filePatchRecord'
 
 interface OwnedEntry {
   path: string
@@ -80,6 +80,7 @@ async function verifyOwned(expected: OwnedEntry, directory: boolean): Promise<vo
 }
 
 export async function cleanupFilePatchArtifacts(record: FilePatchTransaction, preserveDirectories = record.state === 'applied'): Promise<void> {
+  assertLocalPatchTransaction(record)
   for (const entry of [...record.temporary].reverse()) {
     if (!entry.identity) continue
     try {
@@ -290,6 +291,7 @@ export async function executePreparedFilePatchTransaction(
   persist: PersistFilePatchTransaction, signal?: AbortSignal
 ): Promise<FilePatchTransaction> {
   const record = structuredClone(prepared), before = structuredClone(preimages)
+  assertLocalPatchTransaction(record)
   const save = () => persist(structuredClone(record))
   if (before.length) await verifyFilePatchPreimages(before, signal)
   // A failed initial write has no filesystem side effects to undo.
@@ -371,6 +373,7 @@ export async function resumeFilePatchTransaction(
 ): Promise<FilePatchTransaction> {
   const record = structuredClone(source), observed = structuredClone(observations)
   validatePatchTransaction(record)
+  assertLocalPatchTransaction(record)
   if (record.recovery || record.sourceFinalized || record.reverseAttempt || ['applied', 'restored', 'resolved'].includes(record.state)) return record
   if (record.entries.some((entry) => !observed.some((image) => image.target.canonicalPath === entry.before.target.canonicalPath))) {
     throw new Error('Patch recovery is missing target observations.')

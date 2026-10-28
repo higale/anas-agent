@@ -1,14 +1,16 @@
+import { randomUUID } from 'node:crypto'
+import Database from 'better-sqlite3'
+import { NativeConversationDatabase } from './nativeConversationDatabase'
+import { SqliteMemoryStore } from './memoryStore'
+import { FileEditStore } from '../fileEditStore'
+import { toolEffectArtifactPurposes, type ToolEffectArtifactIdentity } from '../../runtime/toolEffectIdentity'
+import { nativeCapabilityFixture } from '../../test/nativeCapabilityFixture'
+import { runtimeToolDefinitions } from '../llm/runtimeTools'
+import { ToolInputError } from '../../runtime/errors'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ToolMessage } from '@langchain/core/messages'
-import { ToolInputParsingException } from '@langchain/core/tools'
-import { createAgent, FakeToolCallingModel } from 'langchain'
-import { createRuntimeTools } from '../llm/runtimeTools'
-import { createToolInputErrorMiddleware } from './toolInputErrors'
-import { createAgentToolEffectMiddleware } from './toolEffectMiddleware'
-import { AgentDatabase } from './agentDatabase'
 import { ManagedCallService, type ManagedCallControl } from './managedCallService'
 import {
   currentAgentToolEffectArtifactId,
@@ -23,21 +25,43 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-function createRun(database: AgentDatabase, suffix: string) {
+function createRun(database: NativeConversationDatabase, suffix: string) {
   const thread = database.createThread({ title: `Managed call ${suffix}` })
-  const run = database.createRun(thread.id, `run-${suffix}`)
+  const runId = `run-${suffix}`, id = `${runId}:input`
+  const run = database.runs.createRun({ threadId: thread.id, runId, operation: 'agent',
+    message: { id, value: { id, kind: 'user', content: suffix, context: { runId } } } })
   return { thread, run }
 }
 
+const connections: Array<{ product: NativeConversationDatabase; global: Database.Database; root?: string }> = []
+function openDatabase(file: string = ':memory:', attachmentRoot?: string) {
+  const root = attachmentRoot ? undefined : mkdtempSync(join(tmpdir(), 'anas-native-managed-service-'))
+  attachmentRoot ??= join(root!, 'attachments')
+  const global = new Database(':memory:')
+  const product = NativeConversationDatabase.open(file, { attachmentRoot, memoryStore: new SqliteMemoryStore(global),
+    fileEditStore: new FileEditStore(join(dirname(attachmentRoot), 'file_edits')) })
+  connections.push({ product, global, root })
+  product.recover()
+  return product
+}
+function effectIdentity(runId: string): ToolEffectArtifactIdentity {
+  return { runId, artifacts: Object.fromEntries(toolEffectArtifactPurposes.map(purpose => [purpose, randomUUID()])) as ToolEffectArtifactIdentity['artifacts'] }
+}
+
 afterEach(() => {
+  vi.restoreAllMocks()
+  for (const { product, global, root } of connections.splice(0)) {
+    product.close(); global.close()
+    if (root) rmSync(root, { recursive: true, force: true })
+  }
   vi.useRealTimers()
 })
 
 describe('ManagedCallService', () => {
   it('keeps the confirmed remote result when a cancellation races with completion', async () => {
     vi.useFakeTimers()
-    const database = AgentDatabase.open(':memory:')
-    const service = new ManagedCallService(database)
+    const database = openDatabase(':memory:')
+    const service = new ManagedCallService(database.managed, database.results)
     const { thread, run } = createRun(database, 'confirmed-after-cancel')
     try {
       const started = service.start({ kind: 'custom', threadId: thread.id, runId: run.id, summary: 'complete remotely',
@@ -52,13 +76,13 @@ describe('ManagedCallService', () => {
       await vi.advanceTimersByTimeAsync(10_000)
       const handle = JSON.parse(await started)
       await service.cancel(handle.call_id, thread.id)
-      expect(database.getManagedCall(handle.call_id, thread.id)).toMatchObject({ status: 'completed', result: 'The operation completed.' })
+      expect(database.managed.getManagedCall(handle.call_id, thread.id)).toMatchObject({ status: 'completed', result: 'The operation completed.' })
     } finally { await service.shutdown(); database.close() }
   })
 
   it('cancels queued calls before execution and retains busy slots until real settlement', async () => {
     vi.useFakeTimers()
-    const database = AgentDatabase.open(':memory:'), service = new ManagedCallService(database)
+    const database = openDatabase(':memory:'), service = new ManagedCallService(database.managed, database.results)
     const { thread, run } = createRun(database, 'queued-cancel')
     const releases = Array.from({ length: 10 }, () => deferred<string>())
     const executed: number[] = []
@@ -81,7 +105,7 @@ describe('ManagedCallService', () => {
 
   it('serializes conflicting mutations without consuming the other execution slots', async () => {
     vi.useFakeTimers()
-    const database = AgentDatabase.open(':memory:'), service = new ManagedCallService(database)
+    const database = openDatabase(':memory:'), service = new ManagedCallService(database.managed, database.results)
     const { thread, run } = createRun(database, 'queued-mutations')
     const release = deferred<string>(), writes: number[] = []
     try {
@@ -102,7 +126,7 @@ describe('ManagedCallService', () => {
 
   it('bounds queued work and removes it on shutdown without dispatching it', async () => {
     vi.useFakeTimers()
-    const database = AgentDatabase.open(':memory:'), service = new ManagedCallService(database)
+    const database = openDatabase(':memory:'), service = new ManagedCallService(database.managed, database.results)
     const { thread, run } = createRun(database, 'queue-bound')
     let executions = 0
     try {
@@ -124,8 +148,8 @@ describe('ManagedCallService', () => {
 
   it('binds input to the live terminal instance and never carries it across ownership or restart', async () => {
     vi.useFakeTimers()
-    const database = AgentDatabase.open(':memory:')
-    const service = new ManagedCallService(database)
+    const database = openDatabase(':memory:')
+    const service = new ManagedCallService(database.managed, database.results)
     const finish = deferred<string>()
     try {
       const { thread, run } = createRun(database, 'pty')
@@ -153,9 +177,9 @@ describe('ManagedCallService', () => {
       expect(arm).toHaveBeenCalledWith(expect.objectContaining({ kind: 'terminal_input', recoveryMode: 'confirm',
         target: { callId, threadId: thread.id, terminalId: terminal.id, action } }))
       expect(apply).toHaveBeenCalledExactlyOnceWith(action)
-      await expect(service.writeTerminal(callId, 'other-thread', terminal.id, action)).rejects.toBeInstanceOf(ToolInputParsingException)
-      await expect(service.writeTerminal(callId, thread.id, 'stale-terminal', action)).rejects.toBeInstanceOf(ToolInputParsingException)
-      await expect(new ManagedCallService(database).writeTerminal(callId, thread.id, terminal.id, action)).rejects.toBeInstanceOf(ToolInputParsingException)
+      await expect(service.writeTerminal(callId, 'other-thread', terminal.id, action)).rejects.toBeInstanceOf(ToolInputError)
+      await expect(service.writeTerminal(callId, thread.id, 'stale-terminal', action)).rejects.toBeInstanceOf(ToolInputError)
+      await expect(new ManagedCallService(database.managed, database.results).writeTerminal(callId, thread.id, terminal.id, action)).rejects.toBeInstanceOf(ToolInputError)
       await expect(runWithCurrentAgentToolEffect({ arm: () => { throw new Error('journal failed') } }, send)).rejects.toThrow('journal failed')
       expect(apply).toHaveBeenCalledTimes(1)
       apply.mockRejectedValueOnce(new Error('acknowledgement lost'))
@@ -168,38 +192,32 @@ describe('ManagedCallService', () => {
   })
 
   it('returns a stale terminal target to the model before dispatch and allows a status read', async () => {
-    const database = AgentDatabase.open(':memory:')
-    const service = new ManagedCallService(database)
+    const h = nativeCapabilityFixture(), { service, thread, run } = h
     try {
-      const { thread, run } = createRun(database, 'stale-terminal')
-      const available = await createRuntimeTools({ enabled: true, primaryFolder: '.', threadId: thread.id, runId: run.id,
+      const available = await runtimeToolDefinitions({ enabled: true, primaryFolder: '.', threadId: thread.id, runId: run.id,
         memory: false, network: false, shell: true, mcp: false, backgroundTools: true, managedCalls: service,
         commandShell: { executable: 'pwsh', name: 'PowerShell', family: 'powershell', version: '7.5.0' } })
       const tools = available.filter(tool => ['write_call', 'read_call'].includes(tool.name))
-      const agent = createAgent({ model: new FakeToolCallingModel({ toolCalls: [[{
+      const result = await h.executeCalls(tools, [[{
         id: 'stale', name: 'write_call', args: {
           call_id: '11111111-1111-4111-8111-111111111111', terminal_id: '22222222-2222-4222-8222-222222222222',
           action: { type: 'text', text: 'do not send' }
         }
-      }], [{ id: 'inspect', name: 'read_call', args: {} }], []] }), tools, checkpointer: database.checkpointer,
-        middleware: [createToolInputErrorMiddleware(), createAgentToolEffectMiddleware({ database, runId: run.id, threadId: thread.id, tools })] })
-      const result = await agent.invoke({ messages: [{ role: 'user', content: 'Inspect the terminal.' }] }, {
-        configurable: { thread_id: thread.id }, durability: 'sync'
-      })
-      const responses = result.messages.filter(ToolMessage.isInstance)
+      }], [{ id: 'inspect', name: 'read_call', args: {} }]])
+      const responses = result.messages.map(message => message.value).filter(message => message.kind === 'tool')
       expect(responses).toMatchObject([
-        { tool_call_id: 'stale', status: 'error', content: expect.stringContaining('terminal instance is unavailable') },
-        { tool_call_id: 'inspect', status: 'success' }
+        { resultFor: 'stale', resultStatus: 'error', content: expect.stringContaining('terminal instance is unavailable') },
+        { resultFor: 'inspect', resultStatus: 'success' }
       ])
-      expect(result).not.toHaveProperty('__interrupt__')
+      expect(h.database.runs.store.load(thread.id)?.phase).toBe('completed')
       expect(JSON.parse(responses[1].content as string)).toMatchObject({ count: 0, calls: [] })
-    } finally { await service.waitForIdle(); database.close() }
+    } finally { await h.close() }
   })
 
   it('flushes a large burst before its timer without losing persisted output', async () => {
     vi.useFakeTimers()
-    const database = AgentDatabase.open(':memory:')
-    const service = new ManagedCallService(database)
+    const database = openDatabase(':memory:')
+    const service = new ManagedCallService(database.managed, database.results)
     const finish = deferred<string>()
     let starting: Promise<string> | undefined
     try {
@@ -209,15 +227,15 @@ describe('ManagedCallService', () => {
       // Yield promises but not the 50 ms output flush timer.
       await vi.advanceTimersByTimeAsync(0)
       const callId = service.activeCallIds()[0]
-      expect(database.getManagedCall(callId, thread.id)!.outputChars).toBeGreaterThan(0)
+      expect(database.managed.getManagedCall(callId, thread.id)!.outputChars).toBeGreaterThan(0)
       finish.resolve('done'); await starting
     } finally { finish.resolve('done'); await starting; await service.waitForIdle(); database.close() }
   })
   it('keeps fast operations as ordinary tool results', async () => {
-    const database = AgentDatabase.open(':memory:')
+    const database = openDatabase(':memory:')
     try {
       const { thread, run } = createRun(database, 'fast')
-      const service = new ManagedCallService(database)
+      const service = new ManagedCallService(database.managed, database.results)
       await expect(service.start({
         kind: 'http',
         threadId: thread.id,
@@ -234,18 +252,10 @@ describe('ManagedCallService', () => {
   })
 
   it('keeps a fast effect-scoped result available to a replay without re-executing', async () => {
-    const database = AgentDatabase.open(':memory:')
+    const database = openDatabase(':memory:')
     try {
       const { thread, run } = createRun(database, 'fast-effect-replay')
-      const effectKey = {
-        runId: run.id,
-        checkpointId: 'checkpoint-fast-effect-replay',
-        checkpointNs: '',
-        taskId: 'framework-task-fast-effect-replay',
-        callKey: 'id:tool-call-fast-effect-replay',
-        inputHash: 'b'.repeat(64)
-      }
-      const scope = { effectKey, arm: vi.fn() }
+      const scope = { identity: effectIdentity(run.id), arm: vi.fn() }
       const callId = runWithCurrentAgentToolEffect(
         scope,
         () => currentAgentToolEffectArtifactId('managed-call')
@@ -265,18 +275,18 @@ describe('ManagedCallService', () => {
 
       await expect(runWithCurrentAgentToolEffect(
         scope,
-        () => new ManagedCallService(database).start(startOptions)
+        () => new ManagedCallService(database.managed, database.results).start(startOptions)
       )).resolves.toBe('durable fast result')
-      expect(database.getManagedCall(callId, thread.id)).toMatchObject({
+      expect(database.managed.getManagedCall(callId, thread.id)).toMatchObject({
         status: 'completed',
         result: 'durable fast result'
       })
-      expect(database.getManagedCall(callId, thread.id)).not.toHaveProperty('detachedAt')
+      expect(database.managed.getManagedCall(callId, thread.id)).not.toHaveProperty('detachedAt')
 
       const replayExecute = vi.fn(async () => 'must not execute')
       const replay = await runWithCurrentAgentToolEffect(
         scope,
-        () => new ManagedCallService(database).start({
+        () => new ManagedCallService(database.managed, database.results).start({
           ...startOptions,
           execute: replayExecute
         })
@@ -284,7 +294,7 @@ describe('ManagedCallService', () => {
 
       expect(replay).toBe('durable fast result')
       expect(replayExecute).not.toHaveBeenCalled()
-      expect(database.getManagedCall(callId, thread.id)).toMatchObject({
+      expect(database.managed.getManagedCall(callId, thread.id)).toMatchObject({
         result: 'durable fast result'
       })
     } finally {
@@ -294,10 +304,10 @@ describe('ManagedCallService', () => {
 
   it('returns a durable handle after ten seconds and exposes output separately', async () => {
     vi.useFakeTimers()
-    const database = AgentDatabase.open(':memory:')
+    const database = openDatabase(':memory:')
     try {
       const { thread, run } = createRun(database, 'slow')
-      const service = new ManagedCallService(database)
+      const service = new ManagedCallService(database.managed, database.results)
       const completion = deferred<string>()
       let control!: ManagedCallControl
       const starting = service.start({
@@ -382,10 +392,10 @@ describe('ManagedCallService', () => {
 
   it('surfaces a structured failed operation outcome without returning its output', async () => {
     vi.useFakeTimers()
-    const database = AgentDatabase.open(':memory:')
+    const database = openDatabase(':memory:')
     try {
       const { thread, run } = createRun(database, 'failed-outcome')
-      const service = new ManagedCallService(database)
+      const service = new ManagedCallService(database.managed, database.results)
       const completion = deferred<string>()
       const starting = service.start({
         kind: 'shell',
@@ -421,24 +431,24 @@ describe('ManagedCallService', () => {
 
   it('waits for the full timeout regardless of existing output', async () => {
     vi.useFakeTimers()
-    const database = AgentDatabase.open(':memory:')
+    const database = openDatabase(':memory:')
     try {
       const { thread, run } = createRun(database, 'wait-timeout')
-      const call = database.createManagedCall({
+      const call = database.managed.createManagedCall({
         id: '99999999-9999-8999-8999-999999999999',
         threadId: thread.id,
         runId: run.id,
         kind: 'shell',
         summary: 'long quiet call'
       })
-      database.markManagedCallRunning(call.id, thread.id)
-      database.appendManagedCallOutput({
+      database.managed.markManagedCallRunning(call.id, thread.id)
+      database.managed.appendManagedCallOutput({
         callId: call.id,
         threadId: thread.id,
         stream: 'stderr',
         text: 'already observed\n'
       })
-      const service = new ManagedCallService(database)
+      const service = new ManagedCallService(database.managed, database.results)
 
       let settled = false
       const waiting = service.wait({
@@ -464,10 +474,10 @@ describe('ManagedCallService', () => {
 
   it('does not return before the timeout when new output arrives', async () => {
     vi.useFakeTimers()
-    const database = AgentDatabase.open(':memory:')
+    const database = openDatabase(':memory:')
     try {
       const { thread, run } = createRun(database, 'wait-new-output')
-      const service = new ManagedCallService(database)
+      const service = new ManagedCallService(database.managed, database.results)
       const completion = deferred<string>()
       let control!: ManagedCallControl
       const starting = service.start({
@@ -513,10 +523,10 @@ describe('ManagedCallService', () => {
 
   it('returns before the timeout when a quiet call reaches a terminal state', async () => {
     vi.useFakeTimers()
-    const database = AgentDatabase.open(':memory:')
+    const database = openDatabase(':memory:')
     try {
       const { thread, run } = createRun(database, 'wait-completion')
-      const service = new ManagedCallService(database)
+      const service = new ManagedCallService(database.managed, database.results)
       const completion = deferred<string>()
       const starting = service.start({
         kind: 'http',
@@ -558,10 +568,10 @@ describe('ManagedCallService', () => {
 
   it('wakes concurrent waiters only when their own call finishes', async () => {
     vi.useFakeTimers()
-    const database = AgentDatabase.open(':memory:')
+    const database = openDatabase(':memory:')
     try {
       const { thread, run } = createRun(database, 'wait-routing')
-      const service = new ManagedCallService(database)
+      const service = new ManagedCallService(database.managed, database.results)
       const firstCompletion = deferred<string>()
       const secondCompletion = deferred<string>()
       let firstControl!: ManagedCallControl
@@ -640,12 +650,12 @@ describe('ManagedCallService', () => {
 
   it('batches rapid output into one persistence transaction', async () => {
     vi.useFakeTimers()
-    const database = AgentDatabase.open(':memory:')
+    const database = openDatabase(':memory:')
     try {
       const { thread, run } = createRun(database, 'batched-output')
-      const service = new ManagedCallService(database)
+      const service = new ManagedCallService(database.managed, database.results)
       const completion = deferred<string>()
-      const append = vi.spyOn(database, 'appendManagedCallOutputBatch')
+      const append = vi.spyOn(database.managed, 'appendManagedCallOutputBatch')
       const starting = service.start({
         kind: 'shell',
         threadId: thread.id,
@@ -674,11 +684,11 @@ describe('ManagedCallService', () => {
 
   it('aborts and records uncertainty instead of dropping output after a persistence failure', async () => {
     vi.useFakeTimers()
-    const database = AgentDatabase.open(':memory:')
+    const database = openDatabase(':memory:')
     try {
       const { thread, run } = createRun(database, 'output-failure')
-      const service = new ManagedCallService(database)
-      vi.spyOn(database, 'appendManagedCallOutputBatch').mockImplementation(() => {
+      const service = new ManagedCallService(database.managed, database.results)
+      vi.spyOn(database.managed, 'appendManagedCallOutputBatch').mockImplementation(() => {
         throw new Error('disk full')
       })
       const starting = service.start({
@@ -714,12 +724,12 @@ describe('ManagedCallService', () => {
   })
 
   it('falls back to a durable uncertain state when the exact terminal result cannot be stored', async () => {
-    const database = AgentDatabase.open(':memory:')
+    const database = openDatabase(':memory:')
     try {
       const { thread, run } = createRun(database, 'terminal-persistence-failure')
-      const service = new ManagedCallService(database)
-      const finishManagedCall = database.finishManagedCall.bind(database)
-      const finish = vi.spyOn(database, 'finishManagedCall')
+      const service = new ManagedCallService(database.managed, database.results)
+      const finishManagedCall = database.managed.finishManagedCall.bind(database.managed)
+      const finish = vi.spyOn(database.managed, 'finishManagedCall')
         .mockImplementationOnce(() => {
           throw new Error('result is too large')
         })
@@ -754,10 +764,10 @@ describe('ManagedCallService', () => {
 
   it('cancels an exact active call and reports its terminal state', async () => {
     vi.useFakeTimers()
-    const database = AgentDatabase.open(':memory:')
+    const database = openDatabase(':memory:')
     try {
       const { thread, run } = createRun(database, 'cancel')
-      const service = new ManagedCallService(database)
+      const service = new ManagedCallService(database.managed, database.results)
       const starting = service.start({
         kind: 'shell',
         threadId: thread.id,
@@ -794,10 +804,10 @@ describe('ManagedCallService', () => {
 
   it('bounds exact cancellation and keeps an unresponsive dispatched executor identifiable', async () => {
     vi.useFakeTimers()
-    const database = AgentDatabase.open(':memory:')
+    const database = openDatabase(':memory:')
     try {
       const { thread, run } = createRun(database, 'exact-cancel-timeout')
-      const service = new ManagedCallService(database)
+      const service = new ManagedCallService(database.managed, database.results)
       const completion = deferred<string>()
       const starting = service.start({
         kind: 'shell',
@@ -845,10 +855,10 @@ describe('ManagedCallService', () => {
 
   it('keeps pre-dispatch cancellation pending until its executor winds down', async () => {
     vi.useFakeTimers()
-    const database = AgentDatabase.open(':memory:')
+    const database = openDatabase(':memory:')
     try {
       const { thread, run } = createRun(database, 'exact-pre-dispatch-timeout')
-      const service = new ManagedCallService(database)
+      const service = new ManagedCallService(database.managed, database.results)
       const completion = deferred<string>()
       let callControl!: ManagedCallControl
       const starting = service.start({
@@ -896,26 +906,26 @@ describe('ManagedCallService', () => {
     const root = mkdtempSync(join(tmpdir(), 'anas-managed-call-'))
     const file = join(root, 'agent.sqlite')
     try {
-      const first = AgentDatabase.open(file, join(root, 'attachments'))
+      const first = openDatabase(file, join(root, 'attachments'))
       const { thread, run } = createRun(first, 'restart')
-      first.createManagedCall({
+      first.managed.createManagedCall({
         id: 'call-restart',
         threadId: thread.id,
         runId: run.id,
         kind,
         summary: 'remote mutation'
       })
-      first.markManagedCallRunning('call-restart', thread.id)
+      first.managed.markManagedCallRunning('call-restart', thread.id)
       first.close()
 
-      const recovered = AgentDatabase.open(file, join(root, 'attachments'))
+      const recovered = openDatabase(file, join(root, 'attachments'))
       try {
-        expect(recovered.getManagedCall('call-restart', thread.id)).toMatchObject({
+        expect(recovered.managed.getManagedCall('call-restart', thread.id)).toMatchObject({
           status: 'uncertain',
           detachedAt: expect.any(String),
           error: expect.stringContaining('outcome is unknown')
         })
-        const service = new ManagedCallService(recovered)
+        const service = new ManagedCallService(recovered.managed, recovered.results)
         expect(service.unresolvedForRun(run.id).map((call) => call.id)).toEqual(['call-restart'])
         expect(service.unresolvedForThread(thread.id).map((call) => call.id)).toEqual(['call-restart'])
         await expect(service.cancelRun(run.id)).resolves.toEqual({
@@ -933,32 +943,24 @@ describe('ManagedCallService', () => {
   })
 
   it('re-executes an uncertain durable call after effect recovery authorizes a retry', async () => {
-    const database = AgentDatabase.open(':memory:')
+    const database = openDatabase(':memory:')
     try {
       const { thread, run } = createRun(database, 'effect-retry')
-      const effectKey = {
-        runId: run.id,
-        checkpointId: 'checkpoint-retry',
-        checkpointNs: '',
-        taskId: 'framework-task-retry',
-        callKey: 'id:tool-call-retry',
-        inputHash: 'a'.repeat(64)
-      }
-      const scope = { effectKey, arm: vi.fn() }
+      const scope = { identity: effectIdentity(run.id), arm: vi.fn() }
       const callId = runWithCurrentAgentToolEffect(
         scope,
         () => currentAgentToolEffectArtifactId('managed-call')
       )
       if (!callId) throw new Error('Expected a stable managed call ID.')
-      database.createManagedCall({
+      database.managed.createManagedCall({
         id: callId,
         threadId: thread.id,
         runId: run.id,
         kind: 'http',
         summary: 'retry remote request'
       })
-      database.markManagedCallRunning(callId, thread.id)
-      database.finishManagedCall({
+      database.managed.markManagedCallRunning(callId, thread.id)
+      database.managed.finishManagedCall({
         callId,
         threadId: thread.id,
         status: 'uncertain',
@@ -969,7 +971,7 @@ describe('ManagedCallService', () => {
         control.markRunning()
         return 'retried result'
       })
-      await expect(runWithCurrentAgentToolEffect(scope, () => new ManagedCallService(database).start({
+      await expect(runWithCurrentAgentToolEffect(scope, () => new ManagedCallService(database.managed, database.results).start({
         kind: 'http',
         threadId: thread.id,
         runId: run.id,
@@ -977,7 +979,7 @@ describe('ManagedCallService', () => {
         execute
       }))).resolves.toBe('retried result')
       expect(execute).toHaveBeenCalledOnce()
-      expect(database.getManagedCall(callId, thread.id)).toMatchObject({
+      expect(database.managed.getManagedCall(callId, thread.id)).toMatchObject({
         status: 'completed',
         result: 'retried result'
       })
@@ -987,10 +989,10 @@ describe('ManagedCallService', () => {
   })
 
   it('keeps a fast uncertain outcome as a durable call instead of a normal result', async () => {
-    const database = AgentDatabase.open(':memory:')
+    const database = openDatabase(':memory:')
     try {
       const { thread, run } = createRun(database, 'fast-uncertain')
-      const service = new ManagedCallService(database)
+      const service = new ManagedCallService(database.managed, database.results)
       const handle = JSON.parse(await service.start({
         kind: 'http',
         threadId: thread.id,
@@ -1022,8 +1024,8 @@ describe('ManagedCallService', () => {
 
   it.each([false, true])('retains late output and outcomes after cancellation times out (remote uncertainty: %s)', async (remote) => {
     vi.useFakeTimers()
-    const database = AgentDatabase.open(':memory:')
-    const service = new ManagedCallService(database)
+    const database = openDatabase(':memory:')
+    const service = new ManagedCallService(database.managed, database.results)
     const completion = deferred<string>()
     try {
       const { thread, run } = createRun(database, 'cancel-timeout')
@@ -1058,7 +1060,7 @@ describe('ManagedCallService', () => {
       completion.resolve('late result')
       await service.waitForIdle()
       expect(JSON.parse(await waiting)).toMatchObject({ terminal: true, status: remote ? 'uncertain' : 'cancelled' })
-      expect(database.getManagedCall(handle.call_id, thread.id)).toMatchObject({
+      expect(database.managed.getManagedCall(handle.call_id, thread.id)).toMatchObject({
         outputChars: 'before\nafter\n'.length, result: 'late result', outcome: { ok: true, exit_code: 0 }
       })
     } finally { completion.resolve('done'); await service.waitForIdle(); database.close() }
@@ -1066,10 +1068,10 @@ describe('ManagedCallService', () => {
 
   it('tracks a noncooperative preparation after cancellation times out', async () => {
     vi.useFakeTimers()
-    const database = AgentDatabase.open(':memory:')
+    const database = openDatabase(':memory:')
     try {
       const { thread, run } = createRun(database, 'pre-dispatch-timeout')
-      const service = new ManagedCallService(database)
+      const service = new ManagedCallService(database.managed, database.results)
       const completion = deferred<string>()
       const starting = service.start({
         kind: 'shell',
@@ -1099,8 +1101,8 @@ describe('ManagedCallService', () => {
 
   it('waits for actual run executor settlement independently of other runs after shutdown cancellation', async () => {
     vi.useFakeTimers()
-    const database = AgentDatabase.open(':memory:')
-    const service = new ManagedCallService(database)
+    const database = openDatabase(':memory:')
+    const service = new ManagedCallService(database.managed, database.results)
     const finishing = [deferred<string>(), deferred<string>()]
     try {
       const owners = [createRun(database, 'local-shutdown-one'), createRun(database, 'local-shutdown-two')]
@@ -1119,7 +1121,7 @@ describe('ManagedCallService', () => {
       const shutdown = service.shutdown()
       await vi.advanceTimersByTimeAsync(5_000)
       expect(await shutdown).toEqual({ uncertainCallIds: [], lingeringCallIds: ids })
-      expect(database.getManagedCall(ids[0], owners[0].thread.id)?.status).toBe('running')
+      expect(database.managed.getManagedCall(ids[0], owners[0].thread.id)?.status).toBe('running')
       let firstIdle = false
       let allIdle = false
       const runIdle = service.waitForRunIdle(owners[0].run.id).then(() => { firstIdle = true })
@@ -1133,7 +1135,7 @@ describe('ManagedCallService', () => {
       expect(allIdle).toBe(false)
       expect(service.hasActiveForRun(owners[0].run.id)).toBe(false)
       expect(service.hasActiveForRun(owners[1].run.id)).toBe(true)
-      expect(database.getManagedCall(ids[0], owners[0].thread.id)).toMatchObject({ status: 'completed', result: 'confirmed first commit' })
+      expect(database.managed.getManagedCall(ids[0], owners[0].thread.id)).toMatchObject({ status: 'completed', result: 'confirmed first commit' })
       finishing[1].resolve('confirmed second commit')
       await idle
     } finally {
@@ -1144,25 +1146,25 @@ describe('ManagedCallService', () => {
   })
 
   it('keeps reporting a persisted unresolved uncertain call across cancellation retries', async () => {
-    const database = AgentDatabase.open(':memory:')
+    const database = openDatabase(':memory:')
     try {
       const { thread, run } = createRun(database, 'persistent-uncertain')
-      database.createManagedCall({
+      database.managed.createManagedCall({
         id: '11111111-1111-8111-8111-111111111111',
         threadId: thread.id,
         runId: run.id,
         kind: 'http',
         summary: 'uncertain mutation'
       })
-      database.markManagedCallRunning('11111111-1111-8111-8111-111111111111', thread.id)
-      database.finishManagedCall({
+      database.managed.markManagedCallRunning('11111111-1111-8111-8111-111111111111', thread.id)
+      database.managed.finishManagedCall({
         callId: '11111111-1111-8111-8111-111111111111',
         threadId: thread.id,
         status: 'uncertain',
         error: 'The remote outcome is unknown.'
       })
-      database.markManagedCallDetached('11111111-1111-8111-8111-111111111111', thread.id)
-      const service = new ManagedCallService(database)
+      database.managed.markManagedCallDetached('11111111-1111-8111-8111-111111111111', thread.id)
+      const service = new ManagedCallService(database.managed, database.results)
       const expected = {
         uncertainCallIds: ['11111111-1111-8111-8111-111111111111'],
         lingeringCallIds: []

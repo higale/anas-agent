@@ -45,11 +45,12 @@ import type {
   AgentThreadUpdate,
   AgentWorkspaceState
 } from '@shared/agentTypes'
-import { appendRunSettledEvent } from './runSettlementEvents'
 import { compactToolCallProgress } from '@shared/agentEventReplay'
-import { AgentDatabase, type AgentSubagentCallRecord } from './agentDatabase'
-import { AgentRuntimeCoordinator } from './agentRuntimeCoordinator'
+import type { AgentSubagentCallRecord } from './subagentTaskStore'
+import type { AgentApplicationReadModel } from './agentApplicationTypes'
+import { NativeRuntimeCoordinator } from './nativeRuntimeCoordinator'
 import { AgentStorage } from './agentStorage'
+import type { NativeConversationDatabase } from './nativeConversationDatabase'
 import { withConversationLeaseScope } from './agentConversationLease'
 import { getDataDir } from '../config/dataDir'
 import {
@@ -72,8 +73,8 @@ import { handleMainIpc } from '../ipcSecurity'
 import { dialogParentFromEvent, showModalSaveDialog } from '../modalDialog'
 import { userInputService } from './userInputService'
 
-let storage: AgentStorage | undefined
-let runtime: AgentRuntimeCoordinator | undefined
+let storage: AgentStorage<NativeConversationDatabase> | undefined
+let runtime: NativeRuntimeCoordinator | undefined
 type AgentRuntimeLifecycle = 'open' | 'closing' | 'closed'
 let agentRuntimeLifecycle: AgentRuntimeLifecycle = 'open'
 let agentRuntimeCloseAttempt: Promise<boolean> | undefined
@@ -86,7 +87,6 @@ const inactiveReplayRunIds = new Set<string>()
 const activeReplaySubagentIds = new Map<string, Set<string>>()
 const agentEventReplayCapacity = 4_096
 let agentEventRevision = 0
-const pendingEventForwarders = new Set<Promise<void>>()
 const pendingRunSubmissions = new Map<string, Promise<AgentRunSubmission>>()
 let pendingWorkspaceMutations: Promise<void> = Promise.resolve()
 const maximumModelRequestPreviewBytes = 32 * 1024 * 1024
@@ -100,9 +100,9 @@ async function gitViewRead<T>(read: () => Promise<T>, defaultCode: GitReadErrorC
   }
 }
 
-function currentStorage(): AgentStorage {
+function currentStorage(): AgentStorage<NativeConversationDatabase> {
   if (runtime) return runtime.storageForOperation()
-  if (!storage) storage = AgentStorage.open(getDataDir(), (ownerThreadId, runId) => {
+  if (!storage) storage = AgentStorage.openNative(getDataDir(), (ownerThreadId, runId) => {
     if (agentRuntimeLifecycle !== 'open') return
     try {
       publishAgentEvent({ type: 'file_changes', runId, threadId: ownerThreadId })
@@ -113,12 +113,12 @@ function currentStorage(): AgentStorage {
   return storage
 }
 
-function currentDatabase(threadId?: string): AgentDatabase {
-  return threadId ? currentRuntime().databaseForThread(threadId) : currentStorage().previewDatabase()
+function currentDatabase(threadId?: string): AgentApplicationReadModel {
+  return (threadId ? currentRuntime().databaseForThread(threadId) : currentStorage().previewDatabase()).readModel
 }
 
-function currentRuntime(): AgentRuntimeCoordinator {
-  if (!runtime) runtime = new AgentRuntimeCoordinator(currentStorage(), publishAgentEvent)
+function currentRuntime(): NativeRuntimeCoordinator {
+  if (!runtime) runtime = new NativeRuntimeCoordinator(currentStorage(), { push: publishAgentEvent })
   return runtime
 }
 
@@ -146,7 +146,7 @@ function hydrateActiveReplaySubagents(runId: string): void {
     const parentRunId = pendingRunIds.shift()
     if (!parentRunId || visitedRunIds.has(parentRunId)) continue
     visitedRunIds.add(parentRunId)
-    for (const call of database.listSubagentCallsForParentRun(parentRunId)) {
+    for (const call of database.resources.listSubagentCallsForParentRun(parentRunId)) {
       pendingRunIds.push(call.childRunId)
       if (activeSubagentStatus(call.status)) activeIds.add(call.id)
     }
@@ -277,28 +277,6 @@ function subscribeAgentEvents(
   }
 }
 
-async function forwardEvents(
-  events: AsyncIterable<AgentRuntimeEvent>
-): Promise<void> {
-  for await (const event of events) publishAgentEvent(event)
-}
-
-function startForwardingEvents(
-  sender: WebContents,
-  events: AsyncIterable<AgentRuntimeEvent>
-): void {
-  subscribeAgentEvents(sender)
-  const task = forwardEvents(appendRunSettledEvent(events))
-  pendingEventForwarders.add(task)
-  void task.then(
-    () => pendingEventForwarders.delete(task),
-    (reason) => {
-      pendingEventForwarders.delete(task)
-      runtimeLog('error', 'agent', 'Failed to forward runtime events to the renderer.', { error: reason })
-    }
-  )
-}
-
 function finishAgentIpcOperation(): void {
   activeAgentIpcOperations -= 1
   if (activeAgentIpcOperations !== 0) return
@@ -380,12 +358,6 @@ function enqueueWorkspaceMutation<T>(mutation: () => Promise<T>): Promise<T> {
   return result
 }
 
-async function drainEventForwarders(): Promise<void> {
-  while (pendingEventForwarders.size > 0) {
-    await Promise.allSettled([...pendingEventForwarders])
-  }
-}
-
 async function settlesWithin(promise: Promise<unknown>, timeoutMs: number): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
@@ -420,13 +392,11 @@ function beginAgentRuntimeClose(timeoutMs: number): Promise<boolean> {
 
   return (async () => {
     if (!await settlesWithin(acceptedWork, timeoutMs)) return false
-    let remainingMs = Math.max(0, timeoutMs - (Date.now() - startedAt))
+    const remainingMs = Math.max(0, timeoutMs - (Date.now() - startedAt))
     const shutdownResult = runtime
       ? await runtime.shutdown({ timeoutMs: remainingMs })
       : { drained: true }
     if (!shutdownResult?.drained) return false
-    remainingMs = Math.max(0, timeoutMs - (Date.now() - startedAt))
-    if (!await settlesWithin(drainEventForwarders(), remainingMs)) return false
     runtime = undefined
     storage?.close()
     storage = undefined
@@ -777,8 +747,8 @@ export function registerAgentIpcHandlers(): void {
         executionInput.text = codeReviewPrompt(executionInput.codeReview)
         delete executionInput.displayText
       }
+      subscribeAgentEvents(event.sender)
       const result = await currentRuntime().submitRunWithAttachments(executionInput)
-      if (result.events) startForwardingEvents(event.sender, result.events)
       return {
         thread: result.thread,
         run: result.run,
@@ -836,29 +806,25 @@ export function registerAgentIpcHandlers(): void {
       throw new Error('Context compression is unavailable in simple chat mode.')
     }
     const runId = randomUUID()
-    const events = currentRuntime().startCompression(threadId, runId)
-    const run = currentDatabase(threadId).getRun(runId)
-    if (!run) throw new Error(`Compression run ${runId} was not created.`)
-    startForwardingEvents(event.sender, events)
+    subscribeAgentEvents(event.sender)
+    const { run } = await currentRuntime().startCompression(threadId, runId)
     return run
   })
   handleAgentIpc('agent:runs:recover', (
     event,
     threadId: string
   ): boolean => {
-    const events = currentRuntime().recoverRun(threadId)
-    if (!events) return false
-    startForwardingEvents(event.sender, events)
+    subscribeAgentEvents(event.sender)
+    const dispatch = currentRuntime().recoverRun(threadId)
+    if (!dispatch) return false
     return true
   })
   handleAgentIpc('agent:runs:resume', async (
     event,
     input: AgentResumeInput
   ): Promise<AgentRun> => {
-    const events = await currentRuntime().resumeRun(input)
-    const run = currentDatabase(input.threadId).getRun(input.runId)
-    if (!run) throw new Error(`Run ${input.runId} was not found.`)
-    startForwardingEvents(event.sender, events)
+    subscribeAgentEvents(event.sender)
+    const { run } = await currentRuntime().resumeRun(input)
     return run
   })
   handleAgentIpc('agent:runs:steer', (
@@ -885,10 +851,10 @@ export function registerAgentIpcHandlers(): void {
     event,
     input: AgentMessageRegenerateInput
   ): Promise<AgentRun> => {
-    const { run, events } = await currentRuntime().regenerateMessage(
+    subscribeAgentEvents(event.sender)
+    const { run } = await currentRuntime().regenerateMessage(
       createAgentMessageRegenerateExecutionInput(input)
     )
-    startForwardingEvents(event.sender, events)
     return run
   })
   handleAgentIpc('agent:messages:loadEarlier', async (

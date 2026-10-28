@@ -22,6 +22,7 @@ const applicationDataIpcPrefixes = [
   'mcp:',
   'projects:',
   'skills:',
+  'subagents:',
   'tools:'
 ] as const
 

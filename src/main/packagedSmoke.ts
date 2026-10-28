@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { mkdir, mkdtemp, open, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import http from 'node:http'
 import https from 'node:https'
 import net from 'node:net'
@@ -53,7 +54,7 @@ export async function runPackagedSmoke(): Promise<void> {
       }
     } finally { await imageFile.close() }
     app.setPath('documents', documents)
-    configureDataRuntime([process.execPath, '--data-dir', root])
+    configureDataRuntime([process.execPath, '--data-dir=' + root])
     const { initializeBundledExamples } = await import('./bundledExamples')
     const { PluginStore } = await import('./plugins/pluginStore')
     await initializeBundledExamples()
@@ -121,9 +122,10 @@ export async function runPackagedSmoke(): Promise<void> {
       onResult: (result) => { terminalSucceeded = result.ok } })
     await terminalInputResult
     if (!terminalSucceeded || !terminalOutput.includes('PTY_REPLY:中文 smoke')) throw new Error(`Packaged terminal probe failed: ${terminalOutput}`)
-    const [{ AgentDatabase }, { createAgentInstance }, appConfig] = await Promise.all([
-      import('./agent/agentDatabase'),
-      import('./agent/agentFactory'),
+    const [{ AgentStorage }, { NativeRuntimeCoordinator }, { createAgentRunSubmissionExecutionInput }, appConfig] = await Promise.all([
+      import('./agent/agentStorage'),
+      import('./agent/nativeRuntimeCoordinator'),
+      import('./agent/agentRunInput'),
       import('./config/appConfig')
     ])
     await appConfig.initializeAppProfile()
@@ -144,32 +146,51 @@ export async function runPackagedSmoke(): Promise<void> {
       parameters: {},
       parameterPresetMode: 'none',
       capabilities: { vision: false, toolUse: true },
-      stream: true,
-      maxContextTokens: 16_000,
+      stream: false,
+      maxContextTokens: 64_000,
       maxOutputTokens: 2_000,
       contextCompressionThreshold: 0.8,
       contextCompressionEnabled: true
     })
     const smokeModel = modelConfig.providers.find((entry) => entry.id === provider.id)?.models.at(-1)
     if (!smokeModel) throw new Error('Packaged Agent smoke did not create its model configuration.')
-    const database = AgentDatabase.open(':memory:', join(root, 'attachments'))
+    let requests = 0
+    let storage = AgentStorage.openNative(root)
+    const runtime = new NativeRuntimeCoordinator(storage, { push() {} }, { prepareWorkspace: false,
+      providerFetch: async (_url, init) => {
+        const request = JSON.parse(String(init?.body))
+        if (request.model !== 'packaged-smoke' || request.stream !== false) throw new Error('Packaged native model request is invalid.')
+        requests++
+        return new Response(JSON.stringify({ id: 'smoke-' + requests, object: 'chat.completion', created: 1,
+          model: request.model, choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'Native smoke answer ' + requests } }],
+          usage: { prompt_tokens: 20, completion_tokens: 5, total_tokens: 25 } }), { headers: { 'content-type': 'application/json' } })
+      } })
     try {
-      const thread = database.createThread({ title: 'Packaged smoke', modelConfigId: smokeModel.id })
-      const run = database.createRun(thread.id, 'Packaged runtime assembly smoke')
-      const instance = await createAgentInstance(thread, database, {
-        requestId: run.id,
-        prepareWorkspace: false
-      })
-      try {
-        if (!instance.agent || database.getThread(thread.id)?.id !== thread.id) {
-          throw new Error('Packaged Agent smoke did not create its runtime state.')
-        }
-      } finally {
-        await instance.dispose()
-      }
+      const input = createAgentRunSubmissionExecutionInput({ requestId: randomUUID(), text: 'Packaged runtime smoke',
+        newThread: { title: 'Packaged smoke', modelConfigId: smokeModel.id } })
+      const first = await runtime.submitRunWithAttachments(input)
+      if (!first.handle) throw new Error('Packaged native run was not dispatched.')
+      const firstOutcome = await first.handle.completed
+      if (firstOutcome.status !== 'completed') throw new Error('Packaged native run did not complete: ' + (firstOutcome.error ?? firstOutcome.status))
+      await first.handle.drained
+      const second = await runtime.submitRunWithAttachments(createAgentRunSubmissionExecutionInput({ requestId: randomUUID(),
+        threadId: first.thread.id, text: 'Continue the same conversation' }))
+      if (!second.handle) throw new Error('Packaged native continuation was not dispatched.')
+      const secondOutcome = await second.handle.completed
+      if (secondOutcome.status !== 'completed') throw new Error('Packaged native continuation did not complete: ' + (secondOutcome.error ?? secondOutcome.status))
+      await second.handle.drained
+      const duplicate = await runtime.submitRunWithAttachments(input)
+      if (duplicate.run.id !== first.run.id || requests !== 2) throw new Error('Packaged native submission was replayed.')
+      if (!(await runtime.shutdown()).drained) throw new Error('Packaged native runtime did not drain.')
+      storage.close()
+      storage = AgentStorage.openNative(root)
+      const snapshot = storage.conversationForThread(first.thread.id).readSnapshot(first.thread.id)
+      if (snapshot.messages.filter(message => message.role === 'assistant').length !== 2
+        || !JSON.stringify(snapshot.messages).includes('Native smoke answer 2')) throw new Error('Packaged native history did not survive reopening.')
       process.stdout.write('ANAS_PACKAGED_SMOKE_OK\n')
     } finally {
-      database.close()
+      await runtime.shutdown()
+      storage.close()
     }
   } finally {
     await rm(root, { recursive: true, force: true })

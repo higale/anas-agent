@@ -25,4 +25,14 @@ if (result.status !== 0 || problems.length > 0) {
   ].filter(Boolean).join('\n'))
 }
 
+function verifyExecutionDependencies(node) {
+  for (const [name, dependency] of Object.entries(node.dependencies ?? {})) {
+    if (/^(?:@langchain\/|(?:langchain|deepagents)$)/.test(name)) {
+      throw new Error(`Retired execution framework remains installed: ${name}`)
+    }
+    verifyExecutionDependencies(dependency)
+  }
+}
+verifyExecutionDependencies(tree)
+
 console.log('Dependency tree verified: no missing, invalid, or extraneous packages.')

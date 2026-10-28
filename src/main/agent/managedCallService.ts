@@ -1,20 +1,21 @@
+import { ToolInputError } from '../../runtime/errors'
 import { randomUUID } from 'node:crypto'
 import { AsyncResource } from 'node:async_hooks'
-import { ToolInputParsingException } from '@langchain/core/tools'
 import PQueue from 'p-queue'
 import type {
   AgentManagedCallKind,
   AgentManagedCallOutputChunk,
   AgentManagedCallRecord,
-  AgentDatabase
-} from './agentDatabase'
+  ManagedCallStore
+} from './managedCallStore'
 import {
   armCurrentAgentToolEffect,
   currentAgentToolEffectArtifactId,
   deferCurrentManagedCallResult
 } from './toolEffectScope'
 import { runtimeLog } from '../runtimeLogger'
-import { decodeManagedToolResult, decodeManagedToolResultSync, isManagedToolResultReference, managedToolText } from './managedToolResult'
+import { isManagedToolResultReference, toolResultText } from '../../runtime/toolResultMessage'
+import type { ConversationMessage } from '../../runtime/conversationMessage'
 import { terminalActionSchema, type TerminalAction } from '@shared/terminal'
 import type { ShellTerminalControl } from '../ptyShellSupervisor'
 
@@ -41,6 +42,7 @@ const terminalStatuses = new Set<AgentManagedCallRecord['status']>([
 ])
 
 export interface ManagedCallControl {
+  readonly callId: string
   setTerminal?(terminal: ShellTerminalControl): void
   readonly signal: AbortSignal
   readonly dispatched?: boolean
@@ -155,7 +157,7 @@ function isTerminal(call: AgentManagedCallRecord): boolean {
 
 function resultOutputChars(call: AgentManagedCallRecord): number {
   const count = call.outcome?.result_output_chars
-  if (!call.result || call.outcome?.result_format !== 'langchain'
+  if (!call.result || call.outcome?.result_format !== 'conversation'
     || typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0) return 0
   try { return isManagedToolResultReference(JSON.parse(call.result)) ? count : 0 } catch { return 0 }
 }
@@ -217,7 +219,15 @@ export class ManagedCallService {
   private readonly executionQueue = new PQueue({ concurrency: maximumActiveCalls })
   private readonly serialGroups = new Map<string, PQueue>()
 
-  constructor(private readonly database: AgentDatabase) {}
+  constructor(private readonly database: Pick<ManagedCallStore,
+    'appendManagedCallOutputBatch' | 'createManagedCall' | 'deleteManagedCall' | 'finishManagedCall' |
+    'getManagedCall' | 'listUnresolvedManagedCalls' | 'listUnresolvedManagedCallsForThread' |
+    'markManagedCallDetached' | 'markManagedCallRunning' | 'readManagedCallOutputRange' |
+    'resolveManagedCall' | 'updateManagedCallProgress'>, private readonly results: {
+    format: 'conversation'
+    read(reference: string, threadId: string): Promise<ConversationMessage>
+    readSync(reference: string, threadId: string): ConversationMessage
+  }) {}
 
   async start(options: ManagedCallStartOptions): Promise<string> {
     if (this.shuttingDown) return callFailure('Background call service is shutting down.')
@@ -273,6 +283,7 @@ export class ManagedCallService {
     else options.parentSignal?.addEventListener('abort', parentAbort, { once: true })
 
     const control: ManagedCallControl = {
+      callId,
       setTerminal: (terminal) => {
         if ((options.kind !== 'shell' && options.kind !== 'custom') || !active.dispatched || active.cancelRequested || this.active.get(callId) !== active) throw new Error('The call cannot accept terminal control.')
         if (active.terminal) throw new Error('The call already owns a terminal instance.')
@@ -485,8 +496,8 @@ export class ManagedCallService {
 
   async readResult(callId: string, threadId: string) {
     const call = this.database.getManagedCall(callId, threadId)
-    if (!call?.result || call.outcome?.result_format !== 'langchain') return undefined
-    return decodeManagedToolResult(this.database, call.result, threadId)
+    if (!call?.result || call.outcome?.result_format !== this.results.format) return undefined
+    return this.results.read(call.result, threadId)
   }
 
   private async inQueue(queue: PQueue, signal: AbortSignal, execute: () => Promise<string>): Promise<string> {
@@ -542,8 +553,9 @@ export class ManagedCallService {
       stream: chunk.stream, start: chunk.startOffset, end: chunk.endOffset, text: chunk.text
     }))
     if (endOffset > startOffset && endOffset > call.outputChars && resultOutputChars(call) > 0) {
-      const message = decodeManagedToolResultSync(this.database, call.result!, call.threadId)
-      const text = managedToolText(message)
+      if (call.outcome?.result_format !== this.results.format) throw new Error('Managed result format does not match its owning storage.')
+      const message = this.results.readSync(call.result!, call.threadId)
+      const text = toolResultText(message)
       const start = Math.max(startOffset, call.outputChars)
       output.push({ stream: 'stdout', start, end: endOffset,
         text: text.slice(start - call.outputChars, endOffset - call.outputChars) })
@@ -647,7 +659,7 @@ export class ManagedCallService {
     const active = this.active.get(callId)
     if (!call || isTerminal(call) || !active || active.threadId !== threadId || active.cancelRequested
       || !active.terminal || active.terminal.id !== terminalId) {
-      throw new ToolInputParsingException('This live terminal instance is unavailable. Read the call status; do not resend input to a replacement process.')
+      throw new ToolInputError('This live terminal instance is unavailable. Read the call status; do not resend input to a replacement process.')
     }
     active.controller.signal.throwIfAborted()
     this.flushCurrentCall(callId, threadId)

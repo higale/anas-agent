@@ -144,7 +144,7 @@ describe('patch recovery finalization', { timeout: 20_000 }, () => {
 
   it.each(['source-verified', 'inverse-acknowledged', 'finalized'] as const)('resumes bookkeeping after a %s hard exit without rewriting later user edits', async (phase) => {
     const value = await fixture()
-    const crashed = spawnSync(process.execPath, [fileURLToPath(new URL('./agent/toolEffectHardCrashFixture.mjs', import.meta.url)), JSON.stringify({
+    const crashed = spawnSync(process.execPath, [fileURLToPath(new URL('./filePatchRecordCrashFixture.mjs', import.meta.url)), JSON.stringify({
       scenario: 'file_patch_store', finalize: true, phase, workspace: value.workspace, recordsRoot: value.store.root,
       sourceRequestId: value.requestId, sourceOperationId: value.source.operationId,
       requestId: value.inverseRequestId, operationId: value.inverse!.operationId, viteCacheDirectory: join(value.root, 'cache')

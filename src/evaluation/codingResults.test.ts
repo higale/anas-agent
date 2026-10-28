@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:f
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { AIMessage, ToolMessage } from '@langchain/core/messages'
+import type { ConversationMessage } from '../runtime/conversationMessage'
 import type { CodeReviewReport, CodeReviewSnapshot } from '@shared/codeReview'
 import { codingTasks } from './codingTasks'
 import { changedSources, checkModelRequest, checkTaskFiles, fixturePath, scoreReview, scriptBinding, snapshotFiles, sourceFingerprints, toolOutputFailed, toolResultsFromMessages, writeFixture } from './codingResults'
@@ -12,9 +12,9 @@ const sumTask = codingTasks.find((task) => task.id === 'empty-sum')!
 
 describe('coding evaluation oracles', () => {
   it('binds references from paired successful native tool results in the current input', () => {
-    const pair = (name: string, id: string, output: unknown, failed = false) => [
-      new AIMessage({ content: '', tool_calls: [{ name, id, args: {} }] }),
-      new ToolMessage({ content: JSON.stringify(output), name, tool_call_id: id, status: failed ? 'error' : 'success' })
+    const pair = (name: string, id: string, output: unknown, failed = false): ConversationMessage[] => [
+      { kind: 'assistant', content: '', calls: [{ name, id, args: {} }] },
+      { kind: 'tool', content: JSON.stringify(output), name, resultFor: id, resultStatus: failed ? 'error' : 'success' }
     ]
     const first = pair('apply_patch', 'patch-one', { ok: true, operationId: 'one', recoveryRequestId: 'restore-one' })
     const second = pair('apply_patch', 'patch-two', { ok: true, operationId: 'two', recoveryRequestId: 'restore-two' })
@@ -26,7 +26,7 @@ describe('coding evaluation oracles', () => {
     expect(() => scriptBinding(pair('start_subagent', 'child', { ok: true, subagent_id: 'child-id' }, true), 'subagent')).toThrow('current model input')
     expect(scriptBinding([...pair('start_subagent', 'child', { ok: true, subagent_id: 'child-id' }), ...unrelated], 'subagent'))
       .toEqual({ subagent_id: 'child-id' })
-    const mismatched = [first[0], new ToolMessage({ content: '{}', tool_call_id: 'patch-one', name: 'read_file' })]
+    const mismatched: ConversationMessage[] = [first[0], { kind: 'tool', content: '{}', resultFor: 'patch-one', name: 'read_file' }]
     expect(toolResultsFromMessages(mismatched)).toEqual([])
     expect(toolResultsFromMessages(pair('apply_patch', 'disabled', 'Unavailable tool', true))[0].failed).toBe(true)
   })

@@ -497,7 +497,7 @@ export class FileEditStore {
   }
 
   // Host recovery entry: use the original stable identity and whole-group
-  // authorization. The LangGraph effect middleware remains responsible for
+  // authorization. The native effect recovery flow is responsible for
   // obtaining any required recovery confirmation before invoking this service.
   async resumePatch(operationId: string, requestId: string, authorize: AuthorizeFilePatchRestore,
     signal?: AbortSignal): Promise<FilePatchEditRecord> {

@@ -7,15 +7,19 @@ import {
   backgroundTasksPendingError
 } from '@shared/backgroundCleanup'
 import type { AgentBackgroundCleanup } from '@shared/backgroundCleanup'
-import type { AgentDatabase, AgentSubagentCallRecord } from './agentDatabase'
+import type { AgentSubagentCallRecord } from './subagentTaskStore'
+import type { BackgroundTaskStore } from './backgroundTaskStore'
 import type { ManagedCallService } from './managedCallService'
+
+type BackgroundCleanupStorage = Pick<BackgroundTaskStore, 'getManagedCall' | 'hasUnresolvedManagedCallsForThread'
+  | 'listUnresolvedSubagentCallsForRun' | 'listDescendantSubagentCalls' | 'handoffBackgroundTasksToCleanup'>
 
 function detail(error: unknown): string {
   if (error instanceof AggregateError) return error.errors.map(detail).join('; ')
   return (error instanceof Error ? error.message : String(error)).replaceAll(/\s+/g, ' ').slice(0, 500)
 }
 
-export function hasUnresolvedBackgroundTasks(database: AgentDatabase, threadId: string): boolean {
+export function hasUnresolvedBackgroundTasks(database: BackgroundCleanupStorage, threadId: string): boolean {
   if (database.hasUnresolvedManagedCallsForThread(threadId)) return true
   const descendants = database.listDescendantSubagentCalls(threadId)
   if (descendants.some((call) => database.hasUnresolvedManagedCallsForThread(call.childThreadId))) return true
@@ -26,7 +30,7 @@ export function hasUnresolvedBackgroundTasks(database: AgentDatabase, threadId: 
 // Cancellation belongs to the executor, not to another model turn. Keep its
 // report in run metadata; conversation messages and tool results stay intact.
 export async function cleanupUnresolvedBackgroundTasks(options: {
-  database: AgentDatabase
+  database: BackgroundCleanupStorage
   managedCalls: ManagedCallService
   threadId: string
   runId: string

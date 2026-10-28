@@ -1,6 +1,6 @@
-import { ToolMessage } from '@langchain/core/messages'
 import { describe, expect, it } from 'vitest'
-import { toAgentMessage } from '../../../../main/agent/messageMapper'
+import { presentConversationMessage } from '../../../../main/agent/conversationPresentation'
+import { decodeExecutionValue, encodeExecutionValue } from '../../../../runtime/executionValue'
 import { toolResultImages } from './toolResultImages'
 
 const image = { type: 'image', mimeType: 'image/png', data: 'AA==' }
@@ -20,10 +20,10 @@ describe('tool result images', () => {
     { type: 'image_url', image_url: { url: src } },
     { type: 'image_url', image_url: src },
     { type: 'input_image', image_url: src }
-  ])('reads raw and persisted framework image content: $type', (block) => {
+  ])('reads raw and persisted conversation image content: $type', (block) => {
     expect(toolResultImages(block)).toEqual([src])
-    const native = new ToolMessage({ tool_call_id: 'capture', content: [block] })
-    const restored = toAgentMessage(native, 'capture-result')
+    const native = { kind: 'tool' as const, resultFor: 'capture', content: [block] }
+    const restored = presentConversationMessage(decodeExecutionValue(encodeExecutionValue(native)) as typeof native, 'capture-result')
     expect(toolResultImages(restored.content)).toEqual([src])
   })
 

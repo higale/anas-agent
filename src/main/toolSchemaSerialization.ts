@@ -1,5 +1,5 @@
-import { toJsonSchema } from '@langchain/core/utils/json_schema'
-import type { StructuredToolInterface } from '@langchain/core/tools'
+import { toolJsonSchema } from '../runtime/toolSchema'
+import type { ToolDefinition } from '../runtime/toolDefinition'
 import type { RuntimeToolDefinition } from '@shared/types'
 import { commandShellCapabilityId, isCommandShellMetadata } from '@shared/commandShell'
 
@@ -46,18 +46,12 @@ export function schemaParameters(schema: unknown): RuntimeToolDefinition['parame
 }
 
 export function toolInputSchema(schema: unknown): unknown {
-  const record = recordOf(schema)
-  if (record?.type === 'object' && recordOf(record.properties)) return schema
-  try {
-    return toJsonSchema(schema as Parameters<typeof toJsonSchema>[0])
-  } catch {
-    return schema
-  }
+  return toolJsonSchema(schema)
 }
 
-export function serializeStructuredTool(tool: StructuredToolInterface): RuntimeToolDefinition {
-  const inputSchema = toolInputSchema((tool as { schema?: unknown }).schema)
-  const metadata = recordOf((tool as { metadata?: unknown }).metadata)
+export function serializeToolDefinition(tool: Pick<ToolDefinition, 'name' | 'description' | 'inputSchema' | 'metadata'>): RuntimeToolDefinition {
+  const inputSchema = toolInputSchema(tool.inputSchema)
+  const metadata = tool.metadata
   return {
     name: tool.name,
     ...(isCommandShellMetadata(metadata)

@@ -1,14 +1,30 @@
 import { createHash } from 'node:crypto'
-import { basename, dirname, isAbsolute } from 'node:path'
+import { isAbsolute, posix, win32 } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { z } from 'zod'
 import { maxFilePatchBatchBytes, maxFilePatchOperations } from './filePatch'
 import { maxPatchInputBytes } from './fileEditDiff'
-import { isSameOrInsideDirectory, samePath } from './pathContainment'
+import { isSameOrInsideDirectory as containsPath, samePath as pathsEqual } from './pathContainment'
 import type { FilePatchTransaction } from './filePatchTransaction'
 
 const id = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
-const path = z.string().min(1).max(32768).refine((value) => isAbsolute(value) && !value.includes('\0'))
+// Saved paths describe the machine that performed the operation. Reading a
+// history/backup must not reinterpret Windows paths using the current host.
+function pathModule(value: string): typeof posix | undefined {
+  if (/^[a-z]:[\\/]|^\\\\/i.test(value) && win32.isAbsolute(value)) return win32
+  return posix.isAbsolute(value) ? posix : undefined
+}
+function dirname(value: string): string { return pathModule(value)!.dirname(value) }
+function basename(value: string): string { return pathModule(value)!.basename(value) }
+function samePath(left: string, right: string): boolean {
+  const paths = pathModule(left)
+  return !!paths && paths === pathModule(right) && pathsEqual(left, right, paths, paths === win32)
+}
+function isSameOrInsideDirectory(base: string, target: string): boolean {
+  const paths = pathModule(base)
+  return !!paths && paths === pathModule(target) && containsPath(base, target, paths, paths === win32)
+}
+const path = z.string().min(1).max(32768).refine((value) => !!pathModule(value) && !value.includes('\0'))
 const integer = z.number().int().nonnegative().safe()
 const decimal = z.string().regex(/^\d+$/)
 const hash = z.string().regex(/^[0-9a-f]{64}$/)
@@ -255,4 +271,19 @@ export function patchRecordNeedsRetention(record: FilePatchEditRecord): boolean 
   if (transaction.state === 'prepared') return transaction.temporary.length > 0 || transaction.directories.length > 0
   return !['applied', 'restored', 'resolved'].includes(transaction.state) || transaction.temporary.length > 0
     || (transaction.state !== 'applied' && transaction.directories.length > 0)
+}
+
+// Parsing historical evidence does not authorize filesystem access on this host.
+// Call before restore, resume or cleanup touches any saved external path.
+export function assertLocalPatchTransaction(record: FilePatchTransaction): void {
+  const nativePaths = process.platform === 'win32' ? win32 : posix
+  const paths = record.entries.flatMap(entry => [entry.before, entry.after, entry.compensated]
+    .flatMap(image => image ? [image.target.lexicalPath, image.target.canonicalPath, image.parent.path] : []))
+  for (const entry of [...record.temporary, ...record.directories]) {
+    paths.push(entry.path)
+    if (entry.identity) paths.push(entry.identity.path)
+  }
+  if (paths.some(value => !isAbsolute(value) || pathModule(value) !== nativePaths)) {
+    throw new Error('File operation contains paths from another platform; historical records remain available, but cannot be applied on this host.')
+  }
 }

@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { toAgentMessage, toHumanMessage } from './agent/messageMapper'
+import { presentConversationMessage } from './agent/conversationPresentation'
 
 const tempDirs: string[] = []
 
@@ -219,10 +219,10 @@ describe('skillsStore', () => {
     expect(invocation.promptText).toContain(`<skill>\n<name>summarize</name>\n<path>${join(directory, 'SKILL.md')}</path>\n${contents}\n</skill>`)
     expect(invocation.promptText.startsWith('/summarize the report\n\n')).toBe(true)
     expect(invocation.promptText).not.toContain('RESOURCE_BODY_ONLY_LOADED_ON_DEMAND')
-    const message = toHumanMessage(invocation.promptText, undefined, invocation.displayText)
-    const projected = toAgentMessage(message, 'skill-message')
+    const message = { kind: 'user' as const, content: invocation.promptText, context: { displayText: invocation.displayText } }
+    const projected = presentConversationMessage(message, 'skill-message')
     expect(projected.content).toEqual([{ type: 'text', text: '/summarize the report' }])
-    expect(projected.skillInvocation?.promptText).toBe(message.text)
+    expect(projected.skillInvocation?.promptText).toBe(message.content)
     expect(projected.skillInvocation?.promptText).toBe(invocation.promptText)
 
     await writeText(join(directory, 'SKILL.md'), skillText('summarize', 'Summary', 'Updated instructions.'))
@@ -350,7 +350,12 @@ describe('skillsStore', () => {
   it('settles every started mirror before rejecting initialization and allowing a retry', async () => {
     const fs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
     const failure = new Error('Injected configuration copy failure')
-    const copyConfig = vi.fn(fs.copyFile).mockRejectedValueOnce(failure)
+    let notifyConfigFailed!: () => void
+    const configFailed = new Promise<void>((resolve) => { notifyConfigFailed = resolve })
+    const copyConfig = vi.fn(fs.copyFile).mockImplementationOnce(async () => {
+      notifyConfigFailed()
+      throw failure
+    })
     let releaseMirror!: () => void
     const mirrorAllowed = new Promise<void>((resolve) => { releaseMirror = resolve })
     let notifyMirrorStarted!: () => void
@@ -368,7 +373,7 @@ describe('skillsStore', () => {
       () => { returned = true; return undefined },
       (reason: unknown) => { returned = true; return reason }
     )
-    await mirrorStarted
+    await Promise.all([mirrorStarted, configFailed])
     const sameAttempt = fixture.store.initializeSkillsStore().catch((reason: unknown) => reason)
     try {
       expect(returned).toBe(false)

@@ -1,3 +1,5 @@
+import { toolEffectArtifactPurposes, type ToolEffectArtifactIdentity } from '../runtime/toolEffectIdentity'
+import { invokeCapability } from '../runtime/toolInvocation'
 import { randomUUID } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -10,21 +12,24 @@ import { parseFilePatch, resolveFilePatchTargets } from './filePatch'
 import { asPatchInput } from './filePatchTestFixtures'
 import { captureFilePatchPreimages } from './filePatchState'
 import { executeFilePatchTransaction, type FilePatchTransaction } from './filePatchTransaction'
-import { agentToolEffectArtifactId, runWithCurrentAgentToolEffect } from './agent/toolEffectScope'
-import { createFileTools } from './llm/fileTools'
-import { AgentDatabase } from './agent/agentDatabase'
+import { runWithCurrentAgentToolEffect } from './agent/toolEffectScope'
+import { fileToolDefinitions } from './llm/fileTools'
+import { AgentStorage } from './agent/agentStorage'
 
 const roots: string[] = []
-const databases: AgentDatabase[] = []
+const databases: AgentStorage[] = []
 afterEach(async () => {
   for (const database of databases.splice(0)) database.close()
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
 })
 async function recordedHistory(value: Awaited<ReturnType<typeof fixture>>) {
-  const database = AgentDatabase.open(':memory:'); databases.push(database)
-  database.createRun(database.createThread().id, value.requestId, 'agent', [], { kind: 'user', text: 'Inspect batch history' })
-  database.fileChanges.persist(await value.store.loadOperationRecord(value.operationId, value.requestId), true)
-  return database.fileChanges
+  const storage = AgentStorage.openNative(join(value.root, 'data')); databases.push(storage)
+  const thread = storage.createThread(), database = storage.conversationForThread(thread.id)
+  database.runs.createRun({ threadId: thread.id, runId: value.requestId, operation: 'agent', message: {
+    id: value.requestId + ':input', value: { id: value.requestId + ':input', kind: 'user', content: 'Inspect batch history', context: { runId: value.requestId } }
+  } })
+  database.resources.fileChanges.persist(await value.store.loadOperationRecord(value.operationId, value.requestId), true)
+  return database.resources.fileChanges
 }
 async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'anas-patch-record-')))
@@ -60,10 +65,10 @@ describe('durable batch operation records', () => {
       { type: 'create', path: 'server/index.ts', content: 'server\n' }
     ] }), value.workspace)
     await value.store.executePatch(resolved.input, await captureFilePatchPreimages(resolved.targets), value.requestId, { operationId: value.operationId })
-    const tool = createFileTools({ maxReadBytes: 1_000_000, primaryFolder: value.workspace, requestId: value.requestId, fileEditStore: value.store, fileChanges: await recordedHistory(value) })
+    const tool = fileToolDefinitions({ maxReadBytes: 1_000_000, primaryFolder: value.workspace, requestId: value.requestId, fileEditStore: value.store, fileChanges: await recordedHistory(value) })
       .find((item) => item.name === 'get_file_edit_diff')!
     for (const scope of ['operation', 'request']) {
-      const result = JSON.parse(String(await tool.invoke({ scope, operation_id: value.operationId })))
+      const result = JSON.parse(String((await invokeCapability(tool, { scope, operation_id: value.operationId }, {})).content))
       expect(result.patch).toContain('b/client/index.ts')
       expect(result.patch).toContain('b/server/index.ts')
       expect(result.patch).not.toContain('b/index.ts')
@@ -81,9 +86,9 @@ describe('durable batch operation records', () => {
       { tool: 'apply_patch', operationId: value.operationId },
       { tool: 'unavailable', operationId: damagedId, error: expect.stringContaining('Missing metadata') }
     ])
-    const tool = createFileTools({ maxReadBytes: 1_000_000, primaryFolder: value.workspace, requestId: value.requestId, fileEditStore: value.store })
+    const tool = fileToolDefinitions({ maxReadBytes: 1_000_000, primaryFolder: value.workspace, requestId: value.requestId, fileEditStore: value.store })
       .find((item) => item.name === 'get_file_edit_diff')!
-    const result = JSON.parse(String(await tool.invoke({ scope: 'retained' })))
+    const result = JSON.parse(String((await invokeCapability(tool, { scope: 'retained' }, {})).content))
     expect(result).toMatchObject({ ok: true, retained: [
       { operationId: value.operationId, paths: expect.any(Array) },
       { operationId: damagedId, state: 'unavailable', error: expect.any(String) }
@@ -92,7 +97,7 @@ describe('durable batch operation records', () => {
 
   it.each(['prepared', 'staged', 'intent', 'partial', 'applied'] as const)('reopens the real %s checkpoint after a hard process exit without replaying targets', async (phase) => {
     const value = await fixture()
-    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./agent/toolEffectHardCrashFixture.mjs', import.meta.url)), JSON.stringify({
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./filePatchRecordCrashFixture.mjs', import.meta.url)), JSON.stringify({
       scenario: 'file_patch_store', phase, workspace: value.workspace, recordsRoot: value.store.root,
       requestId: value.requestId, operationId: value.operationId, viteCacheDirectory: join(value.root, 'vite-cache')
     })], { cwd: process.cwd(), env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 20_000 })
@@ -139,18 +144,19 @@ describe('durable batch operation records', () => {
     expect(await readFile(join(value.workspace, 'old.txt'), 'utf8')).toBe('after\n')
   })
 
-  it('uses the effect key for stable identity and arms one effect containing every target', async () => {
+  it('uses saved call artifacts for stable identity and arms one effect containing every target', async () => {
     const value = await fixture()
-    const key = { runId: value.requestId, checkpointId: 'checkpoint', checkpointNs: '', taskId: 'task', callKey: 'call', inputHash: 'input' }
+    const identity: ToolEffectArtifactIdentity = { runId: value.requestId,
+      artifacts: Object.fromEntries(toolEffectArtifactPurposes.map(purpose => [purpose, randomUUID()])) as ToolEffectArtifactIdentity['artifacts'] }
     const arm = vi.fn()
-    const result = await runWithCurrentAgentToolEffect({ effectKey: key, arm }, () =>
+    const result = await runWithCurrentAgentToolEffect({ identity, arm }, () =>
       value.store.executePatch(value.input, value.preimages, value.requestId))
-    expect(result.operationId).toBe(agentToolEffectArtifactId(key, 'file_edit'))
+    expect(result.operationId).toBe(identity.artifacts.file_edit)
     expect(arm).toHaveBeenCalledExactlyOnceWith({ kind: 'file_patch', recoveryMode: 'confirm', target: {
       requestId: value.requestId, operationId: result.operationId,
       paths: value.preimages.map((entry) => entry.target.canonicalPath)
     } })
-    await expect(runWithCurrentAgentToolEffect({ effectKey: key, arm }, async () => {
+    await expect(runWithCurrentAgentToolEffect({ identity, arm }, async () => {
       const writer = value.store.createPatchPersistence(value.requestId)
       const initial = await preparedRecord({ ...value, operationId: result.operationId,
         preimages: await captureFilePatchPreimages((await resolveFilePatchTargets(asPatchInput({ operations: [
@@ -251,8 +257,8 @@ describe('durable batch operation records', () => {
     const value = await fixture()
     await value.store.executePatch(value.input, value.preimages, value.requestId, { operationId: value.operationId })
     await value.store.deleteFileEditRecordsForRequest(value.requestId, [value.operationId])
-    const tools = createFileTools({ maxReadBytes: 1_000_000, primaryFolder: value.workspace, requestId: value.requestId, fileEditStore: value.store, fileChanges: await recordedHistory(value) })
-    const invoke = async (name: string, args: Record<string, unknown>) => JSON.parse(String(await tools.find((item) => item.name === name)!.invoke(args)))
+    const tools = fileToolDefinitions({ maxReadBytes: 1_000_000, primaryFolder: value.workspace, requestId: value.requestId, fileEditStore: value.store, fileChanges: await recordedHistory(value) })
+    const invoke = async (name: string, args: Record<string, unknown>) => JSON.parse(String((await invokeCapability(tools.find((item) => item.name === name)!, args, {})).content))
     const diff = await invoke('get_file_edit_diff', { operation_id: value.operationId })
     expect(diff.patch).toContain('-before')
     expect(diff.patch).toContain('new file mode')

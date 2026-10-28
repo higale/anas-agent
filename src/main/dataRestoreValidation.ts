@@ -1,7 +1,7 @@
 import { validateRestoredTools } from './toolsStore'
 import { access, lstat, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import { AgentDatabase } from './agent/agentDatabase'
+import { NativeConversationDatabase } from './agent/nativeConversationDatabase'
 import { AgentStorage } from './agent/agentStorage'
 import { avatarTransformPath, readAvatarTransform } from './avatarAssets'
 import { normalizeAppConfigSnapshot } from './config/appConfig'
@@ -55,6 +55,6 @@ export async function validateRestoredDataDirectory(root: string): Promise<void>
   for (const id of conversationIds) {
     const file = getAgentConversationDatabaseFile(id, root)
     if (!(await lstat(file)).isFile()) throw new Error(`Conversation database is not a regular file: ${id}`)
-    AgentDatabase.validateBackup(file, getAgentAttachmentsDir(id, root), projectIds, id)
+    NativeConversationDatabase.validateBackup(file, getAgentAttachmentsDir(id, root), projectIds, id)
   }
 }

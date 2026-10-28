@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto'
+import { toolEffectArtifactPurposes, type ToolEffectArtifactIdentity } from '../runtime/toolEffectIdentity'
+import { nativeCapabilityFixture } from '../test/nativeCapabilityFixture'
 import { ChildProcess, execFileSync } from 'node:child_process'
 import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -8,10 +11,8 @@ vi.mock('./config/apiKeys', () => ({ loadDataEnv: vi.fn() }))
 vi.mock('./runtimeLogger', () => ({ runtimeLog: vi.fn() }))
 
 import { runPreparedProcess, runShellCommand, type PreparedProcess, type ShellRunResult } from './shellRuntime'
-import { AgentDatabase } from './agent/agentDatabase'
-import { ManagedCallService } from './agent/managedCallService'
 import { DetachedWindowsShellSupervisor } from './windowsDetachedShellSupervisor'
-import { agentToolEffectArtifactId, runWithCurrentAgentToolEffect } from './agent/toolEffectScope'
+import { runWithCurrentAgentToolEffect } from './agent/toolEffectScope'
 
 function prepared(command: string, workingDir: string): PreparedProcess {
   return {
@@ -35,12 +36,9 @@ describe('independent shell processes', () => {
     const root = await mkdtemp(join(tmpdir(), 'anas-independent-'))
     const proceed = join(root, 'continue')
     const completed = join(root, 'completed')
-    const database = AgentDatabase.open(':memory:')
-    const service = new ManagedCallService(database)
-    const thread = database.createThread({ title: 'Independent process' })
-    const run = database.createRun(thread.id, 'independent-run')
-    const scope = { effectKey: { runId: run.id, checkpointId: 'launch-checkpoint', checkpointNs: '',
-      taskId: 'launch-task', callKey: 'launch-call', inputHash: 'a'.repeat(64) }, arm: vi.fn() }
+    const h = nativeCapabilityFixture(), { database, service, thread, run } = h
+    const scope = { identity: { runId: run.id,
+      artifacts: Object.fromEntries(toolEffectArtifactPurposes.map(purpose => [purpose, randomUUID()])) as ToolEffectArtifactIdentity['artifacts'] }, arm: vi.fn() }
     const controller = new AbortController()
     let result: ShellRunResult | undefined
     try {
@@ -70,7 +68,7 @@ describe('independent shell processes', () => {
         stdoutPath: expect.any(String), stderrPath: expect.any(String) } })
       expect(result.exitCode).toBeUndefined()
       expect(service.hasActiveForThread(thread.id)).toBe(false)
-      expect(database.getManagedCall(agentToolEffectArtifactId(scope.effectKey, 'managed-call'), thread.id))
+      expect(database.managed.getManagedCall(scope.identity.artifacts['managed-call'], thread.id))
         .toMatchObject({ status: 'completed', outcome: { ok: true, local_commit_completed: true } })
       const replayExecute = vi.fn(async () => 'must not relaunch')
       const replay = await runWithCurrentAgentToolEffect(scope, () => service.start({
@@ -90,7 +88,7 @@ describe('independent shell processes', () => {
     } finally {
       await writeFile(proceed, '')
       await service.shutdown()
-      database.close()
+      await h.close()
       await cleanup(root, result)
     }
   }, 15_000)

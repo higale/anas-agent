@@ -73,7 +73,7 @@ async function verifyToolArguments(launchApplication) {
     await expect(summary).toContainText('100000')
     await expect(card.locator('.agent-activity-arguments')).toHaveCount(0)
     if (process.env.ANAS_E2E_ARGUMENTS_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_ARGUMENTS_SCREENSHOT })
-    await send({ ...common, type: 'model_tool_calls', modelId: model.id, progress: [{ ...progress, callId: 'tool', characterCount: 100_000, complete: true }] })
+    await send({ ...common, type: 'model_tool_calls', modelId: model.id, progress: [{ ...progress, callId: 'provider-tool', characterCount: 100_000, complete: true }] })
     await expect(summary).toHaveAttribute('aria-disabled', 'true')
     // A downward wheel at the bottom must not linger as upward intent when
     // reasoning automatically collapses at the model/tool transition.

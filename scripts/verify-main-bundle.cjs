@@ -21,6 +21,12 @@ if (!/\brequire\((['"])node-pty\1\)/.test(mainBundle)) {
   throw new Error('node-pty must remain external in the Electron main bundle.')
 }
 
+// The current product must not load a retired execution framework. Serialized
+// v0 names remain data for explicit migration, so inspect module imports only.
+const mainImports = [...mainBundle.matchAll(/\b(?:require|import)\s*\(\s*(['"])([^'"]+)\1\s*\)/g)].map(match => match[2])
+const retiredFramework = mainImports.find(id => /^(?:@langchain\/|(?:langchain|deepagents)(?:\/|$))/.test(id))
+if (retiredFramework) throw new Error(`The Electron main bundle imports a retired execution framework: ${retiredFramework}`)
+
 if (mainBundle.includes('Could not dynamically require')) {
   throw new Error('The Electron main bundle contains Rollup dynamic-require fallback code.')
 }

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { AgentRuntimeEvent } from '../../shared/agentTypes'
 
 vi.mock('../config/dataDir', () => ({ getDataDir: () => '/isolated-agent-ipc-data' }))
 
@@ -11,7 +12,8 @@ function runtimeForStorage<T extends object>(storage: { conversationForThread: (
 }
 
 function conversationStorage<T extends object>(database: T) {
-  return { ...database, conversationForThread: () => database, conversationForRun: () => database, previewDatabase: () => database }
+  const connection = { ...database, readModel: database, resources: database }
+  return { ...database, conversationForThread: () => connection, conversationForRun: () => connection, previewDatabase: () => connection }
 }
 
 afterEach(() => {
@@ -20,6 +22,50 @@ afterEach(() => {
 })
 
 describe('agent IPC recovery', () => {
+  it.each(['submit', 'compress', 'recover', 'resume', 'regenerate'] as const)(
+    'subscribes before %s dispatch and forwards direct host events exactly once', async (operation) => {
+      const handlers = new Map<string, (...args: unknown[]) => unknown>()
+      const handle = vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => { handlers.set(channel, handler) })
+      const thread = { id: 'thread', projectId: 'project', modelConfigId: 'model' }
+      const run = { id: 'run', threadId: thread.id, operation: 'agent' as const, status: 'running' as const,
+        createdAt: '2026-10-27T00:00:00.000Z', updatedAt: '2026-10-27T00:00:00.000Z' }
+      let publish!: (event: AgentRuntimeEvent) => void
+      const started: AgentRuntimeEvent = { type: 'run_started', run, newUserTurn: false }
+      const settled: AgentRuntimeEvent = { type: 'run_settled', runId: run.id, threadId: thread.id, operation: 'agent', status: 'completed' }
+      const dispatch = vi.fn(() => { publish(started); return { thread, run } })
+      const database = { getThread: () => thread }
+      vi.doMock('../ipcSecurity', () => ({ handleMainIpc: handle }))
+      vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: () => conversationStorage(database) } }))
+      vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: vi.fn(function (storage, sink) {
+        publish = sink.push
+        return runtimeForStorage(storage, { getRunSubmission: vi.fn(), submitRunWithAttachments: dispatch,
+          startCompression: dispatch, recoverRun: dispatch, resumeRun: dispatch, regenerateMessage: dispatch })
+      }) }))
+      vi.doMock('../projectStore', () => ({ getProject: async () => ({ kind: 'workspace' }), recoverProjectDeletion: vi.fn() }))
+      vi.doMock('../config/appConfig', () => ({ getAppConfigSnapshot: async () => ({}), findResolvedModelConfig: () => ({ id: 'model', capabilities: {} }) }))
+      vi.doMock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
+      const module = await import('./agentIpcHandlers')
+      module.registerAgentIpcHandlers()
+      const sender = { isDestroyed: () => false, send: vi.fn(), once: vi.fn() }
+      const channel = operation === 'regenerate' ? 'agent:messages:regenerate' : `agent:runs:${operation}`
+      const input = operation === 'compress' || operation === 'recover' ? thread.id : {
+        requestId: '718b5ec8-dbb4-4bd2-8dd0-d9073f14185d', threadId: thread.id, runId: run.id,
+        messageId: 'message', text: 'Continue', responses: []
+      }
+      const result = await handlers.get(channel)!({ sender }, input)
+      expect(result).toEqual(operation === 'recover' ? true : operation === 'submit' ? { thread, run } : run)
+      expect(dispatch).toHaveBeenCalledOnce()
+      expect(sender.send).toHaveBeenCalledExactlyOnceWith('agent:event', expect.objectContaining({ event: started }))
+      publish(settled)
+      await Promise.resolve()
+      expect(sender.send).toHaveBeenCalledTimes(2)
+      const replacement = { isDestroyed: () => false, send: vi.fn(), once: vi.fn() }
+      expect(handlers.get('agent:events:subscribe')!({ sender: replacement }, { afterRevision: 0 })).toMatchObject({
+        replayComplete: true, replay: [{ event: started }, { event: settled }]
+      })
+    }
+  )
+
   it('allows model changes during a run and rejects deleted selections when submitting again', async () => {
     const handlers = new Map<string, (...args: unknown[]) => unknown>()
     const handle = vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => { handlers.set(channel, handler) })
@@ -32,8 +78,8 @@ describe('agent IPC recovery', () => {
     const selectedModel = { id: 'model', capabilities: { vision: true }, parameterPresets: [] }
     const findResolvedModelConfig = vi.fn((_config, id) => id === 'model' ? selectedModel : undefined)
     vi.doMock('../ipcSecurity', () => ({ handleMainIpc: handle }))
-    vi.doMock('./agentStorage', () => ({ AgentStorage: { open: vi.fn(() => conversationStorage(database)) } }))
-    vi.doMock('./agentRuntimeCoordinator', () => ({ AgentRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, runtime) }) }))
+    vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: vi.fn(() => conversationStorage(database)) } }))
+    vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, runtime) }) }))
     vi.doMock('../config/appConfig', () => ({ getAppConfigSnapshot: vi.fn(async () => ({ defaultModelId: 'model' })), findResolvedModelConfig }))
     vi.doMock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
     const module = await import('./agentIpcHandlers')
@@ -60,8 +106,8 @@ describe('agent IPC recovery', () => {
       getSubagentActivity: vi.fn((_runId: string, id: string) => id === 'child' ? { id: 'child', result: 'complete result' } : undefined)
     }
     vi.doMock('../ipcSecurity', () => ({ handleMainIpc: handle }))
-    vi.doMock('./agentStorage', () => ({ AgentStorage: { open: vi.fn(() => conversationStorage(database)) } }))
-    vi.doMock('./agentRuntimeCoordinator', () => ({ AgentRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, { loadEarlierActivities }) }) }))
+    vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: vi.fn(() => conversationStorage(database)) } }))
+    vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, { loadEarlierActivities }) }) }))
     vi.doMock('../config/appConfig', () => ({ getAppConfigSnapshot: vi.fn(), findResolvedModelConfig: vi.fn() }))
     vi.doMock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
     const module = await import('./agentIpcHandlers')
@@ -91,8 +137,8 @@ describe('agent IPC recovery', () => {
     const result = { thread: { id: 'thread' }, run: { id: 'run' } }
     const runtime = { getRunSubmission: vi.fn(() => committed ? result : undefined), submitRunWithAttachments: vi.fn(async () => { committed = true; return result }) }
     vi.doMock('../ipcSecurity', () => ({ handleMainIpc: handle }))
-    vi.doMock('./agentStorage', () => ({ AgentStorage: { open: vi.fn(() => conversationStorage(database)) } }))
-    vi.doMock('./agentRuntimeCoordinator', () => ({ AgentRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, runtime) }) }))
+    vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: vi.fn(() => conversationStorage(database)) } }))
+    vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, runtime) }) }))
     vi.doMock('./codeReview', () => ({ captureCodeReview: capture, codeReviewPrompt: () => 'main-owned review prompt' }))
     vi.doMock('../config/appConfig', () => ({ getAppConfigSnapshot: vi.fn(async () => ({})), findResolvedModelConfig: vi.fn(() => ({ id: 'model', capabilities: { toolUse: true } })) }))
     vi.doMock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
@@ -102,8 +148,9 @@ describe('agent IPC recovery', () => {
       const submit = handlers.get('agent:runs:submit')!
       const review = { kind: 'recorded', threadId: 'thread', runId: 'source-run', version: 'a'.repeat(64), target: 'recorded' }
       const input = { requestId: '718b5ec8-dbb4-4bd2-8dd0-d9073f14185d', threadId: 'thread', text: 'Code review', displayText: 'Short title', review, codeReview: { id: 'renderer-owned' } }
-      await expect(submit({}, input)).resolves.toEqual(result)
-      await expect(submit({}, input)).resolves.toEqual(result)
+      const event = { sender: { once: vi.fn(), isDestroyed: () => false, send: vi.fn() } }
+      await expect(submit(event, input)).resolves.toEqual(result)
+      await expect(submit(event, input)).resolves.toEqual(result)
       expect(capture).toHaveBeenCalledExactlyOnceWith(database, review, 'project')
       expect(runtime.submitRunWithAttachments).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ codeReview: scope, text: 'main-owned review prompt' }))
       expect(runtime.submitRunWithAttachments).not.toHaveBeenCalledWith(expect.objectContaining({ displayText: expect.any(String) }))
@@ -118,8 +165,8 @@ describe('agent IPC recovery', () => {
     vi.doMock('../ipcSecurity', () => ({ handleMainIpc: handle }))
     vi.doMock('../gitChanges', () => ({ queryGitChanges }))
     vi.doMock('../projectStore', () => ({ getProject, recoverProjectDeletion: vi.fn() }))
-    vi.doMock('./agentStorage', () => ({ AgentStorage: { open: vi.fn() } }))
-    vi.doMock('./agentRuntimeCoordinator', () => ({ AgentRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, {}) }) }))
+    vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: vi.fn() } }))
+    vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, {}) }) }))
     vi.doMock('../config/appConfig', () => ({ getAppConfigSnapshot: vi.fn(), findResolvedModelConfig: vi.fn() }))
     vi.doMock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
     const module = await import('./agentIpcHandlers')
@@ -150,8 +197,8 @@ describe('agent IPC recovery', () => {
     const database = { getRun: vi.fn((id: string) => id === 'run' ? { threadId: 'thread' } : undefined), fileChanges: { queryRoundFiles: query } }
     vi.doMock('electron', () => ({ ipcMain: { handle } }))
     vi.doMock('../ipcSecurity', () => ({ handleMainIpc: handle }))
-    vi.doMock('./agentStorage', () => ({ AgentStorage: { open: vi.fn(() => conversationStorage(database)) } }))
-    vi.doMock('./agentRuntimeCoordinator', () => ({ AgentRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, {}) }) }))
+    vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: vi.fn(() => conversationStorage(database)) } }))
+    vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, {}) }) }))
     vi.doMock('../config/appConfig', () => ({ getAppConfigSnapshot: vi.fn(), findResolvedModelConfig: vi.fn() }))
     vi.doMock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
     const module = await import('./agentIpcHandlers')
@@ -188,8 +235,8 @@ describe('agent IPC recovery', () => {
 
     vi.doMock('electron', () => ({ ipcMain: { handle } }))
     vi.doMock('../ipcSecurity', () => ({ handleMainIpc: handle }))
-    vi.doMock('./agentStorage', () => ({ AgentStorage: { open: vi.fn(() => conversationStorage(database)) } }))
-    vi.doMock('./agentRuntimeCoordinator', () => ({ AgentRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, {}) }) }))
+    vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: vi.fn(() => conversationStorage(database)) } }))
+    vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, {}) }) }))
     vi.doMock('../config/appConfig', () => ({
       getAppConfigSnapshot: vi.fn(),
       findResolvedModelConfig: vi.fn()
@@ -267,19 +314,21 @@ describe('agent IPC recovery', () => {
     const forwardedEvent = {
       type: 'run_started' as const,
       run: durable.run,
-      newUserTurn: false
+      newUserTurn: false as const
     }
-    const events = (async function *() { yield forwardedEvent })()
+    let publish!: (event: AgentRuntimeEvent) => void
     let committed = false
     const getRunSubmission = vi.fn(() => committed ? durable : undefined)
     const submitRunWithAttachments = vi.fn(async () => {
       await barrier
       committed = true
-      return { ...durable, events }
+      publish(forwardedEvent)
+      return durable
     })
     const runtime = { getRunSubmission, submitRunWithAttachments }
     const database = { close: vi.fn() }
-    const AgentRuntime = vi.fn(function AgentRuntimeMock(storage) {
+    const AgentRuntime = vi.fn(function AgentRuntimeMock(storage, sink) {
+      publish = sink.push
       return runtimeForStorage(storage, runtime)
     })
     const firstSender = {
@@ -299,8 +348,8 @@ describe('agent IPC recovery', () => {
 
     vi.doMock('electron', () => ({ ipcMain: { handle } }))
     vi.doMock('../ipcSecurity', () => ({ handleMainIpc: handle }))
-    vi.doMock('./agentStorage', () => ({ AgentStorage: { open: vi.fn(() => conversationStorage(database)) } }))
-    vi.doMock('./agentRuntimeCoordinator', () => ({ AgentRuntimeCoordinator: AgentRuntime }))
+    vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: vi.fn(() => conversationStorage(database)) } }))
+    vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: AgentRuntime }))
     vi.doMock('../config/appConfig', () => ({
       getAppConfigSnapshot,
       findResolvedModelConfig
@@ -359,7 +408,7 @@ describe('agent IPC recovery', () => {
     const firstEvent = {
       type: 'run_started' as const,
       run,
-      newUserTurn: false
+      newUserTurn: false as const
     }
     const secondEvent = {
       type: 'model_delta' as const,
@@ -372,15 +421,16 @@ describe('agent IPC recovery', () => {
       type: 'model_tool_calls' as const, runId: run.id, threadId: run.threadId, modelId: 'model-1',
       progress: [{ index: 0, name: 'apply_patch', characterCount: 6, complete: false }]
     }
-    const events = (async function *() {
+    let publish!: (event: AgentRuntimeEvent) => void
+    const emit = async () => {
       await firstGate
-      yield firstEvent
+      publish(firstEvent)
       await secondGate
-      yield secondEvent
-      for (let index = 0; index < 100; index++) yield previewEvent
-    })()
+      publish(secondEvent)
+      for (let index = 0; index < 100; index++) publish(previewEvent)
+    }
     const runtime = {
-      recoverRun: vi.fn(() => events),
+      recoverRun: vi.fn(() => { void emit(); return { run } }),
       shutdown: vi.fn(async () => ({
         drained: true,
         lingeringRunIds: [],
@@ -405,10 +455,10 @@ describe('agent IPC recovery', () => {
     vi.doMock('electron', () => ({ ipcMain: { handle } }))
     vi.doMock('../ipcSecurity', () => ({ handleMainIpc: handle }))
     vi.doMock('./agentStorage', () => ({
-      AgentStorage: { open: vi.fn(() => conversationStorage({ close: vi.fn() })) }
+      AgentStorage: { openNative: vi.fn(() => conversationStorage({ close: vi.fn() })) }
     }))
-    vi.doMock('./agentRuntimeCoordinator', () => ({
-      AgentRuntimeCoordinator: vi.fn(function AgentRuntimeMock(storage) { return runtimeForStorage(storage, runtime) })
+    vi.doMock('./nativeRuntimeCoordinator', () => ({
+      NativeRuntimeCoordinator: vi.fn(function AgentRuntimeMock(storage, sink) { publish = sink.push; return runtimeForStorage(storage, runtime) })
     }))
     vi.doMock('../config/appConfig', () => ({
       getAppConfigSnapshot: vi.fn(),
@@ -502,6 +552,8 @@ describe('agent IPC recovery', () => {
       ...initialDelta,
       delta: { type: 'text' as const, text: 'after resume' }
     }
+    let publish!: (event: AgentRuntimeEvent) => void
+    const emit = async (events: AsyncIterable<AgentRuntimeEvent>) => { for await (const event of events) publish(event) }
     const firstEvents = (async function *() {
       yield { type: 'run_started' as const, run: runningRun, newUserTurn: false as const }
       // The durable call lookup must also cover the case where interruption is
@@ -560,9 +612,9 @@ describe('agent IPC recovery', () => {
     })()
     const runtime = {
       recoverRun: vi.fn()
-        .mockReturnValueOnce(firstEvents)
-        .mockReturnValueOnce(secondEvents)
-        .mockReturnValueOnce(recoveryFailedEvents),
+        .mockImplementationOnce(() => { void emit(firstEvents); return { run: runningRun } })
+        .mockImplementationOnce(() => { void emit(secondEvents); return { run: runningRun } })
+        .mockImplementationOnce(() => { void emit(recoveryFailedEvents); return { run: recoveryFailedRun } }),
       shutdown: vi.fn(async () => ({
         drained: true,
         lingeringRunIds: [],
@@ -601,10 +653,10 @@ describe('agent IPC recovery', () => {
     vi.doMock('electron', () => ({ ipcMain: { handle } }))
     vi.doMock('../ipcSecurity', () => ({ handleMainIpc: handle }))
     vi.doMock('./agentStorage', () => ({
-      AgentStorage: { open: vi.fn(() => conversationStorage(database)) }
+      AgentStorage: { openNative: vi.fn(() => conversationStorage(database)) }
     }))
-    vi.doMock('./agentRuntimeCoordinator', () => ({
-      AgentRuntimeCoordinator: vi.fn(function AgentRuntimeMock(storage) { return runtimeForStorage(storage, runtime) })
+    vi.doMock('./nativeRuntimeCoordinator', () => ({
+      NativeRuntimeCoordinator: vi.fn(function AgentRuntimeMock(storage, sink) { publish = sink.push; return runtimeForStorage(storage, runtime) })
     }))
     vi.doMock('../config/appConfig', () => ({
       getAppConfigSnapshot: vi.fn(),
@@ -723,9 +775,9 @@ describe('agent IPC recovery', () => {
 
     vi.doMock('electron', () => ({ ipcMain: { handle } }))
     vi.doMock('../ipcSecurity', () => ({ handleMainIpc: handle }))
-    vi.doMock('./agentStorage', () => ({ AgentStorage: { open: vi.fn(() => conversationStorage({ close: vi.fn() })) } }))
-    vi.doMock('./agentRuntimeCoordinator', () => ({
-      AgentRuntimeCoordinator: vi.fn(function AgentRuntimeMock(storage) {
+    vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: vi.fn(() => conversationStorage({ close: vi.fn() })) } }))
+    vi.doMock('./nativeRuntimeCoordinator', () => ({
+      NativeRuntimeCoordinator: vi.fn(function AgentRuntimeMock(storage) {
         return runtimeForStorage(storage, runtime)
       })
     }))
@@ -763,10 +815,10 @@ describe('agent IPC recovery', () => {
       operation: 'agent' as const,
       status: 'completed' as const
     }
-    const recoveryEvents = (async function *() { yield recoveryEvent })()
+    let publish!: (event: AgentRuntimeEvent) => void
     const snapshot = { thread: { id: 'thread-1' } }
     const recoverRun = vi.fn()
-      .mockReturnValueOnce(recoveryEvents)
+      .mockImplementationOnce(() => { publish(recoveryEvent); return { run: { id: recoveryEvent.runId, threadId: recoveryEvent.threadId } } })
       .mockReturnValue(undefined)
     const getSnapshot = vi.fn().mockResolvedValue(snapshot)
     const loadEarlierMessages = vi.fn().mockResolvedValue(snapshot)
@@ -779,14 +831,15 @@ describe('agent IPC recovery', () => {
     const close = vi.fn()
     const database = { close }
     const open = vi.fn(() => database)
-    const AgentRuntime = vi.fn(function AgentRuntimeMock(storage) {
+    const AgentRuntime = vi.fn(function AgentRuntimeMock(storage, sink) {
+      publish = sink.push
       return runtimeForStorage(storage, runtime)
     })
 
     vi.doMock('electron', () => ({ ipcMain: { handle } }))
     vi.doMock('../ipcSecurity', () => ({ handleMainIpc: handle }))
-    vi.doMock('./agentStorage', () => ({ AgentStorage: { open: () => conversationStorage(open()) } }))
-    vi.doMock('./agentRuntimeCoordinator', () => ({ AgentRuntimeCoordinator: AgentRuntime }))
+    vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: () => conversationStorage(open()) } }))
+    vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: AgentRuntime }))
     vi.doMock('../config/appConfig', () => ({
       getAppConfigSnapshot: vi.fn(),
       findResolvedModelConfig: vi.fn()
@@ -863,8 +916,8 @@ describe('agent IPC recovery', () => {
       dialogParentFromEvent: vi.fn(() => undefined),
       showModalSaveDialog
     }))
-    vi.doMock('./agentStorage', () => ({ AgentStorage: { open: vi.fn() } }))
-    vi.doMock('./agentRuntimeCoordinator', () => ({ AgentRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, {}) }) }))
+    vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: vi.fn() } }))
+    vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, {}) }) }))
     vi.doMock('../config/appConfig', () => ({
       getAppConfigSnapshot: vi.fn(),
       findResolvedModelConfig: vi.fn()

@@ -6,7 +6,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { requiresToolApproval } from '../agent/toolAuthorization'
 import { withToolExecution } from '../agent/toolExecutionContext'
 import { runWithCurrentAgentToolEffect, type AgentToolEffectArm } from '../agent/toolEffectScope'
-import { createHttpRequestTool, executeHttpRequest } from './httpRequestTool'
+import { httpRequestDefinition, executeHttpRequest } from './httpRequestTool'
+import { invokeCapability } from '../../runtime/toolInvocation'
 
 const registry = vi.hoisted(() => ({ path: '' }))
 vi.mock('../config/dataDir', async (importOriginal) => ({
@@ -452,8 +453,9 @@ describe('http_request', () => {
   ])('propagates an uncertain dispatched outcome to the call layer for $name', async ({ input }) => {
     let running = false
     let uncertainReason: string | undefined
-    const httpRequest = createHttpRequestTool({ primaryFolder: root })
+    const httpRequest = httpRequestDefinition({ primaryFolder: root })
     const output = await withToolExecution({
+      callId: 'http-fixture-call',
       signal: new AbortController().signal,
       markRunning: () => { running = true },
       markLocalCommit: () => undefined,
@@ -461,12 +463,12 @@ describe('http_request', () => {
       output: () => undefined,
       progress: () => undefined,
       setOutcome: () => undefined
-    }, false, () => httpRequest.invoke({
+    }, false, () => invokeCapability(httpRequest, {
       summary: 'Exercise an interrupted request',
       url: origin + '/disconnect',
       ...input
-    }))
-    expect(JSON.parse(String(output))).toMatchObject({ ok: false })
+    }, {}))
+    expect(JSON.parse(String(output.content))).toMatchObject({ ok: false })
     expect(running).toBe(true)
     expect(uncertainReason).toContain('outcome is unknown')
   })

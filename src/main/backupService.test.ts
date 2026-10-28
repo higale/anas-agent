@@ -1,3 +1,4 @@
+import { readFrozenStorage } from '../test/frozenStorage'
 import nativeFs, { createWriteStream } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, stat, symlink, writeFile } from 'node:fs/promises'
@@ -155,7 +156,7 @@ describe('data backup restore', () => {
     const { AgentStorage } = await import('./agent/agentStorage')
     const { saveToolResultFile } = await import('./agent/toolResultFile')
     const { archiveAgentAttachments } = await import('./agent/agentAttachmentStore')
-    let storage = AgentStorage.open(dataRoot)
+    let storage = AgentStorage.openNative(dataRoot)
     try {
       const thread = storage.createThread({ title: 'Backed up conversation' })
       const database = storage.conversationForThread(thread.id)
@@ -163,13 +164,14 @@ describe('data backup restore', () => {
       await writeText(source, 'attachment text')
       const archived = await archiveAgentAttachments([{ path: source, name: 'source.txt', size: 15,
         mimeType: 'text/plain', kind: 'text', contextPolicy: 'conversation' }],
-        { threadId: thread.id, runId: 'run', messageId: 'run:input' }, database.attachmentRoot)
-      database.createRun(thread.id, 'run', 'agent', archived)
+        { threadId: thread.id, runId: 'run', messageId: 'run:input' }, join(dataRoot, 'db/conversations', thread.id, 'attachments'))
+      database.runs.createRun({ threadId: thread.id, runId: 'run', operation: 'agent', attachments: archived,
+        message: { id: 'run:input', value: { id: 'run:input', kind: 'user', content: [{ type: 'text', text: 'Saved input' }], context: { runId: 'run' } } } })
       await storage.memoryStore.saveMemory({ scope: 'global', kind: 'fact', content: 'Keep memory', keywords: [], importance: 3 }, { origin: 'user' })
-      const result = await saveToolResultFile('full tool result', database.toolResultsRoot)
-      const recovery = join(database.fileEditStore.root, 'evidence.txt')
+      const result = await saveToolResultFile('full tool result', database.resources.toolResultsRoot)
+      const recovery = join(database.resources.fileEditStore.root, 'evidence.txt')
       await writeText(recovery, 'retained recovery evidence')
-      await writeText(join(database.temporaryRoot, 'message_edit', 'draft.txt'), 'not in backup')
+      await writeText(join(join(dataRoot, 'tmp', thread.id), 'message_edit', 'draft.txt'), 'not in backup')
       const sharedDocuments = { 'db/projects.json': 'saved project metadata', 'db/input_history.json': 'saved input history',
         'config/assets/avatar-source.png': 'saved avatar source', 'config/assets/avatar-transform.json': '{"version":0}',
         'db/plugins/test-plugin/state.json': '{"version":0,"values":{"draft":"saved plugin data"}}' }
@@ -185,14 +187,41 @@ describe('data backup restore', () => {
       await rm(join(dataRoot, 'config', 'assets'), { recursive: true })
       await service.restoreDataBackupZip(backup.path)
       for (const [name, content] of Object.entries(sharedDocuments)) expect(await readFile(join(dataRoot, name), 'utf8')).toBe(content)
-      storage = AgentStorage.open(dataRoot)
+      storage = AgentStorage.openNative(dataRoot)
       expect(storage.listThreads().map(item => item.title)).toEqual(['Backed up conversation'])
       expect((await storage.memoryStore.searchMemories({ scope: 'global' })).total).toBe(1)
       const restored = storage.conversationForThread(thread.id)
-      expect(await readFile(restored.listAttachmentsForMessage(thread.id, 'run:input')[0].path, 'utf8')).toBe('attachment text')
+      expect(await readFile(restored.resources.listAttachmentsForMessages(thread.id, ['run:input'])[0].path, 'utf8')).toBe('attachment text')
       expect(await readFile(result, 'utf8')).toBe('full tool result')
       expect(await readFile(recovery, 'utf8')).toBe('retained recovery evidence')
     } finally { storage.close() }
+  })
+
+  it('rejects a legacy execution backup without replacing current data or rewriting the archive', async () => {
+    const root = await temporaryDirectory(), dataRoot = join(root, 'data')
+    const { snapshotAgentStorage } = await vi.importActual<typeof import('./agent/agentDatabaseBackup')>('./agent/agentDatabaseBackup')
+    const { validateRestoredDataDirectory } = await vi.importActual<typeof import('./dataRestoreValidation')>('./dataRestoreValidation')
+    const service = await loadBackupService(dataRoot, validateRestoredDataDirectory, undefined, snapshotAgentStorage)
+    const { AgentStorage } = await import('./agent/agentStorage')
+    await cp(join(process.cwd(), 'data/config'), join(dataRoot, 'config'), { recursive: true })
+    await cp(join(process.cwd(), 'data/subagents'), join(dataRoot, 'subagents'), { recursive: true })
+    const catalog = readFrozenStorage<{ thread: { id: string } }>('legacy-catalog')
+    const conversation = readFrozenStorage<{ thread: { id: string } }>('legacy-conversation')
+    const directory = join(dataRoot, 'db/conversations', catalog.metadata.thread.id)
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(dataRoot, 'db/catalog.sqlite'), catalog.bytes)
+    await writeFile(join(directory, 'conversation.sqlite'), conversation.bytes)
+    const backup = await service.createDataBackupZip(join(root, 'legacy.zip'))
+    const archive = await readFile(backup.path)
+    await rm(join(dataRoot, 'db'), { recursive: true })
+    const storage = AgentStorage.openNative(dataRoot)
+    storage.createThread({ title: 'Keep current data' }); storage.close()
+    const current = await readFile(join(dataRoot, 'db/catalog.sqlite'))
+    const config = await readFile(join(dataRoot, 'config/models.json'))
+    await expect(service.restoreDataBackupZip(backup.path)).rejects.toThrow('expected 1')
+    expect(await readFile(join(dataRoot, 'db/catalog.sqlite'))).toEqual(current)
+    expect(await readFile(join(dataRoot, 'config/models.json'))).toEqual(config)
+    expect(await readFile(backup.path)).toEqual(archive)
   })
 
   it('backs up only registered conversations and preserves unregistered creation leftovers on disk', async () => {
@@ -203,7 +232,7 @@ describe('data backup restore', () => {
     const { AgentStorage } = await import('./agent/agentStorage')
     await cp(join(process.cwd(), 'data/config'), join(dataRoot, 'config'), { recursive: true })
     await cp(join(process.cwd(), 'data/subagents'), join(dataRoot, 'subagents'), { recursive: true })
-    const storage = AgentStorage.open(dataRoot)
+    const storage = AgentStorage.openNative(dataRoot)
     try {
       storage.createThread({ title: 'Keep registered conversation' })
       // Exit can occur between opening the database and publishing catalog membership.
@@ -220,7 +249,7 @@ describe('data backup restore', () => {
     expect([...extracted.entryNames].some(name => name.includes('unfinished-creation'))).toBe(false)
     await validateRestoredDataDirectory(destination)
     expect(await readFile(join(destination, 'subagents/_system/general-purpose/PROMPT.md'), 'utf8')).toBe(await readFile(join(dataRoot, 'subagents/_system/general-purpose/PROMPT.md'), 'utf8'))
-    const restored = AgentStorage.open(destination)
+    const restored = AgentStorage.openNative(destination)
     try { expect(restored.listThreads().map(thread => thread.title)).toEqual(['Keep registered conversation']) }
     finally { restored.close() }
     expect(await readFile(join(abandoned, 'conversation.sqlite'))).toEqual(original)
