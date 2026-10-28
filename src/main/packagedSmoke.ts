@@ -42,7 +42,13 @@ export async function runPackagedSmoke(): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), 'anas-packaged-smoke-'))
   try {
     const documents = join(root, 'Documents')
-    await mkdir(documents)
+    // The isolated smoke profile has no OS-created personal folders. Bind all
+    // paths consumed by runtime approval setup to fixtures, never the real user.
+    for (const name of ['desktop', 'downloads', 'documents', 'pictures'] as const) {
+      const directory = name === 'documents' ? documents : join(root, name)
+      await mkdir(directory)
+      app.setPath(name, directory)
+    }
     const { readFileContentInfo } = await import('./fileMetadata')
     const imagePath = join(documents, 'metadata.png')
     await writeFile(imagePath, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg==', 'base64'))
@@ -53,7 +59,6 @@ export async function runPackagedSmoke(): Promise<void> {
         throw new Error(`Packaged local media metadata failed: ${JSON.stringify(metadata)}`)
       }
     } finally { await imageFile.close() }
-    app.setPath('documents', documents)
     configureDataRuntime([process.execPath, '--data-dir=' + root])
     const { initializeBundledExamples } = await import('./bundledExamples')
     const { PluginStore } = await import('./plugins/pluginStore')
@@ -171,13 +176,15 @@ export async function runPackagedSmoke(): Promise<void> {
       const first = await runtime.submitRunWithAttachments(input)
       if (!first.handle) throw new Error('Packaged native run was not dispatched.')
       const firstOutcome = await first.handle.completed
-      if (firstOutcome.status !== 'completed') throw new Error('Packaged native run did not complete: ' + (firstOutcome.error ?? firstOutcome.status))
+      if (firstOutcome.status !== 'completed') throw new AggregateError(first.handle.diagnostics,
+        'Packaged native run did not complete: ' + (firstOutcome.error ?? firstOutcome.status))
       await first.handle.drained
       const second = await runtime.submitRunWithAttachments(createAgentRunSubmissionExecutionInput({ requestId: randomUUID(),
         threadId: first.thread.id, text: 'Continue the same conversation' }))
       if (!second.handle) throw new Error('Packaged native continuation was not dispatched.')
       const secondOutcome = await second.handle.completed
-      if (secondOutcome.status !== 'completed') throw new Error('Packaged native continuation did not complete: ' + (secondOutcome.error ?? secondOutcome.status))
+      if (secondOutcome.status !== 'completed') throw new AggregateError(second.handle.diagnostics,
+        'Packaged native continuation did not complete: ' + (secondOutcome.error ?? secondOutcome.status))
       await second.handle.drained
       const duplicate = await runtime.submitRunWithAttachments(input)
       if (duplicate.run.id !== first.run.id || requests !== 2) throw new Error('Packaged native submission was replayed.')
