@@ -4,6 +4,11 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Publish this version tag after building the selected ref (empty = build only)'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -53,12 +58,16 @@ jobs:
         env:
           EXPECTED_PLATFORM: ${{ matrix.platform }}
           EXPECTED_ARCH: ${{ matrix.arch }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           const assert = require('node:assert/strict')
           const { version } = require(`${process.env.GITHUB_WORKSPACE}/package.json`)
           assert.match(version, /^\d+\.\d+\.\d+$/)
           assert.equal(process.platform, process.env.EXPECTED_PLATFORM)
           assert.equal(process.arch, process.env.EXPECTED_ARCH)
+          if (process.env.RELEASE_TAG) {
+            assert.equal(process.env.RELEASE_TAG, `v${version}`, 'Release tag must match package.json')
+          }
           if (process.env.GITHUB_REF_TYPE === 'tag') {
             assert.equal(process.env.GITHUB_REF_NAME, `v${version}`, 'Release tag must match package.json')
           }
@@ -77,7 +86,7 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || inputs.release_tag != ''
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -95,7 +104,7 @@ jobs:
       - name: Verify complete release and calculate checksums
         working-directory: release-assets
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           version="${RELEASE_TAG#v}"
           files=("Anas-${version}-macos-arm64.dmg" "Anas-${version}-macos-x64.dmg" "Anas-${version}-windows-x64.zip")
@@ -105,8 +114,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
+          cp .github/RELEASE_NOTES.md release-notes.md
+          printf '\n构建源码 / Build source: https://github.com/%s/commit/%s\n' "$GITHUB_REPOSITORY" "$GITHUB_SHA" >> release-notes.md
+          if gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' > release-state.txt; then
+            test "$(cat release-state.txt)" = true || { echo 'Release is already published'; exit 1; }
+            gh release upload "$RELEASE_TAG" release-assets/* --clobber
+            gh release edit "$RELEASE_TAG" --draft=false --title "Anas $RELEASE_TAG" --notes-file release-notes.md
+            exit 0
+          fi
           gh release create "$RELEASE_TAG" release-assets/* \
             --verify-tag --title "Anas $RELEASE_TAG" --generate-notes \
-            --notes-file .github/RELEASE_NOTES.md
+            --notes-file release-notes.md

@@ -55,6 +55,6 @@ git fetch origin
 
 每个作业使用 Node.js 24，在本机架构安装锁定依赖、运行 lint、类型检查与构建，再校验打包资源和实际启动。macOS 检查 ad-hoc 签名，不执行证书签名或公证；Windows ZIP 内有完整 `Anas/` 目录，不是安装器或单文件便携 EXE。Release 同时提供 `SHA256SUMS.txt`。
 
-推送的标签必须精确匹配 `package.json` 的 `vMAJOR.MINOR.PATCH`，普通分支推送不会触发打包。工作流进入默认分支后，可在 Actions > Build release packages > Run workflow 手动验证；手动运行只保留 14 天的 Actions 构建产物，不发布 Release。自动发布失败时先检查该版本的 Release 状态；上传中断可能留下草稿，不要覆盖已发布版本或移动标签。
+推送的标签必须精确匹配 `package.json` 的 `vMAJOR.MINOR.PATCH`，普通分支推送不会触发打包。工作流进入默认分支后，可在 Actions > Build release packages > Run workflow 手动运行；`release_tag` 留空时仅验证，构建产物保留 14 天。修复发布故障后，可选择修复后的分支并填写原版本标签，重新执行全部三平台检查和发布；标签须与 package 版本一致且已存在，不移动标签，Release 说明记录实际构建提交。上传中断留下的草稿在全部构建成功后补齐并发布；已公开的 Release 拒绝覆盖。
 
 本地仍可运行 `npm run pack`、`npm run pack:mac:release` 或 `npm run pack:win:release`，与 CI 使用相同配置。macOS 未公证应用的首次启动说明随 Release 提供，不能将 ad-hoc 校验结果表述为通过 Gatekeeper 公证验证。
