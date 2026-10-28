@@ -4,6 +4,9 @@ import type { AppConfigSnapshot } from '@shared/types'
 import { agentToolDefinitions, getRuntimeToolStatus } from './runtimeToolStatus'
 import { fileToolDefinitions } from './llm/fileTools'
 import { serializeToolDefinition } from './toolSchemaSerialization'
+import { runtimeToolDefinitions } from './llm/runtimeTools'
+import { modelToolDeclaration } from './agent/modelToolDeclarations'
+import { toolDefinitionText } from '../renderer/src/ui/settings/ToolsSettings'
 
 const subagents = [{
  capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: true,
@@ -57,6 +60,18 @@ describe('agent tool status', () => {
         properties: expect.objectContaining({ seconds: expect.objectContaining({ type: 'integer', minimum: 1, maximum: 300 }) })
       })
     })
+    const sleepPreview = status.tools.find(tool => tool.name === 'sleep')!
+    const sleep = (await runtimeToolDefinitions({ enabled: true, primaryFolder: process.cwd(),
+      memory: false, network: false, shell: false })).find(tool => tool.name === 'sleep')!
+    const displayed = JSON.parse(toolDefinitionText(sleepPreview))
+    expect(displayed.parameters).not.toHaveProperty('$schema')
+    expect(displayed.parameters).toHaveProperty('additionalProperties', false)
+    for (const protocol of ['openai_chat_completions', 'openai_responses', 'anthropic_messages'] as const) {
+      const declaration = modelToolDeclaration(sleep, protocol)
+      const schemaPath = protocol === 'openai_chat_completions' ? 'function.parameters'
+        : protocol === 'anthropic_messages' ? 'input_schema' : 'parameters'
+      expect(declaration).toHaveProperty(schemaPath, displayed.parameters)
+    }
     expect(status.toolNames).not.toContain('update_assistant_profile')
     expect(status.toolNames).not.toContain('update_user_profile')
     const commandShell = status.tools.find((tool) => tool.capabilityId === 'run_shell')

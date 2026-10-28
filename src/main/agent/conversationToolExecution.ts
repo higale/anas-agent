@@ -20,7 +20,7 @@ import { runWithCurrentAgentToolEffect, runWithoutCurrentAgentToolEffect } from 
 import { withoutToolExecution } from './toolExecutionContext'
 import { conversationRuleResult, conversationRuleToolRejection } from './conversationRules'
 import { conversationToolError, type ConversationToolPreparationOptions } from './conversationToolPreparation'
-import { patchAuthorizationDiagnostic, withPatchAuthorization, withShellAuthorization } from './toolAuthorizationRuntime'
+import { toolAuthorizationDiagnostic, withPatchAuthorization, withShellAuthorization, withToolAuthorization } from './toolAuthorizationRuntime'
 import type { NativeExecutionStore } from './nativeExecutionStore'
 import { presentToolResult } from '../../runtime/messagePresentation'
 import { presentConversationMessage } from './conversationPresentation'
@@ -87,16 +87,17 @@ export function createConversationToolExecutor(options: ConversationToolExecutio
         const rejection = await conversationRuleToolRejection(current.context, call, options.preparation)
         if (rejection) return { kind: 'result' as const, message: errorResult(rejection) }
       }
-      if (isFileEditTool(call.name)) {
-        const diagnostic = await patchAuthorizationDiagnostic(call.authorization?.patch, call, options.preparation)
-        if (diagnostic) return { kind: 'result' as const, message: errorResult(diagnostic) }
-      }
+      const diagnostic = await toolAuthorizationDiagnostic(call, options.preparation)
+      if (diagnostic) return { kind: 'result' as const, message: errorResult(diagnostic) }
       const invoke = async (): Promise<ExecutionMessageInput> => {
         let started = false
         try {
-          const operation = () => invokeCapability(definition, call.args, { callId: call.id, signal: request.signal }, () => {
+          const operation = () => withToolAuthorization(async () => {
+            const diagnostic = await toolAuthorizationDiagnostic(call, options.preparation)
+            if (diagnostic) throw new ToolInputError(diagnostic)
+          }, () => invokeCapability(definition, call.args, { callId: call.id, signal: request.signal }, () => {
             started = true; observer.tool({ kind: 'started', call: observedCall })
-          })
+          }))
           const authorized = () => isFileEditTool(call.name) ? withPatchAuthorization(call.authorization!.patch!, operation) : operation()
           const shell = options.preparation.shell
           const result = shell?.toolName === call.name

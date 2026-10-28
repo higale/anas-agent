@@ -9,7 +9,9 @@ import type { FilePatchTarget } from '../filePatch'
 import { isSameOrInsideDirectory, samePath } from '../pathContainment'
 import type { createShellCommandAuthorization } from '../shellCommandAuthorization'
 import type { SkillScriptInvocation } from '../skillsStore'
-import { prepareToolPathAuthorization } from './toolAuthorization'
+import { approvalToolNames, prepareToolPathAuthorization } from './toolAuthorization'
+import type { ApprovalDirectories } from './approvalDirectories'
+import { modelApprovalDecision } from '../../runtime/smartApproval'
 
 type Call = { id: string; name: string; args: Record<string, unknown> }
 export interface PatchAuthorizationOptions {
@@ -18,14 +20,39 @@ export interface PatchAuthorizationOptions {
   folders: string[]
   accessMode(): AgentAccessMode
   fileEditStore?: Pick<FileEditStore, 'loadOperationRecord'>
+  directories?: ApprovalDirectories
 }
 export interface ShellAuthorizationOptions {
   analyzer: ReturnType<typeof createShellCommandAuthorization>
   accessMode(): AgentAccessMode
 }
 
+/** Recheck delayed operations with the current mode; saved approval still owns
+ * this exact prepared call. Never turn a mode change into an implicit grant. */
+export async function toolAuthorizationDiagnostic(call: Call & { authorization?: { approval?: string; patch?: PatchAuthorizationReceipt } },
+  options: PatchAuthorizationOptions & { shell?: ShellAuthorizationOptions & { toolName: string } }): Promise<string | undefined> {
+  if (['apply_patch', 'write_file', 'restore_file_edit'].includes(call.name)) return patchAuthorizationDiagnostic(call.authorization?.patch, call, options)
+  if (call.name === options.shell?.toolName || !approvalToolNames().includes(call.name)) return undefined
+  try {
+    const prepared = await prepareToolPathAuthorization({ toolName: call.name, args: structuredClone(call.args),
+      primaryFolder: options.primaryFolder, trustedFolders: options.folders, directories: options.directories,
+      accessMode: options.accessMode(), fileEditStore: options.fileEditStore, requestId: options.runId })
+    if (prepared.requiresApproval && call.authorization?.approval !== 'granted') return 'NOT EXECUTED: This operation now requires approval. Submit it again under the current access mode.'
+  } catch (error) {
+    return `NOT EXECUTED: ${error instanceof Error ? error.message : String(error)}`
+  }
+  return undefined
+}
+
 const approvedTargets = new AsyncLocalStorage<PatchAuthorizationReceipt['targets']>()
 const shellVerifier = new AsyncLocalStorage<() => Promise<void>>()
+const toolVerifier = new AsyncLocalStorage<() => Promise<void>>()
+export function withToolAuthorization<T>(verify: () => Promise<void>, operation: () => T): T {
+  return toolVerifier.run(verify, operation)
+}
+export async function verifyCurrentToolAuthorization(): Promise<void> {
+  await toolVerifier.getStore()?.()
+}
 const pathOperations = { dirname, samePath, isSameOrInsideDirectory }
 
 export async function preparePatchAuthorization(call: Call, options: PatchAuthorizationOptions): Promise<PatchAuthorizationReceipt> {
@@ -33,7 +60,7 @@ export async function preparePatchAuthorization(call: Call, options: PatchAuthor
   try {
     const prepared = await prepareToolPathAuthorization({ toolName: call.name, args: structuredClone(call.args),
       primaryFolder: options.primaryFolder, trustedFolders: options.folders,
-      accessMode: options.accessMode() === 'strict_approval' ? 'strict_approval' : 'read_only_allowed',
+      accessMode: options.accessMode(), directories: options.directories,
       requestId: options.runId, fileEditStore: options.fileEditStore })
     return { ...identity, requiresApproval: prepared.requiresApproval,
       targets: prepared.targets.map(target => ({ path: target.canonicalPath, lexicalPath: target.lexicalPath,
@@ -53,7 +80,7 @@ export async function patchAuthorizationDiagnostic(receipt: PatchAuthorizationRe
   try {
     if (!receipt) throw new Error('Missing persisted patch authorization.')
     const current = await prepareToolPathAuthorization({ toolName: call.name, args: structuredClone(call.args),
-      primaryFolder: options.primaryFolder, trustedFolders: options.folders, accessMode: options.accessMode(),
+      primaryFolder: options.primaryFolder, trustedFolders: options.folders, accessMode: options.accessMode(), directories: options.directories,
       requestId: options.runId, fileEditStore: options.fileEditStore })
     const currentFiles = current.targets.filter(target => !target.kind || target.kind === 'file')
     assertPatchFileBinding(currentFiles.map(target => ({ path: target.canonicalPath, access: target.access, locator: target.locator })), receipt.targets, samePath)
@@ -86,7 +113,8 @@ export async function prepareShellAuthorization(call: Call, skill: SkillScriptIn
   options: ShellAuthorizationOptions): Promise<ShellAuthorizationReceipt> {
   const fullAccess = options.accessMode() === 'full_access'
   const plan = fullAccess ? undefined : await options.analyzer.inspect(call.args, skill)
-  return { id: call.id, name: call.name, inputHash: authorizationInputHash(call.args), requiresApproval: !fullAccess && !plan,
+  return { id: call.id, name: call.name, inputHash: authorizationInputHash(call.args), requiresApproval: !fullAccess && !plan
+    && (options.accessMode() !== 'smart_approval' || modelApprovalDecision(call.args)),
     humanApproved: false, ...(plan ? { plan } : {}) }
 }
 

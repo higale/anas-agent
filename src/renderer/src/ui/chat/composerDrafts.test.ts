@@ -30,10 +30,10 @@ describe('ComposerDraftStore', () => {
     store.setInput(projectA, 'My task')
     store.setAttachments(projectA, [attachment('/project/a.txt')])
     expect(store.get(projectA, 'strict_approval').accessMode).toBe('strict_approval')
-    store.setAccessMode(projectA, 'read_only_allowed')
+    store.setAccessMode(projectA, 'smart_approval')
     store.setInput(projectA, '')
     store.setAttachments(projectA, [])
-    expect(store.get(projectA, 'full_access').accessMode).toBe('read_only_allowed')
+    expect(store.get(projectA, 'full_access').accessMode).toBe('smart_approval')
     expect(store.get(projectB, 'full_access').accessMode).toBe('full_access')
     store.discard(projectA)
     expect(store.get(projectA, 'full_access').accessMode).toBe('full_access')
@@ -48,18 +48,18 @@ describe('ComposerDraftStore', () => {
     store.setInput(threadA, 'draft for A')
     store.setAttachments(threadA, [fileA])
 
-    expect(store.get(threadB)).toEqual({ input: '', attachments: [], accessMode: 'read_only_allowed' })
+    expect(store.get(threadB)).toEqual({ input: '', attachments: [], accessMode: 'smart_approval' })
     store.setInput(threadB, 'draft for B')
 
     expect(store.get(threadA)).toEqual({
       input: 'draft for A',
       attachments: [fileA],
-      accessMode: 'read_only_allowed'
+      accessMode: 'smart_approval'
     })
     expect(store.get(threadB)).toEqual({
       input: 'draft for B',
       attachments: [],
-      accessMode: 'read_only_allowed'
+      accessMode: 'smart_approval'
     })
   })
 
@@ -77,7 +77,7 @@ describe('ComposerDraftStore', () => {
     expect(store.get(projectA).input).toBe('new task in A')
     expect(store.get(projectA).accessMode).toBe('strict_approval')
     expect(store.get(projectB).input).toBe('new task in B')
-    expect(store.get(projectB).accessMode).toBe('read_only_allowed')
+    expect(store.get(projectB).accessMode).toBe('smart_approval')
     expect(store.get(defaultWorkspace).input).toBe('default workspace task')
   })
 
@@ -91,12 +91,12 @@ describe('ComposerDraftStore', () => {
     expect(store.discard(threadA)).toEqual({
       input: '',
       attachments: [temporary, persistent],
-      accessMode: 'read_only_allowed'
+      accessMode: 'smart_approval'
     })
     expect(store.get(threadA)).toEqual({
       input: '',
       attachments: [],
-      accessMode: 'read_only_allowed'
+      accessMode: 'smart_approval'
     })
     expect(store.discard(threadA)).toBeUndefined()
   })
@@ -111,7 +111,7 @@ describe('ComposerDraftStore', () => {
     expect(store.discardMany([threadA])).toEqual([{
       input: 'A',
       attachments: [],
-      accessMode: 'read_only_allowed'
+      accessMode: 'smart_approval'
     }])
     expect(store.get(threadA).input).toBe('')
     expect(store.get(threadB).input).toBe('B')

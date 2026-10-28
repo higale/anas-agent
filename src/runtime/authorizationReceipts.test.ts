@@ -78,7 +78,7 @@ describe('native authorization receipts', () => {
     const receipt = shellReceipt(), before = structuredClone(receipt)
     let current = structuredClone(receipt.plan)
     const inspect = vi.fn(async () => current)
-    const options = { inspect, accessMode: () => 'read_only_allowed' as const, samePath: paths.samePath }
+    const options = { inspect, accessMode: () => 'smart_approval' as const, samePath: paths.samePath }
     await expect(verifyShellReceipt(receipt, args, options)).resolves.toBeUndefined()
     current = { ...current!, skillScript: { ...current!.skillScript!, skillId: 'another-skill' } }
     await expect(verifyShellReceipt(receipt, args, options)).rejects.toThrow('targets changed')
@@ -91,7 +91,7 @@ describe('native authorization receipts', () => {
   it.each(['executable', 'workingDir', 'paths'] as const)('rejects changed Shell %s', async field => {
     const receipt = shellReceipt()
     const current = { ...receipt.plan!, [field]: field === 'paths' ? ['/different'] : '/different' }
-    await expect(verifyShellReceipt(receipt, args, { accessMode: () => 'read_only_allowed', samePath: paths.samePath,
+    await expect(verifyShellReceipt(receipt, args, { accessMode: () => 'smart_approval', samePath: paths.samePath,
       inspect: async () => current })).rejects.toThrow('targets changed')
   })
 

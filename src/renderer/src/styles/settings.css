@@ -203,6 +203,15 @@
   --ui-code-block-padding: 12px 14px;
 }
 
+.settings-tool-definition-formats {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding-bottom: 12px;
+  flex-shrink: 0;
+}
+
 .settings-contribution-group > summary {
   cursor: pointer;
   min-height: var(--control-height);

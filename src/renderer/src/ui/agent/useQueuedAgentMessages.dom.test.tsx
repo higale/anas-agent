@@ -32,7 +32,7 @@ function runningSubmission(input: AgentRunSubmissionInput): AgentRunSubmission {
       title: 'Thread',
       projectId: 'default',
       pinned: false,
-      accessMode: 'read_only_allowed',
+      accessMode: 'smart_approval',
       status: 'running',
       userTurnCount: 1,
       createdAt: '2026-08-30T00:00:00.000Z',

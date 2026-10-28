@@ -224,7 +224,7 @@ export class SubagentTaskStore {
     `).get(input.id)
     if (duplicateCall) throw new Error(`Subagent ${input.id} already exists.`)
     defaultTitle(input.childThread.title)
-    accessModeColumns(input.childThread.accessMode ?? 'read_only_allowed')
+    accessModeColumns(input.childThread.accessMode ?? 'smart_approval')
     const now = new Date().toISOString()
     return this.database.transaction(() => {
       armEffect?.()

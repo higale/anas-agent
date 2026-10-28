@@ -1,4 +1,4 @@
-import { ProjectRulesError, ProjectRulesReadRequired, ProjectRulesRequestBudgetError, isProjectRulesError, errorCauses } from '../../runtime/errors'
+import { ProjectRulesError, ProjectRulesRequestBudgetError, isProjectRulesError, errorCauses } from '../../runtime/errors'
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { lstat, open, opendir, realpath } from 'node:fs/promises'
@@ -116,7 +116,7 @@ export async function discoverProjectRules(snapshot: ProjectRulesSnapshot, direc
     return chain
   } catch (error) {
     // Preserve native approval pauses, the remaining graph boundary and cancellation.
-    if (error instanceof Error && (error instanceof ProjectRulesReadRequired || error.name.includes('Interrupt') || reader.signal?.aborted || isProjectRulesError(error))) throw error
+    if (error instanceof Error && (error.name.includes('Interrupt') || reader.signal?.aborted || isProjectRulesError(error))) throw error
     throw new ProjectRulesError(`Could not read rules for ${directory}: ${error instanceof Error ? error.message : String(error)}.`)
   }
 }

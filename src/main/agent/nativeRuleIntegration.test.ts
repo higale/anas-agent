@@ -219,15 +219,11 @@ describe('native project rules in durable tool execution', () => {
     expect(h.store.load('thread')?.phase).toBe('failed')
   })
 
-  it('requires durable approval before reading rules outside trusted folders', async () => {
+  it('reads verified rules outside trusted folders without approval in strict mode', async () => {
     const h = await fixture()
     h.preparation.folders = [join(h.root, 'child')]; h.preparation.primaryFolder = join(h.root, 'child'); h.preparation.accessMode = () => 'strict_approval'
     await h.run()
-    const waiting = h.store.load('thread')!, approval = waiting.approvals[0]
-    expect(waiting.phase).toBe('waiting_context'); expect(h.fetch).not.toHaveBeenCalled()
-    h.store.resolveContextWait({ threadId: 'thread', runId: h.runId, expectedRevisionId: waiting.revisionId }, approval.id, approval.generation, 'approve')
-    const completed = await h.execution().execute('continue', h.request, h.observer)
-    if (completed.result.status === 'rejected') throw completed.result.reason
+    expect(h.store.load('thread')!.approvals).toEqual([])
     expect(h.fetch).toHaveBeenCalledOnce(); expect(h.store.load('thread')?.phase).toBe('completed')
   })
 

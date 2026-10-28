@@ -71,7 +71,7 @@ export async function createConversationInstance(thread: AgentThread, database: 
   const { catalog, tools, attachments, memory, includeRules, contextRuntime } = prepareConversationContext(thread, database, config, resources, context)
   const accessMode = createAgentAccessModeResolver(database, thread.id, context.subagentCall)
   const preparation: ConversationToolPreparationOptions = { runId: context.requestId, folders: workspace.trustedFolders,
-    primaryFolder: workspace.primaryFolder, fileEditStore: database.fileEditStore, accessMode, signal: context.signal,
+    primaryFolder: workspace.primaryFolder, fileEditStore: database.fileEditStore, accessMode, directories: resources.approvalDirectories, signal: context.signal,
     includeRules, definitions: [...catalog.definitions, ...(catalog.planning ? [planningToolSpec] : [])], review: context.review,
     ...(resources.commandShell && resources.shellCommandAuthorization ? { shell: { toolName: commandShellToolName(resources.commandShell.executable),
       analyzer: resources.shellCommandAuthorization, accessMode } } : {}) }

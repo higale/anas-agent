@@ -9,7 +9,7 @@ function submission(): AgentRunSubmission & { userMessage: AgentMessage } {
       title: 'First message',
       projectId: 'default-workspace',
       pinned: false,
-      accessMode: 'read_only_allowed',
+      accessMode: 'smart_approval',
       status: 'running',
       userTurnCount: 1,
       createdAt: '2026-08-15T15:00:00.000Z',

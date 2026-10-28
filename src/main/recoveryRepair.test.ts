@@ -209,7 +209,7 @@ describe('field-level recovery', () => {
     expect(repairDocument('models.json', damaged)).toEqual({ value: raw, fields: ['models.json: version'] })
   })
 
-  it.each([undefined, 'strict_approval', 'read_only_allowed', 'full_access', 'unknown', null])('preserves optional project permissions and repairs only invalid choices: %s', accessMode => {
+  it.each([undefined, 'strict_approval', 'smart_approval', 'full_access', 'unknown', null])('preserves optional project permissions and repairs only invalid choices: %s', accessMode => {
     const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep', pinned: false, collapsed: true,
       createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z', sourceFolders: ['/keep/path'],
       prompt: 'Keep project rules', coding_mode: false, advanced_settings: false, restrict_subagents: false,
@@ -217,7 +217,7 @@ describe('field-level recovery', () => {
     const raw = { version: 0, projects: [project] }
     const result = repairDocument('projects.json', raw)
     const invalid = accessMode === 'unknown' || accessMode === null
-    expect(result.value).toEqual(invalid ? { ...raw, projects: [{ ...project, access_mode: 'read_only_allowed' }] } : raw)
+    expect(result.value).toEqual(invalid ? { ...raw, projects: [{ ...project, access_mode: 'smart_approval' }] } : raw)
     expect(result.fields).toHaveLength(invalid ? 1 : 0)
   })
 

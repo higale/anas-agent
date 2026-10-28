@@ -8,6 +8,9 @@ import { promisify } from 'node:util'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { ZipFile } from 'yazl'
 import { backupManifest, backupManifestFileName } from './backupArchive'
+import projectDefaults from '../../data/config/projects.json'
+import capabilities from '../../data/config/capabilities.json'
+import { DEFAULT_WORKSPACE_PROJECT_ID } from '../shared/types'
 
 const documents = vi.hoisted(() => ({ path: '' }))
 vi.mock('electron', () => ({ app: {
@@ -218,11 +221,11 @@ describe('data backup restore', () => {
     storage.createThread({ title: 'Keep current data' }); storage.close()
     const current = await readFile(join(dataRoot, 'db/catalog.sqlite'))
     const config = await readFile(join(dataRoot, 'config/models.json'))
-    await expect(service.restoreDataBackupZip(backup.path)).rejects.toThrow('expected 1')
+    await expect(service.restoreDataBackupZip(backup.path)).rejects.toThrow('expected 2')
     expect(await readFile(join(dataRoot, 'db/catalog.sqlite'))).toEqual(current)
     expect(await readFile(join(dataRoot, 'config/models.json'))).toEqual(config)
     expect(await readFile(backup.path)).toEqual(archive)
-  })
+  }, 15_000)
 
   it('backs up only registered conversations and preserves unregistered creation leftovers on disk', async () => {
     const root = await temporaryDirectory(), dataRoot = join(root, 'data')
@@ -469,6 +472,49 @@ describe('data backup restore', () => {
     }
     for (const name of untouched) expect(await readFile(join(dataRoot, name), 'utf8')).toBe('keep')
     expect(await service.recoverInterruptedDataRestore()).toBe(false)
+  })
+
+  it('resets exactly the previewed execution storage while retaining project definitions and settings', async () => {
+    const root = await temporaryDirectory(), dataRoot = join(root, 'data')
+    const projects = JSON.stringify({ version: 0, projects: [{ ...projectDefaults,
+      id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep project settings', pinned: false,
+      collapsed: false, sourceFolders: ['/keep/source'], capabilities, restrict_subagents: false,
+      createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z' }] })
+    await writeText(join(dataRoot, 'db/projects.json'), projects)
+    for (const name of ['db/catalog.sqlite', 'db/catalog.sqlite-wal', 'db/conversations/a/conversation.sqlite']) {
+      await writeText(join(dataRoot, name), 'broken database')
+    }
+    const service = await loadBackupService(dataRoot)
+    const { preserveRecoveryData } = await import('./recoveryData')
+    const targets = await service.inspectResetTargets(true)
+    expect(targets).toEqual([
+      { path: join(dataRoot, 'db/catalog.sqlite'), kind: 'file' },
+      { path: join(dataRoot, 'db/catalog.sqlite-wal'), kind: 'file' },
+      { path: join(dataRoot, 'db/conversations'), kind: 'directory' }
+    ])
+    const preserved = await service.resetExecutionData(() => preserveRecoveryData(dataRoot, root), targets)
+    for (const target of targets) await expect(stat(target.path)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(join(dataRoot, 'db/projects.json'), 'utf8')).toBe(projects)
+    expect(await readFile(join(preserved, 'data/db/projects.json'), 'utf8')).toBe(projects)
+    expect(await readFile(join(preserved, 'data/db/catalog.sqlite'), 'utf8')).toBe('broken database')
+    const { AgentStorage } = await import('./agent/agentStorage')
+    const storage = AgentStorage.openNative(dataRoot)
+    try { expect(storage.createThread().accessMode).toBe('smart_approval') } finally { storage.close() }
+    expect(await readFile(join(dataRoot, 'db/projects.json'), 'utf8')).toBe(projects)
+  })
+
+  it.each(['before', 'during'])('refuses changed reset targets %s preservation without deleting files', async when => {
+    const root = await temporaryDirectory(), dataRoot = join(root, 'data')
+    await writeText(join(dataRoot, 'db/catalog.sqlite'), 'keep database')
+    const service = await loadBackupService(dataRoot)
+    const targets = await service.inspectResetTargets(false)
+    const add = () => writeText(join(dataRoot, 'db/projects.json'), 'keep projects')
+    if (when === 'before') await add()
+    const preserve = vi.fn(async () => { if (when === 'during') await add(); return '/preserved' })
+    await expect(service.resetProjectData(preserve, targets)).rejects.toThrow('file list changed')
+    expect(preserve).toHaveBeenCalledTimes(when === 'before' ? 0 : 1)
+    expect(await readFile(join(dataRoot, 'db/catalog.sqlite'), 'utf8')).toBe('keep database')
+    expect(await readFile(join(dataRoot, 'db/projects.json'), 'utf8')).toBe('keep projects')
   })
 
   it('does not reset projects or database when preservation fails', async () => {

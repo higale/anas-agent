@@ -67,7 +67,7 @@ export function createConversationModelPreparation(options: ConversationModelExe
     if (options.rules && options.rules.runId !== request.runId) throw new Error('Rule preparation belongs to another run.')
     if (options.rules && (state.context.rulePreparation?.runId !== request.runId || !state.context.rulePreparation.initialized)) {
       const prepared = await prepareConversationRules(state.context, { ...options.rules, signal: request.signal })
-      return prepared.kind === 'wait' ? prepared : { kind: 'context', context: prepared.context }
+      return { kind: 'context', context: prepared.context }
     }
     const model = await options.resolveModel()
     request.signal.throwIfAborted()

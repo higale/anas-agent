@@ -2,7 +2,7 @@ import { parseArgs } from 'node:util'
 import { realpath, stat } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import type { AgentAccessMode } from '@shared/agentTypes'
-import { isSameOrInsideDirectory, samePath } from './pathContainment'
+import { samePath } from './pathContainment'
 import { resolveCanonicalWorkspacePath } from './workspacePath'
 import type { CommandShellInfo } from './shellRuntime'
 import { parsePowerShellCommands, type PowerShellWord } from './powershellCommandAnalysis'
@@ -189,15 +189,7 @@ export function createShellCommandAuthorization(options: ShellCommandAuthorizati
     let timer: NodeJS.Timeout | undefined
     try {
       const plan = await Promise.race([
-        (async () => {
-          const candidate = await analyze(command, workingDir, invocation)
-          if (candidate && !candidate.skillScript && options.accessMode() === 'strict_approval') {
-            const roots = await Promise.all(options.trustedFolders.map(async (root) =>
-              (await resolveCanonicalWorkspacePath(root, options.primaryFolder, 'follow')).canonicalPath))
-            if (candidate.paths.some((target) => !roots.some((root) => isSameOrInsideDirectory(root, target)))) return undefined
-          }
-          return candidate
-        })(),
+        analyze(command, workingDir, invocation),
         new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), 5000) })
       ])
       return plan

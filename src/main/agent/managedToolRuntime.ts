@@ -1,3 +1,4 @@
+import { verifyCurrentToolAuthorization } from './toolAuthorizationRuntime'
 import { pluginToolMetadata } from '@shared/pluginTools'
 import { isCustomToolMetadata } from '@shared/customTools'
 import { isCommandShellMetadata } from '@shared/commandShell'
@@ -73,6 +74,7 @@ export function createManagedToolRuntime(definition: ToolDefinition, options: Ma
           try {
             const invoke = async () => {
               control.signal.throwIfAborted()
+              await verifyCurrentToolAuthorization()
               return definition.execute(args, { signal: control.signal, ...(typeof context.timeoutMs === 'number' ? { timeoutMs: context.timeoutMs } : {}) })
             }
             const output = await (options.withResources ? options.withResources(args, invoke) : invoke())

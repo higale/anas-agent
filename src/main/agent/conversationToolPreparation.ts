@@ -57,7 +57,6 @@ export async function prepareConversationToolBatch(state: ExecutionState, option
   let context = state.context
   if (options.includeRules) {
     const result = await preflightConversationRules(context, calls.filter(call => !answered.has(call.id)), state.response?.value.context?.projectRulesReceipt, options)
-    if (result.kind === 'wait') return result
     context = result.context
     const updated = new Map(result.calls.map(call => [call.id, call]))
     calls = calls.map(call => updated.get(call.id) ?? call)
@@ -94,13 +93,19 @@ export async function prepareConversationToolBatch(state: ExecutionState, option
       if (patch.error) { reject(call, patch.error); continue }
       requiresApproval = options.accessMode() !== 'full_access' && patch.requiresApproval
     } else if (options.shell?.toolName === call.name) {
-      const shell = call.authorization?.shell ?? await prepareShellAuthorization(validated, options.explicitSkill, options.shell)
-      item.authorization = { shell }
-      requiresApproval = options.accessMode() !== 'full_access' && shell.requiresApproval
+      try {
+        const shell = call.authorization?.shell ?? await prepareShellAuthorization(validated, options.explicitSkill, options.shell)
+        item.authorization = { shell }
+        requiresApproval = options.accessMode() !== 'full_access' && shell.requiresApproval
+      } catch (error) {
+        if (!(error instanceof ToolInputError)) throw error
+        reject(call, toolInputDiagnostic(call.name, error.message))
+        continue
+      }
     } else if (approvalNames.has(call.name)) {
       try {
         requiresApproval = await requiresToolApproval({ toolName: call.name, args: validated.args, primaryFolder: options.primaryFolder,
-          trustedFolders: options.folders, accessMode: options.accessMode(), commandShellToolName: options.shell?.toolName })
+          trustedFolders: options.folders, accessMode: options.accessMode(), commandShellToolName: options.shell?.toolName, directories: options.directories })
       } catch (error) {
         options.signal?.throwIfAborted()
         reject(call, `NOT EXECUTED: ${String(error)}. Correct the arguments and decide again.`)
@@ -112,7 +117,7 @@ export async function prepareConversationToolBatch(state: ExecutionState, option
       pending.push({ call: validated, policy: { allowedDecisions: ['approve', 'reject'], description: call.name === options.shell?.toolName
         ? `Run a command with ${call.name}.` : call.name === 'update_config' ? 'Modify application configuration.'
           : call.name === 'write_call' ? 'Send input to the selected live terminal. Input may execute a pending command.'
-            : 'Access a host file path outside the project folders.' } })
+            : 'Review the file operation and its resolved targets.' } })
     }
   }
   options.signal?.throwIfAborted()

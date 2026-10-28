@@ -4,10 +4,39 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { parseProjectStore } from './projectStore'
 import { AgentStorage } from './agent/agentStorage'
+import { catalogVersion, catalogConversationColumns, catalogConversationSchema, catalogConversationIndexes, validateCatalogAccessMode } from './agent/catalogSchema'
 import { NativeConversationDatabase } from './agent/nativeConversationDatabase'
 import { replaceProjectData } from './backupService'
 import { repairArchivedFileChangeVersions } from './recoveryFileChanges'
 import { getProjectStoreFile } from './config/dataDir'
+
+/** Manual repair of a staged copy. Invalid choices use the current default;
+ * no historical permission names or version conversion rules are interpreted. */
+function repairCatalogAccessMode(database: Database.Database): string[] {
+  try { validateCatalogAccessMode(database); return [] } catch { /* Rebuild only the known current table shape. */ }
+  const columns = database.prepare('PRAGMA table_info(agent_conversations)').all() as Array<{ name: string }>
+  if (columns.length !== catalogConversationColumns.length || columns.some(({ name }) => !catalogConversationColumns.includes(name))) {
+    throw new Error('Unrecognized conversation catalog columns; original database preserved.')
+  }
+  const foreignKeys = database.pragma('foreign_keys', { simple: true })
+  database.pragma('foreign_keys = OFF')
+  try {
+    database.transaction(() => {
+      database.exec(catalogConversationSchema.replace('CREATE TABLE agent_conversations', 'CREATE TABLE repaired_conversations'))
+      const selected = catalogConversationColumns.map(column => column === 'access_mode'
+        ? "CASE WHEN access_mode IN ('strict_approval', 'smart_approval', 'full_access') THEN access_mode ELSE 'smart_approval' END"
+        : column)
+      database.exec(`INSERT INTO repaired_conversations (${catalogConversationColumns.join(',')})
+        SELECT ${selected.join(',')} FROM agent_conversations;
+        DROP TABLE agent_conversations;
+        ALTER TABLE repaired_conversations RENAME TO agent_conversations;
+        ${catalogConversationIndexes}`)
+      validateCatalogAccessMode(database)
+      if ((database.pragma('foreign_key_check') as unknown[]).length) throw new Error('Agent catalog foreign key check failed.')
+    })()
+  } finally { database.pragma(`foreign_keys = ${foreignKeys ? 'ON' : 'OFF'}`) }
+  return ['agent_conversations.access_mode (constraint repaired; invalid values use smart_approval)']
+}
 
 async function storageFiles(root: string): Promise<Map<string, string>> {
   const files = new Map<string, string>()
@@ -94,12 +123,14 @@ async function stageProjectRepair(root: string, staged: string, before: string, 
         if (files.has(`${relative}${suffix}`)) await copyFile(`${original}${suffix}`, `${probe}${suffix}`)
       }
       let version: number
+      const targetVersion = relative === 'db/catalog.sqlite' ? catalogVersion : 1
       let repairedFields: string[] = []
       const database = new Database(probe, { fileMustExist: true })
       try {
         version = database.pragma('user_version', { simple: true }) as number
         if (relative === 'db/catalog.sqlite') {
           if (unsupportedConversations) throw new Error('Unsupported conversation schema; catalog preserved without conversion.')
+          repairedFields = repairCatalogAccessMode(database)
         } else {
           const native = Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='execution_state'").get())
           const legacy = Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='current_state'").get())
@@ -108,7 +139,7 @@ async function stageProjectRepair(root: string, staged: string, before: string, 
             throw new Error('Unsupported execution schema; original database preserved without conversion.')
           }
         }
-        database.pragma('user_version = 1')
+        database.pragma(`user_version = ${targetVersion}`)
         if (relative !== 'db/catalog.sqlite') repairedFields = await repairArchivedFileChangeVersions(database, join(root, dirname(relative)))
         const checkpoint = database.pragma('wal_checkpoint(TRUNCATE)') as Array<{ busy: number }>
         if (checkpoint.some((result) => result.busy)) throw new Error('SQLite snapshot is busy.')
@@ -118,10 +149,10 @@ async function stageProjectRepair(root: string, staged: string, before: string, 
       else {
         NativeConversationDatabase.validateBackup(probe, join(root, dirname(relative), 'attachments'), projectIds, relative.split('/')[2])
       }
-      if (version !== 1 || repairedFields.length) {
+      if (version !== targetVersion || repairedFields.length) {
         await copyFile(probe, original)
         for (const suffix of ['-wal', '-shm', '-journal']) await rm(`${original}${suffix}`, { force: true })
-        if (version !== 1) fields.push(`${relative}: user_version (${version} → 1)`)
+        if (version !== targetVersion) fields.push(`${relative}: user_version (${version} → ${targetVersion})`)
         fields.push(...repairedFields.map(field => `${relative}: ${field}`))
       }
     } catch (error) {

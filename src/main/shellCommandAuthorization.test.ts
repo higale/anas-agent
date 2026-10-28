@@ -126,16 +126,16 @@ describe.skipIf(process.platform !== 'win32')('Windows Shell read authorization'
     for (const command of [
       'rg needle ../outside', 'rg -f ../outside/secret.txt .', 'rg --ignore-file=../outside/secret.txt needle .',
       'Get-Content notes.txt; Get-Content ../outside/secret.txt'
-    ]) expect(await h.authorization.requiresApproval({ command })).toBe(true)
-    const readOnly = createShellCommandAuthorization({ ...h, accessMode: () => 'read_only_allowed' })
+    ]) expect(await h.authorization.requiresApproval({ command })).toBe(false)
+    const readOnly = createShellCommandAuthorization({ ...h, accessMode: () => 'smart_approval' })
     expect(await readOnly.requiresApproval({ command: 'Get-Content ../outside/secret.txt' })).toBe(false)
-    expect(await h.authorization.requiresApproval({ command: 'rg --version', working_dir: h.outside })).toBe(true)
+    expect(await h.authorization.requiresApproval({ command: 'rg --version', working_dir: h.outside })).toBe(false)
   })
-  it('resolves linked targets and rejects retargeting before dispatch', async () => {
+  it('resolves linked targets and resolves changed physical targets during inspection', async () => {
     const h = await fixture()
     const link = join(h.project, 'link')
     await symlink(h.outside, link, 'junction')
-    expect(await h.authorization.requiresApproval({ command: 'Get-Content link/secret.txt' })).toBe(true)
+    expect(await h.authorization.requiresApproval({ command: 'Get-Content link/secret.txt' })).toBe(false)
     const directory = join(h.project, 'data')
     await mkdir(directory)
     await writeFile(join(directory, 'secret.txt'), 'inside')
@@ -143,7 +143,7 @@ describe.skipIf(process.platform !== 'win32')('Windows Shell read authorization'
     expect(await h.authorization.requiresApproval(args)).toBe(false)
     await rm(directory, { recursive: true })
     await symlink(h.outside, directory, 'junction')
-    expect(await h.authorization.requiresApproval(args)).toBe(true)
+    expect(await h.authorization.requiresApproval(args)).toBe(false)
     expect(args).toEqual({ command: 'Get-Content data/secret.txt' })
   })
   it('parses without executing embedded code and fails closed when the parser fails', async () => {
@@ -166,12 +166,12 @@ describe.skipIf(process.platform !== 'win32')('Windows Shell read authorization'
   })
   it('rechecks a changed access mode at execution', async () => {
     const h = await fixture()
-    let mode: AgentAccessMode = 'read_only_allowed'
+    let mode: AgentAccessMode = 'smart_approval'
     const authorization = createShellCommandAuthorization({ ...h, accessMode: () => mode })
     const args: Record<string, unknown> = { command: 'Get-Content ../outside/secret.txt' }
     expect(await authorization.requiresApproval(args)).toBe(false)
     mode = 'strict_approval'
-    expect(await authorization.requiresApproval(args)).toBe(true)
+    expect(await authorization.requiresApproval(args)).toBe(false)
   })
   it('preserves explicit rg output formatting and resolves bundled rg on the unmodified Shell PATH', async () => {
     const h = await fixture()

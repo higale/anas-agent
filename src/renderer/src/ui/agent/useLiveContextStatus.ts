@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import stableStringify from 'fast-json-stable-stringify'
-import type { AgentContextStatus } from '@shared/agentTypes'
+import type { AgentAccessMode, AgentContextStatus } from '@shared/agentTypes'
 import { contextStatusForModel } from '@shared/contextWindow'
 import { modelContextKey } from '@shared/modelConfig'
 import type { AppConfigSnapshot, Project, ResolvedModelConfig } from '@shared/types'
@@ -8,6 +8,7 @@ import type { AppConfigSnapshot, Project, ResolvedModelConfig } from '@shared/ty
 interface ContextProjection {
   config: AppConfigSnapshot | undefined
   project: Project | undefined
+  accessMode?: AgentAccessMode
   /** Interruptions retain run capabilities, but rebuild prompts when resumed. */
   continuationRunId: string | undefined
   continuationStatus?: 'running' | 'interrupted'
@@ -15,9 +16,10 @@ interface ContextProjection {
   liveStatus?: AgentContextStatus
 }
 
-function projectionKey({ config, project, continuationRunId, continuationStatus }: ContextProjection): string {
+function projectionKey({ config, project, accessMode, continuationRunId, continuationStatus }: ContextProjection): string {
   if (continuationStatus === 'running') return `running:${continuationRunId}`
   return stableStringify({
+    accessMode,
     continuationRunId,
     continuationStatus,
     project: project && {

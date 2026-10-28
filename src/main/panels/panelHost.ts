@@ -17,7 +17,7 @@ import type { PanelDefinition } from './panelPages'
 const id = z.string().min(1).max(256)
 const builtinSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('document'), documentId: z.custom<keyof typeof helpDocuments>(isHelpDocumentId), anchor: z.string().max(2048).optional(), navigationId: id.optional() }).strict(),
-  z.object({ kind: z.literal('files'), projectId: id, threadId: id.optional(), runId: id.optional(), navigationId: id.optional(), draft: z.object({ modelConfigId: id.optional(), modelParameterPresetId: id.nullable().optional(), accessMode: z.enum(['strict_approval', 'read_only_allowed', 'full_access']).optional() }).strict().optional() }).strict(),
+  z.object({ kind: z.literal('files'), projectId: id, threadId: id.optional(), runId: id.optional(), navigationId: id.optional(), draft: z.object({ modelConfigId: id.optional(), modelParameterPresetId: id.nullable().optional(), accessMode: z.enum(['strict_approval', 'smart_approval', 'full_access']).optional() }).strict().optional() }).strict(),
   z.object({ kind: z.literal('subagent'), projectId: id, threadId: id, runId: id, subagentId: id, name: z.string().min(1).max(512) }).strict()
 ])
 let preferences: PanelPreferences | undefined

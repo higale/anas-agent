@@ -20,7 +20,13 @@ export interface RecoverySnapshot {
   stopError?: string
   canModify: boolean
   files: RecoveryFileStatus[]
+  resetTargets: { projects: RecoveryResetTarget[]; execution: RecoveryResetTarget[] }
   lastPreservationPath?: string
+}
+
+export interface RecoveryResetTarget {
+  path: string
+  kind: 'file' | 'directory'
 }
 
 export interface RecoveryResult {
@@ -38,7 +44,8 @@ export interface RecoveryApi {
   inspect(): Promise<RecoverySnapshot>
   openDirectory(kind: 'data' | 'log' | 'preservation'): Promise<void>
   reset(file: ResettableConfigFile): Promise<RecoveryResult>
-  resetProjects(): Promise<RecoveryResult>
+  resetProjects(targets: RecoveryResetTarget[]): Promise<RecoveryResult>
+  resetExecution(targets: RecoveryResetTarget[]): Promise<RecoveryResult>
   repair(file: RecoveryFile): Promise<RecoveryRepairResult>
   restart(): Promise<void>
 }

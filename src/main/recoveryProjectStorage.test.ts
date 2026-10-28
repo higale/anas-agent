@@ -20,6 +20,7 @@ import { AgentStorage } from './agent/agentStorage'
 import { getAgentCatalogFile, getAgentConversationDatabaseFile } from './config/dataDir'
 import { inspectRecoveryRepair, repairRecoveryData } from './recoveryRepair'
 import { preserveRecoveryData } from './recoveryData'
+import { validateExecutionStorageDirectory } from './executionStorageValidation'
 import { patchTextHash } from './filePatchRecord'
 
 const roots: string[] = []
@@ -93,6 +94,40 @@ async function archivedChangeFixture(version: number | undefined, databaseVersio
 }
 
 describe('project version metadata recovery', () => {
+  it.each([1, 2])('repairs an incompatible access mode constraint labelled catalog v%s without losing conversation data', async version => {
+    const { root, data, databases, thread } = await fixture(0)
+    for (const [index, path] of databases.entries()) {
+      const db = new Database(path)
+      db.pragma(`user_version = ${index === 0 ? version : 1}`)
+      db.close()
+    }
+    const before = await Promise.all(databases.map(path => readFile(path)))
+    await expect(validateExecutionStorageDirectory(data)).rejects.toThrow(version === 1 ? 'expected catalog 2' : 'access mode')
+    const inspected = await inspectRecoveryRepair(data)
+    expect(inspected.files.find(file => file.name === 'projects.json')?.repairableFields.join('\n')).toContain('access_mode')
+    expect(await Promise.all(databases.map(path => readFile(path)))).toEqual(before)
+    const result = await repairRecoveryData(data, 'projects.json', () => preserveRecoveryData(data, root))
+    expect(result.unresolved).toEqual([])
+    expect(await readFile(join(result.preservationPath!, 'data/db/catalog.sqlite'))).toEqual(before[0])
+    expect(await readFile(databases[1])).toEqual(before[1])
+    await expect(validateExecutionStorageDirectory(data)).resolves.toBeUndefined()
+    const storage = AgentStorage.openNative(data)
+    try {
+      expect(storage.getThread(thread.id)).toMatchObject({ title: thread.title, accessMode: 'smart_approval' })
+      expect(storage.conversationForThread(thread.id).getThread(thread.id)?.accessMode).toBe('smart_approval')
+      expect((await storage.memoryStore.searchMemories({ scope: 'global' })).items[0].content).toBe('Preserve this memory')
+      const created = storage.createThread({ title: 'New smart conversation' })
+      expect(created.accessMode).toBe('smart_approval')
+      expect(storage.getThread(created.id)?.accessMode).toBe('smart_approval')
+      for (const mode of ['strict_approval', 'full_access', 'smart_approval'] as const) {
+        expect(storage.setAccessMode(created.id, mode).accessMode).toBe(mode)
+      }
+    } finally { storage.close() }
+    const preserve = vi.fn(async () => '/unused')
+    expect((await repairRecoveryData(data, 'projects.json', preserve)).repaired).toEqual([])
+    expect(preserve).not.toHaveBeenCalled()
+  })
+
   it('preserves nested plugin state and private files when replacing project storage', async () => {
     const { root, data, thread } = await fixture()
     const pluginData = join(data, 'db/plugins/test-plugin')
@@ -315,7 +350,7 @@ describe('project version metadata recovery', () => {
     })
     const result = await repairRecoveryData(data, 'projects.json', preserve)
     expect(preserve).toHaveBeenCalledOnce()
-    expect(result.repaired).toHaveLength(3)
+    expect(result.repaired).toHaveLength(4)
     expect(result.unresolved).toEqual([])
     expect(await readFile(stagePath, 'utf8')).toBe(stage)
     expect(await readFile(join(result.preservationPath!, 'data/db/project-deletion.stage.json'), 'utf8')).toBe(stage)
@@ -383,7 +418,7 @@ describe('project version metadata recovery', () => {
     const inspected = await inspectRecoveryRepair(data)
     const status = inspected.files.find(file => file.name === 'projects.json')!
     expect(status.error).toBeUndefined()
-    expect(status.repairableFields).toHaveLength(version === 0 ? 2 : 3)
+    expect(status.repairableFields).toHaveLength(version === 0 ? 3 : 4)
     for (const [index, path] of databases.entries()) expect(await readFile(path)).toEqual(before[index])
     const result = await repairRecoveryData(data, 'projects.json', () => preserveRecoveryData(data, root))
     expect(result.unresolved).toEqual([])
@@ -393,7 +428,7 @@ describe('project version metadata recovery', () => {
     expect(JSON.parse(await readFile(join(result.preservationPath!, 'data/db/projects.json'), 'utf8'))).toEqual(projects)
     for (const [index, path] of databases.entries()) {
       const db = new Database(path, { readonly: true })
-      try { expect(db.pragma('user_version', { simple: true })).toBe(1) } finally { db.close() }
+      try { expect(db.pragma('user_version', { simple: true })).toBe(index === 0 ? 2 : 1) } finally { db.close() }
       const saved = join(result.preservationPath!, 'data', path.slice(data.length + 1))
       expect(await readFile(saved)).toEqual(before[index])
     }
@@ -419,7 +454,7 @@ describe('project version metadata recovery', () => {
     const before = await Promise.all([join(data, 'db/projects.json'), ...databases].map(path => readFile(path)))
     const preserve = vi.fn(() => preserveRecoveryData(data, root))
     const result = await repairRecoveryData(data, 'projects.json', preserve)
-    expect(result.repaired).toHaveLength(2)
+    expect(result.repaired).toHaveLength(fault === 'schema' ? 3 : 2)
     expect(result.unresolved.join('\n')).toContain(fault === 'schema' ? 'Invalid native conversation schema' : 'missing project')
     expect(preserve).toHaveBeenCalledOnce()
     const damagedIndex = fault === 'schema' ? 1 : 0

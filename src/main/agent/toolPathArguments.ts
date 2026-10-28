@@ -1,5 +1,6 @@
 import type { WorkspacePathSemantics } from '../workspacePath'
 import { filePatchPathArguments, parseFilePatch, parseWriteFile } from '../filePatch'
+import { withoutApprovalParameter } from '../../runtime/smartApproval'
 
 export type ToolArgumentLocatorSegment = string | number
 type ToolPathPatternSegment = string | '*'
@@ -74,6 +75,7 @@ export function toolPathArguments(
   args: Record<string, unknown>
 ): ToolPathArgument[] | undefined {
   if (!args || typeof args !== 'object' || Array.isArray(args)) return undefined
+  args = withoutApprovalParameter({ name: toolName }, args) as Record<string, unknown>
   if (toolName === 'apply_patch' || toolName === 'write_file') {
     try {
       return filePatchPathArguments(toolName === 'write_file' ? parseWriteFile(args) : parseFilePatch(args)).map(({ operationIndex, field, value, semantics, access }) => ({

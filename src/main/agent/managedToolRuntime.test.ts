@@ -124,3 +124,30 @@ describe('native managed capability with the current owning service', () => {
     expect(toolResultText(native)).toBe('text')
   })
 })
+
+it('rechecks a queued call using its own authorization context after the previous call releases capacity', async () => {
+  const { withToolAuthorization, toolAuthorizationDiagnostic } = await import('./toolAuthorizationRuntime')
+  const h = fixture('queued-mode-switch')
+  let release!: () => void, entered!: () => void
+  const started = new Promise<void>(resolve => { entered = resolve }), gate = new Promise<void>(resolve => { release = resolve })
+  let mode: 'smart_approval' | 'strict_approval' = 'smart_approval'
+  const write = vi.fn(async (args: { path: string }) => { if (args.path === 'first') { entered(); await gate }; return { content: 'done' } })
+  const definition = defineTool({ name: 'create_directory', description: '', inputSchema: z.object({ path: z.string() }), execute: write })
+  const dispatch = createManagedToolRuntime(definition, { service: h.service, threadId: h.thread.id, runId: h.run.id,
+    allowBackground: false, results: h.database.results })
+  try {
+    const first = withToolAuthorization(async () => {}, () => invokeCapability(dispatch, { path: 'first' }, { callId: 'first' }))
+    await started
+    const call = { id: 'second', name: 'create_directory', args: { path: join(process.cwd(), 'outside-task'), needs_approval: false } }
+    const options = { runId: h.run.id, primaryFolder: process.cwd(), folders: [], accessMode: () => mode }
+    expect(await toolAuthorizationDiagnostic(call, options)).toBeUndefined()
+    const verify = vi.fn(async () => { const error = await toolAuthorizationDiagnostic(call, options); if (error) throw new Error(error) })
+    const second = withToolAuthorization(verify, () => invokeCapability(dispatch, call.args, { callId: call.id }))
+    mode = 'strict_approval'; release(); await first
+    const result = await second
+    expect(verify).toHaveBeenCalledOnce()
+    expect(write).toHaveBeenCalledTimes(1)
+    expect(result.resultStatus).toBe('error')
+    expect(String(result.content)).toContain('now requires approval')
+  } finally { release?.(); await h.close() }
+})

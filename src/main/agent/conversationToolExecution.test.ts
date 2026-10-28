@@ -93,7 +93,7 @@ async function fileApprovalFixture() {
   await writeFile(join(project, 'note.txt'), 'read succeeded'); await writeFile(join(outside, 'note.txt'), 'read succeeded')
   const tools = fileToolDefinitions({ primaryFolder: project, requestId: h.runId, maxReadBytes: 10000,
     fileEditStore: h.fileEditStore, toolNames: ['read_file', 'delete_file'] })
-  Object.assign(h.options, { primaryFolder: project, folders: [project], accessMode: () => 'read_only_allowed', definitions: tools })
+  Object.assign(h.options, { primaryFolder: project, folders: [project], accessMode: () => 'smart_approval', definitions: tools })
   return { ...h, tools, project, target: join(outside, 'note.txt') }
 }
 
@@ -281,7 +281,7 @@ describe('native capability dispatch and durable effects', () => {
     const h = await fixture(), execute = vi.fn(async (_args: unknown) => ({ content: 'done' }))
     const tool: ToolDefinition = { name: 'pwsh', description: 'Shell', inputSchema: z.object({ command: z.string() }), execute }
     h.options.definitions = [tool]
-    h.options.accessMode = () => decision === 'automatic' ? 'full_access' : 'read_only_allowed'
+    h.options.accessMode = () => decision === 'automatic' ? 'full_access' : 'smart_approval'
     const inspect = vi.fn(async () => undefined)
     h.options.shell = { toolName: 'pwsh', analyzer: { inspect, requiresApproval: vi.fn(async () => true) }, accessMode: h.options.accessMode }
     await h.begin([call('shell', 'pwsh', { command: 'original' })])

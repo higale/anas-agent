@@ -1,13 +1,14 @@
 import type { ToolDefinition, ToolInvocationContext } from './toolDefinition'
 import { parseToolInput } from './toolInput'
 import { isCustomToolMetadata, maxCustomToolInputBytes } from '../shared/customTools'
+import { withoutApprovalParameter } from './smartApproval'
 
 /** One final parse and one business invocation. Cleanup belongs to the handler;
  * cancellation must not race it or discard a confirmed result. */
 export async function invokeCapability<Result>(definition: ToolDefinition<Result>, input: unknown,
   context: ToolInvocationContext, started?: () => void): Promise<Result> {
   context.signal?.throwIfAborted()
-  const parsed = await parseToolInput(input, definition.inputSchema, {
+  const parsed = await parseToolInput(withoutApprovalParameter(definition, input), definition.inputSchema, {
     maxBytes: isCustomToolMetadata(definition.metadata) ? maxCustomToolInputBytes : undefined
   })
   context.signal?.throwIfAborted()

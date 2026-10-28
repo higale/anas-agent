@@ -515,7 +515,7 @@ async function verifyThreadListLayout(electronApplication) {
     ipcMain.removeHandler('agent:threads:list')
     ipcMain.handle('agent:threads:list', () => ['idle', 'running'].map((status, index) => ({
       id: `layout-thread-${index}`, projectId: 'default-workspace', title: `Conversation ${index} with a very long title that must stay on one line`,
-      status, pinned: index === 0, userTurnCount: 7, accessMode: 'read_only_allowed',
+      status, pinned: index === 0, userTurnCount: 7, accessMode: 'smart_approval',
       createdAt: '2026-09-06T01:00:00Z', updatedAt: '2026-09-06T08:00:00Z'
     })))
   })
@@ -1066,7 +1066,7 @@ async function verifyCodeReview(electronApplication) {
   })
   await electronApplication.evaluate(({ ipcMain }, { modelConfigId, currentThread }) => {
     const now = new Date().toISOString(), version = 'a'.repeat(64)
-    const thread = { id: currentThread.id, projectId: currentThread.projectId, modelConfigId, title: 'Code review', status: 'idle', accessMode: 'read_only_allowed',
+    const thread = { id: currentThread.id, projectId: currentThread.projectId, modelConfigId, title: 'Code review', status: 'idle', accessMode: 'smart_approval',
       pinned: false, userTurnCount: 1, createdAt: now, updatedAt: now }
     const scope = { id: 'b'.repeat(64), projectId: thread.projectId, capturedAt: now, description: 'Recorded changes / 已记录改动 · greeting.ts',
       request: { kind: 'recorded', threadId: thread.id, runId: 'changes-run', version, target: 'recorded' }, limitations: [],

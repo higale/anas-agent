@@ -7,8 +7,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentAccessMode } from '@shared/agentTypes'
 import type { ResolvedModelConfig } from '@shared/types'
 import type { ExecutionContext, ExecutionPendingCall, ExecutionState } from '../../runtime/executionState'
-import { conversationExecution, type ConversationExecutionServices } from '../../runtime/conversationExecution'
-import type { RunObserver } from '../../runtime/runExecution'
 import { ProjectRulesError, ProjectRulesRequestBudgetError } from '../../runtime/errors'
 import { projectRulesText, ruleScopeIds } from '../../runtime/projectRules'
 import { toolEffectArtifactPurposes } from '../../runtime/toolEffectIdentity'
@@ -158,100 +156,47 @@ describe('native project rules and durable preparation approval', () => {
     expect(store.load('thread')).toEqual(saved)
   })
 
-  it('reopens a paused loop, preserves captured rules and commits approval with its input intent', async () => {
+  it('captures external rules in strict mode without pausing and retains the frozen snapshot after reopening', async () => {
     const { root, options } = await fixture(), file = join(root, 'execution.sqlite')
-    let db = database(file), failCommit = false
-    let store = new NativeExecutionStore(db, () => { if (failCommit) throw new Error('owner commit failed') })
-    const invoke = vi.fn(async () => ({ message: { id: 'model', value: { kind: 'assistant' as const, content: 'done' } }, calls: [],
-      context: { ...store.load('thread')!.context, modelCalls: 1 } }))
-    const observer: RunObserver = { started: vi.fn(), startModel: vi.fn(() => 'model'), discardModel: vi.fn(), model: vi.fn(), tool: vi.fn(), approval: vi.fn(), committed: vi.fn(async () => {}) }
-    const services: ConversationExecutionServices = { store, enter: async command => { if (command === 'input') begin(store) },
-      prepareModel: async state => {
-        const prepared = await prepareConversationRules(state.context, options)
-        if (prepared.kind === 'wait') return prepared
-        if (!state.context.rulePreparation?.initialized) return { kind: 'context', context: prepared.context }
-        return { kind: 'model', invoke }
-      }, afterModel: async () => ({ kind: 'complete' }), prepareTools: async () => { throw new Error('unexpected tools') },
-      executeTool: async () => { throw new Error('unexpected dispatch') }, directions: async () => [], drain: vi.fn(async () => {}), retry: { maxRetries: 0 } }
-    const request = { threadId: 'thread', runId: 'run', signal: new AbortController().signal }
-    expect((await conversationExecution(services).execute('input', request, observer)).interrupted).toBe(true)
-    const waiting = store.load('thread')!, approval = waiting.approvals[0]
-    expect(waiting.phase).toBe('waiting_context')
-    expect(waiting.calls).toEqual([])
-    expect(waiting.messages).toHaveLength(1)
-    expect(invoke).not.toHaveBeenCalled()
-    expect(waiting.context.projectRules!.documents).toHaveLength(1)
-    await writeFile(join(root, 'one/AGENTS.md'), 'CHANGED WHILE WAITING')
-    db.close(); db = database(file, false)
-    store = new NativeExecutionStore(db, () => { if (failCommit) throw new Error('owner commit failed') }); services.store = store
-    db.exec('CREATE TABLE input_intent (consumed INTEGER); INSERT INTO input_intent VALUES (0)')
-    expect(() => store.resolveContextWait(scope(waiting), approval.id, 'stale', 'approve')).toThrow('generation changed')
-    failCommit = true
-    expect(() => store.resolveContextWait(scope(waiting), approval.id, approval.generation, 'approve', () => { db.exec('UPDATE input_intent SET consumed=1') })).toThrow('owner commit failed')
-    expect(db.prepare('SELECT consumed FROM input_intent').get()).toEqual({ consumed: 0 })
-    expect(store.load('thread')!.context.rulePreparation!.reads).toEqual([])
-    failCommit = false
-    store.resolveContextWait(scope(waiting), approval.id, approval.generation, 'approve', () => { db.exec('UPDATE input_intent SET consumed=1') })
-    expect(() => store.resolveContextWait(scope(waiting), approval.id, approval.generation, 'approve')).toThrow()
-    expect((await conversationExecution(services).execute('continue', request, observer)).result.status).toBe('fulfilled')
-    const completed = store.load('thread')!
-    expect(completed.phase).toBe('completed')
-    expect(invoke).toHaveBeenCalledOnce()
-    expect(completed.context.projectRules!.documents.map(document => document.content)).toEqual(['one ORIGINAL RULE', 'two ORIGINAL RULE'])
-    expect(projectRulesText(completed.context.projectRules!)).toContain('one ORIGINAL RULE')
-    expect(projectRulesText(completed.context.projectRules!)).not.toContain('two ORIGINAL RULE')
-    expect(completed.context.rulePreparation!.reads).toEqual([{ path: join(root, 'two/AGENTS.md'), approved: true }])
+    const prepared = await prepareConversationRules(context(), options)
+    expect(prepared.kind).toBe('ready')
+    expect(prepared.context.projectRules!.documents.map(document => document.content)).toEqual(['one ORIGINAL RULE', 'two ORIGINAL RULE'])
+    let db = database(file), store = new NativeExecutionStore(db)
+    begin(store); store.prepareContext(scope(store.load('thread')!), prepared.context)
+    await writeFile(join(root, 'two/AGENTS.md'), 'Changed after capture')
+    db.close(); db = database(file, false); store = new NativeExecutionStore(db)
+    const repeated = await prepareConversationRules(store.load('thread')!.context, options)
+    expect(repeated.context).toEqual(prepared.context)
+    expect(repeated.context.rulePreparation!.reads).toEqual([])
+    expect(store.load('thread')!.approvals).toEqual([])
+    const next = await prepareConversationRules(repeated.context, { ...options, runId: 'next' })
+    expect(next.kind).toBe('ready')
+    expect(next.context.projectRules!.documents.map(document => document.content)).toContain('Changed after capture')
   })
 
-  it('retains rejection, does not widen its scope, and keeps preview read-only', async () => {
-    const { options } = await fixture(), store = new NativeExecutionStore(database())
-    begin(store)
-    const prepared = await prepareConversationRules(context(), options)
-    if (prepared.kind !== 'wait') throw new Error('Expected external read approval')
-    expect(prepared.context.rulePreparation!.reads).toEqual([])
-    expect(() => store.waitForContext(scope(store.load('thread')!), { ...prepared.approval, path: 'different' }, prepared.context)).toThrow('context read approval')
-    store.waitForContext(scope(store.load('thread')!), prepared.approval, prepared.context)
-    const waiting = store.load('thread')!
-    store.resolveContextWait(scope(waiting), prepared.approval.id, prepared.approval.generation, 'reject')
-    await expect(prepareConversationRules(store.load('thread')!.context, options)).rejects.toThrow('not approved')
-    await expect(prepareConversationRules(context(), { ...options, allowApprovals: false })).rejects.toThrow('cannot be included in this preview')
-    for (const mode of ['read_only_allowed', 'full_access'] as const) {
-      expect((await prepareConversationRules(context(), { ...options, accessMode: () => mode })).kind).toBe('ready')
-    }
-    const newRun = await prepareConversationRules(store.load('thread')!.context, { ...options, runId: 'new-run' })
-    expect(newRun.kind).toBe('wait')
-    expect(newRun.context.rulePreparation!.reads).toEqual([])
+  it.each(['strict_approval', 'smart_approval', 'full_access'] as const)('includes validated external rules in a read-only preview in %s', async mode => {
+    const { options } = await fixture(mode)
+    const result = await prepareConversationRules(context(), options)
+    expect(result.kind).toBe('ready')
+    expect(result.context.rulePreparation!.reads).toEqual([])
+    expect(result.context.projectRules!.documents).toHaveLength(2)
   })
 
-  it('persists a tool-preflight pause and withholds writes generated without the newly discovered rules', async () => {
-    const { root, options } = await fixture()
-    options.folders = [join(root, 'one')]
+  it('reads newly discovered external rules automatically but withholds writes generated without them', async () => {
+    const { root, options } = await fixture(); options.folders = [join(root, 'one')]
     const prepared = await prepareConversationRules(context(), options)
-    if (prepared.kind !== 'ready') throw new Error('Expected ready rules')
-    const store = new NativeExecutionStore(database()); begin(store)
-    store.prepareContext(scope(store.load('thread')!), prepared.context)
-    const tool = call(join(root, 'two/new.txt')), receipt = { runId: 'run', scopes: ruleScopeIds(prepared.context.projectRules!), minimumTokens: 100, budget: 10000 }
-    store.acceptModel(scope(store.load('thread')!), { id: 'model', value: { kind: 'assistant', content: '', calls: [{ id: tool.providerCallId, name: tool.name, args: tool.args }] } }, [tool], { ...prepared.context, modelCalls: 1 })
-    let state = store.load('thread')!
-    const paused = await preflightConversationRules(state.context, state.calls, receipt, options)
-    if (paused.kind !== 'wait') throw new Error('Expected preflight read approval')
-    expect(paused.approval.resumePhase).toBe('tools')
-    store.waitForContext(scope(state), paused.approval, paused.context)
-    state = store.load('thread')!
-    expect(() => store.prepareEffect({ threadId: 'thread', runId: 'run', callId: tool.id }, 'confirm')).toThrow()
-    store.resolveContextWait(scope(state), paused.approval.id, paused.approval.generation, 'approve')
-    state = store.load('thread')!
-    const result = await preflightConversationRules(state.context, state.calls, receipt, options)
-    if (result.kind !== 'ready') throw new Error('Expected ready preflight')
+    const tool = call(join(root, 'two/new.txt'))
+    const result = await preflightConversationRules(prepared.context, [tool],
+      { runId: 'run', scopes: ruleScopeIds(prepared.context.projectRules!), minimumTokens: 100, budget: 10000 }, options)
+    expect(result.kind).toBe('ready')
     expect(result.context.projectRules!.blockedCalls).toEqual([tool.id])
     expect(await conversationRuleToolRejection(result.context, tool, options)).toContain('Newly discovered scoped project rules')
     expect(projectRulesText(result.context.projectRules!)).toContain('two ORIGINAL RULE')
-    expect(state.context.modelCalls).toBe(1)
-    expect(state.calls[0].prepared).toBe(false)
+    expect(result.context.rulePreparation!.reads).toEqual([])
   })
 
   it('guards the final request and records the exact rule scopes on a complete SDK response', async () => {
-    const { options } = await fixture('read_only_allowed'), prepared = await prepareConversationRules(context(), options)
+    const { options } = await fixture('smart_approval'), prepared = await prepareConversationRules(context(), options)
     if (prepared.kind !== 'ready') throw new Error('Expected ready rules')
     const systemMessage = conversationRuleSystemMessage({ kind: 'system', content: 'Instructions' }, prepared.context, 'run')
     const input = { systemMessage, messages: [{ kind: 'user' as const, content: 'Do the task' }], tools: [], requiresTools: false, projectRules: prepared.context.projectRules }
@@ -267,7 +212,7 @@ describe('native project rules and durable preparation approval', () => {
     expect(fetch).toHaveBeenCalledOnce()
   })
 
-  it('preserves a recovered sibling result while the remaining batch needs rule approval', async () => {
+  it('preserves a recovered sibling result while discovering external rules', async () => {
     const { root, options } = await fixture(); options.folders = [join(root, 'one')]
     const initial = await prepareConversationRules(context(), options)
     if (initial.kind !== 'ready') throw new Error('Expected local rules')
@@ -278,8 +223,8 @@ describe('native project rules and durable preparation approval', () => {
     store.settleCall(scope(store.load('thread')!), right.id, { id: 'known-result', value: { kind: 'tool', content: 'already completed', resultFor: right.providerCallId } })
     const state = store.load('thread')!, prepared = await preflightConversationRules(state.context, state.calls,
       { runId: 'run', scopes: ruleScopeIds(initial.context.projectRules!), minimumTokens: 100, budget: 10000 }, options)
-    if (prepared.kind !== 'wait') throw new Error('Expected external rule approval')
-    store.waitForContext(scope(state), prepared.approval, prepared.context)
+    expect(prepared.kind).toBe('ready')
+    expect(prepared.context.projectRules!.blockedCalls).toContain(left.id)
     expect(store.load('thread')!.calls[1].result!.value.content).toBe('already completed')
     store.finish(scope(store.load('thread')!), 'cancelled')
     expect(store.load('thread')!.messages.at(-1)!.id).toBe('known-result')

@@ -17,7 +17,7 @@ function snapshot(status: AgentThreadSnapshot['thread']['status']): AgentThreadS
       title: 'Thread',
       projectId: 'default-workspace',
       pinned: false,
-      accessMode: 'read_only_allowed',
+      accessMode: 'smart_approval',
       status,
       userTurnCount: 1,
       createdAt: '2026-08-09T00:00:00.000Z',

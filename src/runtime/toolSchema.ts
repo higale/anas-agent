@@ -5,6 +5,17 @@ import type { ZodType } from 'zod/v3'
 type Fields = Record<string, unknown>
 const converted = new WeakMap<object, Fields>()
 
+/** Shared input description for model requests and their settings preview. */
+export function modelToolJsonSchema(inputSchema: unknown): Fields {
+  const converted = toolJsonSchema(inputSchema)
+  // Raw external schemas keep their declared dialect. Generated descriptions
+  // omit it without mutating the cached schema or local validation definition.
+  if (converted === inputSchema) return converted
+  const schema = { ...converted }
+  delete schema.$schema
+  return schema
+}
+
 /** Describe accepted input, leaving validation/defaults/transforms to execution. */
 export function toolJsonSchema(schema: unknown): Fields {
   if (!schema || typeof schema !== 'object' || Array.isArray(schema)) throw new Error('Tool schema must be a JSON Schema or schema object.')

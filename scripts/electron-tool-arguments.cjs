@@ -16,7 +16,7 @@ async function verifyToolArguments(launchApplication) {
     await app.evaluate(({ ipcMain, BrowserWindow }) => {
       const now = new Date().toISOString()
       const thread = { id: 'arguments-thread', projectId: 'default-workspace', title: 'Tool arguments',
-        status: 'idle', accessMode: 'read_only_allowed', pinned: false, userTurnCount: 1, createdAt: now, updatedAt: now }
+        status: 'idle', accessMode: 'smart_approval', pinned: false, userTurnCount: 1, createdAt: now, updatedAt: now }
       const snapshot = { thread, messages: [{ id: 'user', role: 'user', runId: 'arguments-run', content: [{ type: 'text', text: 'Argument reception probe' }] }],
         activities: [], todos: [], interrupts: [], messageWindow: { startIndex: 0, shown: 1, total: 1, remaining: 0 } }
       globalThis.__toolArgumentEvents = []

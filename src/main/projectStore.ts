@@ -156,7 +156,7 @@ function serializeProjectStore(store: StoredProjects) {
         ...stored,
         ...(sortOrder !== undefined ? { sort_order: sortOrder } : {}),
         ...(threadOrder !== undefined ? { thread_order: threadOrder } : {}),
-        ...(project.kind === 'workspace' && project.accessMode && project.accessMode !== 'read_only_allowed'
+        ...(project.kind === 'workspace' && project.accessMode && project.accessMode !== 'smart_approval'
           ? { access_mode: project.accessMode } : {}),
         ...(project.kind === 'workspace' ? { capabilities: serializeCapabilities(project.capabilities), restrict_subagents: project.restrictSubagents, advanced_settings: project.advancedSettings, coding_mode: project.codingMode, ...(project.compressionPrompt ? { compression_prompt: project.compressionPrompt } : {}) } : {}),
         ...(modelConfigId ? { model_config_id: modelConfigId } : {}),
@@ -347,8 +347,8 @@ function validateProjectAppearance(request: ProjectCreateRequest): {
 }
 
 function validateProjectAccessMode(value: unknown): AgentAccessMode {
-  if (value === undefined) return 'read_only_allowed'
-  if (value === 'strict_approval' || value === 'read_only_allowed' || value === 'full_access') return value
+  if (value === undefined) return 'smart_approval'
+  if (value === 'strict_approval' || value === 'smart_approval' || value === 'full_access') return value
   throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Invalid project tool access mode.')
 }
 

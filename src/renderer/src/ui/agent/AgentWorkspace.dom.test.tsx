@@ -71,7 +71,7 @@ function workspaceProps(
     composerFormRef: createRef<HTMLFormElement>(),
     composerInputRef: createRef<HTMLTextAreaElement>(),
     error,
-    accessMode: 'read_only_allowed',
+    accessMode: 'smart_approval',
     input: '',
     assistantName: 'Anas',
     projects: [],
@@ -155,7 +155,7 @@ describe('AgentWorkspace', () => {
         messageTokens: 20_000, attachmentTokens: 0 }
     }
     const snapshot: AgentThreadSnapshot = {
-      thread: { id: 'thread-1', projectId: 'project', title: 'Test', pinned: false, accessMode: 'read_only_allowed', status: 'running',
+      thread: { id: 'thread-1', projectId: 'project', title: 'Test', pinned: false, accessMode: 'smart_approval', status: 'running',
         userTurnCount: 1, createdAt: '', updatedAt: '' },
       messages: [], activities: [], todos: [], interrupts: [], contextStatus,
       messageWindow: { startIndex: 0, shown: 0, total: 0, remaining: 0 }
@@ -201,7 +201,7 @@ describe('AgentWorkspace', () => {
       }
       const snapshot: AgentThreadSnapshot = {
         thread: { id: 'thread-1', title: 'Test', projectId: 'project', pinned: false,
-          accessMode: 'read_only_allowed', status: state === 'interrupted' ? 'interrupted' : 'running',
+          accessMode: 'smart_approval', status: state === 'interrupted' ? 'interrupted' : 'running',
           userTurnCount: 1, createdAt: '', updatedAt: '' },
         messages: [], activities: [], todos: [], interrupts: [], contextStatus,
         pendingRun: { id: 'run-1', threadId: 'thread-1', operation: 'agent',
@@ -272,7 +272,7 @@ describe('AgentWorkspace', () => {
     const props = { ...workspaceProps({ ...interruptedRun([]), status: state }), selectedProjectId: project.id }
     if (state === 'running') props.run!.liveContextStatus = contextStatus
     const snapshot: AgentThreadSnapshot = {
-      thread: { id: 'thread-1', projectId: project.id, title: 'Test', pinned: false, accessMode: 'read_only_allowed', status: state,
+      thread: { id: 'thread-1', projectId: project.id, title: 'Test', pinned: false, accessMode: 'smart_approval', status: state,
         userTurnCount: 1, createdAt: '', updatedAt: '' },
       messages: [], activities: [], todos: [], interrupts: [], contextStatus,
       messageWindow: { startIndex: 0, shown: 0, total: 0, remaining: 0 }

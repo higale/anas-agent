@@ -86,4 +86,4 @@ ANAS_EVAL_CONFIG_DIR=/absolute/test-data/config npm run eval:coding:live -- -t e
 
 供应商入口复制指定 `models.json` 到各样本临时配置，只从 `settings.json` 读取默认模型；保留模型参数、预设、流式及上下文设置。其他设置使用固定基线：英语、关闭 Shell/MCP/子 Agent/Skill/环境注入、每回合最多 16 次模型调用。单样本限时 180 秒，源配置只读，报告不序列化模型凭据。
 
-当前供应商场景为 `empty-sum`、`rename-export`、`merge-settings`、`diagnose-range`、`compression-resume`、`review-regression`、`review-clean`；对照普通/编码模式，访问模式固定允许只读，默认共 14 个样本。真实模型探索时的工具错误单独记录，任务仍须通过行为、文件保护、终态和持久状态 检查。审核报告及冻结差异保存在结果中，需独立语义评审，定位分数不能代替该结论。
+当前供应商场景为 `empty-sum`、`rename-export`、`merge-settings`、`diagnose-range`、`compression-resume`、`review-regression`、`review-clean`；对照普通/编码模式，访问模式固定智能审核，默认共 14 个样本。真实模型探索时的工具错误单独记录，任务仍须通过行为、文件保护、终态和持久状态 检查。审核报告及冻结差异保存在结果中，需独立语义评审，定位分数不能代替该结论。

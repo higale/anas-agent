@@ -9,7 +9,7 @@ import {
 } from './toolAuthorization'
 
 describe('tool authorization', () => {
-  it.each(['strict_approval', 'read_only_allowed', 'full_access'] as const)('authorizes terminal input independently of the original command in %s', async (accessMode) => {
+  it.each(['strict_approval', 'smart_approval', 'full_access'] as const)('authorizes terminal input independently of the original command in %s', async (accessMode) => {
     expect(approvalToolNames()).toContain('write_call')
     for (const action of [{ type: 'text', text: 'a new command\r' }, { type: 'key', key: 'enter' }, { type: 'eof' }]) {
       expect(await requiresToolApproval({ toolName: 'write_call', args: { action }, accessMode,
@@ -38,7 +38,7 @@ describe('tool authorization', () => {
     expect(names).toContain('apply_patch')
   })
 
-  it.each(['strict_approval', 'read_only_allowed', 'full_access'] as const)('checks every patch target in %s without rewriting lexical arguments', async (accessMode) => {
+  it.each(['strict_approval', 'smart_approval', 'full_access'] as const)('checks every patch target in %s without rewriting lexical arguments', async (accessMode) => {
     const primary = await temporaryDirectory('anas-auth-primary-')
     const outside = await temporaryDirectory('anas-auth-outside-')
     const args = { summary: 'Edit files', patch: `*** Begin Patch\n*** Add File: 新建 file.txt\n*** Update File: update.txt\n@@\n-before\n+after\n*** Delete File: delete.txt\n*** Update File: source.txt\n*** Move to: ${join(outside, 'target.txt')}\n@@\n before\n*** End Patch` }
@@ -83,12 +83,12 @@ describe('tool authorization', () => {
     }
   })
 
-  it.each(['strict_approval', 'read_only_allowed', 'full_access'] as const)('authorizes a dry run as a read in %s', async (accessMode) => {
+  it.each(['strict_approval', 'smart_approval', 'full_access'] as const)('authorizes a dry run as a read in %s', async (accessMode) => {
     const primary = await temporaryDirectory('anas-auth-primary-'), outside = await temporaryDirectory('anas-auth-outside-')
     const args = { dry_run: true, patch: `*** Begin Patch\n*** Update File: ${join(outside, 'source.txt')}\n*** Move to: ${join(outside, 'target.txt')}\n@@\n-before\n+after\n@@\n before\n*** End Patch` }
     const result = await prepareToolPathAuthorization({ toolName: 'apply_patch', args,
       primaryFolder: primary, trustedFolders: [primary], accessMode })
-    expect(result.requiresApproval).toBe(accessMode === 'strict_approval')
+    expect(result.requiresApproval).toBe(false)
     expect(result.targets.map((target) => target.access)).toEqual(['read', 'read'])
     expect(args).not.toHaveProperty('operations')
   })
@@ -99,9 +99,9 @@ describe('tool authorization', () => {
     const path = join(outside, 'image.png')
     await writeFile(path, 'image')
     const args = toolName === 'view_image' ? { path } : { paths: [join(primary, 'local.png'), path] }
-    for (const accessMode of ['strict_approval', 'read_only_allowed', 'full_access'] as const) {
+    for (const accessMode of ['strict_approval', 'smart_approval', 'full_access'] as const) {
       const result = await prepareToolPathAuthorization({ toolName, args, primaryFolder: primary, trustedFolders: [primary], accessMode })
-      expect(result.requiresApproval).toBe(accessMode === 'strict_approval')
+      expect(result.requiresApproval).toBe(false)
       expect(result.targets.at(-1)).toMatchObject({ canonicalPath: path, access: 'read' })
     }
   })
@@ -121,7 +121,7 @@ describe('tool authorization', () => {
     })).resolves.toBe(true)
     await expect(requiresToolApproval({
       ...base,
-      accessMode: 'read_only_allowed'
+      accessMode: 'smart_approval'
     })).resolves.toBe(true)
     await expect(requiresToolApproval({
       ...base,
@@ -150,7 +150,7 @@ describe('tool authorization', () => {
       primaryFolder: primary,
       trustedFolders: [primary, secondary],
       accessMode: 'strict_approval'
-    })).resolves.toBe(true)
+    })).resolves.toBe(false)
   })
 
   it('allows reads outside projects but reviews outside writes in the default mode', async () => {
@@ -164,21 +164,21 @@ describe('tool authorization', () => {
       args: { path: outsideFile },
       primaryFolder: primary,
       trustedFolders: [primary],
-      accessMode: 'read_only_allowed'
+      accessMode: 'smart_approval'
     })).resolves.toBe(false)
     await expect(requiresToolApproval({
       toolName: 'list_directory',
       args: { path: outside },
       primaryFolder: primary,
       trustedFolders: [primary],
-      accessMode: 'read_only_allowed'
+      accessMode: 'smart_approval'
     })).resolves.toBe(false)
     await expect(requiresToolApproval({
       toolName: 'delete_file',
       args: { path: outsideFile, content: 'changed' },
       primaryFolder: primary,
       trustedFolders: [primary],
-      accessMode: 'read_only_allowed'
+      accessMode: 'smart_approval'
     })).resolves.toBe(true)
   })
 
@@ -256,7 +256,7 @@ describe('tool authorization', () => {
       primaryFolder: primary,
       trustedFolders: [primary],
       accessMode: 'strict_approval'
-    })).resolves.toBe(true)
+    })).resolves.toBe(false)
     await expect(requiresToolApproval({
       toolName: 'delete_file',
       args: writeArgs,
@@ -282,7 +282,7 @@ describe('tool authorization', () => {
     await expect(requiresToolApproval({
       toolName: 'read_file', args: readArgs, primaryFolder: primary,
       trustedFolders: [primary], accessMode: 'strict_approval'
-    })).resolves.toBe(true)
+    })).resolves.toBe(false)
     await expect(requiresToolApproval({
       toolName: 'apply_patch', args: writeArgs, primaryFolder: primary,
       trustedFolders: [primary], accessMode: 'strict_approval'
@@ -307,7 +307,7 @@ describe('tool authorization', () => {
     await expect(requiresToolApproval({
       toolName: 'list_directory', args: listArgs, primaryFolder: primary,
       trustedFolders: [primary], accessMode: 'strict_approval'
-    })).resolves.toBe(true)
+    })).resolves.toBe(false)
     await expect(requiresToolApproval({
       toolName: 'delete_file', args: deleteArgs, primaryFolder: primary,
       trustedFolders: [primary], accessMode: 'strict_approval'
@@ -383,14 +383,14 @@ describe('tool authorization', () => {
       args: { url: 'https://example.com', body_file: payload },
       primaryFolder: primary,
       trustedFolders: [primary],
-      accessMode: 'read_only_allowed'
+      accessMode: 'smart_approval'
     })).resolves.toBe(false)
     await expect(requiresToolApproval({
       toolName: 'http_request',
       args: { url: 'https://example.com', output_path: join(outside, 'result.bin') },
       primaryFolder: primary,
       trustedFolders: [primary],
-      accessMode: 'read_only_allowed'
+      accessMode: 'smart_approval'
     })).resolves.toBe(true)
   })
 
@@ -403,5 +403,53 @@ describe('tool authorization', () => {
       trustedFolders: [primary],
       accessMode: 'strict_approval'
     })).rejects.toThrow('Invalid file path arguments')
+  })
+})
+
+describe('smart approval precedence', () => {
+  const roots: string[] = []
+  afterEach(async () => { for (const path of roots.splice(0)) await rm(path, { recursive: true, force: true }) })
+  async function fixture() {
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'anas-smart-'))); roots.push(root)
+    const project = join(root, 'project'), temporary = join(root, 'temporary'), personal = join(root, 'Desktop'), outside = join(root, 'outside')
+    return { project, temporary, personal, outside, options: { primaryFolder: project, trustedFolders: [project], directories: { temporary: [temporary], personal: [personal] } } }
+  }
+  it.each(['strict_approval', 'smart_approval', 'full_access'] as const)('checks directories before the model decision in %s', async accessMode => {
+    const h = await fixture()
+    for (const flag of [{}, { needs_approval: true }, { needs_approval: false }]) {
+      for (const folder of [h.project, h.temporary, h.personal, h.outside]) {
+        const args = { path: join(folder, 'new.txt'), content: '', ...flag }
+        const result = await prepareToolPathAuthorization({ ...h.options, accessMode, toolName: 'write_file', args })
+        const safe = folder === h.project || folder === h.temporary || accessMode === 'smart_approval' && folder === h.personal
+        expect(result.requiresApproval).toBe(accessMode !== 'full_access' && !safe && (accessMode === 'strict_approval' || flag.needs_approval !== false))
+      }
+    }
+  })
+  it('uses code checks for Freeform and preserves JSON patch intent', async () => {
+    const h = await fixture(), patch = `*** Begin Patch\n*** Add File: ${join(h.outside, 'new.txt')}\n+new\n*** End Patch`
+    for (const field of ['patch', 'input']) {
+      const args = { [field]: patch, needs_approval: false }
+      const result = await prepareToolPathAuthorization({ ...h.options, accessMode: 'smart_approval', toolName: 'apply_patch', args })
+      expect(result.requiresApproval).toBe(field === 'input')
+      expect(args[field]).toBe(patch)
+    }
+  })
+  it('canonicalizes safe-directory links before deciding and binds generic targets with approval metadata', async () => {
+    const h = await fixture(), link = join(h.options.directories.personal[0], 'link')
+    const { mkdir } = await import('node:fs/promises')
+    await mkdir(h.personal); await mkdir(h.outside)
+    await symlink(h.outside, link, process.platform === 'win32' ? 'junction' : 'dir')
+    const args = { path: join(link, 'new.txt'), needs_approval: true }
+    const result = await prepareToolPathAuthorization({ ...h.options, accessMode: 'smart_approval', toolName: 'delete_file', args })
+    expect(result.requiresApproval).toBe(true)
+    expect(args).toEqual({ path: join(h.outside, 'new.txt'), needs_approval: true })
+  })
+  it('permits verified reads, pure requests and resizing even when approval is requested', async () => {
+    const h = await fixture()
+    for (const [toolName, args] of [['http_request', { url: 'https://example.com', body_file: join(h.outside, 'file') }],
+      ['write_call', { action: { type: 'resize', columns: 80, rows: 24 } }],
+      ['apply_patch', { dry_run: true, patch: `*** Begin Patch\n*** Add File: ${join(h.outside, 'file')}\n+new\n*** End Patch` }]] as const) {
+      expect(await requiresToolApproval({ ...h.options, toolName, args: { ...args, needs_approval: true }, accessMode: 'smart_approval' })).toBe(false)
+    }
   })
 })

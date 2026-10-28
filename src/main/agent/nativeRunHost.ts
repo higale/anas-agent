@@ -148,7 +148,7 @@ export class NativeRunHost {
       let thread = input.newThread
       if (thread) {
         const project = await getProject(thread.projectId)
-        thread = { ...thread, accessMode: thread.accessMode ?? (project.kind === 'workspace' ? project.accessMode : undefined) ?? 'read_only_allowed' }
+        thread = { ...thread, accessMode: thread.accessMode ?? (project.kind === 'workspace' ? project.accessMode : undefined) ?? 'smart_approval' }
       }
       const id = `${input.runId}:input`, archived = await archiveAgentAttachments(input.attachments ?? [],
         { threadId: input.threadId, runId: input.runId, messageId: id }, this.database.resourceCleanup.attachmentRoot)

@@ -793,7 +793,7 @@ describe('native user input source', () => {
     const selected = delegated ? child : owner
     const accessMode = createAgentAccessModeResolver(database.resources, selected.id, delegated ? { ownerThreadId: owner.id } : undefined)
     try {
-      for (const mode of ['full_access', 'read_only_allowed', 'strict_approval', 'full_access'] as const) {
+      for (const mode of ['full_access', 'smart_approval', 'strict_approval', 'full_access'] as const) {
         database.setAccessMode(owner.id, mode)
         expect(selected.accessMode).toBe('full_access')
         expect(database.getThread(owner.id)?.accessMode).toBe(mode)
@@ -1128,4 +1128,26 @@ it.each([false, true])('keeps background tools %s through a saved approval and r
     await instance.dispose()
     expect(database.runs.getRunConfiguration(owner)).toEqual(saved)
   } finally { database.close() }
+})
+
+it('projects approval parameters and shared instructions only in smart mode across repeated mode changes', async () => {
+  const project = defaultWorkspaceProject()
+  projectStoreMocks.getProject.mockResolvedValue(project)
+  memoryStoreMocks.buildMemoryRulesPrompt.mockResolvedValue('')
+  const database = openDatabase(), owner = configuredThread(database), snapshot = previewConfig()
+  const managed = new ManagedCallService(database.managed, database.results)
+  try {
+    for (const accessMode of ['smart_approval', 'strict_approval', 'full_access', 'smart_approval'] as const) {
+      database.setAccessMode(owner.id, accessMode)
+      const preview = JSON.parse(await captureAgentModelRequest(database.getThread(owner.id)!, database.resources, snapshot, managed))
+      const body = preview.request.body, tools = body.tools as Array<{ function: { name: string; parameters: { properties: Record<string, unknown> } } }>
+      const writer = tools.find(tool => tool.function.name === 'write_file')!
+      expect(writer).toBeDefined()
+      expect(Boolean(writer.function.parameters.properties.needs_approval)).toBe(accessMode === 'smart_approval')
+      expect(tools.find(tool => tool.function.name === 'read_file')!.function.parameters.properties).not.toHaveProperty('needs_approval')
+      const prompt = String(body.messages[0].content)
+      expect(prompt.match(/<smart_approval>/g) ?? []).toHaveLength(accessMode === 'smart_approval' ? 1 : 0)
+      if (accessMode !== 'smart_approval') expect(prompt).not.toContain('needs_approval')
+    }
+  } finally { await managed.shutdown(); database.close() }
 })

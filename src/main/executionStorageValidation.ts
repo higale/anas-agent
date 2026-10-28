@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3'
+import { catalogVersion, validateCatalogSchema } from './agent/catalogSchema'
 import { copyFile, lstat, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -41,6 +42,7 @@ async function executionVersion(root: string): Promise<number | undefined> {
       const version = database.pragma('user_version', { simple: true }) as number
       const tables = database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' LIMIT 1").get()
       if (!tables && version === 0) { await assertEmpty(); return undefined }
+      if (version === catalogVersion) validateCatalogSchema(database)
       return version
     } finally { database.close() }
   } finally { await rm(temporary, { recursive: true, force: true }) }
@@ -50,7 +52,7 @@ async function executionVersion(root: string): Promise<number | undefined> {
 /** Startup preflight reads a copied catalog and never upgrades saved execution data. */
 export async function validateExecutionStorageDirectory(root: string): Promise<void> {
   const version = await executionVersion(root)
-  if (version !== undefined && version !== 1) {
-    throw new Error(`Unsupported execution storage version ${version}; expected 1. Anas 5 requires a new database and does not migrate legacy execution data.`)
+  if (version !== undefined && version !== catalogVersion) {
+    throw new Error(`Unsupported execution storage version ${version}; expected catalog ${catalogVersion}. Repair the saved data before opening it; automatic conversion is not supported.`)
   }
 }

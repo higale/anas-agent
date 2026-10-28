@@ -17,7 +17,7 @@ function composerProps(): ComponentProps<typeof ChatComposer> {
     attachments: [], config: undefined,
     contextCompressionBusy: false, contextCompressionDisabled: true,
     generationBusy: false, locked: false, dragActive: false,
-    accessMode: 'read_only_allowed', formRef: createRef(), inputRef: createRef(),
+    accessMode: 'smart_approval', formRef: createRef(), inputRef: createRef(),
     input: 'draft', assistantName: 'Anas', projects: [], queuedMessages: [],
     simpleChatEnabled: false, submissionBusy: false, selectedProjectId: 'project',
     projectSelectionDisabled: false, showProjectPicker: false, showSuggestions: false,

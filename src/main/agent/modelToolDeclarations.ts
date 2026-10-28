@@ -1,8 +1,9 @@
-import { toolJsonSchema } from '../../runtime/toolSchema'
+import { modelToolJsonSchema } from '../../runtime/toolSchema'
 import { openAiToolDefinition } from '../../providers/openAiParameters'
 import { anthropicToolDefinition } from '../../providers/anthropicParameters'
 import type { ModelProtocol } from '@shared/types'
 import codexPatchSpec from '../codexPatchSpec.json'
+import { approvalParameterSchema } from '../../runtime/smartApproval'
 
 type Fields = Record<string, unknown>
 function record(value: unknown): Fields { return value && typeof value === 'object' && !Array.isArray(value) ? value as Fields : {} }
@@ -29,7 +30,11 @@ export function modelToolDeclaration(value: unknown, protocol: ModelProtocol = '
   else if (extras.providerToolDefinition) native = record(extras.providerToolDefinition)
   else if (metadata.customTool) native = { type: 'custom', ...record(metadata.customTool) }
   else if (typeof tool.name === 'string' && ('inputSchema' in tool || 'schema' in tool)) {
-    const schema = toolJsonSchema('inputSchema' in tool ? tool.inputSchema : tool.schema)
+    const baseSchema = modelToolJsonSchema('inputSchema' in tool ? tool.inputSchema : tool.schema)
+    const schema = metadata.smartApproval === true ? { ...baseSchema,
+      properties: { ...record(baseSchema.properties), needs_approval: approvalParameterSchema },
+      required: [...new Set([...(Array.isArray(baseSchema.required) ? baseSchema.required : []), 'needs_approval'])]
+    } : baseSchema
     native = protocol === 'anthropic_messages'
       ? { name: tool.name, description: tool.description, input_schema: schema,
         ...Object.fromEntries(['cache_control', 'defer_loading', 'input_examples', 'allowed_callers', 'strict']

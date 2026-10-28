@@ -44,6 +44,45 @@ async function verifyCurrentData(launchApplication) {
     await writeFile(join(root, 'sqlite/agent.sqlite'), 'Keep unrelated historical data')
     application = await launchApplication(root)
     await expect((await application.firstWindow()).locator('[data-agent-composer-input]')).toBeVisible({ timeout: 20000 })
+    const projectCreated = await (await application.firstWindow()).evaluate(() => globalThis.gale.projects.create({
+      kind: 'simple_chat', name: 'Retained after database reset', prompt: 'Keep project prompt'
+    }))
+    assert.equal(projectCreated.status, 'ok')
+    await closeElectronTestApplication(application)
+    application = undefined
+    const projectsBeforeReset = await readFile(join(root, 'db/projects.json'))
+    await mkdir(join(root, 'db/conversations/reset-scope-fixture'), { recursive: true })
+    await writeFile(join(root, 'db/conversations/reset-scope-fixture/material.txt'), 'Retained in preservation copy')
+    await promisify(execFile)(require('electron'), ['-e', `
+      const Database = require('better-sqlite3');
+      const db = new Database(require('node:path').join(process.argv[1], 'db/catalog.sqlite'));
+      db.pragma('user_version = 1'); db.close();
+    `, root], { cwd: resolve(__dirname, '..'), env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } })
+    application = await launchApplication(root)
+    const databaseRecovery = await application.firstWindow()
+    await expect(databaseRecovery.locator('.initial-app-status-error')).toBeVisible({ timeout: 20000 })
+    const resetPlan = await databaseRecovery.evaluate(() => globalThis.gale.recovery.inspect())
+    await databaseRecovery.getByRole('button', { name: /^(重置全部项目与会话|Reset all projects and conversations)$/ }).click()
+    const allResetDialog = databaseRecovery.getByRole('alertdialog')
+    assert.deepEqual(await allResetDialog.locator('li code').allTextContents(), resetPlan.resetTargets.projects.map(target => target.path))
+    await allResetDialog.getByRole('button', { name: /^(取消|Cancel)$/ }).click()
+    await databaseRecovery.getByRole('button', { name: /^(重置会话数据库|Reset conversation database)$/ }).click()
+    const resetDialog = databaseRecovery.getByRole('alertdialog')
+    assert.deepEqual(await resetDialog.locator('li code').allTextContents(), resetPlan.resetTargets.execution.map(target => target.path))
+    assert.ok(!resetPlan.resetTargets.execution.some(target => target.path.endsWith('/projects.json')))
+    if (process.env.ANAS_E2E_RESET_SCREENSHOT) await databaseRecovery.screenshot({ path: process.env.ANAS_E2E_RESET_SCREENSHOT })
+    await resetDialog.getByRole('button', { name: /^(重置会话数据库|Reset conversation database)$/ }).click()
+    await expect(databaseRecovery.locator('.initial-app-status-error')).toHaveAttribute('aria-busy', 'false')
+    assert.deepEqual(await readFile(join(root, 'db/projects.json')), projectsBeforeReset)
+    const resetStatus = await databaseRecovery.evaluate(() => globalThis.gale.recovery.inspect())
+    assert.deepEqual(await readFile(join(resetStatus.lastPreservationPath, 'data/db/projects.json')), projectsBeforeReset)
+    assert.equal(await readFile(join(resetStatus.lastPreservationPath, 'data/db/conversations/reset-scope-fixture/material.txt'), 'utf8'), 'Retained in preservation copy')
+    await assert.rejects(readFile(join(root, 'db/conversations/reset-scope-fixture/material.txt')), { code: 'ENOENT' })
+    await closeElectronTestApplication(application)
+    application = await launchApplication(root)
+    const afterReset = await application.firstWindow()
+    await expect(afterReset.locator('[data-agent-composer-input]')).toBeVisible({ timeout: 20000 })
+    assert.ok((await afterReset.evaluate(() => globalThis.gale.projects.list())).some(project => project.name === 'Retained after database reset'))
     await closeElectronTestApplication(application)
     application = undefined
     for (const invalid of ['{"order":["user:example-read-text-raw"]}', '{"version":1,"order":["user:example-read-text-raw"]}']) {
@@ -159,7 +198,7 @@ async function verifyCurrentData(launchApplication) {
     const avatar = await usable.evaluate(() => globalThis.gale.files.getAvatar())
     assert.ok(avatar)
     assert.equal(await application.evaluate(({ nativeImage }, path) => !nativeImage.createFromPath(path).isEmpty(), avatar.path), true)
-    console.log('Configuration v0 / native execution Electron E2E passed: current data, version repair, project/catalog repair, partial history rescue, avatar crop recovery, original preservation and successful restart.')
+    console.log('Configuration v0 / native execution Electron E2E passed: current data, exact reset file lists, database reset retaining projects, version repair, project/catalog repair, partial history rescue, avatar crop recovery, original preservation and successful restart.')
   } finally {
     await closeElectronTestApplication(application)
     await rm(temporaryRoot, { recursive: true, force: true })

@@ -15,6 +15,7 @@ const snapshot: RecoverySnapshot = {
   dataDir: '/test/data', logDir: '/test/data/log', preservationParent: '/test',
   catalogPath: '/test/data/db/catalog.sqlite', conversationsPath: '/test/data/db/conversations',
   startupError: 'Malformed /test/data/config/settings.json', canModify: true,
+  resetTargets: { projects: [{ path: '/test/data/db/projects.json', kind: 'file' }, { path: '/test/data/db/catalog.sqlite', kind: 'file' }, { path: '/test/data/db/conversations', kind: 'directory' }], execution: [{ path: '/test/data/db/catalog.sqlite', kind: 'file' }, { path: '/test/data/db/conversations', kind: 'directory' }] },
   files: [
     { name: 'settings.json', path: '/test/data/config/settings.json', error: 'Unexpected token', repairableFields: [] },
     { name: 'subagents.json', path: '/test/data/config/subagents.json', repairableFields: ['subagents.json: subagents[0].capabilities.skills'] },
@@ -22,7 +23,7 @@ const snapshot: RecoverySnapshot = {
     { name: 'projects.json', path: '/test/data/db/projects.json', error: 'Invalid project', repairableFields: [] }
   ]
 }
-const api = { inspect: vi.fn(), reset: vi.fn(), enter: vi.fn(), restart: vi.fn(), openDirectory: vi.fn(), resetProjects: vi.fn(), repair: vi.fn() }
+const api = { inspect: vi.fn(), reset: vi.fn(), enter: vi.fn(), restart: vi.fn(), openDirectory: vi.fn(), resetProjects: vi.fn(), resetExecution: vi.fn(), repair: vi.fn() }
 beforeEach(() => {
   vi.resetAllMocks()
   api.inspect.mockResolvedValue(snapshot)
@@ -118,8 +119,10 @@ describe('RecoveryApp', () => {
     const user = userEvent.setup()
     render(<RecoveryApp />)
     const row = within(await screen.findByRole('group', { name: 'projects.json' }))
-    await user.click(row.getByRole('button', { name: 'recovery.reset' }))
+    await user.click(row.getByRole('button', { name: 'recovery.reset_projects_confirm_button' }))
+    expect(row.getByText('recovery.project_reset_scope')).toBeVisible()
     const dialog = screen.getByRole('alertdialog')
+    expect(within(dialog).getByRole('heading')).toHaveTextContent('recovery.reset_projects_confirm_button')
     expect(dialog).toHaveTextContent('/test/data/db/projects.json')
     expect(dialog).toHaveTextContent('/test/data/db/catalog.sqlite')
     expect(dialog).toHaveTextContent('/test/data/db/conversations')
@@ -127,6 +130,23 @@ describe('RecoveryApp', () => {
     await waitFor(() => expect(api.resetProjects).toHaveBeenCalledOnce())
     expect(row.queryByRole('button')).not.toBeInTheDocument()
     expect(api.reset).not.toHaveBeenCalled()
+    expect(api.resetProjects).toHaveBeenCalledWith(snapshot.resetTargets.projects)
+    expect(api.resetExecution).not.toHaveBeenCalled()
+  })
+
+  it('confirms only the listed execution files and never invokes the project reset', async () => {
+    const user = userEvent.setup()
+    render(<RecoveryApp />)
+    const row = within(await screen.findByRole('group', { name: 'projects.json' }))
+    await user.click(row.getByRole('button', { name: 'recovery.reset_execution' }))
+    const dialog = screen.getByRole('alertdialog')
+    expect(within(dialog).getAllByRole('listitem')).toHaveLength(2)
+    expect(within(dialog).getByRole('list')).not.toHaveTextContent('/test/data/db/projects.json')
+    expect(within(dialog).getByRole('list')).toHaveTextContent('/test/data/db/catalog.sqlite')
+    expect(within(dialog).getByRole('list')).toHaveTextContent('recovery.directory_all_contents')
+    await user.click(within(dialog).getByRole('button', { name: 'recovery.reset_execution' }))
+    await waitFor(() => expect(api.resetExecution).toHaveBeenCalledWith(snapshot.resetTargets.execution))
+    expect(api.resetProjects).not.toHaveBeenCalled()
   })
 
   it('leaves unresolved repairs actionable and retains the preservation location in details', async () => {

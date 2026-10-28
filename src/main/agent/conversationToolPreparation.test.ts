@@ -33,7 +33,7 @@ async function fixture() {
   let failCommit = false
   const store = new NativeExecutionStore(db, () => { if (failCommit) throw new Error('commit failed') })
   const options: ConversationToolPreparationOptions = { runId: 'run', primaryFolder: join(root, 'project'), folders: [join(root, 'project')],
-    accessMode: () => 'read_only_allowed', includeRules: false,
+    accessMode: () => 'smart_approval', includeRules: false,
     definitions: [...fileToolDefinitions({ primaryFolder: join(root, 'project'), maxReadBytes: 10000, toolNames: ['read_file', 'write_file'] }), planningToolSpec] }
   function begin(calls: ExecutionToolCall[], context = { modelCalls: 0, todos: [] } as ExecutionState['context'], receipt?: unknown) {
     store.start({ threadId: 'thread', runId: 'run', context, messages: [{ id: 'user', value: { kind: 'user', content: 'Do work' } }] })
@@ -97,7 +97,7 @@ describe('native complete tool batch preparation', () => {
     expect(h.store.load('thread')).toEqual(before)
   })
 
-  it.each(['strict_approval', 'read_only_allowed', 'full_access'] as const)(
+  it.each(['strict_approval', 'smart_approval', 'full_access'] as const)(
     'lets the model correct empty, missing and non-string paths in %s', async mode => {
       const h = await fixture()
       h.options.accessMode = () => mode
@@ -136,7 +136,7 @@ describe('native complete tool batch preparation', () => {
 
   it.each(['pwsh', 'update_config', 'delete_file'] as const)('uses the current access mode for each %s batch and preserves approval choices', async name => {
     const h = await fixture()
-    let mode: 'read_only_allowed' | 'full_access' = 'read_only_allowed'
+    let mode: 'smart_approval' | 'full_access' = 'smart_approval'
     h.options.accessMode = () => mode
     h.options.definitions = [{ name, inputSchema: z.record(z.string(), z.unknown()) }]
     const inspect = vi.fn(async () => undefined)
@@ -145,7 +145,7 @@ describe('native complete tool batch preparation', () => {
       ? { config: 'settings', key: 'theme', value: 'dark' } : { path: join(h.root, 'outside/result.txt') }
     h.begin([call('operation', name, args)])
     const state = h.store.load('thread')!, before = structuredClone(state)
-    for (const current of ['read_only_allowed', 'full_access', 'read_only_allowed'] as const) {
+    for (const current of ['smart_approval', 'full_access', 'smart_approval'] as const) {
       mode = current
       const result = await prepareConversationToolBatch(state, h.options)
       if ('kind' in result) throw new Error('Unexpected rule wait')
@@ -154,7 +154,7 @@ describe('native complete tool batch preparation', () => {
         expect(result.approvals![0].request.reviewConfigs).toEqual([{ actionName: name, allowedDecisions: ['approve', 'reject'] }])
         expect(result.approvals![0].request.actionRequests).toEqual([{ name, args,
           description: name === 'pwsh' ? 'Run a command with pwsh.' : name === 'update_config'
-            ? 'Modify application configuration.' : 'Access a host file path outside the project folders.' }])
+            ? 'Modify application configuration.' : 'Review the file operation and its resolved targets.' }])
       }
       expect(result.calls[0].args).toEqual(args)
       expect(state).toEqual(before)
@@ -267,7 +267,7 @@ describe('native complete tool batch preparation', () => {
     expect(execute).toHaveBeenCalledOnce()
   })
 
-  it('finishes rule-read approval before ordinary authorization and withholds unseen-rule writes', async () => {
+  it('reads external rules automatically and withholds unseen-rule writes', async () => {
     const h = await fixture()
     h.options.includeRules = true; h.options.accessMode = () => 'strict_approval'
     await writeFile(join(h.root, 'outside/AGENTS.md'), 'External write rules')
@@ -275,11 +275,6 @@ describe('native complete tool batch preparation', () => {
     if (rules.kind !== 'ready') throw new Error('Expected local initial rules')
     h.begin([call('write', 'write_file', { path: join(h.root, 'outside/new.txt'), content: 'new' })], rules.context,
       { runId: 'run', scopes: ruleScopeIds(rules.context.projectRules!), minimumTokens: 10, budget: 10000 })
-    const state = h.store.load('thread')!, pending = await prepareConversationToolBatch(state, h.options)
-    if (!('kind' in pending)) throw new Error('Expected rule read approval')
-    h.store.waitForContext(scope(state), pending.approval, pending.context)
-    expect(h.store.load('thread')!.calls[0].prepared).toBe(false)
-    h.store.resolveContextWait(scope(h.store.load('thread')!), pending.approval.id, pending.approval.generation, 'approve')
     const after = await h.prepare()
     expect(after.approvals).toEqual([])
     expect(after.calls[0].result!.value.content).toContain('Newly discovered scoped project rules')

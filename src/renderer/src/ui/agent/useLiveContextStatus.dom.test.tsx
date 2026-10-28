@@ -216,3 +216,17 @@ describe('useLiveContextStatus', () => {
     expect(result.current?.estimatedInputTokens).toBe(800)
   })
 })
+
+it('reprojects idle tool definitions after a permission-mode change and ignores the old result', async () => {
+  const finish: Array<(status: AgentContextStatus) => void> = []
+  installStatusReader(vi.fn(() => new Promise<AgentContextStatus>(resolve => finish.push(resolve))))
+  const reported = contextStatus()
+  const { result, rerender } = renderHook(({ accessMode }) => useLiveContextStatus('thread', model, reported, {
+    config: undefined, project, continuationRunId: undefined, accessMode
+  }), { initialProps: { accessMode: 'smart_approval' as 'smart_approval' | 'strict_approval' } })
+  rerender({ accessMode: 'strict_approval' })
+  await act(async () => finish[0](contextStatus(model, 500)))
+  expect(result.current).toBeUndefined()
+  await act(async () => finish[1](contextStatus(model, 200)))
+  expect(result.current?.estimatedInputTokens).toBe(200)
+})

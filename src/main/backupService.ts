@@ -1,4 +1,4 @@
-import { projectResetEntries, rename, writeRestoreJournal, rollbackRestore, swapRestoredData, recoverInterruptedDataRestoreExcept, enqueueDataReplacement, type RestoreJournal } from './dataReplacement'
+import { executionResetEntries, projectResetEntries, rename, writeRestoreJournal, rollbackRestore, swapRestoredData, recoverInterruptedDataRestoreExcept, enqueueDataReplacement, type RestoreJournal } from './dataReplacement'
 export { replaceProjectData } from './dataReplacement'
 import { createWriteStream } from 'node:fs'
 import { app } from 'electron'
@@ -19,6 +19,8 @@ import {
 import { validateRestoredDataDirectory } from './dataRestoreValidation'
 import { runtimeLog } from './runtimeLogger'
 import { withApplicationDataSnapshot } from './applicationDataSnapshot'
+import { parseProjectStore } from './projectStore'
+import type { RecoveryResetTarget } from '@shared/recovery'
 
 const requiredRestoreFiles = new Set(configFileNames.map((fileName) => `${configDirName}/${fileName}`))
 const windowsReservedNames = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i
@@ -325,9 +327,30 @@ export function restoreDataBackupZip(
   return enqueueDataReplacement(() => restoreDataBackupZipExclusive(sourcePath, lifecycle))
 }
 
-// Uses the restore journal so a crash cannot leave old project metadata paired
-// with a new database (or the reverse). Call only with all data writers stopped.
-export function resetProjectData(preserveCurrentData: () => Promise<string>): Promise<string> {
+// Both reset scopes preserve originals and use the crash-safe restore journal.
+// Call only with all data writers stopped.
+export function resetProjectData(preserveCurrentData: () => Promise<string>, targets?: RecoveryResetTarget[]): Promise<string> {
+  return resetData(preserveCurrentData, false, targets)
+}
+
+export function resetExecutionData(preserveCurrentData: () => Promise<string>, targets?: RecoveryResetTarget[]): Promise<string> {
+  return resetData(preserveCurrentData, true, targets)
+}
+
+export async function inspectResetTargets(executionOnly: boolean): Promise<RecoveryResetTarget[]> {
+  const targets: RecoveryResetTarget[] = []
+  for (const target of executionOnly ? executionResetEntries : projectResetEntries) {
+    const path = join(resolve(getDataDir()), target)
+    const entry = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined
+      throw error
+    })
+    if (entry) targets.push({ path, kind: target === 'db/conversations' ? 'directory' : 'file' })
+  }
+  return targets
+}
+
+function resetData(preserveCurrentData: () => Promise<string>, executionOnly: boolean, expectedTargets?: RecoveryResetTarget[]): Promise<string> {
   return enqueueDataReplacement(async () => {
     await recoverInterruptedDataRestore()
     const dataDir = resolve(getDataDir())
@@ -336,19 +359,34 @@ export function resetProjectData(preserveCurrentData: () => Promise<string>): Pr
       throw error
     })
     if (databaseDir && !databaseDir.isDirectory()) throw new Error('Cannot reset project data through a linked or invalid database directory.')
-    const previousEntries: string[] = []
-    for (const target of projectResetEntries) {
-      try {
-        const info = await lstat(join(dataDir, target))
-        if (target === 'db/conversations' ? !info.isDirectory() : !info.isFile()) {
-          throw new Error(`Cannot reset a linked or invalid project data entry: ${join(dataDir, target)}`)
-        }
-        previousEntries.push(target)
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    const targets = await inspectResetTargets(executionOnly)
+    if (expectedTargets && JSON.stringify(targets) !== JSON.stringify(expectedTargets)) {
+      throw new Error('Reset file list changed; refresh and confirm the current list before resetting.')
+    }
+    if (executionOnly) {
+      const projects = join(dataDir, 'db/projects.json')
+      if (!(await lstat(projects)).isFile()) throw new Error('Repair project definitions before resetting only the conversation database.')
+      parseProjectStore(JSON.parse(await readFile(projects, 'utf8')))
+      for (const pending of ['db/project-deletion.json', 'db/project-deletion.stage.json']) {
+        const entry = await lstat(join(dataDir, pending)).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return undefined
+          throw error
+        })
+        if (entry) throw new Error('Resolve pending project deletion before resetting only the conversation database.')
       }
     }
+    const previousEntries: string[] = []
+    for (const target of targets) {
+      const info = await lstat(target.path)
+      if (target.kind === 'directory' ? !info.isDirectory() : !info.isFile()) {
+        throw new Error(`Cannot reset a linked or invalid project data entry: ${target.path}`)
+      }
+      previousEntries.push(relative(dataDir, target.path).split(sep).join('/'))
+    }
     const preservationPath = await preserveCurrentData()
+    if (JSON.stringify(await inspectResetTargets(executionOnly)) !== JSON.stringify(targets)) {
+      throw new Error('Reset file list changed during preservation; refresh and confirm the current list before resetting.')
+    }
     const transactionRoot = await mkdtemp(join(dirname(dataDir), `.anas-restore-v4-${basename(dataDir)}-`))
     const journalPath = join(transactionRoot, 'transaction.json')
     const journal: RestoreJournal = { version: 0, dataDir, phase: 'staged', previousEntries, installedEntries: [] }
@@ -362,8 +400,7 @@ export function resetProjectData(preserveCurrentData: () => Promise<string>): Pr
       for (const target of previousEntries) {
         await rename(join(dataDir, target), join(transactionRoot, 'previous', target))
       }
-      // Normal initialization creates a default project and empty database on
-      // restart. No damaged JSON or SQLite file needs to be opened for the reset.
+      // Normal initialization recreates only the removed storage on restart.
       journal.phase = 'committed'
       await writeRestoreJournal(journalPath, journal)
       cleanup = true

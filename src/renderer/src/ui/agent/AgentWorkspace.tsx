@@ -155,7 +155,7 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
     ? currentRun.status : undefined
   const contextStatus = useLiveContextStatus(
     props.activeThreadId, selectedPresetValid ? selectedModel : undefined, props.snapshot?.contextStatus,
-    { config: props.config, project: selectedProject, continuationRunId, continuationStatus,
+    { config: props.config, project: selectedProject, accessMode: props.accessMode, continuationRunId, continuationStatus,
       liveStatus: props.run?.liveContextStatus }
   )
   const contextBudget = props.snapshot?.contextStatus && selectedPresetValid

@@ -112,7 +112,7 @@ The tool can upload or download files independently of **File read** and **File 
 
 Provides `update_config` to change supported application settings at your request, such as the theme, font size, and profile. It currently supports application settings fields, not arbitrary changes to project, model, or MCP configuration files.
 
-It does not require **File write**. Each call requires approval in **Allow read-only** and **Strict approval** modes; **Full access** permits execution without that prompt.
+It does not require **File write**. **Strict approval** requires confirmation for each call; **Smart approval** uses the model’s assessment; **Full access** skips that prompt.
 
 ### User Interaction
 
@@ -130,7 +130,7 @@ The chat entry shows a clock icon and remaining seconds. When the countdown reac
 
 ### File Read
 
-Reads and inspects local files without requiring **Command execution**. The conversation's access mode determines whether reading outside project folders needs approval.
+Reads and inspects local files without requiring **Command execution**. Verified reads are exempt in every access mode, including files outside project folders.
 
 | Tool | Function |
 | --- | --- |
@@ -150,7 +150,7 @@ For text searches, use rg through **Command execution**. This group has no separ
 
 ### File Write
 
-Creates, changes, moves, or deletes local files without requiring **Command execution**. Select only the tools needed. Enable a suitable reading tool when the Agent should inspect existing content first. Writes outside project folders usually need approval; see [Tools And Approval](#tools-and-approval).
+Creates, changes, moves, or deletes local files without requiring **Command execution**. Select only the tools needed. Enable a suitable reading tool when the Agent should inspect existing content first. Write approval follows the current mode, safe directories, and model assessment; see [Tools And Approval](#tools-and-approval).
 
 | Tool | Function |
 | --- | --- |
@@ -270,13 +270,15 @@ Set Vision and Tool use to match the model's actual capabilities. Turning Tool u
 
 Project Customize capabilities selects available tools; the model's Tool use setting determines whether it can call them. See [Projects And Capabilities](#projects-and-capabilities) for functions and dependencies.
 
-Below the folders in project settings, choose the default tool access mode on the left and the model and reasoning option on the right. New conversations inherit this mode and can override it beside the input. Changing the project default does not affect existing conversations. An omitted setting defaults to Allow read-only; Customize capabilities does not need to be enabled.
+Below the folders in project settings, choose the default tool access mode on the left and the model and reasoning option on the right. New conversations inherit this mode and can override it beside the input. Changing the project default does not affect existing conversations. An omitted setting defaults to Smart approval; Customize capabilities does not need to be enabled.
 
 Conversations offer three access modes:
 
-- **Allow read-only**: the default. Files outside projects can be read directly; external writes and commands that cannot be verified as supported read-only operations require confirmation.
-- **Strict approval**: external reads also require confirmation. Only supported read-only commands targeting project files run without a prompt.
-- **Full access**: skips pre-execution approval. Switch to Allow read-only or Strict approval from the tool access menu beside the input; operations already started are not interrupted.
+- **Strict approval**: verified reads anywhere and writes inside project, application temporary, or system temporary directories run automatically. Enabled Skill script exemptions still apply. Other operations require confirmation.
+- **Smart approval**: the default. In addition to strict-mode exemptions, writes inside Desktop, Downloads, Documents, and Pictures are allowed. The model assesses remaining operations; omission requests confirmation. Code-verified safe operations always run automatically. Freeform patches use target checks only and require confirmation for writes outside safe directories.
+- **Full access**: skips pre-execution permission approval while retaining validation, cancellation, and recovery confirmation. Change modes beside the input; queued calls recheck the current mode before dispatch, while operations already started are not interrupted.
+
+Only Smart approval adds the required `needs_approval` parameter to model-facing JSON tool definitions. The model must explicitly provide it on every call; execution still falls back to `true` if it is omitted. Automatic code exemptions take priority, then remaining operations use the model’s value. Strict approval, Full access, and Freeform patches do not expose this parameter. Tool details in Settings let you switch modes and patch formats to inspect their definitions. Mode changes preserve historical call arguments; queued calls recheck the current mode before execution.
 
 An external operation with an uncertain outcome still requires confirmation before retrying. A conversation awaiting confirmation cannot accept messages, history edits, regeneration, or compression. Other conversations remain available.
 
@@ -438,7 +440,7 @@ Settings > Dev provides developer tools, logs, and Start in console. Console sta
 If startup data cannot load, the recovery page lists affected files. View error details, open logs, and choose:
 
 - **Repair**: restores invalid settings to their defaults while keeping valid settings. Capability selections are checked field by field against the current configuration format. Unrecognized values use the corresponding defaults without translating old formats or resetting the whole file, projects, or conversations. Invalid selection lists without item defaults use the list default. Unparseable files or projects whose identity cannot be determined still require manual repair. Changed fields are listed in the error details.
-- **Reset**: restores the selected configuration to defaults. **Resetting `db/projects.json` also deletes every project's conversations, messages, execution records, task recovery information, and memory**. Conversation attachments, long tool results and file-edit recovery material are also cleared. Input history, other settings, skills and project source files are kept.
+- **Reset**: configuration reset affects only the selected configuration. **Reset conversation database** clears conversations, runs, shared memory, attachments, tool results and file-edit recovery material while retaining project definitions and settings. **Reset all projects and conversations** also removes all project definitions. Both preserve originals first and retain project source files, other configuration, skills and input history. The confirmation lists the actual files and directories; directories explicitly include all contents. If the execution list changes, refresh and confirm it again.
 
 Before changes, original data is saved beside the data directory under `Anas-Recovery/timestamp-random-suffix/`. If that fails, no changes are made. Restart after recovery.
 

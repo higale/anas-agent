@@ -90,11 +90,11 @@ it('holds the connection while an accepted queued attachment is archived during 
 })
 
 it.each([
-  { projectMode: undefined, override: undefined, expected: 'read_only_allowed' },
+  { projectMode: undefined, override: undefined, expected: 'smart_approval' },
   { projectMode: 'full_access', override: undefined, expected: 'full_access' },
   { projectMode: 'strict_approval', override: undefined, expected: 'strict_approval' },
-  { projectMode: 'full_access', override: 'read_only_allowed', expected: 'read_only_allowed' },
-  { projectMode: 'read_only_allowed', override: 'full_access', expected: 'full_access' }
+  { projectMode: 'full_access', override: 'smart_approval', expected: 'smart_approval' },
+  { projectMode: 'smart_approval', override: 'full_access', expected: 'full_access' }
 ] as const)('deduplicates submissions and preserves project permission $projectMode with override $override', async ({ projectMode, override, expected }) => {
   const h = fixture(), input = h.input(), assembly = deferred()
   const project = await getProject('project')

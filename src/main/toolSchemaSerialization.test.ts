@@ -3,8 +3,25 @@ import { describe, expect, it } from 'vitest'
 import { commandShellMetadata } from '@shared/commandShell'
 import { serializeToolDefinition } from './toolSchemaSerialization'
 import { defineContentTool } from '../runtime/toolDefinition'
+import { fileToolDefinitions } from './llm/fileTools'
+import { modelToolDeclaration } from './agent/modelToolDeclarations'
+import codexPatchSpec from './codexPatchSpec.json'
 
 describe('tool schema serialization', () => {
+  it('previews both patch formats using the actual model declarations', () => {
+    const patch = fileToolDefinitions({ primaryFolder: process.cwd(), maxReadBytes: 1000 }).find(tool => tool.name === 'apply_patch')!
+    const preview = serializeToolDefinition(patch)
+    expect(preview.definitionVariants).toEqual([
+      { format: 'json', definition: modelToolDeclaration(patch, 'openai_chat_completions') },
+      { format: 'freeform', definition: modelToolDeclaration(patch, 'openai_responses') }
+    ])
+    expect(preview.definitionVariants![0].definition).toMatchObject({ type: 'function', function: {
+      name: 'apply_patch', parameters: { required: ['patch'], additionalProperties: false }
+    } })
+    expect(preview.definitionVariants![1].definition).toEqual(codexPatchSpec)
+    expect(serializeToolDefinition({ ...patch, metadata: undefined }).definitionVariants).toBeUndefined()
+  })
+
   it('describes native inputs without executing transforms or business handlers', () => {
     let invoked = false
     const definition = defineContentTool({

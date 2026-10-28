@@ -29,7 +29,7 @@ async function fixture() {
   const workspace = join(root, 'project'), outside = join(root, 'outside'), file = join(root, 'execution.sqlite')
   await mkdir(workspace); await mkdir(outside)
   let db = new Database(file); databases.push(db); db.pragma('foreign_keys=ON'); db.exec(nativeExecutionSchema)
-  let store = new NativeExecutionStore(db), mode: AgentAccessMode = 'read_only_allowed'
+  let store = new NativeExecutionStore(db), mode: AgentAccessMode = 'smart_approval'
   const runId = randomUUID(), fileEditStore = new FileEditStore(join(root, 'records')), operations = new ToolRunScope()
   const definitions = fileToolDefinitions({ maxReadBytes: 1000000, primaryFolder: workspace, requestId: runId, fileEditStore, toolNames: ['apply_patch', 'write_file', 'restore_file_edit'] })
   const options: ConversationToolPreparationOptions = { runId, primaryFolder: workspace, folders: [workspace], fileEditStore, accessMode: () => mode, definitions, includeRules: false }
@@ -184,38 +184,37 @@ describe('native durable patch authorization', () => {
     for (const path of paths) expect(await pathExists(path)).toBe(false)
   })
 
-  it.each(['strict_approval', 'read_only_allowed', 'full_access'] as const)('uses saved read authorization for an outside patch preview in %s', async mode => {
+  it.each(['strict_approval', 'smart_approval', 'full_access'] as const)('uses saved read authorization for an outside patch preview in %s', async mode => {
     const h = await fixture(), path = join(h.outside, 'preview.txt'); h.mode(mode)
     await h.stage([{ id: 'preview', name: 'apply_patch', args: { dry_run: true, patch: `*** Begin Patch\n*** Add File: ${path}\n+preview\n*** End Patch` } }])
-    expect(h.state().approvals).toHaveLength(mode === 'strict_approval' ? 1 : 0)
+    expect(h.state().approvals).toHaveLength(0)
     expect(h.state().calls[0].authorization?.patch?.targets).toEqual([expect.objectContaining({ path, access: 'read', locator: ['operations', 0, 'path'] })])
-    h.reopen(); if (mode === 'strict_approval') h.decide([{ type: 'approve' }])
+    h.reopen()
     expect((await h.dispatch()).at(-1)?.content).toContain('"dryRun":true')
     expect(await pathExists(path)).toBe(false); expect(await h.fileEditStore.listEditRecordsForRequest(h.runId)).toEqual([])
   })
 
-  it.each(['strict_approval', 'read_only_allowed', 'full_access'] as const)('previews external restoration as a read in %s', async mode => {
+  it.each(['strict_approval', 'smart_approval', 'full_access'] as const)('previews external restoration as a read in %s', async mode => {
     const h = await fixture(), path = join(h.outside, 'created.txt'), args = await restoreArgs(h, [path]); h.mode(mode)
     await h.stage([{ id: 'restore-preview', name: 'restore_file_edit', args: { ...args, dry_run: true } }])
-    expect(h.state().approvals).toHaveLength(mode === 'strict_approval' ? 1 : 0)
+    expect(h.state().approvals).toHaveLength(0)
     expect(h.state().calls[0].authorization?.patch?.targets.every(target => target.access === 'read')).toBe(true)
-    h.reopen(); if (mode === 'strict_approval') h.decide([{ type: 'approve' }])
+    h.reopen()
     expect((await h.dispatch()).at(-1)?.content).toContain('"dryRun":true')
     expect(await readFile(path, 'utf8')).toBe('created\n'); expect(await h.fileEditStore.listEditRecordsForRequest(h.runId)).toEqual([])
   })
 
-  it.each(['apply_patch', 'restore_file_edit'])('blocks an external %s preview when access tightens after preparation', async name => {
+  it.each(['apply_patch', 'restore_file_edit'])('allows verified external %s previews after switching to strict approval', async name => {
     const h = await fixture(), path = join(h.outside, 'preview.txt')
     const args = name === 'restore_file_edit' ? await restoreArgs(h, [path]) : { patch: `*** Begin Patch\n*** Add File: ${path}\n+created\n*** End Patch` }
     await h.stage([{ id: 'preview', name, args: { ...args, dry_run: true } }]); h.mode('strict_approval')
     const output = (await h.dispatch()).at(-1)!
-    expect(output.resultStatus).toBe('error'); expect(output.content).toContain('Patch targets require a new approval after the access mode changed')
-    expect(output.content).not.toContain('"dryRun":true')
+    expect(output.resultStatus).toBe('success'); expect(output.content).toContain('"dryRun":true')
     if (name === 'restore_file_edit') expect(await readFile(path, 'utf8')).toBe('created\n'); else expect(await pathExists(path)).toBe(false)
     expect(await h.fileEditStore.listEditRecordsForRequest(h.runId)).toEqual([])
   })
 
-  it.each([['apply_patch', 'read_only_allowed'], ['apply_patch', 'strict_approval'], ['restore_file_edit', 'read_only_allowed'], ['restore_file_edit', 'strict_approval']] as const)(
+  it.each([['apply_patch', 'smart_approval'], ['apply_patch', 'strict_approval'], ['restore_file_edit', 'smart_approval'], ['restore_file_edit', 'strict_approval']] as const)(
     'does not convert full-access %s preparation into a human grant after switching to %s', async (name, mode) => {
     const h = await fixture(), path = join(h.outside, 'revoked.txt')
     const args = name === 'restore_file_edit' ? await restoreArgs(h, [path]) : { patch: `*** Begin Patch\n*** Add File: ${path}\n+created\n*** End Patch` }
@@ -239,13 +238,13 @@ describe('native durable patch authorization', () => {
     expect(await pathExists(nextPath)).toBe(false); expect(await h.fileEditStore.listEditRecordsForRequest(h.runId)).toHaveLength(1)
   })
 
-  it.each(['apply_patch', 'restore_file_edit'])('requires separate %s write approval after an approved preview', async name => {
+  it.each(['apply_patch', 'restore_file_edit'])('requires separate %s write approval after an automatic read-only preview', async name => {
     const h = await fixture(), path = join(h.outside, 'preview-then-write.txt')
     const args = name === 'restore_file_edit' ? await restoreArgs(h, [path]) : { patch: `*** Begin Patch\n*** Add File: ${path}\n+created\n*** End Patch` }
     h.mode('strict_approval'); await h.stage([{ id: 'preview', name, args: { ...args, dry_run: true } }])
-    expect(h.state().approvals).toHaveLength(1)
+    expect(h.state().approvals).toHaveLength(0)
     expect(h.state().calls[0].authorization?.patch?.targets).toEqual([expect.objectContaining({ path, access: 'read' })])
-    h.decide([{ type: 'approve' }]); expect((await h.dispatch()).at(-1)?.content).toContain('"dryRun":true')
+    expect((await h.dispatch()).at(-1)?.content).toContain('"dryRun":true')
     const write = { id: 'write', name, args: { ...args, dry_run: false } }
     await h.stage([write]); expect(h.state().approvals).toHaveLength(1)
     expect(h.state().approvals[0].request.actionRequests).toMatchObject([{ name, args: write.args }])

@@ -87,6 +87,8 @@ export async function verifyShellReceipt(receipt: ShellAuthorizationReceipt | un
   if (receipt.humanApproved) return
   if (!receipt.plan) {
     if (options.accessMode() === 'full_access') return
+    if (options.accessMode() === 'smart_approval' && !receipt.requiresApproval && args && typeof args === 'object'
+      && 'needs_approval' in args && args.needs_approval === false) return
     throw new Error('Shell command requires approval after the access mode changed. Submit the command again.')
   }
   const current = await options.inspect()

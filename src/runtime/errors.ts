@@ -77,14 +77,6 @@ export class ProjectRulesError extends Error {
   }
 }
 
-/** A preparation pause, not a failed read or an executable tool call. */
-export class ProjectRulesReadRequired extends Error {
-  constructor(readonly path: string) {
-    super(`Reading project rules requires approval: ${path}`)
-    this.name = 'ProjectRulesReadRequired'
-  }
-}
-
 export class ProjectRulesRequestBudgetError extends ProjectRulesError {
   constructor(tokens: number, readonly inputCapacityTokens: number) {
     super(`Final model request needs about ${tokens} input tokens; safe capacity is ${inputCapacityTokens}, including reply reserve and estimation margin.`)

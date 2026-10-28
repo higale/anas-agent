@@ -23,13 +23,11 @@ export function ComposerAccessPicker({
   const [open, setOpen] = useState(false)
   const Trigger = modal ? DropdownMenu.Trigger : DropdownMenuTrigger
   const TriggerButton = modal ? 'button' : NoFocusButton
-  const platform = document.documentElement.dataset.platform
-  const hintSuffix = platform === 'win32' || platform === 'darwin' ? `_${platform}` : ''
   const label = accessMode === 'full_access'
     ? t('chat.access_full')
     : accessMode === 'strict_approval'
       ? t('chat.access_strict_approval')
-      : t('chat.access_read_only_allowed')
+      : t('chat.access_smart_approval')
 
   function select(nextAccessMode: AgentAccessMode): void {
     setOpen(false)
@@ -76,20 +74,20 @@ export function ComposerAccessPicker({
             <ShieldQuestion size={16} />
             <span className="ui-copy-stack">
               <strong>{t('chat.access_strict_approval')}</strong>
-              <small>{t(`chat.access_strict_approval_hint${hintSuffix}`)}</small>
+              <small>{t('chat.access_strict_approval_hint')}</small>
             </span>
             {accessMode === 'strict_approval' && <Check className="composer-access-check" size={15} />}
           </DropdownMenu.Item>
           <DropdownMenu.Item
             className="composer-access-item ui-menu-item ui-menu-item-row"
-            onSelect={() => select('read_only_allowed')}
+            onSelect={() => select('smart_approval')}
           >
             <Shield size={16} />
             <span className="ui-copy-stack">
-              <strong>{t('chat.access_read_only_allowed')}</strong>
-              <small>{t(`chat.access_read_only_allowed_hint${hintSuffix}`)}</small>
+              <strong>{t('chat.access_smart_approval')}</strong>
+              <small>{t('chat.access_smart_approval_hint')}</small>
             </span>
-            {accessMode === 'read_only_allowed' && <Check className="composer-access-check" size={15} />}
+            {accessMode === 'smart_approval' && <Check className="composer-access-check" size={15} />}
           </DropdownMenu.Item>
           <DropdownMenu.Item
             className="composer-access-item composer-access-item-full ui-menu-item ui-menu-item-row"

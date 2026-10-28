@@ -10,7 +10,7 @@ import { closeCachedMcpRuntime } from './mcpRuntimeService'
 import { closePluginHost } from './plugins/pluginHost'
 import { createMainWindow } from './appShell'
 import { preserveRecoveryData, requireResettableConfigFile, resetRecoveryConfig } from './recoveryData'
-import { recoverInterruptedDataRestore, resetProjectData } from './backupService'
+import { inspectResetTargets, recoverInterruptedDataRestore, resetExecutionData, resetProjectData } from './backupService'
 import { errorDetail, type RecoveryResult, type RecoverySnapshot } from '@shared/recovery'
 import { configureRuntimeLogger, runtimeLog } from './runtimeLogger'
 import { inspectRecoveryRepair, repairRecoveryData, requireRecoveryFile } from './recoveryRepair'
@@ -99,7 +99,8 @@ export function registerRecoveryIpcHandlers(): void {
       dataDir: getDataDir(), logDir: getLogDir(), preservationParent: dirname(getDataDir()),
       catalogPath: getAgentCatalogFile(), conversationsPath: getAgentConversationsDir(),
       startupError, stopError, canModify, lastPreservationPath,
-      files: repair.files
+      files: repair.files,
+      resetTargets: { projects: await inspectResetTargets(false), execution: await inspectResetTargets(true) }
     }
   })
   handleMainIpc('recovery:repair', (_event, file: unknown) => exclusive(async () => {
@@ -131,11 +132,14 @@ export function registerRecoveryIpcHandlers(): void {
     runtimeLog('warn', 'recovery', 'Reset configuration file.', { file: selected, preservationPath })
     return { preservationPath }
   }))
-  handleMainIpc('recovery:resetProjects', (): Promise<RecoveryResult> => exclusive(async () => {
+  for (const scope of ['resetProjects', 'resetExecution'] as const) handleMainIpc(`recovery:${scope}`, (_event, targets: unknown): Promise<RecoveryResult> => exclusive(async () => {
     requireStopped()
+    if (!Array.isArray(targets) || targets.some(target => !target || typeof target.path !== 'string' || !['file', 'directory'].includes(target.kind))) {
+      throw new Error('Confirm the reset file list before resetting.')
+    }
     try {
-      const preservationPath = await resetProjectData(() => preserve())
-      runtimeLog('warn', 'recovery', 'Reset projects and agent storage.', { preservationPath })
+      const preservationPath = await (scope === 'resetProjects' ? resetProjectData : resetExecutionData)(() => preserve(), targets)
+      runtimeLog('warn', 'recovery', scope === 'resetProjects' ? 'Reset projects and agent storage.' : 'Reset agent storage; project definitions retained.', { preservationPath })
       return { preservationPath }
     } catch (error) {
       try { await recoverInterruptedDataRestore() } catch (rollbackError) {

@@ -324,7 +324,7 @@ describe('renderer interaction accessibility', () => {
     ['win32', '_win32'],
     ['darwin', '_darwin'],
     ['linux', '']
-  ])('shows access modes with current system hints on %s and supports changing access', async (platform, hintSuffix) => {
+  ])('shows access modes with current system hints on %s and supports changing access', async (platform) => {
     document.documentElement.dataset.platform = platform
     const onChange = vi.fn()
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
@@ -333,17 +333,17 @@ describe('renderer interaction accessibility', () => {
     })
     render(
       <ComposerAccessPicker
-        accessMode="read_only_allowed"
+        accessMode="smart_approval"
         disabled={false}
         onChange={onChange}
       />
     )
 
-    expect(screen.getByText('chat.access_read_only_allowed')).toBeVisible()
+    expect(screen.getByText('chat.access_smart_approval')).toBeVisible()
     await userEvent.click(screen.getByRole('button', { name: 'chat.access_mode' }))
     expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
-      `chat.access_strict_approvalchat.access_strict_approval_hint${hintSuffix}`,
-      `chat.access_read_only_allowedchat.access_read_only_allowed_hint${hintSuffix}`,
+      `chat.access_strict_approvalchat.access_strict_approval_hint`,
+      `chat.access_smart_approvalchat.access_smart_approval_hint`,
       'chat.access_fullchat.access_full_hint'
     ])
 
@@ -968,7 +968,7 @@ describe('renderer interaction accessibility', () => {
       title: 'Thread',
       projectId: project.id,
       pinned: false,
-      accessMode: 'read_only_allowed',
+      accessMode: 'smart_approval',
       status: 'idle',
       userTurnCount: 1,
       createdAt: '2026-08-13T00:00:00.000Z',
@@ -1057,7 +1057,7 @@ describe('renderer interaction accessibility', () => {
   it.each(['dropdown', 'context'] as const)('places thread time and turn count above actions in the %s menu', async (kind) => {
     const user = userEvent.setup()
     const thread: AgentThread = { id: 'thread-meta', projectId: 'default-workspace', title: 'Thread metadata',
-      pinned: false, status: 'idle', accessMode: 'read_only_allowed', userTurnCount: 7,
+      pinned: false, status: 'idle', accessMode: 'smart_approval', userTurnCount: 7,
       createdAt: '2026-09-06T01:00:00Z', updatedAt: '2026-09-06T08:00:00Z' }
     const onTogglePinned = vi.fn()
     const props = { thread, onTogglePinned, onRename: vi.fn(), onDelete: vi.fn() }
@@ -1095,7 +1095,7 @@ describe('renderer interaction accessibility', () => {
       title: 'Thread',
       projectId: project.id,
       pinned: false,
-      accessMode: 'read_only_allowed',
+      accessMode: 'smart_approval',
       status: 'idle',
       userTurnCount: 1,
       createdAt: '2026-08-13T00:00:00.000Z',
@@ -1165,7 +1165,7 @@ describe('renderer interaction accessibility', () => {
       title,
       projectId,
       pinned: false,
-      accessMode: 'read_only_allowed',
+      accessMode: 'smart_approval',
       status: 'idle',
       userTurnCount: 1,
       createdAt: '2026-08-13T00:00:00.000Z',
@@ -1426,7 +1426,7 @@ describe('renderer interaction accessibility', () => {
     const onClose = vi.fn()
     const view = render(<ProjectDialog open kind="workspace" project={project} config={modelPickerConfig(true)} onClose={onClose} onSave={onSave} />)
     const access = screen.getByRole('button', { name: 'chat.access_mode' })
-    expect(access).toHaveTextContent('chat.access_read_only_allowed')
+    expect(access).toHaveTextContent('chat.access_smart_approval')
     await user.click(access)
     await user.keyboard('{Escape}')
     expect(access).toHaveFocus()
@@ -1440,8 +1440,8 @@ describe('renderer interaction accessibility', () => {
 
     view.rerender(<ProjectDialog open kind="workspace" project={{ ...project, accessMode: 'full_access' }} config={modelPickerConfig(true)} onClose={onClose} onSave={onSave} />)
     await user.click(access)
-    await user.click(screen.getByRole('menuitem', { name: /^chat.access_read_only_allowed/ }))
-    await waitFor(() => expect(access).toHaveTextContent('chat.access_read_only_allowed'))
+    await user.click(screen.getByRole('menuitem', { name: /^chat.access_smart_approval/ }))
+    await waitFor(() => expect(access).toHaveTextContent('chat.access_smart_approval'))
     await user.click(screen.getByRole('button', { name: 'common.save' }))
     expect(onSave.mock.lastCall![0].accessMode).toBeUndefined()
   })

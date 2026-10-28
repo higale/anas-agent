@@ -11,7 +11,7 @@ export function ConfirmDialog({ request, onClose, children }: { request?: Confir
     <AlertDialog.Root open={Boolean(request)} onOpenChange={(open) => { if (!open) onClose() }}>
       <AlertDialog.Portal>
         <AlertDialog.Overlay className="ui-backdrop" />
-        <AlertDialog.Content className="ui-dialog ui-dialog-compact ui-dialog-centered ui-popover">
+        <AlertDialog.Content className="ui-dialog ui-dialog-compact ui-dialog-centered ui-dialog-scroll ui-popover">
           <header className="ui-dialog-header">
             <div className={variant === 'danger' ? 'ui-dialog-icon ui-dialog-icon-danger' : 'ui-dialog-icon'}>
               {variant === 'danger' ? <Trash2 size={18} /> : <Check size={18} />}

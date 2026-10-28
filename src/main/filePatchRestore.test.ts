@@ -330,7 +330,7 @@ describe('batch restore preflight', () => {
     expect(plan.entries[4].observed.text).toBe('move.txt\r\n')
   })
 
-  it.each(['strict_approval', 'read_only_allowed', 'full_access'] as const)('uses all targets with the existing %s policy', async (accessMode) => {
+  it.each(['strict_approval', 'smart_approval', 'full_access'] as const)('uses all targets with the existing %s policy', async (accessMode) => {
     const value = await fixture(true)
     const plan = await value.store.previewPatchRestore(value.operationId, value.requestId, async (targets) => {
       const authorization = await prepareFilePatchRestoreAuthorization({ targets, primaryFolder: value.workspace,
@@ -346,7 +346,7 @@ describe('batch restore preflight', () => {
     const value = await fixture()
     await value.store.previewPatchRestore(value.operationId, value.requestId, async (targets) => {
       const result = await prepareFilePatchRestoreAuthorization({ targets, primaryFolder: value.workspace,
-        trustedFolders: [value.workspace], accessMode: 'read_only_allowed' })
+        trustedFolders: [value.workspace], accessMode: 'smart_approval' })
       expect(result.requiresApproval).toBe(false)
     })
   })

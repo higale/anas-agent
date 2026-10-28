@@ -50,7 +50,7 @@ async function preparePreview(thread: AgentThread, database: ConversationResourc
   if (!resources.simpleChat && resources.runConfiguration.codingMode) {
     const rules = await prepareConversationRules({ modelCalls: 0, todos: [] }, {
       runId: 'preview', primaryFolder: workspace.primaryFolder, folders: workspace.trustedFolders,
-      accessMode: createAgentAccessModeResolver(database, thread.id), allowApprovals: false
+      accessMode: createAgentAccessModeResolver(database, thread.id)
     })
     if (rules.kind !== 'ready') throw new Error('Preview rule preparation did not complete.')
     systemMessage = conversationRuleSystemMessage(systemMessage, rules.context, 'preview')

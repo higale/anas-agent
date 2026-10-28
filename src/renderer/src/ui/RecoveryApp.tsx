@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { errorDetail, recoverableAuxiliaryFiles, resettableConfigFiles, type ResettableConfigFile, type RecoveryFile, type RecoveryFileStatus, type RecoverySnapshot } from '@shared/recovery'
+import { errorDetail, recoverableAuxiliaryFiles, resettableConfigFiles, type ResettableConfigFile, type RecoveryFile, type RecoveryFileStatus, type RecoverySnapshot, type RecoveryResetTarget } from '@shared/recovery'
 import { ConfirmDialog } from './dialogs/ConfirmDialog'
 import type { ConfirmDialogRequest } from './dialogs/dialogTypes'
 
@@ -11,7 +11,7 @@ export function RecoveryApp() {
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const pending = useRef(false)
-  const [confirmation, setConfirmation] = useState<ConfirmDialogRequest>()
+  const [confirmation, setConfirmation] = useState<ConfirmDialogRequest & { resetTargets?: RecoveryResetTarget[] }>()
   const [completed, setCompleted] = useState<Partial<Record<RecoveryFile, string>>>({})
   const [reports, setReports] = useState<Partial<Record<RecoveryFile, string>>>({})
 
@@ -37,21 +37,27 @@ export function RecoveryApp() {
     }
   }
 
-  function confirmReset(file: RecoveryFileStatus): void {
+  function confirmReset(file: RecoveryFileStatus, executionOnly = false): void {
     if (!snapshot) return
     if (file.name !== 'projects.json' && !resettableConfigFiles.includes(file.name as ResettableConfigFile)) return
     const project = file.name === 'projects.json'
+    const resetKey = executionOnly ? 'recovery.reset_execution' : 'recovery.reset_projects_confirm_button'
+    const targets = project ? snapshot.resetTargets[executionOnly ? 'execution' : 'projects'] : undefined
     setConfirmation({
-      title: t('recovery.reset_file', { file: file.name }), variant: 'danger',
-      confirmText: t(project ? 'recovery.reset_projects_confirm_button' : 'recovery.reset'),
-      description: project ? t('recovery.reset_projects_confirm', {
+      title: project ? t(resetKey) : t('recovery.reset_file', { file: file.name }), variant: 'danger',
+      confirmText: t(project ? resetKey : 'recovery.reset'),
+      resetTargets: targets,
+      description: project ? t(executionOnly ? 'recovery.reset_execution_confirm' : 'recovery.reset_projects_confirm', {
         path: file.path, catalog: snapshot.catalogPath, conversations: snapshot.conversationsPath,
         parent: snapshot.preservationParent
       }) : t('recovery.reset_confirm', {
         path: file.path, parent: snapshot.preservationParent, impact: t(`recovery.impact_${file.name.replace('.json', '')}`)
       }),
       onConfirm: () => perform(async () => {
-        if (file.name === 'projects.json') await window.gale.recovery.resetProjects()
+        if (project && targets) {
+          if (executionOnly) await window.gale.recovery.resetExecution(targets)
+          else await window.gale.recovery.resetProjects(targets)
+        }
         else await window.gale.recovery.reset(file.name as ResettableConfigFile)
         setCompleted((current) => ({ ...current, [file.name]: t('recovery.file_reset') }))
         setReports((current) => ({ ...current, [file.name]: t('recovery.file_reset') }))
@@ -107,9 +113,11 @@ export function RecoveryApp() {
                 ? completed[file.name] : !file.error && !file.repairableFields.length ? completed[file.name] : undefined
               return <div className="initial-app-failure" key={file.name} role="group" aria-label={file.name}>
                 <span>
-                  <b>{file.name === 'config/assets/avatar-transform.json' ? t('recovery.avatar_files') : file.name}</b>
+                  <b>{file.name === 'projects.json' ? t('recovery.project_data') : file.name === 'config/assets/avatar-transform.json' ? t('recovery.avatar_files') : file.name}</b>
                   {file.name === 'config/assets/avatar-transform.json' && <small>{file.path}</small>}
                   {file.name === 'projects.json' && <>
+                    <small>{t('recovery.project_reset_scope')}</small>
+                    <small>{file.path}</small>
                     <small>{snapshot.catalogPath}</small>
                     <small>{snapshot.conversationsPath}</small>
                   </>}
@@ -118,7 +126,8 @@ export function RecoveryApp() {
                 </span>
                 {!done && <div className="ui-row">
                   <button className="ui-button ui-button-primary" disabled={busy || !snapshot.canModify} onClick={() => confirmRepair(file)}>{t('recovery.repair')}</button>
-                  {!recoverableAuxiliaryFiles.includes(file.name as typeof recoverableAuxiliaryFiles[number]) && <button className="ui-button ui-button-danger" disabled={busy || !snapshot.canModify} onClick={() => confirmReset(file)}>{t('recovery.reset')}</button>}
+                  {file.name === 'projects.json' && <button className="ui-button ui-button-danger" disabled={busy || !snapshot.canModify || !snapshot.resetTargets.execution.length} onClick={() => confirmReset(file, true)}>{t('recovery.reset_execution')}</button>}
+                  {!recoverableAuxiliaryFiles.includes(file.name as typeof recoverableAuxiliaryFiles[number]) && <button className="ui-button ui-button-danger" disabled={busy || !snapshot.canModify} onClick={() => confirmReset(file)}>{t(file.name === 'projects.json' ? 'recovery.reset_projects_confirm_button' : 'recovery.reset')}</button>}
                 </div>}
               </div>
             })}
@@ -149,6 +158,13 @@ export function RecoveryApp() {
         </details>
       </section>
     </main>
-    <ConfirmDialog request={confirmation} onClose={() => setConfirmation(undefined)} />
+    <ConfirmDialog request={confirmation} onClose={() => setConfirmation(undefined)}>
+      {confirmation?.resetTargets && <div className="ui-page-section ui-dialog-description">
+        <strong>{t('recovery.reset_file_list')}</strong>
+        <ul>{confirmation.resetTargets.map(target => <li key={target.path}>
+          <code>{target.path}</code>{target.kind === 'directory' ? ` — ${t('recovery.directory_all_contents')}` : ''}
+        </li>)}</ul>
+      </div>}
+    </ConfirmDialog>
   </div>
 }

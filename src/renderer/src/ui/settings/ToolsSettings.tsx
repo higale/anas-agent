@@ -14,6 +14,8 @@ import type { AppConfigSnapshot } from '@shared/types'
 import type { ToolPackage } from '@shared/toolPackages'
 import { pluginDisplayText, type PluginSummary } from '@shared/plugins'
 import { pluginToolName } from '@shared/pluginTools'
+import { SegmentedControl } from '../SegmentedControl'
+import type { AgentAccessMode } from '@shared/agentTypes'
 
 interface ToolsSettingsProps {
   actionsTarget?: HTMLElement | null
@@ -99,6 +101,8 @@ export function ToolsSettings({ actionsTarget, plugins, pluginError, customTools
   const { t, i18n } = useTranslation()
   const [selectedGroup, setSelectedGroup] = useState<'builtin' | 'mcp' | 'plugins' | 'customTools'>('builtin')
   const [selectedToolKey, setSelectedToolKey] = useState<string>()
+  const [selectedFormat, setSelectedFormat] = useState<'json' | 'freeform'>('json')
+  const [previewAccessMode, setPreviewAccessMode] = useState<AgentAccessMode>('smart_approval')
   const renderGroupTitle = (label: string) => (
     <strong className="settings-tool-group-title">{label}</strong>
   )
@@ -141,7 +145,12 @@ export function ToolsSettings({ actionsTarget, plugins, pluginError, customTools
     ]))
   ]), [runtimeToolByName, mcpGroups, pluginGroups, t])
   const selectedTool = selectedToolKey ? toolDefinitions.get(selectedToolKey) : undefined
-  const selectedToolText = selectedTool ? toolDefinitionText(selectedTool) : ''
+  const selectedVariant = selectedTool?.definitionVariants?.find(variant => variant.format === selectedFormat)
+    ?? selectedTool?.definitionVariants?.[0]
+  const smartDefinition = previewAccessMode === 'smart_approval' && selectedVariant?.format !== 'freeform'
+    ? selectedTool?.smartApprovalDefinition : undefined
+  const selectedToolText = smartDefinition ? JSON.stringify(smartDefinition, null, 2) : selectedVariant ? JSON.stringify(selectedVariant.definition, null, 2)
+    : selectedTool ? toolDefinitionText(selectedTool) : ''
   function renderToolRow(key: string) {
     const tool = toolDefinitions.get(key)!
     return (
@@ -150,7 +159,7 @@ export function ToolsSettings({ actionsTarget, plugins, pluginError, customTools
         className="settings-tool-catalog-row"
         key={key}
         type="button"
-        onClick={() => setSelectedToolKey(key)}
+        onClick={() => { setSelectedFormat('json'); setSelectedToolKey(key) }}
       >
         <code className="settings-tool-catalog-name ui-tool-name">{tool.name}</code>
       </button>
@@ -202,6 +211,17 @@ export function ToolsSettings({ actionsTarget, plugins, pluginError, customTools
 
       {selectedTool && <ContentPreviewDialog title={selectedTool.name} description={t('settings.tool_definition_hint')}
         copyText={selectedToolText} onClose={() => setSelectedToolKey(undefined)}>
+        {selectedTool.smartApprovalDefinition && <div className="settings-tool-definition-formats">
+          <SegmentedControl<AgentAccessMode> ariaLabel={t('chat.access_mode')} value={previewAccessMode} onChange={setPreviewAccessMode}
+            options={(['strict_approval', 'smart_approval', 'full_access'] as const).map(value => ({ value,
+              label: t(value === 'full_access' ? 'chat.access_full' : `chat.access_${value}`) }))} />
+        </div>}
+        {selectedTool.definitionVariants && selectedVariant && <div className="settings-tool-definition-formats">
+          <SegmentedControl<'json' | 'freeform'> ariaLabel={t('settings.tool_definition_format')} value={selectedVariant.format} onChange={setSelectedFormat}
+            options={selectedTool.definitionVariants.map(variant => ({ value: variant.format,
+              label: `${selectedTool.name} (${variant.format === 'json' ? 'JSON' : 'Freeform'})` }))} />
+          <small className="ui-field-hint">{t(`settings.tool_definition_${selectedVariant.format}_hint`)}</small>
+        </div>}
         <pre className="ui-code-block settings-code-preview-code">{selectedToolText}</pre>
       </ContentPreviewDialog>}
     </>

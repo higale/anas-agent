@@ -39,7 +39,7 @@ describe('native terminal input authorization', () => {
         [call], { modelCalls: 1, todos: [] })
       // The terminal and tool schema were created during full access. Revoking it
       // still governs this new input; the original command grants no exemption.
-      accessMode = 'read_only_allowed'
+      accessMode = 'smart_approval'
       const prepared = await prepareConversationToolBatch(store.load(thread.id)!, preparation)
       if ('kind' in prepared) throw new Error('Unexpected context wait')
       store.prepareTools(scope(), prepared.calls, prepared.approvals, prepared.context)

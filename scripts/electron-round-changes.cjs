@@ -65,7 +65,7 @@ async function installRoundChangesFixture(application, directory) {
     const { projectId, threadId, oldRun, newRun, modelConfigId } = fixture
     const now = new Date().toISOString(), older = '2026-09-01T00:00:00.000Z'
     const thread = { id: threadId, projectId, modelConfigId, title: 'Recorded changes',
-      status: 'idle', accessMode: 'read_only_allowed', pinned: false, userTurnCount: 2, createdAt: older, updatedAt: now }
+      status: 'idle', accessMode: 'smart_approval', pinned: false, userTurnCount: 2, createdAt: older, updatedAt: now }
     const rounds = [
       { runId: newRun, createdAt: now, summary: 'Update greeting with child help', status: 'completed' },
       { runId: oldRun, createdAt: older, summary: 'Create the first greeting', status: 'completed' }

@@ -92,15 +92,15 @@ describe('project store', () => {
     const project = await store.createProject(request)
     const original = await readFile(storePaths.projectFile, 'utf8')
     expect(JSON.parse(original).projects.find((p: Project) => p.id === project.id)).not.toHaveProperty('access_mode')
-    expect(await store.getProject(project.id)).toMatchObject({ accessMode: 'read_only_allowed' })
+    expect(await store.getProject(project.id)).toMatchObject({ accessMode: 'smart_approval' })
     expect(await readFile(storePaths.projectFile, 'utf8')).toBe(original)
-    for (const accessMode of ['strict_approval', 'full_access', 'read_only_allowed'] as const) {
+    for (const accessMode of ['strict_approval', 'full_access', 'smart_approval'] as const) {
       await store.updateProject(project.id, { ...request, accessMode })
       expect(await store.getProject(project.id)).toMatchObject({ accessMode, advancedSettings: false })
       const raw = JSON.parse(await readFile(storePaths.projectFile, 'utf8'))
       expect(raw.version).toBe(0)
       const saved = raw.projects.find((p: Project) => p.id === project.id)
-      expect(saved.access_mode ?? 'read_only_allowed').toBe(accessMode)
+      expect(saved.access_mode ?? 'smart_approval').toBe(accessMode)
       expect(saved).not.toHaveProperty('accessMode')
       expect(await store.prepareProjectPreview({ ...request, accessMode })).toMatchObject({ accessMode })
     }

@@ -37,7 +37,7 @@ function snapshot(): AgentThreadSnapshot {
       title: 'Thread',
       projectId: 'default-workspace',
       pinned: false,
-      accessMode: 'read_only_allowed',
+      accessMode: 'smart_approval',
       status: 'idle',
       userTurnCount: 1,
       createdAt: '',

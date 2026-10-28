@@ -71,7 +71,7 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
   const [skills, setSkills] = useState<SkillSnapshot>()
   const [mcpStatus, setMcpStatus] = useState<McpToolStatus>()
   const [runtimeToolStatus, setRuntimeToolStatus] = useState<RuntimeToolStatus>()
-  const [accessMode, setAccessMode] = useState<AgentAccessMode>('read_only_allowed')
+  const [accessMode, setAccessMode] = useState<AgentAccessMode>('smart_approval')
   const [modelConfigId, setModelConfigId] = useState<string>()
   const [modelParameterPresetId, setModelParameterPresetId] = useState<string | null>()
   const [busy, setBusy] = useState(false)
@@ -95,7 +95,7 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
       ? { ...preferences, kind: 'simple_chat', prompt }
       : { ...preferences, kind: 'workspace', sourceFolders,
         capabilities: config ? removeEmptyMissingMcpSelections(capabilities, new Set(config.mcpServers.map((server) => server.id))) : capabilities,
-        restrictSubagents, prompt, advancedSettings, codingMode, ...(accessMode !== 'read_only_allowed' ? { accessMode } : {}), ...(compressionPrompt.trim() ? { compressionPrompt } : {}) }
+        restrictSubagents, prompt, advancedSettings, codingMode, ...(accessMode !== 'smart_approval' ? { accessMode } : {}), ...(compressionPrompt.trim() ? { compressionPrompt } : {}) }
   }, [accessMode, advancedSettings, capabilities, codingMode, compressionPrompt, config, icon, iconColor, modelConfigId,
     modelParameterPresetId, name, prompt, restrictSubagents, simpleChat, sourceFolders, t])
 
@@ -111,7 +111,7 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
     setCodingMode(initialCodingMode)
     setCapabilities(structuredClone(project?.kind === 'workspace' ? project.capabilities : defaultCapabilities))
     setRestrictSubagents(project?.kind === 'workspace' ? project.restrictSubagents : defaultRestrictSubagents)
-    setAccessMode(project?.kind === 'workspace' ? project.accessMode ?? 'read_only_allowed' : 'read_only_allowed')
+    setAccessMode(project?.kind === 'workspace' ? project.accessMode ?? 'smart_approval' : 'smart_approval')
     setModelConfigId(project?.modelConfigId)
     setModelParameterPresetId(project?.modelParameterPresetId)
     setCompressionPrompt(project?.kind === 'workspace' ? project.compressionPrompt ?? '' : '')

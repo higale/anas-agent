@@ -111,7 +111,7 @@ describe('native durable input and resume owner', () => {
       expect(h.owner.readInterrupts(h.identity)).toEqual([])
       expect(() => h.owner.saveResponses({ ...h.identity, responses: [response] })).toThrow('match the current durable root interrupts')
       expect(h.product.readModel.getRun('run')?.status).toBe('running')
-      expect(h.product.getThread(h.identity.threadId)?.accessMode).toBe('read_only_allowed')
+      expect(h.product.getThread(h.identity.threadId)?.accessMode).toBe('smart_approval')
       h.owner.requestCancellation(h.identity); h.owner.completeCancellation(h.identity)
       expect(h.product.getThread(h.identity.threadId)?.status).toBe('idle')
     } finally { h.dispose() }
@@ -362,7 +362,7 @@ describe('native durable input and resume owner', () => {
     } finally { h.dispose() }
   })
 
-  it.each(['read_only_allowed', 'strict_approval', 'full_access'] as const)('atomically creates a conversation with the original %s selection and its first input', async accessMode => {
+  it.each(['smart_approval', 'strict_approval', 'full_access'] as const)('atomically creates a conversation with the original %s selection and its first input', async accessMode => {
     const h = fixture('agent', false)
     try {
       const identity = { threadId: 'new-thread', runId: 'first-run' }

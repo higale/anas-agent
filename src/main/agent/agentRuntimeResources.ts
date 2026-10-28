@@ -36,6 +36,8 @@ import { buildSubagentSystemPrompt } from './subagentPrompt'
 import { isDeveloperHttpTraceEnabled } from './developerHttpTraceState'
 import { buildMemoryRulesPrompt } from './conversationMemory'
 import type { ManagedCallService } from './managedCallService'
+import { applicationApprovalDirectories, safeApprovalFolders } from './approvalDirectories'
+import { smartApprovalPrompt, supportsApprovalParameter } from '../../runtime/smartApproval'
 
 export interface AgentResourceContext {
   requestId?: string
@@ -69,7 +71,7 @@ export function createAgentAccessModeResolver(
   subagentCall?: Pick<AgentSubagentCallRecord, 'ownerThreadId'>
 ): () => AgentThread['accessMode'] {
   const accessModeOwnerId = subagentCall?.ownerThreadId ?? threadId
-  return () => database.getThread(accessModeOwnerId)?.accessMode ?? 'read_only_allowed'
+  return () => database.getThread(accessModeOwnerId)?.accessMode ?? 'smart_approval'
 }
 
 export function shouldIncludeCommandShell(
@@ -313,6 +315,8 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
       selection: capabilities.skills, allowUserInvocation: !activeSubagent, pluginTools: capabilities.pluginTools },
     accessMode: createAgentAccessModeResolver(database, thread.id, context.subagentCall), signal: context.signal
   }) : undefined
+  const approvalDirectories = applicationApprovalDirectories()
+  const accessMode = () => database.getThread(context.subagentCall?.ownerThreadId ?? thread.id)?.accessMode ?? thread.accessMode
   const activeToolNames = capabilities.toolMode !== 'all'
     ? [...builtinToolCatalog.filter((tool) => toolAllowed(capabilities, tool.id)).map((tool) => tool.id), ...mcpTools.map((tool) => tool.name)]
     : undefined
@@ -430,7 +434,10 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
   }) : []
   const requestSystemPrompt = (model: ResolvedModelConfig): AgentSystemPrompt => {
     const provider = model.protocol === 'anthropic_messages' ? 'anthropic' : 'openai'
-    const suffix = simpleChat ? undefined : modelSystemGuidance(provider, model.model)
+    const suffix = simpleChat ? undefined : [modelSystemGuidance(provider, model.model),
+      toolsEnabled && model.capabilities.toolUse && accessMode() === 'smart_approval'
+        ? smartApprovalPrompt(safeApprovalFolders(workspace.trustedFolders, accessMode(), approvalDirectories)) : ''
+    ].filter(Boolean).join('\n\n')
     return suffix ? {
       text: [systemPrompt.text, suffix].filter(Boolean).join('\n\n'),
       sections: [...systemPrompt.sections, { kind: 'system_instruction', content: suffix }]
@@ -440,12 +447,14 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
     try {
       const serverTools = configuredServerTools(model)
       if (!toolsEnabled || !model.capabilities.toolUse) return []
-      return [...tools.filter(tool => model.capabilities.vision || !['view_image', 'view_multiple_images'].includes(tool.name)), ...serverTools]
+      return [...tools.filter(tool => model.capabilities.vision || !['view_image', 'view_multiple_images'].includes(tool.name))
+        .map(tool => accessMode() === 'smart_approval' && supportsApprovalParameter(tool)
+          ? { ...tool, metadata: { ...('metadata' in tool ? tool.metadata as Record<string, unknown> : {}), smartApproval: true } } : tool), ...serverTools]
     } catch (cause) {
       throw new ModelSelectionError(`The selected model has invalid tool parameters: ${cause instanceof Error ? cause.message : String(cause)}. Correct its settings and send again.`, { cause })
     }
   }
   return { resolveModel, initialModel, developerHttpTrace, activeSubagent, runConfiguration, capabilities, features, requestSystemPrompt, selectModelTools,
-    workspace, systemPrompt, simpleChatPrompt, simpleChat, toolsEnabled, review, hasUnresolvedManagedCalls,
+    workspace, approvalDirectories, systemPrompt, simpleChatPrompt, simpleChat, toolsEnabled, review, hasUnresolvedManagedCalls,
     commandShell, shellCommandAuthorization, activeMcpTools, runtimeTools, fileTools, subagentTools, customTools, pluginTools, outputLanguage }
 }

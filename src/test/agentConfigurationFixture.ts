@@ -67,7 +67,7 @@ export function thread(projectId = DEFAULT_WORKSPACE_PROJECT_ID): AgentThread {
     title: 'Thread',
     projectId,
     pinned: false,
-    accessMode: 'read_only_allowed',
+    accessMode: 'smart_approval',
     status: 'idle',
     userTurnCount: 0,
     createdAt: '2026-07-29T00:00:00.000Z',

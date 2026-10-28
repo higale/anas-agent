@@ -2,7 +2,9 @@
 
 [简体中文](UPGRADE_TO_5.zh-CN.md) · [User guide](USER_GUIDE.en.md)
 
-**Version 5.0 uses a fresh native execution database v1. Previous conversations, memory and execution records are not migrated, and legacy full backups cannot be restored.** Only compatible settings and extensions can be copied manually. Backup, repair and crash recovery remain available for current 5.0 data.
+**Version 5.0 uses a fresh native execution database (catalog v2, conversations v1). Previous conversations, memory and execution records are not migrated, and legacy full backups cannot be restored.** Only compatible settings and extensions can be copied manually. Backup, repair and crash recovery remain available for current 5.0 data.
+
+**Upgrading from 5.0.0 to 5.0.1:** The catalog changes from v1 to v2; conversation databases remain v1. Backups containing the old catalog cannot be restored directly; repair the original data directory and create a new backup. If startup reports a catalog version or access-mode constraint error, select project data repair on the recovery page. Original files are preserved before the catalog is repaired; invalid permission values use the default Smart approval mode. This does not convert legacy framework databases or replay tools. Do not change only the version number.
 
 ## Subagent Configuration Compatibility
 

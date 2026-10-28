@@ -15,6 +15,8 @@ import {
 } from './toolPathArguments'
 import type { AgentAccessMode } from '@shared/agentTypes'
 import { terminalActionSchema } from '@shared/terminal'
+import { modelApprovalDecision, withoutApprovalParameter } from '../../runtime/smartApproval'
+import { safeApprovalFolders, type ApprovalDirectories } from './approvalDirectories'
 
 const fullAccessBypassToolNames = new Set(['update_config', 'write_call'])
 
@@ -46,16 +48,18 @@ export interface ToolPathAuthorization {
 }
 
 async function authorizeCanonicalTargets(
-  targets: ToolPathAuthorization['targets'], trusted: readonly string[], accessMode: AgentAccessMode
+  targets: ToolPathAuthorization['targets'], trusted: readonly string[], accessMode: AgentAccessMode,
+  args: Record<string, unknown>, codeOnly = false
 ): Promise<ToolPathAuthorization> {
   if (accessMode === 'full_access' || targets.length === 0) return { requiresApproval: false, targets }
   const trustedFolders = await Promise.all(trusted.map(async (folder) =>
     (await canonicalizeAbsolutePath(folder, 'follow')).canonicalPath
   ))
-  return { requiresApproval: targets.some((target) =>
+  const outside = targets.some((target) =>
     !trustedFolders.some((folder) => isSameOrInsideDirectory(folder, target.canonicalPath))
-    && (accessMode === 'strict_approval' || target.access === 'write')
-  ), targets }
+    && target.access === 'write'
+  )
+  return { requiresApproval: outside && (accessMode === 'strict_approval' || codeOnly || modelApprovalDecision(args)), targets }
 }
 
 // Internal preflight integration point; this does not approve, register or run a
@@ -65,13 +69,14 @@ export async function prepareFilePatchRestoreAuthorization(options: {
   primaryFolder: string
   trustedFolders: string[]
   accessMode: AgentAccessMode
+  args?: Record<string, unknown>
 }): Promise<ToolPathAuthorization> {
   const targets = await Promise.all(options.targets.map(async (target, index) => {
     const resolved = await resolveCanonicalWorkspacePath(target.path, options.primaryFolder, 'entry')
     if (!samePath(resolved.canonicalPath, target.path) || resolved.finalIsSymbolicLink) throw new Error('Patch restore authorization target changed.')
     return { ...resolved, locator: ['targets', index, 'path'], access: target.access, kind: target.kind }
   }))
-  return authorizeCanonicalTargets(targets, options.trustedFolders, options.accessMode)
+  return authorizeCanonicalTargets(targets, options.trustedFolders, options.accessMode, options.args ?? {})
 }
 
 export async function prepareToolPathAuthorization(options: {
@@ -83,14 +88,19 @@ export async function prepareToolPathAuthorization(options: {
   commandShellToolName?: string
   requestId?: string
   fileEditStore?: Pick<FileEditStore, 'loadOperationRecord'>
+  directories?: ApprovalDirectories
 }): Promise<ToolPathAuthorization> {
+  const approvalArgs = options.args
+  const codeOnly = options.toolName === 'apply_patch' && typeof approvalArgs.input === 'string'
+  options = { ...options, trustedFolders: safeApprovalFolders(options.trustedFolders, options.accessMode, options.directories),
+    args: withoutApprovalParameter({ name: options.toolName }, options.args) as Record<string, unknown> }
   if (options.toolName === 'restore_file_edit') {
     const args = options.args
     if (!options.fileEditStore) throw new Error('Conversation file edit storage is unavailable.')
     const record = await options.fileEditStore.loadOperationRecord(
       typeof args.operation_id === 'string' ? args.operation_id.trim() : '',
       typeof args.request_id === 'string' && args.request_id.trim() ? args.request_id.trim() : options.requestId)
-    return prepareFilePatchRestoreAuthorization({ ...options, targets: filePatchRestoreTargets(record).map((target) => ({
+    return prepareFilePatchRestoreAuthorization({ ...options, args: approvalArgs, targets: filePatchRestoreTargets(record).map((target) => ({
       ...target, access: args.dry_run === true ? 'read' : 'write'
     })) })
   }
@@ -102,12 +112,13 @@ export async function prepareToolPathAuthorization(options: {
     // hide a link retargeted after rule discovery.
     return authorizeCanonicalTargets(targets.map((target) => ({ ...target,
       locator: ['operations', target.operationIndex, target.field]
-    })), options.trustedFolders, options.accessMode)
+    })), options.trustedFolders, options.accessMode, approvalArgs, codeOnly)
   }
   if (fullAccessBypassToolNames.has(options.toolName)) {
     return {
       requiresApproval: options.accessMode !== 'full_access' && (options.toolName !== 'write_call'
-        || terminalActionSchema.parse(options.args.action).type !== 'resize'),
+        || terminalActionSchema.parse(options.args.action).type !== 'resize')
+        && (options.accessMode === 'strict_approval' || modelApprovalDecision(approvalArgs)),
       targets: []
     }
   }
@@ -123,11 +134,11 @@ export async function prepareToolPathAuthorization(options: {
     )
   })))
   for (const target of targets) {
-    setArgumentValue(options.args, target.locator, target.canonicalPath)
+    setArgumentValue(approvalArgs, target.locator, target.canonicalPath)
   }
   if (options.accessMode === 'full_access') return { requiresApproval: false, targets }
   if (options.toolName === options.commandShellToolName) return { requiresApproval: true, targets }
-  return authorizeCanonicalTargets(targets, options.trustedFolders, options.accessMode)
+  return authorizeCanonicalTargets(targets, options.trustedFolders, options.accessMode, approvalArgs)
 }
 
 export async function requiresToolApproval(options: {
@@ -137,6 +148,7 @@ export async function requiresToolApproval(options: {
   trustedFolders: string[]
   accessMode: AgentAccessMode
   commandShellToolName?: string
+  directories?: ApprovalDirectories
 }): Promise<boolean> {
   return (await prepareToolPathAuthorization(options)).requiresApproval
 }

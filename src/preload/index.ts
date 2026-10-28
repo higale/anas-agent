@@ -68,7 +68,8 @@ const api: GaleApi = {
     inspect: () => ipcRenderer.invoke('recovery:inspect'),
     openDirectory: (kind) => ipcRenderer.invoke('recovery:openDirectory', kind),
     reset: (file) => ipcRenderer.invoke('recovery:reset', file),
-    resetProjects: () => ipcRenderer.invoke('recovery:resetProjects'),
+    resetProjects: (targets) => ipcRenderer.invoke('recovery:resetProjects', targets),
+    resetExecution: (targets) => ipcRenderer.invoke('recovery:resetExecution', targets),
     repair: (file) => ipcRenderer.invoke('recovery:repair', file),
     restart: () => ipcRenderer.invoke('recovery:restart')
   },

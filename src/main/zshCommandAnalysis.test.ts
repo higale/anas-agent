@@ -80,13 +80,13 @@ describe.skipIf(process.platform !== 'darwin')('macOS original-command read auth
     expect(args.command).toBe(command)
   })
 
-  it('applies project read boundaries to the physical target of parent traversal', async () => {
+  it('allows verified reads of the physical target of parent traversal', async () => {
     const h = await fixture()
     await mkdir(join(h.outside, 'child'))
     await symlink(join(h.outside, 'child'), join(h.project, 'link'))
     const args = { command: "cat 'link/../文档 notes.txt'" }
-    expect(await h.authorization.requiresApproval(args)).toBe(true)
-    h.mode('read_only_allowed')
+    expect(await h.authorization.requiresApproval(args)).toBe(false)
+    h.mode('smart_approval')
     expect((await h.authorization.inspect(args))?.paths).toContain(join(h.outside, '文档 notes.txt'))
   })
 
@@ -167,14 +167,14 @@ describe.skipIf(process.platform !== 'darwin')('macOS original-command read auth
 
   it('rechecks canonical targets and access mode without changing original arguments', async () => {
     const h = await fixture()
-    h.mode('read_only_allowed')
+    h.mode('smart_approval')
     const args = Object.freeze({ command: "cat '../outside/文档 notes.txt'" })
     expect(await h.authorization.requiresApproval(args)).toBe(false)
     h.mode('strict_approval')
-    expect(await createShellCommandAuthorization(h.options).requiresApproval(args)).toBe(true)
+    expect(await createShellCommandAuthorization(h.options).requiresApproval(args)).toBe(false)
     await rm(join(h.project, '文档 notes.txt'))
     await symlink(join(h.outside, '文档 notes.txt'), join(h.project, '文档 notes.txt'))
-    expect(await h.authorization.requiresApproval({ command: "cat '文档 notes.txt'" })).toBe(true)
+    expect(await h.authorization.requiresApproval({ command: "cat '文档 notes.txt'" })).toBe(false)
   })
 
   it('retains manual approval for PTY, retained processes and Bash, and honors cancellation', async () => {

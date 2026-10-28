@@ -33,7 +33,7 @@ export function newThreadComposerDraftKey(projectId: string): string {
 export class ComposerDraftStore {
   private readonly drafts = new Map<string, StoredComposerDraft>()
 
-  get(key: string, defaultAccessMode: AgentAccessMode = 'read_only_allowed'): ComposerDraft {
+  get(key: string, defaultAccessMode: AgentAccessMode = 'smart_approval'): ComposerDraft {
     const draft = this.drafts.get(key) ?? emptyDraft()
     return { ...draft, accessMode: draft.accessMode ?? defaultAccessMode }
   }
@@ -54,7 +54,7 @@ export class ComposerDraftStore {
     const draft = this.drafts.get(key)
     if (!draft) return undefined
     this.drafts.delete(key)
-    return { ...draft, accessMode: draft.accessMode ?? 'read_only_allowed' }
+    return { ...draft, accessMode: draft.accessMode ?? 'smart_approval' }
   }
 
   discardMany(keys: Iterable<string>): ComposerDraft[] {
@@ -75,7 +75,7 @@ export class ComposerDraftStore {
   }
 }
 
-export function useComposerDrafts(activeKey: string, defaultAccessMode: AgentAccessMode = 'read_only_allowed') {
+export function useComposerDrafts(activeKey: string, defaultAccessMode: AgentAccessMode = 'smart_approval') {
   const storeRef = useRef<ComposerDraftStore | null>(null)
   const [, setRevision] = useState(0)
   if (!storeRef.current) storeRef.current = new ComposerDraftStore()

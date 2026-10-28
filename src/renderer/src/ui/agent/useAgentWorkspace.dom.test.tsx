@@ -24,7 +24,7 @@ const thread: AgentThread = {
   modelConfigId: 'model-2',
   modelParameterPresetId: 'thinking-on',
   pinned: false,
-  accessMode: 'read_only_allowed',
+  accessMode: 'smart_approval',
   status: 'idle',
   userTurnCount: 1,
   createdAt: '2026-08-21T00:00:00.000Z',

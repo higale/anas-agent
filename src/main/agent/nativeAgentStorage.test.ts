@@ -36,10 +36,10 @@ function submit(database: NativeConversationDatabase, threadId: string) {
 it('persists thread metadata and every access mode through the native catalog and conversation after reopening', async () => {
   const { root, storage } = await fixture()
   const created = storage.createThread({ title: '  Original   title ', projectId: 'selected-project' })
-  expect(created).toMatchObject({ title: 'Original title', status: 'idle', accessMode: 'read_only_allowed' })
+  expect(created).toMatchObject({ title: 'Original title', status: 'idle', accessMode: 'smart_approval' })
   storage.updateThread(created.id, { title: 'Updated title', pinned: true, modelConfigId: 'chosen-model', modelParameterPresetId: 'chosen-preset' })
   let current = storage
-  for (const accessMode of ['strict_approval', 'full_access', 'read_only_allowed'] as const) {
+  for (const accessMode of ['strict_approval', 'full_access', 'smart_approval'] as const) {
     expect(current.setAccessMode(created.id, accessMode).accessMode).toBe(accessMode)
     current.close(); current = open(root)
     const expected = { id: created.id, title: 'Updated title', pinned: true, projectId: 'selected-project', accessMode,
@@ -74,10 +74,10 @@ it('routes native submissions, hidden children and queues from committed notific
   expect(() => storage.updateThread(thread.id, { modelConfigId: null })).toThrow('must select its own model')
   storage.updateThread(thread.id, { pinned: true })
   storage.updateThread(thread.id, { pinned: false, projectId: 'moved', modelParameterPresetId: null })
-  storage.setAccessMode(thread.id, 'read_only_allowed')
+  storage.setAccessMode(thread.id, 'smart_approval')
   storage.updateThread(childThreadId, { modelConfigId: null })
   expect(database.getThread(childThreadId)).toMatchObject({ projectId: 'moved', modelConfigId: undefined })
-  expect(storage.getThread(thread.id)).toMatchObject({ pinned: false, modelConfigId: 'model', accessMode: 'read_only_allowed' })
+  expect(storage.getThread(thread.id)).toMatchObject({ pinned: false, modelConfigId: 'model', accessMode: 'smart_approval' })
   expect(storage.getThread(thread.id)?.modelParameterPresetId).toBeUndefined()
   database.queue.deleteQueuedInput(thread.id, 'queued')
   database.runs.requestCancellation(run); database.runs.completeCancellation(run)
@@ -154,15 +154,20 @@ it('rejects a legacy catalog without changing its bytes or opening its conversat
   const thread = await frozenLegacyStorage(root)
   const catalog = getAgentCatalogFile(root), conversation = getAgentConversationDatabaseFile(thread.id, root)
   const before = await Promise.all([readFile(catalog), readFile(conversation)])
-  expect(() => AgentStorage.openNative(root)).toThrow('expected 1')
+  expect(() => AgentStorage.openNative(root)).toThrow('expected 2')
   expect(await Promise.all([readFile(catalog), readFile(conversation)])).toEqual(before)
 })
 
 it('rejects a legacy conversation registered in a native catalog and preserves unrelated usable conversations', async () => {
   const root = await mkdtemp(join(tmpdir(), 'anas-native-storage-mixed-')); roots.push(root)
-  const thread = await frozenLegacyStorage(root)
-  const catalog = new Database(getAgentCatalogFile(root)); catalog.pragma('user_version=1'); catalog.close()
-  const file = getAgentConversationDatabaseFile(thread.id, root), before = await readFile(file), storage = open(root)
+  const frozen = readFrozenStorage<{ thread: AgentThread }>('legacy-conversation')
+  const thread = frozen.metadata.thread
+  const initial = open(root)
+  initial.createThread({ title: thread.title }, thread.id)
+  initial.close()
+  const file = getAgentConversationDatabaseFile(thread.id, root)
+  await writeFile(file, frozen.bytes)
+  const before = await readFile(file), storage = open(root)
   expect(storage.listThreads().map(item => item.id)).toEqual([thread.id])
   expect(() => storage.conversationForThread(thread.id)).toThrow()
   expect(await readFile(file)).toEqual(before)

@@ -27,7 +27,7 @@ export async function resolveAgentPreviewTarget(
     modelConfigId: selection.modelConfigId,
     modelParameterPresetId: selection.modelParameterPresetId ?? undefined,
     pinned: false,
-    accessMode: project.kind === 'workspace' ? project.accessMode ?? 'read_only_allowed' : 'read_only_allowed',
+    accessMode: project.kind === 'workspace' ? project.accessMode ?? 'smart_approval' : 'smart_approval',
     status: 'idle',
     userTurnCount: 0,
     createdAt: now,

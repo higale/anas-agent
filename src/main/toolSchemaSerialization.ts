@@ -1,7 +1,9 @@
-import { toolJsonSchema } from '../runtime/toolSchema'
+import { modelToolJsonSchema } from '../runtime/toolSchema'
 import type { ToolDefinition } from '../runtime/toolDefinition'
 import type { RuntimeToolDefinition } from '@shared/types'
 import { commandShellCapabilityId, isCommandShellMetadata } from '@shared/commandShell'
+import { modelToolDeclaration } from './agent/modelToolDeclarations'
+import { supportsApprovalParameter } from '../runtime/smartApproval'
 
 function recordOf(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
@@ -46,7 +48,7 @@ export function schemaParameters(schema: unknown): RuntimeToolDefinition['parame
 }
 
 export function toolInputSchema(schema: unknown): unknown {
-  return toolJsonSchema(schema)
+  return modelToolJsonSchema(schema)
 }
 
 export function serializeToolDefinition(tool: Pick<ToolDefinition, 'name' | 'description' | 'inputSchema' | 'metadata'>): RuntimeToolDefinition {
@@ -59,6 +61,12 @@ export function serializeToolDefinition(tool: Pick<ToolDefinition, 'name' | 'des
       : {}),
     description: typeof tool.description === 'string' ? tool.description : '',
     parameters: schemaParameters(inputSchema),
-    inputSchema
+    inputSchema,
+    ...(supportsApprovalParameter(tool) ? { smartApprovalDefinition: modelToolDeclaration({ ...tool,
+      metadata: { ...metadata, smartApproval: true } }, 'openai_chat_completions') } : {}),
+    ...(metadata?.codexApplyPatch === true ? { definitionVariants: [
+      { format: 'json' as const, definition: modelToolDeclaration(tool, 'openai_chat_completions') },
+      { format: 'freeform' as const, definition: modelToolDeclaration(tool, 'openai_responses') }
+    ] } : {})
   }
 }

@@ -17,7 +17,7 @@ it('leaves a fresh directory empty for native initialization', async () => {
   expect(await readdir(root)).toEqual([])
 })
 
-it.each([0, 99])('rejects execution version %s without changing its original database', async version => {
+it.each([0, 1, 99])('rejects execution version %s without changing its original database', async version => {
   const root = await directory(), file = join(root, 'db/catalog.sqlite')
   await mkdir(join(root, 'db'))
   await writeFile(file, readFrozenStorage('legacy-catalog').bytes)
@@ -46,4 +46,18 @@ it('reads a copied native WAL without checkpointing or rewriting the live databa
     await expect(validateExecutionStorageDirectory(root)).resolves.toBeUndefined()
     expect(await Promise.all(paths.map(path => readFile(path)))).toEqual(before)
   } finally { storage.close() }
+})
+
+it('rejects an incorrectly labelled current catalog before runtime and preserves its bytes', async () => {
+  const root = await directory(), file = join(root, 'db/catalog.sqlite')
+  await mkdir(join(root, 'db'))
+  await writeFile(file, readFrozenStorage('legacy-catalog').bytes)
+  const database = new Database(file)
+  database.pragma('user_version=2')
+  database.close()
+  const before = await readFile(file)
+  await expect(validateExecutionStorageDirectory(root)).rejects.toThrow('access mode')
+  expect(() => AgentStorage.openNative(root)).toThrow('access mode')
+  expect(() => AgentStorage.validateCatalogBackup(file, new Set())).toThrow('access mode')
+  expect(await readFile(file)).toEqual(before)
 })

@@ -3,7 +3,7 @@ import type { CodeReviewRequest, CodeReviewPresentation } from './codeReview'
 import type { AgentBackgroundCleanup } from './backgroundCleanup'
 
 export type AgentThreadStatus = 'idle' | 'running' | 'interrupted' | 'failed'
-export type AgentAccessMode = 'strict_approval' | 'read_only_allowed' | 'full_access'
+export type AgentAccessMode = 'strict_approval' | 'smart_approval' | 'full_access'
 
 export function isAgentThreadLocked(status: AgentThreadStatus | undefined): boolean {
   return status === 'running' || status === 'interrupted'

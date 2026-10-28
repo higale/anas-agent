@@ -320,6 +320,8 @@ export interface RuntimeToolDefinition {
   description: string
   parameters: Array<{ name: string; description: string; schema?: unknown }>
   inputSchema?: unknown
+  definitionVariants?: Array<{ format: 'json' | 'freeform'; definition: Record<string, unknown> }>
+  smartApprovalDefinition?: Record<string, unknown>
 }
 
 export interface RuntimeToolStatus {

@@ -62,7 +62,7 @@ function startCandidate(handleEvent: (event: AgentRuntimeEvent) => void, started
 
 function finishRun(handleEvent: (event: AgentRuntimeEvent) => void, modelId: string, text: string) {
   const snapshot: AgentThreadSnapshot = {
-    thread: { id: run.threadId, projectId: 'default-workspace', title: 'Speech test', pinned: false, accessMode: 'read_only_allowed', status: 'idle', userTurnCount: 1, createdAt: '', updatedAt: '' },
+    thread: { id: run.threadId, projectId: 'default-workspace', title: 'Speech test', pinned: false, accessMode: 'smart_approval', status: 'idle', userTurnCount: 1, createdAt: '', updatedAt: '' },
     messages: [{ id: `${modelId}-message`, runId: run.id, role: 'assistant', content: [{ type: 'text', text }] }],
     todos: [], interrupts: [], activities: [], messageWindow: { startIndex: 0, shown: 1, total: 1, remaining: 0 }
   }

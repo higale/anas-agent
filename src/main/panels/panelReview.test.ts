@@ -32,7 +32,7 @@ describe('review from an independent file panel', () => {
     } }))
     vi.doMock('../agent/agentStorage', () => ({ AgentStorage: { openNative: () => storage } }))
     vi.doMock('../agent/nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: vi.fn(function () { return runtime }) }))
-    vi.doMock('../projectStore', () => ({ getProject: async () => ({ id: 'origin-project', kind: 'workspace', modelConfigId: 'project-model', accessMode: 'read_only_allowed' }) }))
+    vi.doMock('../projectStore', () => ({ getProject: async () => ({ id: 'origin-project', kind: 'workspace', modelConfigId: 'project-model', accessMode: 'smart_approval' }) }))
     vi.doMock('../agent/codeReview', () => ({ captureCodeReview: capture, codeReviewPrompt: () => 'Captured review prompt' }))
     vi.doMock('../config/appConfig', () => ({ getAppConfigSnapshot: async () => ({ defaultModelId: 'global-model' }),
       findResolvedModelConfig: (_config: unknown, id: string) => ({ id, capabilities: { toolUse: true } }) }))

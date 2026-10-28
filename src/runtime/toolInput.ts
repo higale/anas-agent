@@ -4,6 +4,7 @@ import { type $ZodType, prettifyError, safeParseAsync } from 'zod/v4/core'
 import { ToolInputError } from './errors'
 import type { ToolDefinition } from './toolDefinition'
 import { isCustomToolMetadata, maxCustomToolInputBytes } from '../shared/customTools'
+import { withoutApprovalParameter } from './smartApproval'
 
 export type ToolInputDefinition = Pick<ToolDefinition, 'name' | 'inputSchema' | 'metadata'>
 
@@ -14,8 +15,8 @@ export function toolInputDiagnostic(toolName: string, detail: string): string {
 
 /** Preflight reads the original capability definition, never a protocol schema
  * projected for the model or a tool object registered with an executor. */
-export function validateCapabilityInput(definition: ToolInputDefinition | undefined, args: unknown): Promise<void> {
-  return validateToolInput(args, definition?.inputSchema, {
+export async function validateCapabilityInput(definition: ToolInputDefinition | undefined, args: unknown): Promise<void> {
+  return validateToolInput(withoutApprovalParameter(definition, args), definition?.inputSchema, {
     maxBytes: isCustomToolMetadata(definition?.metadata) ? maxCustomToolInputBytes : undefined
   })
 }

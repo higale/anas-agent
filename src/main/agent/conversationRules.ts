@@ -1,17 +1,16 @@
 import { requireObjectToolCall } from '../../runtime/toolInput'
-import { randomUUID } from 'node:crypto'
 import type { AgentAccessMode } from '@shared/agentTypes'
 import type { ConversationMessage } from '../../runtime/conversationMessage'
-import type { ExecutionApproval, ExecutionContext, ExecutionPendingCall } from '../../runtime/executionState'
-import { ProjectRulesError, ProjectRulesReadRequired } from '../../runtime/errors'
-import { preflightProjectRuleBatch, projectRulesText, type ProjectRulesSnapshot } from '../../runtime/projectRules'
+import type { ExecutionContext, ExecutionPendingCall } from '../../runtime/executionState'
+import { ProjectRulesError } from '../../runtime/errors'
+import { preflightProjectRuleBatch, projectRulesText } from '../../runtime/projectRules'
 import type { FileEditStore } from '../fileEditStore'
-import { isSameOrInsideDirectory } from '../pathContainment'
 import { createProjectRulesSnapshot, discoverProjectRules, mutationDirectories, projectRuleTargetDirectory, type ProjectRulesReader } from './projectRules'
 import { prepareToolPathAuthorization } from './toolAuthorization'
 import { toolPathArguments } from './toolPathArguments'
 import { countConversationTokens } from './conversationContext'
 import { authorizationInputHash } from '../../runtime/authorizationReceipts'
+import type { ApprovalDirectories } from './approvalDirectories'
 
 export interface ConversationRulesOptions {
   runId: string
@@ -19,32 +18,18 @@ export interface ConversationRulesOptions {
   primaryFolder: string
   accessMode(): AgentAccessMode
   signal?: AbortSignal
-  allowApprovals?: boolean
   fileEditStore?: Pick<FileEditStore, 'loadOperationRecord'>
+  directories?: ApprovalDirectories
 }
-type RuleWait = { kind: 'wait'; context: ExecutionContext; approval: Extract<ExecutionApproval, { kind: 'context_read' }> }
-
-function reader(context: ExecutionContext, snapshot: ProjectRulesSnapshot, options: ConversationRulesOptions): ProjectRulesReader {
-  return { signal: options.signal, authorizeRead: path => {
-    if (options.accessMode() !== 'strict_approval' || snapshot.trustedFolders.some(folder => isSameOrInsideDirectory(folder, path))) return
-    const decision = context.rulePreparation?.runId === options.runId ? context.rulePreparation.reads.find(read => read.path === path) : undefined
-    if (decision?.approved) return
-    if (decision) throw new ProjectRulesError(`Reading required rules was not approved: ${path}.`)
-    if (options.allowApprovals === false) throw new ProjectRulesError(`Rules outside project folders need read approval and cannot be included in this preview: ${path}.`)
-    throw new ProjectRulesReadRequired(path)
-  } }
+function reader(options: ConversationRulesOptions): ProjectRulesReader {
+  // Rule discovery validates canonical file targets; verified reads are allowed
+  // in every access mode, including outside the project folders.
+  return { signal: options.signal, authorizeRead: () => {} }
 }
 
-function waiting(context: ExecutionContext, error: ProjectRulesReadRequired, resumePhase: 'prepare_model' | 'tools'): RuleWait {
-  return { kind: 'wait', context, approval: { id: randomUUID(), generation: randomUUID(), kind: 'context_read', callIds: [], path: error.path, resumePhase,
-    request: { actionRequests: [{ name: 'read_file', args: { path: error.path }, description: `Read project rules: ${error.path}` }],
-      reviewConfigs: [{ actionName: 'read_file', allowedDecisions: ['approve', 'reject'] }] } } }
-}
-
-/** Freeze rule documents and absences once per run. A partial snapshot survives
- * an approval pause; resuming must not reread already captured documents. */
+/** Freeze rule documents and absences once per run; resumed runs retain the snapshot. */
 export async function prepareConversationRules(source: ExecutionContext, options: ConversationRulesOptions): Promise<
-  { kind: 'ready'; context: ExecutionContext } | RuleWait> {
+  { kind: 'ready'; context: ExecutionContext }> {
   const context = structuredClone(source)
   if (context.projectRules?.runId !== options.runId) {
     // A read can have been approved before any discovery snapshot was saved.
@@ -58,19 +43,14 @@ export async function prepareConversationRules(source: ExecutionContext, options
   if (!preparation || preparation.runId !== options.runId) throw new ProjectRulesError('Missing native rule preparation state.')
   if (snapshot.fatalError) throw new ProjectRulesError(snapshot.fatalError)
   if (preparation.initialized) return { kind: 'ready', context }
-  try {
-    for (const root of [...snapshot.roots]) {
-      const scopes = await discoverProjectRules(snapshot, root.folder, reader(context, snapshot, options))
-      if (!snapshot.initialScopes.length) snapshot.initialScopes = scopes
-    }
-    snapshot.initialScopes = [...new Set(snapshot.initialScopes)]
-    snapshot.activeScopes = [...snapshot.initialScopes]
-    preparation.initialized = true
-    return { kind: 'ready', context }
-  } catch (error) {
-    if (error instanceof ProjectRulesReadRequired) return waiting(context, error, 'prepare_model')
-    throw error
+  for (const root of [...snapshot.roots]) {
+    const scopes = await discoverProjectRules(snapshot, root.folder, reader(options))
+    if (!snapshot.initialScopes.length) snapshot.initialScopes = scopes
   }
+  snapshot.initialScopes = [...new Set(snapshot.initialScopes)]
+  snapshot.activeScopes = [...snapshot.initialScopes]
+  preparation.initialized = true
+  return { kind: 'ready', context }
 }
 
 export function conversationRuleSystemMessage(system: ConversationMessage, context: ExecutionContext, runId: string): ConversationMessage {
@@ -87,7 +67,7 @@ export function conversationRuleSystemMessage(system: ConversationMessage, conte
 /** Inspect the whole batch before any dispatch. The shared rule algorithm binds
  * writes to the scopes seen by the model and withholds newly discovered scopes. */
 export async function preflightConversationRules(source: ExecutionContext, rawCalls: readonly ExecutionPendingCall[], receipt: unknown,
-  options: ConversationRulesOptions): Promise<{ kind: 'ready'; context: ExecutionContext; calls: ExecutionPendingCall[] } | RuleWait> {
+  options: ConversationRulesOptions): Promise<{ kind: 'ready'; context: ExecutionContext; calls: ExecutionPendingCall[] }> {
   const calls = rawCalls.map(requireObjectToolCall)
   const context = structuredClone(source)
   if (context.rulePreparation?.runId !== options.runId || !context.rulePreparation.initialized) throw new ProjectRulesError('Missing completed rule discovery.')
@@ -99,46 +79,41 @@ export async function preflightConversationRules(source: ExecutionContext, rawCa
     }
   }
   if (calls.every(call => previous.some(item => item.id === call.id))) return { kind: 'ready', context, calls: [...calls] }
-  try {
-    const result = await preflightProjectRuleBatch({ runId: options.runId, snapshot: context.projectRules, calls, receipt,
-      answered: new Set(calls.filter(call => call.result).map(call => call.id)),
-      countScopeTokens: (snapshot, scopes) => { const text = projectRulesText(snapshot, scopes); return text ? countConversationTokens([{ kind: 'system', content: text }], []) : 0 },
-      inspect: async (snapshot, call) => {
-        context.projectRules = snapshot
-        if (call.name !== 'apply_patch') {
-          const arguments_ = toolPathArguments(call.name, call.args)
-          if (!arguments_ || arguments_.some(argument => typeof argument.value !== 'string' || !argument.value.trim())) {
-            return { rejection: 'NOT EXECUTED: Invalid file path arguments. Correct the arguments and decide again.' }
-          }
-          if (!arguments_.length && call.name !== 'restore_file_edit') return undefined
+  const result = await preflightProjectRuleBatch({ runId: options.runId, snapshot: context.projectRules, calls, receipt,
+    answered: new Set(calls.filter(call => call.result).map(call => call.id)),
+    countScopeTokens: (snapshot, scopes) => { const text = projectRulesText(snapshot, scopes); return text ? countConversationTokens([{ kind: 'system', content: text }], []) : 0 },
+    inspect: async (snapshot, call) => {
+      context.projectRules = snapshot
+      if (call.name !== 'apply_patch') {
+        const arguments_ = toolPathArguments(call.name, call.args)
+        if (!arguments_ || arguments_.some(argument => typeof argument.value !== 'string' || !argument.value.trim())) {
+          return { rejection: 'NOT EXECUTED: Invalid file path arguments. Correct the arguments and decide again.' }
         }
-        let prepared: Awaited<ReturnType<typeof prepareToolPathAuthorization>>
-        try {
-          prepared = await prepareToolPathAuthorization({ toolName: call.name, args: call.args, primaryFolder: options.primaryFolder,
-            trustedFolders: options.folders, accessMode: options.accessMode(), requestId: options.runId, fileEditStore: options.fileEditStore })
-        } catch (error) {
-          options.signal?.throwIfAborted()
-          return { rejection: `NOT EXECUTED: Cannot resolve the file targets: ${String(error)}. Correct the paths and decide again.` }
-        }
-        const scopes = new Set<string>(), fileTargets = prepared.targets.filter(target => !target.kind || target.kind === 'file')
-        for (const target of fileTargets) {
-          let directories = [await projectRuleTargetDirectory(target.canonicalPath)]
-          if (target.access === 'write' && (call.name === 'delete_file' || call.name === 'move_file')) {
-            directories = await mutationDirectories(target.canonicalPath,
-              call.name === 'move_file' && target.locator[0] === 'source' ? String(call.args.destination) : undefined, reader(context, snapshot, options))
-          } else if (call.name === 'create_directory') directories.push(target.canonicalPath)
-          for (const directory of directories) for (const scope of await discoverProjectRules(snapshot, directory, reader(context, snapshot, options))) scopes.add(scope)
-        }
-        return { scopes: [...scopes], ...(prepared.targets.some(target => target.access === 'write') ? { writePaths: fileTargets.map(target => target.canonicalPath) } : {}) }
+        if (!arguments_.length && call.name !== 'restore_file_edit') return undefined
       }
-    })
-    context.projectRules = result.snapshot
-    context.rulePreparation.completedCalls = (result.calls ?? calls).map(call => ({ id: call.id, name: call.name, inputHash: authorizationInputHash(call.args) }))
-    return { kind: 'ready', context, calls: result.calls ?? [...calls] }
-  } catch (error) {
-    if (error instanceof ProjectRulesReadRequired) return waiting(context, error, 'tools')
-    throw error
-  }
+      let prepared: Awaited<ReturnType<typeof prepareToolPathAuthorization>>
+      try {
+        prepared = await prepareToolPathAuthorization({ toolName: call.name, args: call.args, primaryFolder: options.primaryFolder,
+          trustedFolders: options.folders, accessMode: options.accessMode(), directories: options.directories, requestId: options.runId, fileEditStore: options.fileEditStore })
+      } catch (error) {
+        options.signal?.throwIfAborted()
+        return { rejection: `NOT EXECUTED: Cannot resolve the file targets: ${String(error)}. Correct the paths and decide again.` }
+      }
+      const scopes = new Set<string>(), fileTargets = prepared.targets.filter(target => !target.kind || target.kind === 'file')
+      for (const target of fileTargets) {
+        let directories = [await projectRuleTargetDirectory(target.canonicalPath)]
+        if (target.access === 'write' && (call.name === 'delete_file' || call.name === 'move_file')) {
+          directories = await mutationDirectories(target.canonicalPath,
+            call.name === 'move_file' && target.locator[0] === 'source' ? String(call.args.destination) : undefined, reader(options))
+        } else if (call.name === 'create_directory') directories.push(target.canonicalPath)
+        for (const directory of directories) for (const scope of await discoverProjectRules(snapshot, directory, reader(options))) scopes.add(scope)
+      }
+      return { scopes: [...scopes], ...(prepared.targets.some(target => target.access === 'write') ? { writePaths: fileTargets.map(target => target.canonicalPath) } : {}) }
+    }
+  })
+  context.projectRules = result.snapshot
+  context.rulePreparation.completedCalls = (result.calls ?? calls).map(call => ({ id: call.id, name: call.name, inputHash: authorizationInputHash(call.args) }))
+  return { kind: 'ready', context, calls: result.calls ?? [...calls] }
 }
 
 export async function conversationRuleToolRejection(context: ExecutionContext, rawCall: ExecutionPendingCall,
@@ -153,7 +128,7 @@ export async function conversationRuleToolRejection(context: ExecutionContext, r
   const checked = snapshot.checkedWrites.find(checked => checked.id === call.id)
   if (!checked) return undefined
   const prepared = await prepareToolPathAuthorization({ toolName: call.name, args: structuredClone(call.args),
-    primaryFolder: options.primaryFolder, trustedFolders: options.folders, accessMode: options.accessMode(),
+    primaryFolder: options.primaryFolder, trustedFolders: options.folders, accessMode: options.accessMode(), directories: options.directories,
     requestId: options.runId, fileEditStore: options.fileEditStore })
   if (JSON.stringify(prepared.targets.filter(target => !target.kind || target.kind === 'file').map(target => target.canonicalPath)) !== JSON.stringify(checked.paths)) {
     return 'NOT EXECUTED: The resolved file targets changed after rule preflight. Inspect the current paths and decide again.'

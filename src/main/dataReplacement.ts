@@ -3,10 +3,12 @@ import { basename, dirname, join, resolve } from 'node:path'
 import fs from 'stubborn-fs'
 import { shouldSkipBackupRelativePath } from './backupArchive'
 
-export const projectResetEntries = [
-  'db/projects.json', 'db/project-deletion.json', 'db/project-deletion.stage.json',
+export const executionResetEntries = [
   'db/catalog.sqlite', 'db/catalog.sqlite-wal', 'db/catalog.sqlite-shm', 'db/catalog.sqlite-journal',
   'db/conversations'
+] as const
+export const projectResetEntries = [
+  'db/projects.json', 'db/project-deletion.json', 'db/project-deletion.stage.json', ...executionResetEntries
 ] as const
 let restoreTail: Promise<void> = Promise.resolve()
 // Windows can retain a directory handle briefly after plugin processes exit.

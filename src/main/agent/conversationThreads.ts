@@ -28,7 +28,7 @@ export function accessModeColumns(accessMode: AgentAccessMode): {
   strictApproval: number
 } {
   if (
-    accessMode !== 'read_only_allowed'
+    accessMode !== 'smart_approval'
     && accessMode !== 'strict_approval'
     && accessMode !== 'full_access'
   ) throw new Error('Agent access mode is invalid.')
@@ -50,7 +50,7 @@ export function threadFromRow(row: ThreadRow): AgentThread {
       ? 'full_access'
       : row.strict_approval === 1
         ? 'strict_approval'
-        : 'read_only_allowed',
+        : 'smart_approval',
     status: row.status,
     userTurnCount: row.user_turn_count,
     createdAt: row.created_at,
@@ -88,7 +88,7 @@ export function createThreadRecord(
     modelConfigId: options.modelConfigId,
     modelParameterPresetId: options.modelParameterPresetId ?? undefined,
     pinned: false,
-    accessMode: options.accessMode ?? 'read_only_allowed',
+    accessMode: options.accessMode ?? 'smart_approval',
     status: 'idle',
     userTurnCount: 0,
     createdAt: now,

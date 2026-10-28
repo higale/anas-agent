@@ -20,18 +20,9 @@ import { completeProjectCatalogDeletion, readConversationCatalogSnapshot, writeC
 import { SqliteMemoryStore } from './memoryStore'
 import { FileEditStore, managedDirectChildPath } from '../fileEditStore'
 import { AgentThreadLockedError } from './agentErrors'
+import { catalogVersion, catalogConversationSchema, catalogConversationIndexes, validateCatalogSchema } from './catalogSchema'
 
-const catalogVersion = 1
 const nativeDependency = createRequire(import.meta.url)
-const requiredCatalogColumns: Record<string, string[]> = {
-  agent_conversations: ['id', 'title', 'project_id', 'model_config_id', 'model_parameter_preset_id', 'pinned', 'access_mode', 'status', 'user_turn_count', 'has_queued_inputs', 'created_at', 'updated_at'],
-  agent_thread_locations: ['thread_id', 'owner_thread_id'],
-  agent_run_locations: ['run_id', 'thread_id', 'owner_thread_id', 'submission_id'],
-  agent_conversation_deletions: ['owner_thread_id'],
-  agent_workspace_state: ['id', 'active_thread_id', 'draft_project_id', 'draft_model_config_id', 'draft_model_parameter_preset_id'],
-  agent_store_items: ['namespace_path', 'key', 'value_json', 'created_at', 'updated_at'],
-  agent_memory_fts: ['namespace_path', 'key', 'content', 'keywords']
-}
 
 interface ConversationRow {
   id: string
@@ -58,17 +49,6 @@ function threadFromRow(row: ConversationRow): AgentThread {
   }
 }
 
-function validateCatalogSchema(database: Database.Database): void {
-  const version = database.pragma('user_version', { simple: true }) as number
-  if (version !== catalogVersion) throw new Error(`Unsupported agent catalog schema ${version}; expected ${catalogVersion}.`)
-  for (const [table, required] of Object.entries(requiredCatalogColumns)) {
-    const columns = new Set((database.prepare('SELECT name FROM pragma_table_info(?)').all(table) as Array<{ name: string }>).map(({ name }) => name))
-    if (!columns.size) throw new Error(`Agent catalog is missing table ${table}.`)
-    for (const column of required) {
-      if (!columns.has(column)) throw new Error(`Agent catalog is missing column ${table}.${column}.`)
-    }
-  }
-}
 
 function requireText(value: unknown, label: string): asserts value is string {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} must be non-empty text.`)
@@ -157,22 +137,8 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
     this.catalog.pragma('journal_mode = WAL')
     this.catalog.transaction(() => {
       this.catalog.exec(`
-        CREATE TABLE agent_conversations (
-          id TEXT PRIMARY KEY,
-          title TEXT NOT NULL,
-          project_id TEXT NOT NULL,
-          model_config_id TEXT,
-          model_parameter_preset_id TEXT,
-          pinned INTEGER NOT NULL CHECK (pinned IN (0, 1)),
-          access_mode TEXT NOT NULL CHECK (access_mode IN ('strict_approval', 'read_only_allowed', 'full_access')),
-          status TEXT NOT NULL CHECK (status IN ('idle', 'running', 'interrupted', 'failed')),
-          user_turn_count INTEGER NOT NULL CHECK (user_turn_count >= 0),
-          has_queued_inputs INTEGER NOT NULL DEFAULT 0 CHECK (has_queued_inputs IN (0, 1)),
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL
-        );
-        CREATE INDEX agent_conversations_order_idx ON agent_conversations (pinned DESC, updated_at DESC, id);
-        CREATE INDEX agent_conversations_project_idx ON agent_conversations (project_id);
+        ${catalogConversationSchema}
+        ${catalogConversationIndexes}
         CREATE TABLE agent_thread_locations (
           thread_id TEXT PRIMARY KEY,
           owner_thread_id TEXT NOT NULL REFERENCES agent_conversations(id) ON DELETE CASCADE

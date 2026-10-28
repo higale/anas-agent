@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { McpToolStatus, RuntimeToolStatus } from '@shared/types'
 import type { PluginSummary } from '@shared/plugins'
 import { ToolsSettings as ToolsSettingsContent } from './ToolsSettings'
+import codexPatchSpec from '../../../../main/codexPatchSpec.json'
 
 function ToolsSettings(props: ComponentProps<typeof ToolsSettingsContent>) {
   const [target, setTarget] = useState<HTMLDivElement | null>(null)
@@ -39,6 +40,50 @@ function plugin(id: string, enabled = true): PluginSummary {
 beforeEach(() => { vi.stubGlobal('gale', { tools: { get: vi.fn(async () => ({ roots: [], tools: [] })) } }) })
 
 describe('tool catalog', () => {
+  it('switches and copies patch formats from one catalog entry and resets on reopen', async () => {
+    const user = userEvent.setup()
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText')
+    const json = { type: 'function', function: { name: 'apply_patch', description: 'Patch with JSON arguments.',
+      parameters: { type: 'object', properties: { patch: { type: 'string' } }, required: ['patch'], additionalProperties: false } } }
+    render(<ToolsSettings {...props} runtimeToolStatus={{ checkedAt: '', toolNames: ['apply_patch'], tools: [
+      { name: 'apply_patch', description: 'Patch with JSON arguments.', parameters: [], definitionVariants: [
+        { format: 'json', definition: json }, { format: 'freeform', definition: codexPatchSpec }
+      ] }
+    ] }} />)
+    const entry = screen.getByRole('button', { name: 'apply_patch: settings.tools_view_details' })
+    await user.click(entry)
+    const dialog = screen.getByRole('dialog')
+    const displayed = () => JSON.parse(dialog.querySelector('pre')!.textContent!)
+    expect(within(dialog).getByRole('radio', { name: 'apply_patch (JSON)' })).toBeChecked()
+    expect(displayed()).toEqual(json)
+    await user.click(within(dialog).getByRole('button', { name: 'common.copy' }))
+    expect(JSON.parse(writeText.mock.lastCall![0])).toEqual(json)
+    await user.click(within(dialog).getByRole('radio', { name: 'apply_patch (Freeform)' }))
+    expect(displayed()).toEqual(codexPatchSpec)
+    expect(within(dialog).getByText('settings.tool_definition_freeform_hint')).toBeVisible()
+    await user.click(within(dialog).getByRole('button', { name: 'common.copy' }))
+    expect(JSON.parse(writeText.mock.lastCall![0])).toEqual(codexPatchSpec)
+    await user.keyboard('{Escape}')
+    await user.click(entry)
+    expect(screen.getByRole('radio', { name: 'apply_patch (JSON)' })).toBeChecked()
+  })
+
+  it('shows approval parameters only in the smart JSON preview', async () => {
+    const user = userEvent.setup()
+    const normal = { name: 'apply_patch', parameters: { type: 'object', properties: { patch: { type: 'string' } } } }
+    const smart = { ...normal, parameters: { ...normal.parameters, properties: { ...normal.parameters.properties, needs_approval: { type: 'boolean', default: true } } } }
+    render(<ToolsSettings {...props} runtimeToolStatus={{ checkedAt: '', toolNames: ['apply_patch'], tools: [{ name: 'apply_patch', description: '', parameters: [],
+      smartApprovalDefinition: smart, definitionVariants: [{ format: 'json', definition: normal }, { format: 'freeform', definition: codexPatchSpec }] }] }} />)
+    await user.click(screen.getByRole('button', { name: 'apply_patch: settings.tools_view_details' }))
+    const dialog = screen.getByRole('dialog'), displayed = () => JSON.parse(dialog.querySelector('pre')!.textContent!)
+    expect(displayed()).toEqual(smart)
+    for (const name of ['chat.access_strict_approval', 'chat.access_full']) {
+      await user.click(within(dialog).getByRole('radio', { name })); expect(displayed()).toEqual(normal)
+    }
+    await user.click(within(dialog).getByRole('radio', { name: 'chat.access_smart_approval' })); expect(displayed()).toEqual(smart)
+    await user.click(within(dialog).getByRole('radio', { name: 'apply_patch (Freeform)' })); expect(displayed()).toEqual(codexPatchSpec)
+  })
+
   it('groups every built-in and framework tool under its matching capability', () => {
     render(<ToolsSettings {...props} />)
     const expected = {

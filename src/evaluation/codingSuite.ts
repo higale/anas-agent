@@ -71,7 +71,7 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
   const results: CodingEvaluationResult[] = []
   const modes = [false, true] as const
   const accessModes: AgentAccessMode[] = options.kind === 'provider-runtime'
-    ? ['read_only_allowed'] : ['strict_approval', 'read_only_allowed', 'full_access']
+    ? ['smart_approval'] : ['strict_approval', 'smart_approval', 'full_access']
   // POSIX has no read-only Shell analyzer yet. Do not auto-approve its interrupts
   // or describe unexecuted permission combinations as successful search samples.
   const taskAccessModes = (task: CodingTask) => task.tools?.includes('run_shell') && process.platform !== 'win32'
