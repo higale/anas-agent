@@ -2,12 +2,14 @@
 
 - 项目定义与界面状态分开保存，会话及其资源统一归入所属项目目录。
 - 完善重置、备份和恢复流程，保持项目与会话的数据边界一致。
+- 修复首次对话的初始化顺序，创建会话目录前先初始化或校验项目。
 - 修复项目目录或状态缺失导致无法启动的问题。手动修复先保全原始数据，尽量抢救有效内容，隔离无法恢复的内容并验证程序可重新进入。
 
 **数据说明：升级后需要重置全部项目与会话。**
 
 - Store project definitions separately from UI state, with conversations and their resources organized under each project.
 - Update reset, backup and restore flows to use consistent project and conversation boundaries.
+- Initialize or validate the project before creating a conversation directory, fixing first-conversation startup.
 - Fix startup failures caused by missing project directories or state. Manual repair preserves the originals, salvages usable content, isolates unrecoverable content, and verifies that the application can reopen.
 
 **Data notice: After upgrading, reset all projects and conversations.**

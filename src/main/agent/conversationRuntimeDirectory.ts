@@ -157,6 +157,8 @@ export class ConversationRuntimeDirectory<Connection extends ConversationStorage
     this.leaseResource(creation, () => {
       if (this.creatingProjects.get(projectId) === creation) this.creatingProjects.delete(projectId)
     })
+    await getProject(projectId)
+    this.assertOpen()
     const database = this.storage.openConversation(input.threadId, { create: true, projectId: input.newThread.projectId })
     const runtime = this.runtimeForDatabase(database)
     try {

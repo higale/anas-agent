@@ -12,6 +12,7 @@ import { ConversationRuntimeDirectory } from './conversationRuntimeDirectory'
 import { getAgentConversationDatabaseFile } from '../config/dataDir'
 import type { AgentRunSubmissionExecutionInput } from './agentRunInput'
 import { withConversationLeaseScope } from './agentConversationLease'
+import { getProject } from '../projectStore'
 
 vi.mock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
 vi.mock('../projectStore', () => ({
@@ -39,6 +40,25 @@ async function fixture(onCreate?: (host: NativeRunHost) => void) {
     async close() { await directory.shutdown(); storage.close(); await rm(root, { recursive: true, force: true }) } }
 }
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done }); return { promise, resolve } }
+
+it('keeps project lookup leased and stops creation when shutdown starts before lookup finishes', async () => {
+  const h = await fixture(), gate = deferred(), entered = deferred(), threadId = randomUUID()
+  const project = await getProject('project-a')
+  vi.mocked(getProject).mockImplementationOnce(async () => { entered.resolve(); await gate.promise; return project })
+  const create = vi.fn(async (): Promise<NativeRunInstance> => { throw new Error('Unexpected model request') })
+  try {
+    const submitted = h.directory.submit({ threadId, runId: randomUUID(), submissionId: randomUUID(), newThread: { projectId: 'project-a' }, text: 'Task' }, create)
+    const rejected = expect(submitted).rejects.toThrow('shutting down')
+    await entered.promise
+    await expect(h.directory.deleteProject('project-a')).rejects.toThrow('still being created')
+    expect(await h.directory.shutdown({ timeoutMs: 0 })).toMatchObject({ drained: false })
+    gate.resolve(); await rejected
+    expect(await h.directory.shutdown()).toMatchObject({ drained: true })
+    expect(h.storage.openedConversations()).toEqual([])
+    expect(existsSync(getAgentConversationDatabaseFile(threadId, h.root, 'project-a'))).toBe(false)
+    expect(create).not.toHaveBeenCalled()
+  } finally { gate.resolve(); await h.close() }
+})
 
 it('shares native connection leases and idle reclamation with the existing product directory', async () => {
   const h = await fixture(), gate = deferred(), held = h.storage.createThread()
