@@ -4,11 +4,10 @@ import fs from 'stubborn-fs'
 import { shouldSkipBackupRelativePath } from './backupArchive'
 
 export const executionResetEntries = [
-  'db/catalog.sqlite', 'db/catalog.sqlite-wal', 'db/catalog.sqlite-shm', 'db/catalog.sqlite-journal',
-  'db/conversations'
+  'db/catalog.sqlite', 'db/catalog.sqlite-wal', 'db/catalog.sqlite-shm', 'db/catalog.sqlite-journal'
 ] as const
 export const projectResetEntries = [
-  'db/projects.json', 'db/project-deletion.json', 'db/project-deletion.stage.json', ...executionResetEntries
+  'db/projects', 'db/project-write.json', 'db/project-deletion.json', 'db/project-deletion.stage.json', ...executionResetEntries
 ] as const
 let restoreTail: Promise<void> = Promise.resolve()
 // Windows can retain a directory handle briefly after plugin processes exit.
@@ -50,12 +49,13 @@ async function validateRestoreJournal(value: unknown, dataDir: string, path: str
     for (const name of entries) {
       if (typeof name !== 'string' || !name || /[\\:]/.test(name) || name.includes('\0') || name === '.' || name === '..') return false
       if (name.includes('/')) {
-        if (!allowDatabaseFiles || !projectResetEntries.some((target) => target === name)) return false
+        if (!allowDatabaseFiles || !projectResetEntries.some((target) => target === name) && !/^db\/projects\/[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}\/conversations$/.test(name)) return false
       } else if (shouldSkipBackupRelativePath(name)) return false
       else roots.add(name)
     }
     return new Set(entries).size === entries.length
       && !entries.some((name) => name.includes('/') && roots.has(name.split('/')[0]))
+      && !entries.some(name => entries.some(other => other !== name && name.startsWith(`${other}/`)))
   }
   if (!journal || journal.version !== 0 || typeof journal.dataDir !== 'string'
     || !['staged', 'swapping', 'activated', 'committed', 'restoring_previous', 'rolled_back'].includes(journal.phase ?? '')

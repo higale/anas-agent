@@ -89,7 +89,7 @@
   "recovery": {
     "title": "Startup recovery",
     "repair": "Repair",
-    "repair_confirm": "Preserve the original data, then attempt to repair {{path}}. {{count}} repairable items have been identified; valid settings are retained and unresolved issues are reported individually. Project repair also salvages associated databases, keeping unrecoverable databases unchanged. Capability repairs may change tool and skill availability.",
+    "repair_confirm": "Preserve the original data, then repair {{path}}. {{count}} repairable items have been identified; valid settings are retained and unresolved issues are reported individually. Project repair salvages valid conversations, rebuilds missing project definitions and catalog entries, and isolates unrecoverable content from active data while retaining it in the preservation copy. The result is validated for startup before publication. Capability repairs may change tool and skill availability.",
     "repaired_fields": "Repaired:",
     "unresolved_fields": "Unresolved:",
     "retry_stop": "Retry stopping background activity",

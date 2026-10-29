@@ -17,6 +17,9 @@ async function verifyCurrentData(launchApplication) {
     await writeFile(path, JSON.stringify({ version: 0, order: ['user:example-read-text-raw'], external_directories: [] }))
     await writeFile(join(root, 'projects.json'), 'abandoned project metadata')
     await writeFile(join(root, 'input_history.json'), 'abandoned input history')
+    const ignoredProjectFiles = ['db/projects.json', 'db/conversations/old/conversation.sqlite']
+    await mkdir(join(root, 'db/conversations/old'), { recursive: true })
+    for (const file of ignoredProjectFiles) await writeFile(join(root, file), 'ignored old layout')
     await cp(resolve(__dirname, '../data/examples/tools/read_text_raw'), join(root, 'tools/read_text_raw'), { recursive: true })
     application = await launchApplication(root)
     const page = await application.firstWindow()
@@ -37,7 +40,7 @@ async function verifyCurrentData(launchApplication) {
       assert.equal(JSON.parse(await readFile(join(root, `config/${file}.json`), 'utf8')).version, file === 'subagents' ? 1 : 0)
     }
     await assert.rejects(readFile(join(root, 'config/capabilities.json')), { code: 'ENOENT' })
-    assert.equal(JSON.parse(await readFile(join(root, 'db/projects.json'), 'utf8')).version, 0)
+    assert.equal(JSON.parse(await readFile(join(root, 'db/projects/state.json'), 'utf8')).version, 0)
     assert.equal(await readFile(join(root, 'projects.json'), 'utf8'), 'abandoned project metadata')
     assert.equal(await readFile(join(root, 'input_history.json'), 'utf8'), 'abandoned input history')
     await mkdir(join(root, 'sqlite'), { recursive: true })
@@ -50,9 +53,9 @@ async function verifyCurrentData(launchApplication) {
     assert.equal(projectCreated.status, 'ok')
     await closeElectronTestApplication(application)
     application = undefined
-    const projectsBeforeReset = await readFile(join(root, 'db/projects.json'))
-    await mkdir(join(root, 'db/conversations/reset-scope-fixture'), { recursive: true })
-    await writeFile(join(root, 'db/conversations/reset-scope-fixture/material.txt'), 'Retained in preservation copy')
+    const projectsBeforeReset = await readFile(join(root, 'db/projects/state.json'))
+    await mkdir(join(root, 'db/projects/default-workspace/conversations/reset-scope-fixture'), { recursive: true })
+    await writeFile(join(root, 'db/projects/default-workspace/conversations/reset-scope-fixture/material.txt'), 'Retained in preservation copy')
     await promisify(execFile)(require('electron'), ['-e', `
       const Database = require('better-sqlite3');
       const db = new Database(require('node:path').join(process.argv[1], 'db/catalog.sqlite'));
@@ -73,11 +76,11 @@ async function verifyCurrentData(launchApplication) {
     if (process.env.ANAS_E2E_RESET_SCREENSHOT) await databaseRecovery.screenshot({ path: process.env.ANAS_E2E_RESET_SCREENSHOT })
     await resetDialog.getByRole('button', { name: /^(重置会话数据库|Reset conversation database)$/ }).click()
     await expect(databaseRecovery.locator('.initial-app-status-error')).toHaveAttribute('aria-busy', 'false')
-    assert.deepEqual(await readFile(join(root, 'db/projects.json')), projectsBeforeReset)
+    assert.deepEqual(await readFile(join(root, 'db/projects/state.json')), projectsBeforeReset)
     const resetStatus = await databaseRecovery.evaluate(() => globalThis.gale.recovery.inspect())
-    assert.deepEqual(await readFile(join(resetStatus.lastPreservationPath, 'data/db/projects.json')), projectsBeforeReset)
-    assert.equal(await readFile(join(resetStatus.lastPreservationPath, 'data/db/conversations/reset-scope-fixture/material.txt'), 'utf8'), 'Retained in preservation copy')
-    await assert.rejects(readFile(join(root, 'db/conversations/reset-scope-fixture/material.txt')), { code: 'ENOENT' })
+    assert.deepEqual(await readFile(join(resetStatus.lastPreservationPath, 'data/db/projects/state.json')), projectsBeforeReset)
+    assert.equal(await readFile(join(resetStatus.lastPreservationPath, 'data/db/projects/default-workspace/conversations/reset-scope-fixture/material.txt'), 'utf8'), 'Retained in preservation copy')
+    await assert.rejects(readFile(join(root, 'db/projects/default-workspace/conversations/reset-scope-fixture/material.txt')), { code: 'ENOENT' })
     await closeElectronTestApplication(application)
     application = await launchApplication(root)
     const afterReset = await application.firstWindow()
@@ -89,8 +92,8 @@ async function verifyCurrentData(launchApplication) {
       await writeFile(path, invalid)
       const numbered = Object.hasOwn(JSON.parse(invalid), 'version')
       if (numbered) {
-        const projects = JSON.parse(await readFile(join(root, 'db/projects.json'), 'utf8'))
-        await writeFile(join(root, 'db/projects.json'), JSON.stringify({ ...projects, version: 4 }))
+        const projects = JSON.parse(await readFile(join(root, 'db/projects/state.json'), 'utf8'))
+        await writeFile(join(root, 'db/projects/state.json'), JSON.stringify({ ...projects, version: 4 }))
         await promisify(execFile)(require('electron'), ['-e', `
           const Database = require('better-sqlite3');
           const db = new Database(require('node:path').join(process.argv[1], 'db/catalog.sqlite'));
@@ -116,14 +119,14 @@ async function verifyCurrentData(launchApplication) {
         assert.deepEqual(repaired.order, ['user:example-read-text-raw'])
         assert.deepEqual(repaired.external_directories, [])
         if (numbered) {
-          const projectsBefore = await readFile(join(root, 'db/projects.json'), 'utf8')
+          const projectsBefore = await readFile(join(root, 'db/projects/state.json'), 'utf8')
           await failed.getByRole('group', { name: 'projects.json', exact: true }).getByRole('button', { name: /^(修复|Repair)$/ }).click()
           await failed.getByRole('alertdialog').getByRole('button', { name: /^(修复|Repair)$/ }).click()
-          await expect.poll(async () => JSON.parse(await readFile(join(root, 'db/projects.json'), 'utf8')).version, { timeout: 15000 }).toBe(0)
+          await expect.poll(async () => JSON.parse(await readFile(join(root, 'db/projects/state.json'), 'utf8')).version, { timeout: 15000 }).toBe(0)
           await expect(failed.locator('.initial-app-status-error')).toHaveAttribute('aria-busy', 'false')
           const status = await failed.evaluate(() => globalThis.gale.recovery.inspect())
           assert.equal(status.files.find(file => file.name === 'projects.json').error, undefined)
-          assert.equal(await readFile(join(status.lastPreservationPath, 'data/db/projects.json'), 'utf8'), projectsBefore)
+          assert.equal(await readFile(join(status.lastPreservationPath, 'data/db/projects/state.json'), 'utf8'), projectsBefore)
           assert.equal(await readFile(join(root, 'sqlite/agent.sqlite'), 'utf8'), 'Keep unrelated historical data')
         }
         await closeElectronTestApplication(application)
@@ -198,7 +201,50 @@ async function verifyCurrentData(launchApplication) {
     const avatar = await usable.evaluate(() => globalThis.gale.files.getAvatar())
     assert.ok(avatar)
     assert.equal(await application.evaluate(({ nativeImage }, path) => !nativeImage.createFromPath(path).isEmpty(), avatar.path), true)
-    console.log('Configuration v0 / native execution Electron E2E passed: current data, exact reset file lists, database reset retaining projects, version repair, project/catalog repair, partial history rescue, avatar crop recovery, original preservation and successful restart.')
+    await closeElectronTestApplication(application)
+    application = undefined
+    await writeFile(join(root, 'db/projects/state.json'), 'broken current state')
+    application = await launchApplication(root)
+    const fullReset = await application.firstWindow()
+    await expect(fullReset.locator('.initial-app-status-error')).toBeVisible({ timeout: 20000 })
+    await fullReset.getByRole('button', { name: /^(重置全部项目与会话|Reset all projects and conversations)$/ }).click()
+    await fullReset.getByRole('alertdialog').getByRole('button', { name: /^(重置全部项目与会话|Reset all projects and conversations)$/ }).click()
+    await expect(fullReset.locator('.initial-app-status-error')).toHaveAttribute('aria-busy', 'false')
+    const fullResetStatus = await fullReset.evaluate(() => globalThis.gale.recovery.inspect())
+    assert.equal(fullResetStatus.files.find(file => file.name === 'projects.json').error, undefined)
+    assert.equal(await readFile(join(fullResetStatus.lastPreservationPath, 'data/db/projects/state.json'), 'utf8'), 'broken current state')
+    for (const file of ignoredProjectFiles) assert.equal(await readFile(join(root, file), 'utf8'), 'ignored old layout')
+    await closeElectronTestApplication(application)
+    application = await launchApplication(root)
+    await expect((await application.firstWindow()).locator('[data-agent-composer-input]')).toBeVisible({ timeout: 20000 })
+    await closeElectronTestApplication(application)
+    application = undefined
+    await rm(join(root, 'db/projects'), { recursive: true })
+    application = await launchApplication(root)
+    await expect((await application.firstWindow()).locator('[data-agent-composer-input]')).toBeVisible({ timeout: 20000 })
+    await closeElectronTestApplication(application)
+    application = undefined
+    await rm(join(root, 'db/projects'), { recursive: true })
+    await promisify(execFile)(require('electron'), ['-e', `
+      const Database = require('better-sqlite3');
+      const db = new Database(require('node:path').join(process.argv[1], 'db/catalog.sqlite'));
+      db.prepare("INSERT INTO agent_conversations (id,title,project_id,pinned,access_mode,status,user_turn_count,has_queued_inputs,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
+        .run('missing-conversation', 'Preserve missing conversation evidence', 'default-workspace', 0, 'smart_approval', 'idle', 0, 0, '2026-10-29T00:00:00Z', '2026-10-29T00:00:00Z');
+      db.close();
+    `, root], { cwd: resolve(__dirname, '..'), env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } })
+    application = await launchApplication(root)
+    const missingProjects = await application.firstWindow()
+    const projectRecovery = missingProjects.getByRole('group', { name: 'projects.json', exact: true })
+    await expect(projectRecovery).toBeVisible({ timeout: 20000 })
+    await projectRecovery.getByRole('button', { name: /^(修复|Repair)$/ }).click()
+    await missingProjects.getByRole('alertdialog').getByRole('button', { name: /^(修复|Repair)$/ }).click()
+    await expect(missingProjects.locator('.initial-app-status-error')).toHaveAttribute('aria-busy', 'false')
+    const repairedProjects = await missingProjects.evaluate(() => globalThis.gale.recovery.inspect())
+    assert.ok(repairedProjects.lastPreservationPath)
+    await closeElectronTestApplication(application)
+    application = await launchApplication(root)
+    await expect((await application.firstWindow()).locator('[data-agent-composer-input]')).toBeVisible({ timeout: 20000 })
+    console.log('Current-data Electron E2E passed: configuration and native storage repair, preservation, full reset, missing project initialization, missing conversation isolation and usable restart.')
   } finally {
     await closeElectronTestApplication(application)
     await rm(temporaryRoot, { recursive: true, force: true })

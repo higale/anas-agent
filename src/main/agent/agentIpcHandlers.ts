@@ -598,7 +598,7 @@ export function registerAgentIpcHandlers(): void {
     threadId: string,
     input: AgentThreadUpdate
   ) => {
-    if (input.projectId !== undefined) await getProject(input.projectId)
+    if ('projectId' in input) throw new Error('Conversation project cannot be changed.')
     if (input.modelConfigId === null) {
       // Clearing a child binding restores inheritance; the database checks ownership.
       return currentRuntime().updateThread(threadId, input)

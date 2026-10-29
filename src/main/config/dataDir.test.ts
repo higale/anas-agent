@@ -143,9 +143,9 @@ describe('application data directory', () => {
     const selected = join(home, 'profile')
 
     expect(dataDir.getAgentCatalogFile(selected)).toBe(join(selected, 'db', 'catalog.sqlite'))
-    expect(dataDir.getProjectStoreFile(selected)).toBe(join(selected, 'db', 'projects.json'))
+    expect(dataDir.getProjectStoreFile(selected)).toBe(join(selected, 'db', 'projects', 'state.json'))
     expect(dataDir.getInputHistoryFile(selected)).toBe(join(selected, 'db', 'input_history.json'))
-    expect(dataDir.getAgentConversationDatabaseFile('conversation-1', selected)).toBe(join(selected, 'db', 'conversations', 'conversation-1', 'conversation.sqlite'))
+    expect(dataDir.getAgentConversationDatabaseFile('conversation-1', selected)).toBe(join(selected, 'db', 'projects', 'default-workspace', 'conversations', 'conversation-1', 'conversation.sqlite'))
     for (const id of ['../outside', 'nested/thread', 'nested\\thread', 'CON', 'thread:stream', '']) {
       expect(() => dataDir.getAgentConversationDatabaseFile(id, selected)).toThrow('not a valid storage directory name')
     }
@@ -164,7 +164,7 @@ describe('application data directory', () => {
     expect(dataDir.getSkillExamplesDir()).toBe(join(home, '.anas', 'examples', 'skills'))
     expect(dataDir.getToolExamplesDir()).toBe(join(home, '.anas', 'examples', 'tools'))
     expect(dataDir.getPluginExamplesDir()).toBe(join(home, '.anas', 'examples', 'plugins'))
-    expect(dataDir.getFileEditRecordsDir('conversation-1')).toBe(join(home, '.anas', 'db', 'conversations', 'conversation-1', 'file_edits'))
+    expect(dataDir.getFileEditRecordsDir('conversation-1')).toBe(join(home, '.anas', 'db', 'projects', 'default-workspace', 'conversations', 'conversation-1', 'file_edits'))
     expect(dataDir.getFileEditRecordsDir('conversation-1')).not.toContain(join('.anas', 'tmp'))
     expect(existsSync(dataDir.getDataDir())).toBe(false)
 

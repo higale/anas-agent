@@ -5,7 +5,7 @@ import { ProjectOperationFailure } from '@shared/projectOperation'
 import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { app } from 'electron'
-import { renameSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { getDefaultWorkspaceDir, getProjectStoreFile } from './config/dataDir'
@@ -132,15 +132,101 @@ export function parseProjectStore(value: unknown): StoredProjects {
 }
 
 export async function readProjectStoreFile(path: string): Promise<StoredProjects> {
-  const content = await readFile(path, 'utf8')
   try {
-    return parseProjectStore(JSON.parse(content))
+    const root = dirname(path)
+    if (existsSync(root) && !lstatSync(root).isDirectory()) throw new Error('Project storage must be a real directory.')
+    if (existsSync(path) && !lstatSync(path).isFile()) throw new Error('Project state must be a regular file.')
+    const state = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : { version: 0, storage_layout: 'project-directories', projects: [] }
+    if (state.version !== 0 || state.storage_layout !== 'project-directories' || !Array.isArray(state.projects)) throw new Error('Invalid project directory state.')
+    const states = new Map<string, Record<string, unknown>>()
+    for (const entry of state.projects) {
+      if (!entry || typeof entry.id !== 'string' || states.has(entry.id)
+        || Object.keys(entry).some(key => !['id', 'pinned', 'collapsed', 'sort_order', 'thread_order'].includes(key))) throw new Error('Invalid project UI state.')
+      states.set(entry.id, entry)
+    }
+    const projects: unknown[] = []
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (entry.name === 'state.json' || entry.isFile() && entry.name.endsWith('.tmp')) continue
+      if (!entry.isDirectory()) throw new Error(`Invalid project directory: ${entry.name}`)
+      validateProjectDirectoryId(entry.name)
+      const file = join(root, entry.name, 'project.json')
+      if (!existsSync(file)) throw new Error(`Project definition is missing: ${entry.name}`)
+      if (!lstatSync(file).isFile()) throw new Error(`Invalid project definition: ${entry.name}`)
+      const document = JSON.parse(readFileSync(file, 'utf8'))
+      if (document.version !== 0 || document.project?.id !== entry.name) throw new Error(`Project directory identity mismatch: ${entry.name}`)
+      projects.push({ ...document.project, pinned: false, collapsed: false, ...states.get(entry.name) })
+    }
+    if (!projects.length && !existsSync(path)) throw Object.assign(new Error('Project store is not initialized.'), { code: 'ENOENT' })
+    return parseProjectStore({ version: 0, projects })
   } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') throw cause
     throw new Error(`Could not read project file: ${path}\n${cause instanceof Error ? cause.message : String(cause)}`, { cause })
   }
 }
 
-function serializeProjectStore(store: StoredProjects) {
+function validateProjectDirectoryId(id: string): void {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(id) || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(id)) throw new Error('Invalid project directory ID.')
+}
+
+function writeAtomicSync(path: string, value: unknown): void {
+  const content = `${JSON.stringify(value, null, 2)}\n`
+  if (existsSync(path) && readFileSync(path, 'utf8') === content) return
+  mkdirSync(dirname(path), { recursive: true })
+  const temporary = `${path}.${randomUUID()}.tmp`
+  writeFileSync(temporary, content, 'utf8')
+  renameSync(temporary, path)
+}
+
+function directoryJournal(path: string): string { return join(dirname(dirname(path)), 'project-write.json') }
+
+function applyDirectoryWrite(path: string, value: ReturnType<typeof serializeProjectStore>, removed: string[]): void {
+  for (const project of value.projects) validateProjectDirectoryId(String(project.id))
+  for (const id of removed) {
+    validateProjectDirectoryId(id)
+    if (value.projects.some(project => project.id === id)) throw new Error('Invalid project write removal.')
+  }
+  for (const directory of [dirname(dirname(path)), dirname(path), ...value.projects.map(project => join(dirname(path), String(project.id))), ...removed.map(id => join(dirname(path), id))]) {
+    if (existsSync(directory) && !lstatSync(directory).isDirectory()) throw new Error(`Project storage must be a real directory: ${directory}`)
+  }
+  const states: Record<string, unknown>[] = []
+  for (const project of value.projects) {
+    const { pinned, collapsed, sort_order, thread_order, ...definition } = project
+    validateProjectDirectoryId(String(definition.id))
+    writeAtomicSync(join(dirname(path), String(definition.id), 'project.json'), { version: 0, project: definition })
+    states.push({ id: definition.id, pinned, collapsed, ...(sort_order !== undefined ? { sort_order } : {}), ...(thread_order !== undefined ? { thread_order } : {}) })
+  }
+  writeAtomicSync(path, { version: 0, storage_layout: 'project-directories', projects: states })
+  for (const id of removed) {
+    validateProjectDirectoryId(id)
+    if (value.projects.some(project => project.id === id)) throw new Error('Invalid project write removal.')
+    rmSync(join(dirname(path), id), { recursive: true, force: true })
+  }
+}
+
+function recoverDirectoryWrite(path: string): void {
+  const journal = directoryJournal(path)
+  if (!existsSync(journal)) return
+  const value = JSON.parse(readFileSync(journal, 'utf8'))
+  if (value.version !== 0 || !Array.isArray(value.removed) || value.removed.some((id: unknown) => typeof id !== 'string')) throw new Error('Invalid project write journal.')
+  parseProjectStore(value.next)
+  const store = value.next as ReturnType<typeof serializeProjectStore>
+  value.removed.forEach(validateProjectDirectoryId)
+  applyDirectoryWrite(path, store, value.removed)
+  rmSync(journal)
+}
+
+export function writeDirectoryStore(path: string, store: StoredProjects, removed: string[] = []): void {
+  writeProjectStoreDocument(path, serializeProjectStore(store), removed)
+}
+
+export function writeProjectStoreDocument(path: string, next: ReturnType<typeof serializeProjectStore>, removed: string[] = []): void {
+  recoverDirectoryWrite(path)
+  parseProjectStore(next)
+  writeAtomicSync(directoryJournal(path), { version: 0, next, removed })
+  recoverDirectoryWrite(path)
+}
+
+export function serializeProjectStore(store: StoredProjects): { version: 0; projects: Record<string, unknown>[] } {
   return {
     version: store.version,
     projects: store.projects.map((project) => {
@@ -170,6 +256,7 @@ function serializeProjectStore(store: StoredProjects) {
 
 async function readStore(): Promise<StoredProjects> {
   const path = getProjectStoreFile()
+  recoverDirectoryWrite(path)
   try {
     return applyDefaultWorkspaceName(await readProjectStoreFile(path))
   } catch (error) {
@@ -211,7 +298,7 @@ async function initializeMissingStore(path: string): Promise<void> {
           updatedAt: timestamp
         }]
       }
-      await writeJsonFileAtomic(path, serializeProjectStore(store))
+      writeDirectoryStore(path, store)
       return
     }
     throw error
@@ -226,7 +313,7 @@ async function writeJsonFileAtomic(path: string, value: unknown): Promise<void> 
 }
 
 async function writeStore(store: StoredProjects): Promise<void> {
-  await writeJsonFileAtomic(getProjectStoreFile(), serializeProjectStore(store))
+  writeDirectoryStore(getProjectStoreFile(), store)
 }
 
 function sortProjects(projects: Project[]): Project[] {
@@ -527,11 +614,11 @@ export async function updateProjectState(projectId: string, update: ProjectState
 }
 
 function projectDeletionJournalPath(): string {
-  return join(dirname(getProjectStoreFile()), 'project-deletion.json')
+  return join(dirname(dirname(getProjectStoreFile())), 'project-deletion.json')
 }
 
 function projectDeletionStagePath(): string {
-  return join(dirname(getProjectStoreFile()), 'project-deletion.stage.json')
+  return join(dirname(dirname(getProjectStoreFile())), 'project-deletion.stage.json')
 }
 
 export async function recoverProjectDeletion(
@@ -540,7 +627,7 @@ export async function recoverProjectDeletion(
 ): Promise<boolean> {
   return serializeProjectMutation(async () => {
     const storePath = getProjectStoreFile()
-    const journalPath = join(dirname(storePath), 'project-deletion.json'), stagePath = join(dirname(storePath), 'project-deletion.stage.json')
+    const journalPath = projectDeletionJournalPath(), stagePath = projectDeletionStagePath()
     let journal: ProjectDeletionJournal
     try {
       journal = JSON.parse(await readFile(journalPath, 'utf8')) as ProjectDeletionJournal
@@ -565,7 +652,7 @@ export async function recoverProjectDeletion(
       ? journal.threadIds.every((threadId) => !threadExists(threadId))
       : !current.projects.some((project) => project.id === journal.projectId)
     if (databaseCommitted) completeDatabaseCommit(journal.projectId)
-    await writeJsonFileAtomic(storePath, serializeProjectStore(databaseCommitted ? next : previous))
+    writeDirectoryStore(storePath, databaseCommitted ? next : previous, databaseCommitted ? [journal.projectId] : [])
     await Promise.all([
       rm(journalPath, { force: true }),
       rm(stagePath, { force: true })
@@ -608,10 +695,13 @@ export async function deleteProjectWithThreads<T>(
     let result: T
     try {
       result = commitDatabase(() => {
-        renameSync(projectDeletionStagePath(), storePath)
+        writeDirectoryStore(storePath, next, [projectId])
+        rmSync(projectDeletionStagePath(), { force: true })
         storeCommitted = true
       })
     } catch (reason) {
+      // A partially published directory write retains both journals for recovery.
+      if (existsSync(directoryJournal(storePath))) throw reason
       if (storeCommitted) await writeStore(store)
       await Promise.all([
         rm(projectDeletionJournalPath(), { force: true }),

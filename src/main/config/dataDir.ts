@@ -3,6 +3,7 @@ import { mkdirSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import path, { join, resolve } from 'node:path'
 import { applicationName } from '@shared/appMetadata'
+import { DEFAULT_WORKSPACE_PROJECT_ID } from '@shared/types'
 
 export const configDirName = 'config'
 export const settingsConfigFileName = 'settings.json'
@@ -220,29 +221,42 @@ export function getAgentCatalogFile(dataDir = getDataDir()): string {
   return join(dataDir, 'db', 'catalog.sqlite')
 }
 
-export function getAgentConversationsDir(dataDir = getDataDir()): string {
-  return join(dataDir, 'db', 'conversations')
+export function getProjectsDir(dataDir = getDataDir()): string {
+  return join(dataDir, 'db', 'projects')
 }
 
-export function getAgentConversationDir(ownerThreadId: string, dataDir = getDataDir()): string {
+export function getProjectDir(projectId: string, dataDir = getDataDir()): string {
+  validateStorageId(projectId)
+  return join(getProjectsDir(dataDir), projectId)
+}
+
+export function getAgentConversationsDir(dataDir = getDataDir(), projectId = DEFAULT_WORKSPACE_PROJECT_ID): string {
+  return join(getProjectDir(projectId, dataDir), 'conversations')
+}
+
+function validateStorageId(ownerThreadId: string): void {
   if (
     typeof ownerThreadId !== 'string'
     || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(ownerThreadId)
     || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(ownerThreadId)
   ) throw new Error('Agent conversation ID is not a valid storage directory name.')
-  return join(getAgentConversationsDir(dataDir), ownerThreadId)
 }
 
-export function getAgentConversationDatabaseFile(ownerThreadId: string, dataDir = getDataDir()): string {
-  return join(getAgentConversationDir(ownerThreadId, dataDir), 'conversation.sqlite')
+export function getAgentConversationDir(ownerThreadId: string, dataDir = getDataDir(), projectId = DEFAULT_WORKSPACE_PROJECT_ID): string {
+  validateStorageId(ownerThreadId)
+  return join(getAgentConversationsDir(dataDir, projectId), ownerThreadId)
 }
 
-export function getAgentAttachmentsDir(ownerThreadId: string, dataDir = getDataDir()): string {
-  return join(getAgentConversationDir(ownerThreadId, dataDir), 'attachments')
+export function getAgentConversationDatabaseFile(ownerThreadId: string, dataDir = getDataDir(), projectId = DEFAULT_WORKSPACE_PROJECT_ID): string {
+  return join(getAgentConversationDir(ownerThreadId, dataDir, projectId), 'conversation.sqlite')
 }
 
-export function getFileEditRecordsDir(ownerThreadId: string, dataDir = getDataDir()): string {
-  return join(getAgentConversationDir(ownerThreadId, dataDir), 'file_edits')
+export function getAgentAttachmentsDir(ownerThreadId: string, dataDir = getDataDir(), projectId = DEFAULT_WORKSPACE_PROJECT_ID): string {
+  return join(getAgentConversationDir(ownerThreadId, dataDir, projectId), 'attachments')
+}
+
+export function getFileEditRecordsDir(ownerThreadId: string, dataDir = getDataDir(), projectId = DEFAULT_WORKSPACE_PROJECT_ID): string {
+  return join(getAgentConversationDir(ownerThreadId, dataDir, projectId), 'file_edits')
 }
 
 export function getAgentConversationTempDir(ownerThreadId: string, dataDir = getDataDir()): string {
@@ -259,7 +273,7 @@ export function getTempDir(): string {
 }
 
 export function getProjectStoreFile(dataDir = getDataDir()): string {
-  return join(dataDir, 'db', 'projects.json')
+  return join(getProjectsDir(dataDir), 'state.json')
 }
 
 export function getInputHistoryFile(dataDir = getDataDir()): string {

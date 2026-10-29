@@ -1,3 +1,4 @@
+import { writeProjectFixture, readProjectFixture } from '../test/projectDirectories'
 import { readFrozenStorage } from '../test/frozenStorage'
 import nativeFs, { createWriteStream } from 'node:fs'
 import { execFile } from 'node:child_process'
@@ -79,7 +80,7 @@ async function loadBackupService(
     customToolsConfigFileName: 'tools.json',
     configFileNames,
     getDataDir: () => dataRoot,
-    getFileEditRecordsDir: (ownerThreadId: string) => join(dataRoot, 'db', 'conversations', ownerThreadId, 'file_edits'),
+    getFileEditRecordsDir: (ownerThreadId: string) => join(dataRoot, 'db', 'projects', 'default-workspace', 'conversations', ownerThreadId, 'file_edits'),
     getProgramName: () => 'Anas'
   }))
   vi.doMock('./config/rawAppConfig', () => ({
@@ -167,7 +168,7 @@ describe('data backup restore', () => {
       await writeText(source, 'attachment text')
       const archived = await archiveAgentAttachments([{ path: source, name: 'source.txt', size: 15,
         mimeType: 'text/plain', kind: 'text', contextPolicy: 'conversation' }],
-        { threadId: thread.id, runId: 'run', messageId: 'run:input' }, join(dataRoot, 'db/conversations', thread.id, 'attachments'))
+        { threadId: thread.id, runId: 'run', messageId: 'run:input' }, join(dataRoot, 'db/projects/default-workspace/conversations', thread.id, 'attachments'))
       database.runs.createRun({ threadId: thread.id, runId: 'run', operation: 'agent', attachments: archived,
         message: { id: 'run:input', value: { id: 'run:input', kind: 'user', content: [{ type: 'text', text: 'Saved input' }], context: { runId: 'run' } } } })
       await storage.memoryStore.saveMemory({ scope: 'global', kind: 'fact', content: 'Keep memory', keywords: [], importance: 3 }, { origin: 'user' })
@@ -175,7 +176,7 @@ describe('data backup restore', () => {
       const recovery = join(database.resources.fileEditStore.root, 'evidence.txt')
       await writeText(recovery, 'retained recovery evidence')
       await writeText(join(join(dataRoot, 'tmp', thread.id), 'message_edit', 'draft.txt'), 'not in backup')
-      const sharedDocuments = { 'db/projects.json': 'saved project metadata', 'db/input_history.json': 'saved input history',
+      const sharedDocuments = { 'db/projects/state.json': 'saved project metadata', 'db/input_history.json': 'saved input history',
         'config/assets/avatar-source.png': 'saved avatar source', 'config/assets/avatar-transform.json': '{"version":0}',
         'db/plugins/test-plugin/state.json': '{"version":0,"values":{"draft":"saved plugin data"}}' }
       for (const [name, content] of Object.entries(sharedDocuments)) await writeText(join(dataRoot, name), content)
@@ -210,7 +211,7 @@ describe('data backup restore', () => {
     await cp(join(process.cwd(), 'data/subagents'), join(dataRoot, 'subagents'), { recursive: true })
     const catalog = readFrozenStorage<{ thread: { id: string } }>('legacy-catalog')
     const conversation = readFrozenStorage<{ thread: { id: string } }>('legacy-conversation')
-    const directory = join(dataRoot, 'db/conversations', catalog.metadata.thread.id)
+    const directory = join(dataRoot, 'db/projects/default-workspace/conversations', catalog.metadata.thread.id)
     await mkdir(directory, { recursive: true })
     await writeFile(join(dataRoot, 'db/catalog.sqlite'), catalog.bytes)
     await writeFile(join(directory, 'conversation.sqlite'), conversation.bytes)
@@ -241,7 +242,7 @@ describe('data backup restore', () => {
       // Exit can occur between opening the database and publishing catalog membership.
       storage.openConversation('unfinished-creation', { create: true })
     } finally { storage.close() }
-    const abandoned = join(dataRoot, 'db/conversations/unfinished-creation')
+    const abandoned = join(dataRoot, 'db/projects/default-workspace/conversations/unfinished-creation')
     const original = await readFile(join(abandoned, 'conversation.sqlite'))
     await writeText(join(abandoned, 'attachments/content.txt'), 'unregistered material')
 
@@ -261,9 +262,9 @@ describe('data backup restore', () => {
 
   it.each([false, true])('rolls back a partial project repair, including a retry after rollback failure: %s', async failRollback => {
     const root = await temporaryDirectory(), data = join(root, 'data')
-    await writeText(join(data, 'db/projects.json'), 'old projects')
+    await writeText(join(data, 'db/projects/state.json'), 'old projects')
     await writeText(join(data, 'db/catalog.sqlite'), 'old catalog')
-    const preservedFiles = ['db/conversations/first/conversation.sqlite', 'db/conversations/first/tool_results/result.txt',
+    const preservedFiles = ['db/projects/default-workspace/conversations/first/conversation.sqlite', 'db/projects/default-workspace/conversations/first/tool_results/result.txt',
       'db/plugins/test-plugin/state.json', 'db/input_history.json', 'conversations/obsolete/conversation.sqlite']
     for (const name of preservedFiles) await writeText(join(data, name), `original ${name}`)
     await writeText(join(data, 'config/settings.json'), 'untouched config')
@@ -274,18 +275,18 @@ describe('data backup restore', () => {
     ))
     let preserved = false
     await expect(service.replaceProjectData(data, async staged => {
-      await writeText(join(staged, 'db/projects.json'), 'repaired projects')
+      await writeText(join(staged, 'db/projects/state.json'), 'repaired projects')
       await writeText(join(staged, 'db/catalog.sqlite'), 'repaired catalog')
-      await writeText(join(staged, 'db/conversations/first/conversation.sqlite'), 'repaired conversation')
+      await writeText(join(staged, 'db/projects/default-workspace/conversations/first/conversation.sqlite'), 'repaired conversation')
       return async () => { expect(preserved).toBe(true) }
     }, async () => {
-      expect(await readFile(join(data, 'db/projects.json'), 'utf8')).toBe('old projects')
+      expect(await readFile(join(data, 'db/projects/state.json'), 'utf8')).toBe('old projects')
       preserved = true
       return '/preserved'
     })).rejects.toThrow(failRollback ? 'could not be rolled back' : 'injected rename failure')
     failing = false
     expect(await service.recoverInterruptedDataRestore()).toBe(failRollback)
-    expect(await readFile(join(data, 'db/projects.json'), 'utf8')).toBe('old projects')
+    expect(await readFile(join(data, 'db/projects/state.json'), 'utf8')).toBe('old projects')
     expect(await readFile(join(data, 'db/catalog.sqlite'), 'utf8')).toBe('old catalog')
     for (const name of preservedFiles) expect(await readFile(join(data, name), 'utf8')).toBe(`original ${name}`)
     expect(await readFile(join(data, 'config/settings.json'), 'utf8')).toBe('untouched config')
@@ -370,11 +371,11 @@ describe('data backup restore', () => {
   it('keeps referenced attachment files until the ZIP has finished while background cleanup waits', async () => {
     const root = await temporaryDirectory()
     const dataRoot = join(root, 'data')
-    const attachmentRoot = join(dataRoot, 'db', 'conversations', 'thread', 'attachments')
+    const attachmentRoot = join(dataRoot, 'db', 'projects', 'default-workspace', 'conversations', 'thread', 'attachments')
     const attachment = join(attachmentRoot, 'thread', 'artifact', 'content.txt')
     await writeText(attachment, 'Attachment captured by the database snapshot')
     const requestId = '11111111-1111-4111-8111-111111111111'
-    const requestDirectory = join(dataRoot, 'db', 'conversations', 'thread', 'file_edits', requestId)
+    const requestDirectory = join(dataRoot, 'db', 'projects', 'default-workspace', 'conversations', 'thread', 'file_edits', requestId)
     await mkdir(requestDirectory, { recursive: true })
     let release!: () => void
     let entered!: () => void
@@ -392,7 +393,7 @@ describe('data backup restore', () => {
     const backup = service.createDataBackupZip(join(root, 'backup.zip'))
     await snapshotReady
     const cleanup = deleteArchivedAgentAttachments([{ id: 'artifact', path: attachment }], attachmentRoot)
-    const editCleanup = new FileEditStore(join(dataRoot, 'db', 'conversations', 'thread', 'file_edits')).deleteFileEditRecordsForRequest(requestId)
+    const editCleanup = new FileEditStore(join(dataRoot, 'db', 'projects', 'default-workspace', 'conversations', 'thread', 'file_edits')).deleteFileEditRecordsForRequest(requestId)
     expect(await readFile(attachment, 'utf8')).toContain('captured')
     expect((await stat(requestDirectory)).isDirectory()).toBe(true)
     release()
@@ -404,14 +405,14 @@ describe('data backup restore', () => {
     const { extractBackupArchive } = await import('./backupArchive')
     const extracted = join(root, 'extracted')
     await extractBackupArchive(result.path, extracted)
-    expect(await readFile(join(extracted, 'db/conversations/thread/attachments/thread/artifact/content.txt'), 'utf8')).toContain('captured')
+    expect(await readFile(join(extracted, 'db/projects/default-workspace/conversations/thread/attachments/thread/artifact/content.txt'), 'utf8')).toContain('captured')
   })
 
   it('excludes attachment trees belonging to already accepted conversation deletions', async () => {
     const root = await temporaryDirectory()
     const dataRoot = join(root, 'data')
-    await writeText(join(dataRoot, 'db/conversations/deleted/attachments/artifact/content.txt'), 'Deleted large attachment')
-    await writeText(join(dataRoot, 'db/conversations/retained/attachments/artifact/content.txt'), 'Keep this attachment')
+    await writeText(join(dataRoot, 'db/projects/default-workspace/conversations/deleted/attachments/artifact/content.txt'), 'Deleted large attachment')
+    await writeText(join(dataRoot, 'db/projects/default-workspace/conversations/retained/attachments/artifact/content.txt'), 'Keep this attachment')
     const service = await loadBackupService(dataRoot, undefined, undefined, async (_source, destination) => {
       const absPath = join(destination, 'db/catalog.sqlite')
       await writeText(absPath, 'snapshot catalog')
@@ -420,19 +421,19 @@ describe('data backup restore', () => {
     const result = await service.createDataBackupZip(join(root, 'backup.zip'))
     const { extractBackupArchive } = await import('./backupArchive')
     const extracted = await extractBackupArchive(result.path, join(root, 'extracted'))
-    expect([...extracted.entryNames]).toEqual(expect.arrayContaining(['db/conversations/retained/attachments/artifact/content.txt']))
-    expect([...extracted.entryNames].some(name => name.startsWith('db/conversations/deleted/attachments/'))).toBe(false)
+    expect([...extracted.entryNames]).toEqual(expect.arrayContaining(['db/projects/default-workspace/conversations/retained/attachments/artifact/content.txt']))
+    expect([...extracted.entryNames].some(name => name.startsWith('db/projects/default-workspace/conversations/deleted/attachments/'))).toBe(false)
   })
 
   it('archives SQLite snapshots without copying live databases or their sidecars', async () => {
     const root = await temporaryDirectory()
     const dataRoot = join(root, 'data')
-    for (const name of ['db/catalog.sqlite', 'db/catalog.sqlite-wal', 'db/conversations/first/conversation.sqlite', 'db/conversations/first/conversation.sqlite-shm']) {
+    for (const name of ['db/catalog.sqlite', 'db/catalog.sqlite-wal', 'db/projects/default-workspace/conversations/first/conversation.sqlite', 'db/projects/default-workspace/conversations/first/conversation.sqlite-shm']) {
       await writeText(join(dataRoot, name), `live ${name}`)
     }
-    await writeText(join(dataRoot, 'db/conversations/first/attachments/content.txt'), 'attachment')
+    await writeText(join(dataRoot, 'db/projects/default-workspace/conversations/first/attachments/content.txt'), 'attachment')
     const service = await loadBackupService(dataRoot, undefined, undefined, async (_source, destination) => {
-      const files = ['db/catalog.sqlite', 'db/conversations/first/conversation.sqlite']
+      const files = ['db/catalog.sqlite', 'db/projects/default-workspace/conversations/first/conversation.sqlite']
       return Promise.all(files.map(async (relPath) => {
         const absPath = join(destination, relPath)
         await writeText(absPath, `snapshot ${relPath}`)
@@ -446,21 +447,22 @@ describe('data backup restore', () => {
     const extracted = await extractBackupArchive(result.path, destination)
 
     expect([...extracted.entryNames].sort()).toEqual([
-      backupManifestFileName, 'db/catalog.sqlite', 'db/conversations/first/attachments/content.txt', 'db/conversations/first/conversation.sqlite'
+      backupManifestFileName, 'db/catalog.sqlite', 'db/projects/default-workspace/conversations/first/attachments/content.txt', 'db/projects/default-workspace/conversations/first/conversation.sqlite'
     ])
-    expect(await readFile(join(destination, 'db/conversations/first/conversation.sqlite'), 'utf8')).toBe('snapshot db/conversations/first/conversation.sqlite')
+    expect(await readFile(join(destination, 'db/projects/default-workspace/conversations/first/conversation.sqlite'), 'utf8')).toBe('snapshot db/projects/default-workspace/conversations/first/conversation.sqlite')
   })
 
   it('resets broken project metadata and all database files together, preserving unrelated data', async () => {
     const root = await temporaryDirectory()
     const dataRoot = join(root, 'data')
-    const resetFiles = ['db/projects.json', 'db/project-deletion.json', 'db/project-deletion.stage.json',
+    const resetFiles = ['db/projects/state.json', 'db/project-deletion.json', 'db/project-deletion.stage.json',
       'db/catalog.sqlite', 'db/catalog.sqlite-wal', 'db/catalog.sqlite-shm', 'db/catalog.sqlite-journal',
-      'db/conversations/first/conversation.sqlite', 'db/conversations/first/attachments/file.txt',
-      'db/conversations/first/file_edits/evidence.txt', 'db/conversations/first/tool_results/result.txt',
-      'db/conversations/second/conversation.sqlite', 'db/conversations/second/conversation.sqlite-wal']
+      'db/projects/default-workspace/conversations/first/conversation.sqlite', 'db/projects/default-workspace/conversations/first/attachments/file.txt',
+      'db/projects/default-workspace/conversations/first/file_edits/evidence.txt', 'db/projects/default-workspace/conversations/first/tool_results/result.txt',
+      'db/projects/default-workspace/conversations/second/conversation.sqlite', 'db/projects/default-workspace/conversations/second/conversation.sqlite-wal']
     for (const name of resetFiles) await writeText(join(dataRoot, name), `broken ${name}`)
     const untouched = ['db/input_history.json', 'db/plugins/test-plugin/state.json', 'conversations/obsolete/conversation.sqlite',
+      'db/projects.json', 'db/conversations/obsolete/conversation.sqlite',
       'projects.json', 'input_history.json', 'config/settings.json', 'skills/test/SKILL.md', 'attachments/example.txt', 'sqlite/unrelated.sqlite']
     for (const name of untouched) await writeText(join(dataRoot, name), 'keep')
     const service = await loadBackupService(dataRoot)
@@ -472,6 +474,11 @@ describe('data backup restore', () => {
     }
     for (const name of untouched) expect(await readFile(join(dataRoot, name), 'utf8')).toBe('keep')
     expect(await service.recoverInterruptedDataRestore()).toBe(false)
+    const { validateExecutionStorageDirectory } = await import('./executionStorageValidation')
+    await expect(validateExecutionStorageDirectory(dataRoot)).resolves.toBeUndefined()
+    const { AgentStorage } = await import('./agent/agentStorage')
+    const storage = AgentStorage.openNative(dataRoot)
+    try { expect(storage.createThread().projectId).toBe(DEFAULT_WORKSPACE_PROJECT_ID) } finally { storage.close() }
   })
 
   it('resets exactly the previewed execution storage while retaining project definitions and settings', async () => {
@@ -480,8 +487,8 @@ describe('data backup restore', () => {
       id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep project settings', pinned: false,
       collapsed: false, sourceFolders: ['/keep/source'], capabilities, restrict_subagents: false,
       createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z' }] })
-    await writeText(join(dataRoot, 'db/projects.json'), projects)
-    for (const name of ['db/catalog.sqlite', 'db/catalog.sqlite-wal', 'db/conversations/a/conversation.sqlite']) {
+    await writeProjectFixture(dataRoot, JSON.parse(projects))
+    for (const name of ['db/catalog.sqlite', 'db/catalog.sqlite-wal', 'db/projects/default-workspace/conversations/a/conversation.sqlite']) {
       await writeText(join(dataRoot, name), 'broken database')
     }
     const service = await loadBackupService(dataRoot)
@@ -490,17 +497,17 @@ describe('data backup restore', () => {
     expect(targets).toEqual([
       { path: join(dataRoot, 'db/catalog.sqlite'), kind: 'file' },
       { path: join(dataRoot, 'db/catalog.sqlite-wal'), kind: 'file' },
-      { path: join(dataRoot, 'db/conversations'), kind: 'directory' }
+      { path: join(dataRoot, 'db/projects/default-workspace/conversations'), kind: 'directory' }
     ])
     const preserved = await service.resetExecutionData(() => preserveRecoveryData(dataRoot, root), targets)
     for (const target of targets) await expect(stat(target.path)).rejects.toMatchObject({ code: 'ENOENT' })
-    expect(await readFile(join(dataRoot, 'db/projects.json'), 'utf8')).toBe(projects)
-    expect(await readFile(join(preserved, 'data/db/projects.json'), 'utf8')).toBe(projects)
+    expect(await readProjectFixture(dataRoot)).toBe(await readProjectFixture(join(preserved, 'data')))
+    expect(JSON.parse(await readProjectFixture(join(preserved, 'data')))).toEqual(JSON.parse(projects))
     expect(await readFile(join(preserved, 'data/db/catalog.sqlite'), 'utf8')).toBe('broken database')
     const { AgentStorage } = await import('./agent/agentStorage')
     const storage = AgentStorage.openNative(dataRoot)
     try { expect(storage.createThread().accessMode).toBe('smart_approval') } finally { storage.close() }
-    expect(await readFile(join(dataRoot, 'db/projects.json'), 'utf8')).toBe(projects)
+    expect(await readProjectFixture(dataRoot)).toBe(await readProjectFixture(join(preserved, 'data')))
   })
 
   it.each(['before', 'during'])('refuses changed reset targets %s preservation without deleting files', async when => {
@@ -508,49 +515,49 @@ describe('data backup restore', () => {
     await writeText(join(dataRoot, 'db/catalog.sqlite'), 'keep database')
     const service = await loadBackupService(dataRoot)
     const targets = await service.inspectResetTargets(false)
-    const add = () => writeText(join(dataRoot, 'db/projects.json'), 'keep projects')
+    const add = () => writeText(join(dataRoot, 'db/projects/state.json'), 'keep projects')
     if (when === 'before') await add()
     const preserve = vi.fn(async () => { if (when === 'during') await add(); return '/preserved' })
     await expect(service.resetProjectData(preserve, targets)).rejects.toThrow('file list changed')
     expect(preserve).toHaveBeenCalledTimes(when === 'before' ? 0 : 1)
     expect(await readFile(join(dataRoot, 'db/catalog.sqlite'), 'utf8')).toBe('keep database')
-    expect(await readFile(join(dataRoot, 'db/projects.json'), 'utf8')).toBe('keep projects')
+    expect(await readFile(join(dataRoot, 'db/projects/state.json'), 'utf8')).toBe('keep projects')
   })
 
   it('does not reset projects or database when preservation fails', async () => {
     const root = await temporaryDirectory()
     const dataRoot = join(root, 'data')
-    await writeText(join(dataRoot, 'db/projects.json'), 'broken projects')
+    await writeText(join(dataRoot, 'db/projects/state.json'), 'broken projects')
     await writeText(join(dataRoot, 'db/catalog.sqlite'), 'database')
     const service = await loadBackupService(dataRoot)
     await expect(service.resetProjectData(async () => { throw new Error('disk full') })).rejects.toThrow('disk full')
-    expect(await readFile(join(dataRoot, 'db/projects.json'), 'utf8')).toBe('broken projects')
+    expect(await readFile(join(dataRoot, 'db/projects/state.json'), 'utf8')).toBe('broken projects')
     expect(await readFile(join(dataRoot, 'db/catalog.sqlite'), 'utf8')).toBe('database')
   })
 
   it('rolls back catalog and projects if moving the conversation directory fails', async () => {
     const root = await temporaryDirectory()
     const dataRoot = join(root, 'data')
-    await writeText(join(dataRoot, 'db/projects.json'), 'projects')
+    await writeText(join(dataRoot, 'db/projects/state.json'), 'projects')
     await writeText(join(dataRoot, 'db/catalog.sqlite'), 'catalog')
-    await writeText(join(dataRoot, 'db/conversations/first/conversation.sqlite'), 'conversation')
+    await writeText(join(dataRoot, 'db/projects/default-workspace/conversations/first/conversation.sqlite'), 'conversation')
     const service = await loadBackupService(dataRoot, undefined, (source) =>
-      source === join(dataRoot, 'db', 'conversations'))
+      source === join(dataRoot, 'db', 'projects'))
     await expect(service.resetProjectData(async () => '/preserved')).rejects.toThrow('injected rename failure')
-    expect(await readFile(join(dataRoot, 'db/projects.json'), 'utf8')).toBe('projects')
+    expect(await readFile(join(dataRoot, 'db/projects/state.json'), 'utf8')).toBe('projects')
     expect(await readFile(join(dataRoot, 'db/catalog.sqlite'), 'utf8')).toBe('catalog')
-    expect(await readFile(join(dataRoot, 'db/conversations/first/conversation.sqlite'), 'utf8')).toBe('conversation')
+    expect(await readFile(join(dataRoot, 'db/projects/default-workspace/conversations/first/conversation.sqlite'), 'utf8')).toBe('conversation')
   })
 
   it('rolls back the project file if moving the database fails during reset', async () => {
     const root = await temporaryDirectory()
     const dataRoot = join(root, 'data')
-    await writeText(join(dataRoot, 'db/projects.json'), 'broken projects')
+    await writeText(join(dataRoot, 'db/projects/state.json'), 'broken projects')
     await writeText(join(dataRoot, 'db/catalog.sqlite'), 'database')
     const service = await loadBackupService(dataRoot, undefined, (source, target) =>
       source === join(dataRoot, 'db/catalog.sqlite') && target.includes(join('previous', 'db', 'catalog.sqlite')))
     await expect(service.resetProjectData(async () => '/preserved')).rejects.toThrow('injected rename failure')
-    expect(await readFile(join(dataRoot, 'db/projects.json'), 'utf8')).toBe('broken projects')
+    expect(await readFile(join(dataRoot, 'db/projects/state.json'), 'utf8')).toBe('broken projects')
     expect(await readFile(join(dataRoot, 'db/catalog.sqlite'), 'utf8')).toBe('database')
     expect((await readdir(root)).filter((name) => name.startsWith('.anas-restore'))).toEqual([])
   })
@@ -559,16 +566,16 @@ describe('data backup restore', () => {
     const root = await temporaryDirectory()
     const dataRoot = join(root, 'data')
     const transaction = join(root, '.anas-restore-v4-data-test-reset')
-    await writeText(join(transaction, 'previous/db/projects.json'), 'old projects')
+    await writeText(join(transaction, 'previous/db/projects/state.json'), 'old projects')
     await writeText(join(transaction, 'previous/db/catalog.sqlite'), 'old database')
     await mkdir(join(dataRoot, 'db'), { recursive: true })
     await writeText(join(transaction, 'transaction.json'), JSON.stringify({
       version: 0, dataDir: dataRoot, phase: 'swapping',
-      previousEntries: ['db/projects.json', 'db/catalog.sqlite'], installedEntries: []
+      previousEntries: ['db/projects', 'db/catalog.sqlite'], installedEntries: []
     }))
     const service = await loadBackupService(dataRoot)
     expect(await service.recoverInterruptedDataRestore()).toBe(true)
-    expect(await readFile(join(dataRoot, 'db/projects.json'), 'utf8')).toBe('old projects')
+    expect(await readFile(join(dataRoot, 'db/projects/state.json'), 'utf8')).toBe('old projects')
     expect(await readFile(join(dataRoot, 'db/catalog.sqlite'), 'utf8')).toBe('old database')
     expect(await service.recoverInterruptedDataRestore()).toBe(false)
   })
@@ -577,14 +584,14 @@ describe('data backup restore', () => {
     const root = await temporaryDirectory()
     const dataRoot = join(root, 'data')
     await writeText(join(root, 'external/catalog.sqlite'), 'external database')
-    await writeText(join(root, 'external/projects.json'), 'projects')
+    await writeText(join(root, 'external/projects/state.json'), 'projects')
     await mkdir(dataRoot)
     await symlink(join(root, 'external'), join(dataRoot, 'db'), 'junction')
     const service = await loadBackupService(dataRoot)
     const preserve = vi.fn(async () => '/preserved')
     await expect(service.resetProjectData(preserve)).rejects.toThrow('linked or invalid database directory')
     expect(preserve).not.toHaveBeenCalled()
-    expect(await readFile(join(dataRoot, 'db/projects.json'), 'utf8')).toBe('projects')
+    expect(await readFile(join(dataRoot, 'db/projects/state.json'), 'utf8')).toBe('projects')
     expect(await readFile(join(root, 'external/catalog.sqlite'), 'utf8')).toBe('external database')
   })
 
@@ -592,15 +599,15 @@ describe('data backup restore', () => {
     const root = await temporaryDirectory()
     const dataRoot = join(root, 'data')
     const transaction = join(root, '.anas-restore-v4-data-test-reset')
-    await writeText(join(dataRoot, 'db/projects.json'), 'keep')
+    await writeText(join(dataRoot, 'db/projects/state.json'), 'keep')
     await writeText(join(root, 'outside.txt'), 'outside')
     const service = await loadBackupService(dataRoot)
-    for (const previousEntries of [['../outside.txt'], ['sqlite/other.sqlite'], ['db', 'db/catalog.sqlite']]) {
+    for (const previousEntries of [['../outside.txt'], ['sqlite/other.sqlite'], ['db', 'db/catalog.sqlite'], ['db/projects', 'db/projects/default-workspace/conversations']]) {
       await writeText(join(transaction, 'transaction.json'), JSON.stringify({
         version: 0, dataDir: dataRoot, phase: 'swapping', previousEntries, installedEntries: []
       }))
       await expect(service.recoverInterruptedDataRestore()).rejects.toThrow('Invalid restore transaction journal')
-      expect(await readFile(join(dataRoot, 'db/projects.json'), 'utf8')).toBe('keep')
+      expect(await readFile(join(dataRoot, 'db/projects/state.json'), 'utf8')).toBe('keep')
       expect(await readFile(join(root, 'outside.txt'), 'utf8')).toBe('outside')
     }
   })

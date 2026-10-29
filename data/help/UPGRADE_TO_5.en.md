@@ -6,6 +6,10 @@
 
 **Upgrading from 5.0.0 to 5.0.1:** The catalog changes from v1 to v2; conversation databases remain v1. Backups containing the old catalog cannot be restored directly; repair the original data directory and create a new backup. If startup reports a catalog version or access-mode constraint error, select project data repair on the recovery page. Original files are preserved before the catalog is repaired; invalid permission values use the default Smart approval mode. This does not convert legacy framework databases or replay tools. Do not change only the version number.
 
+## Upgrading to 5.0.2
+
+Reset all projects and conversations.
+
 ## Subagent Configuration Compatibility
 
 **Subagent configuration notice (since 4.0.5):** `config/subagents.json` uses v1; the previous v0 array format is neither supported nor migrated. Old files are preserved and reported as a startup error, and backups containing that format cannot be restored directly. Fully quit the app, move the old file outside the data directory for safekeeping, then restart and recreate or import subagent packages. Do not just change the version number. Existing v1 configurations are unaffected. [Subagent setup and recovery instructions](USER_GUIDE.en.md#subagents)

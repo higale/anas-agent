@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -45,8 +45,11 @@ describe('agent database snapshots', () => {
   it('snapshots the catalog and every listed conversation with stable archive paths', async () => {
     const source = await temporaryDirectory()
     const destination = await temporaryDirectory()
+    await mkdir(join(source, 'db/conversations/old'), { recursive: true })
+    await writeFile(join(source, 'db/projects.json'), 'unreadable original project')
+    await writeFile(join(source, 'db/conversations/old/conversation.sqlite'), 'unreadable original database')
     const catalog = await openDatabase(getAgentCatalogFile(source))
-    catalog.exec("CREATE TABLE agent_conversations (id TEXT PRIMARY KEY); CREATE TABLE agent_conversation_deletions (owner_thread_id TEXT); CREATE TABLE agent_thread_locations (thread_id TEXT, owner_thread_id TEXT); INSERT INTO agent_conversations VALUES ('first'), ('second')")
+    catalog.exec("CREATE TABLE agent_conversations (id TEXT PRIMARY KEY, project_id TEXT NOT NULL DEFAULT 'default-workspace'); CREATE TABLE agent_conversation_deletions (owner_thread_id TEXT); CREATE TABLE agent_thread_locations (thread_id TEXT, owner_thread_id TEXT); INSERT INTO agent_conversations (id) VALUES ('first'), ('second')")
     for (const id of ['first', 'second']) {
       const conversation = await openDatabase(getAgentConversationDatabaseFile(id, source))
       conversation.exec('CREATE TABLE records (content TEXT)')
@@ -56,9 +59,11 @@ describe('agent database snapshots', () => {
     const snapshots = await snapshotAgentStorage(source, destination)
 
     expect(snapshots.map(({ relPath }) => relPath)).toEqual([
-      'db/catalog.sqlite', 'db/conversations/first/conversation.sqlite', 'db/conversations/second/conversation.sqlite'
+      'db/catalog.sqlite', 'db/projects/default-workspace/conversations/first/conversation.sqlite', 'db/projects/default-workspace/conversations/second/conversation.sqlite'
     ])
     expect(snapshots.every(({ size }) => size > 0)).toBe(true)
+    expect(await readFile(join(source, 'db/projects.json'), 'utf8')).toBe('unreadable original project')
+    expect(await readFile(join(source, 'db/conversations/old/conversation.sqlite'), 'utf8')).toBe('unreadable original database')
     for (const id of ['first', 'second']) {
       const snapshot = await openDatabase(getAgentConversationDatabaseFile(id, destination))
       expect(snapshot.prepare('SELECT content FROM records').get()).toEqual({ content: `Message in ${id}` })
@@ -69,7 +74,7 @@ describe('agent database snapshots', () => {
     const source = await temporaryDirectory()
     const destination = await temporaryDirectory()
     const catalog = await openDatabase(getAgentCatalogFile(source))
-    catalog.exec("CREATE TABLE agent_conversations (id TEXT PRIMARY KEY); CREATE TABLE agent_conversation_deletions (owner_thread_id TEXT); CREATE TABLE agent_thread_locations (thread_id TEXT, owner_thread_id TEXT); INSERT INTO agent_conversations VALUES ('missing')")
+    catalog.exec("CREATE TABLE agent_conversations (id TEXT PRIMARY KEY, project_id TEXT NOT NULL DEFAULT 'default-workspace'); CREATE TABLE agent_conversation_deletions (owner_thread_id TEXT); CREATE TABLE agent_thread_locations (thread_id TEXT, owner_thread_id TEXT); INSERT INTO agent_conversations (id) VALUES ('missing')")
 
     await expect(snapshotAgentStorage(source, destination)).rejects.toMatchObject({ code: 'ENOENT' })
   })
@@ -78,7 +83,7 @@ describe('agent database snapshots', () => {
     const source = await temporaryDirectory()
     const destination = await temporaryDirectory()
     const catalog = await openDatabase(getAgentCatalogFile(source))
-    catalog.exec("CREATE TABLE agent_conversations (id TEXT PRIMARY KEY); CREATE TABLE agent_conversation_deletions (owner_thread_id TEXT); CREATE TABLE agent_thread_locations (thread_id TEXT, owner_thread_id TEXT); INSERT INTO agent_conversations VALUES ('../outside')")
+    catalog.exec("CREATE TABLE agent_conversations (id TEXT PRIMARY KEY, project_id TEXT NOT NULL DEFAULT 'default-workspace'); CREATE TABLE agent_conversation_deletions (owner_thread_id TEXT); CREATE TABLE agent_thread_locations (thread_id TEXT, owner_thread_id TEXT); INSERT INTO agent_conversations (id) VALUES ('../outside')")
 
     await expect(snapshotAgentStorage(source, destination)).rejects.toThrow('not a valid storage directory name')
   })

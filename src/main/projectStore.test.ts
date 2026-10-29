@@ -24,11 +24,39 @@ vi.mock('./config/dataDir', () => ({
   getDefaultWorkspaceDir: () => join(tempDir, 'default-workspace')
 }))
 
+async function readSnapshot(): Promise<string> {
+  const root = join(tempDir, 'db/projects')
+  const state = JSON.parse(await readFile(storePaths.projectFile, 'utf8'))
+  const { readdir } = await import('node:fs/promises')
+  const projects = []
+  for (const entry of await readdir(root, { withFileTypes: true })) if (entry.isDirectory()) {
+    const document = JSON.parse(await readFile(join(root, entry.name, 'project.json'), 'utf8'))
+    projects.push({ ...document.project, ...state.projects.find((item: { id: string }) => item.id === entry.name) })
+  }
+  return JSON.stringify({ version: 0, projects })
+}
+async function writeSnapshot(content: string, _encoding?: string): Promise<void> {
+  const value = JSON.parse(content)
+  const states = []
+  const { readdir } = await import('node:fs/promises')
+  for (const entry of await readdir(join(tempDir, 'db/projects'), { withFileTypes: true }).catch(() => [])) {
+    if (entry.isDirectory() && !value.projects.some((project: { id: string }) => project.id === entry.name)) await rm(join(tempDir, 'db/projects', entry.name), { recursive: true })
+  }
+  for (const project of value.projects) {
+    const { pinned, collapsed, sort_order, thread_order, ...definition } = project
+    const root = join(tempDir, 'db/projects', project.id)
+    await mkdir(root, { recursive: true })
+    await writeFile(join(root, 'project.json'), JSON.stringify({ version: 0, project: definition }))
+    states.push({ id: project.id, pinned, collapsed, sort_order, thread_order })
+  }
+  await writeFile(storePaths.projectFile, JSON.stringify({ version: value.version, storage_layout: 'project-directories', projects: states }))
+}
+
 let tempDir = ''
 
 beforeEach(async () => {
   tempDir = await mkdtemp(join(tmpdir(), 'anas-project-store-'))
-  storePaths.projectFile = join(tempDir, 'db/projects.json')
+  storePaths.projectFile = join(tempDir, 'db/projects/state.json')
   await mkdir(join(tempDir, 'db'))
 })
 
@@ -37,6 +65,50 @@ afterEach(async () => {
 })
 
 describe('project store', () => {
+  it('separates definitions from UI state and defaults missing state without rewriting definitions', async () => {
+    const store = await import('./projectStore')
+    const project = await store.createProject({ kind: 'simple_chat', name: 'Separate', prompt: 'Keep this prompt' })
+    const path = join(tempDir, 'db/projects', project.id, 'project.json')
+    const before = await readFile(path, 'utf8')
+    expect(JSON.parse(before).project).not.toHaveProperty('pinned')
+    await store.updateProjectState(project.id, { pinned: true, collapsed: true })
+    expect(await readFile(path, 'utf8')).toBe(before)
+    const state = JSON.parse(await readFile(storePaths.projectFile, 'utf8'))
+    expect(state.projects.find((item: { id: string }) => item.id === project.id)).not.toHaveProperty('prompt')
+    await rm(storePaths.projectFile)
+    expect(await store.getProject(project.id)).toMatchObject({ pinned: false, collapsed: false, prompt: 'Keep this prompt' })
+    expect(await readFile(path, 'utf8')).toBe(before)
+  })
+
+  it('initializes current projects without reading or changing previous-layout files', async () => {
+    const store = await import('./projectStore')
+    const previous = join(tempDir, 'db/projects.json')
+    await writeFile(previous, 'preserve these bytes')
+    await mkdir(join(tempDir, 'db/conversations/old'), { recursive: true })
+    await writeFile(join(tempDir, 'db/conversations/old/conversation.sqlite'), 'unreadable old database')
+    expect(await store.listProjects()).toMatchObject([{ id: DEFAULT_WORKSPACE_PROJECT_ID }])
+    const project = await store.createProject({ kind: 'simple_chat', name: 'New project', prompt: '' })
+    expect(await store.getProject(project.id)).toMatchObject({ name: 'New project' })
+    expect(await readFile(previous, 'utf8')).toBe('preserve these bytes')
+    expect(await readFile(join(tempDir, 'db/conversations/old/conversation.sqlite'), 'utf8')).toBe('unreadable old database')
+  })
+
+  it('refuses incomplete current directories without creating replacement data', async () => {
+    const store = await import('./projectStore')
+    await mkdir(join(tempDir, 'db/projects/incomplete'), { recursive: true })
+    await expect(store.listProjects()).rejects.toThrow('definition is missing')
+    await expect(readFile(storePaths.projectFile)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('completes a journaled project write after interrupted publication', async () => {
+    const store = await import('./projectStore')
+    const project = await store.createProject({ kind: 'simple_chat', name: 'Before', prompt: 'Keep' })
+    const next = JSON.parse(await readSnapshot())
+    next.projects.find((item: { id: string }) => item.id === project.id).name = 'After'
+    await writeFile(join(tempDir, 'db/project-write.json'), JSON.stringify({ version: 0, next, removed: [] }))
+    expect(await store.getProject(project.id)).toMatchObject({ name: 'After', prompt: 'Keep' })
+    await expect(readFile(join(tempDir, 'db/project-write.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
   it('persists group order independently of updates, preserves it on editing, and puts new projects first', async () => {
     const store = await import('./projectStore')
     const a = await store.createProject({ kind: 'simple_chat', name: 'A', prompt: '' })
@@ -49,11 +121,11 @@ describe('project store', () => {
     const c = await store.createProject({ kind: 'simple_chat', name: 'C', prompt: '' })
     expect((await store.listProjects()).map(p => p.id)).toEqual([c.id, a.id, b.id, DEFAULT_WORKSPACE_PROJECT_ID])
     await store.updateProjectState(b.id, { pinned: true })
-    const before = await readFile(storePaths.projectFile, 'utf8')
+    const before = await readSnapshot()
     await expect(store.reorderSidebar(request, () => [])).rejects.toThrow('target changed')
     await expect(store.reorderSidebar({ ...request, id: DEFAULT_WORKSPACE_PROJECT_ID, beforeId: null }, () => [])).rejects.toThrow()
     await expect(store.reorderSidebar({ ...request, groupId: 'workspace' }, () => [])).rejects.toThrow()
-    expect(await readFile(storePaths.projectFile, 'utf8')).toBe(before)
+    expect(JSON.parse(await readSnapshot())).toEqual(JSON.parse(before))
     const raw = JSON.parse(before)
     expect(raw.version).toBe(0)
     expect(raw.projects.find((p: Project) => p.id === a.id)).toHaveProperty('sort_order', 0)
@@ -72,11 +144,11 @@ describe('project store', () => {
     const request = { kind: 'thread' as const, groupId: DEFAULT_WORKSPACE_PROJECT_ID, pinned: false, id: 'b', beforeId: 'a' }
     await store.reorderSidebar(request, () => threads)
     expect((await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)).threadOrder).toEqual(['b', 'a', 'pin'])
-    const before = await readFile(storePaths.projectFile, 'utf8')
+    const before = await readSnapshot()
     for (const beforeId of ['other', 'pin', 'deleted']) {
       await expect(store.reorderSidebar({ ...request, beforeId }, () => threads)).rejects.toThrow('target changed')
     }
-    expect(await readFile(storePaths.projectFile, 'utf8')).toBe(before)
+    expect(JSON.parse(await readSnapshot())).toEqual(JSON.parse(before))
     const raw = JSON.parse(before)
     expect(raw.projects.find((p: Project) => p.id === DEFAULT_WORKSPACE_PROJECT_ID).thread_order).toEqual(['b', 'a', 'pin'])
     raw.projects.find((p: Project) => p.id === DEFAULT_WORKSPACE_PROJECT_ID).thread_order = []
@@ -90,24 +162,24 @@ describe('project store', () => {
     const request = { kind: 'workspace' as const, name: 'Permissions', sourceFolders: [tempDir],
       codingMode: false, advancedSettings: false, prompt: '', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false }
     const project = await store.createProject(request)
-    const original = await readFile(storePaths.projectFile, 'utf8')
+    const original = await readSnapshot()
     expect(JSON.parse(original).projects.find((p: Project) => p.id === project.id)).not.toHaveProperty('access_mode')
     expect(await store.getProject(project.id)).toMatchObject({ accessMode: 'smart_approval' })
-    expect(await readFile(storePaths.projectFile, 'utf8')).toBe(original)
+    expect(await readSnapshot()).toBe(original)
     for (const accessMode of ['strict_approval', 'full_access', 'smart_approval'] as const) {
       await store.updateProject(project.id, { ...request, accessMode })
       expect(await store.getProject(project.id)).toMatchObject({ accessMode, advancedSettings: false })
-      const raw = JSON.parse(await readFile(storePaths.projectFile, 'utf8'))
+      const raw = JSON.parse(await readSnapshot())
       expect(raw.version).toBe(0)
       const saved = raw.projects.find((p: Project) => p.id === project.id)
       expect(saved.access_mode ?? 'smart_approval').toBe(accessMode)
       expect(saved).not.toHaveProperty('accessMode')
       expect(await store.prepareProjectPreview({ ...request, accessMode })).toMatchObject({ accessMode })
     }
-    const beforeInvalid = await readFile(storePaths.projectFile, 'utf8')
+    const beforeInvalid = await readSnapshot()
     await expect(store.updateProject(project.id, { ...request, accessMode: 'unknown' } as unknown as ProjectCreateRequest))
       .rejects.toThrow('Invalid project tool access mode')
-    expect(await readFile(storePaths.projectFile, 'utf8')).toBe(beforeInvalid)
+    expect(await readSnapshot()).toBe(beforeInvalid)
     const invalid = JSON.parse(beforeInvalid)
     invalid.projects.find((p: Project) => p.id === project.id).access_mode = 'unknown'
     expect(() => store.parseProjectStore(invalid)).toThrow('Invalid project tool access mode')
@@ -118,12 +190,12 @@ describe('project store', () => {
     const request = { kind: 'workspace' as const, name: 'Summary', sourceFolders: [tempDir],
       codingMode: false, advancedSettings: false, prompt: 'Keep project rules', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false }
     const original = await store.createProject(request)
-    const file = await readFile(storePaths.projectFile, 'utf8')
+    const file = await readSnapshot()
     expect(await store.getProject(original.id)).not.toHaveProperty('compressionPrompt', expect.any(String))
-    expect(await readFile(storePaths.projectFile, 'utf8')).toBe(file)
+    expect(await readSnapshot()).toBe(file)
     const compressionPrompt = 'Preserve sources: {conversation}'
     await store.updateProject(original.id, { ...request, compressionPrompt })
-    const stored = JSON.parse(await readFile(storePaths.projectFile, 'utf8'))
+    const stored = JSON.parse(await readSnapshot())
     expect(stored.version).toBe(0)
     expect(stored.projects.find((p: Project) => p.id === original.id)).toMatchObject({ compression_prompt: compressionPrompt })
     expect(stored.projects.find((p: Project) => p.id === original.id)).not.toHaveProperty('compressionPrompt')
@@ -131,19 +203,19 @@ describe('project store', () => {
     await expect(store.updateProject(original.id, { ...request, compressionPrompt: 'missing history placeholder' })).rejects.toThrow('compression prompt')
     expect(await store.getProject(original.id)).toMatchObject({ compressionPrompt, prompt: request.prompt })
     await store.updateProject(original.id, { ...request, compressionPrompt: '' })
-    expect(JSON.parse(await readFile(storePaths.projectFile, 'utf8')).projects.find((p: Project) => p.id === original.id)).not.toHaveProperty('compression_prompt')
+    expect(JSON.parse(await readSnapshot()).projects.find((p: Project) => p.id === original.id)).not.toHaveProperty('compression_prompt')
   })
 
   it('validates a project preview without creating or updating stored projects', async () => {
     const store = await import('./projectStore')
     const saved = await store.createProject({ kind: 'simple_chat', name: 'Saved', prompt: 'Original' })
-    const before = await readFile(storePaths.projectFile, 'utf8')
+    const before = await readSnapshot()
     const preview = await store.prepareProjectPreview({
       kind: 'workspace', name: 'Unsaved', prompt: 'Draft instructions', sourceFolders: [tempDir],
       capabilities: defaultCapabilities, restrictSubagents: false, advancedSettings: true, codingMode: true
     }, saved.id)
     expect(preview).toMatchObject({ id: saved.id, prompt: 'Draft instructions', sourceFolders: [tempDir], codingMode: true })
-    expect(await readFile(storePaths.projectFile, 'utf8')).toBe(before)
+    expect(JSON.parse(await readSnapshot())).toEqual(JSON.parse(before))
     await expect(store.prepareProjectPreview({ kind: 'simple_chat', name: 'Invalid', prompt: 42 } as unknown as ProjectCreateRequest))
       .rejects.toThrow('prompt')
   })
@@ -170,7 +242,7 @@ describe('project store', () => {
       codingMode: false, advancedSettings: true, prompt: '', capabilities: { ...structuredClone(defaultCapabilities), subagents: { mode: 'custom' as const, names: ['general-purpose', 'removed-agent'] } }, restrictSubagents: false }
     const created = await store.createProject(request)
     expect((await store.getProject(created.id))).toMatchObject({ capabilities: { subagents: request.capabilities.subagents }, restrictSubagents: false })
-    const raw = JSON.parse(await readFile(storePaths.projectFile, 'utf8')).projects.find((item: Project) => item.id === created.id)
+    const raw = JSON.parse(await readSnapshot()).projects.find((item: Project) => item.id === created.id)
     expect(raw.capabilities.subagents).toEqual(request.capabilities.subagents)
     expect(raw).not.toHaveProperty('subagentSelection')
     await store.updateProject(created.id, { ...request, capabilities: { ...request.capabilities, subagents: { mode: 'custom', names: [] } }, restrictSubagents: true })
@@ -191,7 +263,7 @@ describe('project store', () => {
     const created = await store.createProject(request)
     expect(await store.getProject(created.id)).toEqual(created)
     expect(created).toMatchObject({ codingMode: true, advancedSettings: false })
-    const raw = JSON.parse(await readFile(storePaths.projectFile, 'utf8'))
+    const raw = JSON.parse(await readSnapshot())
     const stored = raw.projects.find((item: Project) => item.id === created.id)
     expect(stored.coding_mode).toBe(true)
     expect(stored).not.toHaveProperty('codingMode')
@@ -205,9 +277,9 @@ describe('project store', () => {
     expect(await store.updateProject(created.id, { ...request, codingMode: false })).toMatchObject({ codingMode: false })
     expect(await store.getProject(created.id)).toMatchObject({ codingMode: false })
     stored.coding_mode = 'false'
-    await writeFile(storePaths.projectFile, JSON.stringify(raw))
+    await writeSnapshot( JSON.stringify(raw))
     await expect(store.getProject(created.id)).rejects.toThrow('coding mode')
-    expect(JSON.parse(await readFile(storePaths.projectFile, 'utf8'))).toEqual(raw)
+    expect(JSON.parse(await readSnapshot())).toEqual(raw)
   })
 
   it('retains advanced values while disabled and persists the switch in snake_case', async () => {
@@ -220,7 +292,7 @@ describe('project store', () => {
     const disabled = await store.updateProject(created.id, { ...request, advancedSettings: false })
     expect(await store.getProject(created.id)).toEqual(disabled)
     expect(disabled).toMatchObject({ advancedSettings: false, prompt: request.prompt, capabilities: request.capabilities, restrictSubagents: true })
-    const raw = JSON.parse(await readFile(storePaths.projectFile, 'utf8')).projects.find((item: Project) => item.id === created.id)
+    const raw = JSON.parse(await readSnapshot()).projects.find((item: Project) => item.id === created.id)
     expect(raw.advanced_settings).toBe(false)
     expect(raw).not.toHaveProperty('advancedSettings')
     expect(await store.updateProject(created.id, request)).toMatchObject({ advancedSettings: true, prompt: request.prompt })
@@ -234,7 +306,7 @@ describe('project store', () => {
       modelConfigId: 'project-model', modelParameterPresetId: null
     })
     expect(await store.getProject(project.id)).toEqual(project)
-    const raw = JSON.parse(await readFile(storePaths.projectFile, 'utf8'))
+    const raw = JSON.parse(await readSnapshot())
       .projects.find((item: Project) => item.id === project.id)
     expect(raw).toMatchObject({ model_config_id: 'project-model', model_parameter_preset_id: null })
     expect(raw).not.toHaveProperty('modelConfigId')
@@ -269,12 +341,12 @@ describe('project store', () => {
     const removed = await store.createProject({ kind: 'simple_chat', name: 'Remove', prompt: '' })
     await store.deleteProjectWithThreads(removed.id, [], (commit) => commit())
     expect(await store.getProject(preferred.id)).toEqual(preferred)
-    const previous = JSON.parse(await readFile(storePaths.projectFile, 'utf8'))
+    const previous = JSON.parse(await readSnapshot())
     const next = { ...previous, projects: previous.projects.filter((item: Project) => item.id !== preferred.id) }
     await writeFile(join(tempDir, 'db/project-deletion.json'), JSON.stringify({
       version: 0, projectId: preferred.id, threadIds: ['thread'], previous, next
     }), 'utf8')
-    await writeFile(storePaths.projectFile, JSON.stringify(next), 'utf8')
+    await writeSnapshot( JSON.stringify(next), 'utf8')
     await store.recoverProjectDeletion(() => true, vi.fn())
     expect(await store.getProject(preferred.id)).toEqual(preferred)
   })
@@ -544,7 +616,7 @@ describe('project store', () => {
       next
     }
     await writeFile(join(tempDir, 'db/project-deletion.json'), storedProjectJson(journal), 'utf8')
-    await writeFile(storePaths.projectFile, storedProjectJson(next), 'utf8')
+    await writeSnapshot( storedProjectJson(next), 'utf8')
 
     const completeDatabaseCommit = vi.fn()
     await expect(store.recoverProjectDeletion(
@@ -555,7 +627,7 @@ describe('project store', () => {
     expect(completeDatabaseCommit).not.toHaveBeenCalled()
 
     await writeFile(join(tempDir, 'db/project-deletion.json'), storedProjectJson(journal), 'utf8')
-    await writeFile(storePaths.projectFile, storedProjectJson(previous), 'utf8')
+    await writeSnapshot( storedProjectJson(previous), 'utf8')
     await expect(store.recoverProjectDeletion(
       () => false,
       completeDatabaseCommit
@@ -584,7 +656,7 @@ describe('project store', () => {
       next
     }
     await writeFile(join(tempDir, 'db/project-deletion.json'), storedProjectJson(journal), 'utf8')
-    await writeFile(storePaths.projectFile, storedProjectJson(next), 'utf8')
+    await writeSnapshot( storedProjectJson(next), 'utf8')
     const completeDatabaseCommit = vi.fn()
 
     await expect(store.recoverProjectDeletion(
@@ -636,7 +708,7 @@ describe('project store', () => {
       .rejects.toThrow('cannot be deleted')
     expect((await store.listProjects()).at(-1)).toEqual(updated)
     expect(await store.getProject(initial.id)).toEqual(updated)
-    const raw = JSON.parse(await readFile(storePaths.projectFile, 'utf8'))
+    const raw = JSON.parse(await readSnapshot())
     expect(raw.version).toBe(0)
     expect(raw.projects.find((item: Project) => item.id === initial.id)).toMatchObject({
       advanced_settings: true, coding_mode: true, restrict_subagents: true,
@@ -652,15 +724,15 @@ describe('project store', () => {
     const other = await store.createProject({ kind: 'simple_chat', name: 'Other', prompt: '' })
     const project = await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)
     if (project.kind !== 'workspace') throw new Error('Expected workspace')
-    const before = await readFile(storePaths.projectFile, 'utf8')
+    const before = await readSnapshot()
     const directory = join(tempDir, 'default-workspace')
     await rm(directory, { recursive: true })
     await writeFile(directory, 'Keep this file')
     expect(await store.listProjects()).toContainEqual(other)
     expect(await store.getProject(other.id)).toEqual(other)
-    expect(await readFile(storePaths.projectFile, 'utf8')).toBe(before)
+    expect(JSON.parse(await readSnapshot())).toEqual(JSON.parse(before))
     await expect(store.updateProject(project.id, { ...project, icon: 'braces' })).rejects.toThrow('not a directory')
-    expect(await readFile(storePaths.projectFile, 'utf8')).toBe(before)
+    expect(JSON.parse(await readSnapshot())).toEqual(JSON.parse(before))
     expect(await store.updateProject(project.id, { ...project, sourceFolders: [tempDir], icon: 'braces' }))
       .toMatchObject({ sourceFolders: [tempDir], icon: 'braces' })
     expect(await readFile(directory, 'utf8')).toBe('Keep this file')
@@ -671,10 +743,10 @@ describe('project store', () => {
     const project = await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)
     if (project.kind !== 'workspace') throw new Error('Expected workspace')
     const other = await store.createProject({ kind: 'simple_chat', name: 'Other', prompt: '' })
-    const raw = JSON.parse(await readFile(storePaths.projectFile, 'utf8'))
+    const raw = JSON.parse(await readSnapshot())
     raw.projects.find((item: Project) => item.id === project.id).name = 'Previously renamed default'
     raw.projects.find((item: Project) => item.id === other.id).name = project.name
-    await writeFile(storePaths.projectFile, JSON.stringify(raw))
+    await writeSnapshot( JSON.stringify(raw))
     expect(await store.updateProject(project.id, { ...project, icon: 'braces', modelConfigId: 'model' }))
       .toMatchObject({ name: project.name, icon: 'braces', modelConfigId: 'model' })
     expect(await store.updateProject(other.id, { kind: 'simple_chat', name: project.name, prompt: 'Updated' }))
@@ -690,21 +762,21 @@ describe('project store', () => {
     const store = await import('./projectStore')
     const project = await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)
     if (project.kind !== 'workspace') throw new Error('Expected workspace')
-    const before = await readFile(storePaths.projectFile, 'utf8')
+    const before = await readSnapshot()
     await expect(store.updateProject(project.id, { ...project, name: 'Renamed' }))
       .rejects.toThrow('The default project name cannot be changed')
     const changes = [{ sourceFolders: [] }, { compressionPrompt: 'Missing placeholder' }, { capabilities: {} }]
     for (const change of changes) {
       await expect(store.updateProject(project.id, { ...project, ...change } as ProjectCreateRequest)).rejects.toThrow()
     }
-    expect(await readFile(storePaths.projectFile, 'utf8')).toBe(before)
+    expect(JSON.parse(await readSnapshot())).toEqual(JSON.parse(before))
     expect(await store.getProject(project.id)).toEqual(project)
   })
 
   it('reads saved v0 default workspace settings and previews unsaved changes without overwriting them', async () => {
     const store = await import('./projectStore')
     const project = await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)
-    const original = JSON.parse(await readFile(storePaths.projectFile, 'utf8'))
+    const original = JSON.parse(await readSnapshot())
     Object.assign(original.projects[0], {
       name: 'Previous custom name', sourceFolders: [join(tempDir, 'old-folder')],
       prompt: 'Old custom prompt', advanced_settings: true, coding_mode: true, restrict_subagents: true,
@@ -714,7 +786,7 @@ describe('project store', () => {
       collapsed: true
     })
     const before = JSON.stringify(original)
-    await writeFile(storePaths.projectFile, before)
+    await writeSnapshot( before)
     const effective = await store.getProject(project.id)
     expect(effective).toEqual({ ...project, icon: 'braces', iconColor: 'blue', modelConfigId: 'custom-model', modelParameterPresetId: null, collapsed: true,
       sourceFolders: [join(tempDir, 'old-folder')], prompt: 'Old custom prompt', advancedSettings: true, codingMode: true, restrictSubagents: true,
@@ -722,7 +794,7 @@ describe('project store', () => {
       capabilities: { ...defaultCapabilities, skills: { ...defaultCapabilities.skills, mode: 'off' } }
     })
     expect((await store.listProjects()).at(-1)).toEqual(effective)
-    expect(await readFile(storePaths.projectFile, 'utf8')).toBe(before)
+    expect(JSON.parse(await readSnapshot())).toEqual(JSON.parse(before))
     const request = { ...effective, kind: 'workspace' as const, sourceFolders: [tempDir],
       capabilities: defaultCapabilities, restrictSubagents: true, advancedSettings: true, codingMode: true,
       compressionPrompt: 'Draft summary: {conversation}', prompt: 'Draft override', modelConfigId: undefined, modelParameterPresetId: undefined }
@@ -731,7 +803,7 @@ describe('project store', () => {
       restrictSubagents: true, advancedSettings: true, codingMode: true,
       compressionPrompt: 'Draft summary: {conversation}', prompt: 'Draft override'
     })
-    expect(await readFile(storePaths.projectFile, 'utf8')).toBe(before)
+    expect(JSON.parse(await readSnapshot())).toEqual(JSON.parse(before))
     expect(await store.updateProjectState(project.id, { collapsed: false })).toEqual({ ...effective, collapsed: false })
     expect(await store.getProject(project.id)).toEqual({ ...effective, collapsed: false })
   })

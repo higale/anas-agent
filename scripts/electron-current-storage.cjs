@@ -247,7 +247,7 @@ async function verifyCurrentStorage(repositoryRoot, executablePath) {
         const thread = storage.createThread({ title: `Discard ${kind} conversation` })
         storage.closeConversation(thread.id)
         const require = globalThis.__anasStorageProbe.nativeRequire
-        const directory = require('node:path').join(storage.dataDir, 'db/conversations', thread.id)
+        const directory = require('node:path').join(storage.dataDir, 'db/projects', thread.projectId, 'conversations', thread.id)
         const file = require('node:path').join(directory, 'conversation.sqlite')
         if (kind === 'missing') require('node:fs').rmSync(directory, { recursive: true })
         else if (kind === 'corrupt') require('node:fs').writeFileSync(file, 'damaged database')

@@ -134,9 +134,6 @@ export class ConversationRuntimeDirectory<Connection extends ConversationStorage
 
   updateThread(threadId: string, update: AgentThreadUpdate) {
     this.databaseForThread(threadId)
-    if (update.projectId && this.mutatingProjects.has(update.projectId)) {
-      throw new AgentThreadLockedError(threadId, 'be moved while its target project is being deleted')
-    }
     return this.storage.updateThread(threadId, update)
   }
 
@@ -160,7 +157,7 @@ export class ConversationRuntimeDirectory<Connection extends ConversationStorage
     this.leaseResource(creation, () => {
       if (this.creatingProjects.get(projectId) === creation) this.creatingProjects.delete(projectId)
     })
-    const database = this.storage.openConversation(input.threadId, { create: true })
+    const database = this.storage.openConversation(input.threadId, { create: true, projectId: input.newThread.projectId })
     const runtime = this.runtimeForDatabase(database)
     try {
       const submission = await submit(runtime)

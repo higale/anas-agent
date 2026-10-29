@@ -20,14 +20,14 @@ const usage = () => getDataStorageUsage({ dataDir: data, electronCacheSize: asyn
 
 it('previews and removes obsolete and unknown data while retaining complete managed trees and write recovery files', async () => {
   const retained = ['.env', 'config/settings.json', 'config/assets/custom.png', 'db/catalog.sqlite',
-    'db/catalog.sqlite-wal', 'db/projects.json', 'db/project-deletion.json', 'db/project-deletion.stage.json',
-    'db/conversations/unregistered/arbitrary.bin', 'db/plugins/uninstalled/secret.bin',
+    'db/catalog.sqlite-wal', 'db/projects/state.json', 'db/project-deletion.json', 'db/project-deletion.stage.json',
+    'db/projects/default-workspace/conversations/unregistered/arbitrary.bin', 'db/plugins/uninstalled/secret.bin',
     'subagents/custom/AGENT.json', 'subagents/custom/skills/private/extra.bin', 'subagents/.transaction/previous/PROMPT.md',
     'cache/tool-results/old.txt', 'cache/anything.txt', 'skills/custom/extra.bin', 'tools/custom/data.bin',
     'plugins/.remove-recoverable/transaction.json', 'plugins/.replace-recoverable/previous/data.bin',
     'examples/future/document.md', 'lang/custom.json', 'help/custom.md', 'electron/Local State',
     'tmp/generated.bin', 'log/current.log', 'dev/model-http/request.json',
-    'config/.settings.json.1.2.tmp', 'db/projects.json.write.tmp',
+    'config/.settings.json.1.2.tmp', 'db/projects/state.json.write.tmp',
     'config/.avatar-assets-stage-interrupted/previous-assets/source.png', '.examples.mirror.previous/readme.md']
   for (const path of retained) await file(join(data, path))
   await file(join(data, 'config/custom_tools.json'), 'obsolete')

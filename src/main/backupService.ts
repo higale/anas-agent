@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { ZipFile } from 'yazl'
 import type { DataBackupResult, DataRestoreResult } from '@shared/types'
-import { configDirName, configFileNames, getDataDir, getProgramName } from './config/dataDir'
+import { configDirName, configFileNames, getDataDir, getProgramName, getProjectStoreFile, getProjectsDir, getProjectDir } from './config/dataDir'
 import { readRawConfig } from './config/rawAppConfig'
 import { normalizeAppProfile } from './config/profileConfig'
 import { snapshotAgentStorage } from './agent/agentDatabaseBackup'
@@ -19,7 +19,7 @@ import {
 import { validateRestoredDataDirectory } from './dataRestoreValidation'
 import { runtimeLog } from './runtimeLogger'
 import { withApplicationDataSnapshot } from './applicationDataSnapshot'
-import { parseProjectStore } from './projectStore'
+import { readProjectStoreFile } from './projectStore'
 import type { RecoveryResetTarget } from '@shared/recovery'
 
 const requiredRestoreFiles = new Set(configFileNames.map((fileName) => `${configDirName}/${fileName}`))
@@ -100,9 +100,9 @@ async function collectFiles(root: string, excludePath: string, current = root, i
     const normalizedRelPath = relPath.split(sep).join('/')
     if (normalizedRelPath === backupManifestFileName) continue
     if (/^db\/catalog\.sqlite(?:-(?:wal|shm|journal))?$/i.test(normalizedRelPath)
-      || /^db\/conversations\/[^/]+\/conversation\.sqlite(?:-(?:wal|shm|journal))?$/i.test(normalizedRelPath)) continue
-    const [directory, collection, ownerId] = normalizedRelPath.split('/')
-    if (directory.toLowerCase() === 'db' && collection?.toLowerCase() === 'conversations' && ownerId && !includedConversations.has(ownerId)) continue
+      || /^db\/projects\/[^/]+\/conversations\/[^/]+\/conversation\.sqlite(?:-(?:wal|shm|journal))?$/i.test(normalizedRelPath)) continue
+    const [directory, collection, , conversations, ownerId] = normalizedRelPath.split('/')
+    if (directory.toLowerCase() === 'db' && collection?.toLowerCase() === 'projects' && conversations === 'conversations' && ownerId && !includedConversations.has(ownerId)) continue
     if (entry.isDirectory()) {
       files.push({ absPath, relPath: normalizedRelPath, size: 0, kind: 'directory' })
       files.push(...await collectFiles(root, excludePath, absPath, includedConversations))
@@ -339,13 +339,24 @@ export function resetExecutionData(preserveCurrentData: () => Promise<string>, t
 
 export async function inspectResetTargets(executionOnly: boolean): Promise<RecoveryResetTarget[]> {
   const targets: RecoveryResetTarget[] = []
-  for (const target of executionOnly ? executionResetEntries : projectResetEntries) {
+  const entries: string[] = [...(executionOnly ? executionResetEntries : projectResetEntries)]
+  if (executionOnly) {
+    const projects = await readdir(getProjectsDir(getDataDir()), { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return []
+      throw error
+    })
+    for (const project of projects) if (project.isDirectory()) {
+      getProjectDir(project.name, getDataDir())
+      entries.push(`db/projects/${project.name}/conversations`)
+    }
+  }
+  for (const target of entries) {
     const path = join(resolve(getDataDir()), target)
     const entry = await lstat(path).catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return undefined
       throw error
     })
-    if (entry) targets.push({ path, kind: target === 'db/conversations' ? 'directory' : 'file' })
+    if (entry) targets.push({ path, kind: entry.isDirectory() ? 'directory' : 'file' })
   }
   return targets
 }
@@ -364,9 +375,7 @@ function resetData(preserveCurrentData: () => Promise<string>, executionOnly: bo
       throw new Error('Reset file list changed; refresh and confirm the current list before resetting.')
     }
     if (executionOnly) {
-      const projects = join(dataDir, 'db/projects.json')
-      if (!(await lstat(projects)).isFile()) throw new Error('Repair project definitions before resetting only the conversation database.')
-      parseProjectStore(JSON.parse(await readFile(projects, 'utf8')))
+      await readProjectStoreFile(getProjectStoreFile(dataDir))
       for (const pending of ['db/project-deletion.json', 'db/project-deletion.stage.json']) {
         const entry = await lstat(join(dataDir, pending)).catch((error: NodeJS.ErrnoException) => {
           if (error.code === 'ENOENT') return undefined
@@ -398,6 +407,7 @@ function resetData(preserveCurrentData: () => Promise<string>, executionOnly: bo
       await writeRestoreJournal(journalPath, journal)
       cleanup = false
       for (const target of previousEntries) {
+        await mkdir(dirname(join(transactionRoot, 'previous', target)), { recursive: true })
         await rename(join(dataDir, target), join(transactionRoot, 'previous', target))
       }
       // Normal initialization recreates only the removed storage on restart.

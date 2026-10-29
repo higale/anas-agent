@@ -356,7 +356,7 @@ Conversations are saved automatically. The sidebar counts user turns, and earlie
 
 Long conversations are compressed automatically. You can also compress manually using the context indicator beside the input. It shows estimated usage by category; reserved output space is displayed separately and is not counted as used context.
 
-When context exceeds its limit, oversized tool results can be shortened to a preview with a path to the complete result; the original chat history is preserved. Files are stored in `db/conversations/<main-conversation-ID>/tool_results/` under the data directory and included in application backups. They are deleted with the entire conversation; clearing caches does not remove them.
+When context exceeds its limit, oversized tool results can be shortened to a preview with a path to the complete result; the original chat history is preserved. Files are stored in `db/projects/<projectId>/conversations/<main-conversation-ID>/tool_results/` under the data directory and included in application backups. They are deleted with the entire conversation; clearing caches does not remove them.
 
 Preview request in the project editor shows the context and tools that would be supplied for the current project.
 
@@ -404,7 +404,7 @@ You can also specify a directory at launch, for example `Anas.exe "D:\Anas Data\
 
 ZIP backups default to the current system user's Documents folder; a previously selected backup folder is preserved. Backups include user tools and skills. Back up project source folders and externally referenced skills separately. Backups exclude runtime logs, temporary files, developer request traces, application caches, interface caches and sign-in state, and obsolete layout residues.
 
-Data cleanup in Settings > General hides categories confirmed to have no removable data. Conversation cleanup keeps pinned, running, and approval-pending conversations. Unknown files is unchecked by default and shows a preview of paths outside the allowlist; directory paths end in `/`. This includes obsolete layout residues and backup files inside the data root. Before cleaning up old projects, input history, plugin data or avatars that you want to restore manually, move them to their new locations or back them up separately. Cache cleanup owns `cache/`; conversation deletion owns `db/conversations/`.
+Data cleanup in Settings > General hides categories confirmed to have no removable data. Conversation cleanup keeps pinned, running, and approval-pending conversations. Unknown files is unchecked by default and shows a preview of paths outside the allowlist; directory paths end in `/`. This includes obsolete layout residues and backup files inside the data root. Before cleaning up old projects, input history, plugin data or avatars that you want to restore manually, move them to their new locations or back them up separately. Cache cleanup owns `cache/`; conversation deletion owns `db/projects/<projectId>/conversations/`.
 
 Deleting an entire conversation from its menu does not require repairing a missing, damaged or unsupported-version conversation database first. Deletion also removes its attachments, file-edit recovery material, long tool results and temporary drafts. If the operating system refuses to delete files, deletion progress is retained so you can retry after resolving file locks or permissions.
 
@@ -412,11 +412,11 @@ Deleting an entire conversation from its menu does not require repairing a missi
 | --- | --- |
 | `config/` | Settings, providers/models, subagent order and switches, MCP, Skill sources/availability, and custom-tool sources/ordering |
 | `db/catalog.sqlite` | Main conversation directory and shared memory |
-| `db/conversations/<threadId>/conversation.sqlite` | One main conversation and its subagents |
-| `db/projects.json` | Project definitions and source folders |
+| `db/projects/<projectId>/conversations/<threadId>/conversation.sqlite` | One main conversation and its subagents |
+| `db/projects/<projectId>/project.json` | Project definitions and source folders |
 | `db/input_history.json` | Global input history and pinned inputs |
 | `.env` | Application environment variables |
-| `attachments/`, `file_edits/`, `tool_results/` under `db/conversations/<threadId>/` | Attachments, file-edit recovery material and long tool results inside the main conversation directory; removed with that conversation |
+| `attachments/`, `file_edits/`, `tool_results/` under `db/projects/<projectId>/conversations/<threadId>/` | Attachments, file-edit recovery material and long tool results inside the main conversation directory; removed with that conversation |
 | `skills/`, `tools/` | User-managed packages |
 | `subagents/` | Subagent definitions, prompts, and private Skills and tools |
 | `plugins/`, `db/plugins/` | Installed plugins and independent data; uninstalling retains data unless deletion is selected |
@@ -439,14 +439,14 @@ Settings > Dev provides developer tools, logs, and Start in console. Console sta
 
 If startup data cannot load, the recovery page lists affected files. View error details, open logs, and choose:
 
-- **Repair**: restores invalid settings to their defaults while keeping valid settings. Capability selections are checked field by field against the current configuration format. Unrecognized values use the corresponding defaults without translating old formats or resetting the whole file, projects, or conversations. Invalid selection lists without item defaults use the list default. Unparseable files or projects whose identity cannot be determined still require manual repair. Changed fields are listed in the error details.
+- **Repair**: restores invalid settings to their defaults while keeping valid settings. Capability selections are checked field by field against the current configuration format. Unrecognized values use the corresponding defaults without translating old formats or resetting the whole file, projects, or conversations. Invalid selection lists without item defaults use the list default. Unparseable configuration files can still be reset individually. Damaged project definitions are salvaged using their directory identity, with defaults for missing fields. Changes are listed in the error details.
 - **Reset**: configuration reset affects only the selected configuration. **Reset conversation database** clears conversations, runs, shared memory, attachments, tool results and file-edit recovery material while retaining project definitions and settings. **Reset all projects and conversations** also removes all project definitions. Both preserve originals first and retain project source files, other configuration, skills and input history. The confirmation lists the actual files and directories; directories explicitly include all contents. If the execution list changes, refresh and confirm it again.
 
 Before changes, original data is saved beside the data directory under `Anas-Recovery/timestamp-random-suffix/`. If that fails, no changes are made. Restart after recovery.
 
-Application-owned persisted data uses explicit format version `0` as its current baseline. Automatic upgrades and manual recovery are separate: missing or mismatched versions and failed upgrades do not prevent trying **Repair**. Input history and avatar asset errors also open recovery before the main interface loads. Originals are preserved before configuration, input history, avatars, project metadata, and associated databases are salvaged, retaining valid settings, project identities, conversations, and memories where possible. Unrecoverable databases remain unchanged while independent repairs continue, and unresolved issues are listed. Repair does not automatically clear projects or conversations.
+Application-owned persisted data uses explicit format version `0` as its current baseline. Automatic upgrades and manual recovery are separate: missing or mismatched versions and failed upgrades do not prevent trying **Repair**. Input history and avatar asset errors also open recovery before the main interface loads. Originals are preserved before configuration, input history, avatars, project metadata, and associated databases are salvaged, retaining valid settings, project identities, conversations, and memories where possible. Project repair rebuilds the catalog from valid conversations and isolates unrecoverable content from active data while retaining its original bytes in the preservation copy. Required structures are rebuilt and validated for startup before publication. Reports distinguish recovered data from remaining issues so damaged content does not keep blocking access to the application.
 
-Input history can recover readable entries individually while retaining their order and pinned state. Invalid entries remain in the preserved original, and the result reports partial recovery. A nonempty history with no readable entries is not replaced with an empty list. A staged project-deletion file without its corresponding journal is also preserved and does not block project repair.
+Input history can recover readable entries individually while retaining their order and pinned state. Invalid entries remain in the preserved original, and the result reports partial recovery. A nonempty history with no readable entries is not replaced with an empty list. Project repair preserves and isolates unfinished deletion journals and staging files without replaying deletions. Valid pending project writes are used to recover the latest settings.
 
 Avatar repair rebuilds required assets from a readable source, crop, or display image after preserving the originals. If no image can be recovered, it reports the problem without automatically replacing the avatar with the default. Backup imports also validate avatar parameters before replacing data, rejecting unsupported versions or invalid parameters. Missing optional avatar parameters can still be initialized normally.
 

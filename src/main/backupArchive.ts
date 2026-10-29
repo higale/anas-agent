@@ -16,7 +16,7 @@ export const backupArchiveLimits: Readonly<BackupArchiveLimits> = Object.freeze(
 })
 
 export const backupManifestFileName = 'anas-backup.json'
-export const backupManifest = { version: 0, storage_layout: 'db-conversations' } as const
+export const backupManifest = { version: 0, storage_layout: 'project-directories' } as const
 
 // Obsolete layout remains on disk, but is neither exported nor restored.
 const skippedRootDirs = new Set([
@@ -30,6 +30,7 @@ export function shouldSkipBackupRelativePath(relPath: string): boolean {
   return skippedRootDirs.has(first)
     || first.startsWith('.avatar-assets-stage-')
     || normalized === 'projects.json' || normalized === 'input_history.json'
+    || normalized === 'db/projects.json' || normalized === 'db/conversations' || normalized.startsWith('db/conversations/')
     || normalized === 'projects.json.delete-journal' || normalized === 'projects.json.delete-stage'
 }
 

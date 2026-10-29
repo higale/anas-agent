@@ -22,7 +22,7 @@ let root = ''
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'anas-project-lifecycle-'))
-  paths.projectFile = join(root, 'db/projects.json')
+  paths.projectFile = join(root, 'db/projects/state.json')
 })
 
 afterEach(async () => {
@@ -62,7 +62,8 @@ describe('project deletion lifecycle', () => {
       const first = storage.createThread({ projectId: project.id })
       const second = storage.createThread({ projectId: project.id })
       storage.updateThread(second.id, { pinned: true })
-      const other = storage.createThread({ projectId: 'other-project' })
+      const otherProject = await projectStore.createProject({ kind: 'simple_chat', name: 'Other', prompt: '' })
+      const other = storage.createThread({ projectId: otherProject.id })
       await storage.memoryStore.saveMemory({ scope: 'project', projectId: project.id,
         kind: 'fact', content: 'Keep this project memory', keywords: ['keep'], importance: 3 }, { origin: 'user' })
 
@@ -120,13 +121,15 @@ describe('project deletion lifecycle', () => {
     try {
       const first = storage.createThread({ projectId: project.id })
       const second = storage.createThread({ projectId: project.id })
-      const other = storage.createThread({ projectId: 'other-project' })
+      const otherProject = await projectStore.createProject({ kind: 'simple_chat', name: 'Other', prompt: '' })
+      const other = storage.createThread({ projectId: otherProject.id })
 
       const result = await runtime.deleteProject(project.id)
 
       expect(result.projectId).toBe(project.id)
       expect(new Set(result.deletedThreadIds)).toEqual(new Set([first.id, second.id]))
       expect(await projectStore.listProjects()).toEqual([
+        expect.objectContaining({ id: otherProject.id }),
         expect.objectContaining({ id: DEFAULT_WORKSPACE_PROJECT_ID })
       ])
       expect(storage.getThread(first.id)).toBeNull()

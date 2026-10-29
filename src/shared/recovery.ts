@@ -37,6 +37,7 @@ export interface RecoveryRepairResult {
   preservationPath?: string
   repaired: string[]
   unresolved: string[]
+  readyToRestart?: boolean
 }
 
 export interface RecoveryApi {

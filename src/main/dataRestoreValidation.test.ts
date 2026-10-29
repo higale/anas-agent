@@ -1,3 +1,4 @@
+import { writeProjectFixture } from '../test/projectDirectories'
 import type { AgentThreadCreate } from '../shared/agentTypes'
 import { defaultCapabilities, serializeCapabilities } from '@shared/agentCapabilities'
 import { cp, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
@@ -111,7 +112,7 @@ describe('restored native data validation', () => {
 
   it('accepts formal config, project, input history, Skill, custom tool, SQLite, and attachment state', async () => {
     const root = await fixture()
-    await writeText(join(root, 'db/projects.json'), JSON.stringify({
+    await writeProjectFixture(root, {
       version: 0,
       projects: [{
  capabilities: serializeCapabilities(defaultCapabilities), restrict_subagents: false, coding_mode: false, advanced_settings: true, prompt: '',
@@ -134,7 +135,7 @@ describe('restored native data validation', () => {
         createdAt: '2026-08-10T00:00:00.000Z',
         updatedAt: '2026-08-10T00:00:00.000Z'
       }]
-    }))
+    })
     await writeText(join(root, 'db/input_history.json'), JSON.stringify({
       version: 0,
       maxHistory: 10,
@@ -227,8 +228,8 @@ describe('restored native data validation', () => {
 
   it('rejects invalid project and Skill data', async () => {
     const projectRoot = await fixture()
-    await writeText(join(projectRoot, 'db/projects.json'), JSON.stringify({ version: 0, projects: [{ id: 1 }] }))
-    await expect(validateRestoredDataDirectory(projectRoot)).rejects.toThrow('Project 1')
+    await writeProjectFixture(projectRoot, { version: 0, projects: [{ id: 1 }] })
+    await expect(validateRestoredDataDirectory(projectRoot)).rejects.toThrow(/Invalid project UI state/)
 
     const skillRoot = await fixture()
     await writeText(join(skillRoot, 'skills', 'broken', 'SKILL.md'), 'missing front matter')

@@ -2,7 +2,7 @@ import { panelPages } from './panels/panelRegistry'
 import { app, shell } from 'electron'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { getAgentCatalogFile, getAgentConversationsDir, getBundledConfigDir, getDataDir, getLogDir } from './config/dataDir'
+import { getAgentCatalogFile, getProjectsDir, getBundledConfigDir, getDataDir, getLogDir } from './config/dataDir'
 import { handleMainIpc } from './ipcSecurity'
 import { beginApplicationDataTransition } from './applicationDataLifecycle'
 import { closeAgentRuntime } from './agent/agentIpcHandlers'
@@ -97,7 +97,7 @@ export function registerRecoveryIpcHandlers(): void {
     const repair = await inspectRecoveryRepair(getDataDir())
     return {
       dataDir: getDataDir(), logDir: getLogDir(), preservationParent: dirname(getDataDir()),
-      catalogPath: getAgentCatalogFile(), conversationsPath: getAgentConversationsDir(),
+      catalogPath: getAgentCatalogFile(), conversationsPath: getProjectsDir(),
       startupError, stopError, canModify, lastPreservationPath,
       files: repair.files,
       resetTargets: { projects: await inspectResetTargets(false), execution: await inspectResetTargets(true) }

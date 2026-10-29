@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
 import { existsSync, lstatSync, mkdirSync, rmSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
+import { readdir, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { Worker } from 'node:worker_threads'
@@ -11,7 +11,7 @@ import type {
 } from '@shared/agentTypes'
 import { DEFAULT_WORKSPACE_PROJECT_ID } from '@shared/types'
 import {
-  getAgentCatalogFile, getAgentConversationDatabaseFile, getAgentConversationDir, getAgentConversationsDir, getAgentAttachmentsDir, getAgentConversationTempDir, getFileEditRecordsDir
+  getAgentCatalogFile, getAgentConversationDatabaseFile, getAgentConversationDir, getAgentConversationsDir, getAgentAttachmentsDir, getAgentConversationTempDir, getFileEditRecordsDir, getProjectsDir
 } from '../config/dataDir'
 import { measureDirectorySize } from '../dataStorageUsage'
 import { runtimeLog } from '../runtimeLogger'
@@ -90,6 +90,7 @@ interface ConversationConnectionOptions<T> {
 export class AgentStorage<T extends ConversationStorageConnection = NativeConversationDatabase> {
   private readonly conversations = new Map<string, T>()
   private readonly unregisteredCreations = new Set<string>()
+  private readonly creatingProjects = new Map<string, string>()
   private preview?: T
   private closed = false
   private maintaining = false
@@ -105,6 +106,7 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
     this.catalog = new Database(getAgentCatalogFile(this.dataDir))
     try {
       this.initializeCatalog()
+      mkdirSync(getProjectsDir(this.dataDir), { recursive: true })
       this.sharedMemoryStore = new SqliteMemoryStore(this.catalog)
     } catch (error) {
       this.catalog.close()
@@ -130,7 +132,11 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
     const tables = this.catalog.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' LIMIT 1").get()
     if (tables) {
       validateCatalogSchema(this.catalog)
+      if (!existsSync(getProjectsDir(this.dataDir)) && this.catalog.prepare('SELECT 1 FROM agent_conversations LIMIT 1').get()) {
+        throw new Error('Conversation databases are missing; preserve the catalog before repairing project data.')
+      }
       this.catalog.pragma('journal_mode = WAL')
+      this.initializeWorkspaceState()
       return
     }
     if (version !== 0) throw new Error(`Unsupported agent catalog schema ${version}; expected ${catalogVersion}.`)
@@ -162,10 +168,16 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
           draft_model_parameter_preset_id TEXT
         );
       `)
-      this.catalog.prepare('INSERT INTO agent_workspace_state VALUES (1, NULL, ?, NULL, NULL)').run(DEFAULT_WORKSPACE_PROJECT_ID)
+      this.initializeWorkspaceState()
       new SqliteMemoryStore(this.catalog)
       this.catalog.pragma(`user_version = ${catalogVersion}`)
     })()
+  }
+
+  private initializeWorkspaceState(): void {
+    this.catalog.prepare(`INSERT OR IGNORE INTO agent_workspace_state
+      (id, active_thread_id, draft_project_id, draft_model_config_id, draft_model_parameter_preset_id)
+      VALUES (1, NULL, ?, NULL, NULL)`).run(DEFAULT_WORKSPACE_PROJECT_ID)
   }
 
   static validateCatalogBackup(file: string, projectIds: ReadonlySet<string>): string[] {
@@ -179,7 +191,7 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
       if ((database.pragma('foreign_key_check') as unknown[]).length) throw new Error('Agent catalog foreign key check failed.')
       const rows = database.prepare('SELECT id, project_id FROM agent_conversations ORDER BY id').all() as Array<{ id: string; project_id: string }>
       for (const row of rows) {
-        getAgentConversationDatabaseFile(row.id, dirname(dirname(file)))
+        getAgentConversationDatabaseFile(row.id, dirname(dirname(file)), row.project_id)
         if (!projectIds.has(row.project_id)) throw new Error(`Agent conversation references missing project ${row.project_id}.`)
       }
       const invalidLocation = database.prepare(`
@@ -235,10 +247,16 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
     return (this.catalog.prepare('SELECT id FROM agent_conversations WHERE has_queued_inputs = 1 ORDER BY updated_at, id').all() as Array<{ id: string }>).map(({ id }) => id)
   }
 
+  private projectFor(ownerThreadId: string): string {
+    const project = this.getThread(ownerThreadId)?.projectId ?? this.creatingProjects.get(ownerThreadId)
+    if (!project) throw new Error(`Conversation ${ownerThreadId} has no project location.`)
+    return project
+  }
+
   private fileEditStore(ownerThreadId: string): FileEditStore {
-    const root = getFileEditRecordsDir(ownerThreadId, this.dataDir)
+    const root = getFileEditRecordsDir(ownerThreadId, this.dataDir, this.projectFor(ownerThreadId))
     const roots = () => this.listThreads().filter(thread => !this.isConversationDeleting(thread.id))
-      .map(thread => getFileEditRecordsDir(thread.id, this.dataDir))
+      .map(thread => getFileEditRecordsDir(thread.id, this.dataDir, thread.projectId))
     return new FileEditStore(root, {
       roots,
       requestRoot: (requestId) => {
@@ -249,7 +267,7 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
           if (location.owner_thread_id !== ownerThreadId && this.isConversationDeleting(location.owner_thread_id)) {
             throw new Error('File edit conversation is being deleted.')
           }
-          return getFileEditRecordsDir(location.owner_thread_id, this.dataDir)
+          return getFileEditRecordsDir(location.owner_thread_id, this.dataDir, this.projectFor(location.owner_thread_id))
         }
         // Truncating a run may retain recovery material after removing its catalog locator.
         // Search only registered current-layout conversations, never abandoned legacy data.
@@ -260,23 +278,24 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
     })
   }
 
-  openConversation(ownerThreadId: string, options: { create?: boolean; deleting?: boolean } = {}): T {
+  openConversation(ownerThreadId: string, options: { create?: boolean; deleting?: boolean; projectId?: string } = {}): T {
     this.requireOpen()
+    if (options.create && !this.getThread(ownerThreadId)) this.creatingProjects.set(ownerThreadId, options.projectId ?? this.creatingProjects.get(ownerThreadId) ?? DEFAULT_WORKSPACE_PROJECT_ID)
     const deleting = this.isConversationDeleting(ownerThreadId)
     if (deleting && !options.deleting) throw new Error('Conversation deletion is pending; retry deleting this conversation to finish cleanup.')
-    const file = getAgentConversationDatabaseFile(ownerThreadId, this.dataDir)
+    const file = getAgentConversationDatabaseFile(ownerThreadId, this.dataDir, this.projectFor(ownerThreadId))
     const existing = this.conversations.get(ownerThreadId)
     if (existing) return existing
     const thread = this.getThread(ownerThreadId)
     if (!thread && !options.create) throw new Error(`Conversation ${ownerThreadId} was not found.`)
-    const directory = getAgentConversationDir(ownerThreadId, this.dataDir)
+    const directory = getAgentConversationDir(ownerThreadId, this.dataDir, this.projectFor(ownerThreadId))
     if (!thread && existsSync(directory)) throw new Error(`Conversation directory already exists: ${ownerThreadId}`)
     if (existsSync(directory) && !lstatSync(directory).isDirectory()) throw new Error(`Conversation storage is not a directory: ${ownerThreadId}`)
     if (thread && !existsSync(file)) throw new Error(`Conversation database is missing: ${ownerThreadId}`)
     if (existsSync(file) && !lstatSync(file).isFile()) throw new Error(`Conversation database is not a regular file: ${ownerThreadId}`)
     mkdirSync(dirname(file), { recursive: true })
     const database = this.openDatabase(file, {
-      attachmentRoot: getAgentAttachmentsDir(ownerThreadId, this.dataDir),
+      attachmentRoot: getAgentAttachmentsDir(ownerThreadId, this.dataDir, this.projectFor(ownerThreadId)),
       onFileChanges: (runId) => this.onFileChanges?.(ownerThreadId, runId),
       memoryStore: this.sharedMemoryStore,
       temporaryRoot: getAgentConversationTempDir(ownerThreadId, this.dataDir),
@@ -291,7 +310,8 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
     this.conversations.set(ownerThreadId, database)
     if (!thread) this.unregisteredCreations.add(ownerThreadId)
     try {
-      if (thread && !deleting && !database.getThread(ownerThreadId)) throw new Error(`Conversation database does not belong to ${ownerThreadId}.`)
+      if (thread && !deleting && database.getThread(ownerThreadId)?.projectId !== thread.projectId) throw new Error(`Conversation database identity or project does not match ${ownerThreadId}.`)
+      if (thread && database.listThreadIds().some(id => database.getThread(id)?.projectId !== thread.projectId)) throw new Error(`Conversation children cross project boundaries: ${ownerThreadId}`)
       this.refreshConversation(ownerThreadId)
       return database
     } catch (error) {
@@ -304,15 +324,20 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
   createThread(options: AgentThreadCreate = {}, threadId: string = randomUUID()): AgentThread {
     this.requireOpen()
     if (this.getThread(threadId)) throw new Error(`Conversation ${threadId} already exists.`)
-    const database = this.openConversation(threadId, { create: true })
+    this.creatingProjects.set(threadId, options.projectId ?? DEFAULT_WORKSPACE_PROJECT_ID)
+    let database: T
+    try { database = this.openConversation(threadId, { create: true }) }
+    catch (error) { this.creatingProjects.delete(threadId); throw error }
     try {
       const thread = database.createThread(options, threadId)
       this.refreshConversation(threadId)
+      this.creatingProjects.delete(threadId)
       return thread
     } catch (error) {
       this.closeConversation(threadId)
-      rmSync(getAgentConversationDir(threadId, this.dataDir), { recursive: true, force: true })
+      rmSync(getAgentConversationDir(threadId, this.dataDir, this.projectFor(threadId)), { recursive: true, force: true })
       this.unregisteredCreations.delete(threadId)
+      this.creatingProjects.delete(threadId)
       throw error
     }
   }
@@ -322,18 +347,16 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
     const database = this.conversations.get(ownerThreadId)
     const snapshot = database?.readCatalogSnapshot(ownerThreadId)
     if (!snapshot) return
+    if (snapshot.thread.projectId !== this.projectFor(ownerThreadId)) throw new Error(`Conversation project does not match its storage directory: ${ownerThreadId}`)
     writeConversationCatalogSnapshot(this.catalog, snapshot)
     this.unregisteredCreations.delete(ownerThreadId)
+    this.creatingProjects.delete(ownerThreadId)
   }
 
   updateThread(threadId: string, update: AgentThreadUpdate): AgentThread {
+    if ('projectId' in update) throw new Error('Conversation project cannot be changed.')
     const database = this.conversationForThread(threadId)
     const next = database.updateThread(threadId, update)
-    if (update.projectId !== undefined && this.getThread(threadId)) {
-      for (const childId of database.listThreadIds()) {
-        if (childId !== threadId) database.updateThread(childId, { projectId: update.projectId })
-      }
-    }
     this.refreshConversation(this.ownerForThread(threadId)!)
     return next
   }
@@ -408,7 +431,7 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
 
   beginConversationDeletion(ownerThreadId: string): void {
     this.requireOpen()
-    if (FileEditStore.isRootBusy(getFileEditRecordsDir(ownerThreadId, this.dataDir))) {
+    if (FileEditStore.isRootBusy(getFileEditRecordsDir(ownerThreadId, this.dataDir, this.projectFor(ownerThreadId)))) {
       throw new AgentThreadLockedError(ownerThreadId, 'be deleted while its file recovery material is in use')
     }
     this.catalog.prepare('INSERT OR IGNORE INTO agent_conversation_deletions VALUES (?)').run(ownerThreadId)
@@ -420,7 +443,7 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
     const existing = this.conversations.get(ownerThreadId)
     if (existing) return existing
     try {
-      lstatSync(getAgentConversationDatabaseFile(ownerThreadId, this.dataDir))
+      lstatSync(getAgentConversationDatabaseFile(ownerThreadId, this.dataDir, this.projectFor(ownerThreadId)))
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
       throw error
@@ -430,7 +453,6 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
 
   async removeConversation(ownerThreadId: string): Promise<void> {
     this.requireOpen()
-    const file = getAgentConversationDatabaseFile(ownerThreadId, this.dataDir)
     if (!this.getThread(ownerThreadId)) {
       if (!this.unregisteredCreations.has(ownerThreadId)) return
       const database = this.conversations.get(ownerThreadId)
@@ -438,6 +460,7 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
     } else {
       this.beginConversationDeletion(ownerThreadId)
     }
+    const file = getAgentConversationDatabaseFile(ownerThreadId, this.dataDir, this.projectFor(ownerThreadId))
     // The entire database is being discarded; do not read or project damaged data.
     const database = this.conversations.get(ownerThreadId)
     database?.close()
@@ -446,6 +469,7 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
     await rm(dirname(file), { recursive: true, force: true })
     this.catalog.prepare('DELETE FROM agent_conversations WHERE id = ?').run(ownerThreadId)
     this.unregisteredCreations.delete(ownerThreadId)
+    this.creatingProjects.delete(ownerThreadId)
   }
 
   completeProjectDeletion(projectId: string): void {
@@ -455,7 +479,8 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
 
   async getStorageUsage(): Promise<AgentStorageUsageSnapshot> {
     const [conversationBytes, memoryBytes] = await Promise.all([
-      measureDirectorySize(getAgentConversationsDir(this.dataDir)),
+      readdir(getProjectsDir(this.dataDir), { withFileTypes: true }).then(projects => Promise.all(projects.filter(project => project.isDirectory())
+        .map(project => measureDirectorySize(getAgentConversationsDir(this.dataDir, project.name))))).then(sizes => sizes.reduce((sum, size) => sum + size, 0)),
       runStorageWorker<number>(`
         const database = new Database(workerData.file, { readonly: true, fileMustExist: true });
         try {
@@ -477,7 +502,7 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
 
   async compact(): Promise<void> {
     this.requireOpen()
-    const files = this.listThreads().map(({ id }) => getAgentConversationDatabaseFile(id, this.dataDir))
+    const files = this.listThreads().map(({ id, projectId }) => getAgentConversationDatabaseFile(id, this.dataDir, projectId))
     files.push(getAgentCatalogFile(this.dataDir))
     for (const id of [...this.conversations.keys()]) this.closeConversation(id)
     this.preview?.close()

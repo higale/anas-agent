@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { lstat, mkdir, readdir, stat } from 'node:fs/promises'
-import { dirname, relative, sep } from 'node:path'
-import { getAgentCatalogFile, getAgentConversationDatabaseFile, getAgentConversationsDir } from '../config/dataDir'
+import { dirname, join, relative, sep } from 'node:path'
+import { getAgentCatalogFile, getAgentConversationDatabaseFile, getProjectsDir } from '../config/dataDir'
 import { withApplicationDataSnapshot } from '../applicationDataSnapshot'
 
 export interface AgentDatabaseSnapshotFile {
@@ -43,29 +43,35 @@ export async function snapshotAgentStorage(
 async function copyAgentStorage(sourceDataDir: string, destinationDataDir: string): Promise<AgentDatabaseSnapshotFile[]> {
   const catalogPath = getAgentCatalogFile(destinationDataDir)
   if (!await snapshotAgentDatabase(getAgentCatalogFile(sourceDataDir), catalogPath)) {
-    const conversations = await readdir(getAgentConversationsDir(sourceDataDir)).catch((error: NodeJS.ErrnoException) => {
+    const projects = await readdir(getProjectsDir(sourceDataDir), { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return []
       throw error
     })
-    if (conversations.length > 0) throw new Error('Conversation databases exist without an agent catalog.')
+    for (const project of projects) {
+      if (!project.isDirectory()) continue
+      const conversations = await readdir(join(getProjectsDir(sourceDataDir), project.name, 'conversations')).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return []
+        throw error
+      })
+      if (conversations.length) throw new Error('Conversation databases exist without an agent catalog.')
+    }
     return []
   }
   const catalog = new Database(catalogPath, { fileMustExist: true })
-  let conversationIds: string[]
+  let rows: Array<{ id: string; project_id: string }>
   try {
     catalog.pragma('foreign_keys = ON')
     catalog.prepare(`DELETE FROM agent_conversations
       WHERE id IN (SELECT owner_thread_id FROM agent_conversation_deletions)`).run()
-    conversationIds = (catalog.prepare('SELECT id FROM agent_conversations ORDER BY id').all() as Array<{ id: string }>)
-      .map(({ id }) => id)
+    rows = catalog.prepare('SELECT id, project_id FROM agent_conversations ORDER BY id').all() as Array<{ id: string; project_id: string }>
   } finally {
     catalog.close()
   }
 
   const snapshots = [catalogPath]
-  for (const id of conversationIds) {
-    const source = getAgentConversationDatabaseFile(id, sourceDataDir)
-    const destination = getAgentConversationDatabaseFile(id, destinationDataDir)
+  for (const { id, project_id: projectId } of rows) {
+    const source = getAgentConversationDatabaseFile(id, sourceDataDir, projectId)
+    const destination = getAgentConversationDatabaseFile(id, destinationDataDir, projectId)
     const info = await lstat(source)
     if (!info.isFile()) throw new Error(`Conversation database is not a regular file: ${id}`)
     if (!await snapshotAgentDatabase(source, destination)) {
@@ -77,6 +83,6 @@ async function copyAgentStorage(sourceDataDir: string, destinationDataDir: strin
     absPath: path,
     relPath: relative(destinationDataDir, path).split(sep).join('/'),
     size: (await stat(path)).size,
-    ...(path === catalogPath ? { conversationIds } : {})
+    ...(path === catalogPath ? { conversationIds: rows.map(row => row.id) } : {})
   })))
 }

@@ -33,7 +33,6 @@ export interface AgentThreadCreate {
 
 export interface AgentThreadUpdate {
   title?: string
-  projectId?: string
   pinned?: boolean
   /** Null restores a subagent's inherited model selection. Root conversations require an explicit model. */
   modelConfigId?: string | null

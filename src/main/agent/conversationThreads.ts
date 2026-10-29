@@ -128,6 +128,7 @@ export function updateThreadRecord(
   update: AgentThreadUpdate & { status?: AgentThreadStatus }
 ): AgentThread {
   const existing = requireThreadRecord(database, threadId)
+  if ('projectId' in update) throw new Error('Conversation project cannot be changed.')
   if (update.modelConfigId === null && !database.prepare('SELECT 1 FROM agent_subagent_calls WHERE child_thread_id=?').get(threadId)) {
     throw new Error('A root conversation must select its own model.')
   }
@@ -137,7 +138,7 @@ export function updateThreadRecord(
   const next: AgentThread = {
     ...existing,
     title: update.title === undefined ? existing.title : defaultTitle(update.title),
-    projectId: update.projectId ?? existing.projectId,
+
     modelConfigId: update.modelConfigId === undefined ? existing.modelConfigId : update.modelConfigId ?? undefined,
     modelParameterPresetId: update.modelConfigId === null ? undefined : update.modelParameterPresetId === undefined
       ? existing.modelParameterPresetId
@@ -149,7 +150,7 @@ export function updateThreadRecord(
   database.prepare(`
     UPDATE agent_threads
     SET title = @title,
-        project_id = @projectId,
+
         model_config_id = @modelConfigId,
         model_parameter_preset_id = @modelParameterPresetId,
         pinned = @pinned,

@@ -60,12 +60,13 @@ async function verifyModelSelection(launchApplication) {
       skills: { mode: 'off', project: false, entries: [] },
       mcp: { default_mode: 'selected', servers: [] } }
     const timestamp = new Date().toISOString()
-    await mkdir(join(profile, 'db'), { recursive: true })
-    await writeFile(join(profile, 'db/projects.json'), `${JSON.stringify({ version: 0, projects: [{
-      id: 'default-workspace', kind: 'workspace', name: 'Model selection test', pinned: false, collapsed: false,
+    await mkdir(join(profile, 'db/projects/default-workspace'), { recursive: true })
+    await writeFile(join(profile, 'db/projects/default-workspace/project.json'), `${JSON.stringify({ version: 0, project: {
+      id: 'default-workspace', kind: 'workspace', name: 'Model selection test',
       sourceFolders: [workspace], capabilities, restrict_subagents, advanced_settings: true,
       coding_mode: false, prompt: '', createdAt: timestamp, updatedAt: timestamp
-    }] })}\n`)
+    } })}\n`)
+    await writeFile(join(profile, 'db/projects/state.json'), JSON.stringify({ version: 0, storage_layout: 'project-directories', projects: [] }))
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
     application = await launchApplication(profile)
     const page = await application.firstWindow()

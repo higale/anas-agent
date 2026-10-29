@@ -84,8 +84,8 @@ describe('conversation runtime routing', () => {
     await expect(coordinator.deleteProjectThreads('project-a')).rejects.toThrow('is busy')
     expect(storage.getThread(idle.id)).not.toBeNull()
     expect(storage.getThread(busy.id)).not.toBeNull()
-    expect(existsSync(getAgentConversationDatabaseFile(idle.id, directory))).toBe(true)
-    expect(existsSync(getAgentConversationDatabaseFile(busy.id, directory))).toBe(true)
+    expect(existsSync(getAgentConversationDatabaseFile(idle.id, directory, idle.projectId))).toBe(true)
+    expect(existsSync(getAgentConversationDatabaseFile(busy.id, directory, busy.projectId))).toBe(true)
   })
 
   it('deletes the selected project conversations and leaves another project readable', async () => {
@@ -96,8 +96,8 @@ describe('conversation runtime routing', () => {
     const result = await coordinator.deleteProjectThreads('project-a')
     expect(result.deletedThreadIds.sort()).toEqual([first.id, second.id].sort())
     expect(storage.listThreads().map((thread) => thread.id)).toEqual([retained.id])
-    expect(existsSync(getAgentConversationDatabaseFile(first.id, directory))).toBe(false)
-    expect(existsSync(getAgentConversationDatabaseFile(second.id, directory))).toBe(false)
+    expect(existsSync(getAgentConversationDatabaseFile(first.id, directory, first.projectId))).toBe(false)
+    expect(existsSync(getAgentConversationDatabaseFile(second.id, directory, second.projectId))).toBe(false)
     expect((await coordinator.getSnapshot(retained.id)).thread.title).toBe('Retained')
   })
 
@@ -124,7 +124,6 @@ describe('conversation runtime routing', () => {
         submissionId: randomUUID(), runId: randomUUID(), threadId: randomUUID(),
         newThread: { projectId: 'project-a', title: 'Must not start' }, text: 'New work'
       })).rejects.toThrow('being deleted')
-      expect(() => coordinator.updateThread(other.id, { projectId: 'project-a' })).toThrow('target project')
       expect(storage.getThread(other.id)?.projectId).toBe('project-b')
       expect(storage.listThreads()).toHaveLength(2)
     } finally {

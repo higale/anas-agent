@@ -72,7 +72,7 @@ describe('agent conversation storage', () => {
     expect(current.getWorkspaceState().mode).toBe('new_thread')
     const thread = current.createThread({ title: 'New conversation' })
     expect(existsSync(getAgentConversationDatabaseFile(thread.id, root))).toBe(true)
-    expect(existsSync(join(root, 'sqlite', 'conversations', oldThread.id, 'conversation.sqlite'))).toBe(true)
+    expect(existsSync(join(root, 'sqlite', 'projects', DEFAULT_WORKSPACE_PROJECT_ID, 'conversations', oldThread.id, 'conversation.sqlite'))).toBe(true)
     expect(await readFile(join(root, 'sqlite', 'catalog.sqlite'))).toEqual(oldCatalog)
     expect(await readFile(join(rootConversation, 'conversation.sqlite'), 'utf8')).toBe('obsolete conversation data')
     expect(reopen(root, current).listThreads().map(item => item.title)).toEqual(['New conversation'])
@@ -144,18 +144,19 @@ describe('agent conversation storage', () => {
     expect((await current.getStorageUsage()).memories.totalBytes).toBeGreaterThan(0)
   })
 
-  it('persists workspace selection and moves a conversation without moving its file', async () => {
+  it('persists workspace selection and immutable conversation project ownership', async () => {
     const { root, storage } = await fixture()
     const thread = storage.createThread({ projectId: 'first-project' })
-    const file = getAgentConversationDatabaseFile(thread.id, root)
+    const file = getAgentConversationDatabaseFile(thread.id, root, thread.projectId)
     storage.setWorkspaceState({ mode: 'thread', threadId: thread.id })
-    storage.updateThread(thread.id, { projectId: 'second-project', title: 'Moved' })
+    expect(() => storage.updateThread(thread.id, { projectId: 'second-project' } as unknown as import('@shared/agentTypes').AgentThreadUpdate)).toThrow('cannot be changed')
+    storage.updateThread(thread.id, { title: 'Updated' })
     const current = reopen(root, storage)
 
     expect(current.getWorkspaceState()).toEqual({ mode: 'thread', threadId: thread.id })
-    expect(current.getThread(thread.id)).toMatchObject({ title: 'Moved', projectId: 'second-project' })
+    expect(current.getThread(thread.id)).toMatchObject({ title: 'Updated', projectId: 'first-project' })
     expect(existsSync(file)).toBe(true)
-    expect(AgentStorage.validateCatalogBackup(getAgentCatalogFile(root), new Set(['second-project']))).toEqual([thread.id])
+    expect(AgentStorage.validateCatalogBackup(getAgentCatalogFile(root), new Set(['first-project']))).toEqual([thread.id])
   })
 
   it('removes only the selected conversation and resets its active workspace reference', async () => {

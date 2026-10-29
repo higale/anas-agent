@@ -78,7 +78,7 @@ function configuredThread(database: NativeConversationDatabase, input: Parameter
 }
 /** An idle history is a valid native state after editing or conversion. Build
  * that state directly, then reopen through the normal product database. */
-function openHistoryDatabase(messages: ConversationMessage[], summary?: { cutoffIndex: number; content: string }) {
+function openHistoryDatabase(messages: ConversationMessage[], summary?: { cutoffIndex: number; content: string }, projectId?: string) {
   const file = join(testPaths.root, randomUUID() + '.sqlite'), raw = new Database(file)
   const record = (message: ConversationMessage) => {
     const value = { ...message, id: message.id ?? randomUUID() }, id = value.id
@@ -87,7 +87,7 @@ function openHistoryDatabase(messages: ConversationMessage[], summary?: { cutoff
   let thread
   try {
     initializeNativeConversationStorage(raw)
-    thread = createThreadRecord(raw, { modelConfigId: 'preview-model' })
+    thread = createThreadRecord(raw, { modelConfigId: 'preview-model', projectId })
     const summarized = summary ? record({ id: 'summary', kind: 'user', content: summary.content,
       context: { summary: true, summaryId: 'history-summary' } }) : undefined
     const records = messages.map(record)
@@ -596,7 +596,7 @@ describe('native context integration', () => {
 
   it.each(['openai_chat_completions', 'openai_responses', 'anthropic_messages'].flatMap(protocol =>
     [false, true].map(summarized => ({ protocol: protocol as ModelProtocol, summarized }))))(
-    'projects moved simple-chat history before counting or sending ($protocol/summary=$summarized)', async ({ protocol, summarized }) => {
+    'projects simple-chat history before counting or sending ($protocol/summary=$summarized)', async ({ protocol, summarized }) => {
       const snapshot = previewConfig()
       snapshot.providers[0].protocol = protocol
       appConfigMocks.getAppConfigSnapshot.mockImplementation(async () => structuredClone(snapshot))
@@ -607,8 +607,7 @@ describe('native context integration', () => {
         { id: 'old-call', kind: 'assistant', content: 'Reading', calls: [{ id: 'read-call', name: 'read_file', args: { path: 'file.txt' } }] },
         { id: 'old-tool', kind: 'tool', resultFor: 'read-call', content: 'Large tool output '.repeat(1000) },
         { id: 'old-answer', kind: 'assistant', content: 'Inspected' }]
-      const { database, thread: original } = openHistoryDatabase(history, summarized ? { cutoffIndex: history.length, content: 'Previous inspection' } : undefined)
-      const thread = database.updateThread(original.id, { projectId: simple.id })
+      const { database, thread } = openHistoryDatabase(history, summarized ? { cutoffIndex: history.length, content: 'Previous inspection' } : undefined, simple.id)
       const current: ConversationMessage = { id: 'current', kind: 'user', content: 'CURRENT REQUEST', context: { runId: 'moved-chat' } }
       const path = join(testPaths.root, `moved-chat-${protocol}-${summarized}.txt`)
       await writeFile(path, 'Attached evidence '.repeat(20))

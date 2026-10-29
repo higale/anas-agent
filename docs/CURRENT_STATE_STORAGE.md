@@ -31,23 +31,26 @@
     tools/<工具>/TOOL.json         # 可选，可携带脚本和资源
   db/
     catalog.sqlite
-    projects.json
+    project-write.json             # 仅项目定义／界面状态发布事务期间存在
     input_history.json
     plugins/<插件ID>/             # 插件独立数据、通用设置及安装状态
     project-deletion.json          # 仅项目删除事务期间存在
     project-deletion.stage.json
-    conversations/
-      <主对话ID>/
-        conversation.sqlite
-        attachments/<threadId>/<attachmentId>/content.<ext>
-        file_edits/<runId>/<operationId>/...
-        tool_results/<内容哈希>.txt
+    projects/
+      state.json                  # 排序、置顶、折叠与对话显示顺序
+      <项目ID>/
+        project.json              # 项目定义与设置
+        conversations/<主对话ID>/
+          conversation.sqlite
+          attachments/<threadId>/<attachmentId>/content.<ext>
+          file_edits/<runId>/<operationId>/...
+          tool_results/<内容哈希>.txt
   tmp/conversations/<主对话ID>/
     message_edit/
     direction/
 ```
 
-`db/projects.json` 保存项目定义与设置，`db/input_history.json` 保存全局输入历史和置顶输入，`db/plugins/<id>/` 保存所有插件的独立数据、通用设置和安装状态；`anas-installation.json` 记录启用状态和标题栏图标设置。用户插件代码直接位于 `plugins/<id>/`，内置插件位于 `plugins/_system/<id>/`，均无额外的 `package/` 层级。项目重置只删除项目元数据、catalog 及对话资源，保留输入历史和插件数据。项目修复保留同目录其他文件，并在切换前核对源数据未变化。
+`db/projects/<项目ID>/project.json` 保存项目定义与设置，`db/projects/state.json` 只保存按项目 ID 引用的界面状态，`db/input_history.json` 保存全局输入历史和置顶输入，`db/plugins/<id>/` 保存所有插件的独立数据、通用设置和安装状态；`anas-installation.json` 记录启用状态和标题栏图标设置。用户插件代码直接位于 `plugins/<id>/`，内置插件位于 `plugins/_system/<id>/`，均无额外的 `package/` 层级。项目重置只删除项目元数据、catalog 及对话资源，保留输入历史和插件数据。项目修复保留同目录其他文件，并在切换前核对源数据未变化。
 
 子 Agent 定义只从目录包读取。`web-researcher` 和 `project-analyst` 放在 `examples/subagents/`，不自动加载，导入后作为普通用户包使用。仅 `general-purpose` 内置于 `subagents/_system/`，启动时镜像随包内容，不改动用户包；内置定义和全部文件只读，不可删除或改名，能力全开，固定使用父 Agent 的模型，仅允许切换整个 Agent 的启用状态。`config/subagents.json` v1 保存 `order`、`external_directories`（稳定 ID、显示名及绝对路径；缺失默认空列表）和整个 Agent 的 `disabled`，不再保存内置覆盖配置。包内文件不保存宿主启停状态。自定义提示词统一从文件树的 `PROMPT.md` 编辑；内置文件只可预览，定义和文件保存入口均拒绝写入。
 
@@ -59,7 +62,7 @@
 
 定义编辑和删除使用 `subagents/.transaction/` 保存事务记录，配置文件作为提交标记；外部包的暂存与旧目录保留在同一外部卷的 `.anas-subagent-<事务ID>/`，恢复后清理。再次读取前完成恢复，活动工具目录不能替换或删除。本地整包随备份保存，外部包只保存引用、文件需另行备份；未知文件清理保留整个 `subagents/`。此次改造经用户批准，不迁移或读取原 v0 数组配置；原文件保留并报错，需保全后重新创建或导入包。
 
-对话持久资源统一位于 `db/conversations/`，临时草稿仍在 `tmp/conversations/`。开发期间的根目录 `conversations/` 不读取、不迁移、不纳入备份，也不自动删除。
+对话持久资源统一位于 `db/projects/<项目ID>/conversations/`，临时草稿仍在 `tmp/conversations/`。开发期间的根目录 `conversations/` 不读取、不迁移、不纳入备份，也不自动删除。
 
 侧栏默认项目仍是项目数组中的固定 ID 成员，展示时独立置底。项目的可选 `sort_order` 和 `thread_order` 保存手动显示顺序；缺失时沿用自动排序，无需迁移。拖动只调整同组、同置顶状态的条目，不更改项目归属或对话时间。手动排序后的对话按保存顺序显示，新对话置于未置顶条目前，运行状态和消息更新不改变顺序。
 
@@ -67,9 +70,13 @@
 
 [AgentStorage](../src/main/agent/agentStorage.ts) 的 catalog 保存主对话列表、项目归属、库定位、工作区选择及共享记忆。列表查询不打开全部会话库；catalog 的运行状态只是列表投影，会话库保留权威产品状态。
 
-一个主对话及其全部子 Agent 共用物理目录和会话库，各自使用独立的应用 thread ID。目录名使用既有主对话 ID，不新增另一套 session ID。父子关系、运行、审批、效果记录和结果交付可在同库事务内更新。更换项目只修改归属，不搬迁数据库或附件。
+一个主对话及其全部子 Agent 共用物理目录和会话库，各自使用独立的应用 thread ID。目录名使用既有主对话 ID，不新增另一套 session ID。父子关系、运行、审批、效果记录和结果交付可在同库事务内更新。创建时固定项目归属，之后不可更换项目；catalog 的归属决定会话路径，打开时核对库内身份和项目。
 
 [ConversationRuntimeDirectory](../src/main/agent/conversationRuntimeDirectory.ts) 按需创建 runtime，保护运行、审批等待及在途操作持有的连接，按最近使用顺序淘汰空闲连接，最多保留 32 个空闲会话。空闲连接和整份消息状态的内存缓存有独立生命周期。
+
+项目定义和界面状态通过 `db/project-write.json` 发布事务保存，中断后完成已记录的发布；项目删除另使用删除日志协调 catalog 清理。项目改名不改 ID 或目录。缺失界面状态按默认值读取，损坏定义明确报错。
+
+本次项目目录化不迁移、回退读取或恢复旧布局备份。旧 `db/projects.json` 和 `db/conversations/` 不参与启动、读写或项目重置，其存在不影响新布局，原始文件保留；新备份使用 `storage_layout: "project-directories"`，不包含这些旧文件。记忆仍存于 catalog，工具和召回行为不变。
 
 ## 运行中的模型选择
 
@@ -116,7 +123,7 @@ Responses 流式生图结果通过 SDK 的响应转换生成标准图片块供�
 
 [工具图片请求投影](../src/main/agent/conversationContext.ts) 在发送模型、计算上下文和压缩时，将已有后续正常模型响应的工具图片替换为占位说明。原始图片及 artifact 始终保留在消息正文中；未处理图片、工具文本、调用 ID 和用户附件不变。压缩与重试不能截断待处理图片；主子 Agent 各自依据消息状态判断。
 
-[工具结果文件](../src/main/agent/toolResultFile.ts)用于上下文溢出时的文本收缩：先将完整文本（结构化内容为 JSON）原子写入数据目录 `db/conversations/<主对话ID>/tool_results/`，再向本次模型请求提供绝对文件路径和首尾预览；不重跑工具，不修改持久的完整消息，待处理图片不走此收缩。文件按内容哈希命名，重复内容复用路径；写入失败则报错，不返回不存在的引用。它是会话持有的可读副本，不是第二份会话状态。同一主对话内按内容去重；文件纳入备份，随整个对话删除，清缓存或结束单轮运行不删除。读取沿用现有文件工具与权限；Shell、自定义工具等已有内联输出上限和受管输出查询机制保持不变。
+[工具结果文件](../src/main/agent/toolResultFile.ts)用于上下文溢出时的文本收缩：先将完整文本（结构化内容为 JSON）原子写入数据目录 `db/projects/<项目ID>/conversations/<主对话ID>/tool_results/`，再向本次模型请求提供绝对文件路径和首尾预览；不重跑工具，不修改持久的完整消息，待处理图片不走此收缩。文件按内容哈希命名，重复内容复用路径；写入失败则报错，不返回不存在的引用。它是会话持有的可读副本，不是第二份会话状态。同一主对话内按内容去重；文件纳入备份，随整个对话删除，清缓存或结束单轮运行不删除。读取沿用现有文件工具与权限；Shell、自定义工具等已有内联输出上限和受管输出查询机制保持不变。
 
 编辑和重新生成从当前消息选择有效前缀。[NativeHistoryOwner](../src/main/agent/nativeHistoryOwner.ts) 在一次事务中替换当前根状态、截断相关运行和活动、处理移除的子线程并创建新运行输入，先等待受影响执行与清理真正退出。事务失败保留原状态；废弃附件进入持久清理队列，删除失败不撤销编辑或丢弃编辑草稿，重新打开会话时重试。资源清理完成、写入停止且数据库关闭后，删除整个会话目录及其 `tmp/conversations/<主对话ID>/`；目录删除失败仍保留 catalog 删除标记，可在重启后重试，部分删除不会使其他会话失效。
 

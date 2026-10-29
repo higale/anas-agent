@@ -3,6 +3,7 @@ import { catalogVersion, validateCatalogSchema } from './agent/catalogSchema'
 import { copyFile, lstat, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { getProjectsDir } from './config/dataDir'
 
 async function info(path: string) {
   return lstat(path).catch((error: NodeJS.ErrnoException) => {
@@ -13,13 +14,19 @@ async function info(path: string) {
 
 /** Inspect a raw catalog copy, including WAL. Even a read-only SQLite open can
  * create shared-memory bookkeeping, so the original is never opened here. */
-async function executionVersion(root: string): Promise<number | undefined> {
+async function executionVersion(root: string, requireEmptyConversations: boolean): Promise<number | undefined> {
   const file = join(root, 'db', 'catalog.sqlite'), catalog = await info(file)
   const directory = await info(join(root, 'db'))
   if (directory && !directory.isDirectory()) throw new Error('Execution storage must be in a real database directory.')
   const assertEmpty = async () => {
-    const conversations = join(root, 'db', 'conversations'), entries = await info(conversations)
-    if (entries && (!entries.isDirectory() || (await readdir(conversations)).length)
+    const projects = getProjectsDir(root), entries = await info(projects)
+    let hasConversations = false
+    if (entries?.isDirectory()) for (const entry of await readdir(projects, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const conversations = join(projects, entry.name, 'conversations')
+      if (await info(conversations) && (await readdir(conversations)).length) hasConversations = true
+    }
+    if (entries && !entries.isDirectory() || hasConversations
       || await info(join(root, 'db', 'project-deletion.json'))) throw new Error('Execution storage has no catalog; repair the saved data before opening it.')
   }
   if (!catalog) {
@@ -42,7 +49,12 @@ async function executionVersion(root: string): Promise<number | undefined> {
       const version = database.pragma('user_version', { simple: true }) as number
       const tables = database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' LIMIT 1").get()
       if (!tables && version === 0) { await assertEmpty(); return undefined }
-      if (version === catalogVersion) validateCatalogSchema(database)
+      if (version === catalogVersion) {
+        validateCatalogSchema(database)
+        if ((requireEmptyConversations || !await info(getProjectsDir(root))) && database.prepare('SELECT 1 FROM agent_conversations LIMIT 1').get()) {
+          throw new Error('Conversation databases are missing; preserve the catalog before repairing project data.')
+        }
+      }
       return version
     } finally { database.close() }
   } finally { await rm(temporary, { recursive: true, force: true }) }
@@ -50,8 +62,8 @@ async function executionVersion(root: string): Promise<number | undefined> {
 
 
 /** Startup preflight reads a copied catalog and never upgrades saved execution data. */
-export async function validateExecutionStorageDirectory(root: string): Promise<void> {
-  const version = await executionVersion(root)
+export async function validateExecutionStorageDirectory(root: string, options: { requireEmptyConversations?: boolean } = {}): Promise<void> {
+  const version = await executionVersion(root, options.requireEmptyConversations ?? false)
   if (version !== undefined && version !== catalogVersion) {
     throw new Error(`Unsupported execution storage version ${version}; expected catalog ${catalogVersion}. Repair the saved data before opening it; automatic conversion is not supported.`)
   }

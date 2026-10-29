@@ -108,6 +108,8 @@ describe('backup archive extraction', () => {
       { name: 'notes/state.txt', data: Buffer.from('payload') },
       { name: 'log/ignored.log', data: Buffer.from('not restored') },
       { name: 'dev/model-http/ignored.json', data: Buffer.from('not restored') },
+      { name: 'db/projects.json', data: Buffer.from('not restored') },
+      { name: 'db/conversations/old/conversation.sqlite', data: Buffer.from('not restored') },
       { name: 'empty/' }
     ])
 

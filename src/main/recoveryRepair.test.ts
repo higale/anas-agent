@@ -1,3 +1,4 @@
+import { writeProjectFixture, readProjectFixture } from '../test/projectDirectories'
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -67,7 +68,9 @@ describe('field-level recovery', () => {
 
   it('does not create optional stores during inspection or discard history with unreadable items', async () => {
     const { root, data } = await fixture()
-    expect((await inspectRecoveryRepair(data)).candidates).toEqual([])
+    const inspected = await inspectRecoveryRepair(data)
+    expect(inspected.candidates).toEqual([])
+    expect(inspected.files.find(file => file.name === 'projects.json')?.error).toBeUndefined()
     await expect(readFile(join(data, 'db/input_history.json'))).rejects.toMatchObject({ code: 'ENOENT' })
     const before = '{"version":1,"items":[{"text":7}]}'
     await writeFile(join(data, 'db/input_history.json'), before)
@@ -75,6 +78,20 @@ describe('field-level recovery', () => {
     expect(result.unresolved.join('\n')).toContain('items[0] could not be recovered')
     expect(await readFile(join(data, 'db/input_history.json'), 'utf8')).toBe(before)
     expect(await readFile(join(result.preservationPath!, 'data/db/input_history.json'), 'utf8')).toBe(before)
+  })
+
+  it.each([false, true])('distinguishes missing project data with catalog conversations=%s from uninitialized storage', async hasConversation => {
+    const { data } = await fixture()
+    const storage = AgentStorage.openNative(data)
+    try { if (hasConversation) storage.createThread({ title: 'Preserve catalog record' }) } finally { storage.close() }
+    await rm(join(data, 'db/projects'), { recursive: true, force: true })
+    const before = await readFile(join(data, 'db/catalog.sqlite'))
+    const plan = await inspectRecoveryRepair(data)
+    const status = plan.files.find(file => file.name === 'projects.json')!
+    if (hasConversation) expect(status.error).toContain('Conversation databases are missing')
+    else expect(status.error).toBeUndefined()
+    expect(await readFile(join(data, 'db/catalog.sqlite'))).toEqual(before)
+    await expect(readFile(join(data, 'db/projects/state.json'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it.each([0, 1])('recovers readable history independently of bad entries at version %s', async version => {
@@ -386,7 +403,8 @@ describe('field-level recovery', () => {
     raw.order = 'invalid'
     const before = JSON.stringify(raw)
     await writeFile(join(data, 'config/subagents.json'), before)
-    await writeFile(join(data, 'db/projects.json'), '{broken')
+    await mkdir(join(data, 'db/projects'), { recursive: true })
+    await writeFile(join(data, 'db/projects/state.json'), '{broken')
     await mkdir(join(data, 'sqlite'))
     await writeFile(join(data, 'sqlite/agent.sqlite'), 'leave database untouched')
     const result = await repairRecoveryData(data, 'subagents.json', () => preserveRecoveryData(data, root))
@@ -394,7 +412,7 @@ describe('field-level recovery', () => {
     expect(result.unresolved).toEqual([])
     expect((await inspectRecoveryRepair(data)).files.find((file) => file.name === 'projects.json')?.error).toBeTruthy()
     expect(await readFile(join(result.preservationPath!, 'data/config/subagents.json'), 'utf8')).toBe(before)
-    expect(await readFile(join(data, 'db/projects.json'), 'utf8')).toBe('{broken')
+    expect(await readFile(join(data, 'db/projects/state.json'), 'utf8')).toBe('{broken')
     expect(await readFile(join(data, 'sqlite/agent.sqlite'), 'utf8')).toBe('leave database untouched')
     expect((await inspectRecoveryRepair(data)).candidates).toEqual([])
   })
@@ -407,7 +425,7 @@ describe('field-level recovery', () => {
       capabilities: { ...structuredClone(capabilities), subagents: false } }
     const raw = { projects: [project, { ...structuredClone(project), id: 'second-project', name: 'Keep second project' }] }
     const before = JSON.stringify(raw)
-    await writeFile(join(data, 'db/projects.json'), before)
+    await writeProjectFixture(data, raw)
     const storage = AgentStorage.openNative(data)
     const thread = storage.createThread({ title: 'Keep conversation' })
     storage.close()
@@ -416,10 +434,10 @@ describe('field-level recovery', () => {
     expect(plan.files.find((file) => file.name === 'projects.json')?.repairableFields).toHaveLength(3)
     const result = await repairRecoveryData(data, 'projects.json', () => preserveRecoveryData(data, root))
     expect(result.unresolved).toEqual([])
-    expect(result.repaired).toHaveLength(3)
-    expect(JSON.parse(await readFile(join(data, 'db/projects.json'), 'utf8'))).toEqual({ ...raw, version: 0,
+    expect(result.readyToRestart).toBe(true)
+    expect(JSON.parse(await readProjectFixture(data))).toEqual({ ...raw, version: 0,
       projects: raw.projects.map((entry) => ({ ...entry, capabilities: { ...entry.capabilities, subagents: capabilities.subagents } })) })
-    expect(await readFile(join(result.preservationPath!, 'data/db/projects.json'), 'utf8')).toBe(before)
+    expect(JSON.parse(await readProjectFixture(join(result.preservationPath!, 'data')))).toEqual(JSON.parse(before))
     const reopened = AgentStorage.openNative(data)
     try { expect(reopened.getThread(thread.id)?.title).toBe('Keep conversation') } finally { reopened.close() }
     const preserve = vi.fn(async () => '/unused')
@@ -456,7 +474,7 @@ describe('field-level recovery', () => {
     const plan = await inspectRecoveryRepair(data)
     expect(plan.files.find((file) => file.name === 'settings.json')?.repairableFields.length).toBeGreaterThan(0)
     expect(plan.files.find((file) => file.name === 'models.json')?.error).toBeTruthy()
-    expect(plan.files.find((file) => file.name === 'projects.json')?.error).toContain('missing')
+    expect(plan.files.find((file) => file.name === 'projects.json')?.error).toBeUndefined()
     await repairRecoveryData(data, 'settings.json', async () => '/preserved')
     expect(await readFile(join(data, 'config/subagents.json'), 'utf8')).toBe('{"version":0}')
     expect(await readFile(join(data, 'config/models.json'), 'utf8')).toBe('{broken')

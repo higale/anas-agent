@@ -41,7 +41,7 @@ async function verifyDataCleanup(launchApplication) {
     const unknown = ['assets/', 'attachments/', 'config/capabilities.json', 'config/custom_tools.json', 'file_edits/', 'old-backup.zip']
     for (const path of unknown) await file(path.endsWith('/') ? `${path}old.txt` : path)
     await file('cache/tool-results/retained.txt')
-    await file('db/conversations/unregistered/retained.txt')
+    await file('db/projects/default-workspace/conversations/unregistered/retained.txt')
     const snapshot = await page.evaluate(() => globalThis.gale.app.getDataStorageUsage())
     assert.deepEqual(snapshot.unknownFiles, unknown)
     assert.equal(snapshot.cleanup.input_history.hasData, false)
@@ -72,7 +72,7 @@ async function verifyDataCleanup(launchApplication) {
     assert.deepEqual(after.unknownFiles, [])
     assert.equal(after.cleanup.unknown_files.hasData, false)
     assert.equal(await readFile(join(data, 'cache/tool-results/retained.txt'), 'utf8'), 'fixture')
-    assert.equal(await readFile(join(data, 'db/conversations/unregistered/retained.txt'), 'utf8'), 'fixture')
+    assert.equal(await readFile(join(data, 'db/projects/default-workspace/conversations/unregistered/retained.txt'), 'utf8'), 'fixture')
     await page.getByRole('button', { name: '清理...', exact: true }).click()
     await expect(dialog.locator('.data-cleanup-option').filter({ hasText: '未知文件' })).toHaveCount(0)
     assert.deepEqual(pageErrors, [])

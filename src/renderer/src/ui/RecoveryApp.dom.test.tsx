@@ -31,6 +31,20 @@ beforeEach(() => {
 })
 
 describe('RecoveryApp', () => {
+  it('offers restart after usable project recovery while retaining the unrecovered-data report', async () => {
+    const user = userEvent.setup()
+    api.repair.mockImplementation(async () => {
+      api.inspect.mockResolvedValue({ ...snapshot, files: [{ name: 'projects.json', path: '/test/data/db/projects/state.json', repairableFields: [] }] })
+      return { preservationPath: '/test/originals', repaired: ['Catalog rebuilt'], unresolved: ['Damaged conversation retained in preservation copy'], readyToRestart: true }
+    })
+    render(<RecoveryApp />)
+    await user.click(within(await screen.findByRole('group', { name: 'projects.json' })).getByRole('button', { name: 'recovery.repair' }))
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'recovery.repair' }))
+    expect(await screen.findByText('recovery.restart_hint')).toBeVisible()
+    expect(screen.getByText('Damaged conversation retained in preservation copy')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'recovery.restart' }))
+    expect(api.restart).toHaveBeenCalledOnce()
+  })
   it('keeps a partial recovery report visible after the repaired live file passes validation', async () => {
     const user = userEvent.setup()
     const history = { name: 'input_history.json', path: '/test/data/db/input_history.json', repairableFields: ['items'], error: 'One unreadable entry' }

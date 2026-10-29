@@ -80,6 +80,7 @@ export function RecoveryApp() {
         if (result.unresolved.length) {
           setError(result.unresolved.join('\n'))
           if (result.repaired.length) setCompleted((current) => ({ ...current, [file.name]: t('recovery.file_partially_repaired') }))
+          if (result.readyToRestart) setNotice(t('recovery.restart_hint'))
         } else {
           setCompleted((current) => ({ ...current, [file.name]: t('recovery.file_repaired') }))
           setNotice(t('recovery.restart_hint'))

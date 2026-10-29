@@ -24,8 +24,9 @@ import type { RawAppConfig } from './config/rawAppConfig'
 import { parseProjectStore } from './projectStore'
 import { normalizeSkillsConfig } from './skillsStore'
 import { DEFAULT_WORKSPACE_PROJECT_ID } from '@shared/types'
-import { inspectProjectStorageRepair, repairProjectStorage } from './recoveryProjectStorage'
+import { inspectProjectStorageRepair, repairProjectsForStartup, readRepairProjectDocument } from './recoveryProjectStorage'
 import { getInputHistoryFile, getProjectStoreFile } from './config/dataDir'
+import { validateExecutionStorageDirectory } from './executionStorageValidation'
 
 const { version: _projectDefaultsVersion, ...projectDefaults } = projectDefaultsDocument
 type RecordValue = Record<string, unknown>
@@ -283,10 +284,13 @@ export async function inspectRecoveryRepair(dataDir: string): Promise<RecoveryRe
         throw error
       })
       if (!samePath(parent, dirname(path))) throw new Error('Linked configuration directories must be handled manually.')
-      const before = await readRepairFile(path)
+      const before = file === 'projects.json' ? await readRepairProjectDocument(root) : await readRepairFile(path)
       // These optional stores are created by their owners when first needed.
       if (before === undefined && auxiliary) continue
-      if (before === undefined && file === 'projects.json') throw new Error('Project metadata is missing; use project reset to also clear associated database records.')
+      if (before === undefined && file === 'projects.json') {
+        await validateExecutionStorageDirectory(root, { requireEmptyConversations: true })
+        continue
+      }
       const repaired = repairDocument(file, before === undefined ? {} : JSON.parse(before))
       if (repaired.unresolved?.length) status.error = repaired.unresolved.join('\n')
       if (file === 'projects.json') {
@@ -323,15 +327,12 @@ export async function repairRecoveryData(dataDir: string, file: RecoveryFile, pr
   const plan = await inspectRecoveryRepair(dataDir)
   const candidates = plan.candidates.filter((candidate) => candidate.file === file)
   const result: RecoveryRepairResult = { repaired: [], unresolved: [] }
+  if (file === 'projects.json' && (candidates.length || plan.files.some(status => status.name === file && status.error))) {
+    return repairProjectsForStartup(dataDir, value => repairDocument('projects.json', value), preserve)
+  }
   if (!candidates.length) {
     result.unresolved = plan.files.filter((status) => status.name === file && status.error).map((status) => `${file}: ${status.error}`)
     if (result.unresolved.length) result.preservationPath = await preserve()
-    return result
-  }
-  if (file === 'projects.json') {
-    const candidate = candidates[0]
-    Object.assign(result, await repairProjectStorage(dataDir, candidate.before!, candidate.after, preserve))
-    result.repaired = candidate.fields
     return result
   }
   result.preservationPath = await preserve()

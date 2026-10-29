@@ -74,7 +74,7 @@ it('waits for the actual native executor before removing its conversation and pr
   try {
     const saved = await h.directory.submit({ threadId, runId, submissionId: randomUUID(), newThread: { projectId: 'project-a' }, text: 'Task' }, create)
     await entered.promise
-    const retained = h.storage.createThread({ projectId: 'project-b' }), file = getAgentConversationDatabaseFile(threadId, h.root)
+    const retained = h.storage.createThread({ projectId: 'project-b' }), file = getAgentConversationDatabaseFile(threadId, h.root, 'project-a')
     const deleting = h.directory.deleteThread(threadId)
     await vi.waitFor(() => expect(h.storage.isConversationDeleting(threadId)).toBe(true))
     expect(existsSync(file)).toBe(true)
@@ -125,7 +125,7 @@ it('keeps project deletion out of a new native submission and discards only its 
     await expect(h.directory.deleteProject('project-a')).rejects.toThrow('still being created')
     gate.resolve(); await rejected
     expect(h.storage.openedConversations()).toEqual([])
-    expect(existsSync(getAgentConversationDatabaseFile(threadId, h.root))).toBe(false)
+    expect(existsSync(getAgentConversationDatabaseFile(threadId, h.root, 'project-a'))).toBe(false)
     expect(create).not.toHaveBeenCalled()
   } finally { gate.resolve(); await h.close() }
 })

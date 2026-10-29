@@ -118,10 +118,10 @@ describe('file edit store profile binding', () => {
     expect(await readFile(join(workspace, 'second.txt'), 'utf8')).toBe('second.txt')
     expect((await firstStore.loadOperationRecord(firstOperation, requestId)).operationId).toBe(firstOperation)
     expect(await firstStore.listEditRecordsForRequest(requestId)).toHaveLength(1)
-    expect(secondStore.editRecordsDir(requestId)).toBe(join(second, 'db', 'conversations', 'conversation', 'file_edits', requestId))
-    expect(secondStore.editRecordDir(requestId, secondOperation)).toBe(join(second, 'db', 'conversations', 'conversation', 'file_edits', requestId, secondOperation))
+    expect(secondStore.editRecordsDir(requestId)).toBe(join(second, 'db', 'projects', 'default-workspace', 'conversations', 'conversation', 'file_edits', requestId))
+    expect(secondStore.editRecordDir(requestId, secondOperation)).toBe(join(second, 'db', 'projects', 'default-workspace', 'conversations', 'conversation', 'file_edits', requestId, secondOperation))
     expect((await secondStore.listEditRecordsForRequest(requestId)).map(record => record.operationId)).toEqual([secondOperation])
-    expect(await pathExists(join(first, 'db', 'conversations', 'conversation', 'file_edits', requestId, secondOperation))).toBe(false)
+    expect(await pathExists(join(first, 'db', 'projects', 'default-workspace', 'conversations', 'conversation', 'file_edits', requestId, secondOperation))).toBe(false)
 
     const secondRead = secondStore.loadOperationRecord(secondOperation, requestId)
     selectProfile('first')

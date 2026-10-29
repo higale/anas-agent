@@ -70,7 +70,7 @@ it.each([
   const thread = storage.createThread({ title: 'Missing conversation', projectId: 'project-a' })
   const retained = storage.createThread({ title: 'Keep conversation', projectId: 'project-b' })
   storage.conversationForThread(retained.id).updateThread(retained.id, { pinned: true })
-  const directory = getAgentConversationDir(thread.id, root)
+  const directory = getAgentConversationDir(thread.id, root, thread.projectId)
   const temporary = getAgentConversationTempDir(thread.id, root)
   for (const name of ['attachments', 'file_edits', 'tool_results']) {
     await mkdir(join(directory, name), { recursive: true })
@@ -82,7 +82,7 @@ it.each([
   const preservedFiles = ['db/plugins/test-plugin/state.json', 'db/input_history.json']
   for (const name of preservedFiles) await writeFile(join(root, name), `keep ${name}`)
   storage.closeConversation(thread.id)
-  await rm(missing === 'database' ? getAgentConversationDatabaseFile(thread.id, root) : directory, { recursive: true })
+  await rm(missing === 'database' ? getAgentConversationDatabaseFile(thread.id, root, thread.projectId) : directory, { recursive: true })
 
   expect(storage.isConversationDeleting(thread.id)).toBe(false)
   expect(() => coordinator.getSnapshot(thread.id)).toThrow('Conversation database is missing')
@@ -123,7 +123,7 @@ it('waits for an existing runtime to drain even when its database path is unavai
   const thread = storage.createThread()
   const runtime = coordinator.forThread(thread.id)
   vi.spyOn(runtime, 'shutdown').mockResolvedValueOnce({ drained: false, lingeringRunIds: ['active-run'], lingeringCallIds: [] })
-  faults.unavailableFile = getAgentConversationDatabaseFile(thread.id, root)
+  faults.unavailableFile = getAgentConversationDatabaseFile(thread.id, root, thread.projectId)
   await expect(coordinator.deleteThread(thread.id)).rejects.toThrow('before its work stops')
   expect(storage.getThread(thread.id)).not.toBeNull()
   expect(storage.isConversationDeleting(thread.id)).toBe(true)
@@ -135,7 +135,7 @@ it.each(['unreadable', 'corrupt', 'empty', 'unsupported version'] as const)('del
   const { root, storage, coordinator } = await fixture()
   const thread = storage.createThread()
   storage.closeConversation(thread.id)
-  const file = getAgentConversationDatabaseFile(thread.id, root)
+  const file = getAgentConversationDatabaseFile(thread.id, root, thread.projectId)
   if (kind === 'corrupt') await writeFile(file, 'damaged database')
   else if (kind === 'empty') await writeFile(file, '')
   else if (kind === 'unsupported version') {
@@ -156,7 +156,7 @@ it('deletes an open conversation without reading damaged message tables or refre
   vi.spyOn(database, 'getThread').mockImplementation(() => { throw new Error('Damaged message tables') })
   await coordinator.deleteThread(thread.id)
   expect(storage.getThread(thread.id)).toBeNull()
-  expect(existsSync(getAgentConversationDir(thread.id, root))).toBe(false)
+  expect(existsSync(getAgentConversationDir(thread.id, root, thread.projectId))).toBe(false)
 })
 
 it('clears a project containing a corrupt conversation while preserving another project', async () => {
@@ -165,7 +165,7 @@ it('clears a project containing a corrupt conversation while preserving another 
   const healthy = storage.createThread({ projectId: 'broken-project' })
   const retained = storage.createThread({ projectId: 'retained-project' })
   storage.closeConversation(broken.id)
-  await writeFile(getAgentConversationDatabaseFile(broken.id, root), 'invalid database')
+  await writeFile(getAgentConversationDatabaseFile(broken.id, root, broken.projectId), 'invalid database')
   const result = await coordinator.deleteProjectThreads('broken-project')
   expect(new Set(result.deletedThreadIds)).toEqual(new Set([broken.id, healthy.id]))
   expect(storage.listThreads().map(thread => thread.id)).toEqual([retained.id])
@@ -196,17 +196,17 @@ it('keeps cleanup failure retryable after the main thread row has been deleted',
   const { root, storage, coordinator } = await fixture()
   const thread = storage.createThread({ title: 'Attachment cleanup' })
   // Simulate an incomplete external cleanup while the catalog still owns the directory.
-  const damaged = new Database(getAgentConversationDatabaseFile(thread.id, root))
+  const damaged = new Database(getAgentConversationDatabaseFile(thread.id, root, thread.projectId))
   try { damaged.pragma('foreign_keys=ON'); damaged.prepare('DELETE FROM agent_threads WHERE id=?').run(thread.id) }
   finally { damaged.close() }
-  faults.failRm = getAgentConversationDir(thread.id, root)
+  faults.failRm = getAgentConversationDir(thread.id, root, thread.projectId)
   await expect(coordinator.deleteThread(thread.id)).rejects.toThrow('File temporarily in use')
   expect(storage.openedConversation(thread.id)).toBeUndefined()
   expect(storage.isConversationDeleting(thread.id)).toBe(true)
   faults.failRm = ''; faults.partialFile = ''
   await coordinator.deleteThread(thread.id)
   expect(storage.listThreads()).toEqual([])
-  expect(existsSync(getAgentConversationDatabaseFile(thread.id, root))).toBe(false)
+  expect(existsSync(getAgentConversationDatabaseFile(thread.id, root, thread.projectId))).toBe(false)
 })
 
 it('keeps online backups restorable while deletion waits and ordinary execution commits continue', async () => {
@@ -254,7 +254,7 @@ it('omits accepted pending deletions from the backup catalog without changing th
   const destination = await mkdtemp(join(tmpdir(), 'anas-pending-deletion-backup-'))
   roots.push(destination)
   const files = await snapshotAgentStorage(root, destination)
-  expect(files.map(file => file.relPath)).toEqual(['db/catalog.sqlite', `db/conversations/${retained.id}/conversation.sqlite`])
+  expect(files.map(file => file.relPath)).toEqual(['db/catalog.sqlite', `db/projects/default-workspace/conversations/${retained.id}/conversation.sqlite`])
   expect(storage.isConversationDeleting(deleted.id)).toBe(true)
   const copied = AgentStorage.openNative(destination)
   try { expect(copied.listThreads().map(thread => thread.id)).toEqual([retained.id]) } finally { copied.close() }
@@ -269,7 +269,7 @@ it('deletes the whole conversation and its temporary drafts while preserving oth
   await writeFile(source, 'attachment')
   const attachments = await archiveAgentAttachments([{ path: source, name: 'original.txt', size: 10,
     mimeType: 'text/plain', kind: 'text', contextPolicy: 'conversation' }],
-    { threadId: first.id, runId: 'run', messageId: 'message' }, getAgentAttachmentsDir(first.id, root))
+    { threadId: first.id, runId: 'run', messageId: 'message' }, getAgentAttachmentsDir(first.id, root, first.projectId))
   const result = await saveToolResultFile('long tool output', database.resources.toolResultsRoot)
   const otherResult = await saveToolResultFile('long tool output', other.resources.toolResultsRoot)
   expect(result).not.toBe(otherResult)
@@ -285,9 +285,9 @@ it('deletes the whole conversation and its temporary drafts while preserving oth
   await writeFile(join(root, 'cache', 'shared.json'), 'shared cache')
   await rm(join(root, 'cache'), { recursive: true })
   expect(await readFile(result, 'utf8')).toBe('long tool output')
-  expect(attachments[0].artifact.path.startsWith(getAgentConversationDir(first.id, root))).toBe(true)
+  expect(attachments[0].artifact.path.startsWith(getAgentConversationDir(first.id, root, first.projectId))).toBe(true)
   await coordinator.deleteThread(first.id)
-  expect(existsSync(getAgentConversationDir(first.id, root))).toBe(false)
+  expect(existsSync(getAgentConversationDir(first.id, root, first.projectId))).toBe(false)
   expect(existsSync(getAgentConversationTempDir(first.id, root))).toBe(false)
   expect(await readFile(otherResult, 'utf8')).toBe('long tool output')
   expect(await readFile(source, 'utf8')).toBe('attachment')

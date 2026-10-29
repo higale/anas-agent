@@ -1,3 +1,4 @@
+import { writeProjectFixture } from '../test/projectDirectories'
 import Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
 import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
@@ -10,7 +11,7 @@ import { DEFAULT_WORKSPACE_PROJECT_ID } from '../shared/types'
 import { AgentStorage } from './agent/agentStorage'
 import { snapshotAgentStorage } from './agent/agentDatabaseBackup'
 import { NativeConversationDatabase } from './agent/nativeConversationDatabase'
-import { configFileNames, getAgentAttachmentsDir, getAgentCatalogFile, getAgentConversationDatabaseFile, getProjectStoreFile } from './config/dataDir'
+import { configFileNames, getAgentAttachmentsDir, getAgentCatalogFile, getAgentConversationDatabaseFile } from './config/dataDir'
 import { validateRestoredDataDirectory } from './dataRestoreValidation'
 import { inspectProjectStorageRepair, repairProjectStorage } from './recoveryProjectStorage'
 import { preserveRecoveryData } from './recoveryData'
@@ -51,9 +52,11 @@ async function fixture() {
   const projects = JSON.stringify({ version: 0, projects: [{ ...defaults, id: DEFAULT_WORKSPACE_PROJECT_ID,
     kind: 'workspace', name: 'Workspace', pinned: false, collapsed: false, sourceFolders: [], restrict_subagents: false,
     capabilities: serializeCapabilities(defaultCapabilities), createdAt: '2026-10-27T00:00:00Z', updatedAt: '2026-10-27T00:00:00Z' }] })
-  await writeFile(getProjectStoreFile(root), projects)
+  await writeProjectFixture(root, JSON.parse(projects))
+  const repairDocument = await import('./recoveryProjectStorage').then(module => module.readRepairProjectDocument(root))
+  if (repairDocument === undefined) throw new Error('Project fixture must contain definitions.')
   await Promise.resolve()
-  return { root, storage, thread, pending, runId, pendingRunId, projects, snapshot: database.readSnapshot(thread.id),
+  return { root, storage, thread, pending, runId, pendingRunId, projects: repairDocument, snapshot: database.readSnapshot(thread.id),
     file: getAgentConversationDatabaseFile(thread.id, root), pendingFile: getAgentConversationDatabaseFile(pending.id, root) }
 }
 function mutate(file: string, sql: string) { const raw = new Database(file); try { raw.exec(sql) } finally { raw.close() } }
@@ -67,7 +70,7 @@ it('preserves unsupported legacy execution databases during explicit repair inst
   await mkdir(getAgentAttachmentsDir(catalog.metadata.thread.id, f.root), { recursive: true })
   await writeFile(getAgentCatalogFile(f.root), catalog.bytes)
   await writeFile(file, conversation.bytes)
-  await writeFile(getProjectStoreFile(f.root), f.projects)
+  await writeProjectFixture(f.root, JSON.parse(f.projects))
   const preserved = await directory()
   const result = await repairProjectStorage(f.root, f.projects, f.projects, () => preserveRecoveryData(f.root, preserved))
   expect(result.unresolved).toHaveLength(2)
@@ -81,7 +84,7 @@ it('backs up committed native WAL with history, queued attachments, memory and u
   await cp(join(f.root, 'config'), join(destination, 'config'), { recursive: true })
   await cp(join(f.root, 'subagents'), join(destination, 'subagents'), { recursive: true })
   await snapshotAgentStorage(f.root, destination)
-  await cp(getProjectStoreFile(f.root), getProjectStoreFile(destination))
+  await writeProjectFixture(destination, JSON.parse(f.projects))
   await cp(getAgentAttachmentsDir(f.thread.id, f.root), getAgentAttachmentsDir(f.thread.id, destination), { recursive: true })
   await expect(validateRestoredDataDirectory(destination)).resolves.toBeUndefined()
   const restored = open(destination), database = restored.conversationForThread(f.thread.id)
@@ -150,7 +153,7 @@ it('preserves an unrepairable native conversation and salvages independent versi
   expect(result.unresolved).toHaveLength(1)
   expect(result.unresolved[0]).toContain(f.thread.id)
   expect(await readFile(f.file)).toEqual(damaged)
-  expect(await readFile(join(result.preservationPath, 'data/db/conversations', f.thread.id, 'conversation.sqlite'))).toEqual(damaged)
+  expect(await readFile(join(result.preservationPath, 'data/db/projects/default-workspace/conversations', f.thread.id, 'conversation.sqlite'))).toEqual(damaged)
   const raw = new Database(f.pendingFile, { readonly: true })
   try { expect(raw.pragma('user_version', { simple: true })).toBe(1) } finally { raw.close() }
   NativeConversationDatabase.validateBackup(f.pendingFile, getAgentAttachmentsDir(f.pending.id, f.root), new Set([DEFAULT_WORKSPACE_PROJECT_ID]), f.pending.id)
