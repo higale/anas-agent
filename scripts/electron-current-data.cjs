@@ -20,6 +20,9 @@ async function verifyCurrentData(launchApplication) {
     const ignoredProjectFiles = ['db/projects.json', 'db/conversations/old/conversation.sqlite']
     await mkdir(join(root, 'db/conversations/old'), { recursive: true })
     for (const file of ignoredProjectFiles) await writeFile(join(root, file), 'ignored old layout')
+    await mkdir(join(root, 'db/projects/personal notes'), { recursive: true })
+    await writeFile(join(root, 'db/projects/.DS_Store'), 'Finder metadata')
+    await writeFile(join(root, 'db/projects/personal notes/notes.txt'), 'User notes')
     await cp(resolve(__dirname, '../data/examples/tools/read_text_raw'), join(root, 'tools/read_text_raw'), { recursive: true })
     application = await launchApplication(root)
     const page = await application.firstWindow()
@@ -45,6 +48,8 @@ async function verifyCurrentData(launchApplication) {
     assert.equal(await readFile(join(root, 'input_history.json'), 'utf8'), 'abandoned input history')
     await mkdir(join(root, 'sqlite'), { recursive: true })
     await writeFile(join(root, 'sqlite/agent.sqlite'), 'Keep unrelated historical data')
+    await mkdir(join(root, 'db/projects/default-workspace/conversations/empty-folder'), { recursive: true })
+    await writeFile(join(root, 'db/projects/default-workspace/conversations/.DS_Store'), 'Finder metadata')
     application = await launchApplication(root)
     await expect((await application.firstWindow()).locator('[data-agent-composer-input]')).toBeVisible({ timeout: 20000 })
     const projectCreated = await (await application.firstWindow()).evaluate(() => globalThis.gale.projects.create({

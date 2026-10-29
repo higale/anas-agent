@@ -15,6 +15,7 @@ import { readInputHistoryStoreFile } from './inputHistoryStore'
 import { readProjectStoreFile } from './projectStore'
 import { validateRestoredSkillsDirectory, validateSkillsConfigFile } from './skillsStore'
 import { DEFAULT_WORKSPACE_PROJECT_ID } from '@shared/types'
+import { isConversationStorageEntry, isProjectDirectoryId } from './projectStorageEntries'
 
 async function exists(path: string): Promise<boolean> {
   try {
@@ -36,7 +37,8 @@ export async function validateRestoredDataDirectory(root: string): Promise<void>
     if (error.code === 'ENOENT') return []
     throw error
   })
-  const hasDefinitions = (await Promise.all(definitions.filter(entry => entry.isDirectory()).map(entry => exists(join(getProjectsDir(root), entry.name, 'project.json'))))).some(Boolean)
+  const hasDefinitions = (await Promise.all(definitions.filter(entry => entry.isDirectory() && isProjectDirectoryId(entry.name))
+    .map(entry => exists(join(getProjectsDir(root), entry.name, 'project.json'))))).some(Boolean)
   if (await exists(projects) || hasDefinitions) {
     const store = await readProjectStoreFile(projects)
     for (const project of store.projects) projectIds.add(project.id)
@@ -60,6 +62,7 @@ export async function validateRestoredDataDirectory(root: string): Promise<void>
     if (!await exists(conversationsDir)) continue
     if (!(await lstat(conversationsDir)).isDirectory()) throw new Error('Conversation storage is not a directory.')
     for (const entry of await readdir(conversationsDir, { withFileTypes: true })) {
+      if (!isConversationStorageEntry(conversationsDir, entry, locations.has(entry.name))) continue
       if (!entry.isDirectory() || locations.get(entry.name) !== projectId) throw new Error(`Unexpected conversation storage entry: ${entry.name}`)
     }
   }

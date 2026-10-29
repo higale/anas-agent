@@ -3,6 +3,7 @@ export { replaceProjectData } from './dataReplacement'
 import { createWriteStream } from 'node:fs'
 import { app } from 'electron'
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat } from 'node:fs/promises'
+import { isProjectStorageEntry } from './projectStorageEntries'
 import { hostname } from 'node:os'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
@@ -345,7 +346,7 @@ export async function inspectResetTargets(executionOnly: boolean): Promise<Recov
       if (error.code === 'ENOENT') return []
       throw error
     })
-    for (const project of projects) if (project.isDirectory()) {
+    for (const project of projects) if (project.isDirectory() && isProjectStorageEntry(getProjectsDir(getDataDir()), project)) {
       getProjectDir(project.name, getDataDir())
       entries.push(`db/projects/${project.name}/conversations`)
     }

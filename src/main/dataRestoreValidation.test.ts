@@ -146,6 +146,10 @@ describe('restored native data validation', () => {
     await writeText(join(root, 'config/tools.json'), JSON.stringify({ version: 0, order: ['user:example-read-text-raw'], external_directories: [] }))
     await seedStorage(root, 'projects')
 
+    for (const directory of ['db/projects', 'db/projects/default-workspace/conversations', 'db/projects/project-1/conversations']) {
+      await writeText(join(root, directory, '.DS_Store'), 'Finder metadata')
+    }
+
     await expect(validateRestoredDataDirectory(root)).resolves.toBeUndefined()
   })
 

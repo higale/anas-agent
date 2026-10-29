@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
 import { existsSync, lstatSync, mkdirSync, rmSync } from 'node:fs'
 import { readdir, rm } from 'node:fs/promises'
+import { isProjectStorageEntry } from '../projectStorageEntries'
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { Worker } from 'node:worker_threads'
@@ -479,7 +480,7 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
 
   async getStorageUsage(): Promise<AgentStorageUsageSnapshot> {
     const [conversationBytes, memoryBytes] = await Promise.all([
-      readdir(getProjectsDir(this.dataDir), { withFileTypes: true }).then(projects => Promise.all(projects.filter(project => project.isDirectory())
+      readdir(getProjectsDir(this.dataDir), { withFileTypes: true }).then(projects => Promise.all(projects.filter(project => project.isDirectory() && isProjectStorageEntry(getProjectsDir(this.dataDir), project))
         .map(project => measureDirectorySize(getAgentConversationsDir(this.dataDir, project.name))))).then(sizes => sizes.reduce((sum, size) => sum + size, 0)),
       runStorageWorker<number>(`
         const database = new Database(workerData.file, { readonly: true, fileMustExist: true });

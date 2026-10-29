@@ -4,6 +4,7 @@ import { copyFile, lstat, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { getProjectsDir } from './config/dataDir'
+import { isConversationStorageEntry, isProjectStorageEntry } from './projectStorageEntries'
 
 async function info(path: string) {
   return lstat(path).catch((error: NodeJS.ErrnoException) => {
@@ -22,9 +23,10 @@ async function executionVersion(root: string, requireEmptyConversations: boolean
     const projects = getProjectsDir(root), entries = await info(projects)
     let hasConversations = false
     if (entries?.isDirectory()) for (const entry of await readdir(projects, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue
+      if (!entry.isDirectory() || !isProjectStorageEntry(projects, entry)) continue
       const conversations = join(projects, entry.name, 'conversations')
-      if (await info(conversations) && (await readdir(conversations)).length) hasConversations = true
+      if ((await info(conversations))?.isDirectory()
+        && (await readdir(conversations, { withFileTypes: true })).some(child => isConversationStorageEntry(conversations, child))) hasConversations = true
     }
     if (entries && !entries.isDirectory() || hasConversations
       || await info(join(root, 'db', 'project-deletion.json'))) throw new Error('Execution storage has no catalog; repair the saved data before opening it.')

@@ -13,6 +13,7 @@ import { readConversationCatalogSnapshot, writeConversationCatalogSnapshot } fro
 import { DEFAULT_WORKSPACE_PROJECT_ID } from '@shared/types'
 import { defaultCapabilities, defaultRestrictSubagents, serializeCapabilities } from '@shared/agentCapabilities'
 import projectDefaultsDocument from '../../data/config/projects.json'
+import { isConversationStorageEntry, isProjectStorageEntry } from './projectStorageEntries'
 
 const projectStateFields = ['pinned', 'collapsed', 'sort_order', 'thread_order'] as const
 function projectUiState(value: unknown): Record<string, unknown> {
@@ -31,7 +32,7 @@ export async function readRepairProjectDocument(root: string): Promise<string | 
     if (error.code === 'ENOENT') return []
     throw error
   })
-  if (rawState === undefined && entries.every(entry => entry.isFile() && entry.name.endsWith('.tmp'))) return undefined
+  if (rawState === undefined && !entries.some(entry => isProjectStorageEntry(directory, entry))) return undefined
   const state = rawState === undefined ? { version: 0, storage_layout: 'project-directories', projects: [] } : JSON.parse(rawState)
   const projects: Record<string, unknown>[] = []
   const directoryRepairs: string[] = []
@@ -46,7 +47,8 @@ export async function readRepairProjectDocument(root: string): Promise<string | 
     if (typeof value?.id === 'string') seen.add(value.id)
   }
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue
+    if (!isProjectStorageEntry(directory, entry, seen.has(entry.name))) continue
+    if (!entry.isDirectory()) { directoryRepairs.push(`${entry.name}/project.json`); continue }
     const document = JSON.parse(await readFile(join(directory, entry.name, 'project.json'), 'utf8'))
     if (document.project?.id !== entry.name) throw new Error(`Project directory identity mismatch: ${entry.name}`)
     if (document.version !== 0) directoryRepairs.push(`${entry.name}/project.json.version`)
@@ -326,8 +328,9 @@ export async function repairProjectsForStartup(
       pinned: false, collapsed: false, sourceFolders: [], createdAt: timestamp, updatedAt: timestamp })
     const base = defaultProject(DEFAULT_WORKSPACE_PROJECT_ID)
     const definitions = new Map<string, Record<string, unknown>>([[DEFAULT_WORKSPACE_PROJECT_ID, base]])
+    const registeredProjects = new Set(Array.isArray(state?.projects) ? state.projects.map(value => value?.id) : [])
     for (const entry of await readdir(projectsRoot, { withFileTypes: true })) {
-      if (entry.name === 'state.json') continue
+      if (!isProjectStorageEntry(projectsRoot, entry, registeredProjects.has(entry.name))) continue
       const directory = join(projectsRoot, entry.name)
       try {
         getProjectDir(entry.name, staged)
@@ -410,6 +413,7 @@ export async function repairProjectsForStartup(
         if (!info) continue
         if (!info.isDirectory()) { await isolate(directory, `Project ${projectId}: invalid conversation directory`); continue }
         for (const entry of await readdir(directory, { withFileTypes: true })) {
+          if (!isConversationStorageEntry(directory, entry, originalOwners.includes(entry.name))) continue
           const conversation = join(directory, entry.name)
           unresolved.push(...salvageIssues.filter(issue => issue.startsWith(`db/projects/${projectId}/conversations/${entry.name}/conversation.sqlite:`)))
           try {

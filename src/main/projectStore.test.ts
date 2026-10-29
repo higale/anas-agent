@@ -65,6 +65,26 @@ afterEach(async () => {
 })
 
 describe('project store', () => {
+  it.each(['.DS_Store', '._state.json', '.localized', 'Thumbs.db', 'desktop.ini', '.directory'])('ignores desktop metadata %s without changing it during initialization or reads', async name => {
+    const store = await import('./projectStore')
+    await mkdir(join(tempDir, 'db/projects'))
+    const metadata = join(tempDir, 'db/projects', name)
+    await writeFile(metadata, 'Desktop metadata')
+    expect(await store.listProjects()).toMatchObject([{ id: DEFAULT_WORKSPACE_PROJECT_ID }])
+    const project = await store.createProject({ kind: 'simple_chat', name: 'Retained', prompt: 'Keep this prompt' })
+    expect(await store.getProject(project.id)).toMatchObject({ prompt: 'Keep this prompt' })
+    expect(await readFile(metadata, 'utf8')).toBe('Desktop metadata')
+  })
+
+  it.each(['personal notes', '.cache', 'unrelated', 'notes.txt'])('ignores unrelated directory %s and preserves its contents', async name => {
+    const store = await import('./projectStore')
+    const path = join(tempDir, 'db/projects', name, 'conversations')
+    await mkdir(path, { recursive: true })
+    await writeFile(join(path, 'notes.txt'), 'User notes')
+    expect(await store.listProjects()).toMatchObject([{ id: DEFAULT_WORKSPACE_PROJECT_ID }])
+    expect(await readFile(join(path, 'notes.txt'), 'utf8')).toBe('User notes')
+  })
+
   it('separates definitions from UI state and defaults missing state without rewriting definitions', async () => {
     const store = await import('./projectStore')
     const project = await store.createProject({ kind: 'simple_chat', name: 'Separate', prompt: 'Keep this prompt' })
@@ -95,7 +115,8 @@ describe('project store', () => {
 
   it('refuses incomplete current directories without creating replacement data', async () => {
     const store = await import('./projectStore')
-    await mkdir(join(tempDir, 'db/projects/incomplete'), { recursive: true })
+    await mkdir(join(tempDir, 'db/projects/incomplete/conversations/retained'), { recursive: true })
+    await writeFile(join(tempDir, 'db/projects/incomplete/conversations/retained/conversation.sqlite'), 'Retained database')
     await expect(store.listProjects()).rejects.toThrow('definition is missing')
     await expect(readFile(storePaths.projectFile)).rejects.toMatchObject({ code: 'ENOENT' })
   })

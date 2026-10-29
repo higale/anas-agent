@@ -17,6 +17,17 @@ it('leaves a fresh directory empty for native initialization', async () => {
   expect(await readdir(root)).toEqual([])
 })
 
+it('ignores desktop metadata in an otherwise empty conversation collection without hiding stored conversations', async () => {
+  const root = await directory(), conversations = join(root, 'db/projects/default-workspace/conversations')
+  await mkdir(conversations, { recursive: true })
+  await writeFile(join(conversations, '.DS_Store'), 'Finder metadata')
+  await expect(validateExecutionStorageDirectory(root)).resolves.toBeUndefined()
+  await mkdir(join(conversations, 'retained-conversation'))
+  await expect(validateExecutionStorageDirectory(root)).resolves.toBeUndefined()
+  await writeFile(join(conversations, 'retained-conversation/conversation.sqlite'), 'Actual conversation data')
+  await expect(validateExecutionStorageDirectory(root)).rejects.toThrow('no catalog')
+})
+
 it('ignores previous-layout files while initializing and reopening current storage', async () => {
   const root = await directory()
   await mkdir(join(root, 'db/conversations/old'), { recursive: true })
@@ -48,6 +59,8 @@ it.each(['missing', 'empty'])('preserves orphan conversations when the catalog i
   await mkdir(join(root, 'db/projects/default-workspace/conversations/orphan'), { recursive: true })
   await writeFile(material, 'keep')
   if (kind === 'empty') new Database(join(root, 'db/catalog.sqlite')).close()
+  await expect(validateExecutionStorageDirectory(root)).resolves.toBeUndefined()
+  await writeFile(join(root, 'db/projects/default-workspace/conversations/orphan/conversation.sqlite'), 'Recoverable database evidence')
   await expect(validateExecutionStorageDirectory(root)).rejects.toThrow('has no catalog')
   expect(await readFile(material, 'utf8')).toBe('keep')
 })

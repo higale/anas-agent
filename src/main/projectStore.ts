@@ -9,6 +9,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { getDefaultWorkspaceDir, getProjectStoreFile } from './config/dataDir'
+import { isProjectDirectoryId, isProjectStorageEntry } from './projectStorageEntries'
 import { PROJECT_ICON_COLORS, PROJECT_ICON_NAMES } from '@shared/projectAppearance'
 import { defaultCapabilities, defaultProjectSettings, defaultRestrictSubagents, parseCapabilities, serializeCapabilities, validateCapabilities } from '@shared/agentCapabilities'
 import {
@@ -146,7 +147,7 @@ export async function readProjectStoreFile(path: string): Promise<StoredProjects
     }
     const projects: unknown[] = []
     for (const entry of readdirSync(root, { withFileTypes: true })) {
-      if (entry.name === 'state.json' || entry.isFile() && entry.name.endsWith('.tmp')) continue
+      if (!isProjectStorageEntry(root, entry, states.has(entry.name))) continue
       if (!entry.isDirectory()) throw new Error(`Invalid project directory: ${entry.name}`)
       validateProjectDirectoryId(entry.name)
       const file = join(root, entry.name, 'project.json')
@@ -165,7 +166,7 @@ export async function readProjectStoreFile(path: string): Promise<StoredProjects
 }
 
 function validateProjectDirectoryId(id: string): void {
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(id) || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(id)) throw new Error('Invalid project directory ID.')
+  if (!isProjectDirectoryId(id)) throw new Error('Invalid project directory ID.')
 }
 
 function writeAtomicSync(path: string, value: unknown): void {

@@ -60,6 +60,10 @@ export async function runPackagedSmoke(): Promise<void> {
       }
     } finally { await imageFile.close() }
     configureDataRuntime([process.execPath, '--data-dir=' + root])
+    await mkdir(join(root, 'db/projects/personal notes'), { recursive: true })
+    await mkdir(join(root, 'db/projects/unrelated'))
+    await writeFile(join(root, 'db/projects/.DS_Store'), 'Finder metadata')
+    await writeFile(join(root, 'db/projects/personal notes/notes.txt'), 'Preserve unrelated content')
     const { initializeBundledExamples } = await import('./bundledExamples')
     const { PluginStore } = await import('./plugins/pluginStore')
     await initializeBundledExamples()

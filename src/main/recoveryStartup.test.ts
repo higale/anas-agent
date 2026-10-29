@@ -12,6 +12,7 @@ import { readProjectStoreFile } from './projectStore'
 import { inspectRecoveryRepair, repairRecoveryData } from './recoveryRepair'
 import { preserveRecoveryData } from './recoveryData'
 import { validateExecutionStorageDirectory } from './executionStorageValidation'
+import { validateRestoredDataDirectory } from './dataRestoreValidation'
 
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
@@ -34,6 +35,44 @@ async function fixture(parentDirectory = tmpdir()) {
   storage.close()
   return { parent, root, good, bad, document }
 }
+
+it('keeps desktop metadata from triggering or blocking repair, startup and restore validation', async () => {
+  const f = await fixture()
+  const metadata = ['db/projects/.DS_Store', 'db/projects/default-workspace/conversations/.DS_Store']
+  for (const path of metadata) await writeFile(join(f.root, path), 'Finder metadata')
+  const status = (await inspectRecoveryRepair(f.root)).files.find(file => file.name === 'projects.json')!
+  expect(status.error).toBeFalsy()
+  expect(status.repairableFields).toEqual([])
+  await expect(readProjectStoreFile(getProjectStoreFile(f.root))).resolves.toBeDefined()
+  const db = new Database(join(f.root, 'db/catalog.sqlite'))
+  db.pragma('user_version=99'); db.close()
+  const repaired = await repairRecoveryData(f.root, 'projects.json', () => preserveRecoveryData(f.root, f.parent))
+  expect(repaired.readyToRestart).toBe(true)
+  expect(repaired.unresolved).toEqual([])
+  await cp(join(process.cwd(), 'data/subagents'), join(f.root, 'subagents'), { recursive: true })
+  await validateRestoredDataDirectory(f.root)
+  for (const path of metadata) expect(await readFile(join(f.root, path), 'utf8')).toBe('Finder metadata')
+})
+
+it('ignores unrelated files and directories and retains them through independent data repair', async () => {
+  const f = await fixture()
+  await writeFile(join(f.root, 'db/projects/unexpected.txt'), 'Preserve unexpected data')
+  await mkdir(join(f.root, 'db/projects/personal notes'), { recursive: true })
+  await writeFile(join(f.root, 'db/projects/personal notes/notes.txt'), 'User notes')
+  await mkdir(join(f.root, 'db/projects/default-workspace/conversations/empty-folder'))
+  const status = (await inspectRecoveryRepair(f.root)).files.find(file => file.name === 'projects.json')!
+  expect(status.error).toBeFalsy()
+  expect(status.repairableFields).toEqual([])
+  const db = new Database(join(f.root, 'db/catalog.sqlite'))
+  db.pragma('user_version=99'); db.close()
+  const repaired = await repairRecoveryData(f.root, 'projects.json', () => preserveRecoveryData(f.root, f.parent))
+  expect(repaired.readyToRestart).toBe(true)
+  expect(repaired.unresolved).toEqual([])
+  expect(await readFile(join(repaired.preservationPath!, 'data/db/projects/unexpected.txt'), 'utf8')).toBe('Preserve unexpected data')
+  expect(await readFile(join(f.root, 'db/projects/personal notes/notes.txt'), 'utf8')).toBe('User notes')
+  await cp(join(process.cwd(), 'data/subagents'), join(f.root, 'subagents'), { recursive: true })
+  await validateRestoredDataDirectory(f.root)
+})
 
 it.each(['conversation', 'catalog', 'project'])('returns usable project data after %s corruption while preserving independent content and originals', async fault => {
   const f = await fixture()
