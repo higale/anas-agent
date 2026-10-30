@@ -4,8 +4,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const electronMocks = vi.hoisted(() => ({
   fromWebContents: vi.fn(),
-  handle: vi.fn()
+  handle: vi.fn(),
+  log: vi.fn()
 }))
+
+vi.mock('./runtimeLogger', () => ({ runtimeLog: electronMocks.log }))
 
 vi.mock('electron', () => ({
   BrowserWindow: {
@@ -26,10 +29,11 @@ import {
   rendererLocationMatches,
   resolveRendererLocation
 } from './ipcSecurity'
+import { beginApplicationDataTransition, finishApplicationDataTransition } from './applicationDataLifecycle'
 
 function fakeWindow(frameUrl = 'file:///tmp/anas/renderer/index.html') {
   const mainFrame = { url: frameUrl }
-  const webContents = { mainFrame }
+  const webContents = { mainFrame, id: 42 }
   let closed: (() => void) | undefined
   const window = {
     isDestroyed: () => false,
@@ -294,6 +298,74 @@ describe('IPC sender security', () => {
       'plugins:readWidget',
       'speech:logWarning'
     ])
+  })
+})
+
+describe('IPC failure diagnostics', () => {
+  beforeEach(() => {
+    electronMocks.handle.mockReset()
+    electronMocks.log.mockReset()
+    finishApplicationDataTransition()
+  })
+
+  function register(channel: string, listener: () => unknown) {
+    const location = resolveRendererLocation({ isPackaged: true, rendererFile: '/tmp/anas/renderer/index.html' })
+    const trusted = fakeWindow(location.url)
+    registerMainRendererWindow(trusted.window as never, location)
+    handleMainIpc(channel, listener)
+    return { invoke: electronMocks.handle.mock.calls.at(-1)![1], event: trusted.event }
+  }
+
+  it.each(['skills:get', 'app:restoreData'])('logs rejected %s calls once, including their causes, and rethrows the original error', async channel => {
+    const cause = new Error('Skill source folders must be absolute directory paths.')
+    const error = new AggregateError([cause], 'Could not load resources')
+    const { invoke, event } = register(channel, async () => { throw error })
+    await expect(invoke(event, { apiKey: 'secret-request-value', content: 'private document' })).rejects.toBe(error)
+    expect(electronMocks.log).toHaveBeenCalledExactlyOnceWith('error', 'ipc', 'IPC request failed.', {
+      channel, senderId: 42, error: expect.stringContaining(cause.message), stack: error.stack
+    })
+    expect(JSON.stringify(electronMocks.log.mock.calls)).not.toContain('secret-request-value')
+    expect(JSON.stringify(electronMocks.log.mock.calls)).not.toContain('private document')
+  })
+
+  it('records synchronous failures and leaves successful results unchanged', () => {
+    const error = new Error('Invalid request')
+    const failed = register('app:getBuildInfo', () => { throw error })
+    expect(() => failed.invoke(failed.event)).toThrow(error)
+    expect(electronMocks.log).toHaveBeenCalledOnce()
+    electronMocks.log.mockClear()
+    const succeeded = register('app:getBuildInfo', () => 'ok')
+    expect(succeeded.invoke(succeeded.event)).toBe('ok')
+    expect(electronMocks.log).not.toHaveBeenCalled()
+  })
+
+  it('records data-transition rejections without dispatching the operation', async () => {
+    const listener = vi.fn()
+    const { invoke, event } = register('skills:get', listener)
+    await beginApplicationDataTransition()
+    try {
+      await expect(invoke(event)).rejects.toThrow('Application data is unavailable')
+      expect(listener).not.toHaveBeenCalled()
+      expect(electronMocks.log).toHaveBeenCalledExactlyOnceWith('error', 'ipc', 'IPC request failed.',
+        expect.objectContaining({ channel: 'skills:get', error: expect.stringContaining('Application data is unavailable') }))
+    } finally { finishApplicationDataTransition() }
+  })
+
+  it('records sender validation failures before dispatch', () => {
+    const listener = vi.fn()
+    const { invoke, event } = register('skills:get', listener)
+    expect(() => invoke({ ...event, senderFrame: { url: 'file:///unregistered.html' } })).toThrow('main frame')
+    expect(listener).not.toHaveBeenCalled()
+    expect(electronMocks.log).toHaveBeenCalledOnce()
+  })
+
+  it('preserves the original error even when writing the log fails', async () => {
+    const error = new Error('Original failure')
+    electronMocks.log.mockImplementationOnce(() => { throw new Error('Log directory not writable') })
+    const stderr = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const { invoke, event } = register('skills:get', async () => { throw error })
+    await expect(invoke(event)).rejects.toBe(error)
+    expect(stderr).toHaveBeenCalledOnce()
   })
 })
 

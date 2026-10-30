@@ -9,6 +9,7 @@ import { notice } from '../notice'
 import type { SettingsTab } from './settingsTabs'
 
 interface UseDataManagementStateOptions {
+  onRestoreData(sourcePath: string): void
   openConfirmDialog: (request: ConfirmDialogRequest) => void
   setConfig: (update: (current: AppConfigSnapshot | undefined) => AppConfigSnapshot | undefined) => void
   setInputHistory: (snapshot: InputHistorySnapshot) => void
@@ -19,6 +20,7 @@ interface UseDataManagementStateOptions {
 }
 
 export function useDataManagementState({
+  onRestoreData,
   openConfirmDialog,
   setConfig,
   setInputHistory,
@@ -178,15 +180,7 @@ export function useDataManagementState({
       description: t('settings.restore_data_description'),
       confirmText: t('settings.restore_data_action'),
       variant: 'danger',
-      onConfirm: async () => {
-        try {
-          await window.gale.app.restoreData(sourcePath)
-          notice.success(t('settings.restore_completed'))
-          window.location.reload()
-        } catch {
-          notice.error(t('settings.failed_restore_data'))
-        }
-      }
+      onConfirm: () => onRestoreData(sourcePath)
     })
   }
 

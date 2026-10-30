@@ -1,6 +1,5 @@
 import { panelPages } from './panels/panelRegistry'
 import { app, shell } from 'electron'
-import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { getAgentCatalogFile, getProjectsDir, getBundledConfigDir, getDataDir, getLogDir } from './config/dataDir'
 import { handleMainIpc } from './ipcSecurity'
@@ -10,7 +9,7 @@ import { closeCachedMcpRuntime } from './mcpRuntimeService'
 import { closePluginHost } from './plugins/pluginHost'
 import { createMainWindow } from './appShell'
 import { preserveRecoveryData, requireResettableConfigFile, resetRecoveryConfig } from './recoveryData'
-import { inspectResetTargets, recoverInterruptedDataRestore, resetExecutionData, resetProjectData } from './backupService'
+import { defaultRecoveryDirectory, inspectResetTargets, recoverInterruptedDataRestore, resetExecutionData, resetProjectData } from './backupService'
 import { errorDetail, type RecoveryResult, type RecoverySnapshot } from '@shared/recovery'
 import { configureRuntimeLogger, runtimeLog } from './runtimeLogger'
 import { inspectRecoveryRepair, repairRecoveryData, requireRecoveryFile } from './recoveryRepair'
@@ -61,7 +60,7 @@ function requireStopped(): void {
 
 async function preserve(): Promise<string> {
   requireStopped()
-  lastPreservationPath = await preserveRecoveryData(getDataDir(), dirname(getDataDir()))
+  lastPreservationPath = await preserveRecoveryData(getDataDir(), defaultRecoveryDirectory())
   runtimeLog('info', 'recovery', 'Preserved application data.', { path: lastPreservationPath })
   return lastPreservationPath
 }
@@ -96,7 +95,7 @@ export function registerRecoveryIpcHandlers(): void {
     requireRecovery()
     const repair = await inspectRecoveryRepair(getDataDir())
     return {
-      dataDir: getDataDir(), logDir: getLogDir(), preservationParent: dirname(getDataDir()),
+      dataDir: getDataDir(), logDir: getLogDir(), preservationParent: defaultRecoveryDirectory(),
       catalogPath: getAgentCatalogFile(), conversationsPath: getProjectsDir(),
       startupError, stopError, canModify, lastPreservationPath,
       files: repair.files,

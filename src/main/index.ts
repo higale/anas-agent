@@ -23,7 +23,7 @@ import { initializeCustomEnvironmentInformation } from './environmentContextServ
 import { installRuntimeNetworkPolicy } from './runtimeNetworkPolicy'
 import { initializeSkillsStore } from './skillsStore'
 import { initializeToolsStore } from './toolsStore'
-import { initializePluginsStore } from './plugins/pluginRuntime'
+import { initializePluginsStore, stopPluginChangeNotifications } from './plugins/pluginRuntime'
 import { initializeBundledExamples } from './bundledExamples'
 import { getInputHistory } from './inputHistoryStore'
 import { validateExecutionStorageDirectory } from './executionStorageValidation'
@@ -158,6 +158,7 @@ function startApplication(): void {
     event.preventDefault()
     shutdownStarted = true
     markAppQuitting()
+    stopPluginChangeNotifications()
     let deadline: ReturnType<typeof setTimeout> | undefined
     const shutdown = Promise.allSettled([
       Promise.resolve().then(() => panelPages.closeAll()),

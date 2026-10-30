@@ -22,7 +22,7 @@ vi.mock('./recoveryData', async (importOriginal) => ({
   ...await importOriginal<typeof import('./recoveryData')>(),
   preserveRecoveryData: mocks.preserve, resetRecoveryConfig: mocks.reset
 }))
-vi.mock('./backupService', () => ({ recoverInterruptedDataRestore: mocks.recoverRestore, resetProjectData: mocks.resetProjects, resetExecutionData: mocks.resetExecution, inspectResetTargets: mocks.inspectResetTargets }))
+vi.mock('./backupService', () => ({ defaultRecoveryDirectory: () => '/test/documents/Anas/recovery', recoverInterruptedDataRestore: mocks.recoverRestore, resetProjectData: mocks.resetProjects, resetExecutionData: mocks.resetExecution, inspectResetTargets: mocks.inspectResetTargets }))
 vi.mock('./runtimeLogger', () => ({ runtimeLog: vi.fn(), configureRuntimeLogger: mocks.configureLogger }))
 vi.mock('./recoveryRepair', async (importOriginal) => ({
   ...await importOriginal<typeof import('./recoveryRepair')>(), inspectRecoveryRepair: mocks.inspectRepair, repairRecoveryData: mocks.repair
@@ -42,7 +42,7 @@ beforeEach(() => {
   mocks.handlers.clear()
   mocks.inspectRepair.mockResolvedValue({ candidates: [], issues: [], files: [] })
   mocks.inspectResetTargets.mockResolvedValue([])
-  mocks.preserve.mockResolvedValue('/test/Anas-Recovery/copy')
+  mocks.preserve.mockResolvedValue('/test/documents/Anas/recovery/copy')
 })
 
 describe('startup recovery lifecycle', () => {
@@ -51,7 +51,7 @@ describe('startup recovery lifecycle', () => {
     mocks.inspectRepair.mockResolvedValue({ candidates: [], issues: [], files: [{ name: 'projects.json', path: '/test/data/db/projects/state.json', repairableFields: ['db/catalog.sqlite: user_version (1 → 2)'] }] })
     await recovery.showStartupRecovery(new Error('database failed'))
     const snapshot = await invoke('inspect')
-    expect(snapshot).toMatchObject({ catalogPath: '/test/data/db/catalog.sqlite', conversationsPath: '/test/data/db/projects' })
+    expect(snapshot).toMatchObject({ preservationParent: '/test/documents/Anas/recovery', catalogPath: '/test/data/db/catalog.sqlite', conversationsPath: '/test/data/db/projects' })
     expect(snapshot.files[0]).toMatchObject({ name: 'projects.json', repairableFields: ['db/catalog.sqlite: user_version (1 → 2)'] })
   })
   it('requires stopped writers for field repair and delegates preservation to the repair service', async () => {
@@ -65,7 +65,7 @@ describe('startup recovery lifecycle', () => {
     const result = await invoke('repair', 'subagents.json')
     expect(mocks.repair).toHaveBeenCalledWith('/test/data', 'subagents.json', expect.any(Function))
     expect(result.repaired).toHaveLength(1)
-    expect(mocks.preserve).toHaveBeenCalledOnce()
+    expect(mocks.preserve).toHaveBeenCalledExactlyOnceWith('/test/data', '/test/documents/Anas/recovery')
     expect(mocks.resetProjects).not.toHaveBeenCalled()
   })
   it('requires stopped writers and raw preservation for project reset', async () => {
@@ -73,8 +73,8 @@ describe('startup recovery lifecycle', () => {
     await expect(invoke('resetProjects', [])).rejects.toThrow('Enter startup recovery')
     await recovery.showStartupRecovery(new Error('broken projects'))
     mocks.resetProjects.mockImplementation(async (preserve: () => Promise<string>) => preserve())
-    await expect(invoke('resetProjects', [])).resolves.toEqual({ preservationPath: '/test/Anas-Recovery/copy' })
-    expect(mocks.preserve).toHaveBeenCalledOnce()
+    await expect(invoke('resetProjects', [])).resolves.toEqual({ preservationPath: '/test/documents/Anas/recovery/copy' })
+    expect(mocks.preserve).toHaveBeenCalledExactlyOnceWith('/test/data', '/test/documents/Anas/recovery')
     expect(mocks.reset).not.toHaveBeenCalled()
   })
 
@@ -85,7 +85,7 @@ describe('startup recovery lifecycle', () => {
     await expect(invoke('resetExecution')).rejects.toThrow('Confirm the reset file list')
     const targets = [{ path: '/test/data/db/catalog.sqlite', kind: 'file' }]
     mocks.resetExecution.mockImplementation(async (preserve: () => Promise<string>) => preserve())
-    await expect(invoke('resetExecution', targets)).resolves.toEqual({ preservationPath: '/test/Anas-Recovery/copy' })
+    await expect(invoke('resetExecution', targets)).resolves.toEqual({ preservationPath: '/test/documents/Anas/recovery/copy' })
     expect(mocks.resetExecution).toHaveBeenCalledWith(expect.any(Function), targets)
     expect(mocks.resetProjects).not.toHaveBeenCalled()
   })
@@ -138,7 +138,7 @@ describe('startup recovery lifecycle', () => {
     expect(mocks.reset).not.toHaveBeenCalled()
     await invoke('reset', 'models.json')
     expect(mocks.reset).toHaveBeenCalledWith('/test/data', '/bundled/config', 'models.json')
-    expect(await invoke('inspect')).toMatchObject({ lastPreservationPath: '/test/Anas-Recovery/copy' })
+    expect(await invoke('inspect')).toMatchObject({ lastPreservationPath: '/test/documents/Anas/recovery/copy' })
   })
 
   it('rejects concurrent reset and restart until preservation finishes', async () => {

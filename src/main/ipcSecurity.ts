@@ -2,6 +2,8 @@ import { BrowserWindow, ipcMain } from 'electron'
 import type { IpcMainInvokeEvent, WebContents } from 'electron'
 import { pathToFileURL } from 'node:url'
 import { runApplicationDataOperation } from './applicationDataLifecycle'
+import { errorDetail } from '@shared/recovery'
+import { runtimeLog } from './runtimeLogger'
 
 export type RendererLocation =
   | { kind: 'local'; url: string }
@@ -157,10 +159,27 @@ export function handleMainIpc<Args extends unknown[], Result>(
   listener: (event: IpcMainInvokeEvent, ...args: Args) => Result
 ): void {
   ipcMain.handle(channel, (event, ...args) => {
-    assertApplicationIpcEvent(event, channel, args)
-    const invoke = () => listener(event, ...args as Args)
-    return ipcUsesApplicationData(channel)
-      ? runApplicationDataOperation(invoke, { snapshot: channel === 'app:backupData' || channel === 'app:cleanupData' })
-      : invoke()
+    const fail = (reason: unknown): never => {
+      // Request arguments may contain credentials or document contents. Keep
+      // diagnostics at the call boundary without copying the request payload.
+      const details = { channel, senderId: event.sender.id, error: errorDetail(reason),
+        stack: reason instanceof Error ? reason.stack : undefined }
+      try {
+        runtimeLog('error', 'ipc', 'IPC request failed.', details)
+      } catch (loggingError) {
+        console.error('[ipc] Could not write request failure to the runtime log.', details, errorDetail(loggingError))
+      }
+      throw reason
+    }
+    try {
+      assertApplicationIpcEvent(event, channel, args)
+      const invoke = () => listener(event, ...args as Args)
+      const result = ipcUsesApplicationData(channel)
+        ? runApplicationDataOperation(invoke, { snapshot: channel === 'app:backupData' || channel === 'app:cleanupData' })
+        : invoke()
+      return result instanceof Promise ? result.catch(fail) : result
+    } catch (reason) {
+      return fail(reason)
+    }
   })
 }

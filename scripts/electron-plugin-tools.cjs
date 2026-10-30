@@ -243,6 +243,7 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
     await writeFile(join(home, 'plugins/_system/usage-meter/stale.txt'), 'bundled file from an older backup')
     await mkdir(join(home, 'examples/plugins/notepad'))
     await writeFile(join(home, 'examples/plugins/notepad/stale.txt'), 'example file from an older backup')
+    await application.evaluate(({ app }, directory) => app.setPath('documents', directory), archiveRoot)
     await application.evaluate(({ dialog }, path) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: path }) }, archivePath)
     const backup = await page.evaluate(() => globalThis.gale.app.backupData())
     assert.equal(backup.path, archivePath)
@@ -263,6 +264,7 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
       }
     }, { timeout: 10000 }).toBe(true)
     assert.equal((await restarted.evaluate(() => globalThis.gale.agent.threads.list())).some(thread => thread.id === persisted.thread.id), false)
+    await application.evaluate(({ app }, directory) => app.setPath('documents', directory), archiveRoot)
     await restarted.evaluate(path => globalThis.gale.app.restoreData(path), archivePath)
     assert.ok(JSON.stringify(await restarted.evaluate(id => globalThis.gale.agent.threads.get(id), persisted.thread.id)).includes('iVBORw0KGgo'), 'Restore must recover ordinary image history.')
     assert.equal((await restarted.evaluate(() => globalThis.gale.plugins.invoke('example-text-tools', 'settings.get'))).values.prefix, 'Configured: ')

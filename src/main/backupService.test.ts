@@ -2,7 +2,7 @@ import { writeProjectFixture, readProjectFixture } from '../test/projectDirector
 import { readFrozenStorage } from '../test/frozenStorage'
 import nativeFs, { createWriteStream } from 'node:fs'
 import { execFile } from 'node:child_process'
-import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
 import { promisify } from 'node:util'
@@ -97,6 +97,7 @@ async function loadBackupService(
 }
 
 afterEach(async () => {
+  vi.useRealTimers()
   renameFailure = undefined
   vi.doUnmock('./config/dataDir')
   vi.doUnmock('./config/rawAppConfig')
@@ -110,14 +111,61 @@ afterEach(async () => {
 })
 
 describe('data backup restore', () => {
-  it('defaults to the system Documents directory and preserves an explicitly chosen backup directory', async () => {
+  it('defaults to Anas/backups under system Documents and preserves an explicitly chosen backup directory', async () => {
     const root = await temporaryDirectory(), dataRoot = join(root, 'data')
     const service = await loadBackupService(dataRoot)
-    expect(service.defaultBackupDirectory()).toBe(documents.path)
-    expect(dirname(await service.backupDialogDefaultPath())).toBe(documents.path)
-    expect(dirname(await service.backupDialogDefaultPath(''))).toBe(documents.path)
+    expect(service.defaultBackupDirectory()).toBe(join(documents.path, 'Anas', 'backups'))
+    expect(dirname(await service.backupDialogDefaultPath())).toBe(join(documents.path, 'Anas', 'backups'))
+    expect(dirname(await service.backupDialogDefaultPath(''))).toBe(join(documents.path, 'Anas', 'backups'))
     expect(dirname(await service.backupDialogDefaultPath(join(root, 'chosen')))).toBe(join(root, 'chosen'))
     expect(dirname(await service.backupDialogDefaultPath(dataRoot))).toBe(dataRoot)
+    expect((await stat(service.defaultBackupDirectory())).isDirectory()).toBe(true)
+    expect(service.defaultRecoveryDirectory()).toBe(join(documents.path, 'Anas', 'recovery'))
+  })
+
+  it('keeps distinct pre-restore copies in Documents even when importing from the data directory', async () => {
+    const root = await temporaryDirectory(), dataRoot = join(root, 'data')
+    await writeText(join(dataRoot, 'config/settings.json'), 'original')
+    const archive = join(dataRoot, 'valid.zip')
+    await writeZip(archive, configFileNames.map(name => ({ name: `config/${name}`, data: '{}' })))
+    const service = await loadBackupService(dataRoot)
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-28T09:12:41.001Z'))
+    const first = await service.restoreDataBackupZip(archive)
+    // Restore replaces the source directory; import the same archive again.
+    await writeZip(archive, configFileNames.map(name => ({ name: `config/${name}`, data: '{}' })))
+    await writeText(join(dataRoot, 'config/settings.json'), 'second')
+    const second = await service.restoreDataBackupZip(archive)
+    const parent = await realpath(join(documents.path, 'Anas/backups/before-restore'))
+    expect(dirname(dirname(first.preRestoreBackupPath))).toBe(parent)
+    expect(dirname(dirname(second.preRestoreBackupPath))).toBe(parent)
+    expect(first.preRestoreBackupPath).not.toBe(second.preRestoreBackupPath)
+    const { extractBackupArchive } = await import('./backupArchive')
+    await extractBackupArchive(first.preRestoreBackupPath, join(root, 'first'))
+    await extractBackupArchive(second.preRestoreBackupPath, join(root, 'second'))
+    expect(await readFile(join(root, 'first/config/settings.json'), 'utf8')).toBe('original')
+    expect(await readFile(join(root, 'second/config/settings.json'), 'utf8')).toBe('second')
+  })
+
+  it.each(['nested', 'linked', 'unavailable', 'snapshot-failure'])('aborts restore safely when preservation fails: %s', async kind => {
+    const root = await temporaryDirectory(), dataRoot = join(root, 'data'), archive = join(root, 'valid.zip')
+    await writeText(join(dataRoot, 'config/settings.json'), 'original')
+    await writeZip(archive, configFileNames.map(name => ({ name: `config/${name}`, data: '{}' })))
+    const service = await loadBackupService(dataRoot, undefined, undefined, async () => {
+      if (kind === 'snapshot-failure') throw new Error('snapshot failed')
+      return []
+    })
+    if (kind === 'nested') documents.path = join(dataRoot, 'documents')
+    if (kind === 'linked') await symlink(dataRoot, documents.path, 'junction')
+    if (kind === 'unavailable') await writeText(documents.path, 'blocked')
+    const deactivate = vi.fn(), activate = vi.fn(), reactivatePrevious = vi.fn()
+    await expect(service.restoreDataBackupZip(archive, { deactivate, activate, reactivatePrevious })).rejects.toThrow()
+    expect(activate).not.toHaveBeenCalled()
+    expect(reactivatePrevious).toHaveBeenCalledOnce()
+    expect(await readFile(join(dataRoot, 'config/settings.json'), 'utf8')).toBe('original')
+    expect(await readdir(dataRoot)).toEqual(['config'])
+    expect((await readdir(root)).filter(name => name.startsWith('.anas-restore'))).toEqual([])
+    if (kind === 'snapshot-failure') expect(await readdir(join(documents.path, 'Anas/backups/before-restore'))).toEqual([])
   })
 
   it.each([undefined, 'conversation-directories'])('rejects old backup layout %s before stopping writers and leaves old disk residues untouched', async storageLayout => {

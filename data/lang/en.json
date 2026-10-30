@@ -886,7 +886,7 @@
     "restore_data_action": "Restore",
     "restore_data_title": "Restore data from backup?",
     "restore_data_description": "Current data is backed up first, then replaced with the selected zip backup. The app reloads after restore.",
-    "restore_completed": "Restore completed. Reloading.",
+    "restoring_data": "Restoring data, please wait…",
     "failed_restore_data": "Failed to restore data directory.",
     "failed_cleanup_data": "Failed to clean selected data.",
     "cleanup_completed": "Cleanup completed.",

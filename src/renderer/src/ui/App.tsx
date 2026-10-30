@@ -74,6 +74,7 @@ import { useAgentSpeech } from './speech/useAgentSpeech'
 import { parseSlashSkillInput } from '@shared/skillShortcuts'
 import { AppIssueTray, InitialAppGate } from './InitialAppStatus'
 import { initialAppCriticalPhase } from './initialAppLoad'
+import { DataRestoreView } from './DataRestoreView'
 
 type ChatScrollSnapshot = {
   bottomDistance: number
@@ -90,6 +91,13 @@ const expandedSidebarSections: SidebarCollapsedSections = {
 }
 
 export function App() {
+  const [restoreSource, setRestoreSource] = useState<string>()
+  return restoreSource
+    ? <DataRestoreView sourcePath={restoreSource} onReload={() => window.location.reload()} />
+    : <AppContent onRestoreData={setRestoreSource} />
+}
+
+function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void }) {
   const { t, i18n } = useTranslation()
   const [projects, setProjects] = useState<Project[]>([])
   const [projectDialogOpen, setProjectDialogOpen] = useState(false)
@@ -380,6 +388,7 @@ export function App() {
     toggleDataCleanupTarget,
     updateDeveloperHttpTraceEnabled
   } = useDataManagementState({
+    onRestoreData,
     cleanupAgentThreads,
     openConfirmDialog,
     setConfig,

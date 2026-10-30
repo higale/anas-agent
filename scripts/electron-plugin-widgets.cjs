@@ -269,6 +269,7 @@ async function verifyPluginWidgets(launchApplication) {
     assert.equal(await page.evaluate(modelId => globalThis.gale.plugins.readWidget('usage-meter', 'quota', modelId), selected.modelId), null)
     await page.evaluate(() => globalThis.gale.plugins.startBackend('usage-meter'))
     await expect(page.locator('.plugin-widget')).toBeVisible()
+    await app.evaluate(({ app }, directory) => app.setPath('documents', directory), output)
     await app.evaluate(({ dialog }, path) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: path }) }, join(output, 'backup.zip'))
     const backup = await page.evaluate(() => globalThis.gale.app.backupData())
     assert.equal(backup.path, join(output, 'backup.zip'))

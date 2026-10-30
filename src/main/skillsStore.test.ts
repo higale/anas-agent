@@ -291,6 +291,16 @@ describe('skillsStore', () => {
     await expect(fixture.store.listSkillSnapshot(undefined, ['relative-folder'])).rejects.toThrow('absolute directory paths')
   })
 
+  it('identifies the invalid source folder and project in load failures', async () => {
+    const fixture = await loadSkillsStore()
+    const invalidPath = process.platform === 'win32' ? 'relative-folder' : 'C:\\Users\\example\\Documents'
+    await expect(fixture.store.listSkillSnapshot('restored-project', [fixture.workspace, invalidPath])).rejects.toThrow(
+      `sourceFolders[1]=${JSON.stringify(invalidPath)}; project="restored-project", platform=${process.platform}`
+    )
+    await expect(fixture.store.listSkillSnapshot(undefined, [null] as unknown as string[])).rejects.toThrow('sourceFolders[0]=<null>')
+    await expect(fixture.store.listSkillSnapshot('restored-project', null as unknown as string[])).rejects.toThrow('must be an array')
+  })
+
   it('supports project shortcut-only overrides and disables both paths with the Skill capability', async () => {
     const fixture = await loadSkillsStore()
     await writeSkill(fixture.skillsDir, 'shortcut-only')

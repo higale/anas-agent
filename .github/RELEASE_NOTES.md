@@ -1,20 +1,28 @@
-## Anas v5.0.2
+## Anas v5.0.3
 
-- 项目定义与界面状态分开保存，会话及其资源统一归入所属项目目录。
-- 完善重置、备份和恢复流程，保持项目与会话的数据边界一致。
-- 修复首次对话的初始化顺序，创建会话目录前先初始化或校验项目。
-- 忽略项目与会话集合中的无关文件和目录，避免 `.DS_Store` 等条目阻断启动或恢复。
-- 修复项目目录或状态缺失导致无法启动的问题。手动修复先保全原始数据，尽量抢救有效内容，隔离无法恢复的内容并验证程序可重新进入。
+- 备份与修复前保存的原始数据更容易找到：默认集中放在系统“文档”目录下的 `Anas` 文件夹，分别保存在 `backups` 和 `recovery` 中。已有自选备份目录继续使用，旧备份保留原位。
+- 恢复备份时单独显示恢复状态，避免恢复过程中出现多余的“加载失败”提示。
+- 加载失败等问题会在日志中留下更具体的原因；技能目录有问题时会指出对应路径和项目，方便排查。
+- 修复关闭程序时，插件停止后又触发技能刷新、留下多余错误记录的问题。
+- 修正与已发布版本一致的本地构建仍显示开发版标记的问题。
 
-**数据说明：升级后需要重置全部项目与会话。**
+**从 5.0.2 升级无需重置项目或会话。**
 
-- Store project definitions separately from UI state, with conversations and their resources organized under each project.
-- Update reset, backup and restore flows to use consistent project and conversation boundaries.
-- Initialize or validate the project before creating a conversation directory, fixing first-conversation startup.
-- Ignore unrelated files and directories in project and conversation collections so entries such as `.DS_Store` cannot block startup or recovery.
-- Fix startup failures caused by missing project directories or state. Manual repair preserves the originals, salvages usable content, isolates unrecoverable content, and verifies that the application can reopen.
+- Backups and original data saved before repairs are easier to find: they now default to the `Anas` folder in your system Documents directory, under `backups` and `recovery`. Previously selected backup folders are still used, and existing backups stay where they are.
+- Backup restoration now has a dedicated status screen, avoiding unrelated “failed to load” notices during the restore.
+- Logs now include more useful details when loading fails. Skill folder errors identify the affected path and project to help with troubleshooting.
+- Fix unnecessary error logs caused by refreshing skills while plugins were shutting down on exit.
+- Fix local builds that match a published release still showing a development version label.
 
-**Data notice: After upgrading, reset all projects and conversations.**
+**Upgrading from 5.0.2 does not require resetting projects or conversations.**
+
+## 较早版本升级 / Upgrading from earlier versions
+
+- 从 5.0.1 或更早版本跨越 5.0.2 升级，需要重置全部项目与会话。5.0 不支持导入旧版对话、记忆、运行记录或整包备份；兼容配置与扩展资源的手动复制方式见 [5.0 升级说明](https://github.com/higale/anas-agent/blob/main/data/help/UPGRADE_TO_5.zh-CN.md)。
+- 从 4.0 之前的版本跨入 4.x 时，历史数据目录有变化，见 [4.x 升级说明](https://github.com/higale/anas-agent/blob/main/data/help/UPGRADE_TO_4.zh-CN.md)；其中的数据库恢复方法不适用于 5.0。
+
+- Upgrading from 5.0.1 or earlier across the 5.0.2 boundary requires resetting all projects and conversations. Version 5.0 cannot import older conversations, memories, run history or full backups. See the [5.0 upgrade guide](https://github.com/higale/anas-agent/blob/main/data/help/UPGRADE_TO_5.en.md) for manually copying compatible settings and extensions.
+- Moving from a version before 4.0 into 4.x also involves historical data folder changes. See the [4.x upgrade guide](https://github.com/higale/anas-agent/blob/main/data/help/UPGRADE_TO_4.en.md); its database recovery instructions do not apply to 5.0.
 
 ## 下载与安装 / Downloads & installation
 

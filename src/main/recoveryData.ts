@@ -1,6 +1,6 @@
 import { constants } from 'node:fs'
 import { copyFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { resettableConfigFiles, type ResettableConfigFile } from '@shared/recovery'
 import { isSameOrInsideDirectory, samePath } from './pathContainment'
@@ -9,17 +9,34 @@ const excludedRoots = new Set(['electron', 'tmp', 'cache', 'dev'])
 const maxEntries = 100_000
 const maxBytes = 16 * 1024 ** 3
 
+// Resolve missing destination components through their nearest existing ancestor
+// before creating anything, so linked Documents folders cannot point into data.
+export async function createPreservationDirectory(dataDir: string, destination: string): Promise<string> {
+  const root = await realpath(dataDir)
+  const target = resolve(destination)
+  let ancestor = target
+  let canonical: string
+  while (true) {
+    try {
+      canonical = join(await realpath(ancestor), relative(ancestor, target))
+      break
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || dirname(ancestor) === ancestor) throw error
+      ancestor = dirname(ancestor)
+    }
+  }
+  if (isSameOrInsideDirectory(root, canonical)) throw new Error('Recovery copies must be saved outside the application data directory.')
+  await mkdir(target, { recursive: true, mode: 0o700 })
+  const parent = await realpath(target)
+  if (isSameOrInsideDirectory(root, parent)) throw new Error('Recovery copies must be saved outside the application data directory.')
+  return mkdtemp(join(parent, `${new Date().toISOString().replace(/[:.]/g, '-')}-`))
+}
+
 // A forensic copy, not a logical SQLite backup. Call only after application
 // writers have stopped. Preserve WAL/SHM and links without parsing damaged data.
-export async function preserveRecoveryData(dataDir: string, destinationParent: string): Promise<string> {
+export async function preserveRecoveryData(dataDir: string, destination: string): Promise<string> {
   const root = await realpath(dataDir)
-  const parent = await realpath(destinationParent)
-  if (isSameOrInsideDirectory(root, parent)) throw new Error('Recovery copies must be saved outside the application data directory.')
-  const recoveryDirectory = join(parent, 'Anas-Recovery')
-  await mkdir(recoveryDirectory, { recursive: true, mode: 0o700 })
-  const recoveryRoot = await realpath(recoveryDirectory)
-  if (isSameOrInsideDirectory(root, recoveryRoot)) throw new Error('Recovery copies must be saved outside the application data directory.')
-  const output = await mkdtemp(join(recoveryRoot, `${new Date().toISOString().replace(/[:.]/g, '-')}-`))
+  const output = await createPreservationDirectory(root, destination)
   const payload = join(output, 'data')
   let entries = 0
   let bytes = 0

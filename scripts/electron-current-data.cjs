@@ -1,15 +1,22 @@
 const assert = require('node:assert/strict')
 const { execFile } = require('node:child_process')
 const { promisify } = require('node:util')
-const { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } = require('node:fs/promises')
+const { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } = require('node:fs/promises')
 const { tmpdir } = require('node:os')
-const { join, resolve } = require('node:path')
+const { dirname, join, resolve } = require('node:path')
 const { expect } = require('playwright/test')
 const { closeElectronTestApplication } = require('./electron-test-close.cjs')
 
-async function verifyCurrentData(launchApplication) {
+async function verifyCurrentData(launch) {
   const temporaryRoot = await mkdtemp(join(tmpdir(), 'anas-current-data-e2e-'))
   const root = join(temporaryRoot, 'profile')
+  const documents = join(temporaryRoot, 'documents')
+  await mkdir(documents)
+  async function launchApplication(dataRoot) {
+    const instance = await launch(dataRoot)
+    await instance.evaluate(({ app }, directory) => app.setPath('documents', directory), documents)
+    return instance
+  }
   let application
   try {
     await mkdir(join(root, 'config'), { recursive: true })
@@ -70,6 +77,7 @@ async function verifyCurrentData(launchApplication) {
     const databaseRecovery = await application.firstWindow()
     await expect(databaseRecovery.locator('.initial-app-status-error')).toBeVisible({ timeout: 20000 })
     const resetPlan = await databaseRecovery.evaluate(() => globalThis.gale.recovery.inspect())
+    assert.equal(resetPlan.preservationParent, join(documents, 'Anas/recovery'))
     await databaseRecovery.getByRole('button', { name: /^(重置全部项目与会话|Reset all projects and conversations)$/ }).click()
     const allResetDialog = databaseRecovery.getByRole('alertdialog')
     assert.deepEqual(await allResetDialog.locator('li code').allTextContents(), resetPlan.resetTargets.projects.map(target => target.path))
@@ -83,6 +91,7 @@ async function verifyCurrentData(launchApplication) {
     await expect(databaseRecovery.locator('.initial-app-status-error')).toHaveAttribute('aria-busy', 'false')
     assert.deepEqual(await readFile(join(root, 'db/projects/state.json')), projectsBeforeReset)
     const resetStatus = await databaseRecovery.evaluate(() => globalThis.gale.recovery.inspect())
+    assert.equal(dirname(resetStatus.lastPreservationPath), await realpath(join(documents, 'Anas/recovery')))
     assert.deepEqual(await readFile(join(resetStatus.lastPreservationPath, 'data/db/projects/state.json')), projectsBeforeReset)
     assert.equal(await readFile(join(resetStatus.lastPreservationPath, 'data/db/projects/default-workspace/conversations/reset-scope-fixture/material.txt'), 'utf8'), 'Retained in preservation copy')
     await assert.rejects(readFile(join(root, 'db/projects/default-workspace/conversations/reset-scope-fixture/material.txt')), { code: 'ENOENT' })
@@ -249,7 +258,77 @@ async function verifyCurrentData(launchApplication) {
     await closeElectronTestApplication(application)
     application = await launchApplication(root)
     await expect((await application.firstWindow()).locator('[data-agent-composer-input]')).toBeVisible({ timeout: 20000 })
-    console.log('Current-data Electron E2E passed: configuration and native storage repair, preservation, full reset, missing project initialization, missing conversation isolation and usable restart.')
+    const backupPage = await application.firstWindow()
+    async function readMainLogs() {
+      const directory = join(root, 'log')
+      const files = (await readdir(directory)).filter(file => file.endsWith('_main.log'))
+      return (await Promise.all(files.map(file => readFile(join(directory, file), 'utf8')))).join('\n')
+    }
+    const skillFailure = await backupPage.evaluate(async () => {
+      try {
+        await globalThis.gale.skills.get('default-workspace', ['relative-skill-source'])
+        return ''
+      } catch (error) {
+        return error.message
+      }
+    })
+    assert.match(skillFailure, /Skill source folders must be absolute directory paths/)
+    assert.ok(skillFailure.includes('sourceFolders[0]="relative-skill-source"; project="default-workspace"'))
+    await expect.poll(readMainLogs).toMatch(/\[ipc\] IPC request failed\.[\s\S]*channel: 'skills:get'[\s\S]*Skill source folders must be absolute directory paths[\s\S]*stack:/)
+    await expect.poll(readMainLogs).toContain('sourceFolders[0]="relative-skill-source"; project="default-workspace"')
+    await application.evaluate(({ dialog }, archive) => {
+      dialog.showSaveDialog = async (_parent, options) => {
+        globalThis.__backupDefaultPath = options.defaultPath
+        return { canceled: false, filePath: archive }
+      }
+    }, join(temporaryRoot, 'manual.zip'))
+    const backup = await backupPage.evaluate(() => globalThis.gale.app.backupData())
+    assert.equal(dirname(await application.evaluate(() => globalThis.__backupDefaultPath)), join(documents, 'Anas/backups'))
+    async function confirmRestore(archive) {
+      await application.evaluate(({ dialog }, filePath) => {
+        dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filePath] })
+      }, archive)
+      await backupPage.locator('.sidebar-settings').click()
+      await backupPage.getByRole('menuitem', { name: /^(设置|Settings)$/ }).click()
+      await backupPage.locator('[data-settings-tab="general"]').click()
+      await backupPage.getByRole('button', { name: /^(恢复|Restore)$/ }).click()
+      await backupPage.getByRole('alertdialog').getByRole('button', { name: /^(恢复|Restore)$/ }).click()
+    }
+    const invalidBackup = join(temporaryRoot, 'invalid.zip')
+    await writeFile(invalidBackup, 'not a ZIP archive')
+    await confirmRestore(invalidBackup)
+    const restoreFailure = backupPage.getByRole('alert')
+    await expect(restoreFailure).toContainText(/恢复数据目录失败|Failed to restore/)
+    await expect.poll(readMainLogs).toMatch(/\[ipc\] IPC request failed\.[\s\S]*channel: 'app:restoreData'[\s\S]*stack:/)
+    await expect(backupPage.locator('.sidebar-settings')).toHaveCount(0)
+    if (process.env.ANAS_E2E_RESTORE_ERROR_SCREENSHOT) await backupPage.screenshot({ path: process.env.ANAS_E2E_RESTORE_ERROR_SCREENSHOT })
+    await backupPage.getByRole('button', { name: /^(重新加载|Reload)$/ }).click()
+    await expect(backupPage.locator('[data-agent-composer-input]')).toBeVisible({ timeout: 20000 })
+
+    const restoreUi = []
+    await backupPage.exposeFunction('__recordRestoreUi', record => restoreUi.push(record))
+    await backupPage.evaluate(() => {
+      const capture = () => {
+        for (const node of globalThis.document.querySelectorAll('[role="status"], [data-sonner-toast]')) {
+          if (/正在恢复数据|Restoring data/.test(node.textContent ?? '')) void globalThis.__recordRestoreUi('restoring')
+          if (node.getAttribute('data-type') === 'error') void globalThis.__recordRestoreUi(`error: ${node.textContent}`)
+        }
+      }
+      new globalThis.MutationObserver(capture).observe(globalThis.document.body, { childList: true, subtree: true, characterData: true })
+    })
+    const reloaded = backupPage.waitForEvent('domcontentloaded')
+    await confirmRestore(backup.path)
+    await reloaded
+    await expect(backupPage.locator('[data-agent-composer-input]')).toBeVisible({ timeout: 20000 })
+    assert.ok(restoreUi.includes('restoring'), 'Restore must replace the normal app with a pending view.')
+    assert.deepEqual(restoreUi.filter(value => value.startsWith('error:')), [], 'Restoring must not trigger background loading error notices.')
+    const preRestoreRoot = join(documents, 'Anas/backups/before-restore')
+    const copies = await readdir(preRestoreRoot)
+    assert.equal(copies.length, 1)
+    const archives = await readdir(join(preRestoreRoot, copies[0]))
+    assert.equal(archives.length, 1)
+    assert.ok((await readFile(join(preRestoreRoot, copies[0], archives[0]))).length > 0)
+    console.log('Current-data Electron E2E passed: configuration and native storage repair, Documents preservation and backup restore, full reset, missing project initialization, missing conversation isolation and usable restart.')
   } finally {
     await closeElectronTestApplication(application)
     await rm(temporaryRoot, { recursive: true, force: true })

@@ -4,15 +4,15 @@ import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-const state = vi.hoisted(() => ({ root: '', bundled: '', fork: vi.fn() }))
+const state = vi.hoisted(() => ({ root: '', bundled: '', fork: vi.fn(), send: vi.fn() }))
 vi.mock('../config/dataDir', () => ({
   getDataDir: () => state.root,
   getBundledDataDir: () => state.bundled,
   getSystemPluginsDir: () => join(state.root, 'plugins/_system'),
   getPluginExamplesDir: () => join(state.root, 'examples/plugins')
 }))
-vi.mock('../ipcSecurity', () => ({ isMainRendererWindow: () => false }))
-vi.mock('electron', () => ({ app: { getAppPath: () => '/app' }, BrowserWindow: { getAllWindows: () => [] }, utilityProcess: { fork: state.fork } }))
+vi.mock('../ipcSecurity', () => ({ isMainRendererWindow: () => true }))
+vi.mock('electron', () => ({ app: { getAppPath: () => '/app' }, BrowserWindow: { getAllWindows: () => [{ webContents: { send: state.send } }] }, utilityProcess: { fork: state.fork } }))
 class Child extends EventEmitter {
   postMessage = vi.fn((message: { stop?: boolean }) => { if (message.stop) queueMicrotask(() => this.emit('exit', 0)) })
   kill = vi.fn(() => { this.emit('exit', 1); return true })
@@ -24,6 +24,7 @@ const { prepareExamples } = createRequire(import.meta.url)('../../../scripts/pre
 }
 beforeEach(async () => {
   vi.resetModules()
+  state.send.mockReset()
   state.root = await realpath(await mkdtemp(join(tmpdir(), 'anas-plugin-runtime-')))
   state.bundled = join(state.root, 'bundled')
   await cp(resolve('data/plugins/_system'), join(state.bundled, 'plugins/_system'), { recursive: true })
@@ -35,6 +36,21 @@ beforeEach(async () => {
   await runtime.pluginRuntime().store.install(join(state.root, 'examples/plugins/text-tools.zip'))
 })
 afterEach(async () => { await runtime.stopPluginBackends(); await rm(state.root, { recursive: true, force: true }) })
+
+it.each([false, true])('keeps backend stop notifications except during application exit (quitting=%s)', async quitting => {
+  const prepared = await runtime.pluginRuntime().backends.prepare('example-text-tools')
+  child.emit('message', { ready: true })
+  await prepared.ready
+  expect(state.send).toHaveBeenCalledWith('plugins:changed')
+  state.send.mockClear()
+  if (quitting) runtime.stopPluginChangeNotifications()
+  await runtime.stopPluginBackends()
+  runtime.changed()
+  expect(child.postMessage).toHaveBeenCalledWith({ stop: true })
+  expect(runtime.pluginRuntime().backends.status('example-text-tools')).toMatchObject({ backendStatus: 'stopped' })
+  if (quitting) expect(state.send).not.toHaveBeenCalled()
+  else expect(state.send).toHaveBeenCalledWith('plugins:changed')
+})
 
 it('loads mirrored built-ins, keeps examples inactive and refreshes only app-owned packages', async () => {
   const { store } = runtime.pluginRuntime()

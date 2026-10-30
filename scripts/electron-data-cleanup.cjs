@@ -36,7 +36,7 @@ async function verifyDataCleanup(launchApplication) {
       }
     }, documents)
     await page.evaluate(() => globalThis.gale.app.backupData())
-    assert.equal(dirname(await application.evaluate(() => globalThis.__cleanupBackupDefault)), documents)
+    assert.equal(dirname(await application.evaluate(() => globalThis.__cleanupBackupDefault)), join(documents, 'Anas', 'backups'))
 
     const unknown = ['assets/', 'attachments/', 'config/capabilities.json', 'config/custom_tools.json', 'file_edits/', 'old-backup.zip']
     for (const path of unknown) await file(path.endsWith('/') ? `${path}old.txt` : path)

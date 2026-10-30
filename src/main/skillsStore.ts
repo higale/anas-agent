@@ -528,8 +528,17 @@ async function loadCatalog(projectId?: string, selection?: SkillSelection, sourc
 }
 
 export async function listSkillSnapshot(projectId?: string, sourceFolders?: string[]): Promise<SkillSnapshot> {
-  if (sourceFolders !== undefined && (!Array.isArray(sourceFolders) || sourceFolders.some((folder) => typeof folder !== 'string' || !isAbsolute(folder)))) {
-    throw new Error('Skill source folders must be absolute directory paths.')
+  if (sourceFolders !== undefined) {
+    const context = `project=${JSON.stringify(projectId ?? null)}, platform=${process.platform}`
+    if (!Array.isArray(sourceFolders)) {
+      throw new Error(`Skill source folders must be an array of absolute directory paths. ${context}`)
+    }
+    for (const [index, folder] of sourceFolders.entries()) {
+      if (typeof folder !== 'string' || !isAbsolute(folder)) {
+        const value = typeof folder === 'string' ? JSON.stringify(folder) : `<${folder === null ? 'null' : typeof folder}>`
+        throw new Error(`Skill source folders must be absolute directory paths. sourceFolders[${index}]=${value}; ${context}`)
+      }
+    }
   }
   const folders = sourceFolders === undefined ? undefined : [...new Set(sourceFolders.map((folder) => resolve(folder)))]
   const catalog = await loadCatalog(projectId, undefined, folders)

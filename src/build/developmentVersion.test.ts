@@ -23,7 +23,7 @@ beforeEach(() => {
 })
 afterEach(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 }))
 
-describe('development version from synchronization baselines', () => {
+describe('development version from confirmed release baselines', () => {
   it('does not treat release or legacy synchronization tags as development baselines', () => {
     git('tag', 'v3.1.3')
     git('tag', 'github/v3.1.3')
@@ -32,18 +32,18 @@ describe('development version from synchronization baselines', () => {
   it('counts commits from the baseline without changing the release version', () => {
     git('update-ref', 'refs/anas/github/v3.1.3', 'HEAD')
     expect(git('tag', '--list')).toBe('')
-    expect(getDevelopmentVersion(root, '3.1.3')).toBe(`3.1.3-dev.0+g${git('rev-parse', '--short=8', 'HEAD')}`)
+    expect(getDevelopmentVersion(root, '3.1.3')).toBeUndefined()
     git('commit', '--allow-empty', '-m', 'development change')
     expect(getDevelopmentVersion(root, '3.1.3')).toBe(`3.1.3-dev.1+g${git('rev-parse', '--short=8', 'HEAD')}`)
     git('update-ref', 'refs/anas/github/v3.1.4', 'HEAD')
-    expect(getDevelopmentVersion(root, '3.1.4')).toBe(`3.1.4-dev.0+g${git('rev-parse', '--short=8', 'HEAD')}`)
+    expect(getDevelopmentVersion(root, '3.1.4')).toBeUndefined()
   })
   it('marks tracked, staged and untracked changes, but ignores build output', () => {
     git('update-ref', 'refs/anas/github/v3.1.3', 'HEAD')
     writeFileSync(join(root, '.git/info/exclude'), 'out/\n')
     mkdirSync(join(root, 'out'))
     writeFileSync(join(root, 'out/bundle.js'), 'build')
-    expect(getDevelopmentVersion(root, '3.1.3')).not.toContain('.dirty')
+    expect(getDevelopmentVersion(root, '3.1.3')).toBeUndefined()
     writeFileSync(join(root, 'source.txt'), 'edited\n')
     expect(getDevelopmentVersion(root, '3.1.3')).toMatch(/\.dirty$/)
     git('add', 'source.txt')
@@ -57,6 +57,23 @@ describe('development version from synchronization baselines', () => {
     git('update-ref', 'refs/anas/github/v3.1.3', 'HEAD')
     git('commit', '--allow-empty', '-m', 'prepare release')
     expect(getDevelopmentVersion(root, '3.1.4')).toMatch(/^3\.1\.4-dev\.1\+g/)
+  })
+  it('stops counting fixes once a same-version release retry publishes them', () => {
+    git('update-ref', 'refs/anas/github/v3.1.3', 'HEAD')
+    const original = git('rev-parse', 'HEAD')
+    git('commit', '--allow-empty', '-m', 'first release fix')
+    git('commit', '--allow-empty', '-m', 'second release fix')
+    expect(getDevelopmentVersion(root, '3.1.3')).toMatch(/^3\.1\.3-dev\.2\+g/)
+    git('update-ref', 'refs/anas/github/v3.1.3', 'HEAD', original)
+    expect(getDevelopmentVersion(root, '3.1.3')).toBeUndefined()
+    git('commit', '--allow-empty', '-m', 'new unpublished change')
+    expect(getDevelopmentVersion(root, '3.1.3')).toMatch(/^3\.1\.3-dev\.1\+g/)
+  })
+  it('marks changes at the release commit and a different requested version as development', () => {
+    git('update-ref', 'refs/anas/github/v3.1.3', 'HEAD')
+    expect(getDevelopmentVersion(root, '3.1.4')).toMatch(/^3\.1\.4-dev\.0\+g/)
+    writeFileSync(join(root, 'source.txt'), 'uncommitted change\n')
+    expect(getDevelopmentVersion(root, '3.1.3')).toMatch(/^3\.1\.3-dev\.0\+g[a-f0-9]+\.dirty$/)
   })
   it('counts mainline commits and ignores baseline refs on merged side branches', () => {
     git('update-ref', 'refs/anas/github/v3.1.3', 'HEAD')
@@ -77,6 +94,11 @@ describe('development version from synchronization baselines', () => {
     git('-C', clone, 'config', '--add', 'remote.origin.fetch', 'refs/anas/github/*:refs/anas/github/*')
     git('-C', clone, 'fetch', 'origin')
     expect(getDevelopmentVersion(clone, '3.1.3')).toBe(`3.1.3-dev.1+g${git('rev-parse', '--short=8', 'HEAD')}`)
+    git('commit', '--allow-empty', '-m', 'release retry fix')
+    git('update-ref', 'refs/anas/github/v3.1.3', 'HEAD')
+    git('-C', clone, 'fetch', 'origin')
+    git('-C', clone, 'merge', '--ff-only', 'origin/main')
+    expect(getDevelopmentVersion(clone, '3.1.3')).toBeUndefined()
     expect(git('-C', clone, 'tag', '--list')).toBe('')
   })
   it('does not inherit metadata from a source archive parent directory', async () => {

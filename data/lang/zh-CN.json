@@ -867,7 +867,7 @@
     "restore_data_action": "恢复",
     "restore_data_title": "从备份恢复数据？",
     "restore_data_description": "当前数据会先自动备份，然后被所选 zip 备份替换。恢复后应用会重新加载。",
-    "restore_completed": "恢复完成，正在重新加载。",
+    "restoring_data": "正在恢复数据，请稍候…",
     "failed_restore_data": "恢复数据目录失败。",
     "failed_cleanup_data": "清理所选数据失败。",
     "cleanup_completed": "清理完成。",

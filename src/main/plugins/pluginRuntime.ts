@@ -12,6 +12,7 @@ import { PluginBackends, type PluginViewAction } from './pluginBackend'
 
 let store: PluginStore | undefined
 let backends: PluginBackends | undefined
+let changeNotificationsEnabled = true
 let viewAction: PluginViewAction | undefined
 export function setPluginBackendViewAction(action: PluginViewAction): void { viewAction = action }
 
@@ -19,7 +20,11 @@ let readViews: ((id: string) => PluginBackendCallContext['views']) | undefined
 
 export function setPluginBackendViews(reader: (id: string) => PluginBackendCallContext['views']): void { readViews = reader }
 
+// Process exit is final; data restore and ordinary backend stops keep notifications enabled.
+export function stopPluginChangeNotifications(): void { changeNotificationsEnabled = false }
+
 export function changed(): void {
+  if (!changeNotificationsEnabled) return
   for (const window of BrowserWindow.getAllWindows()) {
     if (isMainRendererWindow(window)) window.webContents.send('plugins:changed')
   }

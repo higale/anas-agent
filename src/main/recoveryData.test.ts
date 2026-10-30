@@ -1,7 +1,7 @@
 import { lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { basename, dirname, join } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { preserveRecoveryData, requireResettableConfigFile, resetRecoveryConfig } from './recoveryData'
 
 const roots: string[] = []
@@ -17,7 +17,7 @@ async function put(path: string, value: string) {
   await mkdir(dirname(path), { recursive: true })
   await writeFile(path, value)
 }
-afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))) })
+afterEach(async () => { vi.useRealTimers(); await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))) })
 
 describe('raw recovery data', () => {
   it('preserves broken JSON, database bytes and journals without parsing, and excludes transient roots', async () => {
@@ -35,8 +35,8 @@ describe('raw recovery data', () => {
     }
     for (const [name, value] of Object.entries(files)) await put(join(data, name), value)
     for (const name of ['electron', 'tmp', 'cache', 'dev']) await put(join(data, name, 'ignored'), 'transient')
-    const output = await preserveRecoveryData(data, root)
-    expect(dirname(output)).toBe(join(root, 'Anas-Recovery'))
+    const output = await preserveRecoveryData(data, join(root, 'Anas', 'recovery'))
+    expect(dirname(output)).toBe(join(root, 'Anas', 'recovery'))
     for (const [name, value] of Object.entries(files)) {
       expect(await readFile(join(output, 'data', name), 'utf8')).toBe(value)
       expect(await readFile(join(data, name), 'utf8')).toBe(value)
@@ -52,7 +52,7 @@ describe('raw recovery data', () => {
     await symlink(external, join(data, 'external'), 'junction')
     await symlink('missing', join(data, 'dangling'), 'file')
     await symlink(data, join(data, 'loop'), 'junction')
-    const output = await preserveRecoveryData(data, root)
+    const output = await preserveRecoveryData(data, join(root, 'Anas', 'recovery'))
     for (const name of ['external', 'dangling', 'loop']) {
       expect((await lstat(join(output, 'data', name))).isSymbolicLink()).toBe(true)
       expect(await readlink(join(output, 'data', name))).toBe(await readlink(join(data, name)))
@@ -65,27 +65,55 @@ describe('raw recovery data', () => {
     await symlink(data, linked, 'junction')
     await expect(preserveRecoveryData(data, data)).rejects.toThrow('outside')
     await expect(preserveRecoveryData(data, linked)).rejects.toThrow('outside')
+    await expect(preserveRecoveryData(data, join(data, 'new', 'recovery'))).rejects.toThrow('outside')
+    await expect(preserveRecoveryData(data, join(linked, 'new', 'recovery'))).rejects.toThrow('outside')
     expect(await readdir(data)).toEqual([])
   })
 
   it('keeps separate copies under the shared recovery directory', async () => {
     const { root, data } = await fixture()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-28T09:12:41.001Z'))
     await put(join(data, 'projects.json'), 'first')
-    const first = await preserveRecoveryData(data, root)
+    const first = await preserveRecoveryData(data, join(root, 'Anas', 'recovery'))
     await put(join(data, 'projects.json'), 'second')
-    const second = await preserveRecoveryData(data, root)
+    const second = await preserveRecoveryData(data, join(root, 'Anas', 'recovery'))
     expect(first).not.toBe(second)
-    expect(dirname(first)).toBe(join(root, 'Anas-Recovery'))
+    expect(basename(first)).toMatch(/^2026-10-28T09-12-41-001Z-/)
+    expect(dirname(first)).toBe(join(root, 'Anas', 'recovery'))
     expect(dirname(second)).toBe(dirname(first))
     expect(await readFile(join(first, 'data/projects.json'), 'utf8')).toBe('first')
     expect(await readFile(join(second, 'data/projects.json'), 'utf8')).toBe('second')
-    expect(await readdir(join(root, 'Anas-Recovery'))).toHaveLength(2)
+    expect(await readdir(join(root, 'Anas', 'recovery'))).toHaveLength(2)
+  })
+
+  it('uses a redirected destination and leaves legacy copies untouched', async () => {
+    const { root, data } = await fixture()
+    const redirected = join(root, 'redirected')
+    await mkdir(redirected)
+    await symlink(redirected, join(root, 'documents'), 'junction')
+    await put(join(root, 'Anas-Recovery', 'old', 'original'), 'old copy')
+    await put(join(data, 'broken.json'), '{broken')
+    const output = await preserveRecoveryData(data, join(root, 'documents', 'Anas', 'recovery'))
+    expect(dirname(output)).toBe(join(redirected, 'Anas', 'recovery'))
+    expect(await readFile(join(output, 'data', 'broken.json'), 'utf8')).toBe('{broken')
+    expect(await readFile(join(root, 'Anas-Recovery', 'old', 'original'), 'utf8')).toBe('old copy')
+  })
+
+  it('reports an unavailable destination without modifying the source or falling back', async () => {
+    const { root, data } = await fixture()
+    await put(join(root, 'documents'), 'not a directory')
+    await put(join(data, 'broken.json'), '{broken')
+    await expect(preserveRecoveryData(data, join(root, 'documents', 'Anas', 'recovery'))).rejects.toThrow()
+    expect(await readFile(join(data, 'broken.json'), 'utf8')).toBe('{broken')
+    expect((await readdir(root)).sort()).toEqual(['bundled', 'data', 'documents'])
   })
 
   it('rejects a shared recovery directory linked back into the source', async () => {
     const { root, data } = await fixture()
-    await symlink(data, join(root, 'Anas-Recovery'), 'junction')
-    await expect(preserveRecoveryData(data, root)).rejects.toThrow('outside')
+    await mkdir(join(root, 'Anas'))
+    await symlink(data, join(root, 'Anas', 'recovery'), 'junction')
+    await expect(preserveRecoveryData(data, join(root, 'Anas', 'recovery'))).rejects.toThrow('outside')
     expect(await readdir(data)).toEqual([])
   })
 
@@ -95,7 +123,7 @@ describe('raw recovery data', () => {
     await put(join(data, 'config/models.json'), '{also broken')
     await put(join(data, 'projects.json'), 'keep projects')
     await put(join(bundled, 'settings.json'), '{"theme":"system"}')
-    const output = await preserveRecoveryData(data, root)
+    const output = await preserveRecoveryData(data, join(root, 'Anas', 'recovery'))
     await resetRecoveryConfig(data, bundled, 'settings.json')
     expect(await readFile(join(data, 'config/settings.json'), 'utf8')).toBe('{"theme":"system"}')
     expect(await readFile(join(output, 'data/config/settings.json'), 'utf8')).toBe('{broken')

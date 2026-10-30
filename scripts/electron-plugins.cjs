@@ -391,7 +391,9 @@ async function checkForms(application, page, directory, settings) {
 
 async function checkBackup(application, page, directory) {
   const backups = await mkdtemp(join(tmpdir(), 'anas-plugin-backups-'))
+  const previousDocuments = await application.evaluate(({ app }) => app.getPath('documents'))
   try {
+    await application.evaluate(({ app }, directory) => app.setPath('documents', directory), backups)
     await application.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }) }, join(backups, 'plugins.zip'))
     await page.evaluate(() => globalThis.gale.plugins.startBackend('example-backend'))
     await writeFile(join(directory, 'examples/plugins/README.md'), 'Stale example documentation')
@@ -417,6 +419,7 @@ async function checkBackup(application, page, directory) {
     assert.equal(await page.evaluate(() => globalThis.gale.plugins.invoke('example-notepad', 'data.get', { key: 'draft' })), 'Plugin saved draft')
     assert.equal(await page.evaluate(async () => (await globalThis.gale.plugins.list()).find(item => item.id === 'example-backend').backendStatus), 'stopped')
   } finally {
+    await application.evaluate(({ app }, directory) => app.setPath('documents', directory), previousDocuments)
     await rm(backups, { recursive: true, force: true })
   }
 }

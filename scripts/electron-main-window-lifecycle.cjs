@@ -38,6 +38,23 @@ async function verifyMainWindowLifecycle(launchApplication) {
     applicationProcess = application.process()
     let main = await application.firstWindow()
     await main.locator('[data-agent-composer-input]').waitFor({ timeout: 45000 })
+    const notificationReport = join(root, 'plugin-notifications.json')
+    await application.evaluate(({ app, BrowserWindow }, { url, reportPath }) => {
+      const { writeFileSync } = process.getBuiltinModule('node:fs')
+      const counts = { running: 0, quitting: 0 }
+      let quitting = false
+      app.prependOnceListener('before-quit', () => { quitting = true })
+      const contents = BrowserWindow.getAllWindows().find(window => window.webContents.getURL() === url).webContents
+      const send = contents.send.bind(contents)
+      contents.send = (channel, ...args) => {
+        if (channel === 'plugins:changed') {
+          counts[quitting ? 'quitting' : 'running']++
+          writeFileSync(reportPath, JSON.stringify(counts))
+        }
+        return send(channel, ...args)
+      }
+      writeFileSync(reportPath, JSON.stringify(counts))
+    }, { url: main.url(), reportPath: notificationReport })
     await application.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, join(source, 'PLUGIN.json'))
     await main.evaluate(() => globalThis.gale.plugins.install())
     await main.evaluate(() => globalThis.gale.plugins.invoke('window-lifecycle', 'host.openView', { instanceId: 'main', location: 'window' }))
@@ -101,6 +118,9 @@ async function verifyMainWindowLifecycle(launchApplication) {
     }
     await expect.poll(() => child.exitCode !== null || child.signalCode !== null, { timeout: 10000 }).toBe(true)
     assert.equal(child.exitCode, 0, 'Main-window close must complete normal application shutdown.')
+    const notifications = JSON.parse(await readFile(notificationReport, 'utf8'))
+    assert.ok(notifications.running > 0, 'Normal plugin changes must still notify the main renderer.')
+    assert.equal(notifications.quitting, 0, 'Application shutdown must not trigger new plugin resource refreshes.')
     assert.equal(plugin.page().isClosed(), true)
     assert.deepEqual(JSON.parse(await readFile(join(root, 'db/plugins/window-lifecycle/stopped.json'), 'utf8')), { stopped: true })
     await expect.poll(() => server.clients.size).toBe(0)

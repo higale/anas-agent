@@ -20,6 +20,7 @@ import {
 import { validateRestoredDataDirectory } from './dataRestoreValidation'
 import { runtimeLog } from './runtimeLogger'
 import { withApplicationDataSnapshot } from './applicationDataSnapshot'
+import { createPreservationDirectory } from './recoveryData'
 import { readProjectStoreFile } from './projectStore'
 import type { RecoveryResetTarget } from '@shared/recovery'
 
@@ -238,9 +239,14 @@ async function restoreDataBackupZipExclusive(
     // boundary used for the new swap.
     await recoverInterruptedDataRestoreExcept(tempRoot, dataDir)
 
-    const preferredBackupDir = dirname(resolvedSourcePath)
-    const preRestoreBackupDir = isInsideDirectory(dataDir, preferredBackupDir) ? tmpdir() : preferredBackupDir
-    const preRestoreBackupPath = (await createDataBackupZip(join(preRestoreBackupDir, await preRestoreBackupFileName()))).path
+    const preRestoreBackupDir = await createPreservationDirectory(dataDir, join(defaultBackupDirectory(), 'before-restore'))
+    let preRestoreBackupPath: string
+    try {
+      preRestoreBackupPath = (await createDataBackupZip(join(preRestoreBackupDir, await preRestoreBackupFileName()))).path
+    } catch (error) {
+      await rm(preRestoreBackupDir, { recursive: true, force: true }).catch(() => undefined)
+      throw error
+    }
     cleanupTransaction = false
     await swapRestoredData(tempRoot, journal)
     swapped = true
@@ -435,9 +441,15 @@ function resetData(preserveCurrentData: () => Promise<string>, executionOnly: bo
 }
 
 export function defaultBackupDirectory(): string {
-  return app.getPath('documents')
+  return join(app.getPath('documents'), 'Anas', 'backups')
+}
+
+export function defaultRecoveryDirectory(): string {
+  return join(app.getPath('documents'), 'Anas', 'recovery')
 }
 
 export async function backupDialogDefaultPath(backupDirectory?: string): Promise<string> {
-  return join(backupDirectory || defaultBackupDirectory(), await defaultBackupFileName())
+  const directory = backupDirectory || defaultBackupDirectory()
+  if (!backupDirectory) await mkdir(directory, { recursive: true, mode: 0o700 })
+  return join(directory, await defaultBackupFileName())
 }

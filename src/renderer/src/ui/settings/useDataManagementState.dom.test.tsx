@@ -10,9 +10,11 @@ vi.mock('../notice', () => ({ notice: { error: vi.fn(), success: vi.fn(), warnin
 
 const t = ((key: string) => key) as TFunction
 const allData = vi.fn(), agentData = vi.fn(), traceData = vi.fn()
-const options = { openConfirmDialog: vi.fn(), setConfig: vi.fn(), setInputHistory: vi.fn(), cleanupAgentThreads: vi.fn(), t }
+const options = { onRestoreData: vi.fn(), openConfirmDialog: vi.fn(), setConfig: vi.fn(), setInputHistory: vi.fn(), cleanupAgentThreads: vi.fn(), t }
 
 beforeEach(() => {
+  options.onRestoreData.mockReset()
+  options.openConfirmDialog.mockReset()
   allData.mockReset().mockImplementation(() => new Promise(() => {}))
   agentData.mockReset().mockImplementation(() => new Promise(() => {}))
   traceData.mockReset().mockResolvedValue({ totalBytes: 15, approximate: false })
@@ -27,6 +29,28 @@ function renderState(tab: SettingsTab = 'dev', open = true) {
     initialProps: { settingsTab: tab, settingsOpen: open }
   })
 }
+
+describe('data restore handoff', () => {
+  it('hands the confirmed path to the app boundary without starting restore in the settings tree', async () => {
+    const restore = vi.fn()
+    Object.assign(window.gale.app, { selectDataRestoreBackup: vi.fn().mockResolvedValue('/selected.zip'), restoreData: restore })
+    const { result } = renderState()
+    await act(async () => result.current.restoreDataDirectory())
+    expect(options.onRestoreData).not.toHaveBeenCalled()
+    expect(restore).not.toHaveBeenCalled()
+    act(() => options.openConfirmDialog.mock.calls[0][0].onConfirm())
+    expect(options.onRestoreData).toHaveBeenCalledExactlyOnceWith('/selected.zip')
+    expect(restore).not.toHaveBeenCalled()
+  })
+
+  it('does not start restore when the file picker is cancelled', async () => {
+    Object.assign(window.gale.app, { selectDataRestoreBackup: vi.fn().mockResolvedValue(null) })
+    const { result } = renderState()
+    await act(async () => result.current.restoreDataDirectory())
+    expect(options.openConfirmDialog).not.toHaveBeenCalled()
+    expect(options.onRestoreData).not.toHaveBeenCalled()
+  })
+})
 
 describe('Dev storage usage', () => {
   it('loads only developer trace usage when the Dev page opens', async () => {
