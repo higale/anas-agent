@@ -8,7 +8,7 @@ import type { SqliteMemoryStore } from './memoryStore'
 import type { FileEditStore } from '../fileEditStore'
 import type { ConversationInstanceOwner } from './conversationInstance'
 import { initializeNativeConversationStorage, validateNativeConversationSchema } from './nativeDatabaseSchema'
-import { validateNativeExecutionStorage } from './nativeStorageValidation'
+import { validateNativeExecutionHeads, validateNativeExecutionStorage } from './nativeStorageValidation'
 import { assertSubagentStorageIntegrity, assertCleanupStorageIntegrity, validateConversationResources } from './conversationResources'
 import { NativeRunOwner } from './nativeRunOwner'
 import { NativeHistoryOwner } from './nativeHistoryOwner'
@@ -75,7 +75,11 @@ export class NativeConversationDatabase {
 
   private constructor(private readonly database: Database.Database, private readonly options: NativeConversationDatabaseOptions) {
     initializeNativeConversationStorage(database)
-    this.validate()
+    database.transaction(() => {
+      validateNativeExecutionHeads(database)
+      assertSubagentStorageIntegrity(database)
+      assertCleanupStorageIntegrity(database)
+    })()
     database.pragma('journal_mode=WAL')
     const projection = new NativeMessageProjection(database)
     this.runs = new NativeRunOwner(database, commit => { projection.commit(commit); this.notifyChanged() }, () => this.notifyChanged())
@@ -192,8 +196,9 @@ export class NativeConversationDatabase {
       const waitingForResume = latestRun && this.database.prepare('SELECT 1 FROM agent_run_resume_intents WHERE run_id=?').get(latestRun.id)
       const interrupts = latestRun && !waitingForResume ? this.runs.readInterrupts({ threadId, runId: latestRun.id }) : []
       const metadata = new RunActivityMetadata(this.database)
-      return conversationSnapshot({ thread, latestRun, messages: window.messages, window, interrupts,
-        todos: this.runs.store.readHistory(threadId)?.context.todos ?? [], contextStatus: window.contextStatus,
+      const head = this.runs.store.readHead(threadId)
+      const snapshot = conversationSnapshot({ thread, latestRun, messages: window.messages, window, interrupts,
+        todos: head?.context.todos ?? [], contextStatus: window.contextStatus,
         settling: latestRun?.id === options.settlingRunId
       }, {
         activities: runIds => this.messages.activities.getActivitiesForRuns(threadId, runIds, { includeUnanchored: initialAgentMessageWindow }),
@@ -203,13 +208,19 @@ export class NativeConversationDatabase {
           options.executingRunId === activity.runId, metadata.canonicalChildren(activity.runId), options.activeSubagentIds),
         decorateActivity: activity => this.decorateActivity(activity, options)
       })
+      if (!options.settlingRunId && !options.executingRunId && thread.status !== 'running' && thread.status !== 'interrupted'
+        && !this.resources.getSubagentCallByChildThreadId(threadId)) {
+        const retries = this.history.modelRetries(threadId)
+        if (retries.length) snapshot.modelRetries = retries
+      }
+      return snapshot
     })()
   }
 
   private snapshotIdentity(threadId: string): string {
     const thread = this.resources.getThread(threadId), run = this.messages.activities.getLatestRunForThread(threadId)
     const answers = run ? this.database.prepare('SELECT interrupt_id,response_json FROM agent_run_resume_intents WHERE run_id=? ORDER BY interrupt_id').all(run.id) : []
-    return JSON.stringify([thread, run, this.runs.store.readHistory(threadId)?.revisionId, answers])
+    return JSON.stringify([thread, run, this.runs.store.readHead(threadId)?.revisionId, answers])
   }
 
   async readSnapshotWithPreviews(threadId: string, primaryFolder: string | undefined, options: NativeSnapshotOptions = {}): Promise<AgentThreadSnapshot> {

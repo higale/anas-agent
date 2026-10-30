@@ -1,3 +1,4 @@
+import type { AgentModelRetryState } from '@shared/agentTypes'
 import {
   Activity,
   AudioLines,
@@ -75,6 +76,8 @@ interface AgentMessageListProps {
   panelRef: RefObject<HTMLElement | null>
   followOutputRef: RefObject<boolean>
   error?: string
+  modelRetries?: AgentModelRetryState[]
+  onRetryModel?(retry: AgentModelRetryState, withholdToolResults: boolean): Promise<void>
   speech: AgentSpeechState
   earlierMessageCount?: number
   onOpenSubagent?(runId: string, subagentId: string): void
@@ -1188,6 +1191,26 @@ function AgentActivityRange({
   )
 }
 
+function ModelRetryActions({ retry, onRetry }: { retry: AgentModelRetryState; onRetry(withhold: boolean): Promise<void> }) {
+  const { t } = useTranslation()
+  const [busy, setBusy] = useState(false)
+  const pending = useRef(false)
+  const submit = async (withhold: boolean) => {
+    if (pending.current) return
+    pending.current = true
+    setBusy(true)
+    try { await onRetry(withhold) }
+    catch (reason) { notice.error(reason instanceof Error ? reason.message : t('agent.model_retry_failed')) }
+    finally { pending.current = false; setBusy(false) }
+  }
+  return <div className="agent-model-retry-actions">
+    <NoFocusButton type="button" className="ui-button" disabled={busy} onClick={() => void submit(false)}>{t('common.retry')}</NoFocusButton>
+    {retry.canWithholdToolResults && <NoFocusButton type="button" className="ui-button" disabled={busy}
+      title={t('agent.retry_without_tool_results_hint')}
+      onClick={() => void submit(true)}>{t('agent.retry_without_tool_results')}</NoFocusButton>}
+  </div>
+}
+
 export function AgentMessageList({
   onOpenChanges,
   title,
@@ -1198,6 +1221,8 @@ export function AgentMessageList({
   panelRef,
   followOutputRef,
   error,
+  modelRetries,
+  onRetryModel,
   speech,
   earlierMessageCount = 0,
   onDeleteRound,
@@ -1289,8 +1314,12 @@ export function AgentMessageList({
           )}
           {timeline.entries.map((entry) => {
             if (entry.type === 'error') {
+              const modelRetry = modelRetries?.find(retry => retry.runId === entry.runId)
               return <div className="agent-activity-error" role="alert" key={entry.key} data-native-context-menu="text">
-                {localizeAgentError(entry.message, t)}
+                <div>{localizeAgentError(entry.message, t)}</div>
+                {modelRetry?.runId === entry.runId && onRetryModel && !run && (
+                  <ModelRetryActions key={modelRetry.revisionId} retry={modelRetry} onRetry={withhold => onRetryModel(modelRetry, withhold)} />
+                )}
               </div>
             }
             if (entry.type === 'cleanup') {

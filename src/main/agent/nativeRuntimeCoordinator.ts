@@ -45,6 +45,12 @@ export class NativeRuntimeCoordinator extends ConversationRuntimeDirectory<Nativ
       return handle ? { run: this.databaseForThread(threadId).messages.activities.getLatestRunForThread(threadId)!, handle } : undefined
     })
   }
+  retryModel(input: Parameters<NativeAgentRuntime['retryModel']>[0]) {
+    return this.useRuntime(input.threadId, async runtime => {
+      const handle = await runtime.retryModel(input)
+      return { run: this.databaseForThread(input.threadId).readModel.getRun(input.runId)!, handle }
+    })
+  }
   resumeRun(input: Parameters<NativeAgentRuntime['resumeRun']>[0]) {
     return this.useRuntime(input.threadId, runtime => {
       const handle = runtime.resumeRun(input)

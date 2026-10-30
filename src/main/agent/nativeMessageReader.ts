@@ -8,6 +8,7 @@ import { RunActivityReader, type ActivityPayloadReader } from './runActivityRead
 import { presentToolResult, traceReasoningSummary } from '../../runtime/messagePresentation'
 import { RunActivityObservations } from './runActivityObservations'
 import { decodeExecutionInput } from '../../runtime/executionInput'
+import { setImmediate as yieldToEventLoop } from 'node:timers/promises'
 
 /** Reads product projections of native execution records.
  * History positions and activity payloads can retain different body versions;
@@ -190,6 +191,29 @@ export class NativeMessageReader {
     })
   }
 
+  /** A compressed preview still recalls memory from the original last user
+   * input. Search visible indexes backwards without loading tool-result bodies. */
+  async latestUserMessageBefore(threadId: string, beforeIndex: number, revisionId: string): Promise<ExecutionMessageRecord | undefined> {
+    let cursor = beforeIndex
+    while (cursor > 0) {
+      await yieldToEventLoop()
+      if (this.store.readHead(threadId)?.revisionId !== revisionId) return undefined
+      const rows = this.database.prepare(`SELECT position,record_id,message_id FROM agent_message_index
+        WHERE thread_id=? AND visible=1 AND position<? ORDER BY position DESC LIMIT 100`)
+        .all(threadId, cursor) as { position: number; record_id: string; message_id: string }[]
+      if (!rows.length) return undefined
+      for (const row of rows) {
+        const record = this.store.readHistoryRange(threadId, row.position, 1)[0]
+        if (!record || record.recordId !== row.record_id || record.id !== row.message_id) {
+          throw new Error('History index differs from the execution history.')
+        }
+        if (record.value.kind === 'user') return record
+      }
+      cursor = rows[rows.length - 1].position
+    }
+    return undefined
+  }
+
   window(threadId: string, startIndex?: number, limit = 100) {
     return this.database.transaction(() => {
       if (!this.database.prepare('SELECT 1 FROM agent_threads WHERE id=?').get(threadId)) throw new Error('Conversation does not exist.')
@@ -199,12 +223,26 @@ export class NativeMessageReader {
       const offset = startIndex === undefined ? Math.max(0, totalCount - size) : Math.min(totalCount, Math.max(0, Math.floor(startIndex)))
       // Preserve the product's explicit-start behavior: the requested suffix
       // is returned in full; limit applies to the default tail window.
-      const rows = this.database.prepare(`SELECT record_id,message_id FROM agent_message_index
-        WHERE thread_id=? AND visible=1 ORDER BY position LIMIT ? OFFSET ?`)
-        .all(threadId, startIndex === undefined ? size : totalCount - offset, offset) as Array<{ record_id: string; message_id: string | null }>
+      const rows = this.database.prepare(`SELECT entry.record_id,entry.message_id,entry.run_id,
+        history.record_id AS history_record_id,history.message_id AS history_message_id,run.thread_id AS owner_thread_id
+        FROM agent_message_index entry LEFT JOIN execution_messages history
+          ON history.thread_id=entry.thread_id AND history.position=entry.position
+        LEFT JOIN agent_runs run ON run.id=entry.run_id
+        WHERE entry.thread_id=? AND entry.visible=1 ORDER BY entry.position LIMIT ? OFFSET ?`)
+        .all(threadId, startIndex === undefined ? size : totalCount - offset, offset) as Array<{
+          record_id: string; message_id: string; run_id: string | null;
+          history_record_id: string | null; history_message_id: string | null; owner_thread_id: string | null
+        }>
       const messages = rows.map(row => {
+        if (row.record_id !== row.history_record_id || row.message_id !== row.history_message_id
+          || row.run_id !== null && row.owner_thread_id !== threadId) throw new Error('History index differs from the execution history or its owner.')
         const record = this.store.readMessageRecord(threadId, row.record_id)
-        if (row.message_id !== null && record.id !== row.message_id) throw new Error('History index references another message identity.')
+        if (record.id !== row.message_id || record.value.context?.runId !== undefined && record.value.context.runId !== row.run_id) {
+          throw new Error('History index references another message identity or owner.')
+        }
+        if (record.value.kind !== 'user' && !(record.value.kind === 'assistant' && !record.value.calls?.length)) {
+          throw new Error('History index exposes a non-visible execution message.')
+        }
         return this.present(threadId, record)
       })
       const status = this.database.prepare('SELECT status_json FROM agent_context_status WHERE thread_id=?').get(threadId) as { status_json: string } | undefined

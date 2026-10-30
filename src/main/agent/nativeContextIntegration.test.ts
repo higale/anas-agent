@@ -94,7 +94,7 @@ function openHistoryDatabase(messages: ConversationMessage[], summary?: { cutoff
     new NativeExecutionStore(raw).installHistory({ threadId: thread.id, revisionId: randomUUID(), messages: records,
       ...(summarized ? { summary: { record: summarized, reference: { id: 'history-summary', messageRecordId: summarized.recordId, cutoffIndex: summary!.cutoffIndex } } } : {}) })
     // Idle histories have no run owner. Include the derived indexes required by
-    // the current database format; normal opening validates the whole fixture.
+    // the current database format; explicit validation checks the whole fixture.
     for (const [position, message] of records.entries()) {
       raw.prepare('INSERT INTO agent_message_index(thread_id,position,record_id,message_id,run_id,visible) VALUES (?,?,?,?,NULL,?)')
         .run(thread.id, position, message.recordId, message.id, Number(message.value.kind === 'user' || message.value.kind === 'assistant' && !message.value.calls?.length))
@@ -103,7 +103,7 @@ function openHistoryDatabase(messages: ConversationMessage[], summary?: { cutoff
       }
     }
   } finally { raw.close() }
-  return { database: openDatabase(file), thread }
+  return { database: openDatabase(file), thread, file }
 }
 function observer(): RunObserver {
   return { started: vi.fn(), startModel: vi.fn(() => 'observation'), discardModel: vi.fn(),
@@ -416,6 +416,44 @@ describe('native context integration', () => {
         expect(database.runs.getRunConfiguration({ threadId: thread.id, runId: 'current-project-config' })!.capabilities.planning).toBe(true)
       } finally { await second.dispose() }
     } finally { await runtime.shutdown(); database.close() }
+  })
+
+  it.each([200, 201, 202].flatMap(cutoffIndex => ['text', 'blocks', 'empty'].map(queryFormat => ({ cutoffIndex, queryFormat }))))(
+    'preserves memory and context usage with summary cutoff $cutoffIndex and $queryFormat user input', async ({ cutoffIndex, queryFormat }) => {
+    const snapshot = previewConfig(), project = minimalProject()
+    project.capabilities.memory = true
+    appConfigMocks.getAppConfigSnapshot.mockImplementation(async () => structuredClone(snapshot))
+    projectStoreMocks.getProject.mockImplementation(async () => structuredClone(project))
+    const messages: ConversationMessage[] = Array.from({ length: 202 }, (_, index) => ({ id: `message-${index}`,
+      kind: index % 2 ? 'assistant' : 'user', content: `Saved content ${index}` }))
+    messages[200].content = queryFormat === 'blocks' ? [{ type: 'text', text: 'Current question' }, { type: 'text', text: 'With details' }]
+      : queryFormat === 'empty' ? '' : 'Current question'
+    const { database, thread, file } = openHistoryDatabase(messages, { cutoffIndex, content: 'Summary of earlier history' })
+    const recalled = vi.spyOn(database.resources.memoryStore, 'relevantMemories').mockResolvedValue([{
+      id: 'memory', scope: 'project', projectId: thread.projectId, kind: 'fact', importance: 1,
+      content: 'Remember the project constraint. ' + 'm'.repeat(4400), keywords: [], origin: 'user',
+      createdAt: '2026-09-24T00:00:00.000Z', updatedAt: '2026-09-24T00:00:00.000Z'
+    }])
+    const history = database.runs.store.readHistory(thread.id)!
+    const expected = await projectConversationContextStatus(thread, database.resources, snapshot,
+      conversationContextSource({ threadId: thread.id, ...history }, database.runs.store), {})
+    const expectedQueries = [...recalled.mock.calls]
+    expect(expectedQueries).toHaveLength(queryFormat === 'empty' ? 0 : 1)
+    recalled.mockClear()
+    database.validate()
+    const raw = new Database(file)
+    try { raw.exec("UPDATE execution_message_bodies SET value=x'00' WHERE message_id='message-0'") } finally { raw.close() }
+    const runtime = new NativeAgentRuntime(database, testPaths.root, { push: vi.fn() }, { prepareWorkspace: false })
+    try {
+      let handledPendingWork = false
+      setImmediate(() => { handledPendingWork = true })
+      const actual = await runtime.getContextStatus(thread.id)
+      expect(handledPendingWork).toBe(true)
+      expect(actual?.estimatedInputTokens).toBe(expected.estimatedInputTokens)
+      expect(actual?.breakdown).toEqual(expected.breakdown)
+      expect(recalled.mock.calls).toEqual(expectedQueries)
+      expect(() => database.validate()).toThrow('content identity')
+    } finally { await runtime.shutdown() }
   })
 
   it.each([false, true].flatMap(codingMode => (['openai_chat_completions', 'openai_responses', 'anthropic_messages'] as const)

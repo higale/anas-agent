@@ -15,7 +15,7 @@ import { ResourceCleanup } from './resourceCleanup'
 import { prepareMessageEditDraft } from './messageEditDraft'
 import type { NativeHistoryRevision } from './nativeHistoryOwner'
 import { AgentThreadLockedError } from './agentErrors'
-import { isAgentThreadLocked, type AgentMessageRangeInput, type AgentRunSubmission, type AgentResumeInput,
+import { isAgentThreadLocked, type AgentMessageRangeInput, type AgentRunSubmission, type AgentResumeInput, type AgentModelRetryInput,
   type AgentQueuedInputCreate, type AgentRunDirectionInput, type AgentRunDirectionReferenceInput } from '../../shared/agentTypes'
 import { normalizeAgentRunSubmissionId, type AgentMessageRegenerateExecutionInput, type AgentRunSubmissionExecutionInput } from './agentRunInput'
 import { archiveAgentAttachments, deleteArchivedAgentAttachments, validatedAttachmentInputs } from './agentAttachmentStore'
@@ -182,6 +182,24 @@ export class NativeRunHost {
     })
   }
 
+  async retryModel(input: AgentModelRetryInput, create: NativeRunFactory): Promise<NativeRunHandle> {
+    if (!input || typeof input.threadId !== 'string' || !input.threadId || typeof input.runId !== 'string' || !input.runId
+        || typeof input.expectedRevisionId !== 'string' || !input.expectedRevisionId || typeof input.withholdToolResults !== 'boolean'
+        || input.discardLaterMessages !== undefined && typeof input.discardLaterMessages !== 'boolean') throw new Error('Invalid model retry request.')
+    return this.withConversationMutation(input.threadId, async () => {
+      if (this.database.resources.getSubagentCallByChildThreadId(input.threadId)) throw new Error('Retry the model request from its main conversation.')
+      const failed = this.requireRun(input)
+      const revision = this.database.history.prepareModelRetry(input)
+      if (revision) await this.commitHistory(revision)
+      else this.database.runs.retryModel(input)
+      runtimeLog('info', 'agent', 'User retried a failed model request.', {
+        threadId: input.threadId, runId: input.runId, failedRevisionId: input.expectedRevisionId,
+        withholdToolResults: input.withholdToolResults, discardedLaterContent: Boolean(revision), previousError: failed.error
+      })
+      return this.launch(input, 'continue', create, false)
+    })
+  }
+
   resumeRun(input: AgentResumeInput, create: NativeRunFactory): NativeRunHandle {
     this.assertOpen()
     const rootId = this.database.resources.getSubagentCallByChildThreadId(input.threadId)?.ownerThreadId ?? input.threadId
@@ -194,7 +212,7 @@ export class NativeRunHost {
     if (this.shuttingDown) return undefined
     const run = this.database.messages.activities.getLatestRunForThread(threadId)
     if (!run || terminal(run) || this.active.has(threadId)) return undefined
-    const state = this.database.runs.store.load(threadId)
+    const state = this.database.runs.store.readHead(threadId)
     let command: RunExecutionCommand = state?.runId === run.id ? 'continue' : 'input'
     if (state?.runId === run.id && (state.phase === 'waiting' || state.phase === 'waiting_context')) {
       if (this.readSnapshot(threadId).interrupts.length) return undefined
@@ -516,7 +534,7 @@ export class NativeRunHost {
           if (!history || !instance?.context) break
           const status = await instance.context.projectedStatus(conversationContextSource({ threadId, ...history }, database.runs.store))
           if (active.controller.signal.aborted) database.runs.completeCancellation(active)
-          if (database.runs.store.readHistory(threadId)?.revisionId !== history.revisionId) continue
+          if (database.runs.store.readHead(threadId)?.revisionId !== history.revisionId) continue
           database.messages.observations.recordContextStatus(threadId, status)
           emit({ type: 'context_status_updated', threadId, runId, status })
           restored = true

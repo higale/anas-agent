@@ -45,6 +45,7 @@ export interface ConversationMessage {
     attachmentProjection?: unknown
     attachmentBlockCount?: unknown
     unrecordedResult?: unknown
+    resultWithheld?: boolean
   }
 }
 

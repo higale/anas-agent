@@ -2,7 +2,7 @@ import { NativeMessageProjection } from './nativeMessageProjection'
 import type Database from 'better-sqlite3'
 import type { NativeRunOwner } from './nativeRunOwner'
 import type { ManagedCallStore } from './managedCallStore'
-import { validateNativeExecutionStorage } from './nativeStorageValidation'
+import { validateNativeExecutionHeads } from './nativeStorageValidation'
 
 export interface NativeRecoverableRun {
   threadId: string
@@ -15,7 +15,7 @@ export interface NativeRecoverableRun {
  * returned candidates are not dispatched here, including unstarted inputs. */
 export function recoverNativeConversation(database: Database.Database, runs: NativeRunOwner, managed: ManagedCallStore): NativeRecoverableRun[] {
   return database.transaction(() => {
-    validateNativeExecutionStorage(database)
+    validateNativeExecutionHeads(database)
     new NativeMessageProjection(database).reconcileToolIdentities()
     managed.recoverAbandonedCalls()
     const requested = database.prepare(`SELECT id AS runId,thread_id AS threadId FROM agent_runs
@@ -43,7 +43,7 @@ export function recoverNativeConversation(database: Database.Database, runs: Nat
       .all() as Array<{ id: string; thread_id: string; status: string }>
     const recoverable: NativeRecoverableRun[] = []
     for (const run of active) {
-      const state = runs.store.load(run.thread_id)
+      const state = runs.store.readHead(run.thread_id)
       const pending = Boolean(database.prepare('SELECT 1 FROM agent_run_input_intents WHERE run_id=?').get(run.id))
       if (pending) {
         if (run.status !== 'running' || state?.runId === run.id) throw new Error('Pending input has inconsistent execution ownership.')
@@ -57,7 +57,7 @@ export function recoverNativeConversation(database: Database.Database, runs: Nat
       if (run.status === 'running' || answered) recoverable.push({ threadId: run.thread_id, runId: run.id,
         command: pending ? 'input' : answered ? 'resume' : 'continue' })
     }
-    validateNativeExecutionStorage(database)
+    validateNativeExecutionHeads(database)
     return recoverable
   })()
 }

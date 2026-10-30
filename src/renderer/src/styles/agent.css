@@ -673,3 +673,10 @@
 @keyframes agent-spin {
   to { transform: rotate(360deg); }
 }
+
+.agent-model-retry-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}

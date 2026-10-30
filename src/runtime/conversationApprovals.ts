@@ -6,7 +6,7 @@ import { subagentApprovalInterruptMetadata } from './approvalRecovery'
 
 /** Adapt the native wait to the existing product approval contract. The set
  * identity follows its requests/generations, not unrelated sibling commits. */
-export function conversationInterrupts(state: ExecutionState): AgentInterrupt[] {
+export function conversationInterrupts<T extends Pick<ExecutionState, 'threadId' | 'runId' | 'phase' | 'approvals'>>(state: T): AgentInterrupt[] {
   if (state.phase !== 'waiting' && state.phase !== 'waiting_context') return []
   if (!state.approvals.length) throw new Error('A waiting execution has no approval requests.')
   const identity = ['anas-native-approval-set-v1', state.threadId, state.runId,

@@ -1428,6 +1428,19 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
         onRetryQueuedMessage={agent.retryQueuedMessage}
         onToggleAttachmentContextPolicy={toggleAttachmentContextPolicy}
         onRemoveSuggestion={removeInputHistoryItem}
+        onRetryModel={async (retry, withhold) => {
+          const threadId = agent.activeThreadId
+          if (!threadId) return
+          if (!retry.requiresRollback) return agent.retryModel(threadId, retry, withhold)
+          openConfirmDialog({
+            title: t('agent.retry_history_title'), description: t('agent.retry_history_description'),
+            confirmText: t('agent.retry_history_confirm'), variant: 'danger',
+            onConfirm: async () => {
+              try { await agent.retryModel(threadId, retry, withhold, true) }
+              catch (error) { agent.setThreadError(threadId, agentActionError(t('agent.model_retry_failed'), error)) }
+            }
+          })
+        }}
         onResume={(responses) => agent.activeThreadId
           ? agent.resume(agent.activeThreadId, responses)
           : Promise.resolve()}

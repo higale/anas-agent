@@ -333,7 +333,21 @@ export interface AgentTodo {
   status: 'pending' | 'in_progress' | 'completed'
 }
 
+export interface AgentModelRetryInput extends AgentRunReferenceInput {
+  expectedRevisionId: string
+  withholdToolResults: boolean
+  discardLaterMessages?: boolean
+}
+
+export interface AgentModelRetryState {
+  runId: string
+  revisionId: string
+  canWithholdToolResults: boolean
+  requiresRollback: boolean
+}
+
 export interface AgentThreadSnapshot {
+  modelRetries?: AgentModelRetryState[]
   thread: AgentThread
   pendingRun?: AgentRun
   /** A terminal model run whose executor is still disposing or cleaning up. */
@@ -511,6 +525,7 @@ export interface AgentApi {
     compress(threadId: string): Promise<AgentRun>
     recover(threadId: string): Promise<boolean>
     resume(input: AgentResumeInput): Promise<AgentRun>
+    retryModel(input: AgentModelRetryInput): Promise<AgentRun>
     steer(input: AgentRunDirectionInput): Promise<boolean>
     removeSteer(input: AgentRunDirectionReferenceInput): Promise<boolean>
     cancel(input: AgentRunReferenceInput): Promise<AgentRunCancellationResult>

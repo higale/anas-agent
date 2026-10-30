@@ -1,3 +1,4 @@
+import { withholdToolResult } from '../../runtime/modelRequestRecovery'
 import type Database from 'better-sqlite3'
 import { isDeepStrictEqual } from 'node:util'
 import { NativeExecutionStore, type NativeExecutionCommit } from './nativeExecutionStore'
@@ -203,6 +204,7 @@ export class NativeMessageProjection {
       if (!isDeepStrictEqual(this.store.readMessageRecord(commit.threadId, record.recordId), record)) throw new Error('Message projection has no matching durable body.')
       if (commit.summary && record.value.context?.summary && record.value.context.summaryId === commit.summary.id) continue
       if (record.value.context?.runId !== undefined && record.value.context.runId !== commit.runId) throw new Error('Committed message belongs to another run.')
+      const replacedToolResult = commit.replacedToolResults?.[record.recordId]
       const existing = this.database.prepare('SELECT run_id,record_id,body_sequence FROM agent_message_payloads WHERE thread_id=? AND message_id=?')
         .get(commit.threadId, record.id) as { run_id: string | null; record_id: string; body_sequence: number | null } | undefined
       if (existing) {
@@ -211,12 +213,14 @@ export class NativeMessageProjection {
           throw new Error('Committed message conflicts with its existing activity reference.')
         }
         if (existing.record_id !== record.recordId) {
-          if (existing.record_id !== commit.previousResponseRecordId || record.value.kind !== 'assistant'
-            || !this.database.prepare('SELECT 1 FROM execution_state WHERE thread_id=? AND response_record_id=?').get(commit.threadId, record.recordId)) {
+          const validToolReplacement = replacedToolResult === existing.record_id && record.value.kind === 'tool'
+            && commit.phase === 'prepare_model' && isDeepStrictEqual(record.value, withholdToolResult(this.store.readMessageRecord(commit.threadId, replacedToolResult).value))
+            && this.database.prepare('SELECT 1 FROM execution_messages WHERE thread_id=? AND message_id=? AND record_id=?').get(commit.threadId, record.id, record.recordId)
+          if (!validToolReplacement && (existing.record_id !== commit.previousResponseRecordId || record.value.kind !== 'assistant'
+            || !this.database.prepare('SELECT 1 FROM execution_state WHERE thread_id=? AND response_record_id=?').get(commit.threadId, record.recordId))) {
             throw new Error('Committed message conflicts with its existing activity reference.')
           }
-          // A prepared response remains in its original activity position.
-          // Only the owner-declared previous version may be replaced.
+          // Explicit revisions retain their original activity position and call identity.
           this.database.prepare('UPDATE agent_message_payloads SET record_id=? WHERE thread_id=? AND message_id=?')
             .run(record.recordId, commit.threadId, record.id)
         }
@@ -225,6 +229,12 @@ export class NativeMessageProjection {
           .get(commit.threadId) as { next: number }
         this.database.prepare('INSERT INTO agent_message_payloads(thread_id,message_id,run_id,record_id,body_sequence) VALUES (?,?,?,?,?)')
           .run(commit.threadId, record.id, commit.runId, record.recordId, order.next)
+      }
+      // The tool already completed; changing its saved return value does not execute or complete it again.
+      if (replacedToolResult) {
+        if (!existing || !this.database.prepare('SELECT 1 FROM agent_tool_messages WHERE thread_id=? AND run_id=? AND tool_message_id=?')
+          .get(commit.threadId, commit.runId, record.id)) throw new Error('The replaced result has no owned tool call.')
+        continue
       }
       const native = record.value.calls?.length ? this.store.readModelCallIds(commit.threadId, record.recordId) : undefined
       if (record.value.kind === 'assistant') {

@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto'
 import { writeFile } from 'node:fs/promises'
 import type {
   AgentAccessMode,
+  AgentModelRetryInput,
   AgentResumeInput,
   AgentMessageEditResult,
   AgentMessageRangeInput,
@@ -818,6 +819,12 @@ export function registerAgentIpcHandlers(): void {
     const dispatch = currentRuntime().recoverRun(threadId)
     if (!dispatch) return false
     return true
+  })
+  handleAgentIpc('agent:runs:retryModel', async (event, input: AgentModelRetryInput): Promise<AgentRun> => {
+    if (!input || typeof input.threadId !== 'string' || !input.threadId || typeof input.runId !== 'string' || !input.runId
+      || typeof input.expectedRevisionId !== 'string' || !input.expectedRevisionId || typeof input.withholdToolResults !== 'boolean') throw new Error('Invalid model retry request.')
+    subscribeAgentEvents(event.sender)
+    return (await currentRuntime().retryModel(input)).run
   })
   handleAgentIpc('agent:runs:resume', async (
     event,

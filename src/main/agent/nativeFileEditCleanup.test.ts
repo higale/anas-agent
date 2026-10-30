@@ -118,3 +118,23 @@ describe('native file-edit recovery handoff', () => {
     } finally { h.dispose() }
   })
 })
+
+it('keeps accepted file-effect evidence when the user replaces its saved return value', async () => {
+  const h = fixture()
+  try {
+    await start(h, [call('accepted')])
+    const effect = arm(h, 'accepted')
+    h.owner.store.saveEffectResult(effect, result('accepted'))
+    h.owner.store.settleCall(h.identity, 'accepted', result('accepted'))
+    h.owner.store.finishBatch(h.scope())
+    h.owner.store.finish(h.scope(), 'failed', 'Provider rejected', { modelRequestFailed: true })
+    const originalEffect = h.owner.store.loadEffect(effect)
+    h.owner.retryModel({ ...h.scope(), withholdToolResults: true })
+    h.owner.store.finish(h.scope(), 'failed', 'Provider still rejected', { modelRequestFailed: true })
+    h.reopen()
+    expect(h.owner.store.loadEffect(effect)).toEqual(originalEffect)
+    expect(h.owner.store.readHistory(h.identity.threadId)!.messages.at(-1)?.value).toMatchObject({ context: { resultWithheld: true } })
+    expect(h.product.resourceCleanup.listRetainedFileEditOperationIds('run')).toEqual([])
+    h.product.validate()
+  } finally { h.dispose() }
+})

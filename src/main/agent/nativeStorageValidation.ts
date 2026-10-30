@@ -6,11 +6,65 @@ import { validateNativeManagedResult } from './nativeManagedResults'
 
 export const nativeConversationSchemaVersion = 1
 
-/** Execution-specific validation shared by native storage creation
- * and recovery. It neither mutates data nor depends on a previous format.
+/** Opening/recovery checks the current owners and pending commands. Historical
+ * bodies are checked by readMessageRecord when consumed; offline validation
+ * below still checks every retained body and projection. */
+export function validateNativeExecutionHeads(database: Database.Database): void {
+  const store = new NativeExecutionStore(database)
+  const fail = (detail: string): never => { throw new Error(`Invalid native execution storage: ${detail}.`) }
+  // These owners participate in restart reconciliation. Do not scan the
+  // historical message/effect tables just to open a display window.
+  for (const table of ['agent_managed_calls', 'agent_managed_call_observations', 'execution_calls']) {
+    if ((database.pragma(`foreign_key_check(${table})`) as unknown[]).length) fail('SQLite integrity failure')
+  }
+  const threads = database.prepare('SELECT id FROM agent_threads ORDER BY id').all() as { id: string }[]
+  if (!isDeepStrictEqual(database.prepare('SELECT thread_id AS id FROM execution_state ORDER BY thread_id').all(), threads)) {
+    fail('execution heads do not cover exactly the conversations')
+  }
+  for (const { id } of threads) {
+    const head = store.readHead(id)!
+    if (!head.revisionId || !['idle', 'prepare_model', 'model_result', 'tools', 'waiting', 'waiting_context', 'completed', 'cancelled', 'failed'].includes(head.phase)
+      || (head.phase === 'idle') !== (head.runId === null)) fail('invalid execution head identity or phase')
+    if (head.phase !== 'idle' && !database.prepare('SELECT 1 FROM agent_runs WHERE id=? AND thread_id=?').get(head.runId, id)) {
+      fail('head has no owning run')
+    }
+    if (head.phase === 'waiting' || head.phase === 'waiting_context') {
+      if (!head.approvals.length) fail('waiting head has no approvals')
+    }
+    for (const recordId of [head.responseRecordId, head.context.summary?.messageRecordId]) {
+      if (recordId && !database.prepare('SELECT 1 FROM execution_message_bodies WHERE thread_id=? AND record_id=?').get(id, recordId)) {
+        fail('head references a missing message body')
+      }
+    }
+  }
+  for (const row of database.prepare(`SELECT intent.run_id,intent.input_json,run.thread_id,run.operation,run.status
+    FROM agent_run_input_intents intent LEFT JOIN agent_runs run ON run.id=intent.run_id`).all() as Array<{
+    run_id: string; input_json: string; thread_id: string | null; operation: string; status: string
+  }>) {
+    const message = decodeExecutionInput(row.input_json)
+    if (!row.thread_id || row.status !== 'running' || (row.operation === 'compression') !== (message === undefined)
+      || message && message.value.context?.runId !== row.run_id || store.readHead(row.thread_id)?.runId === row.run_id) {
+      fail('saved input contradicts its owner or acceptance')
+    }
+  }
+  for (const row of database.prepare(`SELECT intent.run_id,intent.interrupt_id,intent.response_json,run.thread_id
+    FROM agent_run_resume_intents intent LEFT JOIN agent_runs run ON run.id=intent.run_id`).all() as Array<{
+    run_id: string; interrupt_id: string; response_json: string; thread_id: string | null
+  }>) {
+    const head = row.thread_id ? store.readHead(row.thread_id) : undefined
+    const answer = JSON.parse(row.response_json) as { generation?: unknown; response?: unknown } | null
+    if (head?.runId !== row.run_id || !answer || !Object.hasOwn(answer, 'response')
+      || !head.approvals.some(approval => approval.id === row.interrupt_id && approval.generation === answer.generation)) {
+      fail('saved answer has no matching approval generation')
+    }
+  }
+}
+
+/** Complete offline/explicit validation. It neither mutates data nor depends on a previous format.
  * Attachment files and other product resources need their own validation. */
 export function validateNativeExecutionStorage(database: Database.Database): void {
   database.transaction(() => {
+    validateNativeExecutionHeads(database)
     const fail = (detail: string): never => { throw new Error(`Invalid native execution storage: ${detail}.`) }
     if (!isDeepStrictEqual(database.pragma('quick_check'), [{ quick_check: 'ok' }])
       || (database.pragma('foreign_key_check') as unknown[]).length) fail('SQLite integrity failure')
@@ -40,22 +94,6 @@ export function validateNativeExecutionStorage(database: Database.Database): voi
       if (message.id !== row.message_id || row.body_sequence === null || !Number.isSafeInteger(row.body_sequence) || row.body_sequence < 0
         || row.run_id !== null && !database.prepare('SELECT 1 FROM agent_runs WHERE id=? AND thread_id=?').get(row.run_id, row.thread_id)
         || message.value.context?.runId !== undefined && message.value.context.runId !== row.run_id) fail('activity body has invalid ownership or ordering')
-    }
-    for (const row of database.prepare(`SELECT intent.run_id,intent.input_json,run.thread_id,run.operation,run.status
-      FROM agent_run_input_intents intent JOIN agent_runs run ON run.id=intent.run_id`).all() as Array<{
-      run_id: string; input_json: string; thread_id: string; operation: string; status: string
-    }>) {
-      const message = decodeExecutionInput(row.input_json)
-      if (row.status !== 'running' || (row.operation === 'compression') !== (message === undefined)
-        || message && message.value.context?.runId !== row.run_id || store.load(row.thread_id)?.runId === row.run_id) fail('saved input contradicts its owner or acceptance')
-    }
-    for (const row of database.prepare(`SELECT intent.run_id,intent.interrupt_id,intent.response_json,run.thread_id
-      FROM agent_run_resume_intents intent JOIN agent_runs run ON run.id=intent.run_id`).all() as Array<{
-      run_id: string; interrupt_id: string; response_json: string; thread_id: string
-    }>) {
-      const state = store.load(row.thread_id), answer = JSON.parse(row.response_json) as { generation?: unknown; response?: unknown } | null
-      if (state?.runId !== row.run_id || !answer || !Object.hasOwn(answer, 'response')
-        || !state.approvals.some(approval => approval.id === row.interrupt_id && approval.generation === answer.generation)) fail('saved answer has no matching approval generation')
     }
     for (const row of database.prepare('SELECT thread_id,run_id,call_id FROM execution_effects').all() as Array<{ thread_id: string; run_id: string; call_id: string }>) {
       if (!database.prepare('SELECT 1 FROM agent_runs WHERE id=? AND thread_id=?').get(row.run_id, row.thread_id)

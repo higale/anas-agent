@@ -9,7 +9,7 @@ import { getProject } from '../projectStore'
 import { validateCodeReviewSnapshot } from '../../runtime/codeReviewReport'
 import { ModelSelectionError } from '../../runtime/errors'
 import type { RunEventSink } from './runActivityProjection'
-import type { AgentResumeInput, AgentMessageRangeInput, AgentMessageWindowInput, AgentActivityWindowInput,
+import type { AgentModelRetryInput, AgentResumeInput, AgentMessageRangeInput, AgentMessageWindowInput, AgentActivityWindowInput,
   AgentSystemContextPreviewInput, AgentSystemContextPreview, AgentModelRequestPreviewInput, AgentModelRequestPreview } from '../../shared/agentTypes'
 import type { AgentRunSubmissionExecutionInput, AgentMessageRegenerateExecutionInput } from './agentRunInput'
 import { earlierAgentMessagePageSize } from '../../shared/agentMessageWindow'
@@ -19,6 +19,8 @@ import { conversationContextSource } from './conversationModelExecution'
 import { createAgentModelResolver } from './modelSelection'
 import { modelContextKey } from '../../shared/modelConfig'
 import { isDeepStrictEqual } from 'node:util'
+import { setImmediate as yieldToEventLoop } from 'node:timers/promises'
+import type { ExecutionMessageRecord } from '../../runtime/executionState'
 
 export interface NativeAgentRuntimeOptions {
   providerFetch?: typeof fetch
@@ -76,6 +78,7 @@ export class NativeAgentRuntime extends NativeRunHost {
   override startCompression(threadId: string, create = this.factory(threadId), runId?: string) {
     return super.startCompression(threadId, create, runId)
   }
+  override retryModel(input: AgentModelRetryInput, create = this.factory(input.threadId)) { return super.retryModel(input, create) }
   override resumeRun(input: AgentResumeInput, create = this.factory(input.threadId)) { return super.resumeRun(input, create) }
   override recoverRun(threadId: string, create = this.factory(threadId)) { return super.recoverRun(threadId, create) }
   override regenerateMessage(input: AgentMessageRegenerateExecutionInput, create = this.factory(input.threadId)) {
@@ -112,9 +115,32 @@ export class NativeAgentRuntime extends NativeRunHost {
 
   async getContextStatus(threadId: string) {
     for (let attempt = 0; attempt < 3; attempt++) {
-      const thread = this.connection.getThread(threadId), history = this.connection.runs.store.readHistory(threadId)
+      const store = this.connection.runs.store
+      const thread = this.connection.getThread(threadId), head = store.readHead(threadId)
       if (!thread) throw new Error(`Thread ${threadId} was not found.`)
-      if (!history?.messages.length) return undefined
+      if (!head) return undefined
+      // A status preview needs only the effective context. Read in batches so
+      // an uncompressed long conversation does not monopolize startup IPC.
+      const messages: ExecutionMessageRecord[] = [], start = head.context.summary?.cutoffIndex ?? 0, count = store.messageCount(threadId)
+      if (start > count) throw new Error('The summary boundary is outside this conversation history.')
+      for (let offset = start; offset < count; offset += 100) {
+        await yieldToEventLoop()
+        if (store.readHead(threadId)?.revisionId !== head.revisionId) break
+        const batch = store.readHistoryRange(threadId, offset, Math.min(100, count - offset))
+        messages.push(...batch)
+      }
+      if (store.readHead(threadId)?.revisionId !== head.revisionId) continue
+      if (!messages.length && !head.context.summary) return undefined
+      let summaryOffset = 0
+      if (start > 0 && !messages.some(record => record.value.kind === 'user')) {
+        const query = await this.connection.messages.latestUserMessageBefore(threadId, start, head.revisionId)
+        if (store.readHead(threadId)?.revisionId !== head.revisionId) continue
+        // Keep the recall query before the local summary boundary: it is
+        // available to memory projection, but never counted as model history.
+        if (query) { messages.unshift(query); summaryOffset = 1 }
+      }
+      const history = { revisionId: head.revisionId, messages, context: { ...head.context,
+        ...(head.context.summary ? { summary: { ...head.context.summary, cutoffIndex: summaryOffset } } : {}) } }
       const run = this.connection.messages.activities.getLatestRunForThread(threadId)
       const continuation = run && ['running', 'interrupted'].includes(run.status) ? { threadId, runId: run.id } : undefined
       const subagentCall = this.connection.resources.getSubagentCallByChildThreadId(threadId)
@@ -127,7 +153,7 @@ export class NativeAgentRuntime extends NativeRunHost {
           review: scope === undefined ? undefined : validateCodeReviewSnapshot(scope)
         })
       const model = await createAgentModelResolver(threadId, this.connection.resources)()
-      if (this.connection.runs.store.readHistory(threadId)?.revisionId === history.revisionId
+      if (this.connection.runs.store.readHead(threadId)?.revisionId === history.revisionId
         && isDeepStrictEqual(this.connection.getThread(threadId), thread)
         && isDeepStrictEqual(this.connection.messages.activities.getLatestRunForThread(threadId), run)
         && status.modelContextKey === modelContextKey(model)) return status

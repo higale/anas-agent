@@ -482,6 +482,31 @@ describe('NativeAgentRuntime system prompt preview', () => {
     expect(database.readSnapshot(h.owner.threadId).contextStatus).toBeUndefined()
   })
 
+  it('discards a compressed recall query when new input commits during its asynchronous read', async () => {
+    const h = await contextFixture()
+    const summary = { id: 'summary', modelContent: 'Summary', summaryText: 'Summary',
+      cutoffIndex: 2, activatedAfterMessageIndex: 1, inputTokensBefore: 20, inputTokensAfter: 5 }
+    database.summaries.recordContextSummaryStarted(h.owner.runId, summary.id)
+    database.summaries.stageContextSummary(h.owner.runId, summary.id, summary)
+    database.runs.store.commitSummary(h.scope(), summary)
+    const next = { threadId: h.owner.threadId, runId: randomUUID() }, id = `${next.runId}:input`
+    const changed = new Promise<void>((resolve, reject) => setImmediate(() => {
+      void (async () => {
+        database.runs.store.finish(h.scope(), 'completed')
+        database.runs.createRun({ ...next, operation: 'agent', message: { id,
+          value: { id, kind: 'user', content: 'A newer query', context: { runId: next.runId } } } })
+        await database.runs.enter('input', next)
+      })().then(resolve, reject)
+    }))
+    const status = h.runtime.getContextStatus(h.owner.threadId)
+    await changed
+    expect(await status).toEqual(h.status)
+    expect(previewMocks.projectConversationContextStatus).toHaveBeenCalledTimes(1)
+    const source = previewMocks.projectConversationContextStatus.mock.calls[0][3]
+    expect(source.messages.map((message: { content: unknown }) => message.content)).toEqual(['A newer query'])
+    expect(source.summary.cutoffIndex).toBe(0)
+  })
+
   it('reads saved context status from native history without preparing an agent or model', async () => {
     const h = await contextFixture()
     database.messages.observations.recordContextStatus(h.owner.threadId, h.status)

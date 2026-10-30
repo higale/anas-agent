@@ -47,7 +47,7 @@ describe('native conversation connection ownership', () => {
     } finally { database.close(); global.close(); rmSync(root, { recursive: true, force: true }) }
   })
 
-  it.each(['legacy', 'damaged body'] as const)('rejects %s without repairing it or retaining its file handle', async kind => {
+  it.each(['legacy', 'damaged body'] as const)('rejects %s at its validation boundary without repairing it or retaining its file handle', async kind => {
     const root = mkdtempSync(join(tmpdir(), 'anas-native-database-reject-')), file = join(root, 'conversation.sqlite')
     const global = new Database(':memory:'), options = { attachmentRoot: join(root, 'attachments'),
       memoryStore: new SqliteMemoryStore(global), fileEditStore: new FileEditStore(join(root, 'file_edits')) }
@@ -64,10 +64,18 @@ describe('native conversation connection ownership', () => {
       try {
         if (kind === 'legacy') raw.exec('CREATE TABLE current_state(value TEXT)')
         else raw.exec("UPDATE execution_message_bodies SET value=x'00'")
-        raw.pragma('wal_checkpoint(TRUNCATE)'); raw.pragma('journal_mode=DELETE')
+        raw.pragma('wal_checkpoint(TRUNCATE)')
+        if (kind === 'legacy') raw.pragma('journal_mode=DELETE')
       } finally { raw.close() }
       const before = readFileSync(file)
-      expect(() => NativeConversationDatabase.open(file, options)).toThrow()
+      if (kind === 'legacy') expect(() => NativeConversationDatabase.open(file, options)).toThrow()
+      else {
+        const owner = NativeConversationDatabase.open(file, options)
+        try {
+          expect(() => owner.readSnapshot('thread')).toThrow('content identity')
+          expect(() => owner.validate()).toThrow('content identity')
+        } finally { owner.close() }
+      }
       expect(readFileSync(file)).toEqual(before)
       expect(global.open).toBe(true)
       rmSync(file)

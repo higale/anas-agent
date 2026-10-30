@@ -16,6 +16,62 @@ import { toolEffectArtifactPurposes } from '../../runtime/toolEffectIdentity'
 import * as workspacePath from '../workspacePath'
 
 describe('native product snapshot', () => {
+  it.each(['failed', 'waiting'] as const)('opens only the displayed history while retaining %s state and explicit integrity checks', async ending => {
+    const root = mkdtempSync(join(tmpdir(), 'anas-native-window-')), file = join(root, 'conversation.sqlite')
+    const global = new Database(':memory:'), options = { attachmentRoot: join(root, 'attachments'),
+      memoryStore: new SqliteMemoryStore(global), fileEditStore: new FileEditStore(join(root, 'file_edits')) }
+    let database = NativeConversationDatabase.open(file, options)
+    try {
+      database.createThread({}, 'thread')
+      for (let turn = 0; turn < 70; turn++) {
+        const owner = { threadId: 'thread', runId: `run-${turn}` }
+        database.runs.createRun({ ...owner, operation: 'agent', message: { id: `${owner.runId}:input`,
+          value: { id: `${owner.runId}:input`, kind: 'user', content: 'Question', context: { runId: owner.runId } } } })
+        await database.runs.enter('input', owner)
+        const scope = () => ({ ...owner, expectedRevisionId: database.runs.store.readHead('thread')!.revisionId })
+        database.runs.store.acceptModel(scope(), { id: `${owner.runId}:answer`, value: { kind: 'assistant', content: 'Answer' } }, [], { modelCalls: 1, todos: [] })
+        database.runs.store.finish(scope(), 'completed')
+      }
+      const owner = { threadId: 'thread', runId: 'last' }
+      database.runs.createRun({ ...owner, operation: 'agent', message: { id: 'last:input',
+        value: { id: 'last:input', kind: 'user', content: 'Current question', context: { runId: owner.runId } } } })
+      await database.runs.enter('input', owner)
+      const scope = () => ({ ...owner, expectedRevisionId: database.runs.store.readHead('thread')!.revisionId })
+      if (ending === 'failed') database.runs.store.finish(scope(), 'failed', 'Provider rejected input', { modelRequestFailed: true })
+      else database.runs.store.waitForContext(scope(), { id: 'approval', generation: 'generation', kind: 'context_read', callIds: [],
+        path: root, resumePhase: 'prepare_model', request: { actionRequests: [{ name: 'read_file', args: { path: root }, description: 'Read rules' }],
+          reviewConfigs: [{ actionName: 'read_file', allowedDecisions: ['approve', 'reject'] }] } },
+      { modelCalls: 0, todos: [{ content: 'Retain the plan', status: 'in_progress' }],
+        projectRules: { runId: owner.runId, roots: [], trustedFolders: [], documents: [], directories: [], initialScopes: [], activeScopes: [],
+          blockedCalls: [], rejectedCalls: [], checkedWrites: [], blockedReason: '', fatalError: '' },
+        rulePreparation: { runId: owner.runId, initialized: true, reads: [] } })
+      const before = database.readSnapshot('thread')
+      database.validate(); database.close()
+      // An unread historical body must not be decoded as a side effect of
+      // reading current metadata, recovery or a different message window.
+      const raw = new Database(file)
+      try { raw.exec("UPDATE execution_message_bodies SET value=x'00' WHERE message_id='run-0:input'") } finally { raw.close() }
+      database = NativeConversationDatabase.open(file, options)
+      expect(database.recover()).toEqual([])
+      expect(database.readSnapshot('thread')).toEqual(before)
+      expect(before.messages).toHaveLength(100)
+      if (ending === 'failed') expect(before.modelRetries).toMatchObject([{ runId: 'last', canWithholdToolResults: false }])
+      else {
+        expect(before.todos).toEqual([{ content: 'Retain the plan', status: 'in_progress' }])
+        expect(before.interrupts).toHaveLength(1)
+      }
+      expect(() => database.readSnapshot('thread', { startIndex: 0 })).toThrow('content identity')
+      expect(() => database.validate()).toThrow('content identity')
+      expect(() => NativeConversationDatabase.validateBackup(file, options.attachmentRoot, new Set(['default-workspace']), 'thread')).toThrow('content identity')
+      const inconsistent = new Database(file)
+      try {
+        inconsistent.exec(`UPDATE execution_messages SET record_id=(SELECT record_id FROM execution_message_bodies WHERE message_id='run-1:input')
+          WHERE message_id='last:input'`)
+      } finally { inconsistent.close() }
+      expect(() => database.readSnapshot('thread')).toThrow('History index differs')
+    } finally { database.close(); global.close(); rmSync(root, { recursive: true, force: true }) }
+  })
+
   it('keeps recalled memory and discarded compression visible consistently across reopen', async () => {
     const root = mkdtempSync(join(tmpdir(), 'anas-native-context-events-')), file = join(root, 'conversation.sqlite')
     const global = new Database(':memory:'), options = { attachmentRoot: join(root, 'attachments'),

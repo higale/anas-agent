@@ -1,4 +1,5 @@
 import { requireObjectToolCall } from '../../runtime/toolInput'
+import { collectNativeMessageBodies } from './nativeMessageCleanup'
 import { handoffNativeFileEdits } from './nativeFileEditCleanup'
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
@@ -15,7 +16,7 @@ import { conversationSubagentDecisions } from './conversationSubagentApproval'
 import { conversationInterrupts } from '../../runtime/conversationApprovals'
 import { matchApprovalResponses } from '../../runtime/approvalRecovery'
 import { userMessageContent, traceText } from '../../runtime/messagePresentation'
-import type { AgentResumeInput, AgentRun, AgentThreadCreate } from '../../shared/agentTypes'
+import type { AgentModelRetryInput, AgentResumeInput, AgentRun, AgentThreadCreate } from '../../shared/agentTypes'
 import type { ArchivedAgentAttachment } from './agentAttachmentStore'
 import { RunSubmissionStore } from './runSubmissionStore'
 import { createThreadRecord, readThreadRecord } from './conversationThreads'
@@ -99,9 +100,16 @@ export class NativeRunOwner {
   readRunInput(owner: RunOwner): ExecutionMessageInput | undefined {
     const run = this.requireRun(owner)
     const intent = this.database.prepare('SELECT input_json FROM agent_run_input_intents WHERE run_id=?').get(owner.runId) as { input_json: string } | undefined
-    const message = intent ? decodeExecutionInput(intent.input_json) : this.store.readHistory(owner.threadId)?.messages
-      .find(record => record.value.kind === 'user' && record.value.context?.runId === owner.runId)
+    let message = intent ? decodeExecutionInput(intent.input_json) : undefined
     if (run.operation === 'compression') return undefined
+    if (!intent) {
+      const rows = this.database.prepare('SELECT record_id FROM agent_message_index WHERE thread_id=? AND run_id=? ORDER BY position')
+        .all(owner.threadId, owner.runId) as { record_id: string }[]
+      for (const row of rows) {
+        const record = this.store.readMessageRecord(owner.threadId, row.record_id)
+        if (record.value.kind === 'user' && record.value.context?.runId === owner.runId) { message = record; break }
+      }
+    }
     if (!message) throw new Error('The run has no saved user input in its owned history.')
     validateInput(owner.runId, run.operation, message)
     return { id: message.id, value: message.value }
@@ -241,8 +249,9 @@ export class NativeRunOwner {
   readInterrupts(owner: RunOwner) {
     return this.database.transaction(() => {
       this.requireRun(owner)
-      const state = this.store.load(owner.threadId)
-      return state?.runId === owner.runId ? conversationInterrupts(state) : []
+      const state = this.store.readHead(owner.threadId)
+      return state?.runId === owner.runId && state.phase !== 'idle'
+        ? conversationInterrupts({ ...state, runId: owner.runId, phase: state.phase }) : []
     })()
   }
 
@@ -321,6 +330,18 @@ export class NativeRunOwner {
       ON direction.queued_input_id=queued.id WHERE direction.thread_id=? AND direction.run_id=? AND queued.status='queued'
       ORDER BY queued.created_at,queued.rowid`).all(state.threadId, state.runId) as QueuedRow[]
     return rows.map(row => direction(row, state.runId, actual.calls.map(call => call.id)))
+  }
+
+  retryModel(input: AgentModelRetryInput): void {
+    this.changed()
+    this.database.transaction(() => {
+      const run = this.requireRun(input)
+      const latest = this.database.prepare('SELECT id FROM agent_runs WHERE thread_id=? ORDER BY sequence DESC LIMIT 1').get(input.threadId) as { id: string } | undefined
+      if (run.status !== 'failed' || run.operation !== 'agent' || latest?.id !== run.id) throw new Error('Only the latest failed model request can be retried.')
+      this.database.prepare("UPDATE agent_runs SET status='running',error=NULL,cancellation_requested=0 WHERE id=?").run(run.id)
+      this.store.retryModel(input, input.withholdToolResults)
+      if (input.withholdToolResults) collectNativeMessageBodies(this.database, input.threadId)
+    })()
   }
 
   async enter(command: RunExecutionCommand, owner: RunOwner): Promise<void> {

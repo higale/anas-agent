@@ -1,20 +1,20 @@
-## Anas v5.0.3
+## Anas v5.0.4
 
-- 备份与修复前保存的原始数据更容易找到：默认集中放在系统“文档”目录下的 `Anas` 文件夹，分别保存在 `backups` 和 `recovery` 中。已有自选备份目录继续使用，旧备份保留原位。
-- 恢复备份时单独显示恢复状态，避免恢复过程中出现多余的“加载失败”提示。
-- 加载失败等问题会在日志中留下更具体的原因；技能目录有问题时会指出对应路径和项目，方便排查。
-- 修复关闭程序时，插件停止后又触发技能刷新、留下多余错误记录的问题。
-- 修正与已发布版本一致的本地构建仍显示开发版标记的问题。
+- 对话记录较多时，启动后侧栏和当前对话更快显示，打开长对话更流畅。
+- 模型报错后可直接点击“重试”，从失败处继续，无需重发消息，也不会重复执行已完成的工具。重试较早的错误时，会先确认是否移除后续对话内容；工具已经产生的操作不会撤销。
+- 工具返回内容导致模型请求失败时，可选择“重试（不返回工具结果）”。该轮返回内容会替换为不返回结果的说明，重启后仍然保留这一选择；工具已经产生的操作不会撤销。
+- 修复从历史错误处重试后，待办计划丢失的问题。
+- 修正对话压缩后的上下文用量显示，避免漏算召回记忆占用的空间。
 
-**从 5.0.2 升级无需重置项目或会话。**
+**从 5.0.2 或 5.0.3 升级无需重置项目或会话。**
 
-- Backups and original data saved before repairs are easier to find: they now default to the `Anas` folder in your system Documents directory, under `backups` and `recovery`. Previously selected backup folders are still used, and existing backups stay where they are.
-- Backup restoration now has a dedicated status screen, avoiding unrelated “failed to load” notices during the restore.
-- Logs now include more useful details when loading fails. Skill folder errors identify the affected path and project to help with troubleshooting.
-- Fix unnecessary error logs caused by refreshing skills while plugins were shutting down on exit.
-- Fix local builds that match a published release still showing a development version label.
+- The sidebar and current conversation appear sooner at startup when you have a large chat history, and long conversations open more smoothly.
+- After a model error, click **Retry** to continue from the failed request without resending your message or repeating completed tool actions. Retrying an earlier error asks you to confirm removing later conversation content; actions already performed by tools are not undone.
+- If tool output causes a model request to fail, choose **Retry without tool results**. That round’s output is replaced with a note that the results were withheld, and this choice persists after restarting. Actions already performed by tools are not undone.
+- Fix to-do plans being lost when retrying an earlier error.
+- Fix context usage after conversation compaction undercounting the space used by recalled memories.
 
-**Upgrading from 5.0.2 does not require resetting projects or conversations.**
+**Upgrading from 5.0.2 or 5.0.3 does not require resetting projects or conversations.**
 
 ## 较早版本升级 / Upgrading from earlier versions
 

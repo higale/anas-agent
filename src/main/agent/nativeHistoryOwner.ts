@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3'
 import { isAgentThreadLocked } from '../../shared/agentTypes'
-import type { AgentRun } from '../../shared/agentTypes'
+import { isCompleteModelInput, lastToolResultBatch } from '../../runtime/modelRequestRecovery'
+import type { AgentModelRetryInput, AgentModelRetryState, AgentRun } from '../../shared/agentTypes'
 import { historyRevisionBoundary, regenerationContent } from '../../runtime/historyRevision'
 import type { ExecutionMessageInput } from '../../runtime/executionState'
 import { conversationMessageRecordId, encodeConversationMessage } from '../../runtime/conversationStorage'
@@ -13,7 +14,7 @@ import { collectNativeMessageBodies } from './nativeMessageCleanup'
 import type { NativeRunOwner } from './nativeRunOwner'
 
 export interface NativeHistoryRevision {
-  threadId: string; messageId: string; revisionId: string; kind: 'truncate' | 'regenerate';
+  threadId: string; messageId: string; revisionId: string; kind: 'truncate' | 'regenerate' | 'retry'; retryRunId?: string; withholdToolResults?: boolean;
   retainedCount: number; fromRunId: string; replacement?: { runId: string; message: ExecutionMessageInput }
 }
 
@@ -36,8 +37,8 @@ export class NativeHistoryOwner {
     if (isAgentThreadLocked(thread.status)) throw new AgentThreadLockedError(threadId, 'change its messages')
   }
 
-  private history(threadId: string) {
-    const history = this.owner.store.readHistory(threadId)
+  private history(threadId: string, saved = this.owner.store.readHistory(threadId)) {
+    const history = saved
     if (!history) throw new Error('Conversation has no saved history.')
     const indexes = this.database.prepare('SELECT position,record_id,run_id FROM agent_message_index WHERE thread_id=? ORDER BY position')
       .all(threadId) as { position: number; record_id: string; run_id: string | null }[]
@@ -54,6 +55,102 @@ export class NativeHistoryOwner {
         runId: typeof bodyRunId === 'string' ? bodyRunId : indexRunId ?? undefined }
     })
     return { ...history, boundaryMessages: messages }
+  }
+
+  /** Capabilities are anchored to the saved error's run, including errors before later turns. */
+  modelRetries(threadId: string): AgentModelRetryState[] {
+    const runs = this.database.prepare('SELECT id,status,operation FROM agent_runs WHERE thread_id=? ORDER BY sequence')
+      .all(threadId) as { id: string; status: string; operation: string }[]
+    if (!runs.some(run => run.status === 'failed' && run.operation === 'agent')) return []
+    const head = this.owner.store.readHead(threadId)
+    if (!head) return []
+    const indexes = this.database.prepare('SELECT position,record_id,message_id,run_id FROM agent_message_index WHERE thread_id=? ORDER BY position')
+      .all(threadId) as { position: number; record_id: string; message_id: string; run_id: string | null }[]
+    const byRun = new Map<string, number[]>()
+    indexes.forEach((row, index) => {
+      if (row.position !== index) throw new Error('History index positions are not contiguous.')
+      if (row.run_id) {
+        const positions = byRun.get(row.run_id) ?? []
+        positions.push(index); byRun.set(row.run_id, positions)
+      }
+    })
+    const laterStarts: number[] = []
+    let laterStart = indexes.length
+    for (let index = runs.length - 1; index >= 0; index--) {
+      laterStarts[index] = laterStart
+      laterStart = Math.min(laterStart, byRun.get(runs[index].id)?.[0] ?? indexes.length)
+    }
+    const read = (index: number) => {
+      const row = indexes[index], record = this.owner.store.readMessageRecord(threadId, row.record_id)
+      if (record.id !== row.message_id || record.value.context?.runId !== undefined && record.value.context.runId !== row.run_id) {
+        throw new Error('History message and index disagree about their identity or owning run.')
+      }
+      return { ...record.value, id: record.id }
+    }
+    // Older v1 records may lack the optional failure marker. Only that case
+    // needs a complete protocol check; normal snapshots read the failure's tail.
+    let unmarkedHistory: ReturnType<NativeRunOwner['store']['readHistory']>
+    return runs.flatMap((run, runIndex) => {
+      if (run.status !== 'failed' || run.operation !== 'agent') return []
+      const positions = byRun.get(run.id), end = laterStarts[runIndex]
+      if (!positions?.length || positions.at(-1)! >= end || indexes[end - 1]?.run_id !== run.id) return []
+      const currentFailure = this.owner.store.currentModelFailure(threadId, run.id)
+      const savedFailure = head.context.modelFailureBoundaries?.[run.id]
+      const marked = savedFailure?.messageId === indexes[end - 1].message_id ? savedFailure.modelRequestFailed : undefined
+      if (currentFailure === false || currentFailure === undefined && marked === false) return []
+      if (!positions.some(index => read(index).kind === 'user')) return []
+      if (currentFailure === undefined && marked === undefined) {
+        unmarkedHistory ??= this.owner.store.readHistory(threadId)
+        if (!unmarkedHistory || !isCompleteModelInput(unmarkedHistory.messages.slice(0, end).map(record => ({ ...record.value, id: record.id })))) return []
+      }
+      const tail = []
+      for (let index = end - 1; index >= 0; index--) {
+        const message = read(index)
+        tail.push(message)
+        if (message.kind === 'user' || message.kind === 'assistant') break
+      }
+      tail.reverse()
+      const batch = new Set(lastToolResultBatch(tail))
+      return [{ runId: run.id, revisionId: head.revisionId, requiresRollback: runIndex + 1 < runs.length,
+        canWithholdToolResults: tail.some(message => batch.has(message.id) && !message.context?.resultWithheld) }]
+    })
+  }
+
+  private retryPoints(threadId: string, saved = this.owner.store.readHistory(threadId)) {
+    const history = this.history(threadId, saved)
+    const runs = this.database.prepare('SELECT id,status,operation FROM agent_runs WHERE thread_id=? ORDER BY sequence')
+      .all(threadId) as { id: string; status: string; operation: string }[]
+    const order = new Map(runs.map((run, index) => [run.id, index]))
+    return runs.flatMap((run, runIndex) => {
+      if (run.status !== 'failed' || run.operation !== 'agent') return []
+      const firstLater = history.boundaryMessages.findIndex(message => message.runId && (order.get(message.runId) ?? -1) > runIndex)
+      const retainedCount = firstLater < 0 ? history.messages.length : firstLater
+      const retained = history.messages.slice(0, retainedCount)
+      if (!history.boundaryMessages.slice(0, retainedCount).some(message => message.runId === run.id && message.role === 'user')
+        || history.boundaryMessages.slice(retainedCount).some(message => message.runId === run.id)) return []
+      const messages = retained.map(record => ({ ...record.value, id: record.id })), last = messages.at(-1)
+      if (!last || history.boundaryMessages[retainedCount - 1]?.runId !== run.id) return []
+      const currentFailure = this.owner.store.currentModelFailure(threadId, run.id), savedFailure = history.context.modelFailureBoundaries?.[run.id]
+      if (currentFailure === false || currentFailure === undefined
+        && !((savedFailure?.messageId === last.id ? savedFailure.modelRequestFailed : undefined) ?? isCompleteModelInput(messages))) return []
+      const fromRunId = runs[runIndex + 1]?.id
+      const retry: AgentModelRetryState = { runId: run.id, revisionId: history.revisionId, requiresRollback: Boolean(fromRunId),
+        canWithholdToolResults: lastToolResultBatch(messages).some(id => !messages.find(message => message.id === id)?.context?.resultWithheld) }
+      return [{ retry, retainedCount, fromRunId, messageId: last.id }]
+    })
+  }
+
+  prepareModelRetry(input: AgentModelRetryInput): NativeHistoryRevision | undefined {
+    this.assertMutable(input.threadId)
+    const history = this.owner.store.readHistory(input.threadId)
+    if (history?.revisionId !== input.expectedRevisionId) throw new Error('The execution revision changed.')
+    const point = this.retryPoints(input.threadId, history).find(point => point.retry.runId === input.runId)
+    if (!point) throw new Error('This failure is not a retryable model request.')
+    if (input.withholdToolResults && !point.retry.canWithholdToolResults) throw new Error('There are no new tool results to withhold.')
+    if (!point.fromRunId) return undefined
+    if (input.discardLaterMessages !== true) throw new Error('Confirm removal of later conversation content before retrying this error.')
+    return { threadId: input.threadId, messageId: point.messageId, revisionId: input.expectedRevisionId,
+      kind: 'retry', retryRunId: input.runId, withholdToolResults: input.withholdToolResults, retainedCount: point.retainedCount, fromRunId: point.fromRunId }
   }
 
   prepare(input: { threadId: string; messageId: string } & ({ kind: 'truncate' } | { kind: 'regenerate'; runId: string; skillPromptText?: string })): NativeHistoryRevision {
@@ -78,7 +175,10 @@ export class NativeHistoryOwner {
       this.assertMutable(revision.threadId)
       const history = this.history(revision.threadId)
       if (history.revisionId !== revision.revisionId) throw new Error('Conversation history changed before the revision could be committed.')
-      const boundary = historyRevisionBoundary(history.boundaryMessages, revision.messageId, revision.kind)
+      const point = revision.kind === 'retry' ? this.retryPoints(revision.threadId, history).find(point => point.retry.runId === revision.retryRunId) : undefined
+      const boundary = revision.kind === 'retry' ? point : historyRevisionBoundary(history.boundaryMessages, revision.messageId, revision.kind)
+      if (!boundary || revision.kind === 'retry' && (point?.messageId !== revision.messageId || typeof revision.withholdToolResults !== 'boolean'
+        || revision.withholdToolResults && !point?.retry.canWithholdToolResults)) throw new Error('Invalid model retry history boundary.')
       if (boundary.retainedCount !== revision.retainedCount || boundary.fromRunId !== revision.fromRunId
         || (revision.kind === 'regenerate') !== Boolean(revision.replacement)
         || revision.replacement && revision.replacement.message.id !== revision.messageId) throw new Error('Invalid conversation history revision boundary.')
@@ -117,6 +217,11 @@ export class NativeHistoryOwner {
       this.database.prepare('DELETE FROM agent_message_index WHERE thread_id=? AND position>=?').run(revision.threadId, revision.retainedCount)
       this.resources.remove(plan)
       for (const threadId of [revision.threadId, ...plan.children.map(child => child.threadId)]) collectNativeMessageBodies(this.database, threadId)
+      if (revision.kind === 'retry') {
+        // History removal, saved result replacement and reattaching the failed run commit together.
+        this.owner.retryModel({ threadId: revision.threadId, runId: revision.retryRunId!,
+          expectedRevisionId: this.owner.store.readHistory(revision.threadId)!.revisionId, withholdToolResults: revision.withholdToolResults! })
+      }
       if (!revision.replacement) return {}
       const run = this.owner.createRun({ threadId: revision.threadId, runId: revision.replacement.runId, operation: 'agent', message: revision.replacement.message })
       this.resources.restoreAttachments(plan, run.id)

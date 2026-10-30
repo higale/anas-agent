@@ -71,6 +71,7 @@ export interface TurnTimelineDirectionItem {
 
 export interface TurnTimelineErrorItem {
   type: 'error'
+  runId: string
   key: string
   message: string
 }
@@ -393,7 +394,7 @@ export function projectTurnTimeline(
       else trailing.push(range)
     }
     const reports: Array<TurnTimelineErrorItem | TurnTimelineCleanupItem> = []
-    if (run.error) reports.push({ type: 'error', key: `error:${run.runId}`, message: run.error })
+    if (run.error) reports.push({ type: 'error', runId: run.runId, key: `error:${run.runId}`, message: run.error })
     if (run.backgroundCleanup) reports.push({ type: 'cleanup', key: `cleanup:${run.runId}`, cleanup: run.backgroundCleanup })
     // Runtime reports follow this turn's messages, independently of its activities.
     const lastMessage = messages.map((message) => message.runId).lastIndexOf(run.runId)

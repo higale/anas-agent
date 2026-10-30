@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import {
   isAgentThreadLocked,
   type AgentInterruptResponse,
+  type AgentModelRetryState,
   type AgentAccessMode,
   type AgentContextStatus,
   type AgentMessage,
@@ -318,6 +319,7 @@ export function useAgentWorkspace({ onAppError }: UseAgentWorkspaceOptions) {
       threadProjectionRevisionRef.current += 1
     }
     if (event.type === 'run_started') {
+      setSnapshots(current => current[threadId] ? { ...current, [threadId]: { ...current[threadId], modelRetries: undefined } } : current)
       setThreadError(threadId, undefined)
       projectedRunIdsRef.current.set(threadId, event.run.id)
       snapshotReadinessRef.current.markProjected(threadId)
@@ -437,12 +439,12 @@ export function useAgentWorkspace({ onAppError }: UseAgentWorkspaceOptions) {
     }
     if (event.type === 'run_settled') {
       const projectedRunId = projectedRunIdsRef.current.get(threadId)
-      if (event.status === 'completed' && (!projectedRunId || projectedRunId === event.runId)) {
+      if (['completed', 'failed', 'cancelled'].includes(event.status) && (!projectedRunId || projectedRunId === event.runId)) {
         // A snapshot requested between the terminal event and executor release
         // can still carry settlingRun. Invalidate that read and refresh any
         // already-restored owner once the executor has actually released it.
         snapshotReadinessRef.current.markProjected(threadId)
-        if (projectedRunId) {
+        if (projectedRunId || event.status === 'failed') {
           void loadThreadSnapshot(threadId, true)
             .catch(() => setThreadError(threadId, translationRef.current('chat.failed_load_app')))
         }
@@ -672,6 +674,20 @@ export function useAgentWorkspace({ onAppError }: UseAgentWorkspaceOptions) {
   const compressContext = useCallback(async (threadId: string): Promise<void> => {
     await window.gale.agent.runs.compress(threadId)
   }, [])
+
+  const retryModel = useCallback(async (threadId: string, retry: AgentModelRetryState,
+    withholdToolResults: boolean, discardLaterMessages = false): Promise<void> => {
+    await window.gale.agent.runs.retryModel({ threadId, runId: retry.runId,
+      expectedRevisionId: retry.revisionId, withholdToolResults, discardLaterMessages })
+    if (withholdToolResults) setProjection(current => {
+      const snapshot = current.snapshots[threadId], run = current.runs[threadId]
+      return { snapshots: snapshot ? { ...current.snapshots, [threadId]: { ...snapshot,
+        activities: snapshot.activities.filter(activity => activity.runId !== retry.runId) } } : current.snapshots,
+      runs: run?.runId === retry.runId ? { ...current.runs, [threadId]: { ...run, tools: [] } } : current.runs }
+    })
+    // Historical retries remove later messages and activities; refresh their complete window.
+    await loadThreadSnapshot(threadId, true)
+  }, [loadThreadSnapshot])
 
   const resume = useCallback(async (
     threadId: string,
@@ -964,6 +980,7 @@ export function useAgentWorkspace({ onAppError }: UseAgentWorkspaceOptions) {
     renameThread,
     regenerateMessage,
     resume,
+    retryModel,
     runs,
     send,
     setActiveError,
@@ -1002,6 +1019,7 @@ export function useAgentWorkspace({ onAppError }: UseAgentWorkspaceOptions) {
     renameThread,
     regenerateMessage,
     resume,
+    retryModel,
     runs,
     send,
     setActiveError,

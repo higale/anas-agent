@@ -22,6 +22,7 @@ import type { AgentRunView } from './useAgentWorkspace'
 import type { QueuedAgentMessage } from './useQueuedAgentMessages'
 import {
   isAgentThreadLocked,
+  type AgentModelRetryState,
   type AgentAccessMode,
   type AgentInterruptResponse,
   type AgentMessage,
@@ -100,6 +101,7 @@ interface AgentWorkspaceProps {
   onRetryQueuedMessage(message: QueuedAgentMessage): void | Promise<unknown>
   onToggleAttachmentContextPolicy(path: string): void
   onRemoveSuggestion(text: string): void | Promise<void>
+  onRetryModel?(retry: AgentModelRetryState, withholdToolResults: boolean): Promise<void>
   onResume(responses: AgentInterruptResponse[]): void | Promise<void>
   onSelectMainModel(modelConfigId: string): void | Promise<void>
   onSelectModelParameterPreset(modelParameterPresetId: string | null): void | Promise<void>
@@ -248,6 +250,8 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
         panelRef={props.chatPanelRef}
         followOutputRef={props.followOutputRef}
         error={props.error}
+        modelRetries={props.snapshot?.modelRetries}
+        onRetryModel={props.onRetryModel}
         speech={props.speech}
         earlierMessageCount={props.snapshot?.messageWindow.remaining ?? 0}
         onDeleteRound={props.onDeleteRound}

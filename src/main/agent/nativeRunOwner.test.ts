@@ -1,3 +1,4 @@
+import { decodeExecutionValue, encodeExecutionValue } from '../../runtime/executionValue'
 import Database from 'better-sqlite3'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -863,5 +864,59 @@ it.each([[false, false], [false, true], [true, false], [true, true]])('restores 
       h.reopen()
       expect(h.owner.store.readHistory(h.identity.threadId)?.messages.filter(message => message.value.kind === 'tool')).toHaveLength(2)
     }
+  } finally { h.dispose() }
+})
+
+it('saves replacement tool returns across reopen, later retries, later user turns and history edits', async () => {
+  const h = fixture()
+  try {
+    h.owner.saveInput(h.identity, input()); await h.owner.enter('input', h.identity)
+    const requested = call()
+    h.owner.store.acceptModel(h.scope(), { id: 'response', value: { id: 'response', kind: 'assistant', content: '',
+      calls: [{ id: requested.providerCallId, name: requested.name, args: requested.args }] } }, [requested], { modelCalls: 1, todos: [] })
+    h.owner.store.prepareTools(h.scope(), [{ callId: requested.id, args: requested.args }])
+    h.owner.store.settleCall(h.identity, requested.id, { id: 'result', value: { id: 'result', kind: 'tool', name: requested.name,
+      resultFor: requested.providerCallId, content: 'original output' } })
+    h.owner.store.finishBatch(h.scope())
+    h.owner.store.finish(h.scope(), 'failed', 'Provider rejected', { modelRequestFailed: true })
+    const original = h.owner.store.load(h.identity.threadId)!.messages
+    const { withholdToolResult, withheldToolResultText } = await import('../../runtime/modelRequestRecovery')
+    // A previously saved v1 failure has no optional retry marker. Its empty
+    // response pointer still identifies the next model-request boundary.
+    const row = h.sql.prepare('SELECT context_value FROM execution_state WHERE thread_id=?').get(h.identity.threadId) as { context_value: Buffer }
+    const context = decodeExecutionValue(row.context_value) as Record<string, unknown>
+    delete context.model_request_failed
+    delete context.model_failure_boundaries
+    h.sql.prepare('UPDATE execution_state SET context_value=? WHERE thread_id=?').run(encodeExecutionValue(context), h.identity.threadId)
+    h.reopen()
+    expect(h.product.readSnapshot(h.identity.threadId).modelRetries?.[0].canWithholdToolResults).toBe(true)
+    h.sql.exec("CREATE TRIGGER reject_result_replacement BEFORE UPDATE OF record_id ON agent_message_payloads BEGIN SELECT RAISE(ABORT,'replacement failed'); END")
+    expect(() => h.owner.retryModel({ ...h.scope(), withholdToolResults: true })).toThrow('replacement failed')
+    expect(h.owner.store.load(h.identity.threadId)!.messages).toEqual(original)
+    expect(h.product.readModel.getRun(h.identity.runId)?.status).toBe('failed')
+    h.sql.exec('DROP TRIGGER reject_result_replacement')
+    h.owner.retryModel({ ...h.scope(), withholdToolResults: true })
+    expect(h.product.readSnapshot(h.identity.threadId).activities.flatMap(activity => activity.tools)[0]?.output).toBe(withheldToolResultText)
+    h.owner.store.finish(h.scope(), 'failed', 'Provider still rejected', { modelRequestFailed: true })
+    h.reopen()
+    expect(h.owner.store.load(h.identity.threadId)!.messages.find(record => record.id === 'result')?.value).toMatchObject({ content: withheldToolResultText, context: { resultWithheld: true } })
+    expect(() => h.owner.retryModel({ ...h.scope(), withholdToolResults: true })).toThrow('no new tool results')
+    h.owner.retryModel({ ...h.scope(), withholdToolResults: false })
+    expect(h.owner.store.load(h.identity.threadId)!.messages.map(record => record.value))
+      .toEqual(original.map(record => record.id === 'result' ? withholdToolResult(record.value) : record.value))
+    h.owner.store.finish(h.scope(), 'completed')
+    h.owner.createRun({ threadId: h.identity.threadId, runId: 'next', operation: 'agent', message: input('next') })
+    await h.owner.enter('input', { threadId: h.identity.threadId, runId: 'next' })
+    expect(h.owner.store.load(h.identity.threadId)!.messages.find(record => record.id === 'result')?.value).toMatchObject({ content: withheldToolResultText, context: { resultWithheld: true } })
+    expect(() => h.owner.retryModel({ ...h.scope(), withholdToolResults: false })).toThrow('latest failed')
+    const next = h.owner.store.load(h.identity.threadId)!
+    h.owner.store.finish({ threadId: next.threadId, runId: next.runId, expectedRevisionId: next.revisionId }, 'completed')
+    const revise = (retainedCount: number) => h.sql.transaction(() => h.owner.store.reviseHistory({ threadId: next.threadId,
+      expectedRevisionId: h.owner.store.readHistory(next.threadId)!.revisionId, retainedCount }))()
+    revise(original.length)
+    h.reopen()
+    expect(h.owner.store.readHistory(next.threadId)!.messages.find(record => record.id === 'result')?.value.content).toBe(withheldToolResultText)
+    revise(1)
+    expect(h.owner.store.readHistory(next.threadId)!.messages.find(record => record.id === 'result')).toBeUndefined()
   } finally { h.dispose() }
 })

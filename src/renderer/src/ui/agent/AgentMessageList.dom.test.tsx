@@ -592,3 +592,38 @@ describe('AgentMessageList tool disclosure', () => {
     expect(document.querySelector('.agent-subagent-activity-error')).not.toBeNull()
   })
 })
+
+describe('failed model request actions', () => {
+  const props = { title: 'Thread', messages, panelRef: { current: null }, followOutputRef: { current: true },
+    speech: { status: 'idle' as const }, onSpeak: vi.fn() }
+  const failed = { ...activity('completed'), status: 'failed' as const, error: 'Provider rejected input' }
+  const retry = { runId: 'run-1', revisionId: 'revision', canWithholdToolResults: true, requiresRollback: false }
+
+  it('offers both actions below the current error and prevents duplicate clicks while submitting', async () => {
+    let resolve!: () => void
+    const onRetryModel = vi.fn(() => new Promise<void>(done => { resolve = done }))
+    render(<AgentMessageList {...props} activities={[failed]} modelRetries={[retry]} onRetryModel={onRetryModel} />)
+    const ordinary = screen.getByRole('button', { name: 'common.retry' })
+    const withhold = screen.getByRole('button', { name: 'agent.retry_without_tool_results' })
+    expect(ordinary.closest('[role="alert"]')).toHaveTextContent(failed.error)
+    fireEvent.click(withhold)
+    fireEvent.click(ordinary)
+    expect(onRetryModel).toHaveBeenCalledExactlyOnceWith(retry, true)
+    expect(ordinary).toBeDisabled()
+    expect(withhold).toBeDisabled()
+    await act(async () => resolve())
+    fireEvent.click(ordinary)
+    expect(onRetryModel).toHaveBeenLastCalledWith(retry, false)
+    await act(async () => resolve())
+  })
+
+  it('shows only ordinary retry after user input and does not attach another run’s actions', () => {
+    const onRetryModel = vi.fn(async () => {})
+    const { rerender } = render(<AgentMessageList {...props} activities={[failed]}
+      modelRetries={[{ ...retry, canWithholdToolResults: false }]} onRetryModel={onRetryModel} />)
+    expect(screen.getByRole('button', { name: 'common.retry' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: 'agent.retry_without_tool_results' })).not.toBeInTheDocument()
+    rerender(<AgentMessageList {...props} activities={[failed]} modelRetries={[{ ...retry, runId: 'another-run' }]} onRetryModel={onRetryModel} />)
+    expect(screen.queryByRole('button', { name: 'common.retry' })).not.toBeInTheDocument()
+  })
+})

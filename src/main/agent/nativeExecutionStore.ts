@@ -1,3 +1,4 @@
+import { canRetryModelRequest, isCompleteModelInput, lastToolResultBatch, modelRetryTodos, withholdToolResult } from '../../runtime/modelRequestRecovery'
 import { requireObjectToolCall } from '../../runtime/toolInput'
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
@@ -86,10 +87,17 @@ export interface NativeExecutionCommit {
   inputAccepted: boolean
   messageRecords: ExecutionMessageRecord[]
   previousResponseRecordId?: string
+  replacedToolResults?: Record<string, string>
   summary?: ManualContextCompression & { id: string }
 }
 
 function validContext(context: ExecutionContext): ExecutionContext {
+  if (context.modelRequestFailed !== undefined && typeof context.modelRequestFailed !== 'boolean') throw new Error('Invalid model request recovery context.')
+  if (context.modelFailureBoundaries !== undefined && (!context.modelFailureBoundaries || typeof context.modelFailureBoundaries !== 'object'
+    || Array.isArray(context.modelFailureBoundaries) || Object.entries(context.modelFailureBoundaries).some(([id, value]) => !id || !value || typeof value !== 'object'
+      || typeof value.messageId !== 'string' || !value.messageId || typeof value.modelRequestFailed !== 'boolean'))) {
+    throw new Error('Invalid model failure boundaries.')
+  }
   for (const observed of [context.observedManagedCalls, context.observedSubagents]) {
     if (observed !== undefined && (!observed || typeof observed !== 'object' || Array.isArray(observed)
       || Object.entries(observed).some(([id, value]) => !id || value !== true))) throw new Error('Invalid persisted background observation evidence.')
@@ -206,6 +214,9 @@ function readAuthorization(value: unknown): ExecutionToolCall['authorization'] {
 function contextValue(context: ExecutionContext): unknown {
   validContext(context)
   return { model_calls: context.modelCalls, todos: context.todos,
+    ...(context.modelFailureBoundaries === undefined ? {} : { model_failure_boundaries: Object.fromEntries(Object.entries(context.modelFailureBoundaries).map(([id, value]) =>
+      [id, { message_id: value.messageId, model_request_failed: value.modelRequestFailed }])) }),
+    ...(context.modelRequestFailed === undefined ? {} : { model_request_failed: context.modelRequestFailed }),
     ...(context.observedManagedCalls === undefined ? {} : { observed_managed_calls: context.observedManagedCalls }),
     ...(context.observedSubagents === undefined ? {} : { observed_subagents: context.observedSubagents }),
     ...(context.rulePreparation ? { rule_preparation: { run_id: context.rulePreparation.runId,
@@ -226,11 +237,17 @@ function contextValue(context: ExecutionContext): unknown {
 
 function readContext(bytes: Uint8Array): ExecutionContext {
   const value = decodeExecutionValue(bytes) as Record<string, unknown>
+  if (value.model_failure_boundaries !== undefined && (!value.model_failure_boundaries || typeof value.model_failure_boundaries !== 'object'
+    || Array.isArray(value.model_failure_boundaries))) throw new Error('Invalid model failure boundaries.')
   const summary = value.summary as { id: string; message_record_id: string; cutoff_index: number; session_id?: string } | undefined
   const rules = value.project_rules as Record<string, unknown> | undefined
   const preparation = value.rule_preparation as { run_id: string; initialized: boolean; reads: { path: string; approved: boolean }[];
     completed_calls?: { id: string; name: string; input_hash: string }[] } | undefined
-  return validContext({ modelCalls: value.model_calls as number, todos: value.todos as ExecutionContext['todos'],
+  return validContext({
+    ...(value.model_failure_boundaries === undefined ? {} : { modelFailureBoundaries: Object.fromEntries(Object.entries(value.model_failure_boundaries as Record<string, { message_id: string; model_request_failed: boolean }>).map(([id, value]) =>
+      [id, { messageId: value?.message_id, modelRequestFailed: value?.model_request_failed }])) }),
+    ...(value.model_request_failed === undefined ? {} : { modelRequestFailed: value.model_request_failed as boolean }),
+    modelCalls: value.model_calls as number, todos: value.todos as ExecutionContext['todos'],
     ...(value.observed_managed_calls === undefined ? {} : { observedManagedCalls: value.observed_managed_calls as Record<string, true> }),
     ...(value.observed_subagents === undefined ? {} : { observedSubagents: value.observed_subagents as Record<string, true> }),
     ...(preparation === undefined ? {} : { rulePreparation: { runId: preparation.run_id, initialized: preparation.initialized, reads: preparation.reads,
@@ -414,6 +431,20 @@ export class NativeExecutionStore {
     })()
   }
 
+  /** Inspect the current failure boundary without decoding the conversation bodies. */
+  currentModelFailure(threadId: string, runId: string): boolean | undefined {
+    const head = this.head(threadId)
+    if (!head || head.phase === 'idle' || head.run_id !== runId) return undefined
+    return head.phase === 'failed' && (readContext(head.context_value).modelRequestFailed ?? head.response_record_id === null)
+  }
+
+  /** Read execution metadata without materializing conversation or tool-result bodies. */
+  readHead(threadId: string) {
+    const row = this.head(threadId)
+    return row && { threadId, runId: row.run_id, revisionId: row.revision_id, phase: row.phase,
+      context: readContext(row.context_value), approvals: readApprovals(row.approvals_value), responseRecordId: row.response_record_id }
+  }
+
   load(threadId: string): ExecutionState | undefined {
     return this.database.transaction(() => {
       const row = this.head(threadId)
@@ -440,6 +471,18 @@ export class NativeExecutionStore {
       const row = this.head(threadId)
       return row ? { revisionId: row.revision_id, messages: this.historyMessages(threadId), context: readContext(row.context_value) } : undefined
     })()
+  }
+
+  /** Bounded body reads for context previews. The caller checks the head
+   * revision across batches before publishing an asynchronously built result. */
+  readHistoryRange(threadId: string, startIndex: number, limit: number): ExecutionMessageRecord[] {
+    if (!Number.isSafeInteger(startIndex) || startIndex < 0 || !Number.isSafeInteger(limit) || limit < 1) {
+      throw new Error('Invalid history read range.')
+    }
+    return (this.database.prepare(`SELECT m.record_id,m.message_id,b.value FROM execution_messages m
+      LEFT JOIN execution_message_bodies b ON b.thread_id=m.thread_id AND b.record_id=m.record_id
+      WHERE m.thread_id=? AND m.position>=? ORDER BY m.position LIMIT ?`).all(threadId, startIndex, limit) as BodyRow[])
+      .map(body => this.readBody(body))
   }
 
   /** The product owner supplies its exact activity/history/task references in
@@ -476,7 +519,11 @@ export class NativeExecutionStore {
       if (!['idle', 'completed', 'cancelled', 'failed'].includes(head.phase)) throw new Error('Conversation execution is still active.')
       const count = this.messageCount(input.threadId)
       if (!Number.isSafeInteger(input.retainedCount) || input.retainedCount < 0 || input.retainedCount > count) throw new Error('Invalid conversation history revision boundary.')
-      const context: ExecutionContext = { modelCalls: 0, todos: [], ...(input.summary ? { summary: input.summary } : {}) }
+      const saved = readContext(head.context_value)
+      const retainedIds = new Set(saved.modelFailureBoundaries ? (this.database.prepare('SELECT message_id FROM execution_messages WHERE thread_id=? AND position<?')
+        .all(input.threadId, input.retainedCount) as { message_id: string }[]).map(row => row.message_id) : [])
+      const boundaries = Object.fromEntries(Object.entries(saved.modelFailureBoundaries ?? {}).filter(([, value]) => retainedIds.has(value.messageId)))
+      const context: ExecutionContext = { modelCalls: 0, todos: [], ...(Object.keys(boundaries).length ? { modelFailureBoundaries: boundaries } : {}), ...(input.summary ? { summary: input.summary } : {}) }
       if (input.summary) {
         const body = this.requireBody(input.threadId, input.summary.messageRecordId)
         if (input.summary.cutoffIndex > input.retainedCount || body.value.kind !== 'user' || !body.value.context?.summary
@@ -501,7 +548,7 @@ export class NativeExecutionStore {
       this.database.prepare(`INSERT INTO execution_state(thread_id,run_id,revision_id,phase,context_value,approvals_value)
         VALUES (?,?,?,'prepare_model',?,?) ON CONFLICT(thread_id) DO UPDATE SET run_id=excluded.run_id,
         revision_id=excluded.revision_id,phase=excluded.phase,context_value=excluded.context_value,approvals_value=excluded.approvals_value,response_record_id=NULL`)
-        .run(input.threadId, input.runId, revisionId, encodeExecutionValue(contextValue(input.context)), encodeExecutionValue([]))
+        .run(input.threadId, input.runId, revisionId, encodeExecutionValue(contextValue({ ...input.context, modelRequestFailed: undefined })), encodeExecutionValue([]))
       const records = this.append(input.threadId, input.messages)
       this.onCommit?.({ threadId: input.threadId, runId: input.runId, revisionId, phase: 'prepare_model', inputAccepted: true, messageRecords: records })
       return revisionId
@@ -787,17 +834,63 @@ export class NativeExecutionStore {
     })
   }
 
-  finish(scope: ExecutionCommitScope, outcome: 'completed' | 'cancelled' | 'failed', error?: string): string {
+  finish(scope: ExecutionCommitScope, outcome: 'completed' | 'cancelled' | 'failed', error?: string, options?: { modelRequestFailed?: boolean }): string {
     if (error !== undefined && (outcome !== 'failed' || typeof error !== 'string')) throw new Error('Only a failed run can carry a failure detail.')
     return this.mutate(scope, outcome === 'completed' ? ['prepare_model', 'model_result'] : ['prepare_model', 'model_result', 'tools', 'waiting', 'waiting_context'], () => {
+      const head = this.requireRun(scope)
+      const context = readContext(head.context_value)
+      if (outcome === 'failed') context.modelRequestFailed = head.phase === 'prepare_model' && options?.modelRequestFailed === true
+      else delete context.modelRequestFailed
       // Entered operations have been drained by the executor. Preserve every
       // confirmed sibling result even when the remaining work was cancelled.
       const results = this.callRows(scope.threadId).flatMap(call => call.result_record_id ? [this.requireBody(scope.threadId, call.result_record_id)] : [])
       this.appendBatchResults(scope.threadId, results)
+      const last = this.database.prepare('SELECT message_id FROM execution_messages WHERE thread_id=? ORDER BY position DESC LIMIT 1').get(scope.threadId) as { message_id: string } | undefined
+      if (outcome === 'failed' && last) {
+        context.modelFailureBoundaries = { ...context.modelFailureBoundaries, [scope.runId]: { messageId: last.message_id, modelRequestFailed: context.modelRequestFailed! } }
+      }
+      this.database.prepare('UPDATE execution_state SET context_value=? WHERE thread_id=?')
+        .run(encodeExecutionValue(contextValue(context)), scope.threadId)
       this.database.prepare('DELETE FROM execution_calls WHERE thread_id=?').run(scope.threadId)
       this.database.prepare('UPDATE execution_state SET approvals_value=? WHERE thread_id=?').run(encodeExecutionValue([]), scope.threadId)
       return { phase: outcome, records: [], ...(error === undefined ? {} : { error }) }
     })
+  }
+
+  retryModel(scope: ExecutionCommitScope, withholdToolResults: boolean): string {
+    return this.database.transaction(() => {
+      const head = this.head(scope.threadId)
+      if (!head || head.revision_id !== scope.expectedRevisionId) throw new Error('The execution revision changed.')
+      const history = this.readHistory(scope.threadId)!, state = head.phase === 'idle' ? undefined : this.load(scope.threadId)
+      const messages = history.messages.map(record => ({ ...record.value, id: record.id }))
+      const savedFailure = history.context.modelFailureBoundaries?.[scope.runId]
+      if (state ? state.runId !== scope.runId || !canRetryModelRequest(state)
+        : !((savedFailure && savedFailure.messageId === messages.at(-1)?.id
+          ? savedFailure.modelRequestFailed : undefined) ?? isCompleteModelInput(messages))) {
+        throw new Error('This failure is not a retryable model request.')
+      }
+      const ids = lastToolResultBatch(messages).filter(id => !messages.find(message => message.id === id)?.context?.resultWithheld)
+      if (withholdToolResults && !ids.length) throw new Error('There are no new tool results to withhold.')
+      const inputIndex = messages.findIndex(message => message.kind === 'user' && message.context?.runId === scope.runId)
+      if (!state && inputIndex < 0) throw new Error('The retained run has no saved input.')
+      const context = { ...history.context, modelRequestFailed: false,
+        // History edits reset context; restore this run's plan and counters without replaying tools.
+        ...(!state ? { todos: modelRetryTodos(messages.slice(inputIndex)),
+          modelCalls: messages.slice(inputIndex).filter(message => message.kind === 'assistant' && !message.partial).length,
+          threadModelCalls: messages.filter(message => message.kind === 'assistant' && !message.partial).length } : {}) }
+      const replacements: Record<string, string> = {}, records: ExecutionMessageRecord[] = []
+      if (withholdToolResults) for (const original of history.messages.filter(record => ids.includes(record.id))) {
+        const body = this.prepareBody({ id: original.id, value: withholdToolResult(original.value) })
+        this.insertBody(scope.threadId, body)
+        if (this.database.prepare('UPDATE execution_messages SET record_id=? WHERE thread_id=? AND message_id=? AND record_id=?')
+          .run(body.recordId, scope.threadId, original.id, original.recordId).changes !== 1) throw new Error('The tool result changed before retry.')
+        records.push(this.requireBody(scope.threadId, body.recordId))
+        replacements[body.recordId] = original.recordId
+      }
+      this.database.prepare("UPDATE execution_state SET run_id=?,phase='prepare_model',context_value=?,response_record_id=NULL WHERE thread_id=?")
+        .run(scope.runId, encodeExecutionValue(contextValue(context)), scope.threadId)
+      return this.publish(scope, 'prepare_model', records, { replacedToolResults: replacements })
+    })()
   }
 
   prepareEffect(key: ExecutionEffectKey, recoveryMode: ToolEffectRecoveryMode): ExecutionEffectRecord {
@@ -935,7 +1028,7 @@ export class NativeExecutionStore {
     validContext({ modelCalls: 0, todos: value.todos })
     return value
   }
-  private messageCount(threadId: string): number {
+  messageCount(threadId: string): number {
     return (this.database.prepare('SELECT count(*) AS total FROM execution_messages WHERE thread_id=?').get(threadId) as { total: number }).total
   }
   private persistSummary(threadId: string, summary: ManualContextCompression & { id: string }, count: number): ExecutionMessageRecord {
@@ -1025,7 +1118,7 @@ export class NativeExecutionStore {
     this.appendRecords(threadId, pending)
   }
   private publish(scope: { threadId: string; runId: string }, phase: ExecutionPhase, records: ExecutionMessageRecord[],
-    details: Pick<NativeExecutionCommit, 'summary' | 'previousResponseRecordId' | 'error'> = {}): string {
+    details: Pick<NativeExecutionCommit, 'summary' | 'previousResponseRecordId' | 'replacedToolResults' | 'error'> = {}): string {
     const revisionId = randomUUID()
     this.database.prepare('UPDATE execution_state SET revision_id=?,phase=? WHERE thread_id=?').run(revisionId, phase, scope.threadId)
     this.onCommit?.({ ...scope, revisionId, phase, inputAccepted: false, messageRecords: records, ...details })

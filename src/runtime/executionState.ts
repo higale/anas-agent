@@ -18,6 +18,9 @@ export interface ExecutionMessageRecord extends ExecutionMessageInput {
 
 export interface ExecutionContext {
   modelCalls: number
+  modelRequestFailed?: boolean
+  /** Failure classification keyed by run, anchored to its final saved message. */
+  modelFailureBoundaries?: Record<string, { messageId: string; modelRequestFailed: boolean }>
   threadModelCalls?: number
   todos: AgentTodo[]
   summary?: { id: string; messageRecordId: string; cutoffIndex: number; sessionId?: string }

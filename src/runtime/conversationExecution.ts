@@ -27,7 +27,7 @@ export interface ConversationExecutionStore {
   wait(scope: ExecutionCommitScope, approvals: ExecutionApproval[]): string
   waitForContext(scope: ExecutionCommitScope, approval: Extract<ExecutionApproval, { kind: 'context_read' }>, context: ExecutionContext): string
   finishBatch(scope: ExecutionCommitScope, directions?: ExecutionMessageInput[], response?: ExecutionMessageInput): string
-  finish(scope: ExecutionCommitScope, outcome: 'completed' | 'cancelled' | 'failed', error?: string): string
+  finish(scope: ExecutionCommitScope, outcome: 'completed' | 'cancelled' | 'failed', error?: string, options?: { modelRequestFailed?: boolean }): string
 }
 
 export interface ConversationModelResult {
@@ -113,7 +113,7 @@ export function conversationExecution(services: ConversationExecutionServices): 
           id: summary.id, cutoffIndex: summary.cutoffIndex, modelContent: summaryMessage.content
         } } : {}) })
     }
-    let failure: { reason: unknown } | undefined, entered = false
+    let failure: { reason: unknown } | undefined, entered = false, modelRequestFailed = false
     try {
       try {
         await services.enter(command, request)
@@ -135,7 +135,7 @@ export function conversationExecution(services: ConversationExecutionServices): 
             const step = await invokeModelWithRetry(async () => {
               const prepared = await services.prepareModel(current(), request, safeObserver)
               return prepared.kind !== 'model' ? prepared : { kind: 'model' as const, result: await prepared.invoke() }
-            }, { ...services.retry, signal: request.signal })
+            }, { ...services.retry, signal: request.signal }).catch(reason => { modelRequestFailed = true; throw reason })
             if (step.kind === 'context') {
               request.signal.throwIfAborted()
               services.store.prepareContext(scope(state), step.context)
@@ -201,7 +201,7 @@ export function conversationExecution(services: ConversationExecutionServices): 
           if (failure) {
             if (state.phase !== 'cancelled' && state.phase !== 'failed') {
               services.store.finish(scope(state), request.signal.aborted ? 'cancelled' : 'failed',
-                request.signal.aborted ? undefined : failureText(failure.reason))
+                request.signal.aborted ? undefined : failureText(failure.reason), { modelRequestFailed })
               committed()
             }
           } else if (state.phase !== 'waiting' && state.phase !== 'waiting_context') {

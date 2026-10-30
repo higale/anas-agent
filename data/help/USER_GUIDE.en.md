@@ -432,7 +432,7 @@ Deleting an entire conversation from its menu does not require repairing a missi
 
 Settings > Dev provides developer tools, logs, and Start in console. Console startup preserves the data directory and restarts the app in a system terminal to show startup and runtime output.
 
-- **Model request fails**: check the service address, model name, key, and network connection.
+- **Model request fails**: check the service address, model name, key, and network connection. Use **Retry** below the error to resume the failed model request without repeating completed tools. **Retry (without tool results)** appears only when the error directly follows tool results with no later user input. Those tool return values are replaced in the database with an explicit notice that you chose to withhold them. The conversation record and future model requests use the same updated content. Executed actions are not undone, and the replacement persists in backups, across restarts and later turns. Earlier errors can also be retried: after confirmation, later conversation content is removed and execution continues from that error. Actions already performed by tools are not undone.
 - **Skill fails**: check its instructions, environment variables, and required programs.
 - **MCP tools are missing**: confirm that the server is enabled and connected, the model has Tool use enabled, and the project allows the tools.
 - **Operation awaits confirmation**: allow or reject it as prompted. If the outcome is uncertain, retry only when repeating the operation is acceptable.

@@ -20,7 +20,7 @@ const contextKeys: Record<keyof NonNullable<ConversationMessage['context']>, str
   runId: 'run_id', createdAt: 'created_at', displayText: 'display_text', directionAfterCallIds: 'direction_after_call_ids',
   skill: 'skill', reviewScope: 'review_scope', reviewReport: 'review_report', summaryId: 'summary_id', summary: 'summary',
   modelContextKey: 'model_context_key', requestKey: 'request_key', projectRulesReceipt: 'project_rules_receipt',
-  attachmentProjection: 'attachment_projection', attachmentBlockCount: 'attachment_block_count', unrecordedResult: 'unrecorded_result'
+  attachmentProjection: 'attachment_projection', attachmentBlockCount: 'attachment_block_count', unrecordedResult: 'unrecorded_result', resultWithheld: 'result_withheld'
 }
 
 function invalid(detail: string): never { throw new Error(`Invalid conversation message: ${detail}.`) }
@@ -72,7 +72,10 @@ function validate(value: unknown): asserts value is ConversationMessage {
     if (source.contentFormat !== undefined && source.contentFormat !== 'portable') invalid('invalid content format')
     for (const key of ['functionItemIds', 'customItemIds']) if (source[key] !== undefined) record(source[key])
   }
-  if (message.context !== undefined) record(message.context)
+  if (message.context !== undefined) {
+    const context = record(message.context)
+    if (context.resultWithheld !== undefined && typeof context.resultWithheld !== 'boolean') invalid('invalid result withheld flag')
+  }
   // Usage and context evidence are retained as reported, including unknown or
   // invalid measurements. Their consumers decide whether they are usable.
   if (message.usage !== undefined) record(message.usage)

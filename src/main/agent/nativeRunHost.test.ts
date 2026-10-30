@@ -538,3 +538,200 @@ it.each([
     if (terminal?.type === 'run_completed') expect(terminal.snapshot?.thread).toEqual(updated)
   } finally { model.resolve(); disposal.resolve(); await h.close() }
 })
+
+it.each([false, true])('retries only the failed model request, withholding results: %s', async withholdToolResults => {
+  const h = fixture(), requests: import('../../runtime/conversationMessage').ConversationMessage[][] = []
+  const { conversationContextSource } = await import('./conversationModelExecution')
+  const { withheldToolResultText, withholdToolResult } = await import('../../runtime/modelRequestRecovery')
+  const calls: ExecutionToolCall[] = ['left', 'right'].map(id => ({ id, providerCallId: `provider-${id}`, name: 'write_file', args: { path: id },
+    artifacts: Object.fromEntries(toolEffectArtifactPurposes.map(purpose => [purpose, `${id}:${purpose}`])) as ExecutionToolCall['artifacts'] }))
+  const tool = vi.fn(async (call: { id: string; providerCallId?: string }) => ({ kind: 'result' as const,
+    message: { id: `${call.id}:result`, value: { id: `${call.id}:result`, kind: 'tool' as const, name: 'write_file', resultFor: call.providerCallId,
+      content: [{ type: 'image', mimeType: 'image/png', data: 'original-image-bytes' }], resultStatus: 'success' as const } } }))
+  let fail = true
+  h.services.prepareModel = async state => ({ kind: 'model', invoke: async () => {
+    requests.push(conversationContextSource(state, h.database.runs.store).messages)
+    if (state.context.modelCalls && fail) throw Object.assign(new Error('Invalid provider request'), { status: 400 })
+    const pending = state.context.modelCalls ? [] : calls
+    return { message: { id: `answer-${state.context.modelCalls}`, value: { id: `answer-${state.context.modelCalls}`, kind: 'assistant', content: pending.length ? '' : 'Done',
+      calls: pending.map(call => ({ id: call.providerCallId, name: call.name, args: call.args })) } },
+      calls: pending, context: { ...state.context, modelCalls: state.context.modelCalls + 1 } }
+  } })
+  h.services.prepareTools = async state => ({ calls: state.calls.map(call => ({ callId: call.id, args: call.args })) })
+  h.services.executeTool = tool
+  try {
+    const original = h.host.start(h.owner, 'input', async () => h.instance)
+    expect((await original.completed).status).toBe('failed')
+    await original.drained
+    const retry = h.host.readSnapshot('thread').modelRetries![0]
+    expect(retry.canWithholdToolResults).toBe(true)
+    const saved = h.database.runs.store.load('thread')!.messages
+    await expect(h.host.retryModel({ ...h.owner, expectedRevisionId: 'stale', withholdToolResults }, async () => h.instance)).rejects.toThrow('revision changed')
+    expect(h.database.readModel.getRun('run')?.status).toBe('failed')
+    fail = false
+    const request = { ...h.owner, expectedRevisionId: retry.revisionId, withholdToolResults }
+    const resumed = await h.host.retryModel(request, async () => h.instance)
+    await expect(h.host.retryModel(request, async () => h.instance)).rejects.toThrow('change its messages')
+    expect((await resumed.completed).status).toBe('completed')
+    await resumed.drained
+    expect(tool).toHaveBeenCalledTimes(2)
+    expect(requests).toHaveLength(3)
+    const last = requests.at(-1)!
+    expect(last.filter(message => message.kind === 'user')).toHaveLength(1)
+    expect(last.filter(message => message.kind === 'tool').map(message => message.resultFor)).toEqual(['provider-left', 'provider-right'])
+    if (withholdToolResults) {
+      expect(last.filter(message => message.kind === 'tool').map(message => message.content)).toEqual([withheldToolResultText, withheldToolResultText])
+    } else expect(last).toEqual(requests[1])
+    const retained = h.database.runs.store.load('thread')!.messages.slice(0, saved.length)
+    expect(retained.map(record => record.value)).toEqual(saved.map(record => withholdToolResults && record.value.kind === 'tool' ? withholdToolResult(record.value) : record.value))
+    if (withholdToolResults) expect(h.host.readSnapshot('thread').activities.flatMap(activity => activity.tools).map(tool => tool.output)).toEqual([withheldToolResultText, withheldToolResultText])
+    expect(h.events.filter(event => event.type === 'run_started').map(event => event.newUserTurn)).toEqual([true, false])
+    expect(h.host.readSnapshot('thread').modelRetries).toBeUndefined()
+  } finally { await h.close() }
+})
+
+it('does not offer model retry after a tool execution failure', async () => {
+  const h = fixture()
+  // A post-model business failure is not a failed provider request.
+  h.services.afterModel = async () => { throw new Error('Tool assembly failed') }
+  try {
+    const handle = h.host.start(h.owner, 'input', async () => h.instance)
+    await handle.completed; await handle.drained
+    const state = h.database.runs.store.load('thread')!
+    expect(h.host.readSnapshot('thread').modelRetries).toBeUndefined()
+    await expect(h.host.retryModel({ ...h.owner, expectedRevisionId: state.revisionId, withholdToolResults: false }, async () => h.instance))
+      .rejects.toThrow('not a retryable model request')
+    expect(h.database.readModel.getRun('run')?.status).toBe('failed')
+  } finally { await h.close() }
+})
+
+it.each([false, true])('confirms historical retry and retains the failed tool batch, withholding: %s', async withholdToolResults => {
+  const h = fixture()
+  const todos = [{ content: 'Retained plan', status: 'in_progress' as const }]
+  const laterTodos = [{ content: 'Discarded plan', status: 'completed' as const }]
+  const { conversationContextSource } = await import('./conversationModelExecution')
+  const { withheldToolResultText, withholdToolResult } = await import('../../runtime/modelRequestRecovery')
+  try {
+    await h.database.runs.enter('input', h.owner)
+    const scope = () => ({ ...h.owner, expectedRevisionId: h.database.runs.store.load('thread')!.revisionId })
+    const call: ExecutionToolCall = { id: 'saved-call', providerCallId: 'provider-call', name: 'write_todos', args: { todos },
+      artifacts: Object.fromEntries(toolEffectArtifactPurposes.map(purpose => [purpose, `saved:${purpose}`])) as ExecutionToolCall['artifacts'] }
+    h.database.runs.store.acceptModel(scope(), { id: 'saved-response', value: { kind: 'assistant', content: '',
+      calls: [{ id: call.providerCallId, name: call.name, args: call.args }] } }, [call], { modelCalls: 1, todos: [] })
+    h.database.runs.store.prepareTools(scope(), [{ callId: call.id, args: call.args }])
+    h.database.runs.store.settleCall(h.owner, call.id, { id: 'saved-result', value: { kind: 'tool', resultFor: call.providerCallId,
+      name: call.name, content: 'Already written', resultStatus: 'success', context: { runId: 'run' } } }, { todos })
+    h.database.runs.store.finishBatch(scope())
+    h.database.runs.store.finish(scope(), 'failed', 'Provider rejected', { modelRequestFailed: true })
+    expect(h.host.readSnapshot('thread').todos).toEqual(todos)
+    const original = h.database.runs.store.readHistory('thread')!.messages
+    const next = { threadId: 'thread', runId: 'later' }
+    h.database.runs.createRun({ ...next, operation: 'agent', message: { id: 'later:input', value: { id: 'later:input', kind: 'user',
+      content: 'Continue', context: { runId: next.runId } } } })
+    await h.database.runs.enter('input', next)
+    const laterScope = () => ({ ...next, expectedRevisionId: h.database.runs.store.load('thread')!.revisionId })
+    const laterCall = { ...call, id: 'later-call', args: { todos: laterTodos } }
+    h.database.runs.store.acceptModel(laterScope(), { id: 'later-response', value: { kind: 'assistant', content: '',
+      calls: [{ id: laterCall.providerCallId, name: laterCall.name, args: laterCall.args }] } }, [laterCall], { modelCalls: 1, todos: [] })
+    h.database.runs.store.prepareTools(laterScope(), [{ callId: laterCall.id, args: laterCall.args }])
+    h.database.runs.store.settleCall(next, laterCall.id, { id: 'later-result', value: { kind: 'tool', resultFor: laterCall.providerCallId,
+      name: laterCall.name, content: 'Later plan', resultStatus: 'success', context: { runId: next.runId } } }, { todos: laterTodos })
+    h.database.runs.store.finishBatch(laterScope())
+    h.database.runs.store.finish({ ...next, expectedRevisionId: h.database.runs.store.load('thread')!.revisionId }, 'failed', 'Provider rejected again', { modelRequestFailed: true })
+    expect(h.host.readSnapshot('thread').todos).toEqual(laterTodos)
+    const before = h.database.runs.store.readHistory('thread')!
+    expect(h.host.readSnapshot('thread').modelRetries).toEqual([
+      { runId: 'run', revisionId: before.revisionId, requiresRollback: true, canWithholdToolResults: true },
+      { runId: 'later', revisionId: before.revisionId, requiresRollback: false, canWithholdToolResults: true }
+    ])
+    const request = { ...h.owner, expectedRevisionId: before.revisionId, withholdToolResults }
+    await expect(h.host.retryModel(request, async () => h.instance)).rejects.toThrow('Confirm removal')
+    await expect(h.host.retryModel({ ...request, discardLaterMessages: true, expectedRevisionId: 'stale' }, async () => h.instance))
+      .rejects.toThrow('revision changed')
+    expect(h.database.runs.store.readHistory('thread')).toEqual(before)
+    expect(h.database.readModel.getRun('later')?.status).toBe('failed')
+    if (withholdToolResults) {
+      const sql = new Database(join(h.root, 'conversation.sqlite'))
+      try {
+        sql.exec("CREATE TRIGGER reject_history_retry BEFORE UPDATE OF record_id ON agent_message_payloads BEGIN SELECT RAISE(ABORT,'replacement failed'); END")
+        await expect(h.host.retryModel({ ...request, discardLaterMessages: true }, async () => h.instance)).rejects.toThrow('replacement failed')
+        expect(h.database.runs.store.readHistory('thread')).toEqual(before)
+        expect(h.database.readModel.getRun('later')?.status).toBe('failed')
+        expect(h.database.readModel.getRun('run')?.status).toBe('failed')
+      } finally { sql.exec('DROP TRIGGER IF EXISTS reject_history_retry'); sql.close() }
+    }
+    const executeTool = vi.fn(h.services.executeTool)
+    h.services.executeTool = executeTool
+    h.services.prepareModel = async state => {
+      expect(state.context.modelCalls).toBe(1)
+      expect(state.context.todos).toEqual(todos)
+      const messages = conversationContextSource(state, h.database.runs.store).messages
+      expect(messages.filter(message => message.kind === 'user')).toHaveLength(1)
+      expect(messages.at(-1)?.content).toBe(withholdToolResults ? withheldToolResultText : 'Already written')
+      return { kind: 'model', invoke: async () => ({ message: { id: 'retried-answer', value: { kind: 'assistant', content: 'Recovered', context: { runId: 'run' } } },
+        calls: [], context: { ...state.context, modelCalls: 2 } }) }
+    }
+    const handle = await h.host.retryModel({ ...request, discardLaterMessages: true }, async () => h.instance)
+    expect((await handle.completed).status).toBe('completed'); await handle.drained
+    expect(h.database.readModel.getRun('later')).toBeNull()
+    expect(h.database.runs.store.readHistory('thread')!.messages.slice(0, original.length).map(record => record.value))
+      .toEqual(original.map(record => withholdToolResults && record.value.kind === 'tool' ? withholdToolResult(record.value) : record.value))
+    expect(executeTool).not.toHaveBeenCalled()
+    expect(h.host.readSnapshot('thread').todos).toEqual(todos)
+    expect(h.host.readSnapshot('thread').modelRetries).toBeUndefined()
+  } finally { await h.close() }
+})
+
+it('offers retry for a retained failure after the user deletes later messages', async () => {
+  const h = fixture()
+  try {
+    await h.database.runs.enter('input', h.owner)
+    h.database.runs.store.finish({ ...h.owner, expectedRevisionId: h.database.runs.store.load('thread')!.revisionId }, 'failed', 'Provider rejected', { modelRequestFailed: true })
+    const next = { threadId: 'thread', runId: 'later' }
+    h.database.runs.createRun({ ...next, operation: 'agent', message: { id: 'later:input', value: { id: 'later:input', kind: 'user',
+      content: 'Continue', context: { runId: next.runId } } } })
+    await h.database.runs.enter('input', next)
+    h.database.runs.store.finish({ ...next, expectedRevisionId: h.database.runs.store.load('thread')!.revisionId }, 'failed', 'Failed again', { modelRequestFailed: true })
+    await h.host.truncateMessages({ threadId: 'thread', messageId: 'later:input' })
+    expect(h.database.runs.store.load('thread')).toBeUndefined()
+    const retry = h.host.readSnapshot('thread').modelRetries![0]
+    expect(retry).toMatchObject({ runId: 'run', requiresRollback: false, canWithholdToolResults: false })
+    const handle = await h.host.retryModel({ ...h.owner, expectedRevisionId: retry.revisionId, withholdToolResults: false }, async () => h.instance)
+    expect((await handle.completed).status).toBe('completed'); await handle.drained
+    expect(h.database.runs.store.readHistory('thread')!.messages.map(message => message.id)).toEqual(['run:input', 'answer'])
+  } finally { await h.close() }
+})
+
+it('can remove a later failed compression with no messages without losing the earlier model error', async () => {
+  const h = fixture()
+  try {
+    await h.database.runs.enter('input', h.owner)
+    h.database.runs.store.finish({ ...h.owner, expectedRevisionId: h.database.runs.store.load('thread')!.revisionId }, 'failed', 'Provider rejected', { modelRequestFailed: true })
+    const compression = { threadId: 'thread', runId: 'compression' }
+    h.database.runs.createRun({ ...compression, operation: 'compression' })
+    await h.database.runs.enter('input', compression)
+    h.database.runs.store.finish({ ...compression, expectedRevisionId: h.database.runs.store.load('thread')!.revisionId }, 'failed', 'Compression failed')
+    const retry = h.host.readSnapshot('thread').modelRetries![0]
+    expect(retry).toMatchObject({ runId: 'run', requiresRollback: true })
+    const handle = await h.host.retryModel({ ...h.owner, expectedRevisionId: retry.revisionId, withholdToolResults: false, discardLaterMessages: true }, async () => h.instance)
+    expect((await handle.completed).status).toBe('completed'); await handle.drained
+    expect(h.database.readModel.getRun('compression')).toBeNull()
+    expect(h.database.runs.store.readHistory('thread')!.messages.map(message => message.id)).toEqual(['run:input', 'answer'])
+  } finally { await h.close() }
+})
+
+it('keeps non-model failures ineligible after later input and history deletion', async () => {
+  const h = fixture()
+  try {
+    await h.database.runs.enter('input', h.owner)
+    h.database.runs.store.finish({ ...h.owner, expectedRevisionId: h.database.runs.store.load('thread')!.revisionId }, 'failed', 'Tool configuration failed')
+    const later = { threadId: 'thread', runId: 'later' }
+    h.database.runs.createRun({ ...later, operation: 'agent', message: { id: 'later:input', value: { id: 'later:input', kind: 'user',
+      content: 'Continue', context: { runId: later.runId } } } })
+    await h.database.runs.enter('input', later)
+    h.database.runs.store.finish({ ...later, expectedRevisionId: h.database.runs.store.load('thread')!.revisionId }, 'failed', 'Provider rejected', { modelRequestFailed: true })
+    expect(h.host.readSnapshot('thread').modelRetries?.map(retry => retry.runId)).toEqual(['later'])
+    await h.host.truncateMessages({ threadId: 'thread', messageId: 'later:input' })
+    expect(h.host.readSnapshot('thread').modelRetries).toBeUndefined()
+  } finally { await h.close() }
+})
