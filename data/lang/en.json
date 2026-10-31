@@ -1034,6 +1034,15 @@
     "voices_refreshed": "Voice list refreshed."
   },
   "agent": {
+    "model_recovery_network": "Recovering: reconnecting ({{count}}/2)",
+    "model_recovery_rate_limit": "Recovering: waiting to retry after rate limiting ({{count}}/2)",
+    "model_recovery_server": "Recovering: retrying the model service ({{count}}/2)",
+    "model_recovery_timeout": "Recovering: retrying a timed-out request ({{count}}/2)",
+    "model_recovery_configuration_changed": "Recovering: preparing the updated model request ({{count}}/2)",
+    "model_recovery_incomplete": "Recovering: regenerating an interrupted response ({{count}}/2)",
+    "model_recovery_invalid_tool_call": "Recovering: regenerating tool calls ({{count}}/2)",
+    "model_recovery_output_limit": "Recovering: regenerating with shorter output ({{count}}/2)",
+    "model_recovery_text_continuation": "Recovering: continuing a truncated answer ({{count}}/2)",
     "workspace_panels": "Right workspace",
     "show_panels": "Show right workspace",
     "maximize_panels": "Expand right workspace to fill conversation area",

@@ -34,7 +34,8 @@ function fixture(displayText?: string) {
     message: { id: 'run:input', value: { id: 'run:input', kind: 'user', content: 'Task', context: { runId: 'run', ...(displayText === undefined ? {} : { displayText }) } } } })
   const managed = new ManagedCallService(database.managed, database.results), events: AgentRuntimeEvent[] = []
   const sink = { push: vi.fn((event: AgentRuntimeEvent) => { events.push(event) }) }
-  const host = new NativeRunHost(database, managed, sink)
+  const recoveryLog = vi.fn()
+  const host = new NativeRunHost(database, managed, sink, recoveryLog)
   const services: ConversationExecutionServices = { store: database.runs.store, enter: database.execution.enter,
     prepareModel: async state => ({ kind: 'model', invoke: async () => ({
       message: { id: 'answer', value: { id: 'answer', kind: 'assistant', content: 'Final answer', context: { runId: state.runId } } },
@@ -42,7 +43,7 @@ function fixture(displayText?: string) {
     afterModel: async () => ({ kind: 'complete' }), prepareTools: async () => ({ calls: [] }),
     executeTool: async () => { throw new Error('No tool expected') }, directions: async () => [], drain: async () => {}, retry: { maxRetries: 0 } }
   const instance = { execution: conversationExecution(services), dispose: vi.fn(async () => {}) }
-  return { root, database, owner, managed, events, sink, host, services, instance,
+  return { root, database, owner, managed, events, sink, host, services, instance, recoveryLog,
     async close() { await host.waitForIdle(); database.validate(); database.close(); global.close(); rmSync(root, { recursive: true, force: true }) } }
 }
 
@@ -88,7 +89,19 @@ it('persists cancellation during assembly and waits for disposal before discardi
     expect(execute).not.toHaveBeenCalled()
     expect(h.database.runs.store.readHistory('thread')?.messages).toEqual([])
     expect(h.events.map(event => event.type)).toEqual(['run_cancelled', 'run_settled'])
+    expect(h.recoveryLog).toHaveBeenLastCalledWith(expect.objectContaining({ event: 'run_finished', outcome: 'cancelled',
+      threadId: 'thread', runId: 'run' }))
   } finally { assembly.resolve(); disposal.resolve(); await h.close() }
+})
+
+it('preserves manual retry rejection when diagnostic logging is unavailable', async () => {
+  const h = fixture()
+  h.recoveryLog.mockImplementation(() => { throw new Error('Log unavailable') })
+  try {
+    await expect(h.host.retryModel({ ...h.owner, expectedRevisionId: 'stale', withholdToolResults: false }, async () => h.instance))
+      .rejects.not.toThrow('Log unavailable')
+    expect(h.recoveryLog.mock.calls.map(([event]) => event.event)).toEqual(['manual_requested', 'manual_rejected'])
+  } finally { await h.close() }
 })
 
 it('retains ownership after a shutdown deadline and can resume after the pending executor really drains', async () => {
@@ -587,6 +600,11 @@ it.each([false, true])('retries only the failed model request, withholding resul
     if (withholdToolResults) expect(h.host.readSnapshot('thread').activities.flatMap(activity => activity.tools).map(tool => tool.output)).toEqual([withheldToolResultText, withheldToolResultText])
     expect(h.events.filter(event => event.type === 'run_started').map(event => event.newUserTurn)).toEqual([true, false])
     expect(h.host.readSnapshot('thread').modelRetries).toBeUndefined()
+    expect(h.recoveryLog).toHaveBeenCalledWith(expect.objectContaining({ event: 'manual_rejected', error: expect.any(Error),
+      threadId: 'thread', runId: 'run', details: expect.objectContaining({ withholdToolResults }) }))
+    expect(h.recoveryLog).toHaveBeenCalledWith(expect.objectContaining({ event: 'manual_started',
+      details: expect.objectContaining({ withholdToolResults, previousError: expect.stringContaining('Invalid provider request') }) }))
+    expect(h.recoveryLog).toHaveBeenLastCalledWith(expect.objectContaining({ event: 'run_finished', outcome: 'completed' }))
   } finally { await h.close() }
 })
 

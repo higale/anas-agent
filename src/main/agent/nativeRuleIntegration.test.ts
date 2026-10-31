@@ -63,7 +63,7 @@ async function fixture(capacity = 20000) {
     saveToolResult: content => saveToolResultFile(content, join(root, 'tool_results')) }
   const observer: RunObserver = { started: vi.fn(), startModel: vi.fn(() => randomUUID()), discardModel: vi.fn(), model: vi.fn(), tool: vi.fn(), approval: vi.fn(), committed: vi.fn(async () => {}) }
   const request = { threadId: 'thread', runId, signal: new AbortController().signal }, hooks: { beforeTool?(): Promise<void> } = {}
-  function execution(active = store) {
+  function execution(active = store, maxRetries = 0) {
     const native = definitions.map(definition => ({ ...definition, async execute(args, context) {
       const call = active.load('thread')!.calls.find(call => call.id === context.callId)!
       return toolResultMessage(await definition.execute(args, context), { name: definition.name, callId: call.providerCallId!, metadata: definition.metadata })
@@ -72,7 +72,7 @@ async function fixture(capacity = 20000) {
     return conversationExecution({ store: active, enter: async () => {}, prepareModel: createConversationModelPreparation({ ...modelOptions, store: active }),
       afterModel: async () => ({ kind: 'complete' }), prepareTools: state => prepareConversationToolBatch(state, preparation),
       executeTool: async (...args) => { await hooks.beforeTool?.(); return dispatch(...args) },
-      directions: async () => [], drain: () => operations.drain(), retry: { maxRetries: 0 } })
+      directions: async () => [], drain: () => operations.drain(), retry: { maxRetries, initialDelayMs: 0 } })
   }
   async function run(user: ConversationMessage = { kind: 'user', content: 'Edit' }) {
     store.start({ threadId: 'thread', runId, context: { modelCalls: 0, todos: [] }, messages: [{ id: 'user', value: user }] })
@@ -204,7 +204,7 @@ describe('native project rules in durable tool execution', () => {
     const store = new NativeExecutionStore(db)
     expect(store.load('thread')?.phase).toBe('prepare_model')
     h.modelOptions.providerFetch = h.fetch
-    const resumed = await h.execution(store).execute('continue', h.request, h.observer)
+    const resumed = await h.execution(store, 1).execute('continue', h.request, h.observer)
     if (resumed.result.status === 'rejected') throw resumed.result.reason
     expect(store.load('thread')?.phase).toBe('completed'); expect(write.execute).toHaveBeenCalledOnce()
     expect(h.prompts[1]).toContain('CHILD RULE'); expect(h.prompts[1]).not.toContain('CHANGED')

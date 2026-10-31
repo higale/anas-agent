@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { AnthropicResponseAccumulator, collectAnthropicMessage, type AnthropicNativeEvent } from './anthropicStream'
-import { IncompleteModelResponseError } from '../runtime/errors'
+import { IncompleteModelResponseError, ModelOutputLimitError } from '../runtime/errors'
 
 const start = { type: 'message_start', message: { id: 'msg_fixture', type: 'message', role: 'assistant', model: 'fixture', content: [],
   stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 0, cache_creation_input_tokens: 2, cache_read_input_tokens: 3 } } }
@@ -83,4 +83,15 @@ describe('native Anthropic response aggregation', () => {
     expect(closed).toBe(true)
     expect(() => new AnthropicResponseAccumulator().result()).toThrow(IncompleteModelResponseError)
   })
+})
+
+
+it('identifies token-limited malformed tool input from the final Anthropic stop reason', async () => {
+  await expect(collectAnthropicMessage(source([start,
+    { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'bad', name: 'edit', input: {} } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{' } },
+    { type: 'content_block_stop', index: 0 },
+    { type: 'message_delta', delta: { stop_reason: 'max_tokens', stop_sequence: null }, usage: { output_tokens: 100 } },
+    { type: 'message_stop' }
+  ]))).rejects.toBeInstanceOf(ModelOutputLimitError)
 })

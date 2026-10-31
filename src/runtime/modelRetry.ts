@@ -144,11 +144,6 @@ export async function invokeModelWithRetry<T>(
 ): Promise<T> {
   const maxRetries = boundedInteger(options.maxRetries, 2, 0, 8)
   const maxAttempts = maxRetries + 1
-  const initialDelayMs = boundedInteger(options.initialDelayMs, 500, 0, 60_000)
-  const maxDelayMs = Math.max(
-    initialDelayMs,
-    boundedInteger(options.maxDelayMs, 4_000, 0, 60_000)
-  )
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     throwIfAborted(options.signal)
     try {
@@ -160,11 +155,31 @@ export async function invokeModelWithRetry<T>(
         throw new ModelSelectionError(`The provider rejected the current model request (HTTP ${decision.status}). The run was stopped. Check the selected model, credentials, parameters and input requirements. ${error instanceof Error ? error.message : String(error)}`, { cause: error })
       }
       if (!decision.retry || options.retryWhen?.(error) === false || attempt >= maxAttempts) throw error
-      const delayMs = Math.min(maxDelayMs, initialDelayMs * (2 ** (attempt - 1)))
+      const delayMs = modelRetryDelay(error, attempt, options)
       const event: ModelRetryEvent = { ...decision, attempt, delayMs, maxAttempts }
       options.onRetry?.(event)
       await abortableModelRetryDelay(delayMs, options.signal)
     }
   }
   throw new Error('Model retry loop completed without returning.')
+}
+
+export function modelRetryDelay(error: unknown, attempt: number, options: ModelRetryOptions = {}, now = Date.now()): number {
+  const initial = boundedInteger(options.initialDelayMs, 500, 0, 60_000)
+  const maximum = Math.max(initial, boundedInteger(options.maxDelayMs, 4_000, 0, 60_000))
+  let delay = Math.min(maximum, initial * 2 ** Math.max(0, attempt - 1))
+  for (const cause of errorCauses(error)) {
+    const headers = (cause as { headers?: Headers | Record<string, unknown> }).headers
+    if (!headers) continue
+    const value = typeof (headers as Headers).get === 'function'
+      ? (headers as Headers).get('retry-after')
+      : Object.entries(headers).find(([key]) => key.toLowerCase() === 'retry-after')?.[1]
+    if (typeof value !== 'string') continue
+    const seconds = /^\d+(?:\.\d+)?$/.test(value.trim()) ? Number(value) : undefined
+    const supplied = seconds === undefined ? Date.parse(value) - now : seconds * 1000
+    // A timeout larger than this overflows Node's timer. Leave pathological
+    // values to the ordinary bounded backoff instead of retrying immediately.
+    if (Number.isFinite(supplied) && supplied >= 0 && supplied <= 2_147_000_000) delay = Math.max(delay, supplied)
+  }
+  return Math.ceil(delay)
 }

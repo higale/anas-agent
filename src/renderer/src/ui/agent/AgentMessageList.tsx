@@ -773,7 +773,11 @@ function ActivityTimelineItems({
                 <header>
                   <span>{item.round === undefined ? 'round' : `round ${item.round}`}</span>
                   {duration && <small>· {duration}</small>}
-                  {item.model.status === 'running' && (
+                  {item.model.recovery && item.model.status === 'running' && run.status === 'running' && item.model.id === run.models.at(-1)?.id && (
+                    <small role="status">{t(`agent.model_recovery_${item.model.recovery.reason}`, { count: item.model.recovery.attempts })}</small>
+                  )}
+                  {item.model.status === 'running' && run.status === 'running'
+                    && (!item.model.recovery || item.model.id === run.models.at(-1)?.id) && (
                     <LoaderCircle className="agent-spin" size={13} />
                   )}
                 </header>
@@ -1200,7 +1204,7 @@ function ModelRetryActions({ retry, onRetry }: { retry: AgentModelRetryState; on
     pending.current = true
     setBusy(true)
     try { await onRetry(withhold) }
-    catch (reason) { notice.error(reason instanceof Error ? reason.message : t('agent.model_retry_failed')) }
+    catch { notice.error(t('agent.model_retry_failed')) }
     finally { pending.current = false; setBusy(false) }
   }
   return <div className="agent-model-retry-actions">

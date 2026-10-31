@@ -360,12 +360,12 @@ it.each(['completed', 'cancelled', 'commit failure', 'snapshot failure'] as cons
       activatedAfterMessageIndex: 1, coveredThroughMessageId: 'input', firstPreservedMessageId: 'answer', inputTokensBefore: 80, inputTokensAfter: 30 }
     const { handle } = await host.startCompression(h.identity.threadId, async context => {
       const services = h.services()
-      services.prepareModel = async () => {
+      services.prepareModel = async () => ({ kind: 'manual_summary', invoke: async () => {
         summaryId = context.onCompressionStart!()!
         context.onCompressionCompleted!(summaryId, summary.summaryText, summary)
         markStaged(); await gate
-        return { kind: 'manual_summary', summary: { ...summary, id: summaryId } }
-      }
+        return { ...summary, id: summaryId }
+      } })
       return { execution: conversationExecution(services), dispose: async () => {} }
     }, runId)
     await staged

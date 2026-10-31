@@ -4,7 +4,7 @@ import type { AgentRun, AgentRunStatus, AgentRunActivity, AgentSubagentActivity,
 import { modelRoundSql } from './runActivityMetadata'
 
 export interface ActivityPayloadReader {
-  model(runId: string, modelId: string, messageId: string | undefined, subagentId?: string): Pick<AgentModelActivity, 'text' | 'reasoning' | 'reasoningSummary' | 'toolCallIds'>
+  model(runId: string, modelId: string, messageId: string | undefined, subagentId?: string): Pick<AgentModelActivity, 'text' | 'reasoning' | 'reasoningSummary' | 'toolCallIds' | 'recovery'>
   tool(runId: string, callId: string, name: string, subagentId?: string): { call: AgentToolCall; output?: unknown }
 }
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { errorCauses, isModelContextOverflow, ModelRequestChangedError, ModelSelectionError, ProjectRulesRequestBudgetError } from './errors'
-import { invokeModelWithRetry, classifyModelRetryError } from './modelRetry'
+import { invokeModelWithRetry, classifyModelRetryError, modelRetryDelay } from './modelRetry'
 
 afterEach(() => vi.useRealTimers())
 
@@ -85,4 +85,14 @@ describe('model request policy without a host or framework', () => {
       code: 'MODEL_SELECTION_INVALID', cause: failure, message: expect.stringContaining('HTTP 400')
     })
   })
+})
+
+
+it('uses bounded exponential delays and honors provider Retry-After seconds and dates', () => {
+  expect([1, 2, 3, 8].map(attempt => modelRetryDelay(new Error(), attempt))).toEqual([500, 1000, 2000, 4000])
+  expect(modelRetryDelay({ headers: new Headers({ 'retry-after': '30' }) }, 1)).toBe(30_000)
+  expect(modelRetryDelay({ headers: { 'retry-after': '1.0001' } }, 1)).toBe(1001)
+  const now = Date.parse('2026-10-31T00:00:00Z')
+  expect(modelRetryDelay({ cause: { headers: { 'Retry-After': 'Sat, 31 Oct 2026 00:01:00 GMT' } } }, 1, {}, now)).toBe(60_000)
+  expect(modelRetryDelay({ headers: { 'retry-after': 'bad' } }, 2)).toBe(1000)
 })

@@ -1,5 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk'
-import { IncompleteModelResponseError } from '../runtime/errors'
+import { IncompleteModelResponseError, InvalidModelToolCallError, ModelOutputLimitError } from '../runtime/errors'
+import { annotateModelFailure } from '../runtime/modelRecoveryDiagnostics'
 
 export type AnthropicNativeMessage = Anthropic.Message | Anthropic.Beta.BetaMessage
 export type AnthropicNativeEvent = Anthropic.MessageStreamEvent | Anthropic.Beta.BetaRawMessageStreamEvent
@@ -11,9 +12,11 @@ export class AnthropicResponseAccumulator {
   private readonly inputs = new Map<number, string>()
   private readonly openBlocks = new Set<number>()
   private complete = false
+  private readonly malformedInputs = new Set<number>()
 
   get message(): AnthropicNativeMessage | undefined { return this.value as unknown as AnthropicNativeMessage | undefined }
   inputText(index: number): string | undefined { return this.inputs.get(index) }
+  hasMalformedInput(index: number): boolean { return this.malformedInputs.has(index) }
 
   accept(event: AnthropicNativeEvent): void {
     if (this.complete) throw new Error('Anthropic sent data after the message completed.')
@@ -52,20 +55,24 @@ export class AnthropicResponseAccumulator {
       if (input !== undefined) {
         // A parsed string is a real input value; malformed JSON is a protocol
         // failure and must not be turned into a different, valid string value.
-        try { block.input = JSON.parse(input) } catch { throw new Error('Anthropic returned malformed tool input JSON.') }
+        try { block.input = JSON.parse(input) } catch { this.malformedInputs.add(event.index); block.input = input }
         this.inputs.delete(event.index)
       }
     } else if (event.type === 'message_delta') {
       Object.assign(message, structuredClone(event.delta))
       if (event.usage !== undefined) Object.assign(message.usage ??= {}, structuredClone(event.usage))
     } else if (event.type === 'message_stop') {
-      if (this.openBlocks.size) throw new IncompleteModelResponseError()
+      if (this.openBlocks.size) throw annotateModelFailure(new IncompleteModelResponseError(), { response: this.value, inputs: [...this.inputs] })
       this.complete = true
     }
   }
 
   result(): AnthropicNativeMessage {
-    if (!this.complete || !this.value) throw new IncompleteModelResponseError()
+    if (!this.complete || !this.value) throw annotateModelFailure(new IncompleteModelResponseError(), { response: this.value, inputs: [...this.inputs] })
+    if (this.malformedInputs.size) {
+      const error = this.value.stop_reason === 'max_tokens' ? new ModelOutputLimitError() : new InvalidModelToolCallError('Anthropic returned malformed tool input JSON.')
+      throw annotateModelFailure(error, { response: this.value })
+    }
     return this.value as unknown as AnthropicNativeMessage
   }
 }

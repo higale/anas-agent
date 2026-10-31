@@ -1,3 +1,4 @@
+import { modelRecoveryFeedback } from '../../runtime/modelOutputRecovery'
 import { modelParameterInputTokens } from '../../runtime/modelInputBudget'
 import type { ManualContextCompression } from '../../runtime/compression'
 import { observeModelRetry } from './modelRetryLogging'
@@ -23,6 +24,7 @@ import { projectRulesText, type ProjectRulesSnapshot } from '../../runtime/proje
 import { conversationSummaryTranscript, conversationPendingImageStart, effectiveConversationHistory, projectConversationToolHistory, type ConversationSummary } from './conversationHistoryProjection'
 
 export interface ConversationContextSource {
+  modelRecovery?: import('../../shared/modelRecovery').ModelRecoveryState
   messages: ConversationMessage[]
   summary?: ConversationSummary
   projectRules?: ProjectRulesSnapshot
@@ -93,6 +95,8 @@ async function messagesForSummary(
 }
 
 export function createConversationContextRuntime(options: {
+  /** The enclosing conversation loop owns retries when false. */
+  retry?: boolean
   codingMode?: boolean
   compressionPrompt?: string
   developerHttpTrace?: boolean
@@ -177,7 +181,7 @@ export function createConversationContextRuntime(options: {
 
   function statusWithModel(values: ConversationContextSource, model: ResolvedModelConfig): AgentContextStatus {
     return calculateStatus(
-      projectHistory(effectiveMessages(values)),
+      [...projectHistory(effectiveMessages(values)), ...modelRecoveryFeedback(values.modelRecovery)],
       model,
       Boolean(summarizationEvent(values)),
       requestWithRules(values, model)
@@ -206,14 +210,15 @@ export function createConversationContextRuntime(options: {
     if (!projectMessages && !options.projectSystemMessage) return statusWithModel(values, model)
     const projectedMessages = projectMessages ? await projectMessages(messages, model) : messages
     const request = await projectedRequest(values, requestSourceMessages(stateMessages(values), projectedMessages), model)
+    const feedback = modelRecoveryFeedback(values.modelRecovery)
     const projected = calculateStatus(
-      projectedMessages,
+      [...projectedMessages, ...feedback],
       model,
       Boolean(summarizationEvent(values)),
       request
     )
     const raw = calculateStatus(
-      messages,
+      [...messages, ...feedback],
       model,
       Boolean(summarizationEvent(values)),
       request
@@ -277,6 +282,7 @@ export function createConversationContextRuntime(options: {
 
     const prompt = summaryInputPrompt(sourceMessages, outputLanguage, options.codingMode === true, options.compressionPrompt)
     const response = await createCompressionModel(model, {
+      retry: options.retry,
       beforeRequest: validateRequestModel,
       developerHttpTrace: options.developerHttpTrace,
       providerFetch: options.providerFetch,
@@ -318,6 +324,7 @@ export function createConversationContextRuntime(options: {
   }
 
   function compress(values: ConversationContextSource, signal: AbortSignal): Promise<ManualContextCompression> {
+    if (options.retry === false) return compressAttempt(values, signal)
     return invokeModelWithRetry(() => compressAttempt(values, signal), {
       signal,
       onRetry: observeModelRetry(options.requestId),

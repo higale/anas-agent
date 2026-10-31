@@ -17,6 +17,7 @@ export interface ExecutionMessageRecord extends ExecutionMessageInput {
 }
 
 export interface ExecutionContext {
+  modelRecovery?: import('../shared/modelRecovery').ModelRecoveryState
   modelCalls: number
   modelRequestFailed?: boolean
   /** Failure classification keyed by run, anchored to its final saved message. */

@@ -26,7 +26,7 @@ export function prepareConversationContext(thread: AgentThread, database: Conver
     store: database.memoryStore, projectId: thread.projectId,
     onRecall: details => context.onMemoryRecall?.({ ...details, ...(activeSubagent ? { agentName: activeSubagent.name } : {}) }) })
   const includeRules = !simpleChat && runConfiguration.codingMode
-  const contextRuntime = createConversationContextRuntime({ codingMode: runConfiguration.codingMode,
+  const contextRuntime = createConversationContextRuntime({ retry: false, codingMode: runConfiguration.codingMode,
     compressionPrompt: activeSubagent ? undefined : runConfiguration.compressionPrompt, includeProjectRules: includeRules,
     developerHttpTrace: resources.developerHttpTrace, providerFetch: context.providerFetch, resolveModel, outputLanguage, requestId: context.requestId,
     systemPrompt: requestSystemPrompt, projectSystemMessage: memory,

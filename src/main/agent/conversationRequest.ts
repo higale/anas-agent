@@ -5,7 +5,7 @@ import { projectRuleInputBudget } from '@shared/contextWindow'
 import type { ConversationMessage } from '../../runtime/conversationMessage'
 import { contentText } from '../../runtime/inputContent'
 import { codeReviewToolDeclaration } from '../../runtime/codeReviewReport'
-import { ModelRequestChangedError, ModelSelectionError, ProjectRulesError, ProjectRulesRequestBudgetError } from '../../runtime/errors'
+import { InvalidModelToolCallError, ModelOutputLimitError, ModelRequestChangedError, ModelSelectionError, ProjectRulesError, ProjectRulesRequestBudgetError } from '../../runtime/errors'
 import { projectRulesText, ruleScopeIds, type ProjectRulesSnapshot } from '../../runtime/projectRules'
 import { conversationContentBlocks } from '../../providers/conversationInput'
 import { createConversationModel, type ConversationModelOptions } from './conversationModel'
@@ -13,8 +13,11 @@ import type { ObserveConversationProgress } from '../../providers/conversationSt
 import { assertConversationFits, assertConversationSupported, conversationRequestKey, countConversationTokens, projectConversationSkills } from './conversationContext'
 import { codeReviewPrompt } from './codeReview'
 import { withResponseTools } from './modelToolDeclarations'
+import { modelOutputWasTruncated, modelRecoveryFeedback } from '../../runtime/modelOutputRecovery'
+import { annotateModelFailure } from '../../runtime/modelRecoveryDiagnostics'
 
 export interface PreparedConversationContext {
+  modelRecovery?: import('../../shared/modelRecovery').ModelRecoveryState
   /** Context services already applied memory, attachments, rules and summaries. */
   messages: readonly ConversationMessage[]
   systemMessage: ConversationMessage
@@ -56,7 +59,8 @@ export async function prepareConversationModelCall(model: ResolvedModelConfig, c
     if (content.length) content[content.length - 1] = { ...(content[content.length - 1] as Record<string, unknown>), cache_control: { type: 'ephemeral' } }
     systemMessage = { ...systemMessage, content }
   }
-  const input = [systemMessage, ...messages]
+  const feedback = modelRecoveryFeedback(context.modelRecovery)
+  const input = [systemMessage, ...messages, ...feedback]
   let rulesReceipt: { runId: string; scopes: string[]; minimumTokens: number; budget: number } | undefined
   if (context.projectRules) {
     const snapshot = context.projectRules, text = projectRulesText(snapshot)
@@ -77,6 +81,7 @@ export async function prepareConversationModelCall(model: ResolvedModelConfig, c
     rulesReceipt = { runId: options.runId, scopes: ruleScopeIds(snapshot), budget,
       minimumTokens: countConversationTokens([{ kind: 'system', content: withoutRules }, ...task], tools, counting) }
   }
+  messages = [...messages, ...feedback]
   assertConversationSupported(model, input, context.requiresTools || Boolean(context.review))
   assertConversationFits(model, input, tools)
   const selection = JSON.stringify(model)
@@ -91,6 +96,13 @@ export async function prepareConversationModelCall(model: ResolvedModelConfig, c
     options.signal.throwIfAborted()
     const result = await connection.invoke({ messages: input, tools, signal: options.signal, observe,
       ...(context.review ? { toolChoice: 'required' } : {}), cacheControl })
+    const invalid = result.message.invalidCalls?.length
+      || result.message.calls?.some(call => typeof call.id !== 'string' || !call.id || typeof call.name !== 'string' || !call.name)
+      || conversationContentBlocks(result.message).some(block => block.type === 'invalid_tool_call')
+    if (modelOutputWasTruncated(result.message) && (invalid || result.message.calls?.length || context.review || !result.text.trim())) {
+      throw annotateModelFailure(new ModelOutputLimitError(), { response: result.message })
+    }
+    if (invalid) throw annotateModelFailure(new InvalidModelToolCallError(), { response: result.message })
     if (context.review && !result.message.calls?.length) {
       throw new Error('The model ended the review without the required structured report. No completed review is available.')
     }

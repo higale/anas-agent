@@ -1,5 +1,6 @@
 import { canRetryModelRequest, isCompleteModelInput, lastToolResultBatch, modelRetryTodos, withholdToolResult } from '../../runtime/modelRequestRecovery'
 import { requireObjectToolCall } from '../../runtime/toolInput'
+import { modelOutputWasTruncated } from '../../runtime/modelOutputRecovery'
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
@@ -92,6 +93,14 @@ export interface NativeExecutionCommit {
 }
 
 function validContext(context: ExecutionContext): ExecutionContext {
+  const recovery = context.modelRecovery
+  if (recovery !== undefined && (!recovery || !Number.isSafeInteger(recovery.attempts) || recovery.attempts < 0 || recovery.attempts > 2
+    || recovery.inFlight !== undefined && typeof recovery.inFlight !== 'boolean'
+    || !Number.isSafeInteger(recovery.retryAt) || recovery.retryAt < 0
+    || !['network', 'rate_limit', 'server', 'timeout', 'configuration_changed', 'incomplete', 'invalid_tool_call', 'output_limit', 'text_continuation'].includes(recovery.reason)
+    || recovery.feedback !== undefined && !['invalid_tool_call', 'output_limit', 'text_continuation'].includes(recovery.feedback))) {
+    throw new Error('Invalid model recovery state.')
+  }
   if (context.modelRequestFailed !== undefined && typeof context.modelRequestFailed !== 'boolean') throw new Error('Invalid model request recovery context.')
   if (context.modelFailureBoundaries !== undefined && (!context.modelFailureBoundaries || typeof context.modelFailureBoundaries !== 'object'
     || Array.isArray(context.modelFailureBoundaries) || Object.entries(context.modelFailureBoundaries).some(([id, value]) => !id || !value || typeof value !== 'object'
@@ -214,6 +223,9 @@ function readAuthorization(value: unknown): ExecutionToolCall['authorization'] {
 function contextValue(context: ExecutionContext): unknown {
   validContext(context)
   return { model_calls: context.modelCalls, todos: context.todos,
+    ...(context.modelRecovery ? { model_recovery: { attempts: context.modelRecovery.attempts, reason: context.modelRecovery.reason,
+      retry_at: context.modelRecovery.retryAt, ...(context.modelRecovery.inFlight === undefined ? {} : { in_flight: context.modelRecovery.inFlight }),
+      ...(context.modelRecovery.feedback ? { feedback: context.modelRecovery.feedback } : {}) } } : {}),
     ...(context.modelFailureBoundaries === undefined ? {} : { model_failure_boundaries: Object.fromEntries(Object.entries(context.modelFailureBoundaries).map(([id, value]) =>
       [id, { message_id: value.messageId, model_request_failed: value.modelRequestFailed }])) }),
     ...(context.modelRequestFailed === undefined ? {} : { model_request_failed: context.modelRequestFailed }),
@@ -243,7 +255,12 @@ function readContext(bytes: Uint8Array): ExecutionContext {
   const rules = value.project_rules as Record<string, unknown> | undefined
   const preparation = value.rule_preparation as { run_id: string; initialized: boolean; reads: { path: string; approved: boolean }[];
     completed_calls?: { id: string; name: string; input_hash: string }[] } | undefined
+  const recovery = value.model_recovery as { attempts: number; reason: NonNullable<ExecutionContext['modelRecovery']>['reason'];
+    retry_at: number; in_flight?: boolean; feedback?: NonNullable<ExecutionContext['modelRecovery']>['feedback'] } | undefined
   return validContext({
+    ...(recovery === undefined ? {} : { modelRecovery: recovery && { attempts: recovery.attempts, reason: recovery.reason,
+      retryAt: recovery.retry_at, ...(recovery.in_flight === undefined ? {} : { inFlight: recovery.in_flight }),
+      ...(recovery.feedback === undefined ? {} : { feedback: recovery.feedback }) } }),
     ...(value.model_failure_boundaries === undefined ? {} : { modelFailureBoundaries: Object.fromEntries(Object.entries(value.model_failure_boundaries as Record<string, { message_id: string; model_request_failed: boolean }>).map(([id, value]) =>
       [id, { messageId: value?.message_id, modelRequestFailed: value?.model_request_failed }])) }),
     ...(value.model_request_failed === undefined ? {} : { modelRequestFailed: value.model_request_failed as boolean }),
@@ -548,7 +565,7 @@ export class NativeExecutionStore {
       this.database.prepare(`INSERT INTO execution_state(thread_id,run_id,revision_id,phase,context_value,approvals_value)
         VALUES (?,?,?,'prepare_model',?,?) ON CONFLICT(thread_id) DO UPDATE SET run_id=excluded.run_id,
         revision_id=excluded.revision_id,phase=excluded.phase,context_value=excluded.context_value,approvals_value=excluded.approvals_value,response_record_id=NULL`)
-        .run(input.threadId, input.runId, revisionId, encodeExecutionValue(contextValue({ ...input.context, modelRequestFailed: undefined })), encodeExecutionValue([]))
+        .run(input.threadId, input.runId, revisionId, encodeExecutionValue(contextValue({ ...input.context, modelRequestFailed: undefined, modelRecovery: undefined })), encodeExecutionValue([]))
       const records = this.append(input.threadId, input.messages)
       this.onCommit?.({ threadId: input.threadId, runId: input.runId, revisionId, phase: 'prepare_model', inputAccepted: true, messageRecords: records })
       return revisionId
@@ -675,6 +692,7 @@ export class NativeExecutionStore {
       const body = this.persistSummary(scope.threadId, summary, this.messageCount(scope.threadId))
       current.summary = { id: summary.id, messageRecordId: body.recordId, cutoffIndex: summary.cutoffIndex,
         ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }) }
+      if (options.completeRun) delete current.modelRecovery
       this.database.prepare('UPDATE execution_state SET context_value=? WHERE thread_id=?').run(encodeExecutionValue(contextValue(current)), scope.threadId)
       return { phase: options.completeRun ? 'completed' : 'prepare_model',
         records: [this.requireBody(scope.threadId, body.recordId)], summary: decodeExecutionValue(encodeExecutionValue(summary)) as ManualContextCompression & { id: string } }
@@ -839,7 +857,9 @@ export class NativeExecutionStore {
     return this.mutate(scope, outcome === 'completed' ? ['prepare_model', 'model_result'] : ['prepare_model', 'model_result', 'tools', 'waiting', 'waiting_context'], () => {
       const head = this.requireRun(scope)
       const context = readContext(head.context_value)
-      if (outcome === 'failed') context.modelRequestFailed = head.phase === 'prepare_model' && options?.modelRequestFailed === true
+      if (outcome === 'failed') context.modelRequestFailed = options?.modelRequestFailed === true && (head.phase === 'prepare_model'
+        || head.phase === 'model_result' && Boolean(head.response_record_id)
+          && modelOutputWasTruncated(this.requireBody(scope.threadId, head.response_record_id!).value))
       else delete context.modelRequestFailed
       // Entered operations have been drained by the executor. Preserve every
       // confirmed sibling result even when the remaining work was cancelled.
@@ -874,6 +894,9 @@ export class NativeExecutionStore {
       const inputIndex = messages.findIndex(message => message.kind === 'user' && message.context?.runId === scope.runId)
       if (!state && inputIndex < 0) throw new Error('The retained run has no saved input.')
       const context = { ...history.context, modelRequestFailed: false,
+        modelRecovery: messages.at(-1) && modelOutputWasTruncated(messages.at(-1)!)
+          ? { attempts: 0, retryAt: 0, inFlight: false, reason: 'text_continuation' as const, feedback: 'text_continuation' as const }
+          : history.context.modelRecovery ? { ...history.context.modelRecovery, attempts: 0, retryAt: 0, inFlight: false } : undefined,
         // History edits reset context; restore this run's plan and counters without replaying tools.
         ...(!state ? { todos: modelRetryTodos(messages.slice(inputIndex)),
           modelCalls: messages.slice(inputIndex).filter(message => message.kind === 'assistant' && !message.partial).length,

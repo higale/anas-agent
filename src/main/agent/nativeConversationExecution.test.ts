@@ -230,8 +230,8 @@ describe('native conversation execution with the owning SQLite store', () => {
 
   it('completes manual compression without a normal model turn', async () => {
     const { store, services, observer } = harness()
-    services.prepareModel = async () => ({ kind: 'manual_summary', summary: { id: 'summary', summaryText: 'visible', modelContent: 'retained',
-      cutoffIndex: 1, activatedAfterMessageIndex: 0, inputTokensBefore: 30, inputTokensAfter: 10 } })
+    services.prepareModel = async () => ({ kind: 'manual_summary', invoke: async () => ({ id: 'summary', summaryText: 'visible', modelContent: 'retained',
+      cutoffIndex: 1, activatedAfterMessageIndex: 0, inputTokensBefore: 30, inputTokensAfter: 10 }) })
     services.afterModel = vi.fn(async () => { throw new Error('must not run after-model logic') })
     expect((await conversationExecution(services).execute('input', request(), observer)).result.status).toBe('fulfilled')
     expect(services.afterModel).not.toHaveBeenCalled()

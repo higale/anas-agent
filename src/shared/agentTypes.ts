@@ -167,6 +167,7 @@ export interface AgentToolCallProgress {
 }
 
 export interface AgentModelActivity {
+  recovery?: import('./modelRecovery').ModelRecoveryState
   id: string
   messageId?: string
   sequence: number

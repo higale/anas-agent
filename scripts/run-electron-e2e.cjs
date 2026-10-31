@@ -33,6 +33,7 @@ const { verifyDataCleanup } = require('./electron-data-cleanup.cjs')
 const { verifyPluginTransactions } = require('./electron-plugin-transactions.cjs')
 const { verifyModelSelection } = require('./electron-model-selection.cjs')
 const { verifyModelRetry } = require('./electron-model-retry.cjs')
+const { verifyModelRecovery } = require('./electron-model-recovery.cjs')
 const { verifySpeechReply, verifyLiveSpeech } = require('./electron-speech-reply.cjs')
 const { verifyAttachmentPreviews } = require('./electron-attachment-previews.cjs')
 
@@ -1179,6 +1180,10 @@ async function main() {
   }
   if (process.argv.includes('--plugin-widgets-only')) {
     await verifyPluginWidgets(launchApplication)
+    return
+  }
+  if (process.argv.includes('--model-recovery-only')) {
+    await verifyModelRecovery(launchApplication)
     return
   }
   if (process.argv.includes('--model-retry-only')) {

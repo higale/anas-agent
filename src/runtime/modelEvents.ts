@@ -16,6 +16,7 @@ export type ModelRunObservation = { modelId: string; subagentId?: string } & (
   | { kind: 'delta'; channel: 'text' | 'reasoning'; text: string }
   | { kind: 'tool_input'; progress: AgentToolCallProgress[] }
   | { kind: 'incomplete' }
+  | { kind: 'recovering'; recovery: import('../shared/modelRecovery').ModelRecoveryState }
   | { kind: 'completed'; message: AgentMessage; calls: AgentToolCall[]; streamedText: string; streamedReasoning: string;
       usage: unknown; responseMetadata: unknown }
 )

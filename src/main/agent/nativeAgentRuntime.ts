@@ -21,6 +21,7 @@ import { modelContextKey } from '../../shared/modelConfig'
 import { isDeepStrictEqual } from 'node:util'
 import { setImmediate as yieldToEventLoop } from 'node:timers/promises'
 import type { ExecutionMessageRecord } from '../../runtime/executionState'
+import { recordModelRecovery } from './modelRecoveryDiagnostics'
 
 export interface NativeAgentRuntimeOptions {
   providerFetch?: typeof fetch
@@ -38,7 +39,7 @@ export class NativeAgentRuntime extends NativeRunHost {
     events: RunEventSink, private readonly options: NativeAgentRuntimeOptions = {}) {
     connection.recover()
     const managed = new ManagedCallService(connection.managed, connection.results)
-    super(connection, managed, events)
+    super(connection, managed, events, recordModelRecovery)
     this.managedCalls = managed
     this.subagents = new NativeSubagentService(connection, this, {
       configuration: () => getAppConfigSnapshot(), snapshot: threadId => this.getSnapshot(threadId),

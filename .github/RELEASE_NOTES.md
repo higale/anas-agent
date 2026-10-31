@@ -1,20 +1,22 @@
-## Anas v5.0.4
+## Anas v5.0.5
 
-- 对话记录较多时，启动后侧栏和当前对话更快显示，打开长对话更流畅。
-- 模型报错后可直接点击“重试”，从失败处继续，无需重发消息，也不会重复执行已完成的工具。重试较早的错误时，会先确认是否移除后续对话内容；工具已经产生的操作不会撤销。
-- 工具返回内容导致模型请求失败时，可选择“重试（不返回工具结果）”。该轮返回内容会替换为不返回结果的说明，重启后仍然保留这一选择；工具已经产生的操作不会撤销。
-- 修复从历史错误处重试后，待办计划丢失的问题。
-- 修正对话压缩后的上下文用量显示，避免漏算召回记忆占用的空间。
+- 模型响应中断、工具调用不完整或格式有误时，会自动尝试恢复，已完成的工具不会重复执行。
+- 回答达到长度上限时，保留已有文字并尝试继续回答；不完整的工具调用会重新生成，避免执行半截操作。
+- 自动恢复与网络重试共用最多两次重试，界面显示恢复原因和次数；等待时可停止，重试耗尽后仍可手动重试。
+- 修复对话压缩失败时重复重试过多的问题，异常退出后重新打开也会保留已用次数。
+- 附件无法读取或提取文字时，会明确告知模型内容缺失，便于继续处理或说明需要补充的信息。
+- 普通运行日志记录自动恢复和手动重试的过程与错误详情，方便排查问题。
 
-**从 5.0.2 或 5.0.3 升级无需重置项目或会话。**
+**从 5.0.2～5.0.4 升级无需重置项目或会话。**
 
-- The sidebar and current conversation appear sooner at startup when you have a large chat history, and long conversations open more smoothly.
-- After a model error, click **Retry** to continue from the failed request without resending your message or repeating completed tool actions. Retrying an earlier error asks you to confirm removing later conversation content; actions already performed by tools are not undone.
-- If tool output causes a model request to fail, choose **Retry without tool results**. That round’s output is replaced with a note that the results were withheld, and this choice persists after restarting. Actions already performed by tools are not undone.
-- Fix to-do plans being lost when retrying an earlier error.
-- Fix context usage after conversation compaction undercounting the space used by recalled memories.
+- Automatically attempt recovery when a model response is interrupted or contains incomplete or malformed tool calls, without repeating completed tool actions.
+- Keep existing text and attempt to continue when an answer reaches its length limit. Regenerate incomplete tool calls instead of executing partial actions.
+- Automatic recovery and network retries share a limit of two retries. The interface shows the reason and count; you can stop while waiting or retry manually after automatic attempts are exhausted.
+- Fix excessive retries when conversation compaction fails. Used attempts remain counted after an unexpected shutdown and restart.
+- Tell the model when an attachment cannot be read or its text cannot be extracted, so it can continue with available information or explain what is missing.
+- Record automatic recovery and manual retries, including error details, in ordinary application logs to help troubleshoot problems.
 
-**Upgrading from 5.0.2 or 5.0.3 does not require resetting projects or conversations.**
+**Upgrading from 5.0.2–5.0.4 does not require resetting projects or conversations.**
 
 ## 较早版本升级 / Upgrading from earlier versions
 

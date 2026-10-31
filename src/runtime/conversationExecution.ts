@@ -1,7 +1,11 @@
 import type { ManualContextCompression } from './compression'
 import type { ExecutionApproval, ExecutionCommitScope, ExecutionContext, ExecutionMessageInput, ExecutionMessageRecord,
   ExecutionPendingCall, ExecutionState, ExecutionToolCall, ExecutionToolPreparation, ExecutionToolStateUpdate } from './executionState'
-import { invokeModelWithRetry, type ModelRetryOptions } from './modelRetry'
+import { abortableModelRetryDelay, classifyModelRetryError, invokeModelWithRetry, modelRetryDelay, type ModelRetryOptions } from './modelRetry'
+import { maxModelRecoveryAttempts, modelOutputWasTruncated, outputRecoveryReason } from './modelOutputRecovery'
+import { IncompleteModelResponseError, ModelOutputLimitError } from './errors'
+import type { ModelRecoveryState } from '../shared/modelRecovery'
+import { annotateModelFailure, type ModelRecoveryEvent } from './modelRecoveryDiagnostics'
 import type { RunExecution, RunExecutionCommand, RunExecutionResult, RunObserver } from './runExecution'
 
 type Request = { threadId: string; runId: string; signal: AbortSignal }
@@ -44,7 +48,7 @@ export interface ConversationExecutionServices {
   /** Read and consume only the run's already saved input/resume intent. */
   enter(command: RunExecutionCommand, request: Request): Promise<void>
   prepareModel(state: ExecutionState, request: Request, observer: RunObserver): Promise<
-    { kind: 'model'; invoke(): Promise<ConversationModelResult> } | { kind: 'manual_summary'; summary: Summary }
+    { kind: 'model'; invoke(): Promise<ConversationModelResult> } | { kind: 'manual_summary'; invoke(): Promise<Summary> }
     | { kind: 'context'; context: ExecutionContext }
     | { kind: 'wait'; approval: Extract<ExecutionApproval, { kind: 'context_read' }>; context: ExecutionContext }>
   afterModel(state: ExecutionState, request: Request): Promise<
@@ -65,6 +69,7 @@ export interface ConversationExecutionServices {
   observeWaiting?(state: ExecutionState, observer: RunObserver): void
   drain(): Promise<void>
   retry?: Omit<ModelRetryOptions, 'signal'>
+  recoveryLog?(event: ModelRecoveryEvent): void
 }
 
 /** The single application conversation loop. The host owns activation;
@@ -75,18 +80,23 @@ export function conversationExecution(services: ConversationExecutionServices): 
     if (executing) return { result: { status: 'rejected', reason: new Error('This conversation executor is already running.') }, interrupted: false, observationErrors: [] }
     executing = true
     const errors: unknown[] = [], failedObservers = new Set<string>()
-    let observations = Promise.resolve(), modelSequence = 0
+    let observations = Promise.resolve(), modelSequence = 0, lastModelId: string | undefined, lastSubagentId: string | undefined
+    let pendingRecoveryStart: ExecutionState | undefined
     const report = (name: string, error: unknown) => {
       if (!failedObservers.has(name)) { failedObservers.add(name); errors.push(error) }
     }
     const observe = (name: string, action: () => void) => { try { action() } catch (error) { report(name, error) } }
     const safeObserver: RunObserver = {
       started: () => observe('started', () => observer.started()),
-      startModel: subagentId => {
-        try { return observer.startModel(subagentId) } catch (error) {
+      startModel: (subagentId, recovery) => {
+        lastSubagentId = subagentId
+        try { lastModelId = observer.startModel(subagentId, recovery) } catch (error) {
           report('startModel', error)
-          return `${request.runId}:unobserved-model:${++modelSequence}`
+          lastModelId = `${request.runId}:unobserved-model:${++modelSequence}`
         }
+        if (pendingRecoveryStart) logRecovery('attempt_started', pendingRecoveryStart)
+        pendingRecoveryStart = undefined
+        return lastModelId
       },
       discardModel: id => observe('discardModel', () => observer.discardModel(id)),
       model: event => observe('model', () => observer.model(event)),
@@ -114,6 +124,30 @@ export function conversationExecution(services: ConversationExecutionServices): 
         } } : {}) })
     }
     let failure: { reason: unknown } | undefined, entered = false, modelRequestFailed = false
+    const configuredRetries = services.retry?.maxRetries
+    const recoveryLimit = configuredRetries !== undefined && Number.isFinite(configuredRetries)
+      ? Math.min(maxModelRecoveryAttempts, Math.max(0, Math.floor(configuredRetries))) : maxModelRecoveryAttempts
+    const logRecovery = (event: ModelRecoveryEvent['event'], state: ExecutionState,
+      extra: Partial<ModelRecoveryEvent> = {}) => observe('recoveryLog', () => services.recoveryLog?.({ event, threadId: state.threadId,
+      runId: state.runId, revisionId: state.revisionId, modelId: lastModelId, recovery: state.context.modelRecovery,
+      maxRetries: recoveryLimit, ...extra }))
+    const recover = (state: ExecutionState, reason: ModelRecoveryState['reason'], error: unknown, continuation = false): boolean => {
+      const attempts = (state.context.modelRecovery?.attempts ?? 0) + 1
+      if (attempts > recoveryLimit) { logRecovery('exhausted', state, { error, details: { reason } }); return false }
+      const delayMs = modelRetryDelay(error, attempts, services.retry)
+      const recovery: ModelRecoveryState = { attempts, reason, retryAt: Date.now() + delayMs,
+        ...(state.context.modelRecovery?.feedback ? { feedback: state.context.modelRecovery.feedback } : {}),
+        ...(['invalid_tool_call', 'output_limit', 'text_continuation'].includes(reason)
+          ? { feedback: reason as NonNullable<ModelRecoveryState['feedback']> } : {}) }
+      const context = { ...state.context, modelRecovery: recovery }
+      logRecovery('scheduled', state, { recovery, delayMs, error,
+        details: { retainedResponseId: continuation ? state.response?.id : undefined, reason } })
+      if (continuation) services.store.continueAfterModel(scope(state), [], context)
+      else services.store.prepareContext(scope(state), context)
+      committed()
+      if (lastModelId && !continuation) safeObserver.model({ kind: 'recovering', modelId: lastModelId, subagentId: lastSubagentId, recovery })
+      return true
+    }
     try {
       try {
         await services.enter(command, request)
@@ -130,12 +164,52 @@ export function conversationExecution(services: ConversationExecutionServices): 
           if (state.phase === 'waiting_context' || state.phase === 'waiting' && (!pending.length
             || state.approvals.some(approval => approval.kind !== 'effect_recovery' && approval.kind !== 'subagent'))) break
           if (state.phase === 'prepare_model') {
+            // A process restart must not redispatch an already reserved retry
+            // for free. Its response was never committed, so consume the next
+            // slot without replaying any tools.
+            if (state.context.modelRecovery?.inFlight) {
+              const error = new IncompleteModelResponseError()
+              if (recover(state, 'incomplete', error)) continue
+              modelRequestFailed = true
+              throw error
+            }
             // Retry includes fresh preparation/configuration, but never retries
             // the result commit or a previously saved model response.
-            const step = await invokeModelWithRetry(async () => {
-              const prepared = await services.prepareModel(current(), request, safeObserver)
-              return prepared.kind !== 'model' ? prepared : { kind: 'model' as const, result: await prepared.invoke() }
-            }, { ...services.retry, signal: request.signal }).catch(reason => { modelRequestFailed = true; throw reason })
+            let step: Exclude<Awaited<ReturnType<ConversationExecutionServices['prepareModel']>>, { kind: 'model' | 'manual_summary' }>
+              | { kind: 'model'; result: ConversationModelResult } | { kind: 'manual_summary'; summary: Summary }
+            let savingRequest = false
+            try {
+              await abortableModelRetryDelay(Math.max(0, (state.context.modelRecovery?.retryAt ?? 0) - Date.now()), request.signal)
+              // Retry accounting belongs to the durable head. This helper only
+              // normalizes provider failures; it must not start an inner loop.
+              step = await invokeModelWithRetry(async () => {
+                const prepared = await services.prepareModel(current(), request, safeObserver)
+                if (prepared.kind !== 'model' && prepared.kind !== 'manual_summary') return prepared
+                const before = current()
+                savingRequest = true
+                services.store.prepareContext(scope(before), { ...before.context, modelRecovery: {
+                  ...(before.context.modelRecovery ?? { attempts: 0, reason: 'incomplete', retryAt: 0 }), inFlight: true } })
+                savingRequest = false
+                if (prepared.kind === 'manual_summary') {
+                  if (before.context.modelRecovery) logRecovery('attempt_started', current(), { details: { operation: 'compression' } })
+                  return { kind: 'manual_summary' as const, summary: await prepared.invoke() }
+                }
+                pendingRecoveryStart = before.context.modelRecovery ? current() : undefined
+                return { kind: 'model' as const, result: await prepared.invoke() }
+              }, { ...services.retry, maxRetries: 0, signal: request.signal })
+            } catch (error) {
+              request.signal.throwIfAborted()
+              if (savingRequest) throw error
+              const decision = classifyModelRetryError(error, request.signal)
+              const reason = outputRecoveryReason(error) ?? (decision.retry ? decision.reason : undefined)
+              if (reason && services.retry?.retryWhen?.(error) !== false && recover(current(), reason, error)) {
+                if (decision.retry) services.retry?.onRetry?.({ ...decision, attempt: current().context.modelRecovery!.attempts,
+                  delayMs: Math.max(0, current().context.modelRecovery!.retryAt - Date.now()), maxAttempts: recoveryLimit + 1 })
+                continue
+              }
+              modelRequestFailed = true
+              throw error
+            }
             if (step.kind === 'context') {
               request.signal.throwIfAborted()
               services.store.prepareContext(scope(state), step.context)
@@ -144,12 +218,33 @@ export function conversationExecution(services: ConversationExecutionServices): 
               services.store.waitForContext(scope(state), step.approval, step.context)
             } else if (step.kind === 'manual_summary') {
               request.signal.throwIfAborted()
-              services.store.commitSummary(scope(state), step.summary, { completeRun: true })
-            } else services.store.acceptModel(scope(state), step.result.message, step.result.calls, step.result.context, step.result.summary)
+              const attempted = current()
+              services.store.commitSummary(scope(attempted), step.summary, { completeRun: true })
+              if (state.context.modelRecovery) logRecovery('response_accepted', current(), { recovery: attempted.context.modelRecovery,
+                outcome: 'recovered', details: { operation: 'compression', summaryId: step.summary.id } })
+            } else {
+              const attempted = current()
+              services.store.acceptModel(scope(current()), step.result.message, step.result.calls,
+                { ...step.result.context, modelRecovery: modelOutputWasTruncated(step.result.message.value) ? current().context.modelRecovery : undefined }, step.result.summary)
+              if (state.context.modelRecovery) {
+                logRecovery('response_accepted', current(), { recovery: attempted.context.modelRecovery,
+                  outcome: modelOutputWasTruncated(step.result.message.value) ? 'truncated' : 'recovered',
+                  details: { messageId: step.result.message.id, providerResponseId: step.result.message.value.source?.metadata.id,
+                    model: step.result.message.value.source?.metadata.model_name, toolCalls: step.result.calls.length } })
+              }
+              // Later preparation failures must not overwrite this saved reply's activity.
+              lastModelId = undefined
+            }
             committed()
             continue
           }
           if (state.phase === 'model_result') {
+            if (state.response && modelOutputWasTruncated(state.response.value)) {
+              const error = annotateModelFailure(new ModelOutputLimitError(), { response: state.response.value })
+              if (recover(state, 'text_continuation', error, true)) continue
+              modelRequestFailed = true
+              throw error
+            }
             const outcome = await services.afterModel(state, request)
             if (outcome.kind === 'complete') break
             services.store.continueAfterModel(scope(state), outcome.messages, outcome.context)

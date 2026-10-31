@@ -1032,6 +1032,15 @@
     "voices_refreshed": "语音列表已刷新。"
   },
   "agent": {
+    "model_recovery_network": "正在恢复：重新连接（第 {{count}}/2 次）",
+    "model_recovery_rate_limit": "正在恢复：等待限流后重试（第 {{count}}/2 次）",
+    "model_recovery_server": "正在恢复：重试模型服务（第 {{count}}/2 次）",
+    "model_recovery_timeout": "正在恢复：重试超时请求（第 {{count}}/2 次）",
+    "model_recovery_configuration_changed": "正在恢复：重新准备模型请求（第 {{count}}/2 次）",
+    "model_recovery_incomplete": "正在恢复：重新生成中断的响应（第 {{count}}/2 次）",
+    "model_recovery_invalid_tool_call": "正在恢复：重新生成工具调用（第 {{count}}/2 次）",
+    "model_recovery_output_limit": "正在恢复：缩短输出并重新生成（第 {{count}}/2 次）",
+    "model_recovery_text_continuation": "正在恢复：继续被截断的回答（第 {{count}}/2 次）",
     "workspace_panels": "右侧工作区",
     "show_panels": "展开右侧工作区",
     "maximize_panels": "展开右栏以占满对话区",

@@ -117,3 +117,10 @@ describe('native compression model', () => {
     expect(providerFetch).toHaveBeenCalledOnce()
   })
 })
+
+it.each(protocols)('retains two retries for standalone %s compression', async protocol => {
+  const providerFetch = vi.fn<typeof fetch>(async () => Response.json({ error: { message: 'Unavailable' } }, { status: 503 }))
+  const generate = createCompressionModel({ ...selected, protocol }, { providerFetch })
+  await expect(generate('Conversation')).rejects.toThrow('Unavailable')
+  expect(providerFetch).toHaveBeenCalledTimes(3)
+})

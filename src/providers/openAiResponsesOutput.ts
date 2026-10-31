@@ -1,5 +1,6 @@
 import type OpenAI from 'openai'
 import { IncompleteModelResponseError } from '../runtime/errors'
+import { annotateModelFailure } from '../runtime/modelRecoveryDiagnostics'
 
 type Fields = Record<string, unknown>
 export type ResponseBlock = Fields & { type: string }
@@ -155,7 +156,7 @@ export class ResponsesAccumulator {
   }
 
   result(): NativeResponse {
-    if (!this.terminal) throw new IncompleteModelResponseError()
+    if (!this.terminal) throw annotateModelFailure(new IncompleteModelResponseError(), { response: this.response, output: [...this.items.values()] })
     return this.terminal
   }
 }

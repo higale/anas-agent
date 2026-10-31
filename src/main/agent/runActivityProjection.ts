@@ -77,16 +77,16 @@ export class RunActivityProjection {
     this.publishedContextSummaries.set(runId, published)
   }
 
-  startModel(runId: string, threadId: string, queue: RunEventSink, subagentId?: string): string {
+  startModel(runId: string, threadId: string, queue: RunEventSink, subagentId?: string, recovery?: import('../../shared/modelRecovery').ModelRecoveryState): string {
     const id = randomUUID()
-    const model = this.observations.recordModel(runId, { id, status: 'running', subagentId, text: '', reasoning: '', toolCallIds: [] })
+    const model = this.observations.recordModel(runId, { id, status: 'running', subagentId, text: '', reasoning: '', toolCallIds: [], ...(recovery ? { recovery } : {}) })
     queue.push({ type: 'model_started', runId, threadId, model })
     return id
   }
 
   observer(runId: string, threadId: string, queue: RunEventSink, hooks: Partial<Pick<RunObserver, 'started' | 'committed'>> = {}): RunObserver {
     return {
-      started: () => hooks.started?.(), startModel: subagentId => this.startModel(runId, threadId, queue, subagentId),
+      started: () => hooks.started?.(), startModel: (subagentId, recovery) => this.startModel(runId, threadId, queue, subagentId, recovery),
       discardModel: id => { this.observations.discardModel(runId, id) },
       model: event => this.observeModelRun(event, runId, threadId, queue),
       tool: event => this.observeToolRun(event, runId, threadId, queue),
@@ -130,6 +130,10 @@ export class RunActivityProjection {
       }
       this.rememberToolCallProgress(progress)
       queue.push(progress)
+    } else if (event.kind === 'recovering') {
+      const model = this.observations.recordModel(runId, { id, status: 'running', subagentId,
+        text: '', reasoning: '', toolCallIds: [], recovery: event.recovery })
+      queue.push({ type: 'model_started', runId, threadId, model })
     } else if (event.kind === 'incomplete') {
       this.observations.recordModel(runId, { id, status: 'running', subagentId,
         text: '', reasoning: '', toolCallIds: [] })

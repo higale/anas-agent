@@ -40,6 +40,7 @@ export interface ConversationInstanceOwner {
   persistFileChange: ConversationToolExecutionOptions['persistFileChange']
 }
 export interface ConversationInstanceContext extends Omit<AgentResourceContext, 'configuration' | 'parentConfiguration' | 'onConfigurationResolved'>, CompressionTrackingCallbacks {
+  recoveryLog?: ConversationExecutionServices['recoveryLog']
   requestId: string
   prepareWorkspace?: boolean
   review?: CodeReviewSnapshot
@@ -142,7 +143,7 @@ export async function createConversationInstance(thread: AgentThread, database: 
             approval: { status: 'pending_approval', interruptId: approval.id, actionIndex }, subagentId: context.subagentCall?.id })
         })
       }
-    }, drain: () => operations.drain(), retry: { onRetry: observeModelRetry(context.requestId) } }
+    }, drain: () => operations.drain(), retry: { onRetry: observeModelRetry(context.requestId) }, recoveryLog: context.recoveryLog }
   const loop = conversationExecution(services)
   let executing = false
   const execution: RunExecution = { async execute(command, request, observer) {

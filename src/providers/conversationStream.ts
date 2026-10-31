@@ -67,7 +67,7 @@ export async function streamAnthropicConversation(source: AsyncIterable<Anthropi
     if (!('index' in frame)) continue
     const block = accumulator.message?.content[frame.index]
     if (!block) continue
-    const complete = frame.type === 'content_block_stop'
+    const complete = frame.type === 'content_block_stop' && !accumulator.hasMalformedInput(frame.index)
     const fields = anthropicResponseBlock(block as unknown as Record<string, unknown>, frame.index, complete) as Block
     const input = accumulator.inputText(frame.index)
     if (!complete && input !== undefined) fields.args = input

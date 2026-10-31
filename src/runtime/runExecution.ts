@@ -32,7 +32,7 @@ export interface RunProgressCommit {
  * not downgrade a committed run or skip draining already entered operations. */
 export interface RunObserver {
   started(): void
-  startModel(subagentId?: string): string
+  startModel(subagentId?: string, recovery?: import('../shared/modelRecovery').ModelRecoveryState): string
   discardModel(id: string): void
   model(event: ModelRunObservation): void
   tool(event: ToolRunObservation): void

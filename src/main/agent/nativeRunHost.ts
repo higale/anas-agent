@@ -1,5 +1,6 @@
 import type { AgentRun, AgentRuntimeEvent, AgentSubagentActivity } from '../../shared/agentTypes'
 import type { RunExecution, RunExecutionCommand } from '../../runtime/runExecution'
+import type { ModelRecoveryEvent } from '../../runtime/modelRecoveryDiagnostics'
 import type { NativeConversationDatabase } from './nativeConversationDatabase'
 import type { ManagedCallService } from './managedCallService'
 import type { RunActivityProjection, RunEventSink } from './runActivityProjection'
@@ -29,7 +30,8 @@ import { isModelSelectionError, isModelRequestChangedError } from '../../runtime
 
 type Owner = { threadId: string; runId: string }
 export type NativeRunInstance = { execution: RunExecution; context?: Pick<ConversationContextRuntime, 'projectedStatus'>; dispose(): Promise<void> }
-export type NativeRunContext = ReturnType<RunActivityProjection['contextCallbacks']> & { requestId: string; signal: AbortSignal }
+export type NativeRunContext = ReturnType<RunActivityProjection['contextCallbacks']> & { requestId: string; signal: AbortSignal;
+  recoveryLog?: (event: ModelRecoveryEvent) => void }
 export type NativeRunFactory = (context: NativeRunContext) => Promise<NativeRunInstance>
 export type NativeRunSubmission = AgentRunSubmission & { handle?: NativeRunHandle }
 export interface NativeRunHandle {
@@ -64,7 +66,8 @@ export class NativeRunHost {
   private shuttingDown = false
   private shutdownDrain?: Promise<void>
   constructor(private readonly database: NativeConversationDatabase,
-    private readonly managed: ManagedCallService, private readonly events: RunEventSink) {
+    private readonly managed: ManagedCallService, private readonly events: RunEventSink,
+    private readonly recoveryLog?: (event: ModelRecoveryEvent) => void) {
     this.resourceCleanup = new ResourceCleanup(database.resourceCleanup, managed,
       (runId, retained) => database.resources.fileEditStore.deleteFileEditRecordsForRequest(runId, retained), task => this.track(task))
     this.queuedInputs = new QueuedInputService(database.queue, database.resourceCleanup.attachmentRoot,
@@ -186,18 +189,29 @@ export class NativeRunHost {
     if (!input || typeof input.threadId !== 'string' || !input.threadId || typeof input.runId !== 'string' || !input.runId
         || typeof input.expectedRevisionId !== 'string' || !input.expectedRevisionId || typeof input.withholdToolResults !== 'boolean'
         || input.discardLaterMessages !== undefined && typeof input.discardLaterMessages !== 'boolean') throw new Error('Invalid model retry request.')
-    return this.withConversationMutation(input.threadId, async () => {
+    const details = { operationId: randomUUID(), withholdToolResults: input.withholdToolResults,
+      discardLaterMessages: input.discardLaterMessages === true }
+    const event = { threadId: input.threadId, runId: input.runId, revisionId: input.expectedRevisionId, details }
+    this.observeRecovery({ ...event, event: 'manual_requested' })
+    try { return await this.withConversationMutation(input.threadId, async () => {
       if (this.database.resources.getSubagentCallByChildThreadId(input.threadId)) throw new Error('Retry the model request from its main conversation.')
       const failed = this.requireRun(input)
       const revision = this.database.history.prepareModelRetry(input)
       if (revision) await this.commitHistory(revision)
       else this.database.runs.retryModel(input)
-      runtimeLog('info', 'agent', 'User retried a failed model request.', {
-        threadId: input.threadId, runId: input.runId, failedRevisionId: input.expectedRevisionId,
-        withholdToolResults: input.withholdToolResults, discardedLaterContent: Boolean(revision), previousError: failed.error
-      })
-      return this.launch(input, 'continue', create, false)
-    })
+      const handle = this.launch(input, 'continue', create, false)
+      this.observeRecovery({ ...event, event: 'manual_started', details: { ...details, previousError: failed.error,
+        discardedLaterContent: Boolean(revision) } })
+      return handle
+    }) } catch (error) {
+      this.observeRecovery({ ...event, event: 'manual_rejected', error })
+      throw error
+    }
+  }
+
+  private observeRecovery(event: ModelRecoveryEvent): void {
+    try { this.recoveryLog?.(event) }
+    catch { /* Diagnostic logging must not change an accepted retry or its outcome. */ }
   }
 
   resumeRun(input: AgentResumeInput, create: NativeRunFactory): NativeRunHandle {
@@ -491,7 +505,7 @@ export class NativeRunHost {
         active.controller.signal.throwIfAborted()
         if (!create) throw new Error('A run instance is required.')
         const callbacks = database.activityProjection.contextCallbacks(runId, threadId, sink)
-        instance = await create({ requestId: runId, signal: active.controller.signal, ...callbacks,
+        instance = await create({ requestId: runId, signal: active.controller.signal, ...callbacks, recoveryLog: this.recoveryLog,
           onContextStatus: status => { contextObserved = true; callbacks.onContextStatus(status) } })
         active.controller.signal.throwIfAborted()
         const execution = await instance.execution.execute(command, { threadId, runId, signal: active.controller.signal },
@@ -556,6 +570,8 @@ export class NativeRunHost {
     if (active.controller.signal.aborted) database.runs.completeCancellation(active)
     let run = this.requireRun(active)
     if (terminal(run)) {
+      this.observeRecovery({ event: 'run_finished', threadId, runId, outcome: run.status, error: failure ?? run.error,
+        details: { operation: run.operation } })
       try {
         if (hasUnresolvedBackgroundTasks(database.background, threadId)) {
           await cleanupUnresolvedBackgroundTasks({ database: database.background, managedCalls: this.managed, threadId, runId,

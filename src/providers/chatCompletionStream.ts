@@ -1,5 +1,6 @@
 import type OpenAI from 'openai'
 import { IncompleteModelResponseError } from '../runtime/errors'
+import { annotateModelFailure } from '../runtime/modelRecoveryDiagnostics'
 
 type RecordValue = Record<string, unknown>
 interface ChoiceState {
@@ -108,7 +109,9 @@ export class ChatCompletionAccumulator {
   }
 
   result(): OpenAI.Chat.ChatCompletion {
-    if (!this.choices.size || [...this.choices.values()].some(choice => !choice.fields.finish_reason)) throw new IncompleteModelResponseError()
+    if (!this.choices.size || [...this.choices.values()].some(choice => !choice.fields.finish_reason)) {
+      throw annotateModelFailure(new IncompleteModelResponseError(), { response: this.snapshot() })
+    }
     return this.snapshot()
   }
 }

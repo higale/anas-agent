@@ -7,7 +7,6 @@ import type { ExecutionState, ExecutionToolCall } from '../../runtime/executionS
 import { checkModelCallBudget } from '../../runtime/modelCallBudget'
 import { stageManualCompression } from '../../runtime/compression'
 import { toolEffectArtifactPurposes } from '../../runtime/toolEffectIdentity'
-import { conversationContentBlocks } from '../../providers/conversationInput'
 import type { ConversationAttachmentProjector } from './conversationAttachments'
 import type { createConversationMemoryProjector } from './conversationMemory'
 import { invokeConversationWithCompression, type ConversationCompressionOptions } from './conversationCompression'
@@ -18,6 +17,7 @@ import { prepareConversationRules, conversationRuleSystemMessage, type Conversat
 import { ToolArgumentProgress } from './toolArgumentProgress'
 import { presentConversationMessage } from './conversationPresentation'
 import { projectConversationSupervision, reconcileConversationSupervision, type ConversationSupervisionOptions } from './conversationSupervision'
+import { annotateModelFailure } from '../../runtime/modelRecoveryDiagnostics'
 
 export interface ConversationModelExecutionOptions extends Omit<ConversationCompressionOptions, 'runId' | 'signal' | 'observe' | 'resolveModel' | 'includeProjectRules'> {
   store: Pick<ConversationExecutionServices['store'], 'readMessageRecord'>
@@ -43,6 +43,7 @@ export function conversationContextSource(state: Pick<ExecutionState, 'threadId'
   store: Pick<ConversationExecutionServices['store'], 'readMessageRecord'>): ConversationContextSource {
   const summary = state.context.summary
   return { messages: state.messages.map(message => ({ ...message.value, id: message.id })),
+    ...(state.context.modelRecovery ? { modelRecovery: state.context.modelRecovery } : {}),
     ...(summary ? { summary: { cutoffIndex: summary.cutoffIndex, message: store.readMessageRecord(state.threadId, summary.messageRecordId).value } } : {}),
     ...(state.context.projectRules ? { projectRules: state.context.projectRules } : {}) }
 }
@@ -56,7 +57,7 @@ export function createConversationModelPreparation(options: ConversationModelExe
     }
     const source = conversationContextSource(state, options.store)
     if (options.manualCompression) {
-      return { kind: 'manual_summary', summary: await stageManualCompression(
+      return { kind: 'manual_summary', invoke: () => stageManualCompression(
         () => options.manualCompression!.compress(source, request.signal), options.compressionTracking) }
     }
     if (options.supervision) {
@@ -81,12 +82,12 @@ export function createConversationModelPreparation(options: ConversationModelExe
     if (options.memory) systemMessage = await options.memory(systemMessage, messages)
     if (options.rules) systemMessage = conversationRuleSystemMessage(systemMessage, state.context, request.runId)
     if (options.simpleChat) messages = simpleConversationHistory(effectiveConversationHistory(messages, source.summary))
-    const context = { messages, systemMessage, tools,
+    const context = { messages, systemMessage, tools, modelRecovery: state.context.modelRecovery,
       requiresTools: await options.requiresTools() || supervised?.requiresTools === true, review: options.review,
       ...(!options.simpleChat && source.summary ? { summary: source.summary } : {}),
       ...(options.rules ? { projectRules: state.context.projectRules } : {}) }
     return { kind: 'model', invoke: async () => {
-      const modelId = observer.startModel(options.subagentId)
+      const modelId = observer.startModel(options.subagentId, state.context.modelRecovery?.attempts ? state.context.modelRecovery : undefined)
       let streamedText = '', streamedReasoning = '', publishedProgress = false
       const progress = new ToolArgumentProgress(values => {
         if (!values.length && !publishedProgress) return
@@ -111,9 +112,6 @@ export function createConversationModelPreparation(options: ConversationModelExe
             }
           }
         })
-        if (result.message.invalidCalls?.length || conversationContentBlocks(result.message).some(block => block.type === 'invalid_tool_call')) {
-          throw new Error('Model returned an invalid tool call.')
-        }
         progress.flush()
         // Provider IDs may repeat across responses. Keep protocol metadata and
         // replay IDs intact while assigning application-owned durable identities.
@@ -129,7 +127,9 @@ export function createConversationModelPreparation(options: ConversationModelExe
           context: { ...state.context, modelCalls: state.context.modelCalls + 1, threadModelCalls: (state.context.threadModelCalls ?? 0) + 1 } }
       } catch (error) {
         observer.model({ kind: 'incomplete', modelId, subagentId: options.subagentId })
-        throw error
+        throw annotateModelFailure(error, { modelId, subagentId: options.subagentId, providerId: model.providerId,
+          modelConfigId: model.id, model: model.model, protocol: model.protocol, maxOutputTokens: model.maxOutputTokens,
+          streamedTextCharacters: streamedText.length, streamedReasoningCharacters: streamedReasoning.length })
       } finally {
         progress.dispose()
         if (publishedProgress) observer.model({ kind: 'tool_input', modelId, subagentId: options.subagentId, progress: [] })

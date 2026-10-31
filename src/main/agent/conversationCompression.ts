@@ -16,6 +16,7 @@ import type { ConversationModelOptions } from './conversationModel'
 import { codeReviewToolDeclaration } from '../../runtime/codeReviewReport'
 import { withResponseTools } from './modelToolDeclarations'
 import { projectRulesRequestBudget } from './projectRules'
+import { modelRecoveryFeedback } from '../../runtime/modelOutputRecovery'
 
 type Summary = ManualContextCompression & { id: string }
 class PreservedContextOverflowError extends ModelSelectionError {
@@ -60,7 +61,8 @@ export async function invokeConversationWithCompression(model: ResolvedModelConf
   if (!(options.enabled ?? model.contextCompressionEnabled) || !effective.length) return { ...await invoke(messages), summary: undefined as Summary | undefined }
   const selection = selectConversationRetention(effective, raw, threshold,
     messages => countConversationTokens(messages, [], { protocol: model.protocol }))
-  const currentTokens = conversationContextTokens({ messages, tools, systemMessage: context.systemMessage,
+  const feedback = modelRecoveryFeedback(context.modelRecovery)
+  const currentTokens = conversationContextTokens({ messages: [...messages, ...feedback], tools, systemMessage: context.systemMessage,
     modelContextKey: modelContextKey(model), protocol: model.protocol, parameters: model.parameters })
   if (currentTokens < threshold) {
     try { return { ...await invoke(messages), summary: undefined as Summary | undefined } } catch (error) {
@@ -71,6 +73,7 @@ export async function invokeConversationWithCompression(model: ResolvedModelConf
   return prepareCompression({ activeUserRequest: selection.activeUserRequest,
     inputCapacityTokens: Math.max(1, inputCapacityTokens - 256), tokenCountingOptions: { protocol: model.protocol, parameters: model.parameters } }, async preparation => {
     const generate = createCompressionModel(model, {
+      retry: false,
       developerHttpTrace: options.developerHttpTrace, providerFetch: options.providerFetch,
       compressionTracking: options.compressionTracking, signal: options.signal, requestId: options.runId,
       requestRole: `${options.requestRole ?? 'main'}-compression`,
@@ -95,7 +98,7 @@ export async function invokeConversationWithCompression(model: ResolvedModelConf
       if (ruleBudget === undefined && !isModelContextOverflow(error)) throw error
       const facts = conversationHistoryFacts(finalMessages).map((fact, index) => ({ ...fact, content: finalMessages[index].content }))
       const replacements = await compactLatestToolResults(facts, ruleBudget ?? inputCapacityTokens, indices =>
-        countConversationTokens([context.systemMessage, ...finalMessages.map((message, index) => indices.includes(index) ? { ...message, content: '' } : message)],
+        countConversationTokens([context.systemMessage, ...finalMessages.map((message, index) => indices.includes(index) ? { ...message, content: '' } : message), ...feedback],
           tools, { protocol: model.protocol, parameters: model.parameters }), options.saveToolResult)
       if (!replacements.length) throw ruleBudget === undefined ? new PreservedContextOverflowError() : error
       finalMessages = [...finalMessages]

@@ -102,6 +102,7 @@ export class NativeMessageReader {
     if (!message) {
       const pending = this.observations.pendingModel(runId, modelId)
       return { text: pending?.text ?? '', reasoning: pending?.reasoning ?? '', toolCallIds: pending?.toolCallIds ?? [],
+        ...(pending?.recovery ? { recovery: pending.recovery } : {}),
         ...(pending?.reasoningSummary ? { reasoningSummary: pending.reasoningSummary } : {}) }
     }
     const summary = traceReasoningSummary(message.content)

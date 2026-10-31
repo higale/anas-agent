@@ -182,3 +182,35 @@ describe('conversation attachment projection', () => {
       .rejects.toThrow('does not support the required image attachment')
   })
 })
+
+
+it.each([true, false])('reports missing attachment content to the model (available=%s)', async available => {
+  const root = await temporaryDirectory(), path = join(root, 'missing.txt')
+  const source = { id: 'run-1:input', kind: 'user' as const, content: 'Read the attachment.' }
+  const target = projector([artifact(path, { available })], 'run-1')
+  const [projected] = await target.project([source])
+  expect(JSON.stringify(projected.content)).toContain('Application attachment notice')
+  expect(JSON.stringify(projected.content)).toContain('content was not provided')
+  expect(source.content).toBe('Read the attachment.')
+  expect(stripConversationAttachments([projected])[0].content).toEqual([{ type: 'text', text: source.content }])
+  await writeFile(path, 'late change')
+  expect(await target.project([source])).toEqual([projected])
+})
+
+it('passes readable image bytes through without imposing local decoder compatibility', async () => {
+  const root = await temporaryDirectory(), path = join(root, 'provider-specific.png')
+  await writeFile(path, 'provider-specific-image-bytes')
+  const [projected] = await projector([artifact(path, { kind: 'image', mimeType: 'image/png' })], 'run-1')
+    .project([{ id: 'run-1:input', kind: 'user', content: 'Look' }])
+  expect(JSON.stringify(projected.content)).toContain(Buffer.from('provider-specific-image-bytes').toString('base64'))
+  expect(JSON.stringify(projected.content)).not.toContain('Application attachment notice')
+})
+
+it('reports extraction failure instead of silently omitting a document', async () => {
+  const root = await temporaryDirectory(), path = join(root, 'broken.docx')
+  await writeFile(path, 'not a document archive')
+  const [projected] = await projector([artifact(path, { name: 'broken.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })], 'run-1')
+    .project([{ id: 'run-1:input', kind: 'user', content: 'Read' }])
+  expect(JSON.stringify(projected.content)).toContain('extracting its text failed')
+  expect(JSON.stringify(projected.content)).toContain('broken.docx')
+})

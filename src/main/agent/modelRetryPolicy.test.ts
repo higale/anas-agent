@@ -112,7 +112,6 @@ describe('model retry policy', () => {
     const execute = vi.fn(() => 'done')
     const fetch: typeof globalThis.fetch = async () => {
         requests += 1
-        if (requests > 1) throw new Error('Unexpected second model request')
         const toolCalls = [
           { index: 0, type: 'function', function: { arguments: '' } },
           { index: 1, id: 'valid-call', type: 'function', function: { name: structured ? reportName : 'test_tool', arguments: '{}' } }
@@ -140,7 +139,7 @@ describe('model retry policy', () => {
       expect(h.services.prepareTools).not.toHaveBeenCalled()
       expect(h.services.executeTool).not.toHaveBeenCalled()
       expect(h.store.load('thread')!.messages.map(message => message.id)).toEqual(['input'])
-      expect(requests).toBe(1)
+      expect(requests).toBe(3)
     } finally { h.close() }
   })
 

@@ -627,3 +627,16 @@ describe('failed model request actions', () => {
     expect(screen.queryByRole('button', { name: 'common.retry' })).not.toBeInTheDocument()
   })
 })
+
+
+it('shows only the current recovery status and clears it when the run completes', () => {
+  const run = activity('running'); run.tools = []
+  run.models = [{ id: 'retry', sequence: 1, status: 'running', text: '', reasoning: '', toolCallIds: [],
+    recovery: { attempts: 1, reason: 'invalid_tool_call', retryAt: Date.now() + 1000 } }]
+  const props = { title: 'Thread', messages, panelRef: { current: null }, followOutputRef: { current: true },
+    speech: { status: 'idle' as const }, onSpeak: vi.fn() }
+  const view = render(<AgentMessageList {...props} activities={[run]} />)
+  expect(screen.getByRole('status')).toHaveTextContent('agent.model_recovery_invalid_tool_call')
+  view.rerender(<AgentMessageList {...props} activities={[{ ...run, status: 'completed' }]} />)
+  expect(screen.queryByRole('status')).not.toBeInTheDocument()
+})

@@ -27,11 +27,7 @@ function selectedForContext(
   artifact: AgentAttachmentArtifact,
   currentRunId?: string
 ): boolean {
-  return artifact.available
-    && (
-      artifact.runId === currentRunId
-      || artifact.contextPolicy === 'conversation'
-    )
+  return artifact.runId === currentRunId || artifact.contextPolicy === 'conversation'
 }
 
 function textMimeType(mimeType: string): boolean {
@@ -52,6 +48,10 @@ function fileLabel(artifact: AgentAttachmentArtifact): ModelContentBlock {
   }
 }
 
+function unavailableAttachment(artifact: AgentAttachmentArtifact, detail: string): ModelContentBlock[] {
+  return [{ type: 'text', text: `[Application attachment notice: ${JSON.stringify(artifact.name)}]\n${detail}\nThe attachment content was not provided. Do not claim to have read it. Continue with available information, or explain what is missing if it is needed for the task.` }]
+}
+
 async function textContent(
   artifact: AgentAttachmentArtifact,
   maxChars: number,
@@ -60,7 +60,7 @@ async function textContent(
   const text = supportsLocalTextExtraction(artifact.mimeType)
     ? (await extractLocalAttachmentText(artifact.path, artifact.mimeType)).text
     : (await readFile(artifact.path)).toString('utf8')
-  if (text.length > maxChars && overflow === 'error') return []
+  if (text.length > maxChars && overflow === 'error') return unavailableAttachment(artifact, 'Extracted text exceeds the configured attachment limit.')
   const content = text.length > maxChars ? text.slice(0, maxChars) : text
   return [{
     type: 'text',
@@ -73,6 +73,7 @@ async function modelContent(
   maxChars: number,
   overflow: AttachmentTextOverflowMode
 ): Promise<ModelContentBlock[]> {
+  if (!artifact.available) return unavailableAttachment(artifact, 'The archived attachment is unavailable.')
   try {
     if (artifact.kind === 'image') {
       const content = await readFile(artifact.path)
@@ -93,14 +94,14 @@ async function modelContent(
     ) {
       return await textContent(artifact, maxChars, overflow)
     }
-    return []
+    return unavailableAttachment(artifact, 'This attachment has no supported text extraction method.')
   } catch (reason) {
     runtimeLog('warn', 'agent', 'Archived attachment could not be projected into model context.', {
       attachmentId: artifact.id,
       file: artifact.path,
       error: reason instanceof Error ? reason.message : String(reason)
     })
-    return []
+    return unavailableAttachment(artifact, `Reading the archived file or extracting its text failed: ${reason instanceof Error ? reason.message.slice(0, 1000) : String(reason).slice(0, 1000)}`)
   }
 }
 
@@ -164,7 +165,7 @@ export function createConversationAttachmentProjector(
     const messageIds = new Set(messages.flatMap((message) => message.id ? [message.id] : []))
     for (const artifact of artifacts) {
       if (!messageIds.has(artifact.messageId) || includedMessageIds && !includedMessageIds.has(artifact.messageId)) continue
-      if (artifact.kind === 'image' && !visionEnabled) {
+      if (artifact.available && artifact.kind === 'image' && !visionEnabled) {
         throw new ModelSelectionError(`The selected model does not support the required image attachment "${artifact.name}". The run was stopped. Choose a model with vision enabled and send again.`)
       }
       const content = await contentFor(artifact)

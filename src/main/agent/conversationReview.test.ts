@@ -64,6 +64,60 @@ function modelPreparation(h: ReturnType<typeof fixture>, providerFetch: typeof f
 }
 
 describe('native structured code review completion', () => {
+  it.each((['openai_chat_completions', 'openai_responses', 'anthropic_messages'] as const)
+    .flatMap(protocol => ['arguments', 'identity'].map(failure => ({ protocol, failure }))))(
+    'recovers malformed review calls with $protocol ($failure) before accepting a report', async ({ protocol, failure }) => {
+      const h = fixture(), requests: string[] = []
+      try {
+        h.services.retry = { maxRetries: 2, initialDelayMs: 0 }
+        const providerFetch: typeof fetch = async (_url, init) => {
+          requests.push(String(init?.body))
+          const valid = requests.length === 2, validInput = valid || failure !== 'arguments'
+          const identity = valid || failure !== 'identity' ? { id: 'report' } : {}
+          const args = validInput ? JSON.stringify(report) : '{'
+          if (protocol === 'anthropic_messages') return Response.json({ id: 'provider', type: 'message', role: 'assistant', model: 'fixture',
+            content: [{ type: 'tool_use', ...identity, name: codeReviewToolName, ...(validInput ? { input: report } : {}) }],
+            stop_reason: 'tool_use', usage: { input_tokens: 10, output_tokens: 2 } })
+          if (protocol === 'openai_responses') return Response.json({ id: 'provider', object: 'response', created_at: 1, model: 'fixture', status: 'completed',
+            output: [{ id: 'item', type: 'function_call', call_id: identity.id, name: codeReviewToolName, arguments: args }],
+            usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } })
+          return Response.json({ id: 'provider', object: 'chat.completion', model: 'fixture', created: 1,
+            choices: [{ index: 0, finish_reason: 'tool_calls', message: { role: 'assistant', content: '',
+              tool_calls: [{ type: 'function', ...identity, function: { name: codeReviewToolName, arguments: args } }] } }] })
+        }
+        h.services.prepareModel = modelPreparation(h, providerFetch, { model: { ...model, protocol } })
+        const outcome = await conversationExecution(h.services).execute('continue', request, h.observer)
+        expect(outcome.result.status).toBe('fulfilled')
+        expect(requests).toHaveLength(2)
+        expect(requests[1]).toContain('Application recovery notice')
+        expect(requests[1]).toContain('invalid tool call')
+        const state = h.store.load('thread')!
+        expect(state.phase).toBe('completed')
+        expect(state.context.modelRecovery).toBeUndefined()
+        expect(state.messages.at(-1)!.value.context?.reviewReport).toEqual({ snapshot, report })
+        expect(state.messages.filter(message => message.value.kind === 'user')).toHaveLength(1)
+        expect(state.messages.filter(message => message.value.kind === 'tool')).toHaveLength(1)
+        expect(h.services.executeTool).not.toHaveBeenCalled()
+      } finally { h.db.close() }
+    })
+
+  it('stops malformed review responses when the shared recovery budget is exhausted', async () => {
+    const h = fixture()
+    try {
+      h.services.retry = { maxRetries: 2, initialDelayMs: 0 }
+      const providerFetch = vi.fn(async () => Response.json({ id: 'provider', object: 'chat.completion', model: 'fixture', created: 1,
+        choices: [{ index: 0, finish_reason: 'tool_calls', message: { role: 'assistant', content: '',
+          tool_calls: [{ type: 'function', id: 'report', function: { name: codeReviewToolName, arguments: '{' } }] } }] }))
+      h.services.prepareModel = modelPreparation(h, providerFetch)
+      const outcome = await conversationExecution(h.services).execute('continue', request, h.observer)
+      expect(outcome.result).toMatchObject({ status: 'rejected', reason: { code: 'MODEL_TOOL_CALL_INVALID' } })
+      expect(providerFetch).toHaveBeenCalledTimes(3)
+      expect(h.store.load('thread')).toMatchObject({ phase: 'failed', context: { modelRequestFailed: true, modelRecovery: { attempts: 2 } } })
+      expect(h.store.load('thread')!.messages).toHaveLength(1)
+      expect(h.services.executeTool).not.toHaveBeenCalled()
+    } finally { h.db.close() }
+  })
+
   it.each(['schema', 'scope', 'multiple'] as const)('corrects %s report errors without investigation and respects the model budget', async kind => {
     const bad = kind === 'multiple' ? ['one', 'two'].map(id => ({ id, name: codeReviewToolName, args: report }))
       : [{ id: 'bad', name: codeReviewToolName, args: kind === 'scope' ? { ...report, scope_id: 'a'.repeat(64) } : {} }]

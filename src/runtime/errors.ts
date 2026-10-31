@@ -95,3 +95,19 @@ export class IncompleteModelResponseError extends Error {
     this.name = 'IncompleteModelResponseError'
   }
 }
+
+export class InvalidModelToolCallError extends Error {
+  readonly code = 'MODEL_TOOL_CALL_INVALID'
+  constructor(message = 'Model returned an invalid tool call.') {
+    super(message)
+    this.name = 'InvalidModelToolCallError'
+  }
+}
+
+export class ModelOutputLimitError extends Error {
+  readonly code = 'MODEL_OUTPUT_LIMIT'
+  constructor() {
+    super('The model reached its output token limit. Automatic recovery is exhausted or unavailable; retry with shorter output or a larger output limit.')
+    this.name = 'ModelOutputLimitError'
+  }
+}

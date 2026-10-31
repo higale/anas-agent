@@ -15,6 +15,8 @@ import { observeModelRetry } from './modelRetryLogging'
 import { trackCompressionSummary, type GenerateSummary, type SummaryResponse, type CompressionTrackingCallbacks } from '../../runtime/compression'
 
 export interface CompressionModelOptions extends ModelConnectionOptions {
+  /** Disable internal retries when the conversation coordinator owns the budget. */
+  retry?: boolean
   beforeRequest?: () => Promise<void>
   compressionTracking?: CompressionTrackingCallbacks
   signal?: AbortSignal
@@ -68,7 +70,8 @@ export function createCompressionModel(config: ResolvedModelConfig, options: Com
         requestSignal?.throwIfAborted()
         if (attempts++ > 0) await options.beforeRequest?.()
         return request(prompt, requestSignal)
-      }, { signal: requestSignal, onRetry: observeModelRetry(options.requestId), retryWhen: error => !isModelRequestChangedError(error) })
+      }, { signal: requestSignal, maxRetries: options.retry === false ? 0 : undefined,
+        onRetry: observeModelRetry(options.requestId), retryWhen: error => !isModelRequestChangedError(error) })
       return trackCompressionSummary(prompt, options.compressionTracking,
         () => options.observe ? options.observe(prompt, generate) : generate(), { preparation, beforePrepare: async () => { requestSignal?.throwIfAborted(); await options.beforeRequest?.() } })
     }
