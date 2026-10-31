@@ -20,7 +20,6 @@ import type {
   AgentMessageRangeInput,
   AgentMessageRegenerateInput,
   AgentMessageWindowInput,
-  AgentActivityWindowInput,
   AgentRunActivity,
   AgentSubagentActivity,
   AgentModelRequestPreview,
@@ -47,6 +46,8 @@ import type {
   AgentWorkspaceState
 } from '@shared/agentTypes'
 import { compactToolCallProgress } from '@shared/agentEventReplay'
+import { displayActivityPage, displayEvent, displaySnapshot, displayRunSummary, displayTool, activityReference, activityInitialSize } from '@shared/activityDisplay'
+import { presentConversationMessage } from './conversationPresentation'
 import type { AgentSubagentCallRecord } from './subagentTaskStore'
 import type { AgentApplicationReadModel } from './agentApplicationTypes'
 import { NativeRuntimeCoordinator } from './nativeRuntimeCoordinator'
@@ -211,14 +212,17 @@ function publishAgentEvent(event: AgentRuntimeEvent): void {
     event,
     replayActive
   }
+  const retainedEvent = displayEvent(event)
+  const retained = { ...envelope, event: 'snapshot' in retainedEvent ? { ...retainedEvent, snapshot: undefined } : retainedEvent }
   if (runId && replayActive) {
     const activeReplay = activeRunEventReplay.get(runId) ?? new Map([...agentEventReplay]
       .filter(([, candidate]) => agentEventRunId(candidate.event) === runId))
-    activeReplay.set(envelope.revision, envelope)
+    activeReplay.set(envelope.revision, retained)
+    while (activeReplay.size > agentEventReplayCapacity) activeReplay.delete(activeReplay.keys().next().value!)
     if (event.type === 'model_tool_calls') compactToolCallProgress(activeReplay)
     activeRunEventReplay.set(runId, activeReplay)
   }
-  agentEventReplay.set(envelope.revision, envelope)
+  agentEventReplay.set(envelope.revision, retained)
   if (event.type === 'model_tool_calls') compactToolCallProgress(agentEventReplay)
   if (agentEventReplay.size > agentEventReplayCapacity) {
     agentEventReplay.delete(agentEventReplay.keys().next().value!)
@@ -229,7 +233,7 @@ function publishAgentEvent(event: AgentRuntimeEvent): void {
       continue
     }
     try {
-      sender.send('agent:event', envelope)
+      sender.send('agent:event', { ...envelope, event: 'snapshot' in event ? displayEvent(event) : event })
     } catch (reason) {
       runtimeLog('warn', 'agent', 'Failed to forward an Agent event.', {
         error: reason
@@ -593,7 +597,7 @@ export function registerAgentIpcHandlers(): void {
   handleAgentIpc('agent:threads:get', (
     _event,
     threadId: string
-  ): Promise<AgentThreadSnapshot> => currentRuntime().getSnapshot(threadId))
+  ): Promise<AgentThreadSnapshot> => currentRuntime().getSnapshot(threadId).then(displaySnapshot))
   handleAgentIpc('agent:threads:update', async (
     _event,
     threadId: string,
@@ -656,11 +660,30 @@ export function registerAgentIpcHandlers(): void {
   ))
   handleAgentIpc('agent:activities:get', (_event, input: AgentRunReferenceInput): AgentRunActivity => {
     const parsed = z.object({ threadId: z.string().min(1), runId: z.string().min(1) }).strict().parse(input)
-    return currentRuntime().loadEarlierActivities({ ...parsed, beforeSequence: Number.MAX_SAFE_INTEGER })
+    return displayRunSummary(parsed.threadId, currentRuntime().loadEarlierActivities({ ...parsed, beforeSequence: Number.MAX_SAFE_INTEGER }))
   })
-  handleAgentIpc('agent:activities:loadEarlier', (_event, input: AgentActivityWindowInput): AgentRunActivity => {
-    const parsed = z.object({ threadId: z.string().min(1), runId: z.string().min(1), beforeSequence: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER) }).parse(input)
-    return currentRuntime().loadEarlierActivities(parsed)
+  const activityScope = { threadId: z.string().min(1), runId: z.string().min(1) }
+  handleAgentIpc('agent:activities:page', (_event, input: unknown): AgentRunActivity => {
+    const parsed = z.object({ ...activityScope, subagentId: z.string().min(1).optional(), before: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+      after: z.number().int().min(-1).max(Number.MAX_SAFE_INTEGER).optional(), limit: z.number().int().min(1).max(activityInitialSize).optional() })
+      .strict().refine(value => value.before === undefined || value.after === undefined).parse(input)
+    return displayActivityPage(parsed.threadId, currentRuntime().loadActivityPage(parsed))
+  })
+  handleAgentIpc('agent:activities:detail', (_event, input: unknown) => {
+    const parsed = z.object({ ...activityScope, kind: z.enum(['model', 'tool', 'summary', 'memory', 'skill', 'subagent']),
+      id: z.string().min(1), subagentId: z.string().min(1).optional(),
+      field: z.enum(['text', 'reasoning', 'args', 'output', 'result', 'error']).optional() }).strict().parse(input)
+    const database = currentRuntime().databaseForThread(parsed.threadId)
+    if (parsed.kind === 'skill') {
+      if (database.messages.activities.getRun(parsed.runId)?.threadId !== parsed.threadId) throw new Error('Activity run belongs to another conversation.')
+      const message = database.messages.payload(parsed.threadId, parsed.id)
+      if (message?.context?.runId !== parsed.runId) throw new Error('Activity message belongs to another run.')
+      const presented = message && presentConversationMessage(message, parsed.id)
+      if (!presented?.skillInvocation) throw new Error('Skill activity was not found.')
+      return { text: presented.skillInvocation.promptText }
+    }
+    const detail = database.messages.activities.getDisplayDetail(parsed)
+    return parsed.field ? { [parsed.field]: detail[parsed.field] } : detail
   })
   handleAgentIpc('agent:activities:subagent', (_event, input: AgentRunReferenceInput & { subagentId: string }): AgentSubagentActivity => {
     const parsed = z.object({ threadId: z.string().min(1), runId: z.string().min(1), subagentId: z.string().min(1) }).parse(input)
@@ -668,7 +691,9 @@ export function registerAgentIpcHandlers(): void {
     if (database.getRun(parsed.runId)?.threadId !== parsed.threadId) throw new Error('Activity run belongs to another conversation.')
     const activity = database.getSubagentActivity(parsed.runId, parsed.subagentId)
     if (!activity) throw new Error('Subagent activity was not found.')
-    return activity
+    return { ...activity, delegation: activity.delegation && displayTool(parsed.threadId, parsed.runId, activity.delegation),
+      result: undefined, error: activity.error && [...activity.error.slice(0, 240)].join(''), detailsDeferred: true,
+      detail: activityReference(parsed.threadId, parsed.runId, 'subagent', activity.id) }
   })
   handleAgentIpc('agent:context:status', (_event, threadId: unknown) => (
     currentRuntime().getContextStatus(z.string().min(1).parse(threadId))
@@ -849,11 +874,11 @@ export function registerAgentIpcHandlers(): void {
   handleAgentIpc('agent:messages:truncate', async (
     _event,
     input: AgentMessageRangeInput
-  ): Promise<AgentThreadSnapshot> => currentRuntime().truncateMessages(input))
+  ): Promise<AgentThreadSnapshot> => currentRuntime().truncateMessages(input).then(displaySnapshot))
   handleAgentIpc('agent:messages:prepareEdit', async (
     _event,
     input: AgentMessageRangeInput
-  ): Promise<AgentMessageEditResult> => currentRuntime().prepareMessageEdit(input))
+  ): Promise<AgentMessageEditResult> => currentRuntime().prepareMessageEdit(input).then(result => ({ ...result, snapshot: displaySnapshot(result.snapshot) })))
   handleAgentIpc('agent:messages:regenerate', async (
     event,
     input: AgentMessageRegenerateInput
@@ -867,7 +892,7 @@ export function registerAgentIpcHandlers(): void {
   handleAgentIpc('agent:messages:loadEarlier', async (
     _event,
     input: AgentMessageWindowInput
-  ): Promise<AgentThreadSnapshot> => currentRuntime().loadEarlierMessages(input))
+  ): Promise<AgentThreadSnapshot> => currentRuntime().loadEarlierMessages(input).then(displaySnapshot))
 }
 
 export async function closeAgentRuntime(options: {

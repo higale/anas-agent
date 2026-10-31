@@ -40,8 +40,8 @@ async function verifyCurrentStorage(repositoryRoot, executablePath) {
         const started = performance.now()
         try {
           const value = await handler(...args)
-          if (channel === 'agent:activities:loadEarlier') globalThis.__anasStorageProbe.activityPages.push({
-            beforeSequence: args[1].beforeSequence, startSequence: value.activityWindow.startSequence,
+          if (channel === 'agent:activities:page') globalThis.__anasStorageProbe.activityPages.push({
+            beforeSequence: args[1].before, limit: args[1].limit, startSequence: value.activityWindow.startSequence,
             count: value.models.length + value.tools.length + value.subagents.length + (value.summaries?.length || 0) + (value.memoryRecalls?.length || 0)
           })
           return value
@@ -131,21 +131,22 @@ async function verifyCurrentStorage(repositoryRoot, executablePath) {
     assert.ok(initialSnapshot.messages.length < count, 'The UI snapshot must page the real database, not load the entire conversation.')
     const initialActivity = initialSnapshot.activities[0]
     assert.ok(initialActivity.activityWindow.hasEarlier)
-    assert.equal(initialActivity.models.length, 100, 'Only the latest 100 complete model activities should be decoded initially.')
+    assert.equal(initialActivity.models.length, 0, 'The collapsed summary must not retain completed model records.')
+    assert.equal(initialActivity.display.modelCount, count / 2)
     const expandActivities = async () => {
       const toggle = page.locator('.agent-activity-range-toggle[aria-expanded="false"]').first()
       if (await toggle.count()) await toggle.click()
     }
     await expandActivities()
+    await expect.poll(() => page.locator('.agent-activity-model').count()).toBeGreaterThan(0)
     const initialVisibleActivities = await page.locator('.agent-activity-model').count()
     await page.getByRole('button', { name: /^(加载更早活动|Load earlier activities)$/ }).click()
     await expect.poll(() => page.locator('.agent-activity-model').count()).toBeGreaterThan(initialVisibleActivities)
-    const expandedActivityCount = await page.locator('.agent-activity-model').count()
     const pages = await application.evaluate(() => globalThis.__anasStorageProbe.activityPages)
-    assert.equal(pages.length, 1, 'The real earlier-activities IPC must service the UI request.')
-    assert.equal(pages[0].count, 100)
-    assert.equal(pages[0].beforeSequence, initialActivity.activityWindow.startSequence)
-    assert.ok(pages[0].startSequence < pages[0].beforeSequence)
+    assert.ok(pages.some(item => item.limit === 300), 'Expanding must read a bounded latest page through real IPC.')
+    const earlierPage = pages.find(item => item.beforeSequence !== undefined)
+    assert.equal(earlierPage.count, 100)
+    assert.ok(earlierPage.startSequence < earlierPage.beforeSequence)
 
     await page.evaluate(() => {
       const probe = globalThis.__anasStorageFrames = { gaps: [], last: performance.now(), running: true }
@@ -215,7 +216,8 @@ async function verifyCurrentStorage(repositoryRoot, executablePath) {
       await longThread.click()
       await expect(page.locator('.topbar')).toContainText('Storage long conversation')
       await expandActivities()
-      await expect.poll(() => page.locator('.agent-activity-model').count()).toBeGreaterThanOrEqual(expandedActivityCount)
+      await expect.poll(() => page.locator('.agent-activity-model').count()).toBeGreaterThan(0)
+      assert.ok(await page.locator('.agent-activity-model').count() <= 500, 'Reopening must not accumulate prior activity pages.')
       const snapshot = await page.evaluate((id) => globalThis.gale.agent.threads.get(id), seeded.threads[0])
       assert.ok(snapshot.messageWindow.total > count)
       assert.ok(snapshot.messages.length < count)

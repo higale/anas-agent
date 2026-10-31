@@ -111,7 +111,7 @@ describe('AgentMessageList', () => {
     expect(html).toContain(
       '<span>reasoning</span><span class="agent-activity-argument">Checked the protocol response.</span>'
     )
-    expect(html).toContain('<pre>REASONING</pre>')
+    expect(html).not.toContain('<pre>REASONING</pre>')
   })
 
   it('shows an ellipsis when the reasoning summary repeats the full reasoning', () => {
@@ -131,7 +131,7 @@ describe('AgentMessageList', () => {
     expect(html).toContain(
       '<span>reasoning</span><span class="agent-activity-argument">...</span>'
     )
-    expect(html).toContain('<pre>REASONING</pre>')
+    expect(html).not.toContain('<pre>REASONING</pre>')
   })
 
   it('distinguishes a Skill shortcut from a generic file tool call', () => {
@@ -192,7 +192,7 @@ describe('AgentMessageList', () => {
     expect(html).toContain('agent-activity-input agent-activity-memory-recall')
     expect(html).toContain('lucide-brain')
     expect(html).toContain('agent.memory_recall · general-purpose')
-    expect(html).toContain('MEMORY_PROMPT')
+    expect(html).not.toContain('MEMORY_PROMPT')
   })
 
   it('does not allow an interrupted turn to collapse while approval is pending', () => {
@@ -269,7 +269,7 @@ describe('AgentMessageList', () => {
 
     expect(html).toContain('Context compressed #1')
     expect(html).toContain('≈ 13k → 4k tokens')
-    expect(html).toContain('SUMMARY_CONTENT')
+    expect(html).not.toContain('SUMMARY_CONTENT')
   })
 
   it('keeps failed activity expanded and exposes a bottom collapse control', () => {

@@ -100,7 +100,7 @@ export class NativeMessageReader {
     const record = messageId ? this.payloadRecord(source.threadId, messageId, source.runId) : undefined
     const message = record && record.value.kind === 'assistant' ? this.present(source.threadId, record) : undefined
     if (!message) {
-      const pending = this.observations.pendingModel(runId, modelId)
+      const pending = this.observations.pendingModel(source.runId, modelId) ?? this.observations.pendingModel(runId, modelId)
       return { text: pending?.text ?? '', reasoning: pending?.reasoning ?? '', toolCallIds: pending?.toolCallIds ?? [],
         ...(pending?.recovery ? { recovery: pending.recovery } : {}),
         ...(pending?.reasoningSummary ? { reasoningSummary: pending.reasoningSummary } : {}) }

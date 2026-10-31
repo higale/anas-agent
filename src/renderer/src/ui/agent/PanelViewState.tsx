@@ -75,11 +75,16 @@ export function usePanelRef<T>(key: string, initial: T) {
   return ref
 }
 
-export function usePanelDisclosure(key: string, defaultOpen: boolean, trackOpen = false) {
-  const store = useContext(PanelViewContext)
+export function usePanelDisclosure(key: string, defaultOpen: boolean) {
   const [open, setOpen] = usePanelState(`expanded:${key}`, defaultOpen)
-  return store || trackOpen ? { open, onToggle: (event: React.SyntheticEvent<HTMLDetailsElement>) => setOpen(event.currentTarget.open) }
-    : { open: defaultOpen || undefined }
+  const [previousDefault, setPreviousDefault] = useState(defaultOpen)
+  // A running entry opens by default and collapses on completion. Between
+  // status transitions, preserve the reader's choice, including after remount.
+  if (previousDefault !== defaultOpen) {
+    setPreviousDefault(defaultOpen)
+    setOpen(defaultOpen)
+  }
+  return { open, onToggle: (event: React.SyntheticEvent<HTMLDetailsElement>) => setOpen(event.currentTarget.open) }
 }
 
 export function usePanelCheckpoint(save: () => void | Promise<void>) {

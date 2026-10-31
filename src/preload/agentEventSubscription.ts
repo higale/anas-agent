@@ -6,6 +6,7 @@ import type {
 } from '@shared/agentTypes'
 
 import { compactToolCallProgress } from '@shared/agentEventReplay'
+import { displayEvent } from '@shared/activityDisplay'
 
 interface AgentEventIpc {
   invoke(channel: string, request: AgentEventSubscriptionRequest): Promise<unknown>
@@ -336,9 +337,14 @@ class AgentEventHub {
     for (const [revision, buffered] of this.history) {
       if (
         revision <= deliveredThrough
-        && (!buffered.runId || !this.activeRunIds.has(buffered.runId))
+        && (!buffered.runId || !this.activeRunIds.has(buffered.runId) || this.history.size > 4096)
       ) {
         this.history.delete(revision)
+      } else if (revision <= deliveredThrough) {
+        // Consumers joining asynchronously still need the live payload. Once
+        // delivered, keep only identities for subsequent replay and rereads.
+        const lean = displayEvent(buffered.event)
+        this.history.set(revision, { ...buffered, event: 'snapshot' in lean ? { ...lean, snapshot: undefined } : lean })
       }
     }
     // Connection handshakes check receipt continuity using these revisions.

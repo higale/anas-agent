@@ -23,6 +23,8 @@ export class SubagentActivityProjection {
             subagentId
           })
         : this.requireProjectedModelActivity(call, event.model.id, subagentId)
+      if (event.type === 'model_completed') this.activity.rememberToolCallProgress({ type: 'model_tool_calls',
+        runId: call.parentRunId, threadId: call.parentThreadId, modelId: model.id, subagentId, progress: [] })
       return { ...event, runId: call.parentRunId, threadId: call.parentThreadId, model }
     }
     if (event.type === 'model_delta' || event.type === 'model_tool_calls') {

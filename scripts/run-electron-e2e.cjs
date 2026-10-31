@@ -17,6 +17,7 @@ const { verifyEnvironmentStartup } = require('./electron-environment-startup.cjs
 const { verifyGitPanelStates } = require('./electron-git-panel.cjs')
 const { verifyRoundChanges, verifyRoundChangesInApplication } = require('./electron-round-changes.cjs')
 const { verifyToolArguments } = require('./electron-tool-arguments.cjs')
+const { verifyActivityWindow } = require('./electron-activity-window.cjs')
 const { verifyCurrentStorage } = require('./electron-current-storage.cjs')
 const { verifyProjectPreviews } = require('./electron-project-previews.cjs')
 const { verifyProjectModelPicker } = require('./electron-project-model-picker.cjs')
@@ -1243,6 +1244,14 @@ async function main() {
     await verifyToolArguments(launchApplication)
     return
   }
+  if (process.argv.includes('--activity-position-only')) {
+    await verifyActivityWindow(launchApplication, { positionOnly: true })
+    return
+  }
+  if (process.argv.includes('--activity-window-only')) {
+    await verifyActivityWindow(launchApplication)
+    return
+  }
   if (process.argv.includes('--round-changes-only')) {
     await verifyRoundChanges(launchApplication)
     return
@@ -1334,6 +1343,7 @@ async function main() {
   }
   await verifyPtyLifecycle(launchApplication)
   await verifyToolArguments(launchApplication)
+  await verifyActivityWindow(launchApplication)
 }
 
 main().catch((error) => {

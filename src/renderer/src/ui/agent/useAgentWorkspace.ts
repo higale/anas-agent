@@ -15,6 +15,7 @@ import {
   type AgentWorkspaceState
 } from '@shared/agentTypes'
 import { applyRunActivityEvent } from '@shared/agentActivityProjection'
+import { boundedDisplayRun, displaySnapshot, displayEvent, displayMessage } from '@shared/activityDisplay'
 import { DEFAULT_WORKSPACE_PROJECT_ID, type SelectedAttachment } from '@shared/types'
 import {
   loadAgentThreadSnapshotAndRecover,
@@ -32,7 +33,7 @@ import {
   updateThreadError
 } from './threadErrors'
 import { throwIfAborted } from './messagePagination'
-import { mergeActivityPage, mergeSubagentDetails, preserveEarlierActivities } from './activityPagination'
+import { mergeActivityPage, preserveEarlierActivities } from './activityPagination'
 import { projectInitialAgentSubmission } from './agentSubmissionProjection'
 import { useQueuedAgentMessages } from './useQueuedAgentMessages'
 import { selectedAttachmentInput } from '../chat/attachmentUtils'
@@ -167,6 +168,7 @@ export function useAgentWorkspace({ onAppError }: UseAgentWorkspaceOptions) {
     snapshot: AgentThreadSnapshot,
     reconcilePendingRun = false
   ): void => {
+    snapshot = displaySnapshot(snapshot)
     const projectedRun = snapshot.pendingRun ?? snapshot.settlingRun
     if (projectedRun) {
       projectedRunIdsRef.current.set(snapshot.thread.id, projectedRun.id)
@@ -197,7 +199,7 @@ export function useAgentWorkspace({ onAppError }: UseAgentWorkspaceOptions) {
       const snapshot = current.snapshots[run.threadId]
       const stored = snapshot?.activities.find((activity) => activity.runId === run.id)
       const settled = { ...live, status: run.status, error: run.error, backgroundCleanup: run.backgroundCleanup, updatedAt: run.updatedAt }
-      const activity = stored ? mergeActivityPage(settled, stored) : settled
+      const activity = snapshot ? displaySnapshot({ ...snapshot, activities: [stored ? mergeActivityPage(settled, stored) : settled] }).activities[0] : settled
       const nextRuns = { ...current.runs }
       delete nextRuns[run.threadId]
       return {
@@ -307,7 +309,8 @@ export function useAgentWorkspace({ onAppError }: UseAgentWorkspaceOptions) {
     }
   }, [loadThreadSnapshot, reloadThreads, setThreadError])
 
-  useEffect(() => window.gale.agent.onEvent((event: AgentRuntimeEvent) => {
+  useEffect(() => window.gale.agent.onEvent((incoming: AgentRuntimeEvent) => {
+    const event = displayEvent(incoming)
     const threadId = 'run' in event ? event.run.threadId : event.threadId
     if (
       event.type === 'run_started'
@@ -470,7 +473,7 @@ export function useAgentWorkspace({ onAppError }: UseAgentWorkspaceOptions) {
         const run = current[threadId]
         if (!run) return current
         const updated = applyRunActivityEvent(run, event)
-        return updated === run ? current : { ...current, [threadId]: updated }
+        return updated === run ? current : { ...current, [threadId]: boundedDisplayRun(threadId, updated) }
       })
       return
     }
@@ -654,7 +657,8 @@ export function useAgentWorkspace({ onAppError }: UseAgentWorkspaceOptions) {
       saveWorkspaceState({ mode: 'thread', threadId: submission.thread.id })
       if (submission.userMessage) {
         snapshotReadinessRef.current.markProjectionReady(submission.thread.id)
-        setSnapshots((current) => projectInitialAgentSubmission(current, submission))
+        const leanSubmission = { ...submission, userMessage: displayMessage(submission.thread.id, submission.userMessage) }
+        setSnapshots((current) => projectInitialAgentSubmission(current, leanSubmission))
       } else {
         await loadThreadSnapshot(submission.thread.id, true)
       }
@@ -826,50 +830,6 @@ export function useAgentWorkspace({ onAppError }: UseAgentWorkspaceOptions) {
     if (guard.isCurrent()) acceptSnapshot(earlier)
   }, [acceptSnapshot, snapshots])
 
-  const loadEarlierActivities = useCallback(async (
-    threadId: string,
-    runId: string,
-    signal: AbortSignal
-  ): Promise<void> => {
-    throwIfAborted(signal)
-    const activity = runs[threadId]?.runId === runId ? runs[threadId]
-      : snapshots[threadId]?.activities.find((item) => item.runId === runId)
-    const window = activity?.activityWindow
-    if (!window?.hasEarlier || window.startSequence === null) return
-    const guard = snapshotReadinessRef.current.guard(threadId)
-    const earlier = await globalThis.window.gale.agent.activities.loadEarlier({ threadId, runId, beforeSequence: window.startSequence })
-    throwIfAborted(signal)
-    if (!guard.isCurrent() || earlier.runId !== runId) return
-    setSnapshots((current) => {
-      const snapshot = current[threadId]
-      if (!guard.isCurrent() || !snapshot) return current
-      return { ...current, [threadId]: { ...snapshot, activities: snapshot.activities.map((item) => item.runId === runId ? mergeActivityPage(item, earlier, window.startSequence!) : item) } }
-    })
-    setRuns((current) => {
-      const run = current[threadId]
-      return guard.isCurrent() && run?.runId === runId ? { ...current, [threadId]: mergeActivityPage(run, earlier, window.startSequence!) } : current
-    })
-  }, [runs, snapshots])
-
-  const loadSubagentDetails = useCallback(async (threadId: string, runId: string, subagentId: string): Promise<void> => {
-    const guard = snapshotReadinessRef.current.guard(threadId)
-    const details = await window.gale.agent.activities.subagent({ threadId, runId, subagentId })
-    if (!guard.isCurrent()) return
-    const merge = <T extends AgentRunView | AgentThreadSnapshot['activities'][number]>(activity: T): T => ({
-      ...activity,
-      subagents: activity.subagents.map((item) => mergeSubagentDetails(item, details))
-    })
-    setSnapshots((current) => {
-      const snapshot = current[threadId]
-      if (!guard.isCurrent() || !snapshot) return current
-      return { ...current, [threadId]: { ...snapshot, activities: snapshot.activities.map((item) => item.runId === runId ? merge(item) : item) } }
-    })
-    setRuns((current) => {
-      const run = current[threadId]
-      return guard.isCurrent() && run?.runId === runId ? { ...current, [threadId]: merge(run) } : current
-    })
-  }, [])
-
   const regenerateMessage = useCallback(async (
     threadId: string,
     userMessageId: string,
@@ -968,8 +928,6 @@ export function useAgentWorkspace({ onAppError }: UseAgentWorkspaceOptions) {
     draftProjectId,
     loadingThreads,
     loadEarlierMessages,
-    loadEarlierActivities,
-    loadSubagentDetails,
     openThread,
     queueMessage: queuedMessages.enqueue,
     removeQueuedMessage: queuedMessages.remove,
@@ -1009,8 +967,6 @@ export function useAgentWorkspace({ onAppError }: UseAgentWorkspaceOptions) {
     draftProjectId,
     loadingThreads,
     loadEarlierMessages,
-    loadEarlierActivities,
-    loadSubagentDetails,
     openThread,
     queuedMessages,
     reloadThreads,

@@ -32,6 +32,7 @@ export class NativeRuntimeCoordinator extends ConversationRuntimeDirectory<Nativ
   getContextStatus(threadId: string) { return this.useRuntime(threadId, runtime => runtime.getContextStatus(threadId)) }
   loadEarlierMessages(input: Parameters<NativeAgentRuntime['loadEarlierMessages']>[0]) { return this.useRuntime(input.threadId, runtime => runtime.loadEarlierMessages(input)) }
   loadEarlierActivities(input: Parameters<NativeAgentRuntime['loadEarlierActivities']>[0]) { return this.useRuntime(input.threadId, runtime => runtime.loadEarlierActivities(input)) }
+  loadActivityPage(input: Parameters<NativeAgentRuntime['loadActivityPage']>[0]) { return this.useRuntime(input.threadId, runtime => runtime.loadActivityPage(input)) }
   previewSystemContext(input: Parameters<NativeAgentRuntime['previewSystemContext']>[0]) {
     return withConversationLeaseScope(() => this.runtimeForDatabase(this.storage.previewDatabase()).previewSystemContext(input))
   }

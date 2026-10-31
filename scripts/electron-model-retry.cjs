@@ -53,6 +53,11 @@ async function verifyModelRetry(launchApplication) {
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
     application = await launchApplication(profile)
     let page = await application.firstWindow()
+    const readToolActivities = snapshot => page.evaluate(async ({ threadId, runIds }) => {
+      const pages = await Promise.all(runIds.map(runId => globalThis.gale.agent.activities.page({ threadId, runId, limit: 300 })))
+      return Promise.all(pages.flatMap(activity => activity.tools).map(async tool => ({ ...tool,
+        ...(await globalThis.gale.agent.activities.detail({ ...tool.detail, field: 'output' })) })))
+    }, { threadId: snapshot.thread.id, runIds: snapshot.activities.map(activity => activity.runId) })
     page.setDefaultTimeout(20_000)
     await expect(page.locator('[data-agent-composer-input]')).toBeVisible()
     await page.evaluate(async port => {
@@ -110,8 +115,9 @@ async function verifyModelRetry(launchApplication) {
       return globalThis.gale.agent.threads.get(thread.id)
     })
     assert.equal(snapshot.messages.filter(message => message.role === 'user').length, 1)
-    assert.equal(snapshot.activities.flatMap(activity => activity.tools).length, 2, 'Retry must not execute tools again.')
-    for (const tool of snapshot.activities.flatMap(activity => activity.tools)) {
+    const savedTools = await readToolActivities(snapshot)
+    assert.equal(savedTools.length, 2, 'Retry must not execute tools again.')
+    for (const tool of savedTools) {
       assert.match(String(tool.output), /user chose to retry without returning/)
       assert.doesNotMatch(String(tool.output), /PRIVATE_RESULT_/)
     }
@@ -169,8 +175,9 @@ async function verifyModelRetry(launchApplication) {
       return globalThis.gale.agent.threads.get(thread.id)
     })
     assert.equal(afterRollback.messages.filter(message => message.role === 'user').length, 2)
-    assert.equal(afterRollback.activities.flatMap(activity => activity.tools).length, 4, 'Historical retry must not repeat tools.')
-    for (const tool of afterRollback.activities.flatMap(activity => activity.tools)) assert.match(String(tool.output), /user chose to retry without returning/)
+    const rollbackTools = await readToolActivities(afterRollback)
+    assert.equal(rollbackTools.length, 4, 'Historical retry must not repeat tools.')
+    for (const tool of rollbackTools) assert.match(String(tool.output), /user chose to retry without returning/)
 
     // Reproduce deleting a later failed user turn: idle history still offers retry.
     await page.locator('[data-agent-composer-input]').fill('Test retry after deleting later messages.')

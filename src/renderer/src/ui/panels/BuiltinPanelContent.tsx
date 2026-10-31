@@ -15,13 +15,11 @@ import { localizeAgentError } from '../agent/agentErrorMessage'
 import { panelApi } from './contentServices'
 function SubagentContent({ content, open }: { content: Extract<BuiltinPanel, { kind: 'subagent' }>; open(panel: BuiltinPanel): void }) {
   const { t } = useTranslation()
-  const { run, error, loadEarlier, loadDetails } = usePanelActivity(content.threadId, content.runId, content.subagentId)
+  const { run, error } = usePanelActivity(content.threadId, content.runId, content.subagentId)
   usePanelReady(Boolean(run), Boolean(error))
   useEffect(() => { if (error) notice.error(localizeAgentError(String(error), t)) }, [error, t])
   return run?.subagents.some(item => item.id === content.subagentId)
     ? <AgentSubagentPanel run={run} subagentId={content.subagentId} threadId={content.threadId}
-        onLoadEarlierActivities={loadEarlier} onLoadSubagentDetails={loadDetails}
-        onLoadEarlierError={(_id, message) => notice.error(message)}
         onOpenSubagent={(runId, subagentId) => open({ ...content, runId, subagentId,
           name: run.subagents.find(item => item.id === subagentId)?.name ?? subagentId })} />
     : <p className="ui-detail-panel-empty">{t(error ? 'agent.panel_unavailable' : 'common.loading')}</p>

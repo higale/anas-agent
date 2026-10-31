@@ -157,6 +157,7 @@ describe('avatar crop dialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'settings.choose_avatar' }))
     await waitFor(() => expect(onChooseSource).toHaveBeenCalledOnce())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'common.cancel' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }))
 
     expect(onCancel).toHaveBeenCalledOnce()

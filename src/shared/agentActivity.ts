@@ -8,7 +8,7 @@ export function delegationToolForSubagent(
   activity: AgentRunActivity,
   subagent: AgentSubagentActivity
 ): AgentToolActivity | undefined {
-  return activity.tools.find((tool) =>
+  return subagent.delegation ?? activity.tools.find((tool) =>
     tool.call.name.toLowerCase() === 'start_subagent'
     && subagentIdFromStartOutput(tool.output) === subagent.id
     && tool.subagentId === subagent.parentSubagentId
@@ -52,7 +52,8 @@ export function upsertSubagentActivity(
   const existingIndex = activities.findIndex((activity) => activity.id === update.id)
   return existingIndex < 0
     ? [...activities, update]
-    : activities.map((activity, index) => index === existingIndex ? update : activity)
+    : activities.map((activity, index) => index === existingIndex ? { ...update,
+        delegation: update.delegation ?? activity.delegation, activityCounts: update.activityCounts ?? activity.activityCounts } : activity)
 }
 
 export function applySubagentActivityUpdate<T extends AgentRunActivity>(

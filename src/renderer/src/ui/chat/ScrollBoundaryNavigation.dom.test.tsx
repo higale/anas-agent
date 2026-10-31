@@ -12,6 +12,8 @@ function scrollHarness() {
       onWheel={navigation.onWheel} onPointerDown={navigation.onPointerDown}
       onTouchStart={navigation.onTouchStart} onTouchMove={navigation.onTouchMove}>
       <div ref={contentRef}><textarea aria-label="input" /></div>
+      <button onClick={navigation.scrollToTop}>First</button>
+      <button onClick={navigation.scrollToBottom}>Last</button>
     </div>
   }
   const view = render(<Harness />), panel = view.getByTestId('panel')
@@ -25,6 +27,45 @@ function scrollHarness() {
 }
 
 describe('scroll boundary navigation', () => {
+  it('keeps automatic following paused until a handled bottom navigation has positioned its page', () => {
+    const { panel, getByText, following } = scrollHarness()
+    panel.scrollTo = vi.fn()
+    let positioned!: () => void
+    panel.addEventListener('activity-boundary', event => {
+      positioned = (event as CustomEvent).detail.onPosition
+      event.preventDefault()
+    })
+    fireEvent.click(getByText('Last'))
+    expect(following.current).toBe(false)
+    expect(panel.scrollTo).not.toHaveBeenCalled()
+    act(() => positioned())
+    expect(following.current).toBe(true)
+  })
+
+  it('lets activity paging own the positioning instead of starting a competing scroll', () => {
+    const { panel, getByText, following } = scrollHarness()
+    panel.scrollTo = vi.fn()
+    const edges: string[] = []
+    panel.addEventListener('activity-boundary', event => {
+      edges.push((event as CustomEvent).detail.edge)
+      event.preventDefault()
+    })
+    fireEvent.click(getByText('First'))
+    expect(following.current).toBe(false)
+    fireEvent.click(getByText('Last'))
+    expect(edges).toEqual(['first', 'latest'])
+    expect(panel.scrollTo).not.toHaveBeenCalled()
+  })
+
+  it('scrolls directly to the panel boundary when no activity window handles it', () => {
+    const { panel, getByText } = scrollHarness()
+    panel.scrollTo = vi.fn()
+    fireEvent.click(getByText('First'))
+    expect(panel.scrollTo).toHaveBeenLastCalledWith({ top: 0, behavior: 'instant' })
+    fireEvent.click(getByText('Last'))
+    expect(panel.scrollTo).toHaveBeenLastCalledWith({ top: 1000, behavior: 'instant' })
+  })
+
   it('keeps following when a short conversation cannot scroll upward', () => {
     const { panel, following } = scrollHarness()
     Object.defineProperty(panel, 'scrollHeight', { configurable: true, value: 300 })

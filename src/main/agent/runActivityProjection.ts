@@ -92,6 +92,7 @@ export class RunActivityProjection {
       tool: event => this.observeToolRun(event, runId, threadId, queue),
       approval: activity => this.recordInterruptedToolActivity(runId, threadId, activity, queue),
       committed: async commit => {
+        this.observations.releaseCommitted(runId)
         this.reconcileRootToolActivities(runId, threadId, queue)
         this.publishCommittedContextSummary(runId, threadId, commit.summary, queue)
         await hooks.committed?.(commit)
@@ -122,6 +123,7 @@ export class RunActivityProjection {
   observeModelRun(event: ModelRunObservation, runId: string, threadId: string, queue: RunEventSink): void {
     const { modelId: id, subagentId } = event
     if (event.kind === 'delta') {
+      this.observations.appendModel(runId, id, event.channel, event.text, subagentId)
       queue.push({ type: 'model_delta', runId, threadId, modelId: id, subagentId,
         delta: { type: event.channel, text: event.text } })
     } else if (event.kind === 'tool_input') {
@@ -147,6 +149,7 @@ export class RunActivityProjection {
         reasoning: traceText(event.message.content, 'reasoning') || event.streamedReasoning,
         reasoningSummary: traceReasoningSummary(event.message.content), toolCallIds: event.calls.map(call => call.id)
       })
+      this.rememberToolCallProgress({ type: 'model_tool_calls', runId, threadId, modelId: id, subagentId, progress: [] })
       queue.push({ type: 'model_completed', runId, threadId, model })
       for (const call of event.calls) this.ensureToolActivity(runId, threadId, call, queue, subagentId)
     }

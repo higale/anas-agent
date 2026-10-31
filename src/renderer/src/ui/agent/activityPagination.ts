@@ -77,6 +77,7 @@ export function preserveEarlierActivities(
   incoming: AgentRunActivity,
   live?: AgentRunActivity
 ): AgentRunActivity {
+  if (incoming.display) return incoming
   if (live?.runId === incoming.runId) previous = previous?.runId === incoming.runId
     ? mergeActivityPage(live, previous) : live
   const start = incoming.activityWindow?.startSequence

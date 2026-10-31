@@ -21,6 +21,13 @@ export class RunActivityObservations {
   pendingModel(runId: string, modelId: string) { return this.transientModels.get(JSON.stringify([runId, modelId])) }
   pendingTool(runId: string, callId: string, subagentId?: string) { return this.transientTools.get(JSON.stringify([runId, subagentId ?? null, callId])) }
 
+  appendModel(runId: string, modelId: string, channel: 'text' | 'reasoning', text: string, subagentId?: string): void {
+    const key = JSON.stringify([runId, modelId])
+    const current = this.transientModels.get(key)
+    if (!current || current.status !== 'running') return
+    this.transientModels.set(key, { ...current, subagentId, [channel]: current[channel] + text })
+  }
+
   private requireRun(runId: string) {
     const run = this.database.prepare('SELECT thread_id AS threadId FROM agent_runs WHERE id=?').get(runId) as { threadId: string } | undefined
     if (!run) throw new Error(`Run ${runId} was not found.`)
@@ -162,7 +169,7 @@ export class RunActivityObservations {
       WHERE thread_id = ? AND run_id = ? AND message_id = ?`)
       .get(this.activitySourceThread(runId, model.subagentId), this.activitySourceRun(runId, model.subagentId), messageId)
     if (canonical) this.transientModels.delete(key)
-    else if (model.status === 'completed') this.transientModels.set(key, model)
+    else this.transientModels.set(key, model)
     return { ...model, ...this.activityMetadata.model(runId, model) }
   }
 
@@ -187,6 +194,28 @@ export class RunActivityObservations {
   releaseRun(runId: string): void {
     for (const key of this.transientModels.keys()) if ((JSON.parse(key) as string[])[0] === runId) this.transientModels.delete(key)
     for (const key of this.transientTools.keys()) if ((JSON.parse(key) as string[])[0] === runId) this.transientTools.delete(key)
+  }
+
+  releaseCommitted(runId: string): void {
+    for (const [key, model] of this.transientModels) {
+      const owner = (JSON.parse(key) as string[])[0]
+      if (!model.messageId) continue
+      const sourceRun = this.activitySourceRun(owner, model.subagentId)
+      if (owner !== runId && sourceRun !== runId) continue
+      const sourceThread = this.activitySourceThread(owner, model.subagentId)
+      if (this.database.prepare('SELECT 1 FROM agent_message_payloads WHERE thread_id=? AND run_id=? AND message_id=?')
+        .get(sourceThread, sourceRun, model.messageId)) this.transientModels.delete(key)
+    }
+    for (const [key, tool] of this.transientTools) {
+      const [owner, child, id] = JSON.parse(key) as [string, string | null, string]
+      const sourceRun = this.activitySourceRun(owner, child ?? undefined)
+      if (owner !== runId && sourceRun !== runId) continue
+      const row = this.database.prepare('SELECT model_message_id,tool_message_id FROM agent_tool_messages WHERE thread_id=? AND run_id=? AND call_id=?')
+        .get(this.activitySourceThread(owner, child ?? undefined), sourceRun, id) as {
+          model_message_id: string | null; tool_message_id: string | null
+        } | undefined
+      if (row?.model_message_id && (tool.output === undefined || row.tool_message_id)) this.transientTools.delete(key)
+    }
   }
 
   private activitySourceThread(runId:string,subagentId?:string): string {

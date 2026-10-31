@@ -145,6 +145,17 @@ describe('projectTurnTimeline', () => {
     if (finalModel?.type === 'model') expect(finalModel.showText).toBe(false)
   })
 
+  it('places a direction only on the final tool page of a split parallel batch', () => {
+    const run = completedRun()
+    const direction: AgentMessage = { id: 'direction', role: 'user', runId: run.runId,
+      content: [{ type: 'text', text: 'Continue' }], directionAfterToolCallIds: ['first', 'last'] }
+    const makePage = (id: string, sequence: number): AgentRunActivity => ({ ...run, models: [], subagents: [],
+      tools: [{ call: { id, name: 'probe', args: {} }, sequence, status: 'completed' }],
+      activityWindow: { startSequence: sequence, endSequence: sequence, totalCount: 2, hasEarlier: sequence > 1 } })
+    expect(projectRunActivityItems(makePage('first', 1), new Map(), [direction]).filter(item => item.type === 'direction')).toHaveLength(0)
+    expect(projectRunActivityItems(makePage('last', 2), new Map(), [direction]).filter(item => item.type === 'direction')).toHaveLength(1)
+  })
+
   it('places an applied direction after its corresponding tool instead of after the turn input', () => {
     const direction: AgentMessage = {
       id: 'direction-1',

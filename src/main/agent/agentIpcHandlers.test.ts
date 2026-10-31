@@ -100,27 +100,31 @@ describe('agent IPC recovery', () => {
   it('validates activity cursors and confines subagent details to the selected run and thread', async () => {
     const handlers = new Map<string, (...args: unknown[]) => unknown>()
     const handle = vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => { handlers.set(channel, handler) })
-    const loadEarlierActivities = vi.fn(() => ({ runId: 'run', models: [], tools: [], subagents: [] }))
+    const loadActivityPage = vi.fn(() => ({ runId: 'run', models: [], tools: [], subagents: [] }))
     const database = {
       getRun: vi.fn((id: string) => id === 'run' ? { threadId: 'thread' } : undefined),
       getSubagentActivity: vi.fn((_runId: string, id: string) => id === 'child' ? { id: 'child', result: 'complete result' } : undefined)
     }
     vi.doMock('../ipcSecurity', () => ({ handleMainIpc: handle }))
     vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: vi.fn(() => conversationStorage(database)) } }))
-    vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, { loadEarlierActivities }) }) }))
+    vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, { loadActivityPage }) }) }))
     vi.doMock('../config/appConfig', () => ({ getAppConfigSnapshot: vi.fn(), findResolvedModelConfig: vi.fn() }))
     vi.doMock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
     const module = await import('./agentIpcHandlers')
     module.registerAgentIpcHandlers()
-    const earlier = handlers.get('agent:activities:loadEarlier')!
-    expect(earlier({}, { threadId: 'thread', runId: 'run', beforeSequence: 120 })).toEqual({ runId: 'run', models: [], tools: [], subagents: [] })
-    expect(loadEarlierActivities).toHaveBeenCalledExactlyOnceWith({ threadId: 'thread', runId: 'run', beforeSequence: 120 })
+    const earlier = handlers.get('agent:activities:page')!
+    expect(earlier({}, { threadId: 'thread', runId: 'run', before: 120 })).toEqual({ runId: 'run', models: [], tools: [], subagents: [] })
+    expect(loadActivityPage).toHaveBeenCalledExactlyOnceWith({ threadId: 'thread', runId: 'run', before: 120 })
+    earlier({}, { threadId: 'thread', runId: 'run', after: -1, limit: 300 })
+    expect(loadActivityPage).toHaveBeenLastCalledWith({ threadId: 'thread', runId: 'run', after: -1, limit: 300 })
+    expect(() => earlier({}, { threadId: 'thread', runId: 'run', after: -2 })).toThrow()
+    expect(() => earlier({}, { threadId: 'thread', runId: 'run', before: 100, after: -1 })).toThrow()
     for (const beforeSequence of [-1, 1.5, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
-      expect(() => earlier({}, { threadId: 'thread', runId: 'run', beforeSequence })).toThrow()
+      expect(() => earlier({}, { threadId: 'thread', runId: 'run', before: beforeSequence })).toThrow()
     }
     const detail = handlers.get('agent:activities:subagent')!
     const input = { threadId: 'thread', runId: 'run', subagentId: 'child' }
-    expect(detail({}, input)).toEqual({ id: 'child', result: 'complete result' })
+    expect(detail({}, input)).toMatchObject({ id: 'child', result: undefined, detailsDeferred: true, detail: { id: 'child', kind: 'subagent' } })
     expect(() => detail({}, { ...input, threadId: 'other' })).toThrow('another conversation')
     expect(() => detail({}, { ...input, runId: 'missing' })).toThrow('another conversation')
     expect(() => detail({}, { ...input, subagentId: 'missing' })).toThrow('not found')
@@ -690,8 +694,8 @@ describe('agent IPC recovery', () => {
       replay: Array<{ event: unknown }>
     }
     expect(resumedReplay.replay.map(({ event }) => event)).toEqual(expect.arrayContaining([
-      initialDelta,
-      resumedDelta
+      { ...initialDelta, delta: { ...initialDelta.delta, text: '' } },
+      { ...resumedDelta, delta: { ...resumedDelta.delta, text: '' } }
     ]))
     expect(resumedReplay.replay[0]?.event).toMatchObject({ type: 'run_started' })
 
@@ -816,7 +820,7 @@ describe('agent IPC recovery', () => {
       status: 'completed' as const
     }
     let publish!: (event: AgentRuntimeEvent) => void
-    const snapshot = { thread: { id: 'thread-1' } }
+    const snapshot = { thread: { id: 'thread-1' }, messages: [], activities: [] }
     const recoverRun = vi.fn()
       .mockImplementationOnce(() => { publish(recoveryEvent); return { run: { id: recoveryEvent.runId, threadId: recoveryEvent.threadId } } })
       .mockReturnValue(undefined)
@@ -861,12 +865,12 @@ describe('agent IPC recovery', () => {
       once: vi.fn()
     }
 
-    await expect(getThread({ sender }, 'thread-1')).resolves.toBe(snapshot)
-    await expect(getThread({ sender }, 'thread-1')).resolves.toBe(snapshot)
+    await expect(getThread({ sender }, 'thread-1')).resolves.toEqual(snapshot)
+    await expect(getThread({ sender }, 'thread-1')).resolves.toEqual(snapshot)
     await expect(loadEarlier({}, {
       threadId: 'thread-1',
       beforeIndex: 10
-    })).resolves.toBe(snapshot)
+    })).resolves.toEqual(snapshot)
 
     expect(recoverRun).not.toHaveBeenCalled()
     expect(sender.send).not.toHaveBeenCalled()

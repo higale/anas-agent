@@ -11,7 +11,7 @@ export function builtinPanelCanInvoke(panel: BuiltinPanel, channel: string, args
   const input = args[0] as Record<string, unknown> | undefined
   if (channel === 'agent:events:subscribe' || channel === 'agent:changes:cancelRead') return true
   if (channel === 'agent:threads:get') return !!panel.threadId && args[0] === panel.threadId
-  if (channel === 'agent:activities:get' || channel === 'agent:activities:loadEarlier' || channel === 'agent:activities:subagent') {
+  if (['agent:activities:get', 'agent:activities:subagent', 'agent:activities:page', 'agent:activities:detail'].includes(channel)) {
     return panel.kind === 'subagent' && input?.threadId === panel.threadId && input.runId === panel.runId
   }
   if (panel.kind !== 'files') return false

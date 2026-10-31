@@ -37,8 +37,8 @@ export function subagentActivityDetails(run: AgentRunActivity, subagentId: strin
   const currentModel = models
     .filter((model) => model.status === 'running')
     .sort((left, right) => right.sequence - left.sequence)[0]
-  const hasReplyText = Boolean(currentModel?.text.trim())
-  const hasReasoning = Boolean(currentModel?.reasoning.trim())
+  const hasReplyText = Boolean(currentModel?.text.trim() || currentModel?.hasText)
+  const hasReasoning = Boolean(currentModel?.reasoning.trim() || currentModel?.hasReasoning)
 
   return {
     generatingToolName: currentModel?.toolCallProgress?.find((preview) => !preview.complete)?.name,

@@ -5,6 +5,7 @@ import type {
   AgentSubagentActivityStatus,
   AgentThreadSnapshot
 } from '@shared/agentTypes'
+import { boundedDisplayRun } from '@shared/activityDisplay'
 import type { AgentSnapshotReadiness } from './agentSnapshotReadiness'
 import { mergeActivityWindow, mergeSubagentDetails, preserveModelRounds } from './activityPagination'
 
@@ -67,6 +68,7 @@ export function recoveredAgentRunView(
     memoryRecalls: activity?.memoryRecalls ?? [],
     summaries: activity?.summaries ?? [],
     activityWindow: activity?.activityWindow,
+    display: activity?.display,
     interrupts: run.status === 'interrupted' ? snapshot.interrupts : []
   }
 }
@@ -163,7 +165,7 @@ export function reconcileRecoveredAgentRunViews(
     if (existing?.runId === recovered.runId) {
       return {
         ...current,
-        [threadId]: mergeRecoveredRunView(recovered, existing)
+        [threadId]: recovered.display ? boundedDisplayRun(threadId, mergeRecoveredRunView(recovered, existing)) : mergeRecoveredRunView(recovered, existing)
       }
     }
     return { ...current, [threadId]: recovered }

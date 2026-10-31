@@ -13,7 +13,7 @@ describe('built-in panel context boundaries', () => {
     expect(builtinPanelCanInvoke({ kind: 'files', projectId: 'project-a' }, 'agent:changes:rounds', [{}])).toBe(false)
   })
   it('binds activity pagination and deferred details to the selected run', () => {
-    for (const channel of ['agent:activities:get', 'agent:activities:loadEarlier', 'agent:activities:subagent']) {
+    for (const channel of ['agent:activities:get', 'agent:activities:subagent', 'agent:activities:page', 'agent:activities:detail']) {
       expect(builtinPanelCanInvoke(subagent, channel, [{ threadId: 'thread-a', runId: 'run-a' }])).toBe(true)
       expect(builtinPanelCanInvoke(subagent, channel, [{ threadId: 'thread-a', runId: 'run-b' }])).toBe(false)
       expect(builtinPanelCanInvoke(subagent, channel, [{ threadId: 'thread-b', runId: 'run-a' }])).toBe(false)

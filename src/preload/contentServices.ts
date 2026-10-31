@@ -25,8 +25,9 @@ export const contentServices: ContentServices = {
     },
     threads: { get: threadId => ipcRenderer.invoke('agent:threads:get', threadId) },
     activities: {
+      page: input => ipcRenderer.invoke('agent:activities:page', input),
+      detail: input => ipcRenderer.invoke('agent:activities:detail', input),
       get: input => ipcRenderer.invoke('agent:activities:get', input),
-      loadEarlier: input => ipcRenderer.invoke('agent:activities:loadEarlier', input),
       subagent: input => ipcRenderer.invoke('agent:activities:subagent', input)
     },
     onEvent: (listener, synchronize, onError) => subscribeAgentRuntimeEvents(ipcRenderer, listener, { synchronize, onError })

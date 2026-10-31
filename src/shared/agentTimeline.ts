@@ -119,6 +119,7 @@ function finalMessageId(
   messages: AgentMessage[]
 ): string | undefined {
   if (run.status !== 'completed') return undefined
+  if (run.display?.finalMessageId) return run.display.finalMessageId
   const messageId = [...run.models]
     .filter((model) =>
       !model.subagentId
@@ -197,8 +198,8 @@ export function projectRunActivityItems(
       && message.role === 'assistant'
       && message.runId === run.runId
     )
-    if (messageVisible && !model.reasoning) return
-    if (!model.reasoning && !model.text && model.toolCallIds.length === 0 && model.status !== 'running') {
+    if (messageVisible && !model.reasoning && !model.hasReasoning) return
+    if (!model.reasoning && !model.hasReasoning && !model.text && !model.hasText && model.toolCallIds.length === 0 && model.status !== 'running') {
       return
     }
     items.push({
@@ -225,6 +226,7 @@ export function projectRunActivityItems(
     ? run.subagents.some((subagent) => subagent.id === agentId && subagent.status === 'running')
     : run.status === 'running') {
     for (const model of models) {
+      if (model.status !== 'running') continue
       for (const [index, progress] of (model.toolCallProgress ?? []).entries()) {
         const callId = model.toolCallIds[index] ?? progress.callId ?? `${model.id}:draft:${progress.index}`
         if (run.tools.some((tool) => tool.subagentId === agentId && tool.call.id === callId)) continue
@@ -275,7 +277,7 @@ export function projectRunActivityItems(
       })
     }
     const invocation = skillInvocationForRun(run, messages)
-    if (invocation) {
+    if (invocation && !run.activityWindow?.hasEarlier) {
       items.push({
         type: 'skill',
         key: `skill:${run.runId}`,
@@ -298,6 +300,9 @@ export function projectRunActivityItems(
       const matchingSequences = run.tools
         .filter((tool) => toolIds.has(tool.call.id))
         .map((tool) => tool.sequence)
+      // Direction call IDs follow the owning batch order. Only its last tool's
+      // page owns this message when a parallel batch crosses page boundaries.
+      if (run.activityWindow && !run.tools.some(tool => tool.call.id === message.directionAfterToolCallIds!.at(-1))) continue
       items.push({
         type: 'direction',
         key: `direction:${message.id}`,
@@ -326,7 +331,7 @@ function projectRange(
   ) return undefined
   const items = projectRunActivityItems(run, summaryNumbers, messages)
   const finalId = finalMessageId(run, messages)
-  if (items.length === 0 && finalId && !run.activityWindow?.hasEarlier) return undefined
+  if (!run.display && items.length === 0 && finalId && !run.activityWindow?.hasEarlier) return undefined
   return {
     type: 'activity-range',
     key: `range:${run.runId}`,
@@ -334,9 +339,9 @@ function projectRange(
     items,
     finalMessageId: finalId,
     startsExpanded: run.status !== 'completed' || !finalId,
-    modelCount: run.models.filter((model) => !model.subagentId).length,
-    toolCount: visibleToolsForAgent(run).length,
-    subagentCount: run.subagents.filter((subagent) => !subagent.parentSubagentId).length
+    modelCount: run.display?.modelCount ?? run.models.filter((model) => !model.subagentId).length,
+    toolCount: run.display?.toolCount ?? visibleToolsForAgent(run).length,
+    subagentCount: run.display?.subagentCount ?? run.subagents.filter((subagent) => !subagent.parentSubagentId).length
   }
 }
 

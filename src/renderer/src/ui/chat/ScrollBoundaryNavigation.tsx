@@ -28,6 +28,8 @@ type ScrollBoundaryState = {
 
 const boundaryEpsilon = 1
 
+export type ActivityBoundaryRequest = { edge: 'first' | 'latest'; onPosition?(): void }
+
 export function scrollBoundaryState(
   panel: Pick<HTMLElement, 'clientHeight' | 'scrollHeight' | 'scrollTop'>
 ): ScrollBoundaryState {
@@ -219,14 +221,20 @@ export function useScrollBoundaryNavigation({
     if (!panel) return
     followOutputRef.current = false
     setUserInteracted(true)
-    panel.scrollTo({ top: 0, behavior: 'smooth' })
+    if (panel.dispatchEvent(new CustomEvent<ActivityBoundaryRequest>('activity-boundary', { cancelable: true, detail: { edge: 'first' } }))) {
+      panel.scrollTo({ top: 0, behavior: 'instant' })
+    }
   }, [followOutputRef, panelRef])
   const scrollToBottom = useCallback(() => {
     const panel = panelRef.current
     if (!panel) return
-    followOutputRef.current = true
+    followOutputRef.current = false
     setUserInteracted(true)
-    panel.scrollTo({ top: panel.scrollHeight, behavior: 'smooth' })
+    const onPosition = () => { followOutputRef.current = true }
+    if (panel.dispatchEvent(new CustomEvent<ActivityBoundaryRequest>('activity-boundary', { cancelable: true, detail: { edge: 'latest', onPosition } }))) {
+      panel.scrollTo({ top: panel.scrollHeight, behavior: 'instant' })
+      onPosition()
+    }
   }, [followOutputRef, panelRef])
 
   return {

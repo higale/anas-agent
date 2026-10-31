@@ -60,6 +60,72 @@ function config(): SubagentConfig {
 }
 
 describe('run activity windows', () => {
+  it('reads both directions in bounded pages and keeps evicted bodies available from the database', async () => {
+    const h = fixture(), { database } = h
+    try {
+      const thread = database.createThread()
+      const run = await createRun(database, thread.id, 'paged-run')
+      for (let index = 0; index < 750; index++) database.messages.observations.recordMemoryRecall(run.id,
+        { id: `recall-${index}`, query: 'query', promptText: `BODY_${index}`, memoryCount: 1 })
+      const source = database.messages.activities
+      const latest = source.getDisplayPage({ threadId: thread.id, runId: run.id })
+      const first = source.getDisplayPage({ threadId: thread.id, runId: run.id, after: -1 })
+      expect(first.activityWindow).toMatchObject({ startSequence: 0, endSequence: 299, hasEarlier: false, hasLater: true })
+      expect(first.memoryRecalls?.[0].id).toBe('recall-0')
+      expect(latest.activityWindow).toMatchObject({ hasEarlier: true, hasLater: false })
+      const lastFullPage = source.getDisplayPage({ threadId: thread.id, runId: run.id, after: 649, limit: 100 })
+      expect(lastFullPage.activityWindow).toMatchObject({ startSequence: 650, endSequence: 749, hasLater: false })
+      expect(latest.memoryRecalls).toHaveLength(300)
+      expect(latest.activityWindow).toMatchObject({ startSequence: 450, endSequence: 749, totalCount: 750 })
+      const earlier = source.getDisplayPage({ threadId: thread.id, runId: run.id, before: 450, limit: 100 })
+      expect(earlier.activityWindow).toMatchObject({ startSequence: 350, endSequence: 449 })
+      const later = source.getDisplayPage({ threadId: thread.id, runId: run.id, after: 449, limit: 100 })
+      expect(later.memoryRecalls?.map(item => item.id)).toEqual(latest.memoryRecalls!.slice(0, 100).map(item => item.id))
+      expect(source.getDisplayDetail({ threadId: thread.id, runId: run.id, kind: 'memory', id: 'recall-0' })).toEqual({ text: 'BODY_0' })
+      expect(() => source.getDisplayPage({ threadId: 'other', runId: run.id })).toThrow('another conversation')
+      expect(() => source.getDisplayDetail({ threadId: 'other', runId: run.id, kind: 'memory', id: 'recall-0' })).toThrow('another conversation')
+    } finally { h.close() }
+  })
+
+  it('provides complete in-flight reasoning independently of display clients', async () => {
+    const h = fixture(), { database } = h
+    try {
+      const thread = database.createThread()
+      const run = await createRun(database, thread.id, 'stream-run')
+      const observer = database.activityProjection.observer(run.id, thread.id, { push() {} })
+      const modelId = observer.startModel()
+      observer.model({ kind: 'delta', channel: 'reasoning', modelId, text: 'before closing' })
+      observer.model({ kind: 'delta', channel: 'reasoning', modelId, text: ' and after reopening' })
+      expect(database.messages.activities.getDisplayDetail({ threadId: thread.id, runId: run.id, kind: 'model', id: modelId }))
+        .toMatchObject({ reasoning: 'before closing and after reopening' })
+      expect(database.runs.store.load(thread.id)?.messages[0].value.content).toBe('Task')
+    } finally { h.close() }
+  })
+
+  it('reads a child stream from its owner without retaining ancestor copies after commit', async () => {
+    const h = fixture(), { database } = h
+    try {
+      const thread = database.createThread(), run = await createRun(database, thread.id, 'root-stream')
+      const child = database.runs.createSubagentCall({ id: 'stream-child', ownerThreadId: thread.id, parentThreadId: thread.id, parentRunId: run.id,
+        childThreadId: 'child-thread', childRunId: 'child-run', config: config(), description: 'Review', childThread: {} })
+      const observer = database.activityProjection.observer(child.childRunId, child.childThreadId,
+        { push(event) { database.subagentProjection.projectEvent(child, event) } })
+      const modelId = observer.startModel()
+      observer.model({ kind: 'delta', channel: 'reasoning', modelId, text: 'Child live reasoning' })
+      expect(database.messages.activities.getDisplayDetail({ threadId: thread.id, runId: run.id, kind: 'model', id: modelId, subagentId: child.id }))
+        .toMatchObject({ reasoning: 'Child live reasoning' })
+      await database.runs.enter('input', { threadId: child.childThreadId, runId: child.childRunId })
+      const model = { id: modelId, messageId: 'child-answer', status: 'completed' as const, text: 'Answer', reasoning: 'Reason', toolCallIds: [] }
+      database.messages.observations.recordModel(child.childRunId, model)
+      database.subagentProjection.recordProjectedModelActivity(child.id, thread.id, { ...model, subagentId: child.id })
+      await putMessages(database, child.childThreadId, [{ id: model.messageId, value: { kind: 'assistant', content: 'Answer', context: { runId: child.childRunId } } }], child.childRunId)
+      database.messages.observations.releaseCommitted(child.childRunId)
+      expect(database.messages.observations.pendingModel(child.childRunId, modelId)).toBeUndefined()
+      expect(database.messages.observations.pendingModel(run.id, modelId)).toBeUndefined()
+      expect(database.messages.activities.getDisplayDetail({ threadId: thread.id, runId: run.id, kind: 'model', id: modelId, subagentId: child.id })).toMatchObject({ text: 'Answer' })
+    } finally { h.close() }
+  })
+
   it('gives every visible run its own bounded window', async () => {
     const h = fixture(), { database } = h
     try {

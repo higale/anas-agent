@@ -17,7 +17,7 @@ import type { PluginSummary } from '@shared/plugins'
 import { workspacePanelGroup, workspacePanelScope, type WorkspacePanelsController } from './useWorkspacePanels'
 import { WORKSPACE_PANEL_WIDTH_DEFAULT } from '@shared/uiPreferences'
 import { interruptActions } from './agentApproval'
-import { AgentMessageList, type EarlierActivityRequest } from './AgentMessageList'
+import { AgentMessageList } from './AgentMessageList'
 import type { AgentRunView } from './useAgentWorkspace'
 import type { QueuedAgentMessage } from './useQueuedAgentMessages'
 import {
@@ -92,8 +92,6 @@ interface AgentWorkspaceProps {
   onRenameThread(threadId: string, title: string): void | Promise<void>
   onRequestFullAccess(responses: AgentInterruptResponse[]): void
   onLoadEarlierMessages(request: { threadId: string; signal: AbortSignal }): void | Promise<void>
-  onLoadEarlierActivities?(request: EarlierActivityRequest): void | Promise<void>
-  onLoadSubagentDetails?(threadId: string, runId: string, subagentId: string): Promise<void>
   onLoadEarlierError(threadId: string, error: string): void
   onOpenModelSettings(): void | Promise<void>
   onRemoveAttachment(path: string): void
@@ -258,7 +256,6 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
         onEditUserMessage={props.onEditUserMessage}
         onRegenerate={props.onRegenerate}
         onLoadEarlier={props.onLoadEarlierMessages}
-        onLoadEarlierActivities={props.onLoadEarlierActivities}
         onLoadEarlierError={props.onLoadEarlierError}
         onOpenSubagent={openSubagent}
         onSpeak={props.onSpeak}

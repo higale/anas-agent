@@ -1,8 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentMessage, AgentRunActivity } from '@shared/agentTypes'
-import { AgentMessageList, AgentSubagentPanel, type EarlierActivityRequest } from './AgentMessageList'
+import { AgentMessageList, AgentSubagentPanel } from './AgentMessageList'
 import { AgentSubagentActivityTrigger } from './AgentSubagentActivityDock'
+import { PanelViewState } from './PanelViewState'
 import { backgroundCleanupCompleted, backgroundCleanupStarted, backgroundTasksPendingError } from '@shared/backgroundCleanup'
 
 vi.mock('react-i18next', () => ({
@@ -163,6 +164,92 @@ describe('AgentMessageList tool disclosure', () => {
     fireEvent.click(details.querySelector('summary')!)
     fireEvent(details, new Event('toggle'))
   }
+
+  it.each([false, true])('unmounts closed reasoning and reopens the latest text (retained panel=%s)', (retained) => {
+    const run = activity('running')
+    run.models = [{ id: 'model', sequence: 0, status: 'running', text: '', reasoning: 'Initial reasoning', toolCallIds: [] }]
+    const state = new Map<string, unknown>()
+    const content = () => {
+      const list = <AgentMessageList title="Thread" messages={messages} activities={[{ ...run }]}
+        panelRef={{ current: null }} followOutputRef={{ current: true }} speech={{ status: 'idle' }} onSpeak={vi.fn()} />
+      return retained ? <PanelViewState state={state}>{list}</PanelViewState> : list
+    }
+    const view = render(content())
+    const details = view.container.querySelector<HTMLDetailsElement>('.agent-activity-reasoning')!
+    expect(details.querySelector('pre')).toHaveTextContent('Initial reasoning')
+    expand(details)
+    expect(details.open).toBe(false)
+    expect(details.querySelector('pre')).toBeNull()
+    run.models[0] = { ...run.models[0], reasoning: 'Initial reasoning followed by streamed text' }
+    view.rerender(content())
+    expect(details.querySelector('pre')).toBeNull()
+    expand(details)
+    expect(details.querySelector('pre')).toHaveTextContent('Initial reasoning followed by streamed text')
+    run.models[0] = { ...run.models[0], status: 'completed' }
+    view.rerender(content())
+    expect(details.open).toBe(false)
+    expect(details.querySelector('pre')).toBeNull()
+    expand(details)
+    view.rerender(content())
+    expect(details.querySelector('pre')).toHaveTextContent('Initial reasoning followed by streamed text')
+  })
+
+  it('mounts only the expanded memory entry even with hundreds of collapsed entries', () => {
+    const run = activity('running')
+    run.memoryRecalls = Array.from({ length: 300 }, (_, index) => ({
+      id: `recall-${index}`, sequence: index + 2, query: '', promptText: `MEMORY_${index}`, memoryCount: 1,
+      createdAt: run.createdAt
+    }))
+    const view = render(<AgentMessageList title="Thread" messages={messages} activities={[run]}
+      panelRef={{ current: null }} followOutputRef={{ current: true }} speech={{ status: 'idle' }} onSpeak={vi.fn()} />)
+    const entries = view.container.querySelectorAll<HTMLDetailsElement>('.agent-activity-memory-recall')
+    expect(entries).toHaveLength(300)
+    expect(view.container.querySelectorAll('pre')).toHaveLength(0)
+    expand(entries[123])
+    expect(view.container.querySelectorAll('pre')).toHaveLength(1)
+    expect(entries[123].querySelector('pre')).toHaveTextContent('MEMORY_123')
+    expand(entries[123])
+    expect(view.container.querySelectorAll('pre')).toHaveLength(0)
+  })
+
+  it('unmounts summary Markdown on completion and reads updated content on reopening', () => {
+    const run = activity('running')
+    run.summaries = [{ id: 'summary', sequence: 2, status: 'running', summaryText: '**SUMMARY_BODY**', createdAt: run.createdAt }]
+    const content = () => <AgentMessageList title="Thread" messages={messages} activities={[{ ...run }]}
+      panelRef={{ current: null }} followOutputRef={{ current: true }} speech={{ status: 'idle' }} onSpeak={vi.fn()} />
+    const view = render(content())
+    const details = view.container.querySelector<HTMLDetailsElement>('.agent-context-summary')!
+    expect(details.querySelector('strong')).toHaveTextContent('SUMMARY_BODY')
+    run.summaries[0] = { ...run.summaries[0], status: 'completed' }
+    view.rerender(content())
+    expect(details.open).toBe(false)
+    expect(details.querySelector('strong')).toBeNull()
+    run.summaries[0] = { ...run.summaries[0], summaryText: '**UPDATED_SUMMARY**' }
+    view.rerender(content())
+    expand(details)
+    expect(details.querySelector('strong')).toHaveTextContent('UPDATED_SUMMARY')
+    expand(details)
+    expect(details.querySelector('strong')).toBeNull()
+  })
+
+  it('releases nested tool bodies and restores their expansion choices when the tool reopens', () => {
+    const run = activity('completed')
+    const serialize = vi.fn(() => ({ body: 'TOOL_BODY' }))
+    run.tools[0].output = { toJSON: serialize }
+    const view = render(<PanelViewState><AgentMessageList title="Thread" messages={messages} activities={[run]}
+      panelRef={{ current: null }} followOutputRef={{ current: true }} speech={{ status: 'idle' }} onSpeak={vi.fn()} /></PanelViewState>)
+    const card = view.container.querySelector<HTMLDetailsElement>('.agent-activity-tool')!
+    expand(card)
+    expand(card.querySelector<HTMLDetailsElement>('.agent-activity-result')!)
+    expect(card.querySelector('pre')).toHaveTextContent('TOOL_BODY')
+    expect(serialize).toHaveBeenCalledTimes(1)
+    expand(card)
+    expect(card.querySelector('.agent-activity-result')).toBeNull()
+    expect(card.querySelector('pre')).toBeNull()
+    expand(card)
+    expect(card.querySelector('pre')).toHaveTextContent('TOOL_BODY')
+    expect(serialize).toHaveBeenCalledTimes(2)
+  })
 
   it('labels native patch calls in the live timeline and reopened history', () => {
     const run = activity('running')
@@ -344,42 +431,6 @@ describe('AgentMessageList tool disclosure', () => {
     expect(screen.queryByText('round 1', { exact: true })).toBeNull()
   })
 
-  it('loads an earlier activity page for its run and aborts it when changing threads', async () => {
-    const run = activity('running')
-    run.activityWindow = { startSequence: 100, endSequence: 199, totalCount: 200, hasEarlier: true }
-    let release!: () => void
-    const load = vi.fn((_request: EarlierActivityRequest) => new Promise<void>((resolve) => { release = resolve }))
-    const props = { title: 'Thread', messages, activities: [run], panelRef: { current: null }, followOutputRef: { current: true },
-      speech: { status: 'idle' as const }, onSpeak: vi.fn(), onLoadEarlierActivities: load }
-    const { rerender } = render(<AgentMessageList {...props} navigationKey="thread-1" />)
-    const button = screen.getByRole('button', { name: 'agent.load_earlier_activities' })
-    fireEvent.click(button)
-    expect(button).toBeDisabled()
-    expect(load).toHaveBeenCalledWith({ threadId: 'thread-1', runId: run.runId, signal: expect.any(AbortSignal) })
-    const signal = load.mock.calls[0][0].signal
-    rerender(<AgentMessageList {...props} navigationKey="thread-2" />)
-    expect(signal.aborted).toBe(true)
-    await act(async () => { release() })
-    expect(screen.getByRole('button', { name: 'agent.load_earlier_activities' })).toBeEnabled()
-  })
-
-  it('requests deferred subagent details only when its panel opens and renders the completed result', async () => {
-    const run = activity('completed')
-    run.subagents = [{ id: 'child', name: 'Child', sequence: 2, status: 'completed', detailsDeferred: true }]
-    let release!: () => void
-    const load = vi.fn(() => new Promise<void>((resolve) => { release = resolve }))
-    const { rerender } = render(<AgentSubagentPanel run={run} threadId="thread-1" subagentId="child" onLoadSubagentDetails={load} />)
-    await waitFor(() => expect(load).toHaveBeenCalledWith('thread-1', run.runId, 'child'))
-    expect(document.querySelector('.agent-subagent-result')).toBeNull()
-    rerender(<AgentSubagentPanel run={{ ...run, subagents: [{ ...run.subagents[0], name: 'Updated child name' }] }}
-      threadId="thread-1" subagentId="child" onLoadSubagentDetails={load} />)
-    expect(load).toHaveBeenCalledTimes(1)
-    await act(async () => { release() })
-    rerender(<AgentSubagentPanel run={{ ...run, subagents: [{ ...run.subagents[0], detailsDeferred: false, result: 'FULL_CHILD_RESULT' }] }}
-      threadId="thread-1" subagentId="child" onLoadSubagentDetails={load} />)
-    expect(document.querySelector('.agent-subagent-result')).toHaveTextContent('FULL_CHILD_RESULT')
-  })
-
   it.each([false, true])('only permits expansion after complete arguments arrive (late ID=%s)', (lateId) => {
     const props = {
       title: 'Thread', messages, panelRef: { current: null }, followOutputRef: { current: true },
@@ -521,6 +572,7 @@ describe('AgentMessageList tool disclosure', () => {
       .toHaveTextContent('DELEGATION_DESCRIPTION')
     expect(document.querySelector('.agent-activity-result'))
       .toHaveTextContent('subagent-completed')
+    expand(document.querySelector<HTMLDetailsElement>('.agent-subagent-result')!)
     expect(document.querySelector('.agent-subagent-result'))
       .toHaveTextContent('SUBAGENT_FINAL_RESULT')
   })
@@ -543,6 +595,8 @@ describe('AgentMessageList tool disclosure', () => {
     )
 
     expect(screen.getByText(/Failed/)).toBeInTheDocument()
+    expect(screen.queryByText('SUBAGENT_FAILURE')).toBeNull()
+    expand(document.querySelector<HTMLDetailsElement>('.agent-subagent-error')!)
     expect(screen.getByText('SUBAGENT_FAILURE')).toBeInTheDocument()
     expect(document.querySelector('.agent-subagent-error')).not.toBeNull()
   })
@@ -565,6 +619,8 @@ describe('AgentMessageList tool disclosure', () => {
     )
 
     expect(screen.getByText(/Recovery error/)).toBeInTheDocument()
+    expect(screen.queryByText('SUBAGENT_RECOVERY_FAILURE')).toBeNull()
+    expand(document.querySelector<HTMLDetailsElement>('.agent-subagent-error')!)
     expect(screen.getByText('SUBAGENT_RECOVERY_FAILURE')).toBeInTheDocument()
     expect(screen.queryByText(/^Failed$/)).not.toBeInTheDocument()
   })

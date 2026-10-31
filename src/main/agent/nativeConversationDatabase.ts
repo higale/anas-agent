@@ -152,12 +152,12 @@ export class NativeConversationDatabase {
     assertCleanupStorageIntegrity(this.database)
   }
 
-  readActivityWindow(threadId: string, runId: string, beforeSequence: number, options: NativeSnapshotOptions = {}): AgentRunActivity {
+  readActivityWindow(threadId: string, runId: string, beforeSequence: number, options: NativeSnapshotOptions = {}, page?: import('../../shared/agentTypes').AgentActivityPageInput): AgentRunActivity {
     if (!Number.isSafeInteger(beforeSequence) || beforeSequence < 0) throw new Error('The activity window cursor is invalid.')
     return this.database.transaction(() => {
       const run = this.messages.activities.getRun(runId)
       if (!run || run.threadId !== threadId) throw new Error(`Run ${runId} was not found in thread ${threadId}.`)
-      const activity = this.messages.activities.getRunActivityWindow(runId, { beforeSequence })
+      const activity = page ? this.messages.activities.getDisplayPage(page) : this.messages.activities.getRunActivityWindow(runId, { beforeSequence })
       const normalized = normalizeRootActivityProjection(activity, rootActivityEvidence(this.messages.activityMessages(runId, activity), runId),
         options.executingRunId === runId, new RunActivityMetadata(this.database).canonicalChildren(runId), options.activeSubagentIds)
       return this.decorateActivity(normalized, options)

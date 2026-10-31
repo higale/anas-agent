@@ -1419,8 +1419,6 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
         onRenameThread={agent.renameThread}
         onRequestFullAccess={requestApprovalFullAccess}
         onLoadEarlierMessages={({ threadId, signal }) => agent.loadEarlierMessages(threadId, signal)}
-        onLoadEarlierActivities={({ threadId, runId, signal }) => agent.loadEarlierActivities(threadId, runId, signal)}
-        onLoadSubagentDetails={agent.loadSubagentDetails}
         onLoadEarlierError={agent.setThreadError}
         onOpenModelSettings={openModelSettings}
         onRemoveAttachment={removeAttachment}

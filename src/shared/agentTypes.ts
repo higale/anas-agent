@@ -140,6 +140,7 @@ export interface AgentToolApproval {
 }
 
 export interface AgentSkillInvocation {
+  detail?: AgentActivityDetailReference
   name: string
   sourceAlias?: string
   args: string
@@ -147,6 +148,8 @@ export interface AgentSkillInvocation {
 }
 
 export interface AgentToolActivity {
+  detail?: AgentActivityDetailReference
+  freeform?: boolean
   call: AgentToolCall
   sequence: number
   status: 'running' | 'completed'
@@ -167,6 +170,9 @@ export interface AgentToolCallProgress {
 }
 
 export interface AgentModelActivity {
+  detail?: AgentActivityDetailReference
+  hasText?: boolean
+  hasReasoning?: boolean
   recovery?: import('./modelRecovery').ModelRecoveryState
   id: string
   messageId?: string
@@ -192,6 +198,9 @@ export type AgentSubagentActivityStatus =
   | 'cancelled'
 
 export interface AgentSubagentActivity {
+  delegation?: AgentToolActivity
+  activityCounts?: { modelCount: number; toolCount: number; subagentCount: number; lastSequence?: number }
+  detail?: AgentActivityDetailReference
   id: string
   name: string
   sequence: number
@@ -205,6 +214,7 @@ export interface AgentSubagentActivity {
 }
 
 export interface AgentContextSummary {
+  detail?: AgentActivityDetailReference
   id: string
   sequence: number
   status: 'running' | 'completed'
@@ -219,6 +229,7 @@ export interface AgentContextSummary {
 }
 
 export interface AgentMemoryRecall {
+  detail?: AgentActivityDetailReference
   id: string
   sequence: number
   query: string
@@ -229,6 +240,7 @@ export interface AgentMemoryRecall {
 }
 
 export interface AgentRunActivity {
+  display?: { modelCount: number; toolCount: number; subagentCount: number; lastSequence?: number; finalMessageId?: string }
   runId: string
   operation: AgentRun['operation']
   status: AgentRunStatus
@@ -246,6 +258,7 @@ export interface AgentRunActivity {
     endSequence: number | null
     totalCount: number
     hasEarlier: boolean
+    hasLater?: boolean
   }
 }
 
@@ -405,6 +418,29 @@ export interface AgentActivityWindowInput {
   beforeSequence: number
 }
 
+export interface AgentActivityDetailReference extends AgentRunReferenceInput {
+  kind: 'model' | 'tool' | 'summary' | 'memory' | 'skill' | 'subagent'
+  id: string
+  subagentId?: string
+}
+
+export interface AgentActivityPageInput extends AgentRunReferenceInput {
+  subagentId?: string
+  before?: number
+  /** -1 reads from the beginning, including sequence 0. */
+  after?: number
+  limit?: number
+}
+
+export interface AgentActivityDetail {
+  text?: string
+  reasoning?: string
+  args?: unknown
+  output?: unknown
+  result?: unknown
+  error?: string
+}
+
 export interface AgentMessageEditResult {
   snapshot: AgentThreadSnapshot
   attachments: SelectedAttachment[]
@@ -538,8 +574,9 @@ export interface AgentApi {
     loadEarlier(input: AgentMessageWindowInput): Promise<AgentThreadSnapshot>
   }
   activities: {
+    page(input: AgentActivityPageInput): Promise<AgentRunActivity>
+    detail(input: AgentActivityDetailReference & { field?: keyof AgentActivityDetail }): Promise<AgentActivityDetail>
     get(input: AgentRunReferenceInput): Promise<AgentRunActivity>
-    loadEarlier(input: AgentActivityWindowInput): Promise<AgentRunActivity>
     subagent(input: AgentRunReferenceInput & { subagentId: string }): Promise<AgentSubagentActivity>
   }
   context: {

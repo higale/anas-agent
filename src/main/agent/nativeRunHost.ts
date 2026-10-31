@@ -302,6 +302,10 @@ export class NativeRunHost {
     return this.database.readActivityWindow(threadId, runId, beforeSequence, this.snapshotOptions(threadId))
   }
 
+  loadActivityPage(input: import('../../shared/agentTypes').AgentActivityPageInput) {
+    return this.database.readActivityWindow(input.threadId, input.runId, input.before ?? Number.MAX_SAFE_INTEGER, this.snapshotOptions(input.threadId), input)
+  }
+
   async readSnapshotWithPreviews(threadId: string, primaryFolder?: string, startIndex?: number) {
     for (let attempt = 0; attempt < 3; attempt++) {
       const options = this.snapshotOptions(threadId, startIndex)

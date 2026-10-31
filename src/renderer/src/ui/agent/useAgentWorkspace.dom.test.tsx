@@ -298,12 +298,12 @@ describe('useAgentWorkspace startup restoration', () => {
     vi.restoreAllMocks()
   })
 
-  it('atomically keeps live activities when the completed snapshot tail has moved past the cached prefix', async () => {
+  it('releases live activity records when the completed snapshot arrives', async () => {
     const initial = activitySnapshot(0, 4)
     const api = installAgentApi({ mode: 'thread', threadId: thread.id })
     api.getThread.mockResolvedValue(initial)
     const { result } = renderHook(() => useAgentWorkspace({ onAppError: vi.fn() }))
-    await waitFor(() => expect(result.current.activeRun?.models).toHaveLength(5))
+    await waitFor(() => expect(result.current.activeRun?.display).toBeDefined())
     const completed = activitySnapshot(110, 209, 'completed')
     act(() => {
       for (const model of activitySnapshot(5, 209).activities[0].models) {
@@ -313,10 +313,11 @@ describe('useAgentWorkspace startup restoration', () => {
     })
     expect(result.current.activeRun).toBeUndefined()
     expect(result.current.activeSnapshot?.activities[0].models.map((model) => model.sequence))
-      .toEqual(Array.from({ length: 210 }, (_, sequence) => sequence))
+      .toEqual([])
+    expect(result.current.activeSnapshot?.activities[0].display).toBeDefined()
   })
 
-  it('keeps an older tool completion when terminal projection arrives in the same React batch', async () => {
+  it('does not retain tool bodies when completion and terminal projection share a React batch', async () => {
     const initial = activitySnapshot(0, 0)
     const call = { id: 'old-tool', name: 'test', args: {} }
     initial.activities[0].tools = [{ call, sequence: 1, status: 'running' }]
@@ -329,11 +330,11 @@ describe('useAgentWorkspace startup restoration', () => {
       api.emit({ type: 'tool_completed', runId: 'run-1', threadId: thread.id, call, sequence: 1, output: 'COMPLETE_OUTPUT', completedAt: 'finished' })
       api.emit({ type: 'run_completed', run: { ...initial.pendingRun!, status: 'completed' }, snapshot: activitySnapshot(101, 200, 'completed') })
     })
-    expect(result.current.activeSnapshot?.activities[0].tools[0])
-      .toMatchObject({ status: 'completed', output: 'COMPLETE_OUTPUT' })
+    expect(result.current.activeSnapshot?.activities[0].tools).toEqual([])
+    expect(JSON.stringify(result.current.activeSnapshot)).not.toContain('COMPLETE_OUTPUT')
   })
 
-  it('retains the last live completion while loading a missing terminal snapshot', async () => {
+  it('keeps a run summary without activity bodies while loading a missing terminal snapshot', async () => {
     const initial = activitySnapshot(0, 0)
     const api = installAgentApi({ mode: 'thread', threadId: thread.id })
     api.getThread.mockResolvedValue(initial)
@@ -346,135 +347,10 @@ describe('useAgentWorkspace startup restoration', () => {
       api.emit({ type: 'run_completed', run: { ...initial.pendingRun!, status: 'completed' } })
     })
     expect(result.current.activeRun).toBeUndefined()
-    expect(result.current.activeSnapshot?.activities[0].models.map((model) => model.sequence)).toEqual([0, 5])
+    expect(result.current.activeSnapshot?.activities[0].models).toEqual([])
     await act(async () => { resolveSnapshot(activitySnapshot(101, 200, 'completed')) })
-    expect(result.current.activeSnapshot?.activities[0].models.some((model) => model.sequence === 5)).toBe(true)
+    expect(result.current.activeSnapshot?.activities[0].models).toEqual([])
     expect(result.current.activeSnapshot?.activities[0].activityWindow?.hasEarlier).toBe(true)
-  })
-
-  it('retains loaded activity pages and their cursor when a running turn pauses for approval', async () => {
-    const initial = activitySnapshot(100, 199)
-    const api = installAgentApi({ mode: 'thread', threadId: thread.id })
-    api.getThread.mockResolvedValue(initial)
-    api.loadEarlierActivities.mockResolvedValue(activitySnapshot(50, 99).activities[0])
-    const { result } = renderHook(() => useAgentWorkspace({ onAppError: vi.fn() }))
-    await waitFor(() => expect(result.current.activeRun?.activityWindow?.startSequence).toBe(100))
-    await act(() => result.current.loadEarlierActivities(thread.id, 'run-1', new AbortController().signal))
-    const paused = interruptedSnapshot('generation')
-    paused.activities = [{ ...initial.activities[0], status: 'interrupted' }]
-    act(() => api.emit({ type: 'run_interrupted', run: paused.pendingRun!, interrupts: paused.interrupts, snapshot: paused }))
-    expect(result.current.activeRun?.status).toBe('interrupted')
-    expect(result.current.activeRun?.models).toHaveLength(150)
-    expect(result.current.activeRun?.activityWindow).toMatchObject({ startSequence: 50, endSequence: 199, hasEarlier: true })
-    api.loadEarlierActivities.mockResolvedValue(activitySnapshot(0, 49).activities[0])
-    await act(() => result.current.loadEarlierActivities(thread.id, 'run-1', new AbortController().signal))
-    expect(api.loadEarlierActivities).toHaveBeenLastCalledWith({ threadId: thread.id, runId: 'run-1', beforeSequence: 50 })
-    expect(result.current.activeRun?.models).toHaveLength(200)
-    expect(result.current.activeRun?.activityWindow?.hasEarlier).toBe(false)
-  })
-
-  it('loads a missed event interval after background refresh instead of hiding its pagination', async () => {
-    const initial = activitySnapshot(0, 4)
-    const api = installAgentApi({ mode: 'thread', threadId: thread.id })
-    api.getThread.mockResolvedValue(initial)
-    const { result } = renderHook(() => useAgentWorkspace({ onAppError: vi.fn() }))
-    await waitFor(() => expect(result.current.activeRun?.models).toHaveLength(5))
-    api.getThread.mockResolvedValue(activitySnapshot(110, 209))
-    await act(() => api.acknowledgeSubscription())
-    expect(result.current.activeRun?.models).toHaveLength(105)
-    expect(result.current.activeRun?.activityWindow).toMatchObject({ startSequence: 110, hasEarlier: true })
-    api.loadEarlierActivities.mockResolvedValue(activitySnapshot(10, 109).activities[0])
-    await act(() => result.current.loadEarlierActivities(thread.id, 'run-1', new AbortController().signal))
-    expect(api.loadEarlierActivities).toHaveBeenLastCalledWith({ threadId: thread.id, runId: 'run-1', beforeSequence: 110 })
-    expect(result.current.activeRun?.activityWindow).toMatchObject({ startSequence: 10, hasEarlier: true })
-    api.loadEarlierActivities.mockResolvedValue(activitySnapshot(0, 9).activities[0])
-    await act(() => result.current.loadEarlierActivities(thread.id, 'run-1', new AbortController().signal))
-    expect(result.current.activeRun?.models).toHaveLength(210)
-    expect(result.current.activeRun?.activityWindow?.hasEarlier).toBe(false)
-  })
-
-  it('opens the persisted thread and restores its model metadata', async () => {
-    const api = installAgentApi({ mode: 'thread', threadId: thread.id })
-    const onAppError = vi.fn()
-    const { result } = renderHook(() => useAgentWorkspace({ onAppError }))
-
-    await waitFor(() => expect(result.current.loadingThreads).toBe(false))
-
-    expect(result.current.activeThreadId).toBe(thread.id)
-    expect(result.current.activeThread).toMatchObject({
-      modelConfigId: 'model-2',
-      modelParameterPresetId: 'thinking-on'
-    })
-    expect(api.getThread).toHaveBeenCalledWith(thread.id)
-    expect(api.recover).toHaveBeenCalledWith(thread.id)
-    expect(api.setWorkspace).not.toHaveBeenCalled()
-
-    await act(() => result.current.setAccessMode(thread.id, 'strict_approval'))
-    expect(api.setAccessMode).toHaveBeenCalledWith(thread.id, 'strict_approval')
-    expect(result.current.activeThread?.accessMode).toBe('strict_approval')
-  })
-
-  it('prepends older activities without dropping live values and preserves loaded pages on refresh', async () => {
-    const initial = runningSnapshot('tail')
-    initial.activities[0].models[0].sequence = 100
-    initial.activities[0].activityWindow = { startSequence: 100, endSequence: 199, totalCount: 200, hasEarlier: true }
-    const api = installAgentApi({ mode: 'thread', threadId: thread.id })
-    api.getThread.mockResolvedValue(initial)
-    const { result } = renderHook(() => useAgentWorkspace({ onAppError: vi.fn() }))
-    await waitFor(() => expect(result.current.activeRun?.activityWindow?.startSequence).toBe(100))
-    let resolvePage!: (value: AgentRunActivity) => void
-    api.loadEarlierActivities.mockImplementation(() => new Promise((resolve) => { resolvePage = resolve }))
-    let loading!: Promise<void>
-    act(() => { loading = result.current.loadEarlierActivities(thread.id, 'run-1', new AbortController().signal) })
-    act(() => api.emit({ type: 'model_delta', runId: 'run-1', threadId: thread.id, modelId: 'model-1', delta: { type: 'text', text: ' live' } }))
-    const earlier: AgentRunActivity = { ...initial.activities[0],
-      models: [{ ...initial.activities[0].models[0], id: 'old-model', sequence: 0, text: 'old' }, initial.activities[0].models[0]],
-      activityWindow: { startSequence: 0, endSequence: 99, totalCount: 200, hasEarlier: false } }
-    await act(async () => { resolvePage(earlier); await loading })
-    expect(api.loadEarlierActivities).toHaveBeenCalledWith({ threadId: thread.id, runId: 'run-1', beforeSequence: 100 })
-    expect(result.current.activeRun?.models.map((model) => model.text)).toEqual(['old', 'tail live'])
-    await act(() => api.acknowledgeSubscription())
-    expect(result.current.activeSnapshot?.activities[0].models.map((model) => model.id)).toEqual(['old-model', 'model-1'])
-    expect(result.current.activeRun?.models.map((model) => model.text)).toEqual(['old', 'tail live'])
-    expect(result.current.activeRun?.activityWindow?.hasEarlier).toBe(false)
-  })
-
-  it('discards an aborted earlier activity request', async () => {
-    const initial = runningSnapshot('tail')
-    initial.activities[0].activityWindow = { startSequence: 100, endSequence: 199, totalCount: 200, hasEarlier: true }
-    const api = installAgentApi({ mode: 'thread', threadId: thread.id })
-    api.getThread.mockResolvedValue(initial)
-    const { result } = renderHook(() => useAgentWorkspace({ onAppError: vi.fn() }))
-    await waitFor(() => expect(result.current.activeRun).toBeDefined())
-    let resolvePage!: (value: AgentRunActivity) => void
-    api.loadEarlierActivities.mockImplementation(() => new Promise((resolve) => { resolvePage = resolve }))
-    const controller = new AbortController()
-    let loading!: Promise<void>
-    act(() => { loading = result.current.loadEarlierActivities(thread.id, 'run-1', controller.signal) })
-    controller.abort()
-    await act(async () => {
-      resolvePage({ ...initial.activities[0], models: [], activityWindow: { startSequence: 0, endSequence: 99, totalCount: 200, hasEarlier: false } })
-      await expect(loading).rejects.toMatchObject({ name: 'AbortError' })
-    })
-    expect(result.current.activeRun?.activityWindow?.startSequence).toBe(100)
-  })
-
-  it('does not replace a newly completed child with a late running detail response', async () => {
-    const initial = runningSnapshot('tail')
-    const child: AgentSubagentActivity = { id: 'child', name: 'Child', sequence: 2, status: 'running', detailsDeferred: true }
-    initial.activities[0].subagents = [child]
-    const api = installAgentApi({ mode: 'thread', threadId: thread.id })
-    api.getThread.mockResolvedValue(initial)
-    const { result } = renderHook(() => useAgentWorkspace({ onAppError: vi.fn() }))
-    await waitFor(() => expect(result.current.activeRun?.subagents).toHaveLength(1))
-    let resolveDetails!: (value: AgentSubagentActivity) => void
-    api.loadSubagentDetails.mockImplementation(() => new Promise((resolve) => { resolveDetails = resolve }))
-    let loading!: Promise<void>
-    act(() => { loading = result.current.loadSubagentDetails(thread.id, 'run-1', 'child') })
-    act(() => api.emit({ type: 'subagent_updated', runId: 'run-1', threadId: thread.id,
-      subagent: { ...child, status: 'completed', completedAt: 'finished', detailsDeferred: false, result: 'complete result' } }))
-    await act(async () => { resolveDetails({ ...child, detailsDeferred: false }); await loading })
-    expect(result.current.activeRun?.subagents[0]).toMatchObject({ status: 'completed', completedAt: 'finished', result: 'complete result' })
   })
 
   it('restores and updates a new thread that has no conversation record yet', async () => {
@@ -558,7 +434,7 @@ describe('useAgentWorkspace startup restoration', () => {
     const onAppError = vi.fn()
     const { result } = renderHook(() => useAgentWorkspace({ onAppError }))
 
-    await waitFor(() => expect(result.current.activeRun?.models[0]?.text).toBe('durable prefix'))
+    await waitFor(() => expect(result.current.activeRun?.models[0]).toMatchObject({ text: '', hasText: true }))
     act(() => api.emit({
       type: 'model_delta',
       runId: 'run-1',
@@ -566,7 +442,7 @@ describe('useAgentWorkspace startup restoration', () => {
       modelId: 'model-1',
       delta: { type: 'text', text: ' plus live delta' }
     }))
-    expect(result.current.activeRun?.models[0]?.text).toBe('durable prefix plus live delta')
+    expect(result.current.activeRun?.models[0]).toMatchObject({ text: '', hasText: true })
 
     act(() => api.emit({
       type: 'run_recovery_failed',
@@ -580,7 +456,7 @@ describe('useAgentWorkspace startup restoration', () => {
       status: 'running',
       error: 'Recovery unavailable'
     })
-    expect(result.current.activeRun?.models[0]?.text).toBe('durable prefix plus live delta')
+    expect(result.current.activeRun?.models[0]).toMatchObject({ text: '', hasText: true })
   })
 
   it('settles live child projections when a terminal subagent update arrives', async () => {
@@ -646,7 +522,7 @@ describe('useAgentWorkspace startup restoration', () => {
     }))
 
     expect(result.current.activeRun?.models.find((model) => model.id === 'child-model'))
-      .toMatchObject({ status: 'completed', text: 'Partial child work', completedAt })
+      .toMatchObject({ status: 'completed', text: '', hasText: true, completedAt })
     const childTool = result.current.activeRun?.tools.find((tool) => tool.call.id === 'child-tool')
     expect(childTool).toMatchObject({ status: 'completed', completedAt })
     expect(childTool).not.toHaveProperty('approval')
@@ -722,7 +598,7 @@ describe('useAgentWorkspace startup restoration', () => {
     const onAppError = vi.fn()
     const { result } = renderHook(() => useAgentWorkspace({ onAppError }))
 
-    await waitFor(() => expect(result.current.activeRun?.models[0]?.text).toBe('before subscription'))
+    await waitFor(() => expect(result.current.activeRun?.models[0]).toMatchObject({ text: '', hasText: true }))
     await act(() => api.acknowledgeSubscription())
 
     await waitFor(() => expect(result.current.activeRun).toBeUndefined())

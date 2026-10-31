@@ -2,6 +2,9 @@ import type Database from 'better-sqlite3'
 import type { AgentRun, AgentRunStatus, AgentRunActivity, AgentSubagentActivity, AgentModelActivity,
   AgentToolActivity, AgentToolCall, AgentContextSummary, AgentMemoryRecall } from '../../shared/agentTypes'
 import { modelRoundSql } from './runActivityMetadata'
+import type { AgentActivityPageInput, AgentActivityDetailReference, AgentActivityDetail } from '../../shared/agentTypes'
+import { decodeExecutionValue } from '../../runtime/executionValue'
+import { activityInitialSize } from '../../shared/activityDisplay'
 
 export interface ActivityPayloadReader {
   model(runId: string, modelId: string, messageId: string | undefined, subagentId?: string): Pick<AgentModelActivity, 'text' | 'reasoning' | 'reasoningSummary' | 'toolCallIds' | 'recovery'>
@@ -198,6 +201,35 @@ export class RunActivityReader {
     return this.readActivities(run.threadId, [runId], before)[0]
   }
 
+  getDisplayPage(input: AgentActivityPageInput): AgentRunActivity {
+    const run = this.requireRun(input.runId)
+    if (run.threadId !== input.threadId) throw new Error('Activity run belongs to another conversation.')
+    return this.readActivities(input.threadId, [input.runId], input.before ?? Number.MAX_SAFE_INTEGER,
+      input.limit ?? activityInitialSize, input.after, input.subagentId ?? null)[0]
+  }
+
+  getDisplayDetail(input: AgentActivityDetailReference): AgentActivityDetail {
+    const run = this.requireRun(input.runId)
+    if (run.threadId !== input.threadId) throw new Error('Activity run belongs to another conversation.')
+    if (input.kind === 'model') {
+      const model = this.getModelActivity(input.runId, input.id)
+      if (model && model.subagentId === input.subagentId) return { text: model.text, reasoning: model.reasoning }
+    } else if (input.kind === 'tool') {
+      const tool = this.getToolActivity(input.runId, input.id, input.subagentId)
+      if (tool) return { args: tool.call.args, output: tool.output }
+    } else if (input.kind === 'subagent') {
+      const child = this.getSubagentActivity(input.runId, input.id)
+      if (child) return { result: child.result, error: child.error }
+    } else if (input.kind === 'summary' || input.kind === 'memory') {
+      const query = input.kind === 'summary'
+        ? 'SELECT summary_text AS text FROM agent_context_summaries WHERE run_id=? AND summary_id=?'
+        : 'SELECT prompt_text AS text FROM agent_memory_recalls WHERE run_id=? AND recall_id=?'
+      const result = this.database.prepare(query).get(input.runId, input.id) as { text: string } | undefined
+      if (result) return result
+    }
+    throw new Error('Activity detail was not found.')
+  }
+
   getModelActivity(runId: string, modelId: string): AgentModelActivity | undefined {
     const row = this.database.prepare(`
       SELECT model.run_id, model.model_id, message.message_id, model.sequence, ${modelRoundSql} AS model_round,
@@ -232,7 +264,23 @@ export class RunActivityReader {
     const status = row.subagent_status ?? projected.status
     const result = row.subagent_status ? row.subagent_result_text ?? undefined : projected.result
     const error = row.subagent_status ? row.subagent_error ?? undefined : projected.error
+    const parent = this.database.prepare('SELECT parent_run_id FROM agent_subagent_calls WHERE id=?').get(subagentId) as { parent_run_id: string } | undefined
+    let delegation: AgentToolActivity | undefined
+    if (parent) for (const effect of this.database.prepare("SELECT call_id,resources_value FROM execution_effects WHERE run_id=? AND tool_name='start_subagent'").iterate(parent.parent_run_id) as Iterable<{ call_id: string; resources_value: Uint8Array }>) {
+      const resources = decodeExecutionValue(effect.resources_value) as { subagent?: string }
+      if (resources.subagent === subagentId) {
+        delegation = this.getToolActivity(runId, effect.call_id, row.subagent_parent_id ?? undefined)
+        break
+      }
+    }
+    const activityCounts = this.database.prepare(`SELECT
+      (SELECT COUNT(*) FROM agent_model_activities WHERE run_id=@runId AND subagent_id=@subagentId) AS modelCount,
+      (SELECT COUNT(*) FROM agent_activities WHERE run_id=@runId AND kind='tool' AND parent_subagent_id=@subagentId) AS toolCount,
+      (SELECT COUNT(*) FROM agent_activities WHERE run_id=@runId AND kind='subagent' AND parent_subagent_id=@subagentId) AS subagentCount,
+      (SELECT MAX(sequence) FROM (SELECT sequence FROM agent_model_activities WHERE run_id=@runId UNION ALL SELECT sequence FROM agent_activities WHERE run_id=@runId)) AS lastSequence`)
+      .get({ runId, subagentId }) as NonNullable<AgentSubagentActivity['activityCounts']>
     return {
+      delegation, activityCounts,
       id: subagentId, name: row.subagent_name ?? row.name, sequence: row.sequence, status,
       parentSubagentId: (row.subagent_status ? row.subagent_parent_id : row.parent_subagent_id) ?? undefined,
       ...(result === undefined ? {} : { result }), ...(error === undefined ? {} : { error }),
@@ -311,7 +359,7 @@ export class RunActivityReader {
     return this.readActivities(threadId)
   }
 
-  private readActivities(threadId: string, runIds?: string[], beforeSequence = Number.MAX_SAFE_INTEGER): AgentRunActivity[] {
+  private readActivities(threadId: string, runIds?: string[], beforeSequence = Number.MAX_SAFE_INTEGER, limit = 100, afterSequence?: number, displayAgent?: string | null): AgentRunActivity[] {
     this.requireThread(threadId)
     const runRows = this.database.prepare(`
       SELECT
@@ -341,22 +389,29 @@ export class RunActivityReader {
       }
     ]))
     const windows = runRows.map((run) => {
-      const source = `SELECT sequence FROM agent_activities WHERE run_id=@runId
-        UNION ALL SELECT sequence FROM agent_model_activities WHERE run_id=@runId
-        UNION ALL SELECT sequence FROM agent_context_summaries WHERE run_id=@runId
-        UNION ALL SELECT sequence FROM agent_memory_recalls WHERE run_id=@runId`
+      const source = `SELECT sequence FROM agent_activities WHERE run_id=@runId ${displayAgent !== undefined ? 'AND parent_subagent_id IS @agent' : ''}
+        UNION ALL SELECT sequence FROM agent_model_activities WHERE run_id=@runId ${displayAgent !== undefined ? 'AND subagent_id IS @agent' : ''}
+        UNION ALL SELECT sequence FROM agent_context_summaries WHERE run_id=@runId ${displayAgent ? 'AND 0' : ''}
+        UNION ALL SELECT sequence FROM agent_memory_recalls WHERE run_id=@runId ${displayAgent ? 'AND 0' : ''}`
+      const scope = { runId: run.run_id, ...(displayAgent !== undefined ? { agent: displayAgent } : {}) }
       const candidates = this.database.prepare(`SELECT sequence FROM (${source})
-        WHERE sequence < @before ORDER BY sequence DESC LIMIT 101`).all({ runId: run.run_id, before: beforeSequence }) as Array<{ sequence: number }>
-      const selected = candidates.slice(0, 100)
-      const total = this.database.prepare(`SELECT count(*) AS count FROM (${source})`).get({ runId: run.run_id }) as { count: number }
+        WHERE sequence < @before AND (@after IS NULL OR sequence > @after)
+        ORDER BY sequence ${afterSequence === undefined ? 'DESC' : 'ASC'} LIMIT @limit`).all({
+          ...scope, before: beforeSequence, after: afterSequence ?? null, limit: limit + 1 }) as Array<{ sequence: number }>
+      const selected = candidates.slice(0, limit).sort((a, b) => b.sequence - a.sequence)
+      const total = this.database.prepare(`SELECT count(*) AS count FROM (${source})`).get(scope) as { count: number }
       const start = selected.at(-1)?.sequence ?? beforeSequence
       runs.get(run.run_id)!.activityWindow = {
         startSequence: selected.length ? start : null, endSequence: selected[0]?.sequence ?? null,
-        totalCount: total.count, hasEarlier: candidates.length > selected.length
+        totalCount: total.count, hasEarlier: afterSequence === undefined ? candidates.length > selected.length
+          : Boolean(this.database.prepare(`SELECT 1 FROM (${source}) WHERE sequence < @start LIMIT 1`).get({ ...scope, start })),
+        ...(displayAgent !== undefined ? { hasLater: selected.length > 0 && Boolean(this.database.prepare(
+          `SELECT 1 FROM (${source}) WHERE sequence > @end LIMIT 1`).get({ ...scope, end: selected[0].sequence })) } : {})
       }
-      return { runId: run.run_id, start, before: beforeSequence }
+      return { runId: run.run_id, start, before: afterSequence === undefined ? beforeSequence : (selected[0]?.sequence ?? afterSequence) + 1 }
     })
-    const windowParameters = { threadId, runIds: runIds === undefined ? null : JSON.stringify(runIds), windows: JSON.stringify(windows) }
+    const windowParameters = { threadId, runIds: runIds === undefined ? null : JSON.stringify(runIds), windows: JSON.stringify(windows),
+      filterAgent: displayAgent === undefined ? 0 : 1, agent: displayAgent ?? null }
     const rows = this.database.prepare(`
       SELECT
         activity.run_id,
@@ -392,6 +447,7 @@ export class RunActivityReader {
         ON activity.kind = 'subagent'
         AND subagent.id = activity.activity_id
       WHERE run.thread_id = @threadId AND (@runIds IS NULL OR run.id IN (SELECT value FROM json_each(@runIds)))
+        AND (@filterAgent=0 OR activity.parent_subagent_id IS @agent)
       ORDER BY run.rowid ASC, activity.sequence ASC
     `).all(windowParameters) as ActivityRow[]
 
@@ -467,6 +523,7 @@ export class RunActivityReader {
         ON message.run_id = model.run_id
         AND message.model_id = model.model_id
       WHERE run.thread_id = @threadId AND (@runIds IS NULL OR run.id IN (SELECT value FROM json_each(@runIds)))
+        AND (@filterAgent=0 OR model.subagent_id IS @agent)
       ORDER BY run.rowid ASC, model.sequence ASC
     `).all(windowParameters) as ModelActivityRow[]
     for (const row of modelRows) {
@@ -501,6 +558,7 @@ export class RunActivityReader {
         AND recall.sequence >= json_extract(page_window.value, '$.start')
         AND recall.sequence < json_extract(page_window.value, '$.before')
       WHERE run.thread_id = @threadId AND (@runIds IS NULL OR run.id IN (SELECT value FROM json_each(@runIds)))
+        AND (@filterAgent=0 OR @agent IS NULL)
       ORDER BY run.rowid ASC, recall.sequence ASC
     `).all(windowParameters) as MemoryRecallRow[]
     for (const row of memoryRecallRows) {
@@ -533,6 +591,7 @@ export class RunActivityReader {
         AND summary.sequence >= json_extract(page_window.value, '$.start')
         AND summary.sequence < json_extract(page_window.value, '$.before')
       WHERE run.thread_id = @threadId AND (@runIds IS NULL OR run.id IN (SELECT value FROM json_each(@runIds)))
+        AND (@filterAgent=0 OR @agent IS NULL)
       ORDER BY run.rowid ASC, summary.sequence ASC
     `).all(windowParameters) as ContextSummaryRow[]
     for (const row of summaryRows) {
@@ -543,6 +602,20 @@ export class RunActivityReader {
       run.summaries = summaries
     }
     for (const run of runs.values()) {
+      const counts = this.database.prepare(`SELECT
+        (SELECT COUNT(*) FROM agent_model_activities WHERE run_id=@id AND subagent_id IS NULL) AS modelCount,
+        (SELECT COUNT(*) FROM agent_activities WHERE run_id=@id AND kind='tool' AND parent_subagent_id IS NULL) AS toolCount,
+        (SELECT COUNT(*) FROM agent_activities WHERE run_id=@id AND kind='subagent' AND parent_subagent_id IS NULL) AS subagentCount,
+        (SELECT MAX(sequence) FROM (SELECT sequence FROM agent_model_activities WHERE run_id=@id UNION ALL SELECT sequence FROM agent_activities WHERE run_id=@id)) AS lastSequence`)
+        .get({ id: run.runId }) as { modelCount: number; toolCount: number; subagentCount: number; lastSequence: number | null }
+      const final = run.status === 'completed' ? this.database.prepare(`SELECT message.message_id AS id FROM agent_model_activities model
+        JOIN agent_model_messages message ON message.run_id=model.run_id AND message.model_id=model.model_id
+        WHERE model.run_id=? AND model.subagent_id IS NULL
+          AND NOT EXISTS (SELECT 1 FROM agent_model_activities later WHERE later.run_id=model.run_id AND later.subagent_id IS NULL AND later.sequence>model.sequence)
+          AND NOT EXISTS (SELECT 1 FROM agent_activities later WHERE later.run_id=model.run_id AND later.parent_subagent_id IS NULL AND later.sequence>model.sequence)
+          AND NOT EXISTS (SELECT 1 FROM agent_tool_messages tool WHERE tool.run_id=model.run_id AND tool.model_message_id=message.message_id)
+        ORDER BY model.sequence DESC LIMIT 1`).get(run.runId) as { id: string } | undefined : undefined
+      run.display = { ...counts, lastSequence: counts.lastSequence ?? -1, finalMessageId: final?.id }
       const seeds = [...run.models.flatMap((model) => model.subagentId ? [model.subagentId] : []),
         ...run.tools.flatMap((tool) => tool.subagentId ? [tool.subagentId] : []), ...run.subagents.map((subagent) => subagent.id)]
       const headers = this.database.prepare(`
@@ -581,6 +654,12 @@ export class RunActivityReader {
         detailsDeferred: true
       })
       run.subagents.sort((left, right) => left.sequence - right.sequence)
+    }
+    if (displayAgent !== undefined) for (const run of runs.values()) {
+      run.models = run.models.filter(item => (item.subagentId ?? null) === displayAgent)
+      run.tools = run.tools.filter(item => (item.subagentId ?? null) === displayAgent)
+      run.subagents = run.subagents.filter(item => (item.parentSubagentId ?? null) === displayAgent)
+      if (displayAgent) { run.memoryRecalls = []; run.summaries = [] }
     }
     return [...runs.values()]
   }

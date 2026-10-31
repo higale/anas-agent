@@ -20,12 +20,31 @@ async function verifyToolArguments(launchApplication) {
       const snapshot = { thread, messages: [{ id: 'user', role: 'user', runId: 'arguments-run', content: [{ type: 'text', text: 'Argument reception probe' }] }],
         activities: [], todos: [], interrupts: [], messageWindow: { startIndex: 0, shown: 1, total: 1, remaining: 0 } }
       globalThis.__toolArgumentEvents = []
+      const activity = { runId: 'arguments-run', operation: 'agent', status: 'running', createdAt: now, updatedAt: now,
+        models: [], tools: [], subagents: [] }
+      const upsert = (items, item, id) => { const index = items.findIndex(id); if (index < 0) items.push(item); else items[index] = item }
+      const reference = (kind, id) => ({ threadId: thread.id, runId: activity.runId, kind, id })
       globalThis.__sendToolArgumentEvent = (event) => {
+        if (event.type === 'model_started' || event.type === 'model_completed') upsert(activity.models, event.model, item => item.id === event.model.id)
+        if (event.type === 'model_delta') {
+          const model = activity.models.find(item => item.id === event.modelId)
+          model[event.delta.type] += event.delta.text
+        }
+        if (event.type === 'model_tool_calls') activity.models.find(item => item.id === event.modelId).toolCallProgress = event.progress
+        if (event.type === 'tool_started' || event.type === 'tool_completed') upsert(activity.tools,
+          { ...event, status: event.type === 'tool_completed' ? 'completed' : 'running' }, item => item.call.id === event.call.id)
         const envelope = { revision: globalThis.__toolArgumentEvents.length + 1, replayActive: true, event }
         globalThis.__toolArgumentEvents.push(envelope)
         BrowserWindow.getAllWindows()[0].webContents.send('agent:event', envelope)
       }
       for (const [channel, handler] of [
+        ['agent:activities:page', () => ({ ...activity,
+          models: activity.models.map(model => ({ ...model, hasText: !!model.text, hasReasoning: !!model.reasoning, text: '', reasoning: '', detail: reference('model', model.id) })),
+          tools: activity.tools.map(tool => ({ ...tool, call: { ...tool.call, args: { summary: tool.call.args.summary, seconds: tool.call.args.seconds } },
+            output: undefined, detail: reference('tool', tool.call.id) })) })],
+        ['agent:activities:detail', (_event, input) => input.kind === 'model'
+          ? activity.models.find(item => item.id === input.id)
+          : (() => { const tool = activity.tools.find(item => item.call.id === input.id); return { args: tool.call.args, output: tool.output } })()],
         ['agent:threads:list', () => [thread]], ['agent:threads:get', () => snapshot],
         ['agent:workspace:get', () => ({ mode: 'thread', threadId: thread.id })],
         ['agent:runs:recover', (_event, threadId) => {
@@ -81,6 +100,8 @@ async function verifyToolArguments(launchApplication) {
     await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height - 30)
     await page.mouse.wheel(0, 200)
     await send({ ...common, type: 'model_completed', model: { ...model, status: 'completed', toolCallIds: ['tool'] } })
+    const reasoning = page.locator('.agent-activity-reasoning').first()
+    await expect(reasoning.locator('pre')).toHaveCount(0)
     const call = { id: 'tool', name: 'apply_patch', args: { patch: 'FULL_ARGUMENT_BEGIN' + 'x'.repeat(100_000) + 'FULL_ARGUMENT_END' } }
     await send({ ...common, type: 'tool_started', call, sequence: 1, startedAt: now })
     await expect(summary).not.toHaveAttribute('aria-disabled')
@@ -147,6 +168,10 @@ async function verifyToolArguments(launchApplication) {
     await page.getByRole('button', { name: /^(滚动到底部|Scroll to bottom)$/ }).click()
     await expect.poll(async () => (await position()).gap).toBeLessThan(3)
     await send({ ...common, type: 'model_completed', model: { ...nextModel, status: 'completed' } })
+    await reasoning.locator('summary').click()
+    await expect(reasoning.locator('pre')).toHaveText(model.reasoning)
+    await reasoning.locator('summary').click()
+    await expect(reasoning.locator('pre')).toHaveCount(0)
     await summary.click()
     const args = card.locator('.agent-activity-arguments')
     await expect(args.locator('pre')).toHaveCount(0)
@@ -157,6 +182,13 @@ async function verifyToolArguments(launchApplication) {
     await expect(args.locator('pre')).toHaveText(JSON.stringify(call.args, null, 2))
     await expect(card.locator('.agent-activity-result pre')).toHaveCount(0)
     await expect(card.locator(':scope.agent-tool-running > summary')).toHaveCount(0)
+    await summary.click()
+    await expect(card.locator('pre')).toHaveCount(0)
+    await expect(card.locator('.agent-activity-arguments')).toHaveCount(0)
+    await summary.click()
+    // The argument body can be reconstructed after its parent releases it.
+    if (!await args.evaluate(element => element.open)) await args.locator('summary').click()
+    await expect(args.locator('pre')).toHaveText(JSON.stringify(call.args, null, 2))
     await page.evaluate(() => globalThis.gale.config.updateSettings({ language: 'zh-CN', theme: 'dark' }))
     const sleepStarted = new Date(Date.now() - 5000).toISOString()
     const sleepCall = { id: 'sleep', name: 'sleep', args: { seconds: 15, summary: '等待新回复' } }

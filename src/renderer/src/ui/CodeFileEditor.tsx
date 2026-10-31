@@ -1,11 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import type { editor } from 'monaco-editor'
+import { useTranslation } from 'react-i18next'
+
+export const largeTextThreshold = 128 * 1024
 
 export function CodeFileEditor({ path, content, onChange, wordWrap = true }: {
   path: string; content: string; onChange?(content: string): void; wordWrap?: boolean
 }) {
+  const { t } = useTranslation()
   const host = useRef<HTMLDivElement>(null)
   const instance = useRef<editor.IStandaloneCodeEditor | null>(null)
+  const latestContent = useRef(content); latestContent.current = content
+  const applyingContent = useRef(false)
   const wrap = useRef(wordWrap)
   wrap.current = wordWrap
   const change = useRef(onChange)
@@ -15,11 +21,12 @@ export function CodeFileEditor({ path, content, onChange, wordWrap = true }: {
   const editable = Boolean(onChange)
   useEffect(() => {
     let disposed = false
+    setReady(false); setError('')
     const cleanups: Array<() => void> = []
     const release = () => { for (const cleanup of cleanups.splice(0).reverse()) cleanup() }
     void import('./diff/monacoRuntime').then(({ monaco, languageForPath, applyEditorAppearance }) => {
       if (disposed || !host.current) return
-      const model = monaco.editor.createModel(content, languageForPath(path))
+      const model = monaco.editor.createModel(latestContent.current, languageForPath(path))
       cleanups.push(() => model.dispose())
       if (!editable) {
         // Monaco reapplies model defaults when language or shared editor settings change.
@@ -55,7 +62,7 @@ export function CodeFileEditor({ path, content, onChange, wordWrap = true }: {
       })
       instance.current = editor
       cleanups.push(() => { instance.current = null; editor.dispose() })
-      const subscription = editor.onDidChangeModelContent(() => change.current?.(model.getValue(undefined, true)))
+      const subscription = editor.onDidChangeModelContent(() => { if (!applyingContent.current) change.current?.(model.getValue(undefined, true)) })
       cleanups.push(() => subscription.dispose())
       const appearance = () => editor.updateOptions(applyEditorAppearance())
       appearance()
@@ -65,12 +72,21 @@ export function CodeFileEditor({ path, content, onChange, wordWrap = true }: {
       setReady(true)
     }).catch((reason: unknown) => { release(); if (!disposed) setError(String(reason)) })
     return () => { disposed = true; release() }
-    // The parent keys each file/revision; typing must not recreate the model or erase undo history.
-  }, [path, content, editable])
+  }, [path, editable])
+  useEffect(() => {
+    const editor = instance.current, model = editor?.getModel()
+    if (!editor || !model || model.getValue(undefined, true) === content) return
+    const view = editor.saveViewState()
+    applyingContent.current = true
+    try { model.setValue(content) } finally { applyingContent.current = false }
+    editor.restoreViewState(view)
+  }, [content])
   useEffect(() => { instance.current?.updateOptions({ wordWrap: wordWrap ? 'on' : 'off' }) }, [wordWrap])
   return <>
     {error && <div role="alert" className="ui-note ui-note-danger">{error}</div>}
-    {!ready && <pre className="settings-skill-file-content">{content}</pre>}
+    {!ready && (content.length < largeTextThreshold
+      ? <pre className="settings-skill-file-content">{content}</pre>
+      : !error && <span role="status">{t('common.loading')}</span>)}
     <div className="ui-code-file-editor" data-readonly={!editable} hidden={!ready}>
       <div ref={host} className="ui-code-file-editor-surface" />
     </div>
