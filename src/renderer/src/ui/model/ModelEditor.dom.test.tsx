@@ -941,10 +941,10 @@ describe('explicit model save and cancel', () => {
     expect(within(dialog).getByLabelText('settings.model_display_name')).toHaveValue('Keep me')
     expect(slider).not.toHaveAttribute('aria-disabled', 'true')
     fireEvent.keyDown(slider, { key: 'ArrowRight', keyCode: 39 })
-    expect(slider).toHaveAttribute('aria-valuenow', '0.85')
+    expect(slider).toHaveAttribute('aria-valuenow', '0.81')
     await user.click(save)
     expect(onSaveDetails).toHaveBeenCalledTimes(2)
-    expect(onSaveDetails).toHaveBeenLastCalledWith(expect.objectContaining({ contextCompressionThreshold: 0.85 }))
+    expect(onSaveDetails).toHaveBeenLastCalledWith(expect.objectContaining({ contextCompressionThreshold: 0.81 }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 

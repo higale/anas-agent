@@ -9,9 +9,12 @@ import { runApplicationDataOperation } from '../applicationDataLifecycle'
 import { mirrorBundledDirectories } from '../bundledDirectories'
 import { PluginStore, validateBundledPlugin } from './pluginStore'
 import { PluginBackends, type PluginViewAction } from './pluginBackend'
+import { withApplicationDataSnapshot } from '../applicationDataSnapshot'
+import { runtimeLog } from '../runtimeLogger'
 
 let store: PluginStore | undefined
 let backends: PluginBackends | undefined
+let backupTail: Promise<unknown> = Promise.resolve()
 let changeNotificationsEnabled = true
 let viewAction: PluginViewAction | undefined
 export function setPluginBackendViewAction(action: PluginViewAction): void { viewAction = action }
@@ -120,4 +123,32 @@ export function notifyPluginViewsChanged(): void { backends?.viewsChanged() }
 
 export async function stopPluginBackends(): Promise<void> {
   await backends?.stopAll()
+}
+
+/** Serialize the entire pause/copy/restart cycle, including recovery after a failed copy. */
+export function withPluginBackendsStoppedForBackup<T>(operation: () => Promise<T>): Promise<T> {
+  const result = backupTail.then(async () => {
+    let pause: ReturnType<PluginBackends['pauseForBackup']> | undefined
+    let value!: T
+    const failures: unknown[] = []
+    try {
+      value = await withApplicationDataSnapshot(async () => {
+        pause = backends?.pauseForBackup()
+        await pause?.stopped
+        return operation()
+      })
+    } catch (error) { failures.push(error) }
+    // Activation may call host services that need the snapshot lock to be released.
+    try { await pause?.restore() } catch (error) {
+      runtimeLog('error', 'backup', 'Failed to restart plugin backends after backup.', {
+        error, failures: error instanceof AggregateError ? error.errors : [error]
+      })
+      failures.push(error)
+    }
+    if (failures.length === 1) throw failures[0]
+    if (failures.length > 1) throw new AggregateError(failures, 'Data backup and plugin backend recovery both failed.')
+    return value
+  })
+  backupTail = result.then(() => undefined, () => undefined)
+  return result
 }

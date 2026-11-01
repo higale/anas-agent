@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-const state = vi.hoisted(() => ({ root: '', bundled: '', fork: vi.fn(), send: vi.fn() }))
+const state = vi.hoisted(() => ({ root: '', bundled: '', fork: vi.fn(), send: vi.fn(), log: vi.fn() }))
+vi.mock('../runtimeLogger', () => ({ runtimeLog: state.log }))
 vi.mock('../config/dataDir', () => ({
   getDataDir: () => state.root,
   getBundledDataDir: () => state.bundled,
@@ -158,9 +159,163 @@ it('allows backup to stop a running tool instead of waiting for its execution ti
   const pending = runtime.invokePluginTool(snapshot, {}, { onDispatch: dispatch })
   const failure = expect(pending).rejects.toMatchObject({ code: 'unknown_effect', dispatched: true })
   await vi.waitFor(() => expect(dispatch).toHaveBeenCalledOnce())
-  // Import the same lifecycle instance as runtime after resetModules.
-  const { withApplicationDataSnapshot: snapshotData } = await import('../applicationDataSnapshot')
-  await snapshotData(() => runtime.stopPluginBackends())
+  const restarted = new Child()
+  state.fork.mockImplementation(() => {
+    queueMicrotask(() => restarted.emit('message', { ready: true }))
+    return restarted
+  })
+  await runtime.withPluginBackendsStoppedForBackup(async () => {
+    expect(runtime.pluginRuntime().backends.status(snapshot.pluginId).backendStatus).toBe('stopped')
+  })
   await failure
   expect(child.postMessage).toHaveBeenCalledWith({ stop: true })
+  expect(runtime.pluginRuntime().backends.status(snapshot.pluginId).backendStatus).toBe('running')
+  expect(restarted.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ tool: true }))
+})
+
+it.each([false, true])('restores backends and automatic eligibility after backup, allowing activation host calls (copy fails=%s)', async fails => {
+  const { backends } = runtime.pluginRuntime()
+  await backends.stop('usage-meter')
+  const prepared = await backends.prepare('example-text-tools')
+  child.emit('message', { ready: true })
+  await prepared.ready
+  const { runApplicationDataOperation } = await import('../applicationDataLifecycle')
+  const hostCall = vi.fn(() => runApplicationDataOperation(async () => 'opened'))
+  runtime.setPluginBackendViewAction(hostCall)
+  const restarted = new Child()
+  restarted.postMessage.mockImplementation((message: { stop?: boolean; hostResponse?: number }) => {
+    if (message.stop) queueMicrotask(() => restarted.emit('exit', 0))
+    if (message.hostResponse) queueMicrotask(() => restarted.emit('message', { ready: true }))
+  })
+  state.fork.mockImplementation(() => {
+    queueMicrotask(() => restarted.emit('message', { hostRequest: 1, method: 'openView', params: {} }))
+    return restarted
+  })
+  const copyError = new Error('disk full')
+  const backup = runtime.withPluginBackendsStoppedForBackup(async () => {
+    expect(backends.status('example-text-tools').backendStatus).toBe('stopped')
+    expect(backends.canStartAutomatically('unused-plugin')).toBe(false)
+    if (fails) throw copyError
+    return 'saved.zip'
+  })
+  if (fails) await expect(backup).rejects.toBe(copyError)
+  else await expect(backup).resolves.toBe('saved.zip')
+  expect(hostCall).toHaveBeenCalledOnce()
+  expect(backends.status('example-text-tools').backendStatus).toBe('running')
+  expect(backends.canStartAutomatically('example-text-tools')).toBe(true)
+  expect(backends.canStartAutomatically('unused-plugin')).toBe(true)
+  expect(backends.canStartAutomatically('usage-meter')).toBe(false)
+  expect(backends.status('usage-meter').backendStatus).toBe('stopped')
+})
+
+it.each(['shutdown', 'manual stop'])('does not undo %s while completing backup', async action => {
+  const { backends } = runtime.pluginRuntime()
+  const prepared = await backends.prepare('example-text-tools')
+  child.emit('message', { ready: true })
+  await prepared.ready
+  await runtime.withPluginBackendsStoppedForBackup(async () => {
+    if (action === 'shutdown') await runtime.stopPluginBackends()
+    else await backends.stop('example-text-tools')
+  })
+  expect(state.fork).toHaveBeenCalledOnce()
+  expect(backends.status('example-text-tools').backendStatus).toBe('stopped')
+  expect(backends.canStartAutomatically('example-text-tools')).toBe(false)
+})
+
+it.each([false, true])('reports restart failures and retains the failed backend state (copy fails=%s)', async fails => {
+  const { backends } = runtime.pluginRuntime()
+  const prepared = await backends.prepare('example-text-tools')
+  child.emit('message', { ready: true })
+  await prepared.ready
+  const restarted = new Child()
+  state.fork.mockImplementation(() => {
+    queueMicrotask(() => restarted.emit('message', { ready: false, error: 'activation failed' }))
+    return restarted
+  })
+  const copyError = new Error('disk full')
+  const backup = runtime.withPluginBackendsStoppedForBackup(async () => { if (fails) throw copyError; return 'saved.zip' })
+  const restartErrors = [expect.objectContaining({ message: 'Could not restart plugin example-text-tools: activation failed' })]
+  await expect(backup).rejects.toMatchObject({ errors: fails
+    ? [copyError, expect.objectContaining({ errors: restartErrors })] : restartErrors })
+  expect(backends.status('example-text-tools')).toEqual({ backendStatus: 'failed', backendError: 'activation failed' })
+  expect(backends.canStartAutomatically('example-text-tools')).toBe(false)
+  expect(state.log).toHaveBeenCalledWith('error', 'backup', expect.any(String), expect.objectContaining({
+    error: expect.any(AggregateError), failures: restartErrors
+  }))
+})
+
+it('restores healthy backends if another backend cannot stop cleanly and prevents copying', async () => {
+  const { backends } = runtime.pluginRuntime()
+  const prepared = await backends.prepare('example-text-tools')
+  child.emit('message', { ready: true })
+  await prepared.ready
+  const broken = new Child()
+  state.fork.mockReturnValue(broken)
+  const other = await backends.prepare('usage-meter')
+  broken.emit('message', { ready: true })
+  await other.ready
+  broken.postMessage.mockImplementation(message => {
+    if (message.stop) queueMicrotask(() => {
+      broken.emit('message', { stopError: 'flush failed' })
+      broken.emit('exit', 0)
+    })
+  })
+  const restarted = new Child()
+  state.fork.mockImplementation(() => {
+    queueMicrotask(() => restarted.emit('message', { ready: true }))
+    return restarted
+  })
+  const copy = vi.fn(async () => 'saved.zip')
+  await expect(runtime.withPluginBackendsStoppedForBackup(copy)).rejects.toThrow('Could not cleanly stop')
+  expect(copy).not.toHaveBeenCalled()
+  expect(backends.status('example-text-tools').backendStatus).toBe('running')
+  expect(backends.status('usage-meter')).toEqual({ backendStatus: 'failed', backendError: 'Plugin backend cleanup failed: flush failed' })
+  expect(backends.canStartAutomatically('usage-meter')).toBe(false)
+})
+
+it('serializes consecutive backups through backend restart', async () => {
+  const { backends } = runtime.pluginRuntime()
+  const prepared = await backends.prepare('example-text-tools')
+  child.emit('message', { ready: true })
+  await prepared.ready
+  const restarted = new Child()
+  state.fork.mockReturnValue(restarted)
+  const first = runtime.withPluginBackendsStoppedForBackup(async () => 'first.zip')
+  const secondCopy = vi.fn(async () => 'second.zip')
+  const second = runtime.withPluginBackendsStoppedForBackup(secondCopy)
+  await vi.waitFor(() => expect(state.fork).toHaveBeenCalledTimes(2))
+  expect(secondCopy).not.toHaveBeenCalled()
+  state.fork.mockImplementation(() => {
+    const next = new Child()
+    queueMicrotask(() => next.emit('message', { ready: true }))
+    return next
+  })
+  restarted.emit('message', { ready: true })
+  await expect(first).resolves.toBe('first.zip')
+  await expect(second).resolves.toBe('second.zip')
+  expect(backends.status('example-text-tools').backendStatus).toBe('running')
+  expect(backends.canStartAutomatically('example-text-tools')).toBe(true)
+})
+
+it('does not fork a recovering backend after shutdown interrupts its package checks', async () => {
+  const { backends, store } = runtime.pluginRuntime()
+  const prepared = await backends.prepare('example-text-tools')
+  child.emit('message', { ready: true })
+  await prepared.ready
+  const packageFile = store.packageFile.bind(store)
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const check = vi.spyOn(store, 'packageFile').mockImplementation(async (...args) => {
+    await held
+    return packageFile(...args)
+  })
+  const backup = runtime.withPluginBackendsStoppedForBackup(async () => 'saved.zip')
+  const failure = expect(backup).rejects.toThrow('could not be restarted')
+  await vi.waitFor(() => expect(check).toHaveBeenCalled())
+  await runtime.stopPluginBackends()
+  release()
+  await failure
+  expect(state.fork).toHaveBeenCalledOnce()
+  expect(backends.status('example-text-tools').backendStatus).toBe('stopped')
+  expect(backends.canStartAutomatically('example-text-tools')).toBe(false)
 })

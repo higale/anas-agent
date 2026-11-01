@@ -3,6 +3,7 @@ import { Save, SlidersHorizontal, X } from 'lucide-react'
 import { useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { resolveModelListEndpoint } from '@shared/modelListEndpoint'
+import { contextCompressionTriggerTokens } from '@shared/contextWindow'
 import { errorDetail } from '@shared/recovery'
 import { SegmentedMultiSelect } from '../SegmentedMultiSelect'
 import { CommitNumberInput } from '../CommitNumberInput'
@@ -13,7 +14,7 @@ import { SearchableOptionPicker } from '../SearchableOptionPicker'
 import {
   SETTINGS_CONTEXT_COMPRESSION_MAX,
   SETTINGS_CONTEXT_COMPRESSION_MIN,
-  SETTINGS_RANGE_STEP_FINE,
+  SETTINGS_CONTEXT_COMPRESSION_STEP,
   SETTINGS_TOKEN_STEP,
   UI_ICON_SIZE_MEDIUM,
   UI_ICON_SIZE_SMALL
@@ -83,6 +84,12 @@ export function ModelDetailsDialog({
     }
   }
   const tokenFieldId = useId()
+  const maxContextTokens = Number(modelDraft.maxContextTokens)
+  const maxOutputTokens = Number(modelDraft.maxOutputTokens)
+  const compressionTokens = Number.isFinite(maxContextTokens) && Number.isFinite(maxOutputTokens)
+    && maxOutputTokens >= 0 && maxContextTokens > maxOutputTokens
+    ? contextCompressionTriggerTokens(maxContextTokens, maxOutputTokens, modelDraft.contextCompressionThreshold).toLocaleString('en-US')
+    : '—'
   const [portalContainer, setPortalContainer] = useState<HTMLDivElement | null>(null)
   let modelListRequestReady = false
   try {
@@ -195,16 +202,17 @@ export function ModelDetailsDialog({
                     onCommit={(value) => onUpdateDraft({ maxOutputTokens: value === '' ? '0' : value })}
                   />
                 </div>
-                <div className="ui-field-stack">
+                <div className="ui-field-stack" data-tooltip={t('settings.context_compression_threshold_help')}>
                   <RangeField
                     checked={modelDraft.contextCompressionEnabled}
                     disabled={saving}
                     label={t('settings.context_compression_threshold', {
-                      percent: Math.round(modelDraft.contextCompressionThreshold * 100)
+                      percent: Math.round(modelDraft.contextCompressionThreshold * 100),
+                      tokens: compressionTokens
                     })}
                     min={SETTINGS_CONTEXT_COMPRESSION_MIN}
                     max={SETTINGS_CONTEXT_COMPRESSION_MAX}
-                    step={SETTINGS_RANGE_STEP_FINE}
+                    step={SETTINGS_CONTEXT_COMPRESSION_STEP}
                     value={modelDraft.contextCompressionThreshold}
                     onChange={(contextCompressionThreshold) => onUpdateDraft({ contextCompressionThreshold })}
                     onCheckedChange={(contextCompressionEnabled) => onUpdateDraft({ contextCompressionEnabled })}

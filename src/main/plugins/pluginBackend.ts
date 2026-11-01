@@ -2,6 +2,7 @@ import { app, utilityProcess, type UtilityProcess } from 'electron'
 import { join } from 'node:path'
 import { requirePluginId, requirePluginJson, type PluginSummary, type PluginBackendCallContext } from '@shared/plugins'
 import type { PluginStore } from './pluginStore'
+import { runApplicationDataOperation } from '../applicationDataLifecycle'
 
 interface PendingCall {
   method: string
@@ -38,8 +39,11 @@ export class PluginBackends {
   private automaticSuspended = false
   private automaticStopped = new Set<string>()
   private automaticResumed = new Set<string>()
+  private backupSuspended = false
+  private shutdownRevision = 0
+  private stopRevisions = new Map<string, number>()
   canStartAutomatically(id: string): boolean {
-    return !this.automaticStopped.has(id) && (!this.automaticSuspended || this.automaticResumed.has(id))
+    return !this.backupSuspended && !this.automaticStopped.has(id) && (!this.automaticSuspended || this.automaticResumed.has(id))
   }
   resumeAutomatic(id: string): void { this.automaticStopped.delete(id); this.automaticResumed.add(id) }
   private instances = new Map<string, BackendInstance>()
@@ -69,6 +73,7 @@ export class PluginBackends {
   }
 
   async prepare(id: string): Promise<BackendInstance> {
+    const shutdownRevision = this.shutdownRevision
     const existing = this.instances.get(id)
     if (existing) {
       if (existing.stopping) throw new Error('Plugin backend is stopping.')
@@ -80,6 +85,7 @@ export class PluginBackends {
       this.store.packageFile(id, manifest.backend), this.store.packageDirectory(id), this.store.directory('db/plugins', id, true),
       this.store.directory('tmp', id, true)
     ])
+    if (shutdownRevision !== this.shutdownRevision) throw new Error('Plugin backend was stopped during preparation.')
     // Another caller can finish the asynchronous package checks first.
     const concurrent = this.instances.get(id)
     if (concurrent) {
@@ -260,6 +266,11 @@ export class PluginBackends {
   async stop(id: string): Promise<void> {
     requirePluginId(id)
     this.automaticStopped.add(id)
+    this.stopRevisions.set(id, (this.stopRevisions.get(id) ?? 0) + 1)
+    await this.stopInstance(id)
+  }
+
+  private async stopInstance(id: string): Promise<void> {
     const instance = this.instances.get(id)
     if (instance) {
       instance.stopping = true
@@ -277,6 +288,7 @@ export class PluginBackends {
       const timer = setTimeout(() => { instance.stopError = new Error('Plugin backend cleanup timed out.'); instance.process.kill() }, this.stopGraceMs)
       try { await instance.exited } finally { clearTimeout(timer) }
       if (instance.stopError) {
+        this.automaticStopped.add(id)
         this.statuses.set(id, { backendStatus: 'failed', backendError: instance.stopError.message })
         this.changed()
         throw instance.stopError
@@ -287,10 +299,54 @@ export class PluginBackends {
   }
 
   async stopAll(): Promise<void> {
+    this.shutdownRevision += 1
     this.automaticSuspended = true
     this.automaticResumed.clear()
     const results = await Promise.allSettled([...this.instances.keys()].map(id => this.stop(id)))
     const failures = results.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
     if (failures.length) throw new AggregateError(failures, 'Could not cleanly stop all plugin backends.')
+  }
+
+  /** Begin inside the data snapshot; restore only after releasing its lock. */
+  pauseForBackup(): { stopped: Promise<void>; restore(): Promise<void> } {
+    if (this.backupSuspended) throw new Error('Plugin backends are already paused for backup.')
+    this.backupSuspended = true
+    const shutdownRevision = this.shutdownRevision
+    const instances = [...this.instances]
+    const running = instances.filter(([, instance]) => !instance.stopping)
+      .map(([id]) => ({ id, stopRevision: this.stopRevisions.get(id) ?? 0 }))
+    const stopped = Promise.allSettled(instances.map(([id]) => this.stopInstance(id))).then(results => {
+      const failures = results.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
+      if (failures.length) throw new AggregateError(failures, 'Could not cleanly stop plugin backends for backup.')
+    })
+    return {
+      stopped,
+      restore: async () => {
+        this.backupSuspended = false
+        const results = await Promise.allSettled(running.map(async ({ id, stopRevision }) => {
+          // A later explicit stop or application shutdown takes precedence over backup recovery.
+          const unchanged = () => shutdownRevision === this.shutdownRevision
+            && stopRevision === (this.stopRevisions.get(id) ?? 0)
+          if (!unchanged() || this.status(id).backendStatus === 'failed') return
+          try {
+            const result = await runApplicationDataOperation(() => this.store.exclusive(async () => {
+              if (!unchanged()) return
+              // Do not hold data/store locks while activation calls host services.
+              return { prepared: await this.prepare(id) }
+            }))
+            if (result) await result.prepared.ready
+          } catch (error) {
+            if (unchanged()) {
+              this.automaticStopped.add(id)
+              this.statuses.set(id, { backendStatus: 'failed', backendError: String(error instanceof Error ? error.message : error) })
+            }
+            throw new Error(`Could not restart plugin ${id}: ${error instanceof Error ? error.message : String(error)}`, { cause: error })
+          }
+        }))
+        this.changed()
+        const failures = results.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
+        if (failures.length) throw new AggregateError(failures, 'Backup finished, but some plugin backends could not be restarted.')
+      }
+    }
   }
 }
