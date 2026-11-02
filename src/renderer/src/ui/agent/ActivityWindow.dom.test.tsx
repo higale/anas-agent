@@ -37,6 +37,23 @@ beforeEach(() => {
 afterEach(() => { cleanup(); visible.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.clearAllMocks() })
 
 describe('activity reading window', () => {
+  it.each([40, 200])('reads immediately and delays only the loading hint (response at %sms)', async delay => {
+    vi.useFakeTimers()
+    try {
+      let finish!: (value: AgentRunActivity) => void
+      api.page.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+      const view = render(<ActivityWindow threadId="thread" run={base}>{value => <>{value.memoryRecalls?.map(item => <span key={item.id}>ROW_{item.id}</span>)}</>}</ActivityWindow>)
+      expect(api.page).toHaveBeenCalledTimes(1)
+      expect(screen.queryByRole('status')).toBeNull()
+      await act(async () => { await vi.advanceTimersByTimeAsync(delay) })
+      expect(Boolean(screen.queryByRole('status'))).toBe(delay >= 150)
+      await act(async () => finish(page(0, 1)))
+      expect(screen.getByText('ROW_0')).toBeVisible()
+      expect(screen.queryByRole('status')).toBeNull()
+      view.unmount()
+    } finally { vi.useRealTimers() }
+  })
+
   it('keeps repeated live bursts and delayed boundary reads ordered, unique and bounded', async () => {
     let total = 900, receive!: (event: AgentRuntimeEvent) => void
     const snapshot = ({ before, after, limit = 300 }: { before?: number; after?: number; limit?: number }) => {

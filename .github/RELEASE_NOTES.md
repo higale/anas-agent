@@ -1,20 +1,16 @@
-## Anas v5.0.8
+## Anas v5.0.9
 
-- 工具调用展开时统一加载参数和返回值，收起后释放详情；内部参数与结果的展开切换复用已加载数据。
-- 恢复返回值标题旁的图片预览入口，加载工具调用详情后即可预览图片，无需展开结果正文。
-- 加宽项目设置弹窗，并限制左栏最大宽度，让宽窗口为右侧能力区提供更多空间。
-- 文件读、文件写和记忆收起时紧凑并排，展开时占满一行；统一展开图标与复选框间距，展开后同时显示数量和收起入口。
-- 自定义工具显示启用数量与总数，补充 MCP 分区标题，并加宽插件工具列表项，减少长工具名换行。
+- 修复展开轮次时“加载中”与正文未对齐的问题，加载、分页提示与轮次内容使用相同的宽度和居中布局。
+- 轮次与活动详情的“加载中”延迟 150ms 显示，快速加载时直接呈现内容，减少闪烁；数据请求仍立即开始。
+- 收起、切换对象或结束加载时清理旧计时，错误立即显示，重试重新计时。
 
-**从 5.0.2～5.0.7 升级无需重置项目或会话。**
+**从 5.0.2～5.0.8 升级无需重置项目或会话。**
 
-- Expanding a tool call loads its arguments and result together; collapsing it releases the details. Inner argument and result toggles reuse the loaded data.
-- Restore image previews beside the result heading. Once the tool call details load, images can be previewed without expanding the result body.
-- Widen project settings and cap the left pane width, giving the capabilities pane more room in wide windows.
-- File read, file write and memory groups share rows when collapsed and span the full row when expanded. Disclosure icons and checkbox spacing are consistent, with both counts and collapse controls shown while expanded.
-- Show enabled and total custom tool counts, add the MCP section heading, and widen plugin tool items to reduce wrapping of long names.
+- Align loading and pagination messages with the content when expanding a conversation round, using the same width and centering rules.
+- Delay the loading indicator for rounds and activity details by 150ms to avoid flicker on fast reads. Data requests still start immediately.
+- Clear pending indicator timers when collapsing, switching resources or finishing a read. Errors appear immediately, and retries start a fresh delay.
 
-**Upgrading from 5.0.2–5.0.7 does not require resetting projects or conversations.**
+**Upgrading from 5.0.2–5.0.8 does not require resetting projects or conversations.**
 
 ## 较早版本升级 / Upgrading from earlier versions
 

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import type { AgentActivityDetail, AgentActivityDetailReference } from '@shared/agentTypes'
 import { contentServices } from '../panels/contentServices'
 import { NoFocusButton } from '../NoFocusButton'
+import { DelayedLoading } from '../DelayedLoading'
 import { agentActionError } from './agentErrorMessage'
 
 /** Owned exclusively by the mounted body. No payload is stored in panel state. */
@@ -51,6 +52,6 @@ export function ActivityDetail({ reference, field, children }: {
     return () => { disposed = true; clearTimeout(timer); stop() }
   }, [threadId, runId, kind, id, subagentId, field, attempt])
   if (state.error) return <div role="alert">{agentActionError(t('agent.load_activity_detail_failed'), state.error)} <NoFocusButton onClick={() => retry(value => value + 1)}>{t('common.retry')}</NoFocusButton></div>
-  if (!state.value) return <span role="status">{t('common.loading')}</span>
+  if (!state.value) return <DelayedLoading key={JSON.stringify([threadId, runId, kind, id, subagentId, field, attempt])} />
   return field === undefined ? children(state.value) : children(state.value[field])
 }

@@ -8,10 +8,66 @@ const api = vi.hoisted(() => ({ detail: vi.fn(), onEvent: vi.fn((_listener: (eve
 }) }))
 vi.mock('../panels/contentServices', () => ({ contentServices: () => ({ agent: { activities: { detail: api.detail }, onEvent: api.onEvent } }) }))
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
-beforeEach(() => api.detail.mockReset())
+beforeEach(() => { api.detail.mockReset() })
 afterEach(() => vi.clearAllMocks())
 const reference = { threadId: 'thread', runId: 'run', kind: 'model' as const, id: 'm' }
 describe('activity detail lifetime', () => {
+  it.each([40, 200])('loads immediately and only shows a pending hint after 150ms (response at %sms)', async delay => {
+    vi.useFakeTimers()
+    try {
+      let finish!: (value: { reasoning: string }) => void
+      api.detail.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+      render(<ActivityDetail reference={reference} field="reasoning">{value => <pre>{String(value)}</pre>}</ActivityDetail>)
+      expect(api.detail).toHaveBeenCalledTimes(1)
+      expect(screen.queryByRole('status')).toBeNull()
+      await act(async () => { await vi.advanceTimersByTimeAsync(delay) })
+      expect(Boolean(screen.queryByRole('status'))).toBe(delay >= 150)
+      await act(async () => finish({ reasoning: 'READY' }))
+      expect(screen.getByText('READY')).toBeVisible()
+      expect(screen.queryByRole('status')).toBeNull()
+      await act(async () => { await vi.advanceTimersByTimeAsync(200) })
+      expect(screen.queryByRole('status')).toBeNull()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('restarts the hint delay on identity changes and cancels it on unmount', async () => {
+    vi.useFakeTimers()
+    try {
+      api.detail.mockImplementation(() => new Promise(() => undefined))
+      const body = (id: string) => <ActivityDetail reference={{ ...reference, id }} field="reasoning">{value => <pre>{String(value)}</pre>}</ActivityDetail>
+      const view = render(body('first'))
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      view.rerender(body('second'))
+      expect(api.detail).toHaveBeenCalledTimes(2)
+      await act(async () => { await vi.advanceTimersByTimeAsync(149) })
+      expect(screen.queryByRole('status')).toBeNull()
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+      expect(screen.getByRole('status')).toBeVisible()
+      view.rerender(body('third'))
+      expect(screen.queryByRole('status')).toBeNull()
+      view.unmount()
+      expect(vi.getTimerCount()).toBe(0)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('shows errors immediately and gives a retry its own hint delay', async () => {
+    vi.useFakeTimers()
+    try {
+      api.detail.mockRejectedValueOnce(new Error('unavailable')).mockImplementation(() => new Promise(() => undefined))
+      const view = render(<ActivityDetail reference={reference} field="reasoning">{value => <pre>{String(value)}</pre>}</ActivityDetail>)
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(screen.getByRole('alert')).toBeVisible()
+      expect(screen.queryByRole('status')).toBeNull()
+      act(() => screen.getByText('common.retry').click())
+      expect(api.detail).toHaveBeenCalledTimes(2)
+      await act(async () => { await vi.advanceTimersByTimeAsync(149) })
+      expect(screen.queryByRole('status')).toBeNull()
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+      expect(screen.getByRole('status')).toBeVisible()
+      view.unmount()
+    } finally { vi.useRealTimers() }
+  })
+
   it('ignores a child model with the same identity and refreshes only its own body', async () => {
     let receive!: (event: AgentRuntimeEvent) => void
     api.onEvent.mockImplementationOnce((listener, ready) => { receive = listener; void ready(); return vi.fn() })

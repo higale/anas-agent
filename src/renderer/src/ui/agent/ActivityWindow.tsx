@@ -6,6 +6,7 @@ import { displayActivityPage, displayEvent } from '@shared/activityDisplay'
 import { applyRunActivityEvent } from '@shared/agentActivityProjection'
 import { contentServices } from '../panels/contentServices'
 import { NoFocusButton } from '../NoFocusButton'
+import { DelayedLoading } from '../DelayedLoading'
 import { agentActionError } from './agentErrorMessage'
 import type { ActivityBoundaryRequest } from '../chat/ScrollBoundaryNavigation'
 
@@ -367,7 +368,7 @@ export function ActivityWindow({ threadId, run, subagentId, children }: {
         previous.map(item => item.start === slot.start ? { ...item, height } : item), previous.findIndex(item => item.start === focusStart.current))) }}>
       {slot.data && children(slot.data)}
     </Page>)}
-    {loading && <span role="status">{t('common.loading')}</span>}
+    {loading && !error && <DelayedLoading key={JSON.stringify([threadId, run.runId, subagentId])} />}
     <Boundary active={later && !loading && !error} direction="after" load={() => void read('after')}>
       {later && <>
         <NoFocusButton disabled={loading} onClick={() => void read('after')}>{t('agent.load_later_activities')}</NoFocusButton>
