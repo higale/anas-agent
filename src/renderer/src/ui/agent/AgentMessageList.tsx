@@ -440,7 +440,7 @@ function ActivityDisclosure({
   if (!renderWhenEmpty && !detail && !text.trim() && !children) return null
   const body = !disabled && disclosure.open ? (
     <>
-      {detail ? <ActivityDetail reference={detail} field={field}>{value => field === 'output' ? <ToolResultBody value={value} /> : <ToolTraceBody value={value} />}</ActivityDetail> : <>
+      {detail ? <ActivityDetail reference={detail} field={field}>{value => <ToolTraceBody value={value} />}</ActivityDetail> : <>
       {text.trim() && (
         <div className="native-context-menu-text" data-native-context-menu="text">
           <pre>{text}</pre>
@@ -551,21 +551,9 @@ const ToolTraceBody = memo(function ToolTraceBody({ value }: { value: unknown })
     ? <CodeFileEditor path={t('agent.activity_content')} content={text} /> : <pre>{text}</pre>}</div>
 })
 
-function ToolResultBody({ value }: { value: unknown }) {
+function ToolResultDisclosure({ tool, output }: { tool: AgentRunActivity['tools'][number]; output: unknown }) {
   const { t } = useTranslation()
-  const images = useMemo(() => toolResultImages(value), [value])
-  const [selected, setSelected] = useState<number>()
-  return <>
-    {images.map((_, index) => <NoFocusButton key={index} className="ui-icon-button ui-icon-button-xs"
-      aria-label={t('agent.view_tool_image', { index: index + 1 })} onClick={() => setSelected(index)}><ImageIcon size={13} /></NoFocusButton>)}
-    <ToolTraceBody value={value} />
-    {selected !== undefined && <ImageLightbox open index={selected} slides={images.map((src, index) => ({ src, alt: t('agent.view_tool_image', { index: index + 1 }) }))} onClose={() => setSelected(undefined)} />}
-  </>
-}
-
-function ToolResultDisclosure({ tool }: { tool: AgentRunActivity['tools'][number] }) {
-  const { t } = useTranslation()
-  const images = useMemo(() => toolResultImages(tool.output), [tool.output])
+  const images = useMemo(() => toolResultImages(output), [output])
   const [imageIndex, setImageIndex] = useState<number>()
   const imageLabel = (index: number) => t('agent.view_tool_image', { index: index + 1 })
   return (
@@ -575,8 +563,6 @@ function ToolResultDisclosure({ tool }: { tool: AgentRunActivity['tools'][number
         className="agent-activity-result"
         icon={<CircleCheck size={13} />}
         label="result"
-        detail={tool.detail}
-        field="output"
         renderWhenEmpty
         summaryActions={images.length > 0 && (
           <span className="ui-toolbar">
@@ -599,7 +585,7 @@ function ToolResultDisclosure({ tool }: { tool: AgentRunActivity['tools'][number
           </span>
         )}
       >
-        {() => <ToolTraceBody value={tool.output} />}
+        {() => <ToolTraceBody value={output} />}
       </ActivityDisclosure>
       {imageIndex !== undefined && (
         <ImageLightbox
@@ -690,25 +676,27 @@ function ToolActivityDisclosure({
       )}
       renderWhenEmpty
     >
-      {() => (
-        <>
-          {tool.call.args !== undefined && (
-            <ActivityDisclosure
-              stateKey={`arguments:${tool.call.id}`}
-              className="agent-activity-arguments"
-              icon={<Braces size={13} />}
-              label="arguments"
-              detail={tool.detail}
-              field="args"
-            >
-              {() => <ToolTraceBody value={tool.call.args} />}
-            </ActivityDisclosure>
-          )}
-          {tool.status === 'completed' && <ToolResultDisclosure tool={tool} />}
-        </>
-      )}
+      {() => tool.detail
+        ? <ActivityDetail reference={tool.detail}>{detail => <ToolActivityBody tool={tool} detail={detail} />}</ActivityDetail>
+        : <ToolActivityBody tool={tool} detail={{ args: tool.call.args, output: tool.output }} />}
     </ActivityDisclosure>
   )
+}
+
+function ToolActivityBody({ tool, detail }: { tool: AgentRunActivity['tools'][number]; detail: AgentActivityDetail }) {
+  return <>
+    {detail.args !== undefined && (
+      <ActivityDisclosure
+        stateKey={`arguments:${tool.call.id}`}
+        className="agent-activity-arguments"
+        icon={<Braces size={13} />}
+        label="arguments"
+      >
+        {() => <ToolTraceBody value={detail.args} />}
+      </ActivityDisclosure>
+    )}
+    {tool.status === 'completed' && <ToolResultDisclosure tool={tool} output={detail.output} />}
+  </>
 }
 
 type SubagentTimelineItem = Extract<TurnTimelineActivityItem, { type: 'subagent' }>

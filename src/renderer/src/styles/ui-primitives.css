@@ -95,6 +95,7 @@
 }
 
 .ui-disclosure-trigger {
+  cursor: pointer;
   flex: 1 1 auto;
   padding: 0;
   border: 0;
@@ -102,6 +103,10 @@
   color: var(--text-subtle);
   font: inherit;
   text-align: left;
+}
+
+summary.ui-disclosure-trigger {
+  list-style: none;
 }
 
 .ui-disclosure-trigger:hover {
@@ -112,8 +117,53 @@
   flex-shrink: 0;
 }
 
-.ui-disclosure-trigger[aria-expanded="true"] > .ui-disclosure-chevron {
+.ui-disclosure-trigger[aria-expanded="true"] .ui-disclosure-chevron,
+details[open] > .ui-disclosure-trigger .ui-disclosure-chevron {
   transform: rotate(90deg);
+}
+
+.ui-disclosure-count {
+  display: inline-grid;
+  font-size: var(--font-size-small);
+  font-weight: 400;
+  line-height: 1;
+}
+
+.ui-disclosure-count > * {
+  grid-area: 1 / 1;
+}
+
+.ui-disclosure-count > span {
+  color: var(--text-muted);
+}
+
+.ui-disclosure-count > .ui-disclosure-chevron {
+  place-self: center;
+  opacity: 0;
+}
+
+.ui-disclosure-trigger:is(:hover, :focus-visible) .ui-disclosure-count > span {
+  opacity: 0;
+}
+
+.ui-disclosure-trigger:is(:hover, :focus-visible) .ui-disclosure-count > .ui-disclosure-chevron {
+  opacity: 1;
+}
+
+.ui-disclosure-trigger[aria-expanded="true"] .ui-disclosure-count,
+details[open] > .ui-disclosure-trigger .ui-disclosure-count {
+  column-gap: var(--ui-row-gap, 8px);
+}
+
+.ui-disclosure-trigger[aria-expanded="true"] .ui-disclosure-count > span,
+details[open] > .ui-disclosure-trigger .ui-disclosure-count > span {
+  opacity: 1;
+}
+
+.ui-disclosure-trigger[aria-expanded="true"] .ui-disclosure-count > .ui-disclosure-chevron,
+details[open] > .ui-disclosure-trigger .ui-disclosure-count > .ui-disclosure-chevron {
+  grid-column: 2;
+  opacity: 1;
 }
 
 .ui-stack {
@@ -724,7 +774,7 @@
 }
 
 .ui-dialog-split {
-  --ui-dialog-width: min(calc(960px + var(--ui-dialog-font-growth, 0px)), calc(100% - 36px));
+  --ui-dialog-width: min(calc(1200px + var(--ui-dialog-font-growth, 0px)), calc(100% - 36px));
 }
 
 .ui-dialog-fixed-footer > .ui-dialog-panes {
@@ -765,7 +815,7 @@
 
 @media (min-width: 900px) {
   .ui-dialog-split > .ui-dialog-panes {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, min(50%, calc(480px + var(--ui-dialog-font-growth, 0px) / 2))) minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
     overflow: hidden;
   }

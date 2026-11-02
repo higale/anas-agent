@@ -1,20 +1,20 @@
-## Anas v5.0.7
+## Anas v5.0.8
 
-- 模型设置中的压缩阈值同时显示百分比和对应的 token 数，并补充计算说明，方便判断何时开始压缩上下文。
-- 压缩阈值支持按 1% 调整，更方便选择合适的比例。
-- 修复备份后用量仪表等插件后台不再自动恢复的问题；备份完成或失败后恢复此前正常运行的后台，保留手动停止和故障状态，恢复失败会提示并记录具体原因。
+- 工具调用展开时统一加载参数和返回值，收起后释放详情；内部参数与结果的展开切换复用已加载数据。
+- 恢复返回值标题旁的图片预览入口，加载工具调用详情后即可预览图片，无需展开结果正文。
+- 加宽项目设置弹窗，并限制左栏最大宽度，让宽窗口为右侧能力区提供更多空间。
+- 文件读、文件写和记忆收起时紧凑并排，展开时占满一行；统一展开图标与复选框间距，展开后同时显示数量和收起入口。
+- 自定义工具显示启用数量与总数，补充 MCP 分区标题，并加宽插件工具列表项，减少长工具名换行。
 
-**备份仍会暂时停止插件后台；重新启动不能恢复被中断的任务或连接。**
+**从 5.0.2～5.0.7 升级无需重置项目或会话。**
 
-**从 5.0.2～5.0.6 升级无需重置项目或会话。**
+- Expanding a tool call loads its arguments and result together; collapsing it releases the details. Inner argument and result toggles reuse the loaded data.
+- Restore image previews beside the result heading. Once the tool call details load, images can be previewed without expanding the result body.
+- Widen project settings and cap the left pane width, giving the capabilities pane more room in wide windows.
+- File read, file write and memory groups share rows when collapsed and span the full row when expanded. Disclosure icons and checkbox spacing are consistent, with both counts and collapse controls shown while expanded.
+- Show enabled and total custom tool counts, add the MCP section heading, and widen plugin tool items to reduce wrapping of long names.
 
-- Model settings now show both the compression threshold percentage and its token count, with an explanation of the calculation to make compression timing clearer.
-- Adjust the compression threshold in 1% increments for finer control.
-- Fix plugin backends, including Usage Meter, remaining stopped after a backup. Previously running, healthy backends restart after either a successful or failed backup. Manually stopped and failed backends stay stopped; restart failures are reported and logged with details.
-
-**Backups still temporarily stop plugin backends. Restarting cannot restore interrupted tasks or connections.**
-
-**Upgrading from 5.0.2–5.0.6 does not require resetting projects or conversations.**
+**Upgrading from 5.0.2–5.0.7 does not require resetting projects or conversations.**
 
 ## 较早版本升级 / Upgrading from earlier versions
 

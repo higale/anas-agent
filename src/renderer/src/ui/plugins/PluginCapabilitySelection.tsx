@@ -55,7 +55,7 @@ export function PluginCapabilitySelection({ value, plugins, skills, error, onCha
           <fieldset className="ui-capability-list" aria-label={name}>
             {toolIds.length > 0 && <div className="ui-form-section">
               <strong>{t('plugins.tools')}</strong>
-              <div className="ui-capability-tools ui-grid-auto">{toolIds.map(toolId => {
+              <div className="ui-capability-tools ui-grid-auto ui-resource-grid">{toolIds.map(toolId => {
                 const localId = toolId.split(':')[2]
                 const tool = plugin?.manifest?.tools.find(tool => tool.id === localId)
                 const toolName = pluginToolName(id, localId)

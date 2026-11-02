@@ -4,6 +4,7 @@ import type { AgentMessage, AgentRunActivity } from '@shared/agentTypes'
 import { AgentMessageList, AgentSubagentPanel } from './AgentMessageList'
 import { AgentSubagentActivityTrigger } from './AgentSubagentActivityDock'
 import { PanelViewState } from './PanelViewState'
+import * as contentServiceModule from '../panels/contentServices'
 import { backgroundCleanupCompleted, backgroundCleanupStarted, backgroundTasksPendingError } from '@shared/backgroundCleanup'
 
 vi.mock('react-i18next', () => ({
@@ -302,19 +303,32 @@ describe('AgentMessageList tool disclosure', () => {
     verifyPrompt()
   })
 
-  it('previews tool images without expanding the result, including after reopening history', async () => {
+  it.each([false, true])('previews tool images without expanding the result, including after reopening history (deferred=%s)', async deferred => {
     const run = activity('completed')
     const first = 'data:image/png;base64,AA=='
     const second = 'data:image/jpeg;base64,AQ=='
     run.tools[0].output = [{ type: 'image', mimeType: 'image/png', data: 'AA==' },
       { type: 'text', text: 'Captured twice' }, { type: 'image_url', image_url: { url: second } }]
+    const payload = { args: { query: 'Full tool arguments' }, output: run.tools[0].output }
+    const detail = vi.fn().mockResolvedValue(payload)
+    if (deferred) {
+      run.tools[0].detail = { threadId: 'thread', runId: run.runId, kind: 'tool', id: run.tools[0].call.id }
+      delete run.tools[0].output
+      vi.spyOn(contentServiceModule, 'contentServices').mockReturnValue({ agent: {
+        activities: { detail },
+        onEvent: (_listener: unknown, synchronize: () => Promise<void>) => { void synchronize(); return () => undefined }
+      } } as unknown as ReturnType<typeof contentServiceModule.contentServices>)
+    }
     const props = { title: 'Thread', messages, panelRef: { current: null }, followOutputRef: { current: true },
       speech: { status: 'idle' as const }, onSpeak: vi.fn() }
     const view = render(<AgentMessageList {...props} run={{ ...run, status: 'running', interrupts: [] }} activities={[]} />)
+    expect(detail).not.toHaveBeenCalled()
     expand(view.container.querySelector<HTMLDetailsElement>('.agent-activity-tool')!)
+    await screen.findAllByRole('button', { name: /^agent.view_tool_image/ })
     const result = view.container.querySelector<HTMLDetailsElement>('.agent-activity-result')!
     const images = () => screen.getAllByRole('button', { name: /^agent.view_tool_image/ })
     expect(images()).toHaveLength(2)
+    expect(images().every(button => button.closest('summary') === result.querySelector('summary'))).toBe(true)
     fireEvent.click(images()[1])
     expect(result.open).toBe(false)
     expect(result.querySelector('pre')).toBeNull()
@@ -326,10 +340,33 @@ describe('AgentMessageList tool disclosure', () => {
     expect(result.open).toBe(false)
     expand(result)
     expect(result.querySelector('pre')).toHaveTextContent('Captured twice')
+    if (deferred) {
+      const args = view.container.querySelector<HTMLDetailsElement>('.agent-activity-arguments')!
+      expand(args)
+      expect(args.querySelector('pre')).toHaveTextContent('Full tool arguments')
+      expand(args)
+      expand(args)
+      expand(result)
+      expect(images()).toHaveLength(2)
+      expect(detail).toHaveBeenCalledTimes(1)
+      expect(detail).toHaveBeenLastCalledWith({ ...run.tools[0].detail, field: undefined })
+      const tool = view.container.querySelector<HTMLDetailsElement>('.agent-activity-tool')!
+      expand(tool)
+      expect(tool.querySelector('pre')).toBeNull()
+      expect(screen.queryAllByRole('button', { name: /^agent.view_tool_image/ })).toHaveLength(0)
+      detail.mockResolvedValue({ ...payload, args: { query: 'Updated tool arguments' } })
+      expand(tool)
+      await screen.findAllByRole('button', { name: /^agent.view_tool_image/ })
+      expand(view.container.querySelector<HTMLDetailsElement>('.agent-activity-arguments')!)
+      expect(tool.querySelector('pre')).toHaveTextContent('Updated tool arguments')
+      expect(detail).toHaveBeenCalledTimes(2)
+    }
     view.unmount()
     render(<AgentMessageList {...props} activities={[run]} />)
     expand(document.querySelector<HTMLDetailsElement>('.agent-activity-tool')!)
+    await screen.findAllByRole('button', { name: /^agent.view_tool_image/ })
     expect(images()).toHaveLength(2)
+    if (deferred) expect(detail).toHaveBeenCalledTimes(3)
     fireEvent.click(images()[0])
     expect(document.querySelector('.yarl__slide_current img')).toHaveAttribute('src', first)
   })

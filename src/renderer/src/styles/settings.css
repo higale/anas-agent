@@ -695,12 +695,14 @@
 }
 
 .ui-capability-group {
-  --ui-capability-heading-gap: 16px;
-  grid-column: 1 / -1;
   min-width: 0;
   display: grid;
   grid-template-columns: var(--control-checkbox-size) minmax(0, 1fr);
   align-items: start;
+}
+
+.ui-capability-group:has(> details[open]) {
+  grid-column: 1 / -1;
 }
 
 .ui-capability-group > .ui-checkbox-field {
@@ -723,22 +725,15 @@
 }
 
 .ui-capability-group > details > summary {
-  margin-inline-start: calc(var(--control-checkbox-size) + var(--ui-capability-heading-gap));
+  margin-inline-start: calc(var(--control-checkbox-size) + var(--ui-check-gap, 8px));
+  width: fit-content;
+  max-width: 100%;
 }
 
 .ui-capability-group summary {
-  cursor: pointer;
-  color: var(--text-subtle);
   font-size: var(--font-size-ui);
   font-weight: 400;
   line-height: var(--font-line-height-ui);
-}
-
-.ui-capability-group summary > small {
-  color: var(--text-muted);
-  font-size: var(--font-size-small);
-  font-weight: 400;
-  line-height: 1;
 }
 
 .ui-capability-source > .ui-grid-auto {

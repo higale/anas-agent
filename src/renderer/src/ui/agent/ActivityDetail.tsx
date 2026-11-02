@@ -8,11 +8,15 @@ import { agentActionError } from './agentErrorMessage'
 /** Owned exclusively by the mounted body. No payload is stored in panel state. */
 export function ActivityDetail({ reference, field, children }: {
   reference: AgentActivityDetailReference
+} & ({
   field: keyof AgentActivityDetail
   children(value: unknown): ReactNode
-}) {
+} | {
+  field?: undefined
+  children(value: AgentActivityDetail): ReactNode
+})) {
   const { t } = useTranslation()
-  const [state, setState] = useState<{ value?: unknown; loaded?: boolean; error?: unknown }>({})
+  const [state, setState] = useState<{ value?: AgentActivityDetail; error?: unknown }>({})
   const [attempt, retry] = useState(0)
   const { threadId, runId, kind, id, subagentId } = reference
   useEffect(() => {
@@ -24,7 +28,7 @@ export function ActivityDetail({ reference, field, children }: {
       reading = true
       try {
         const result = await contentServices().agent.activities.detail({ threadId, runId, kind, id, subagentId, field })
-        if (!disposed) setState({ loaded: true, value: result[field] })
+        if (!disposed) setState({ value: result })
       } catch (error) {
         if (!disposed) setState({ error })
       } finally {
@@ -47,6 +51,6 @@ export function ActivityDetail({ reference, field, children }: {
     return () => { disposed = true; clearTimeout(timer); stop() }
   }, [threadId, runId, kind, id, subagentId, field, attempt])
   if (state.error) return <div role="alert">{agentActionError(t('agent.load_activity_detail_failed'), state.error)} <NoFocusButton onClick={() => retry(value => value + 1)}>{t('common.retry')}</NoFocusButton></div>
-  if (!state.loaded) return <span role="status">{t('common.loading')}</span>
-  return children(state.value)
+  if (!state.value) return <span role="status">{t('common.loading')}</span>
+  return field === undefined ? children(state.value) : children(state.value[field])
 }

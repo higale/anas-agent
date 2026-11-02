@@ -7,7 +7,7 @@ import { SubagentPackagePanel } from './subagent/SubagentPackagePanel'
 import { packageResourceKey } from '@shared/packageResourceSelection'
 import { useEffect, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Folder, Plug, Trash2 } from 'lucide-react'
+import { ChevronRight, Folder, Plug, Trash2 } from 'lucide-react'
 import { builtinToolCatalog, runtimeToolSelectionId } from '@shared/toolRegistry'
 import { mcpServerSelection, removeEmptyMissingMcpSelections, setMcpServerMode, setMcpToolSelection, resolveSkillSelection, setToolSelection, toolAllowed, toolSelected, type AgentCapabilities } from '@shared/agentCapabilities'
 import type { McpServerConfigDetail, McpToolStatus, RuntimeToolStatus, SkillSnapshot } from '@shared/types'
@@ -231,7 +231,7 @@ export function CapabilityEditor({ customTools: globalTools = [], value: storedV
               tooltip={group.flag === 'applicationEnvironment' ? t('capabilities.environment_hint') : undefined}
               onChange={(checked) => group.flag ? onChange({ ...value, [group.flag]: checked }) : setTools(group.tools.map((tool) => tool.id), checked)} />
             if (group.id === 'customTools') return <CapabilitySection key={group.id} label={group.name}
-              count={customToolItems.filter(tool => !tool.shadowedBy && selectedCustomTools.entries.includes(tool.id)).length}
+              count={<>{customToolItems.filter(tool => !tool.shadowedBy && selectedCustomTools.entries.includes(tool.id)).length}/{customToolItems.length}</>}
               mode={value.customTools.mode ?? 'custom'} disabled={disabled}
               onChange={mode => onChange({ ...value, customTools: { ...value.customTools, mode } })}>
               <div className="ui-capability-list ui-capability-tools">
@@ -252,7 +252,7 @@ export function CapabilityEditor({ customTools: globalTools = [], value: storedV
               <CheckboxField className="ui-checkbox-field-inline" checked={count === total && count > 0} indeterminate={count > 0 && count < total}
                 aria-label={group.name} label="" disabled={total === 0} onChange={toggle} />
               <details>
-                <summary>{group.name} <small>{count}/{total}</small></summary>
+                <summary className="ui-disclosure-trigger">{group.name} <small className="ui-disclosure-count"><span>{count}/{total}</span><ChevronRight className="ui-disclosure-chevron" size={UI_ICON_SIZE_SMALL} aria-hidden="true" /></small></summary>
                 <fieldset className="ui-capability-list ui-capability-tools ui-grid-auto ui-resource-grid">
                   {group.flag && <CheckboxField checked={value[group.flag]}
                     label={t('settings.capability_memory_recall')} onChange={(checked) => onChange({ ...value, [group.flag!]: checked })} />}
@@ -263,6 +263,7 @@ export function CapabilityEditor({ customTools: globalTools = [], value: storedV
           })}
         </div>
         {mcpGroups.length > 0 && <div className="ui-form-section ui-form-section-divided">
+          <strong>{t('settings.capability_mcp')}</strong>
           {mcpGroups.map(group => <CapabilitySection key={group.id} label={group.name}
             title={<><Plug className="ui-muted" size={UI_ICON_SIZE_MEDIUM} aria-hidden="true" /><span>{group.name}</span></>}
             count={group.selection.mode === 'all' ? group.tools.filter(tool => !tool.unavailable).length : group.selection.mode === 'off' ? 0 : group.tools.filter(tool => !tool.unavailable && group.selection.tools.includes(tool.name)).length}
