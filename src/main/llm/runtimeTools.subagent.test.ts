@@ -1,23 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { defineContentTool, type ToolDefinition } from '../../runtime/toolDefinition'
 import { runtimeToolDefinitions } from './runtimeTools'
 import { toolJsonSchema } from '../../runtime/toolSchema'
 import { invokeCapability } from '../../runtime/toolInvocation'
 import { z } from 'zod/v3'
 import { supportsManagedTool } from '../agent/managedToolRuntime'
-
-const memoryMocks = vi.hoisted(() => ({
-  searchMemories: vi.fn(),
-  saveMemory: vi.fn(),
-  deleteMemory: vi.fn(),
-  armEffect: vi.fn()
-}))
-
-vi.mock('../agent/toolEffectScope', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../agent/toolEffectScope')>(),
-  armCurrentAgentToolEffect: memoryMocks.armEffect,
-  currentAgentToolEffectArtifactId: () => '11111111-1111-8111-8111-111111111111'
-}))
 
 async function invokeContent(tool: ToolDefinition, input: unknown) {
   return (await invokeCapability(tool, input, {})).content
@@ -35,28 +22,10 @@ function toolNames(tools: Awaited<ReturnType<typeof runtimeToolDefinitions>>): s
   return tools.map((tool) => tool.name)
 }
 
-beforeEach(() => {
-  memoryMocks.searchMemories.mockReset()
-  memoryMocks.searchMemories.mockResolvedValue({ items: [], total: 0 })
-  memoryMocks.saveMemory.mockReset()
-  memoryMocks.saveMemory.mockResolvedValue({
-    id: '11111111-1111-8111-8111-111111111111',
-    scope: 'project',
-    projectId: 'project-1',
-    kind: 'fact',
-    content: 'Durable fact',
-    keywords: [],
-    importance: 3,
-    origin: 'agent',
-    createdAt: '2026-08-26T00:00:00.000Z',
-    updatedAt: '2026-08-26T00:00:00.000Z'
-  })
-  memoryMocks.deleteMemory.mockReset()
-})
 
 describe('subagent runtime tool scopes', () => {
   it.each(['background', 'supervision'] as const)('advertises %s management tools without an execution service', async (mode) => {
-    const tools = await runtimeToolDefinitions({ enabled: true, primaryFolder: process.cwd(), memory: false,
+    const tools = await runtimeToolDefinitions({ enabled: true, primaryFolder: process.cwd(),
       network: false, shell: false, mcp: false, toolNames: [],
       backgroundTools: mode === 'background', managedCallSupervision: mode === 'supervision' })
     expect(toolNames(tools)).toEqual(['read_call', 'read_call_output', 'wait_call', 'cancel_call'])
@@ -64,7 +33,7 @@ describe('subagent runtime tool scopes', () => {
     await expect(invokeContent(tools[0], {})).rejects.toThrow('require a conversation runtime')
   })
   it.each([false, true])('gates custom terminal input on background tools (%s), independently of Shell selection', async (backgroundTools) => {
-    const tools = await runtimeToolDefinitions({ enabled: true, primaryFolder: process.cwd(), memory: false,
+    const tools = await runtimeToolDefinitions({ enabled: true, primaryFolder: process.cwd(),
       network: false, shell: false, mcp: false, backgroundTools, interactiveCustomTools: true, toolNames: [] })
     expect(toolNames(tools).includes('write_call')).toBe(backgroundTools)
     expect(toolNames(tools)).not.toContain('pwsh')
@@ -72,7 +41,7 @@ describe('subagent runtime tool scopes', () => {
   it('exposes PTY only with enabled input and supervision, preserving explicit sizing', async () => {
     const shellRunner = vi.fn(async () => 'running')
     const managedCalls = { read: vi.fn(), readOutput: vi.fn(), readResult: vi.fn(), wait: vi.fn(), cancel: vi.fn(), start: vi.fn(), writeTerminal: vi.fn(async () => 'accepted') }
-    const options = { enabled: true, primaryFolder: process.cwd(), memory: false, network: false, shell: true,
+    const options = { enabled: true, primaryFolder: process.cwd(),  network: false, shell: true,
       commandShell: pwsh, mcp: false, backgroundTools: true, managedCalls, shellRunner, threadId: 'thread' }
     const tools = await runtimeToolDefinitions(options)
     const shell = tools.find((item) => item.name === 'pwsh')!
@@ -101,8 +70,8 @@ describe('subagent runtime tool scopes', () => {
       enabled: true,
       primaryFolder: process.cwd(),
       configuration: true,
-      memory: true,
-      memoryStore: memoryMocks,
+
+
       projectId: 'project-1',
       network: true,
       shell: true,
@@ -121,7 +90,7 @@ describe('subagent runtime tool scopes', () => {
     const commandOnly = await runtimeToolDefinitions({
       enabled: true,
       primaryFolder: process.cwd(),
-      memory: false,
+
       network: false,
       shell: true,
       commandShell: pwsh,
@@ -130,7 +99,7 @@ describe('subagent runtime tool scopes', () => {
     const networkOnly = await runtimeToolDefinitions({
       enabled: true,
       primaryFolder: process.cwd(),
-      memory: false,
+
       network: true,
       shell: false,
       mcp: false
@@ -155,7 +124,7 @@ describe('subagent runtime tool scopes', () => {
       enabled: true,
       toolNames: ['http_request'],
       primaryFolder: process.cwd(),
-      memory: false,
+
       network: true,
       shell: false,
       threadId: 'thread-1',
@@ -176,7 +145,7 @@ describe('subagent runtime tool scopes', () => {
       enabled: true,
       toolNames: ['http_request'],
       primaryFolder: process.cwd(),
-      memory: false,
+
       network: true,
       shell: false,
       mcp: false
@@ -196,7 +165,7 @@ describe('subagent runtime tool scopes', () => {
     const tools = await runtimeToolDefinitions({
       enabled: true,
       primaryFolder: process.cwd(),
-      memory: false,
+
       network: false,
       shell: false,
       threadId: 'thread-1',
@@ -247,7 +216,7 @@ describe('subagent runtime tool scopes', () => {
     const noUnresolvedCall = await runtimeToolDefinitions({
       enabled: true,
       primaryFolder: process.cwd(),
-      memory: false,
+
       network: false,
       shell: false,
       threadId: 'thread-1',
@@ -269,7 +238,7 @@ describe('subagent runtime tool scopes', () => {
     const tools = await runtimeToolDefinitions({
       enabled: true,
       primaryFolder: process.cwd(),
-      memory: false,
+
       network: false,
       shell: false,
       threadId: 'thread-1',
@@ -296,7 +265,7 @@ describe('subagent runtime tool scopes', () => {
       enabled: true,
       primaryFolder: process.cwd(),
       configuration: true,
-      memory: false,
+
       network: false,
       shell: false,
       toolNames: [],
@@ -306,7 +275,7 @@ describe('subagent runtime tool scopes', () => {
       enabled: true,
       primaryFolder: process.cwd(),
       configuration: false,
-      memory: false,
+
       network: false,
       shell: false,
       toolNames: [],
@@ -316,7 +285,7 @@ describe('subagent runtime tool scopes', () => {
       enabled: false,
       primaryFolder: process.cwd(),
       configuration: true,
-      memory: false,
+
       network: false,
       shell: false,
       mcp: false
@@ -329,74 +298,29 @@ describe('subagent runtime tool scopes', () => {
 
   it.each(Array.from({ length: 8 }, (_, mask) => ({
     selected: ['read_memory', 'save_to_memory', 'forget_memory'].filter((_, index) => mask & (1 << index))
-  })))('exposes exactly the selected memory tools: $selected', async ({ selected }) => {
+  })))('does not expose removed foreground memory tools: $selected', async ({ selected }) => {
     const tools = await runtimeToolDefinitions({
       enabled: true,
       primaryFolder: process.cwd(),
-      memory: true,
+
       toolNames: selected,
-      memoryStore: memoryMocks,
+
       projectId: 'project-1',
       network: false,
       shell: false,
       mcp: false
     })
 
-    expect(toolNames(tools)).toEqual(selected)
+    expect(toolNames(tools)).toEqual([])
   })
 
-  it('writes a structured durable memory record', async () => {
-    const tools = await runtimeToolDefinitions({
-      enabled: true,
-      primaryFolder: process.cwd(),
-      memory: true,
-      memoryStore: memoryMocks,
-      projectId: 'project-1',
-      threadId: 'thread-1',
-      runId: 'run-1',
-      network: false,
-      shell: false,
-      mcp: false
-    })
-
-    expect(toolNames(tools)).not.toContain('log_daily')
-    const saveMemory = tools.find((item) => item.name === 'save_to_memory')
-    expect(saveMemory).toBeDefined()
-
-    await expect(invokeContent(saveMemory!, {
-      summary: 'Save durable memory',
-      content: 'Durable fact'
-    })).rejects.toThrow()
-
-    const result = await invokeContent(saveMemory!, {
-      summary: 'Save durable memory',
-      scope: 'project',
-      kind: 'fact',
-      content: 'Durable fact'
-    })
-    expect(JSON.parse(result as string)).toMatchObject({ ok: true, memory: { content: 'Durable fact' } })
-    expect(memoryMocks.saveMemory).toHaveBeenCalledWith({
-      scope: 'project',
-      projectId: 'project-1',
-      kind: 'fact',
-      content: 'Durable fact',
-      keywords: [],
-      importance: 3
-    }, {
-      accessProjectId: 'project-1',
-      origin: 'agent',
-      newId: '11111111-1111-8111-8111-111111111111',
-      sourceThreadId: 'thread-1',
-      sourceRunId: 'run-1'
-    })
-  })
 
   it('keeps the generic shell tool independent of Skills', async () => {
     const shellRunner = vi.fn().mockResolvedValue('ok')
     const tools = await runtimeToolDefinitions({
       enabled: true,
       primaryFolder: process.cwd(),
-      memory: false,
+
       network: false,
       shell: true,
       commandShell: pwsh,
@@ -458,7 +382,7 @@ describe('subagent runtime tool scopes', () => {
     const tools = await runtimeToolDefinitions({
       enabled: true,
       primaryFolder: process.cwd(),
-      memory: false,
+
       network: false,
       shell: true,
       commandShell: {

@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { NativeConversationDatabase } from './nativeConversationDatabase'
-import { SqliteMemoryStore } from './memoryStore'
+import { SqliteMemoryStore } from '../../test/legacyMemoryFixture'
 import { FileEditStore } from '../fileEditStore'
 import { defaultCapabilities } from '../../shared/agentCapabilities'
 import { DEFAULT_WORKSPACE_PROJECT_ID } from '../../shared/types'

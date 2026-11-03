@@ -1,5 +1,6 @@
+import { legacyMemory } from '../test/legacyMemoryFixture'
 import Database from 'better-sqlite3'
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
@@ -31,7 +32,7 @@ async function fixture(parentDirectory = tmpdir()) {
   const storage = AgentStorage.openNative(root)
   const good = storage.createThread({ title: 'Healthy conversation' })
   const bad = storage.createThread({ title: 'Damaged conversation' })
-  await storage.memoryStore.saveMemory({ scope: 'global', kind: 'fact', content: 'Keep memory', keywords: [], importance: 3 }, { origin: 'user' })
+  await legacyMemory(storage.memoryStore).saveMemory({ scope: 'global', kind: 'fact', content: 'Keep memory', keywords: [], importance: 3 }, { origin: 'user' })
   storage.close()
   return { parent, root, good, bad, document }
 }
@@ -52,6 +53,50 @@ it('keeps desktop metadata from triggering or blocking repair, startup and resto
   await cp(join(process.cwd(), 'data/subagents'), join(f.root, 'subagents'), { recursive: true })
   await validateRestoredDataDirectory(f.root)
   for (const path of metadata) expect(await readFile(join(f.root, path), 'utf8')).toBe('Finder metadata')
+})
+
+it.each(['version', 'unreadable'] as const)('preserves completed preference Markdown while repairing %s background metadata', async fault => {
+  const f = await fixture(), file = join(f.root, 'db/memory.sqlite')
+  await writeFile(join(f.root, 'db/MEMORY.md'), '- Keep this preference')
+  if (fault === 'version') {
+    const database = new Database(file)
+    database.pragma('user_version=99'); database.close()
+  } else await writeFile(file, 'Unrecoverable job metadata')
+  const original = await readFile(file)
+  expect(() => AgentStorage.openNative(f.root)).toThrow()
+  const repaired = await repairRecoveryData(f.root, 'projects.json', () => preserveRecoveryData(f.root, f.parent))
+  expect(repaired.readyToRestart).toBe(true)
+  expect(await readFile(join(repaired.preservationPath!, 'data/db/memory.sqlite'))).toEqual(original)
+  const storage = AgentStorage.openNative(f.root)
+  try {
+    expect(storage.preferences.read({ kind: 'global' }).content).toBe('- Keep this preference')
+    expect(storage.listThreads()).toHaveLength(2)
+  } finally { storage.close() }
+})
+
+it('offers a usable repair for an unsupported memory database left after resetting all projects', async () => {
+  const parent = await mkdtemp(join(tmpdir(), 'anas-memory-reset-'))
+  roots.push(parent)
+  const root = join(parent, 'data'), file = join(root, 'db/memory.sqlite')
+  await mkdir(join(root, 'db/projects'), { recursive: true })
+  const db = new Database(file)
+  db.pragma('journal_mode=WAL')
+  db.exec('CREATE TABLE memory_meta(version INTEGER CHECK(version=0)); INSERT INTO memory_meta VALUES (0)')
+  db.close()
+  await writeFile(join(root, 'db/MEMORY.md'), 'Retained preference')
+  const original = await readFile(file)
+  const entries = (await readdir(join(root, 'db'))).sort()
+  const plan = await inspectRecoveryRepair(root)
+  expect(plan.files.find(entry => entry.name === 'projects.json')?.error).toContain('Unsupported preference memory database version')
+  expect((await readdir(join(root, 'db'))).sort()).toEqual(entries)
+  const repaired = await repairRecoveryData(root, 'projects.json', () => preserveRecoveryData(root, parent))
+  expect(repaired.readyToRestart).toBe(true)
+  expect(await readFile(join(repaired.preservationPath!, 'data/db/memory.sqlite'))).toEqual(original)
+  const storage = AgentStorage.openNative(root)
+  try {
+    expect(storage.preferences.read({ kind: 'global' }).content).toBe('Retained preference')
+    expect(storage.listThreads()).toHaveLength(0)
+  } finally { storage.close() }
 })
 
 it('ignores unrelated files and directories and retains them through independent data repair', async () => {
@@ -92,7 +137,7 @@ it.each(['conversation', 'catalog', 'project'])('returns usable project data aft
     expect(storage.conversationForThread(f.good.id).getThread(f.good.id)?.title).toBe('Healthy conversation')
     expect(storage.listThreads()).toHaveLength(fault === 'conversation' ? 1 : 2)
     expect(storage.createThread({ title: 'New conversation after recovery' }).title).toBe('New conversation after recovery')
-    if (fault !== 'catalog') expect((await storage.memoryStore.searchMemories({ scope: 'global' })).total).toBe(1)
+    if (fault !== 'catalog') expect((await legacyMemory(storage.memoryStore).searchMemories({ scope: 'global' })).total).toBe(1)
   } finally { storage.close() }
 })
 
@@ -119,7 +164,7 @@ it('repairs missing projects and conversations without trapping the application 
   const storage = AgentStorage.openNative(f.root)
   try {
     expect(storage.listThreads()).toEqual([])
-    expect((await storage.memoryStore.searchMemories({ scope: 'global' })).total).toBe(1)
+    expect((await legacyMemory(storage.memoryStore).searchMemories({ scope: 'global' })).total).toBe(1)
     storage.createThread()
   } finally { storage.close() }
 })
@@ -179,6 +224,6 @@ it.each(['catalog', 'conversation'])('isolates an invalid %s SQLite sidecar dire
   const storage = AgentStorage.openNative(f.root)
   try {
     expect(storage.listThreads()).toHaveLength(2)
-    expect((await storage.memoryStore.searchMemories({ scope: 'global' })).total).toBe(1)
+    expect((await legacyMemory(storage.memoryStore).searchMemories({ scope: 'global' })).total).toBe(1)
   } finally { storage.close() }
 })

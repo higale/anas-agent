@@ -35,7 +35,6 @@ export function ProfileSettings({
 }: ProfileSettingsProps) {
   const { t } = useTranslation()
   const assistant = profile?.assistant ?? { name: '', role: '', instructions: '' }
-  const user = profile?.user ?? { preferredName: '', personalInfo: '' }
   const textareaClass = 'ui-autosize-textarea ui-code-textarea ui-textarea-wrap'
 
   return (
@@ -113,38 +112,6 @@ export function ProfileSettings({
             rows={UI_TEXTAREA_ROWS_COMPACT}
             value={assistant.instructions}
             onCommit={(instructions) => void onProfileChange({ assistant: { instructions } })}
-          />
-        </label>
-      </SettingsGroup>
-      <SettingsGroup
-        className="settings-profile-user"
-        title={t('settings.user_profile')}
-      >
-        <label className="ui-form-row ui-form-row-wide" htmlFor="user-preferred-name-input">
-          <span>
-            <strong>{t('settings.preferred_name')}</strong>
-            <small>{t('settings.preferred_name_hint')}</small>
-          </span>
-          <CommitTextInput
-            id="user-preferred-name-input"
-            className="ui-form-control"
-            type="text"
-            value={user.preferredName}
-            onCommit={(preferredName) => void onProfileChange({ user: { preferredName } })}
-          />
-        </label>
-        <label className="ui-form-row ui-form-row-wide" htmlFor="user-personal-info-input">
-          <span>
-            <strong>{t('settings.personal_info')}</strong>
-            <small>{t('settings.personal_info_hint')}</small>
-          </span>
-          <CommitTextarea
-            id="user-personal-info-input"
-            className={textareaClass}
-            data-max-height="none"
-            rows={UI_TEXTAREA_ROWS_COMPACT}
-            value={user.personalInfo}
-            onCommit={(personalInfo) => void onProfileChange({ user: { personalInfo } })}
           />
         </label>
       </SettingsGroup>

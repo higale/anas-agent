@@ -1,4 +1,3 @@
-import Database from 'better-sqlite3'
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
@@ -6,7 +5,6 @@ import { z } from 'zod'
 import { NativeConversationDatabase } from './nativeConversationDatabase'
 import { NativeRunHost } from './nativeRunHost'
 import { ManagedCallService } from './managedCallService'
-import { SqliteMemoryStore } from './memoryStore'
 import { FileEditStore } from '../fileEditStore'
 import { conversationExecution } from '../../runtime/conversationExecution'
 import { ToolRunScope } from '../../runtime/toolEvents'
@@ -65,9 +63,9 @@ function crashFileStore(options: NativeEffectCrashOptions): FileEditStore {
  * an expendable process. Faults terminate without shutdown or SQLite close. */
 export async function runNativeEffectCrashHarness(options: NativeEffectCrashOptions) {
   if (options.scenario === 'restore' && !options.restore) throw new Error('A restore fixture requires its saved source identity.')
-  const global = new Database(':memory:'), fileEdits = crashFileStore(options)
+  const fileEdits = crashFileStore(options)
   const database = NativeConversationDatabase.open(join(options.root, 'conversation.sqlite'), {
-    attachmentRoot: join(options.root, 'attachments'), memoryStore: new SqliteMemoryStore(global), fileEditStore: fileEdits
+    attachmentRoot: join(options.root, 'attachments'), memoryStore: {}, fileEditStore: fileEdits
   })
   const parent = { threadId: options.threadId, runId: options.runId }
   const identity = options.child ? { threadId: options.child.threadId, runId: options.child.runId } : parent
@@ -202,5 +200,5 @@ export async function runNativeEffectCrashHarness(options: NativeEffectCrashOpti
       pendingFileCleanup: database.resourceCleanup.listFileEditCleanupRunIds(),
       parent: options.child ? { phase: store.load(parent.threadId)!.phase, history: store.readHistory(parent.threadId)!.messages.map(message => message.value),
         call: database.runs.subagents.require(options.child.id, parent.threadId) } : undefined }
-  } finally { await host.shutdown(); database.close(); global.close() }
+  } finally { await host.shutdown(); database.close() }
 }

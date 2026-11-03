@@ -598,6 +598,10 @@ export interface AppSettings {
   logLevel: RuntimeLogLevel
   logRetentionDays: number
   maxModelCallsPerRun: number
+  /** No selection pauses background memory generation; never inherits the chat model. */
+  memoryMode: 'background' | 'foreground'
+  memoryModelId?: string | null
+  showMemoryActivityInTitlebar: boolean
   environmentContext: EnvironmentContextSettings
   sidebarVisible: boolean
   sidebarWidth: number
@@ -630,7 +634,6 @@ export interface AppProfile {
 
 export interface AppProfileUpdate {
   assistant?: Partial<Omit<AssistantProfile, 'newAvatarPath'>>
-  user?: Partial<UserProfile>
 }
 
 export interface AppConfigSnapshot {
@@ -641,50 +644,6 @@ export interface AppConfigSnapshot {
   settings: AppSettings
   defaultModelId?: string
   defaultModel?: ResolvedModelConfig
-}
-
-export type MemoryScope = 'global' | 'project'
-export type MemoryKind = 'preference' | 'fact' | 'experience'
-export type MemoryOrigin = 'user' | 'agent'
-
-export interface MemoryItem {
-  id: string
-  scope: MemoryScope
-  projectId?: string
-  kind: MemoryKind
-  content: string
-  keywords: string[]
-  importance: number
-  origin: MemoryOrigin
-  sourceThreadId?: string
-  sourceRunId?: string
-  createdAt: string
-  updatedAt: string
-  score?: number
-}
-
-export interface MemorySearchRequest {
-  query?: string
-  scope?: 'all' | MemoryScope
-  projectId?: string
-  kind?: 'all' | MemoryKind
-  limit?: number
-  offset?: number
-}
-
-export interface MemorySearchResult {
-  items: MemoryItem[]
-  total: number
-}
-
-export interface MemorySaveRequest {
-  id?: string
-  scope: MemoryScope
-  projectId?: string
-  kind: MemoryKind
-  content: string
-  keywords: string[]
-  importance: number
 }
 
 export type SkillRootKind = 'system' | 'user' | 'project' | 'external' | 'plugin' | 'subagent'
@@ -799,6 +758,7 @@ export interface SkillInvocationResult {
 }
 
 export interface GaleApi {
+  preferences: import('./preferenceMemory').PreferenceMemoryApi
   panels: import('./panels').PanelsApi
   plugins: import('./plugins').PluginsApi
   recovery: import('./recovery').RecoveryApi
@@ -850,12 +810,6 @@ export interface GaleApi {
     saveMcpServer(server: McpServerConfigSave): Promise<AppConfigSnapshot>
     deleteMcpServer(index: number): Promise<AppConfigSnapshot>
     moveMcpServer(index: number, direction: -1 | 1): Promise<AppConfigSnapshot>
-  }
-  memory: {
-    search(request?: MemorySearchRequest): Promise<MemorySearchResult>
-    save(request: MemorySaveRequest): Promise<MemoryItem>
-    delete(id: string): Promise<void>
-    clear(): Promise<number>
   }
   tools: {
     setEnabled(id: string, enabled: boolean): Promise<void>

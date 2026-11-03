@@ -58,7 +58,6 @@ import { SettingsSidebarContent, SettingsSidebarFooter } from './settings/Settin
 import { SettingsScreen } from './settings/SettingsScreen'
 import { useDataManagementState } from './settings/useDataManagementState'
 import { useEnvSettingsState } from './settings/useEnvSettingsState'
-import { useMemorySettingsState } from './settings/useMemorySettingsState'
 import { usePersonaAvatarState } from './settings/usePersonaAvatarState'
 import { useSettingsController } from './settings/useSettingsController'
 import { useSkillsSettingsState } from './settings/useSkillsSettingsState'
@@ -138,6 +137,7 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
   const composerFormRef = useRef<HTMLFormElement | null>(null)
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null)
   const settingsContentRef = useRef<HTMLDivElement | null>(null)
+  const [memorySettingsView] = useState(() => new Map<string, unknown>())
   const mcpListRef = useRef<HTMLDivElement | null>(null)
   const followOutputRef = useRef(true)
   const nextFollowOutputScrollBehaviorRef = useRef<ScrollBehavior>('smooth')
@@ -398,12 +398,6 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
     t
   })
   const { envDraft, envPath, openEnvFile, updateEnvDraft } = useEnvSettingsState({ settingsOpen, settingsTab, t })
-  const memorySettings = useMemorySettingsState({
-    openConfirmDialog,
-    settingsOpen,
-    settingsTab,
-    t
-  })
   const {
     addDirectory: addSkillDirectory,
     importDirectories: importSkills,
@@ -661,7 +655,6 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
     mcpEnvText: mcpDraft.envText,
     mcpListRef,
     mcpServerCount: config?.mcpServers.length,
-    memoryDraft: memorySettings.draft?.content,
     messages: agent.activeSnapshot?.messages,
     nextFollowOutputScrollBehaviorRef,
     settingsContentRef,
@@ -1286,13 +1279,12 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
           subagentDraft={subagentDraft}
           subagentListRef={subagentListRef}
           editingSubagentIndex={editingSubagentIndex}
-          memory={memorySettings}
           modelCandidates={modelCandidates}
           modelDraft={modelDraft}
           modelListLoading={modelListLoading}
           modelListRef={modelListRef}
-          projects={projects}
           settingsContentRef={settingsContentRef}
+          memorySettingsView={memorySettingsView}
           sidebarVisible={sidebarVisible}
           skills={skills}
           systemLanguage={systemLanguagePreference}

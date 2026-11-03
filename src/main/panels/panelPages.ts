@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { app, BrowserWindow, screen, type IpcMainInvokeEvent, type Point, type WebContents } from 'electron'
-import { panelIdentity, type PanelContent, type PanelLocation, type PanelMoveOptions, type PanelState, type PanelWindowState, type PanelWindowShellState, type PanelPreferences } from '@shared/panels'
+import { panelIdentity, type PanelContent, type PanelLocation, type PanelMoveOptions, type PanelState, type PanelWindowState, type PanelWindowShellState, type PanelPreferences, type PanelPreferencesSnapshot } from '@shared/panels'
 import { requirePanelJson, requirePanelSize, type PanelJson, type PanelPageContext, type PanelPageCommand, type PanelPagePhase } from '@shared/panelLifecycle'
 import { findPanelToolbarAction, requirePanelToolbar, type PanelToolbar } from '@shared/panelToolbar'
 import type { LanguageResourcesSnapshot, Project } from '@shared/types'
@@ -70,7 +70,7 @@ export class PanelPages {
   onChanged(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
   private watched = new WeakSet<BrowserWindow>()
   private appearance = { language: 'en', theme: 'light' as 'light' | 'dark', fontSize: 14 }
-  private preferences: PanelPreferences = { diffViewMode: 'inline', diffFoldUnchanged: true, diffWordWrap: true }
+  private preferences: PanelPreferencesSnapshot = { revision: 0, diffViewMode: 'inline', diffFoldUnchanged: true, diffWordWrap: true, showMemoryActivityInTitlebar: true }
 
   constructor(private readonly loadLanguages: () => Promise<LanguageResourcesSnapshot>) {}
   private view(entry: Entry): PanelState {
@@ -97,9 +97,14 @@ export class PanelPages {
   }
   list(): PanelState[] { return [...this.entries.values()].map(entry => this.view(entry)) }
   state(id: string): PanelState { return this.view(this.require(id)) }
-  configure(appearance: typeof this.appearance, preferences?: PanelPreferences): void {
+  getPreferences() { return this.preferences }
+  setPreferences(next: PanelPreferences): void {
+    if (Object.entries(next).every(([key, value]) => this.preferences[key as keyof PanelPreferences] === value)) return
+    this.preferences = { ...next, revision: this.preferences.revision + 1 }
+    this.changed()
+  }
+  configure(appearance: typeof this.appearance): void {
     this.appearance = appearance
-    if (preferences) this.preferences = preferences
     for (const entry of this.entries.values()) {
       entry.state.name = entry.definition.name(appearance.language, entry.definition.project)
       for (const page of [entry.source, entry.candidate]) if (page?.location === 'window' && !page.owner.isDestroyed()) page.owner.setTitle(entry.state.name)
@@ -303,7 +308,14 @@ export class PanelPages {
         if (!this.entries.has(viewId)) return
         if (entry.source) {
           entry.source.phase = 'suspended'; this.changed()
-          try { await this.command(entry.source, 'dispose', { reason: 'closed' }, undefined, 15000) }
+          try {
+            const result = await this.command(entry.source, 'dispose', { reason: 'closed' }, undefined, 15000)
+            if (entry.state.content.kind === 'projectMemory' && result === 'keep-open') {
+              await this.command(entry.source, 'resume', null, undefined, 15000)
+              entry.source.phase = 'active'; this.changed()
+              return
+            }
+          }
           catch (error) {
             await this.command(entry.source, 'resume', null, undefined, 15000)
             entry.source.phase = 'active'; this.changed()

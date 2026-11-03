@@ -13,6 +13,7 @@ export const toolGroupOrder = [
 ] as const
 
 export const frameworkToolCatalog = [
+  { id: 'update_memory', feature: 'memory' },
   { id: 'write_todos', feature: 'planning' },
   { id: 'start_subagent', feature: 'subagents' },
   { id: 'read_subagent', feature: 'subagents' },
@@ -44,10 +45,7 @@ export const builtinToolCatalog = [
   { id: 'create_directory', feature: 'fileWrite' },
   { id: 'move_file', feature: 'fileWrite' },
   { id: 'delete_file', feature: 'fileWrite' },
-  { id: 'update_config', feature: 'configuration' },
-  { id: 'read_memory', feature: 'memory' },
-  { id: 'save_to_memory', feature: 'memory' },
-  { id: 'forget_memory', feature: 'memory' }
+  { id: 'update_config', feature: 'configuration' }
 ] as const satisfies readonly BuiltinToolCatalogEntry[]
 
 const catalogToolOrder: Partial<Record<typeof toolGroupOrder[number], readonly string[]>> = {

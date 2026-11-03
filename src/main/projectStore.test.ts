@@ -1,4 +1,4 @@
-import { defaultCapabilities, } from '@shared/agentCapabilities'
+import { defaultCapabilities, effectiveProjectCapabilities, } from '@shared/agentCapabilities'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -688,6 +688,25 @@ describe('project store', () => {
     expect(completeDatabaseCommit).toHaveBeenCalledOnce()
     expect(completeDatabaseCommit).toHaveBeenCalledWith(project.id)
     expect(await store.listProjects()).toEqual(next.projects)
+  })
+
+  it('keeps available capabilities when first enabling default project customization and preserves explicit restrictions', async () => {
+    const store = await import('./projectStore')
+    const initial = await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)
+    if (initial.kind !== 'workspace') throw new Error('Expected workspace')
+    const before = effectiveProjectCapabilities(initial)
+    const customized = await store.updateProject(initial.id, { ...initial, advancedSettings: true })
+    if (customized.kind !== 'workspace') throw new Error('Expected workspace')
+    expect(effectiveProjectCapabilities(customized)).toEqual(before)
+    expect(customized.capabilities).toMatchObject({ customTools: { mode: 'all' }, pluginMode: 'default', mcp: { defaultMode: 'all' } })
+    const restricted = { ...customized.capabilities, customTools: { ...customized.capabilities.customTools, mode: 'off' as const }, pluginMode: 'off' as const }
+    await store.updateProject(initial.id, { ...customized, capabilities: restricted, advancedSettings: false })
+    const saved = await store.getProject(initial.id)
+    if (saved.kind !== 'workspace') throw new Error('Expected workspace')
+    expect(saved.capabilities).toEqual(restricted)
+    const enabled = await store.updateProject(saved.id, { ...saved, advancedSettings: true })
+    if (enabled.kind !== 'workspace') throw new Error('Expected workspace')
+    expect(effectiveProjectCapabilities(enabled)).toEqual(restricted)
   })
 
   it('persists default workspace settings like a regular project while retaining its fixed identity', async () => {

@@ -4,11 +4,12 @@ import type { HelpDocumentId } from '@shared/helpDocuments'
 import type { ProjectOperationResult } from '@shared/projectOperation'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AgentAccessMode, AgentMessageEditResult, AgentMessageRangeInput, AgentMessageRegenerateInput, AgentMessageWindowInput, AgentModelRequestPreview, AgentModelRequestPreviewInput, AgentQueuedInput, AgentQueuedInputCreate, AgentModelRetryInput, AgentResumeInput, AgentRun, AgentRunCancellationResult, AgentRunDirectionInput, AgentRunDirectionReferenceInput, AgentRunReferenceInput, AgentRunSubmission, AgentRunSubmissionInput, AgentRuntimeEvent, AgentStorageUsageSnapshot, AgentSystemContextPreview, AgentSystemContextPreviewInput, AgentThread, AgentThreadCleanupResult, AgentThreadSnapshot, AgentThreadUpdate, AgentWorkspaceState } from '@shared/agentTypes'
-import type { AppAvatarImage, AppBuildInfo, AppConfigSnapshot, AppDataStorageUsageSnapshot, AppProfileUpdate, AppSettingsUpdate, AttachmentPreview, AttachmentPreviewOptions, AvatarCropSaveRequest, AvatarCropSource, AvatarCropSourceReadResult, DataBackupResult, DataCleanupRequest, DataCleanupResult, DataRestoreResult, EnvFileSnapshot, FileIconImage, FileIconSize, GaleApi, InputHistorySnapshot, LanguageResourcesSnapshot, McpMaintenanceResult, McpServerConfigSave, McpServerUpdate, McpToolStatus, MemoryItem, MemorySaveRequest, MemorySearchRequest, MemorySearchResult, ModelListRequest, ModelListResponse, ModelProviderConfigSave, Project, ProjectCreateRequest, ProjectDeleteResult, ProjectStateUpdate, ProjectUpdateRequest, ProviderModelConfigSave, RuntimeToolStatus, SelectedAttachment, SkillAvailabilityUpdate, SkillDirectoryAddResult, SkillFileNode, SkillFilePreview, SkillImportResult, SkillInvocationResult, SkillRootUpdate, SkillSnapshot, SpeechGenerateRequest, SpeechRendererDiagnostics, SpeechRendererWarningKind, SpeechReplyConfig, SpeechVoiceInfo, SubagentConfigSave, SystemEnvironmentDetection } from '@shared/types'
+import type { AppAvatarImage, AppBuildInfo, AppConfigSnapshot, AppDataStorageUsageSnapshot, AppProfileUpdate, AppSettingsUpdate, AttachmentPreview, AttachmentPreviewOptions, AvatarCropSaveRequest, AvatarCropSource, AvatarCropSourceReadResult, DataBackupResult, DataCleanupRequest, DataCleanupResult, DataRestoreResult, EnvFileSnapshot, FileIconImage, FileIconSize, GaleApi, InputHistorySnapshot, LanguageResourcesSnapshot, McpMaintenanceResult, McpServerConfigSave, McpServerUpdate, McpToolStatus, ModelListRequest, ModelListResponse, ModelProviderConfigSave, Project, ProjectCreateRequest, ProjectDeleteResult, ProjectStateUpdate, ProjectUpdateRequest, ProviderModelConfigSave, RuntimeToolStatus, SelectedAttachment, SkillAvailabilityUpdate, SkillDirectoryAddResult, SkillFileNode, SkillFilePreview, SkillImportResult, SkillInvocationResult, SkillRootUpdate, SkillSnapshot, SpeechGenerateRequest, SpeechRendererDiagnostics, SpeechRendererWarningKind, SpeechReplyConfig, SpeechVoiceInfo, SubagentConfigSave, SystemEnvironmentDetection } from '@shared/types'
 import { subscribeAgentRuntimeEvents } from './agentEventSubscription'
 import type { FilesPanelContext, PanelRequest, PanelState } from '@shared/panels'
 
 const api: GaleApi = {
+  preferences: contentServices.preferences,
   panels: {
     pages: panelPagesApi,
     onEscape: listener => {
@@ -217,12 +218,6 @@ const api: GaleApi = {
     saveMcpServer: (server: McpServerConfigSave): Promise<AppConfigSnapshot> => ipcRenderer.invoke('config:saveMcpServer', server),
     deleteMcpServer: (index: number): Promise<AppConfigSnapshot> => ipcRenderer.invoke('config:deleteMcpServer', index),
     moveMcpServer: (index: number, direction: -1 | 1): Promise<AppConfigSnapshot> => ipcRenderer.invoke('config:moveMcpServer', index, direction)
-  },
-  memory: {
-    search: (request: MemorySearchRequest = {}): Promise<MemorySearchResult> => ipcRenderer.invoke('memory:search', request),
-    save: (request: MemorySaveRequest): Promise<MemoryItem> => ipcRenderer.invoke('memory:save', request),
-    delete: (id: string): Promise<void> => ipcRenderer.invoke('memory:delete', id),
-    clear: (): Promise<number> => ipcRenderer.invoke('memory:clear')
   },
   tools: {
     setEnabled: (id, enabled) => ipcRenderer.invoke('tools:setEnabled', id, enabled),

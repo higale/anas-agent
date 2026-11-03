@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { NativeConversationDatabase } from './nativeConversationDatabase'
-import { SqliteMemoryStore } from './memoryStore'
+import { SqliteMemoryStore } from '../../test/legacyMemoryFixture'
 import { FileEditStore } from '../fileEditStore'
 
 const globals: Database.Database[] = []

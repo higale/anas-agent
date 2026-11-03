@@ -132,7 +132,10 @@ export function createConversationContextRuntime(options: {
     const systemTokens = allocatedSystemTokens(systemPrompt, baseSystemTokenTotal)
     // Request preparation can add rules, recalled memory, or model instructions.
     // Count their real projection instead of losing it from the local estimate.
-    systemTokens.system_instruction += systemTokenTotal - baseSystemTokenTotal
+    const memoryText = typeof systemMessage.content === 'string' ? systemMessage.content.match(/<user_preferences>[\s\S]*?<\/user_preferences>/)?.[0] : undefined
+    const memoryTokens = Math.min(systemTokenTotal - baseSystemTokenTotal, memoryText ? approximateTokens([{ kind: 'system', content: memoryText }]) : 0)
+    systemTokens.memory += memoryTokens
+    systemTokens.system_instruction += systemTokenTotal - baseSystemTokenTotal - memoryTokens
     const inputCapacityTokens = model.maxContextTokens - model.maxOutputTokens
     const requestedCompressionThresholdTokens = contextCompressionTriggerTokens(
       model.maxContextTokens,

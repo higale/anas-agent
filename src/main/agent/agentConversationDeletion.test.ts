@@ -237,7 +237,7 @@ it('keeps online backups restorable while deletion waits and ordinary execution 
     expect(database.getThread(thread.id)?.title).toBe('Delete during backup')
     expect(storage.isConversationDeleting(thread.id)).toBe(false)
   } finally { releaseCatalog() }
-  await expect(copying).resolves.toHaveLength(2)
+  await expect(copying).resolves.toHaveLength(3)
   await deleting
   expect(() => NativeConversationDatabase.validateBackup(getAgentConversationDatabaseFile(thread.id, destination),
     getAgentAttachmentsDir(thread.id, destination), new Set([thread.projectId]), thread.id)).not.toThrow()
@@ -254,7 +254,7 @@ it('omits accepted pending deletions from the backup catalog without changing th
   const destination = await mkdtemp(join(tmpdir(), 'anas-pending-deletion-backup-'))
   roots.push(destination)
   const files = await snapshotAgentStorage(root, destination)
-  expect(files.map(file => file.relPath)).toEqual(['db/catalog.sqlite', `db/projects/default-workspace/conversations/${retained.id}/conversation.sqlite`])
+  expect(files.map(file => file.relPath)).toEqual(['db/catalog.sqlite', `db/projects/default-workspace/conversations/${retained.id}/conversation.sqlite`, 'db/memory.sqlite'])
   expect(storage.isConversationDeleting(deleted.id)).toBe(true)
   const copied = AgentStorage.openNative(destination)
   try { expect(copied.listThreads().map(thread => thread.id)).toEqual([retained.id]) } finally { copied.close() }

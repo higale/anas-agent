@@ -15,11 +15,6 @@ import {
   maxCommandTimeoutSeconds
 } from '@shared/commandShell'
 import { toolSummarySchema } from './toolSummary'
-import type { SqliteMemoryStore } from '../agent/memoryStore'
-import {
-  armCurrentAgentToolEffect,
-  currentAgentToolEffectArtifactId
-} from '../agent/toolEffectScope'
 import type { ManagedCallService } from '../agent/managedCallService'
 import { terminalActionSchema, terminalSizeSchema, type TerminalSize } from '@shared/terminal'
 import { userInputSchema, type UserInputSource } from '@shared/userInput'
@@ -40,8 +35,6 @@ export interface RuntimeToolOptions {
   mcpTools?: ToolDefinition[]
   primaryFolder: string
   configuration?: boolean
-  memory: boolean
-  memoryStore?: Pick<SqliteMemoryStore, 'searchMemories' | 'saveMemory' | 'deleteMemory'>
   projectId?: string
   threadId?: string
   runId?: string
@@ -259,123 +252,6 @@ export async function runtimeToolDefinitions(options: RuntimeToolOptions): Promi
 
   if (options.configuration) {
     tools.push(...configToolDefinitions(options.primaryFolder))
-  }
-
-  if (options.memory) {
-    if (!options.memoryStore || !options.projectId) {
-      throw new Error('Memory tools require a connected store and project.')
-    }
-    const memoryStore = options.memoryStore
-    const searchAccessibleMemories = async (input: {
-      query?: string
-      scope?: 'all' | 'global' | 'project'
-      kind?: 'all' | 'preference' | 'fact' | 'experience'
-      limit?: number
-    }) => {
-      const scope = input.scope ?? 'all'
-      const limit = input.limit ?? 10
-      if (scope !== 'all') {
-        return memoryStore.searchMemories({
-          query: input.query,
-          scope,
-          ...(scope === 'project' ? { projectId: options.projectId } : {}),
-          kind: input.kind,
-          limit
-        })
-      }
-      const [global, project] = await Promise.all([
-        memoryStore.searchMemories({ query: input.query, scope: 'global', kind: input.kind, limit }),
-        memoryStore.searchMemories({
-          query: input.query,
-          scope: 'project',
-          projectId: options.projectId,
-          kind: input.kind,
-          limit
-        })
-      ])
-      const items = [...global.items, ...project.items]
-        .sort((left, right) => {
-          const score = (right.score ?? 0) - (left.score ?? 0)
-          return score !== 0 ? score : right.updatedAt.localeCompare(left.updatedAt)
-        })
-        .slice(0, limit)
-      return { items, total: global.total + project.total }
-    }
-    if (includesTool('read_memory')) tools.push(defineContentTool({
-      name: 'read_memory',
-      description: 'Search or list durable memory records available to the current project. Use a focused query when looking for prior preferences, facts, or experience.',
-      inputSchema: z.object({
-        summary: toolSummarySchema,
-        query: z.string().max(2_000).optional().describe('Optional text query. Omit to list the most recently updated records.'),
-        scope: z.enum(['all', 'global', 'project']).optional().describe('Search global records, current-project records, or both. Default both.'),
-        kind: z.enum(['all', 'preference', 'fact', 'experience']).optional().describe('Optional record kind filter.'),
-        limit: z.number().int().min(1).max(50).optional().describe('Maximum records to return. Default 10.')
-      }),
-      execute: async (input) => {
-        return JSON.stringify({ ok: true, ...await searchAccessibleMemories(input) })
-      }
-    }))
-
-    if (includesTool('save_to_memory')) {
-      tools.push(defineContentTool({
-        name: 'save_to_memory',
-        description: 'Create a durable memory record, or update one by memory_id. Prefer revising an existing record over creating duplicates.',
-        inputSchema: z.object({
-          summary: toolSummarySchema,
-          memory_id: z.string().uuid().optional().describe('Existing record ID to update. Omit only when creating a new record.'),
-          scope: z.enum(['global', 'project']).describe('Global applies across projects; project applies only to the current project.'),
-          kind: z.enum(['preference', 'fact', 'experience']).describe('The kind of durable context being stored.'),
-          content: z.string().min(1).max(12_000).describe('Concise, self-contained memory content.'),
-          keywords: z.array(z.string().min(1).max(64)).max(20).default([]).describe('Short search terms, names, or identifiers that improve retrieval.'),
-          importance: z.number().int().min(1).max(5).default(3).describe('Retrieval importance from 1 (low) to 5 (high).')
-        }),
-        execute: async (input) => {
-          const id = input.memory_id ?? currentAgentToolEffectArtifactId('memory-record')
-          if (!id) throw new Error('Memory writes require a durable tool-effect identity.')
-          armCurrentAgentToolEffect({
-            kind: 'memory_write',
-            target: { id },
-            recoveryMode: 'idempotent'
-          })
-          const memory = await memoryStore.saveMemory({
-            ...(input.memory_id ? { id: input.memory_id } : {}),
-            scope: input.scope,
-            ...(input.scope === 'project' ? { projectId: options.projectId } : {}),
-            kind: input.kind,
-            content: input.content,
-            keywords: input.keywords,
-            importance: input.importance
-          }, {
-            accessProjectId: options.projectId,
-            origin: 'agent',
-            newId: id,
-            sourceThreadId: options.threadId,
-            sourceRunId: options.runId
-          })
-          return JSON.stringify({ ok: true, memory })
-        }
-      }))
-    }
-
-    if (includesTool('forget_memory')) {
-      tools.push(defineContentTool({
-        name: 'forget_memory',
-        description: 'Permanently delete a durable memory record by ID when the user asks to forget it or the record is known to be stale.',
-        inputSchema: z.object({
-          summary: toolSummarySchema,
-          memory_id: z.string().uuid().describe('The exact memory record ID to delete. Search memory first if needed.')
-        }),
-        execute: async (input) => {
-          armCurrentAgentToolEffect({
-            kind: 'memory_delete',
-            target: { id: input.memory_id },
-            recoveryMode: 'idempotent'
-          })
-          await memoryStore.deleteMemory(input.memory_id, options.projectId)
-          return JSON.stringify({ ok: true, memory_id: input.memory_id })
-        }
-      }))
-    }
   }
 
   if (options.mcp) tools.push(...(options.mcpTools ?? []))

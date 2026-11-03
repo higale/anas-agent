@@ -18,7 +18,8 @@ import { measureDirectorySize } from '../dataStorageUsage'
 import { runtimeLog } from '../runtimeLogger'
 import { NativeConversationDatabase } from './nativeConversationDatabase'
 import { completeProjectCatalogDeletion, readConversationCatalogSnapshot, writeConversationCatalogSnapshot } from './conversationCatalog'
-import { SqliteMemoryStore } from './memoryStore'
+import type { MemoryResources } from './memoryStore'
+import { PreferenceMemoryStore } from './preferenceMemoryStore'
 import { FileEditStore, managedDirectChildPath } from '../fileEditStore'
 import { AgentThreadLockedError } from './agentErrors'
 import { catalogVersion, catalogConversationSchema, catalogConversationIndexes, validateCatalogSchema } from './catalogSchema'
@@ -80,13 +81,17 @@ export interface ConversationStorageConnection {
   close(): void
 }
 interface ConversationConnectionOptions<T> {
+  ownerThreadId: string
   attachmentRoot: string
   temporaryRoot: string
-  memoryStore: SqliteMemoryStore
+  memoryStore: MemoryResources
   fileEditStore: FileEditStore
   onFileChanges?(runId: string): void
   onChanged?(database: T): void
 }
+
+interface SpeechVisit { threadId: string; order: number; spoken: boolean; needsWrite: boolean }
+export type ConfirmWorkspaceSpeech = (() => string | undefined) | null
 
 export class AgentStorage<T extends ConversationStorageConnection = NativeConversationDatabase> {
   private readonly conversations = new Map<string, T>()
@@ -95,20 +100,26 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
   private preview?: T
   private closed = false
   private maintaining = false
-  private sharedMemoryStore: SqliteMemoryStore
+  private sharedMemoryStore: MemoryResources
   private catalog: Database.Database
+  private speechVisit?: SpeechVisit
+  private latestSpeech?: SpeechVisit
+  private visitOrder = 0
   readonly dataDir: string
+  readonly preferences: PreferenceMemoryStore
 
   private constructor(dataDir: string, private readonly onFileChanges: ((ownerThreadId: string, runId: string) => void) | undefined,
     private readonly openDatabase: (file: string, options: ConversationConnectionOptions<T>) => T,
-    private readonly openPreview: (memory: SqliteMemoryStore) => T) {
+    private readonly openPreview: (memory: MemoryResources) => T) {
     this.dataDir = resolve(dataDir)
     mkdirSync(dirname(getAgentCatalogFile(this.dataDir)), { recursive: true })
     this.catalog = new Database(getAgentCatalogFile(this.dataDir))
     try {
       this.initializeCatalog()
       mkdirSync(getProjectsDir(this.dataDir), { recursive: true })
-      this.sharedMemoryStore = new SqliteMemoryStore(this.catalog)
+      PreferenceMemoryStore.validateDirectory(this.dataDir)
+      this.preferences = new PreferenceMemoryStore(this.dataDir, false, () => this.catalog.prepare('SELECT id FROM agent_conversations').pluck().iterate() as Iterable<string>)
+      this.sharedMemoryStore = { preferences: this.preferences }
     } catch (error) {
       this.catalog.close()
       throw error
@@ -125,7 +136,7 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
       })
   }
 
-  get memoryStore(): SqliteMemoryStore { return this.sharedMemoryStore }
+  get memoryStore(): MemoryResources { return this.sharedMemoryStore }
 
   private initializeCatalog(): void {
     this.catalog.pragma('foreign_keys = ON')
@@ -170,7 +181,6 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
         );
       `)
       this.initializeWorkspaceState()
-      new SqliteMemoryStore(this.catalog)
       this.catalog.pragma(`user_version = ${catalogVersion}`)
     })()
   }
@@ -179,6 +189,12 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
     this.catalog.prepare(`INSERT OR IGNORE INTO agent_workspace_state
       (id, active_thread_id, draft_project_id, draft_model_config_id, draft_model_parameter_preset_id)
       VALUES (1, NULL, ?, NULL, NULL)`).run(DEFAULT_WORKSPACE_PROJECT_ID)
+    this.catalog.exec(`CREATE TABLE IF NOT EXISTS agent_workspace_speech (
+      id INTEGER PRIMARY KEY CHECK (id = 1), thread_id TEXT REFERENCES agent_conversations(id) ON DELETE SET NULL
+    );
+    INSERT OR IGNORE INTO agent_workspace_speech (id, thread_id) SELECT id, active_thread_id FROM agent_workspace_state WHERE id = 1;`)
+    const row = this.catalog.prepare('SELECT active_thread_id FROM agent_workspace_state WHERE id = 1').get() as { active_thread_id: string | null }
+    if (row.active_thread_id) this.enterSpeechVisit(row.active_thread_id)
   }
 
   static validateCatalogBackup(file: string, projectIds: ReadonlySet<string>): string[] {
@@ -296,6 +312,7 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
     if (existsSync(file) && !lstatSync(file).isFile()) throw new Error(`Conversation database is not a regular file: ${ownerThreadId}`)
     mkdirSync(dirname(file), { recursive: true })
     const database = this.openDatabase(file, {
+      ownerThreadId,
       attachmentRoot: getAgentAttachmentsDir(ownerThreadId, this.dataDir, this.projectFor(ownerThreadId)),
       onFileChanges: (runId) => this.onFileChanges?.(ownerThreadId, runId),
       memoryStore: this.sharedMemoryStore,
@@ -386,7 +403,14 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
     if (!state || typeof state !== 'object' || Array.isArray(state)) throw new Error('Agent workspace state is invalid.')
     if (state.mode === 'thread') {
       if (!this.getThread(state.threadId)) throw new Error(`Conversation ${state.threadId} was not found.`)
-      this.catalog.prepare('UPDATE agent_workspace_state SET active_thread_id = ? WHERE id = 1').run(state.threadId)
+      this.catalog.transaction(() => {
+        // A newly submitted chat can already have spoken before the renderer selects it.
+        this.catalog.prepare(`UPDATE agent_workspace_speech SET thread_id = NULL
+          WHERE id = 1 AND thread_id <> ? AND (SELECT active_thread_id FROM agent_workspace_state WHERE id = 1) IS NOT ?`)
+          .run(state.threadId, state.threadId)
+        this.catalog.prepare('UPDATE agent_workspace_state SET active_thread_id = ? WHERE id = 1').run(state.threadId)
+      })()
+      this.enterSpeechVisit(state.threadId)
       return
     }
     if (state.mode !== 'new_thread') throw new Error('Agent workspace mode is invalid.')
@@ -399,6 +423,35 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
     this.catalog.prepare(`UPDATE agent_workspace_state SET active_thread_id = NULL, draft_project_id = ?,
       draft_model_config_id = ?, draft_model_parameter_preset_id = ? WHERE id = 1`)
       .run(state.projectId, state.modelConfigId ?? null, state.modelParameterPresetId)
+    this.speechVisit = undefined
+  }
+
+  private enterSpeechVisit(threadId: string): void {
+    if (this.speechVisit?.threadId === threadId) return
+    const spoken = !!this.catalog.prepare('SELECT 1 FROM agent_workspace_speech WHERE id = 1 AND thread_id = ?').get(threadId)
+    this.speechVisit = { threadId, order: ++this.visitOrder, spoken, needsWrite: false }
+  }
+
+  captureWorkspaceSpeech(threadId: string, newThread = false): ConfirmWorkspaceSpeech {
+    const visit = newThread ? { threadId, order: ++this.visitOrder, spoken: false, needsWrite: false } : this.speechVisit
+    if (!visit || visit.threadId !== threadId) return null
+    return () => {
+      const first = !visit.spoken
+      if (first) {
+        visit.spoken = true
+        visit.needsWrite = true
+        if (!this.latestSpeech || this.latestSpeech.order < visit.order) this.latestSpeech = visit
+        if (newThread && this.latestSpeech === visit) this.speechVisit = visit
+      }
+      // A late acknowledgement belongs to its original visit, not a later visit to the same chat.
+      if (visit.needsWrite && this.speechVisit === visit) {
+        try {
+          this.catalog.prepare('UPDATE agent_workspace_speech SET thread_id = ? WHERE id = 1').run(threadId)
+          visit.needsWrite = false
+        } catch (error) { runtimeLog('warn', 'memory', 'Failed to save the workspace speech marker.', { threadId, error }) }
+      }
+      return first ? this.latestSpeech?.threadId : undefined
+    }
   }
 
   previewDatabase(): T {
@@ -468,6 +521,7 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
     this.conversations.delete(ownerThreadId)
     await rm(getAgentConversationTempDir(ownerThreadId, this.dataDir), { recursive: true, force: true })
     await rm(dirname(file), { recursive: true, force: true })
+    this.preferences.forgetThread(ownerThreadId)
     this.catalog.prepare('DELETE FROM agent_conversations WHERE id = ?').run(ownerThreadId)
     this.unregisteredCreations.delete(ownerThreadId)
     this.creatingProjects.delete(ownerThreadId)
@@ -482,29 +536,18 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
     const [conversationBytes, memoryBytes] = await Promise.all([
       readdir(getProjectsDir(this.dataDir), { withFileTypes: true }).then(projects => Promise.all(projects.filter(project => project.isDirectory() && isProjectStorageEntry(getProjectsDir(this.dataDir), project))
         .map(project => measureDirectorySize(getAgentConversationsDir(this.dataDir, project.name))))).then(sizes => sizes.reduce((sum, size) => sum + size, 0)),
-      runStorageWorker<number>(`
-        const database = new Database(workerData.file, { readonly: true, fileMustExist: true });
-        try {
-          const row = database.prepare(\`SELECT COALESCE(SUM(
-            length(CAST(namespace_path AS BLOB)) + length(CAST(key AS BLOB))
-            + length(CAST(value_json AS BLOB)) + length(CAST(created_at AS BLOB))
-            + length(CAST(updated_at AS BLOB))
-          ), 0) AS bytes FROM agent_store_items
-          WHERE json_extract(namespace_path, '$[0]') = 'memories'\`).get();
-          parentPort.postMessage(row.bytes);
-        } finally { database.close(); }
-      `, { file: getAgentCatalogFile(this.dataDir) })
+      Promise.resolve(this.preferences.usage())
     ])
     return {
       conversations: { totalBytes: conversationBytes, approximate: true, hasData: this.listThreads().some(thread => !thread.pinned) },
-      memories: { totalBytes: memoryBytes, approximate: true, hasData: memoryBytes > 0 }
+      memories: { ...memoryBytes, approximate: true }
     }
   }
 
   async compact(): Promise<void> {
     this.requireOpen()
     const files = this.listThreads().map(({ id, projectId }) => getAgentConversationDatabaseFile(id, this.dataDir, projectId))
-    files.push(getAgentCatalogFile(this.dataDir))
+    files.push(getAgentCatalogFile(this.dataDir), this.preferences.databaseFile)
     for (const id of [...this.conversations.keys()]) this.closeConversation(id)
     this.preview?.close()
     this.preview = undefined
@@ -522,7 +565,7 @@ export class AgentStorage<T extends ConversationStorageConnection = NativeConver
       this.maintaining = false
       this.catalog = new Database(getAgentCatalogFile(this.dataDir))
       this.initializeCatalog()
-      this.sharedMemoryStore = new SqliteMemoryStore(this.catalog)
+      this.sharedMemoryStore = { preferences: this.preferences }
     }
   }
 

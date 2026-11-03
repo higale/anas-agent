@@ -54,8 +54,7 @@ describe('individual tool state', () => {
       .toBe(false)
     expect(builtinToolCatalog.some((tool) => tool.id === ('update_user_profile' as never)))
       .toBe(false)
-    expect(builtinToolCatalog.find((tool) => tool.id === 'read_memory'))
-      .toMatchObject({ feature: 'memory' })
+    expect(builtinToolCatalog.some((tool) => String(tool.id) === 'read_memory')).toBe(false)
   })
 
 })

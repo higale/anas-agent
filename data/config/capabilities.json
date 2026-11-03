@@ -10,7 +10,7 @@
   "tool_mode": "all",
   "tools": [],
   "skills": {
-    "project": false,
+    "project": true,
     "mode": "default",
     "entries": []
   },
@@ -20,16 +20,16 @@
   "workspace": true,
   "memory": true,
   "mcp": {
-    "default_mode": "selected",
+    "default_mode": "all",
     "servers": []
   },
   "plugin_tools": [],
   "plugin_prompts": [],
   "custom_tools": {
-    "project": false,
+    "project": true,
     "entries": [],
-    "mode": "custom"
+    "mode": "all"
   },
-  "plugin_mode": "custom",
+  "plugin_mode": "default",
   "plugins": []
 }

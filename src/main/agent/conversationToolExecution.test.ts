@@ -123,7 +123,7 @@ describe('native capability dispatch and durable effects', () => {
     { args: { command: 'Read-Host', pty: { columns: 100, rows: 30 }, keep_processes: true }, field: 'keep_processes' }
   ])('returns invalid Shell $field before inspection, approval or effects, then accepts correction', async ({ args, field }) => {
     const h = await fixture(), execute = vi.fn(async () => { await verifyCurrentShellAuthorization(); return 'Executed' })
-    const tools = (await runtimeToolDefinitions({ enabled: true, primaryFolder: h.root, memory: false, network: false,
+    const tools = (await runtimeToolDefinitions({ enabled: true, primaryFolder: h.root,  network: false,
       shell: true, mcp: false, commandShell: { executable: 'pwsh.exe', name: 'PowerShell', family: 'powershell' },
       backgroundTools: true, threadId: 'thread', shellRunner: execute,
       managedCalls: { read: vi.fn(), readOutput: vi.fn(), readResult: vi.fn(), wait: vi.fn(), cancel: vi.fn(), start: vi.fn(), writeTerminal: vi.fn() }

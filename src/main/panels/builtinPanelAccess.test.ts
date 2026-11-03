@@ -5,6 +5,16 @@ import type { BuiltinPanel } from '@shared/panels'
 const files: BuiltinPanel = { kind: 'files', projectId: 'project-a', threadId: 'thread-a' }
 const subagent: BuiltinPanel = { kind: 'subagent', projectId: 'project-a', threadId: 'thread-a', runId: 'run-a', subagentId: 'child', name: 'Child' }
 describe('built-in panel context boundaries', () => {
+  it('limits project memory reads and saves to the panel project', () => {
+    const panel = { kind: 'projectMemory', projectId: 'a' } as const
+    for (const channel of ['memory:document:read', 'memory:document:save']) {
+      expect(builtinPanelCanInvoke(panel, channel, [{ kind: 'project', projectId: 'a' }])).toBe(true)
+      expect(builtinPanelCanInvoke(panel, channel, [{ kind: 'project', projectId: 'b' }])).toBe(false)
+      expect(builtinPanelCanInvoke(panel, channel, [{ kind: 'global' }])).toBe(false)
+    }
+    expect(builtinPanelCanInvoke(panel, 'memory:clear', [])).toBe(false)
+    expect(builtinPanelCanInvoke({ kind: 'memory' }, 'memory:document:save', [{ kind: 'global' }])).toBe(false)
+  })
   it('binds file and Git reads to the originating conversation and project', () => {
     expect(builtinPanelCanInvoke(files, 'agent:changes:git', [{ projectId: 'project-a' }])).toBe(true)
     expect(builtinPanelCanInvoke(files, 'agent:changes:git', [{ projectId: 'project-b' }])).toBe(false)

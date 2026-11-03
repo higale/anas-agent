@@ -167,3 +167,13 @@
 .panel-pages { height: 100%; }
 .panel-page { height: 100%; width: 100%; min-height: 0; }
 .plugin-page { display: block; border: 0; height: 100%; width: 100%; }
+/* Memory activity uses the shared panel host in both display locations. */
+.project-memory-panel { height: 100%; overflow: auto; padding: 12px; }
+.project-memory-panel > .ui-form-section { display: flex; flex-direction: column; height: 100%; }
+.memory-activity-panel { overflow: auto; padding: 12px; height: 100%; }
+.memory-activity-panel > .ui-scroll-list { height: auto; max-height: calc(var(--control-height) * 6); }
+.memory-activity-panel > .ui-editor { max-height: none; overflow: visible; }
+.memory-activity-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.memory-activity-spinning { animation: memory-activity-spin 1.2s linear infinite; }
+@keyframes memory-activity-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .memory-activity-spinning { animation: none; } }

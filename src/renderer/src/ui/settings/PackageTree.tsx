@@ -1,6 +1,8 @@
 import { Box, ChevronRight, File, FileCode2, Folder, Link2, Pencil, Puzzle, SquareChevronDown, SquareChevronRight, UserRound } from 'lucide-react'
 import { useId, useRef, useState, type ReactNode, type Ref } from 'react'
 import type { PackageFileNode, PackageFilePreview, PackageFileUpdate } from '@shared/packageFiles'
+import { usePanelState } from '../agent/PanelViewState'
+import { contentServices } from '../panels/contentServices'
 import { CodeFileEditor } from '../CodeFileEditor'
 import { SegmentedControl } from '../SegmentedControl'
 import { PackageFileEditDialog } from './PackageFileEditDialog'
@@ -87,36 +89,48 @@ export function PackageFileTree({ packageId, parentPath, depth = 0, childrenByKe
   })
 }
 
-export function PackageFileViewer({ preview, file, onOpen, t, onSave }: {
-  preview?: PackageFilePreview; file?: PackageFileNode; onOpen(path: string): void | Promise<void>; t(key: string): string
+export function PackageFileViewer({ preview, file, onOpen, t, onSave, onEdit, emptyText, foldMetadata = true }: {
+  preview?: PackageFilePreview; file?: PackageFileNode; onOpen?(path: string): void | Promise<void>; t(key: string): string
+  onEdit?(): void; emptyText?: string; foldMetadata?: boolean
   onSave?(update: PackageFileUpdate): Promise<void>
 }) {
   const [editing, setEditing] = useState(false)
-  const [source, setSource] = useState(false)
+  const [source, setSource] = usePanelState('packageFileSource', false)
   const markdown = preview?.kind === 'text' && /\.(md|markdown)$/i.test(preview.name)
-  if (preview) return <>
-    <div className="settings-detail-heading ui-toolbar ui-toolbar-between"><div><button className="ui-link-button" type="button" data-tooltip={t('chat.show_in_folder')} onClick={() => void onOpen(preview.path)}>{preview.relativePath}</button></div><div className="ui-row">
-      {preview.kind === 'text' && preview.editable && preview.revision && onSave && <button className="ui-icon-button" type="button" aria-label={t('common.edit')} data-tooltip={t('common.edit')} onClick={() => setEditing(true)}><Pencil size={14} /></button>}
-      {markdown && <SegmentedControl ariaLabel={t('settings.file_view_mode')} value={source ? 'source' : 'preview'}
-        options={[{ value: 'preview', label: t('settings.file_preview') }, { value: 'source', label: t('settings.file_source') }]}
-        onChange={value => setSource(value === 'source')} />}
-    </div></div>
-    {preview.linkTarget && <div className="ui-note"><Link2 size={14} /> {preview.linkTarget} → {preview.resolvedPath}</div>}
-    {markdown && !source ? <PackageMarkdownPreview preview={preview} t={t} /> : preview.kind === 'text' ? <CodeFileEditor key={`${preview.path}:${preview.revision ?? preview.content}`} path={preview.path} content={preview.content ?? ''} /> : <div className="ui-empty-state">{t('settings.skill_binary_preview_unavailable')}</div>}
-    {editing && onSave && <PackageFileEditDialog preview={preview} onSave={onSave} onClose={() => setEditing(false)} />}
-  </>
+  if (preview) {
+    let body: ReactNode
+    if (markdown && !source) {
+      body = !preview.content && emptyText ? <div className="ui-empty-state ui-empty-state-compact">{emptyText}</div>
+        : <PackageMarkdownPreview preview={preview} t={t} foldMetadata={foldMetadata} />
+    } else if (preview.kind === 'text') {
+      body = <CodeFileEditor key={`${preview.path}:${preview.revision ?? preview.content}`} path={preview.path} content={preview.content ?? ''} />
+    } else {
+      body = <div className="ui-empty-state">{t('settings.skill_binary_preview_unavailable')}</div>
+    }
+    return <>
+      <div className="settings-detail-heading ui-toolbar ui-toolbar-between"><div>{onOpen ? <button className="ui-link-button" type="button" data-tooltip={t('chat.show_in_folder')} onClick={() => void onOpen(preview.path)}>{preview.relativePath}</button> : <strong>{preview.relativePath}</strong>}</div><div className="ui-row">
+        {preview.kind === 'text' && preview.editable && preview.revision && (onEdit || onSave) && <button className="ui-icon-button" type="button" aria-label={t('common.edit')} data-tooltip={t('common.edit')} onClick={onEdit ?? (() => setEditing(true))}><Pencil size={14} /></button>}
+        {markdown && <SegmentedControl ariaLabel={t('settings.file_view_mode')} value={source ? 'source' : 'preview'}
+          options={[{ value: 'preview', label: t('settings.file_preview') }, { value: 'source', label: t('settings.file_source') }]}
+          onChange={value => setSource(value === 'source')} />}
+      </div></div>
+      {preview.linkTarget && <div className="ui-note"><Link2 size={14} /> {preview.linkTarget} → {preview.resolvedPath}</div>}
+      {body}
+      {editing && onSave && <PackageFileEditDialog preview={preview} onSave={onSave} onClose={() => setEditing(false)} />}
+    </>
+  }
   if (!file) return null
   return <>
-    <div className="settings-detail-heading ui-toolbar ui-toolbar-between"><div><button className="ui-link-button" type="button" data-tooltip={t('chat.show_in_folder')} disabled={file.kind === 'symlink' && !file.resolvedPath} onClick={() => void onOpen(file.path)}>{file.relativePath}</button></div></div>
+    <div className="settings-detail-heading ui-toolbar ui-toolbar-between"><div><button className="ui-link-button" type="button" data-tooltip={t('chat.show_in_folder')} disabled={!onOpen || file.kind === 'symlink' && !file.resolvedPath} onClick={() => void onOpen?.(file.path)}>{file.relativePath}</button></div></div>
     {file.linkTarget && <div className="ui-note"><Link2 size={14} /> {file.linkTarget} → {file.resolvedPath ?? t('settings.skill_link_unavailable')}</div>}
     <div className="ui-empty-state">{t(file.kind === 'directory' || file.linkDirectory ? 'settings.skill_directory_preview' : 'settings.skill_file_preview_unavailable')}</div>
   </>
 }
 
-export function PackageMarkdownPreview({ preview, t }: { preview: Pick<PackageFilePreview, 'content' | 'resolvedPath'>; t(key: string): string }) {
+export function PackageMarkdownPreview({ preview, t, foldMetadata = true }: { preview: Pick<PackageFilePreview, 'content' | 'resolvedPath'>; t(key: string): string; foldMetadata?: boolean }) {
   const root = useRef<HTMLDivElement>(null)
   const text = preview.content ?? ''
-  const metadata = /^\uFEFF?---[ \t]*\r?\n((?:[^\n]*\n)*?)(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/.exec(text)
+  const metadata = foldMetadata && /^\uFEFF?---[ \t]*\r?\n((?:[^\n]*\n)*?)(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/.exec(text)
   return <div className="settings-package-markdown" ref={root}>
     {metadata && <details className="settings-package-metadata"><summary>{t('settings.file_metadata')}</summary><pre>{metadata[1].trimEnd()}</pre></details>}
     <MarkdownText text={metadata ? text.slice(metadata[0].length) : text} documentPath={preview.resolvedPath} onNavigate={async href => {
@@ -125,8 +139,8 @@ export function PackageMarkdownPreview({ preview, t }: { preview: Pick<PackageFi
         Array.from(root.current?.querySelectorAll<HTMLElement>('[id]') ?? []).find(element => element.id === id)?.scrollIntoView({ block: 'start' })
       } else {
         const path = localFilePathFromHref(href)
-        if (path) await window.gale.files.showItemInFolder(path)
-        else await window.gale.app.openExternalUrl(href)
+        if (path) await contentServices().files.showItemInFolder(path)
+        else await contentServices().app.openExternalUrl(href)
       }
     }} />
   </div>

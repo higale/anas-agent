@@ -37,7 +37,7 @@ export interface AgentCapabilities {
   profile: boolean
   environment: boolean
   workspace: boolean
-  /** Automatically recall relevant records; memory tools are selected independently. */
+  /** Include completed global/project preferences and allow background extraction. */
   memory: boolean
   applicationEnvironment: boolean
   backgroundTools: boolean
@@ -159,22 +159,20 @@ export function serializeCapabilities(value: AgentCapabilities) {
   return { ...rest, plugin_mode: pluginMode, plugin_tools: pluginTools, plugin_prompts: pluginPrompts, custom_tools: customTools, mcp: { default_mode: mcp.defaultMode, servers: mcp.servers }, application_environment: applicationEnvironment, background_tools: backgroundTools, tool_mode: toolMode }
 }
 
+/** Shared initial capabilities; saved custom selections are never replaced by these defaults. */
 export const defaultCapabilities = parseCapabilities(defaults)
 requireDataVersion(projectDefaults, 0, 'project defaults')
 export const defaultProjectSettings = { advancedSettings: projectDefaults.advanced_settings, codingMode: projectDefaults.coding_mode, prompt: projectDefaults.prompt }
 
-/** Editable scopes start with explicit choices. Uncustomized projects use all available sources. */
-export const allCapabilities: AgentCapabilities = {
-  ...defaultCapabilities, pluginMode: 'default', plugins: [],
-  customTools: { mode: 'all', project: true, entries: [] },
-  skills: { mode: 'default', project: true, entries: [] },
-  subagents: { mode: 'default', names: [] }, mcp: { defaultMode: 'all', servers: [] }
-}
-
 export function pluginSelectionMode(value: AgentCapabilities, id: string): 'all' | 'custom' | 'off' {
   if (value.pluginMode === 'off') return 'off'
-  return value.plugins?.find(item => item.id === id)?.mode ?? (value.pluginMode === 'default' ? 'all'
-    : [...value.pluginTools, ...value.pluginPrompts, ...value.skills.entries.map(entry => entry.id)].some(key => key.startsWith(`${id}:`)) ? 'custom' : 'off')
+  const configured = value.plugins?.find(item => item.id === id)
+  if (configured) return configured.mode
+  if (value.pluginMode === 'default') return 'all'
+  const hasSelection = value.pluginTools.some(key => key.startsWith(`${id}:`))
+    || value.pluginPrompts.some(key => key.startsWith(`${id}:`))
+    || value.skills.entries.some(entry => isPluginSkillId(entry.id) && entry.id.startsWith(`${id}:skill:`))
+  return hasSelection ? 'custom' : 'off'
 }
 
 /** Resolve current declarations once before freezing a run. No global capability inheritance. */
@@ -209,7 +207,7 @@ export function skillSelectionEnabled(value: SkillSelection): boolean {
 }
 
 export function effectiveProjectCapabilitySettings(project: WorkspaceProject) {
-  return { capabilities: project.advancedSettings ? project.capabilities : allCapabilities,
+  return { capabilities: project.advancedSettings ? project.capabilities : defaultCapabilities,
     restrictSubagents: project.advancedSettings && project.restrictSubagents }
 }
 
@@ -328,7 +326,7 @@ export function capabilityFeatures(value: AgentCapabilities): AgentFeatures {
     environment: value.environment,
     applicationEnvironment: value.applicationEnvironment,
     workspaceContext: value.workspace,
-    memory: value.memory || groupEnabled('memory'),
+    memory: value.memory,
     skills: skillSelectionEnabled(value.skills),
     subagents: value.subagents.mode !== 'off',
     planning: value.planning,

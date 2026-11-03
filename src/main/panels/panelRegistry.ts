@@ -7,7 +7,7 @@ export function panelLanguages(): LanguageResourcesSnapshot {
   if (!languages) throw new Error('Panel language resources have not been prepared.')
   return languages
 }
-export function panelLabel(language: string, key: 'file_changes' | 'review_title'): string {
+export function panelLabel(language: string, key: 'file_changes' | 'review_title' | 'memory_activity' | 'project_memory'): string {
   const resources = panelLanguages().resources
   for (const code of [language, 'en']) {
     const resource = resources[code] as { agent?: Record<string, unknown> } | undefined

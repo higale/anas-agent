@@ -1,6 +1,7 @@
 import { selectedSubagents } from '@shared/subagentSelection'
 import { DEFAULT_WORKSPACE_PROJECT_ID, type AppConfigSnapshot, type RuntimeToolStatus } from '@shared/types'
 import { planningToolSpec } from '../runtime/planning'
+import { updateMemoryToolSpec } from '../runtime/preferenceMemoryTool'
 import { fileToolDefinitions } from './llm/fileTools'
 import { runtimeToolDefinitions } from './llm/runtimeTools'
 import { serializeToolDefinition } from './toolSchemaSerialization'
@@ -10,7 +11,7 @@ import { runtimeToolSelectionId, sortToolDefinitions } from '@shared/toolRegistr
 export function agentToolDefinitions(
   subagents: AppConfigSnapshot['subagents'] = []
 ): RuntimeToolStatus['tools'] {
-  return [serializeToolDefinition(planningToolSpec), ...subagentToolDefinitions({ subagents }).map(serializeToolDefinition)]
+  return [planningToolSpec, updateMemoryToolSpec, ...subagentToolDefinitions({ subagents })].map(serializeToolDefinition)
 }
 
 export async function getRuntimeToolStatus(
@@ -20,16 +21,8 @@ export async function getRuntimeToolStatus(
     enabled: true,
     primaryFolder: process.cwd(),
     configuration: true,
-    memory: true,
-    memoryStore: {
-      searchMemories: async () => ({ items: [], total: 0 }),
-      saveMemory: async () => {
-        throw new Error('Memory writes are unavailable in the settings tool preview.')
-      },
-      deleteMemory: async () => {
-        throw new Error('Memory deletion is unavailable in the settings tool preview.')
-      }
-    },
+
+
     projectId: DEFAULT_WORKSPACE_PROJECT_ID,
     network: true,
     shell: true,

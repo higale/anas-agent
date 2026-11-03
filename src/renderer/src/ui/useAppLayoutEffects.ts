@@ -16,7 +16,6 @@ type AppLayoutEffectsOptions = {
   input: string
   mcpListRef: MutableRef<HTMLDivElement | null>
   mcpServerCount: number | undefined
-  memoryDraft: unknown
   messages: unknown
   mcpArgsText: string
   mcpEnvText: string
@@ -38,7 +37,6 @@ export function useAppLayoutEffects({
   input,
   mcpListRef,
   mcpServerCount,
-  memoryDraft,
   messages,
   mcpArgsText,
   mcpEnvText,
@@ -86,7 +84,6 @@ export function useAppLayoutEffects({
     settingsTab,
     mcpArgsText,
     mcpEnvText,
-    memoryDraft,
     subagentDescription,
     subagentSystemPrompt,
     resizeSettingsTextareas

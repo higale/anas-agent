@@ -13,7 +13,7 @@ import { createConversationInstance, type ConversationInstanceOwner } from './co
 import { initializeNativeConversationStorage } from './nativeDatabaseSchema'
 import { validateNativeExecutionStorage } from './nativeStorageValidation'
 import { ConversationResourceReader } from './conversationResourceReader'
-import { SqliteMemoryStore } from './memoryStore'
+import { SqliteMemoryStore } from '../../test/legacyMemoryFixture'
 import { FileChangeLedger } from './fileChangeLedger'
 import { FileEditStore } from '../fileEditStore'
 import { ManagedCallStore } from './managedCallStore'

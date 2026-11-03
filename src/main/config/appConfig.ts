@@ -223,6 +223,18 @@ function normalizeEnvironmentContext(raw: RawAppConfig): AppSettings['environmen
   }
 }
 
+function normalizeMemoryMode(value: unknown): 'background' | 'foreground' {
+  if (value === undefined || value === 'background') return 'background'
+  if (value === 'foreground') return value
+  throw new Error('Invalid settings.memory_mode.')
+}
+
+function normalizeMemoryModelId(value: unknown): string | null {
+  if (value === undefined || value === null || value === '') return null
+  if (typeof value !== 'string' || !value.trim()) throw new Error('settings.memory_model_id must be a model ID or null.')
+  return value
+}
+
 function normalizeSettings(raw: RawAppConfig): AppSettings {
   const settings = raw.settings
   if (!settings) throw new Error('Config settings are missing.')
@@ -238,6 +250,9 @@ function normalizeSettings(raw: RawAppConfig): AppSettings {
     logLevel: normalizeRuntimeLogLevel(settings.log_level),
     logRetentionDays: normalizeLogRetentionDays(settings.log_retention_days),
     maxModelCallsPerRun: normalizeMaxModelCallsPerRun(settings.max_model_calls_per_run),
+    memoryMode: normalizeMemoryMode(settings.memory_mode),
+    memoryModelId: normalizeMemoryModelId(settings.memory_model_id),
+    showMemoryActivityInTitlebar: settings.show_memory_activity_in_titlebar === undefined || requireBoolean(settings.show_memory_activity_in_titlebar, 'settings.show_memory_activity_in_titlebar'),
     environmentContext: normalizeEnvironmentContext(raw),
     sidebarVisible: requireBoolean(settings.sidebar_visible, 'settings.sidebar_visible'),
     sidebarWidth: normalizeSidebarWidth(settings.sidebar_width),
@@ -386,6 +401,9 @@ function rawSettingsFromSnapshot(snapshot: AppConfigSnapshot): RawAppSettings {
     log_level: settings.logLevel,
     log_retention_days: settings.logRetentionDays,
     max_model_calls_per_run: settings.maxModelCallsPerRun,
+    memory_mode: settings.memoryMode,
+    memory_model_id: settings.memoryModelId ?? null,
+    show_memory_activity_in_titlebar: settings.showMemoryActivityInTitlebar,
     environment_context: {
       operating_system: settings.environmentContext.operatingSystem,
       power_shell: settings.environmentContext.powerShell,
@@ -728,6 +746,9 @@ export async function updateConfigValue(
   if (config !== 'settings') throw new Error(`Config document "${config}" is not supported.`)
   const segments = settingsKeySegments(key)
   const normalizedKey = segments.join('.')
+  if (segments[0] === 'profile' && !['profile.assistant.name', 'profile.assistant.role', assistantNewAvatarPathKey].includes(normalizedKey)) {
+    throw new Error('Only assistant name, role and avatar can be changed with update_config. Custom instructions can only be edited in Settings.')
+  }
   const desiredValue = cloneConfigValue(value)
   return serializeConfigMutation(async () => {
     const [raw, bundled] = await Promise.all([readRawConfig(), readBundledRawConfig()])
@@ -830,6 +851,11 @@ export async function updateSettings(settings: AppSettingsUpdate): Promise<AppCo
       max_model_calls_per_run: settings.maxModelCallsPerRun === undefined
         ? raw.settings?.max_model_calls_per_run
         : normalizeMaxModelCallsPerRun(settings.maxModelCallsPerRun),
+      memory_mode: settings.memoryMode === undefined ? raw.settings?.memory_mode : normalizeMemoryMode(settings.memoryMode),
+      memory_model_id: settings.memoryModelId === undefined
+        ? raw.settings?.memory_model_id
+        : normalizeMemoryModelId(settings.memoryModelId),
+      show_memory_activity_in_titlebar: settings.showMemoryActivityInTitlebar ?? raw.settings?.show_memory_activity_in_titlebar,
       environment_context: settings.environmentContext
         ? {
             operating_system: settings.environmentContext.operatingSystem,
@@ -871,22 +897,19 @@ function hasProfileUpdate(update: AppProfileUpdate): boolean {
   return [
     update.assistant?.name,
     update.assistant?.role,
-    update.assistant?.instructions,
-    update.user?.preferredName,
-    update.user?.personalInfo
+    update.assistant?.instructions
   ].some((value) => value !== undefined)
 }
 
 function assertProfileUpdate(update: AppProfileUpdate): void {
+  if (update && typeof update === 'object' && 'user' in update) throw new Error('User profile editing is unavailable.')
   if (!update || typeof update !== 'object' || !hasProfileUpdate(update)) {
     throw new Error('At least one profile field is required.')
   }
   const fields: Array<[unknown, string]> = [
     [update.assistant?.name, 'assistant.name'],
     [update.assistant?.role, 'assistant.role'],
-    [update.assistant?.instructions, 'assistant.instructions'],
-    [update.user?.preferredName, 'user.preferred_name'],
-    [update.user?.personalInfo, 'user.personal_info']
+    [update.assistant?.instructions, 'assistant.instructions']
   ]
   for (const [value, path] of fields) {
     if (value !== undefined && typeof value !== 'string') {
@@ -915,12 +938,6 @@ function profileUpdateFields(
   if (update.assistant?.instructions !== undefined) {
     fields.push(['assistant.instructions', current.assistant.instructions, desired.assistant.instructions])
   }
-  if (update.user?.preferredName !== undefined) {
-    fields.push(['user.preferredName', current.user.preferredName, desired.user.preferredName])
-  }
-  if (update.user?.personalInfo !== undefined) {
-    fields.push(['user.personalInfo', current.user.personalInfo, desired.user.personalInfo])
-  }
   return fields
 }
 
@@ -946,10 +963,7 @@ export async function updateProfile(update: AppProfileUpdate): Promise<AppConfig
           ? { name: update.assistant.name.trim() }
           : {})
       },
-      user: {
-        ...current.user,
-        ...update.user
-      }
+      user: current.user
     }
     const fields = profileUpdateFields(current, desired, update)
     const alreadyApplied = fields.every(([, before, after]) => before === after)

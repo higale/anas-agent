@@ -12,7 +12,7 @@ import type { ExecutionToolCall } from '../../runtime/executionState'
 import { NativeConversationDatabase } from './nativeConversationDatabase'
 import { NativeRunHost } from './nativeRunHost'
 import { ManagedCallService } from './managedCallService'
-import { SqliteMemoryStore } from './memoryStore'
+import { SqliteMemoryStore } from '../../test/legacyMemoryFixture'
 import { FileEditStore } from '../fileEditStore'
 import { getProject } from '../projectStore'
 

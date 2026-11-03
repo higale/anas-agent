@@ -7,7 +7,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { NativeConversationDatabase } from './nativeConversationDatabase'
 import { NativeRunHost } from './nativeRunHost'
 import { ManagedCallService, type ManagedCallControl } from './managedCallService'
-import { SqliteMemoryStore } from './memoryStore'
+import { PreferenceMemoryStore } from './preferenceMemoryStore'
 import { FileEditStore } from '../fileEditStore'
 import { conversationExecution, type ConversationExecutionServices } from '../../runtime/conversationExecution'
 import type { AgentContextStatus, AgentRuntimeEvent } from '../../shared/agentTypes'
@@ -26,9 +26,10 @@ function deferred() {
   return { promise, resolve }
 }
 function fixture(displayText?: string) {
-  const root = mkdtempSync(join(tmpdir(), 'anas-native-host-')), global = new Database(':memory:')
+  const root = mkdtempSync(join(tmpdir(), 'anas-native-host-'))
+  const preferences = new PreferenceMemoryStore(root)
   const database = NativeConversationDatabase.open(join(root, 'conversation.sqlite'), {
-    attachmentRoot: join(root, 'attachments'), memoryStore: new SqliteMemoryStore(global), fileEditStore: new FileEditStore(join(root, 'file_edits')) })
+    attachmentRoot: join(root, 'attachments'), ownerThreadId: 'thread', memoryStore: { preferences }, fileEditStore: new FileEditStore(join(root, 'file_edits')) })
   const owner = { threadId: 'thread', runId: 'run' }
   database.runs.createThreadAndRun({ ...owner, thread: {}, submissionId: 'submission',
     message: { id: 'run:input', value: { id: 'run:input', kind: 'user', content: 'Task', context: { runId: 'run', ...(displayText === undefined ? {} : { displayText }) } } } })
@@ -43,8 +44,8 @@ function fixture(displayText?: string) {
     afterModel: async () => ({ kind: 'complete' }), prepareTools: async () => ({ calls: [] }),
     executeTool: async () => { throw new Error('No tool expected') }, directions: async () => [], drain: async () => {}, retry: { maxRetries: 0 } }
   const instance = { execution: conversationExecution(services), dispose: vi.fn(async () => {}) }
-  return { root, database, owner, managed, events, sink, host, services, instance, recoveryLog,
-    async close() { await host.waitForIdle(); database.validate(); database.close(); global.close(); rmSync(root, { recursive: true, force: true }) } }
+  return { root, database, preferences, owner, managed, events, sink, host, services, instance, recoveryLog,
+    async close() { await host.waitForIdle(); database.validate(); database.close(); rmSync(root, { recursive: true, force: true }) } }
 }
 
 it.each(['completed', 'failed'] as const)('retains committed %s when the renderer or disposal fails, then releases the run', async status => {
@@ -663,6 +664,7 @@ it.each([false, true])('confirms historical retry and retains the failed tool ba
       { runId: 'later', revisionId: before.revisionId, requiresRollback: false, canWithholdToolResults: true }
     ])
     const request = { ...h.owner, expectedRevisionId: before.revisionId, withholdToolResults }
+    h.preferences.finishScan('thread', before.messages.at(-1)!.recordId)
     await expect(h.host.retryModel(request, async () => h.instance)).rejects.toThrow('Confirm removal')
     await expect(h.host.retryModel({ ...request, discardLaterMessages: true, expectedRevisionId: 'stale' }, async () => h.instance))
       .rejects.toThrow('revision changed')
@@ -692,6 +694,7 @@ it.each([false, true])('confirms historical retry and retains the failed tool ba
     const handle = await h.host.retryModel({ ...request, discardLaterMessages: true }, async () => h.instance)
     expect((await handle.completed).status).toBe('completed'); await handle.drained
     expect(h.database.readModel.getRun('later')).toBeNull()
+    expect(h.preferences.cursor('thread')).toBe(h.database.runs.store.readHistory('thread')!.messages[original.length - 1].recordId)
     expect(h.database.runs.store.readHistory('thread')!.messages.slice(0, original.length).map(record => record.value))
       .toEqual(original.map(record => withholdToolResults && record.value.kind === 'tool' ? withholdToolResult(record.value) : record.value))
     expect(executeTool).not.toHaveBeenCalled()

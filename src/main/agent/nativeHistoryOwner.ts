@@ -1,3 +1,4 @@
+import type { PreferenceMemoryStore } from './preferenceMemoryStore'
 import type Database from 'better-sqlite3'
 import { isAgentThreadLocked } from '../../shared/agentTypes'
 import { isCompleteModelInput, lastToolResultBatch } from '../../runtime/modelRequestRecovery'
@@ -22,7 +23,7 @@ export interface NativeHistoryRevision {
  * product history flow. This service never executes tools or removes files. */
 export class NativeHistoryOwner {
   private readonly resources: HistoryRevisionResources
-  constructor(private readonly database: Database.Database, private readonly owner: NativeRunOwner) {
+  constructor(private readonly database: Database.Database, private readonly owner: NativeRunOwner, private readonly memory?: PreferenceMemoryStore) {
     this.resources = new HistoryRevisionResources(database)
   }
 
@@ -171,7 +172,9 @@ export class NativeHistoryOwner {
   }
 
   commit(revision: NativeHistoryRevision): { run?: AgentRun } {
-    return this.database.transaction(() => {
+    const contains = (recordId: string) => this.owner.store.recordPosition(revision.threadId, recordId) !== undefined
+    let staged = false
+    const result = this.database.transaction(() => {
       this.assertMutable(revision.threadId)
       const history = this.history(revision.threadId)
       if (history.revisionId !== revision.revisionId) throw new Error('Conversation history changed before the revision could be committed.')
@@ -206,6 +209,8 @@ export class NativeHistoryOwner {
         summary = { id, messageRecordId: recordId, cutoffIndex: plan.summary.cutoff_index! }
       }
       for (const runId of plan.runIds) handoffUnacceptedNativeFileEdits(this.database, revision.threadId, runId)
+      const cursor = this.memory?.cursor(revision.threadId, contains)
+      const rewind = cursor && (this.owner.store.recordPosition(revision.threadId, cursor) ?? Infinity) >= revision.retainedCount
       this.owner.store.reviseHistory({ threadId: revision.threadId, expectedRevisionId: revision.revisionId, retainedCount: revision.retainedCount, summary })
       for (const child of plan.children) {
         handoffUnacceptedNativeFileEdits(this.database, child.threadId, child.runId)
@@ -222,10 +227,18 @@ export class NativeHistoryOwner {
         this.owner.retryModel({ threadId: revision.threadId, runId: revision.retryRunId!,
           expectedRevisionId: this.owner.store.readHistory(revision.threadId)!.revisionId, withholdToolResults: revision.withholdToolResults! })
       }
+      if (cursor && rewind) {
+        // Retrying can replace the retained tool result. Stage the final anchor
+        // before this history transaction commits so rollback is still detectable.
+        this.memory!.stageCursorEdit(revision.threadId, cursor, this.owner.store.historyTail(revision.threadId)?.record_id ?? null)
+        staged = true
+      }
       if (!revision.replacement) return {}
       const run = this.owner.createRun({ threadId: revision.threadId, runId: revision.replacement.runId, operation: 'agent', message: revision.replacement.message })
       this.resources.restoreAttachments(plan, run.id)
       return { run }
     })()
+    if (staged) this.memory?.cursor(revision.threadId, contains)
+    return result
   }
 }

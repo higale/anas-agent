@@ -57,7 +57,7 @@ describe('settings autosave', () => {
       const config = initialConfig()
       return { ...config, settings: { ...config.settings, profile: {
         assistant: { ...config.settings.profile.assistant, ...update.assistant },
-        user: { ...config.settings.profile.user, ...update.user }
+        user: config.settings.profile.user
       } } }
     })
     vi.stubGlobal('gale', { config: { updateProfile } })
@@ -65,9 +65,9 @@ describe('settings autosave', () => {
     await act(async () => result.current.saveProfile({ assistant: { name: '  ' } }))
     expect(updateProfile).not.toHaveBeenCalled()
     expect(notice.error).toHaveBeenCalledWith('settings.assistant_name_required')
-    await act(async () => result.current.saveProfile({ user: { preferredName: 'Gale' } }))
+    await act(async () => result.current.saveProfile({ assistant: { instructions: 'Be concise.' } }))
     expect(updateProfile).toHaveBeenCalledOnce()
-    expect(result.current.config?.settings.profile.user.preferredName).toBe('Gale')
+    expect(result.current.config?.settings.profile.assistant.instructions).toBe('Be concise.')
     expect(result.current.config?.settings.profile.assistant.name).toBe('Anas')
   })
 
@@ -102,14 +102,14 @@ describe('settings autosave', () => {
     } })
     const { result } = renderHook(useController)
     act(() => { void result.current.saveSettings({ fontSize: 15 }); void result.current.saveSettings({ fontSize: 18 }) })
-    act(() => { void result.current.saveSpeechReply({ speed: 1.5 }); void result.current.saveProfile({ user: { preferredName: 'Gale' } }) })
+    act(() => { void result.current.saveSpeechReply({ speed: 1.5 }); void result.current.saveProfile({ assistant: { instructions: 'Be concise.' } }) })
     expect(result.current.config?.settings.fontSize).toBe(18)
     expect(result.current.config?.settings.speechReply.speed).toBe(1.5)
     await act(async () => speech.resolve({ ...initialConfig(), settings: { ...initialConfig().settings, speechReply: { enabled: true, voice: 'voice', speed: 1.5 } } }))
     await act(async () => settings.resolve({ ...initialConfig(), settings: { ...initialConfig().settings, fontSize: 15 } }))
-    await act(async () => profile.resolve({ ...initialConfig(), settings: { ...initialConfig().settings, profile: { ...initialConfig().settings.profile, user: { preferredName: 'Gale', personalInfo: '' } } } }))
+    await act(async () => profile.resolve({ ...initialConfig(), settings: { ...initialConfig().settings, profile: { ...initialConfig().settings.profile, assistant: { ...initialConfig().settings.profile.assistant, instructions: 'Be concise.' } } } }))
     expect(result.current.config?.settings.fontSize).toBe(18)
     expect(result.current.config?.settings.speechReply.speed).toBe(1.5)
-    expect(result.current.config?.settings.profile.user.preferredName).toBe('Gale')
+    expect(result.current.config?.settings.profile.assistant.instructions).toBe('Be concise.')
   })
 })

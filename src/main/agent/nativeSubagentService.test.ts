@@ -13,7 +13,7 @@ import { NativeConversationDatabase } from './nativeConversationDatabase'
 import { NativeRunHost } from './nativeRunHost'
 import { NativeSubagentService, type NativeSubagentServices } from './nativeSubagentService'
 import { ManagedCallService } from './managedCallService'
-import { SqliteMemoryStore } from './memoryStore'
+import { SqliteMemoryStore } from '../../test/legacyMemoryFixture'
 import { FileEditStore } from '../fileEditStore'
 import { maximumConcurrentSubagents, maximumSubagentDepth, subagentToolDefinitions, type SubagentProcessSnapshot } from './subagentTools'
 

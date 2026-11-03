@@ -1,3 +1,4 @@
+import { legacyMemory } from '../../test/legacyMemoryFixture'
 import { readFrozenStorage } from '../../test/frozenStorage'
 import type { AgentThread } from '../../shared/agentTypes'
 import Database from 'better-sqlite3'
@@ -21,6 +22,39 @@ async function fixture() {
   return { root, storage: open(root) }
 }
 function open(root: string) { const storage = AgentStorage.openNative(root); storages.add(storage); return storage }
+it('late replies cannot overwrite a newer speaking visit or consume a return visit', async () => {
+  const { root, storage } = await fixture()
+  const a = storage.createThread().id, b = storage.createThread().id
+  storage.setWorkspaceState({ mode: 'thread', threadId: a })
+  const oldA = storage.captureWorkspaceSpeech(a)!
+  storage.setWorkspaceState({ mode: 'thread', threadId: b })
+  expect(storage.captureWorkspaceSpeech(b)!()).toBe(b)
+  expect(oldA()).toBe(b)
+  expect(oldA()).toBeUndefined()
+  storage.close(); storages.delete(storage)
+  const reopened = open(root)
+  expect(reopened.captureWorkspaceSpeech(b)!()).toBeUndefined()
+  reopened.setWorkspaceState({ mode: 'thread', threadId: a })
+  expect(reopened.captureWorkspaceSpeech(a)!()).toBe(a)
+})
+it('remembers the first accepted speech of a visit across browsing and restarts', async () => {
+  const { root, storage } = await fixture()
+  const a = storage.createThread().id, b = storage.createThread().id
+  expect(storage.captureWorkspaceSpeech(a, true)?.()).toBe(a)
+  storage.setWorkspaceState({ mode: 'thread', threadId: a })
+  expect(storage.captureWorkspaceSpeech(a, false)?.()).toBeUndefined()
+  storage.setWorkspaceState({ mode: 'thread', threadId: b })
+  expect(storage.captureWorkspaceSpeech(a, false)?.()).toBeUndefined()
+  storage.close(); storages.delete(storage)
+  const restored = open(root)
+  restored.setWorkspaceState({ mode: 'thread', threadId: b })
+  expect(restored.captureWorkspaceSpeech(b, false)?.()).toBe(b)
+  restored.close(); storages.delete(restored)
+  const continued = open(root)
+  expect(continued.captureWorkspaceSpeech(b, false)?.()).toBeUndefined()
+  continued.setWorkspaceState({ mode: 'thread', threadId: a })
+  expect(continued.captureWorkspaceSpeech(a, false)?.()).toBe(a)
+})
 afterEach(async () => {
   for (const storage of storages) storage.close()
   storages.clear()
@@ -120,13 +154,13 @@ it('projects committed execution status without publishing rolled back submissio
 
 it('shares memories and workspace state across preview, close, maintenance and deletion', async () => {
   const { root, storage } = await fixture(), first = storage.createThread(), second = storage.createThread()
-  await storage.conversationForThread(first.id).resources.memoryStore.saveMemory({ scope: 'global', kind: 'fact',
+  await legacyMemory(storage.conversationForThread(first.id).resources.memoryStore).saveMemory({ scope: 'global', kind: 'fact',
     content: 'Shared fact', keywords: [], importance: 3 }, { origin: 'user' })
   storage.setWorkspaceState({ mode: 'thread', threadId: first.id })
   storage.closeConversation(first.id)
-  expect((await storage.previewDatabase().resources.memoryStore.searchMemories({ scope: 'global' })).total).toBe(1)
+  expect((await legacyMemory(storage.previewDatabase().resources.memoryStore).searchMemories({ scope: 'global' })).total).toBe(1)
   await storage.compact()
-  expect((await storage.conversationForThread(second.id).resources.memoryStore.searchMemories({ scope: 'global' })).total).toBe(1)
+  expect((await legacyMemory(storage.conversationForThread(second.id).resources.memoryStore).searchMemories({ scope: 'global' })).total).toBe(1)
   storage.beginConversationDeletion(first.id)
   storage.close()
   const current = open(root)
@@ -136,7 +170,7 @@ it('shares memories and workspace state across preview, close, maintenance and d
   expect(existsSync(getAgentConversationDatabaseFile(first.id, root))).toBe(false)
   expect(current.listThreads().map(item => item.id)).toEqual([second.id])
   expect(current.getWorkspaceState()).toEqual({ mode: 'new_thread', projectId: DEFAULT_WORKSPACE_PROJECT_ID, modelParameterPresetId: null })
-  expect((await current.memoryStore.searchMemories({ scope: 'global' })).total).toBe(1)
+  expect((await legacyMemory(current.memoryStore).searchMemories({ scope: 'global' })).total).toBe(1)
 })
 
 async function frozenLegacyStorage(root: string) {

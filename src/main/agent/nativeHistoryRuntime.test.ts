@@ -11,7 +11,7 @@ import { defaultCapabilities } from '../../shared/agentCapabilities'
 import { NativeConversationDatabase } from './nativeConversationDatabase'
 import { NativeRunHost } from './nativeRunHost'
 import { ManagedCallService } from './managedCallService'
-import { SqliteMemoryStore } from './memoryStore'
+import { SqliteMemoryStore } from '../../test/legacyMemoryFixture'
 import { FileEditStore } from '../fileEditStore'
 import { archiveAgentAttachments } from './agentAttachmentStore'
 

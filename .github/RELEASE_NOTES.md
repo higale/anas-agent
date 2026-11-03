@@ -1,16 +1,18 @@
-## Anas v5.0.9
+## Anas v5.1.0
 
-- 修复展开轮次时“加载中”与正文未对齐的问题，加载、分页提示与轮次内容使用相同的宽度和居中布局。
-- 轮次与活动详情的“加载中”延迟 150ms 显示，快速加载时直接呈现内容，减少闪烁；数据请求仍立即开始。
-- 收起、切换对象或结束加载时清理旧计时，错误立即显示，重试重新计时。
+- 在“设置 → 记忆”选择偏好保存方式。默认使用后台提取，需先选择后台模型。也可以使用前台主动记忆，让支持工具调用的聊天模型直接保存偏好。两种模式下都能选择后台模型。
+- 开启工作区的记忆能力后，聊天会带入已保存的全局和项目偏好。可在设置中编辑全局记忆，从工作区菜单打开项目记忆，在侧栏或独立窗口预览、编辑 Markdown。模型回复期间编辑了同一份记忆时，会保留最新正文。
+- 切换到另一对话并首次成功发言后，后台会整理其他已启用记忆的工作区对话。两种模式共用处理进度。通过“工作区菜单 → 记忆活动”可查看本轮整理结果和模型用量，也可选择是否显示标题栏按钮。
+- 修复旧开发版记忆库造成的启动恢复问题，完善备份、修复和重置时对记忆数据的处理。项目设置也修正了插件技能归属和子 Agent 工具授权的显示。
 
-**从 5.0.2～5.0.8 升级无需重置项目或会话。**
+**从 5.0.2～5.0.9 升级无需重置项目或会话。** 旧记忆记录保留在原库中，5.1.0 不再读取或自动迁移。旧用户资料仍在配置中，聊天不再注入这些资料。需要沿用的偏好可手动添加到全局或项目记忆。
 
-- Align loading and pagination messages with the content when expanding a conversation round, using the same width and centering rules.
-- Delay the loading indicator for rounds and activity details by 150ms to avoid flicker on fast reads. Data requests still start immediately.
-- Clear pending indicator timers when collapsing, switching resources or finishing a read. Errors appear immediately, and retries start a fresh delay.
+- Choose how Anas saves preferences in **Settings → Memory**. Background extraction is the default and requires an explicit model selection. In foreground mode, a chat model that supports tools can save preferences directly. The background model picker is available in both modes.
+- Workspaces with memory enabled include saved global and project preferences in chat. Edit global memory in Settings, or open project memory from the workspace menu to preview and edit Markdown in the sidebar or a separate window. Edits made while a chat model is responding take precedence over a stale memory update.
+- After you switch chats and send the first message successfully, background extraction checks other eligible workspace chats. Both modes share progress. Open **Workspace menu → Memory activity** to see the current results and model usage, and choose whether to show its title bar button.
+- Fix startup recovery when an older development memory database is present and improve how backup, repair and reset handle memory data. Project settings also identify plugin skills and show subagent tool access more accurately.
 
-**Upgrading from 5.0.2–5.0.8 does not require resetting projects or conversations.**
+**Upgrading from 5.0.2–5.0.9 does not require resetting projects or conversations.** Existing memory records remain in the old database. Version 5.1.0 does not read or automatically migrate them. Previous user profile details remain in configuration and are no longer included in chat. Add preferences you want to carry over to global or project memory.
 
 ## 较早版本升级 / Upgrading from earlier versions
 

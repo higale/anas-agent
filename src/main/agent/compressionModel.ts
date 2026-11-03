@@ -17,6 +17,8 @@ import { trackCompressionSummary, type GenerateSummary, type SummaryResponse, ty
 export interface CompressionModelOptions extends ModelConnectionOptions {
   /** Disable internal retries when the conversation coordinator owns the budget. */
   retry?: boolean
+  /** Structured background publications must never accept a truncated response. */
+  requireComplete?: boolean
   beforeRequest?: () => Promise<void>
   compressionTracking?: CompressionTrackingCallbacks
   signal?: AbortSignal
@@ -40,6 +42,7 @@ export function createCompressionModel(config: ResolvedModelConfig, options: Com
       const body = anthropicRequestParameters({ model, maxOutputTokens, streaming: false, parameters: anthropicModelParameters(parameters) })
       request = async (prompt, signal) => {
         const response = await provider.complete({ ...body, messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }] }, { signal })
+        if (options.requireComplete && response.stop_reason === 'max_tokens') throw new Error('Memory model output was truncated.')
         const { id, text, usage } = readAnthropicResponse(response)
         return { id, text, usage }
       }
@@ -51,6 +54,7 @@ export function createCompressionModel(config: ResolvedModelConfig, options: Com
         const provider = new OpenAiResponses(connection), body = openAiResponsesParameters(settings)
         request = async (prompt, signal) => {
           const response = await provider.complete({ ...body, input: [{ role: 'user', content: prompt }] }, { signal })
+          if (options.requireComplete && response.status !== 'completed') throw new Error('Memory model response did not complete.')
           const { id, text, usage } = readOpenAiResponse(response)
           return { id, text, usage }
         }
@@ -58,6 +62,7 @@ export function createCompressionModel(config: ResolvedModelConfig, options: Com
         const provider = new OpenAiChatCompletions(connection), body = openAiChatParameters(settings)
         request = async (prompt, signal) => {
           const response = await provider.complete({ ...body, messages: [{ role: 'user', content: prompt }] }, { signal })
+          if (options.requireComplete && response.choices[0]?.finish_reason === 'length') throw new Error('Memory model output was truncated.')
           const { id, candidates, usage } = readChatCompletion(response)
           return { id, text: candidates[0]?.text ?? '', usage }
         }

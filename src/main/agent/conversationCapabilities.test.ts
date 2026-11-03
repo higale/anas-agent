@@ -26,7 +26,7 @@ import { beforeAll, afterAll, afterEach, beforeEach, describe, expect, it, vi } 
 import { defaultCapabilities } from '@shared/agentCapabilities'
 import { config, thread, defaultWorkspaceProject, previewConfig } from '../../test/agentConfigurationFixture'
 import { NativeConversationDatabase } from './nativeConversationDatabase'
-import { SqliteMemoryStore } from './memoryStore'
+import { SqliteMemoryStore } from '../../test/legacyMemoryFixture'
 import { FileEditStore } from '../fileEditStore'
 
 import { prepareAgentSystemPrompt } from './agentRuntimeResources'
@@ -162,7 +162,7 @@ describe('native capability snapshots', () => {
       })
       expect(resolved.mock.lastCall![0].capabilities).toMatchObject({ memory: true, workspace: true, toolMode: 'all' })
       expect(resolved.mock.lastCall![0].subagentLimit).toBeUndefined()
-      expect((await definitions.mock.results.at(-1)!.value).map((tool: { name: string }) => tool.name)).toContain('save_to_memory')
+      expect((await definitions.mock.results.at(-1)!.value).map((tool: { name: string }) => tool.name)).not.toContain('save_to_memory')
       expect((await prepareAgentSystemPrompt(owner, previewConfig())).systemPrompt.text).not.toContain('Hidden project instruction')
     } finally { database.close() }
   })
@@ -231,6 +231,35 @@ describe('native capability snapshots', () => {
     if (workspace) expect(sections.findIndex((section) => section.kind === 'project_instruction')).toBeLessThan(sections.findIndex((section) => section.kind === 'workspace'))
   })
 
+  it('changes memory instructions and offered tools together on later requests of the same run', async () => {
+    projectStoreMocks.getProject.mockResolvedValue(defaultWorkspaceProject())
+    memoryStoreMocks.buildMemoryRulesPrompt.mockResolvedValue('Background extraction only')
+    const config = previewConfig()
+    appConfigMocks.getAppConfigSnapshot.mockResolvedValue(config)
+    const database = openDatabase()
+    try {
+      const thread = configuredThread(database, { title: 'Switch modes' })
+      const resources = await prepareAgentRuntimeResources(thread, database.resources, config, {}, {
+        persistent: true, prepareWorkspace: false, requestSubagentApproval: async () => { throw new Error('Unexpected approval') }
+      })
+      for (const mode of ['background', 'foreground', 'background'] as const) {
+        config.settings.memoryMode = mode
+        const model = await resources.resolveModel()
+        const prompt = resources.requestSystemPrompt(model).text
+        const tools = resources.selectModelTools(model, resources.runtimeTools)
+        expect(tools.some(tool => tool.name === 'update_memory')).toBe(mode === 'foreground')
+        expect(prompt.includes('Use update_memory')).toBe(mode === 'foreground')
+        expect(prompt.includes('Background extraction only')).toBe(mode === 'background')
+        if (mode === 'foreground') {
+          const textOnly = { ...model, capabilities: { ...model.capabilities, toolUse: false } }
+          expect(resources.selectModelTools(textOnly, resources.runtimeTools)).toEqual([])
+          expect(resources.requestSystemPrompt(textOnly).text).toContain('Memory writing is unavailable')
+          expect(resources.requestSystemPrompt(textOnly).text).not.toContain('Use update_memory')
+        }
+      }
+    } finally { database.close() }
+  })
+
   it.each((['main', 'independent', 'restricted'] as const).flatMap((scope) => [false, true].map((parentCodingMode) => ({ scope, parentCodingMode }))))('enforces memory tool selection in $scope with parent coding mode $parentCodingMode', async ({ scope, parentCodingMode }) => {
     const project = { customTools: [], ...defaultWorkspaceProject(), codingMode: true, capabilities: { ...{
       ...structuredClone(defaultCapabilities), toolMode: 'except' as const, tools: ['save_to_memory', 'forget_memory']
@@ -259,7 +288,7 @@ describe('native capability snapshots', () => {
       expect(resolved.mock.lastCall![0].capabilities.subagents).toEqual(scope === 'main' ? project.capabilities.subagents : { mode: 'custom', names: [] })
       const actual = (await definitions.mock.results.at(-1)!.value).map((tool: { name: string }) => tool.name) as string[]
       expect(actual.filter((name) => ['read_memory', 'save_to_memory', 'forget_memory'].includes(name))).toEqual(
-        scope === 'independent' ? ['read_memory', 'save_to_memory', 'forget_memory'] : ['read_memory']
+        []
       )
     } finally { database.close() }
   })
@@ -457,7 +486,7 @@ describe('native capability snapshots', () => {
         persistent: true, prepareWorkspace: false, requestSubagentApproval: async () => { throw new Error('Unexpected approval during resource preparation') }
       })
       expect(resolved.mock.lastCall?.[0].capabilities).toMatchObject({ memory: !restricted, applicationEnvironment: !restricted })
-      expect(definitions.mock.lastCall![0]).toMatchObject({ memory: !restricted, network: !restricted })
+      expect(definitions.mock.lastCall![0]).toMatchObject({ network: !restricted })
     } finally { database.close() }
   })
   it('keeps recovery independent from disabled, deleted, or edited live definitions', async () => {
@@ -512,9 +541,8 @@ describe('native capability snapshots', () => {
       expect(database.runs.subagents.require(call.id, owner.id)?.config).toEqual(original)
       expect(definitions.mock.calls.slice(-3).map(([options]) => ({
         toolNames: options.toolNames,
-        memory: options.memory
       }))).toEqual(Array.from({ length: 3 }, () => ({
-        toolNames: ['read_call', 'read_call_output', 'write_call', 'wait_call', 'cancel_call', 'read_file'], memory: false
+        toolNames: ['read_call', 'read_call_output', 'write_call', 'wait_call', 'cancel_call', 'read_file']
       })))
     } finally {
       database.close()

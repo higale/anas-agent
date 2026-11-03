@@ -13,6 +13,7 @@ import { AgentApprovalPanel } from './AgentApprovalPanel'
 import { DiffPreferences, type DiffViewSettings } from '../diff/DiffView'
 import { WorkspacePanels } from './WorkspacePanels'
 import { WorkspaceMenu } from './WorkspaceMenu'
+import { MemoryActivityButton } from './MemoryActivityPanel'
 import type { PluginSummary } from '@shared/plugins'
 import { workspacePanelGroup, workspacePanelScope, type WorkspacePanelsController } from './useWorkspacePanels'
 import { WORKSPACE_PANEL_WIDTH_DEFAULT } from '@shared/uiPreferences'
@@ -140,6 +141,7 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
   const panelWidth = Math.min(panelMaxWidth, Math.max(panelMinWidth, props.config?.settings.workspacePanelWidth ?? WORKSPACE_PANEL_WIDTH_DEFAULT))
   const title = props.snapshot?.thread.title ?? props.thread?.title ?? t('chat.new_thread')
   const selectedProject = props.projects.find((project) => project.id === props.selectedProjectId)
+  const openMemoryActivity = () => props.panels.open({ kind: 'memory' })
   const generationBusy = props.run?.status === 'running'
   const threadLocked = Boolean(props.run)
     || isAgentThreadLocked(props.snapshot?.thread.status)
@@ -219,12 +221,15 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
           onToggleThreadPinned={props.onToggleThreadPinned}
         />
         <div className="topbar-actions ui-row ui-row-tight ui-push-end">
-          {(selectedProject || props.onOpenPluginSettings) && <WorkspaceMenu plugins={props.plugins ?? []}
+          {(props.config?.settings.showMemoryActivityInTitlebar ?? true) && <MemoryActivityButton onOpen={openMemoryActivity} />}
+          <WorkspaceMenu plugins={props.plugins ?? []} onOpenMemoryActivity={openMemoryActivity}
             onOpenPlugin={props.onOpenPlugin} onOpenPluginSettings={props.onOpenPluginSettings}
-            project={selectedProject ? { name: selectedProject.name, onOpenFiles: () => props.panels.open({
+            project={selectedProject ? { name: selectedProject.name,
+              onOpenMemory: selectedProject.kind === 'workspace' ? () => props.panels.open({ kind: 'projectMemory', projectId: selectedProject.id }) : undefined,
+              onOpenFiles: () => props.panels.open({
               kind: 'files', projectId: selectedProject.id, threadId: props.activeThreadId,
               ...(!props.activeThreadId ? { draft: { modelConfigId: selectedModel?.id, modelParameterPresetId: props.selectedModelParameterPresetId ?? null, accessMode: props.accessMode } } : {})
-            }) } : undefined} />}
+            }) } : undefined} />
           {panelGroup.tabs.length > 0 && !panelGroup.expanded && <NoFocusButton ref={panelToggleRef} type="button"
             className="ui-tool-button ui-tool-button-square" aria-expanded={false}
             aria-label={t('agent.show_panels')}

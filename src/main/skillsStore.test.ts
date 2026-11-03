@@ -116,6 +116,8 @@ describe('skillsStore', () => {
     expect(skill.dirPath).toBe(await realpath(join(h.root, 'plugins', 'skill-fixture', 'skills', 'duplicate')))
     expect((await h.store.readSkillFile('project', skill.id, 'SKILL.md')).editable).toBe(false)
     await expect(h.store.saveSkillFile('project', skill.id, 'SKILL.md', {} as never)).rejects.toThrow('read-only')
+    expect((await h.store.buildUserSkillInvocation('project', 'duplicate', 'plugin:skill-fixture', 'check')).promptText).toContain(original)
+    h.projectCapabilities.pluginMode = 'off'
     expect(await h.store.buildUserSkillInvocation('project', 'duplicate', 'plugin:skill-fixture', 'check')).toMatchObject({ errorCode: 'user_unavailable' })
     await h.store.updateSkillAvailability(undefined, skill.id, { modelAvailable: true })
     h.projectCapabilities.pluginMode = 'custom'

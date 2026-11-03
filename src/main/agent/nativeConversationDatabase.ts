@@ -4,7 +4,7 @@ import { ResourceCleanupStore } from './resourceCleanupStore'
 import { BackgroundTaskStore } from './backgroundTaskStore'
 import Database from 'better-sqlite3'
 import { resolve } from 'node:path'
-import type { SqliteMemoryStore } from './memoryStore'
+import type { MemoryResources } from './memoryStore'
 import type { FileEditStore } from '../fileEditStore'
 import type { ConversationInstanceOwner } from './conversationInstance'
 import { initializeNativeConversationStorage, validateNativeConversationSchema } from './nativeDatabaseSchema'
@@ -36,8 +36,9 @@ import type { AgentApplicationReadModel } from './agentApplicationTypes'
 import { backgroundCleanupUnconfirmed, type AgentBackgroundCleanup } from '../../shared/backgroundCleanup'
 
 export interface NativeConversationDatabaseOptions {
+  ownerThreadId?: string
   attachmentRoot: string
-  memoryStore: SqliteMemoryStore
+  memoryStore: MemoryResources
   fileEditStore: FileEditStore
   onFileChanges?(runId: string): void
   onChanged?(database: NativeConversationDatabase): void
@@ -82,8 +83,19 @@ export class NativeConversationDatabase {
     })()
     database.pragma('journal_mode=WAL')
     const projection = new NativeMessageProjection(database)
-    this.runs = new NativeRunOwner(database, commit => { projection.commit(commit); this.notifyChanged() }, () => this.notifyChanged())
-    this.history = new NativeHistoryOwner(database, this.runs)
+    this.runs = new NativeRunOwner(database, commit => {
+      projection.commit(commit)
+      if (options.ownerThreadId === commit.threadId && commit.messageRecords.length) {
+        const memory = options.memoryStore.preferences
+        memory?.markDirty(commit.threadId)
+        for (const record of commit.messageRecords) {
+          const previous = commit.replacedToolResults?.[record.recordId] ?? (record.value.kind === 'assistant' ? commit.previousResponseRecordId : undefined)
+          if (previous) memory?.stageCursorEdit(commit.threadId, previous, record.recordId)
+        }
+      }
+      this.notifyChanged()
+    }, () => this.notifyChanged())
+    this.history = new NativeHistoryOwner(database, this.runs, options.memoryStore.preferences)
     this.messages = new NativeMessageReader(database)
     this.results = new NativeManagedResults(database)
     this.managed = new ManagedCallStore(database, call => this.results.validateCallResult(call))

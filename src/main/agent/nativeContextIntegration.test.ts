@@ -1,3 +1,4 @@
+import { mockPreferenceReader } from '../../test/preferenceFixture'
 import { z } from 'zod'
 import { defineContentTool } from '../../runtime/toolDefinition'
 import type { SkillScriptInvocation } from '../skillsStore'
@@ -44,7 +45,7 @@ import { defaultCapabilities } from '@shared/agentCapabilities'
 import type { ModelProtocol, Project } from '@shared/types'
 import { defaultWorkspaceProject, previewConfig } from '../../test/agentConfigurationFixture'
 import { NativeConversationDatabase } from './nativeConversationDatabase'
-import { SqliteMemoryStore } from './memoryStore'
+import { SqliteMemoryStore } from '../../test/legacyMemoryFixture'
 import { FileEditStore } from '../fileEditStore'
 
 const testPaths = vi.hoisted(() => ({ root: '' }))
@@ -429,16 +430,12 @@ describe('native context integration', () => {
     messages[200].content = queryFormat === 'blocks' ? [{ type: 'text', text: 'Current question' }, { type: 'text', text: 'With details' }]
       : queryFormat === 'empty' ? '' : 'Current question'
     const { database, thread, file } = openHistoryDatabase(messages, { cutoffIndex, content: 'Summary of earlier history' })
-    const recalled = vi.spyOn(database.resources.memoryStore, 'relevantMemories').mockResolvedValue([{
-      id: 'memory', scope: 'project', projectId: thread.projectId, kind: 'fact', importance: 1,
-      content: 'Remember the project constraint. ' + 'm'.repeat(4400), keywords: [], origin: 'user',
-      createdAt: '2026-09-24T00:00:00.000Z', updatedAt: '2026-09-24T00:00:00.000Z'
-    }])
+    const recalled = mockPreferenceReader(database.resources.memoryStore, 'Remember the project constraint. ' + 'm'.repeat(4400))
     const history = database.runs.store.readHistory(thread.id)!
     const expected = await projectConversationContextStatus(thread, database.resources, snapshot,
       conversationContextSource({ threadId: thread.id, ...history }, database.runs.store), {})
     const expectedQueries = [...recalled.mock.calls]
-    expect(expectedQueries).toHaveLength(queryFormat === 'empty' ? 0 : 1)
+    expect(expectedQueries).toHaveLength(2)
     recalled.mockClear()
     database.validate()
     const raw = new Database(file)
@@ -795,11 +792,7 @@ describe('native context integration', () => {
     projectStoreMocks.getProject.mockResolvedValue(project)
     const { database, thread } = openHistoryDatabase([{ id: 'old-user', kind: 'user', content: 'h'.repeat(4400) },
       { id: 'old-answer', kind: 'assistant', content: 'a'.repeat(4400) }])
-    const relevant = vi.spyOn(database.resources.memoryStore, 'relevantMemories').mockResolvedValue([{
-      id: 'memory', scope: 'project', projectId: thread.projectId, kind: 'fact', importance: 1,
-      content: 'Remember the project constraint. ' + 'm'.repeat(4400), keywords: [], origin: 'user',
-      createdAt: '2026-09-24T00:00:00.000Z', updatedAt: '2026-09-24T00:00:00.000Z'
-    }])
+    const relevant = mockPreferenceReader(database.resources.memoryStore, 'Remember the project constraint. ' + 'm'.repeat(4400))
     createRun(database, thread.id, 'memory-compression', 'Continue')
     const current = database.runs.readRunInput({ threadId: thread.id, runId: 'memory-compression' })!.value
     const source = conversationContextSource({ threadId: thread.id, ...database.runs.store.readHistory(thread.id)! }, database.runs.store)
@@ -812,7 +805,7 @@ describe('native context integration', () => {
     }
     try {
       const before = await projectConversationContextStatus(thread, database.resources, snapshot, source, {})
-      relevant.mockResolvedValueOnce([])
+      relevant.mockReturnValueOnce({ scope: { kind: 'global' }, content: '', hash: '' }).mockReturnValueOnce({ scope: { kind: 'project', projectId: thread.projectId }, content: '', hash: '' })
       const withoutRecall = await projectConversationContextStatus(thread, database.resources, snapshot, source, {})
       expect(before.estimatedInputTokens).toBeGreaterThan(withoutRecall.estimatedInputTokens + 1000)
       const capacity = withoutRecall.estimatedInputTokens + 500

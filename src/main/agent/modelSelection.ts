@@ -7,7 +7,7 @@ import { findResolvedModelConfig, getAppConfigSnapshot } from '../config/appConf
 import type { ConversationResourceAccess } from './conversationResourceReader'
 
 type ModelSelection = Pick<AgentThread, 'modelConfigId' | 'modelParameterPresetId'>
-type ModelConfiguration = Pick<AppConfigSnapshot, 'providers' | 'defaultModel'>
+type ModelConfiguration = Pick<AppConfigSnapshot, 'providers' | 'defaultModel'> & Partial<Pick<AppConfigSnapshot, 'settings'>>
 type ModelSelectionDatabase = Pick<ConversationResourceAccess, 'getThread' | 'getSubagentCallByChildThreadId'>
 
 /** Bind explicit definition choices once, when creating the child conversation. */
@@ -78,13 +78,15 @@ export function resolveModelSelection(
 export function createAgentModelResolver(
   threadId: string,
   database: ModelSelectionDatabase,
-  options: { loadConfig?: () => Promise<ModelConfiguration> } = {}
+  options: { loadConfig?: () => Promise<ModelConfiguration>; onResolved?(model: ResolvedModelConfig, config: ModelConfiguration): void } = {}
 ): () => Promise<ResolvedModelConfig> {
   const loadConfig = options.loadConfig ?? getAppConfigSnapshot
   return async () => {
     try {
       const config = await loadConfig()
-      return resolveModelSelection(resolveThreadModelSelection(threadId, database), config)
+      const model = resolveModelSelection(resolveThreadModelSelection(threadId, database), config)
+      options.onResolved?.(model, config)
+      return model
     } catch (cause) {
       if (cause instanceof ModelSelectionError) throw cause
       throw new ModelSelectionError(`The current model configuration could not be loaded: ${cause instanceof Error ? cause.message : String(cause)}. Correct its settings and send again.`, { cause })

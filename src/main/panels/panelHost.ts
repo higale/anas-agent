@@ -4,7 +4,7 @@ import { BrowserWindow, ipcMain, nativeTheme } from 'electron'
 import { z } from 'zod/v3'
 import { helpDocuments, isHelpDocumentId } from '@shared/helpDocuments'
 import type { AppConfigSnapshot, Project } from '@shared/types'
-import type { BuiltinPanel, PanelLocation, PanelPreferences } from '@shared/panels'
+import type { BuiltinPanel, PanelLocation } from '@shared/panels'
 import { getAppSettings, onAppConfigChanged, updateSettings } from '../config/appConfig'
 import { runApplicationDataOperation } from '../applicationDataLifecycle'
 import { getLanguageResources, resolveConfiguredLanguage } from '../languageStore'
@@ -18,9 +18,10 @@ const id = z.string().min(1).max(256)
 const builtinSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('document'), documentId: z.custom<keyof typeof helpDocuments>(isHelpDocumentId), anchor: z.string().max(2048).optional(), navigationId: id.optional() }).strict(),
   z.object({ kind: z.literal('files'), projectId: id, threadId: id.optional(), runId: id.optional(), navigationId: id.optional(), draft: z.object({ modelConfigId: id.optional(), modelParameterPresetId: id.nullable().optional(), accessMode: z.enum(['strict_approval', 'smart_approval', 'full_access']).optional() }).strict().optional() }).strict(),
-  z.object({ kind: z.literal('subagent'), projectId: id, threadId: id, runId: id, subagentId: id, name: z.string().min(1).max(512) }).strict()
+  z.object({ kind: z.literal('subagent'), projectId: id, threadId: id, runId: id, subagentId: id, name: z.string().min(1).max(512) }).strict(),
+  z.object({ kind: z.literal('memory') }).strict(),
+  z.object({ kind: z.literal('projectMemory'), projectId: id }).strict()
 ])
-let preferences: PanelPreferences | undefined
 // Serialize context preparation, not page loading or placement acknowledgements.
 let filesPreparation: Promise<unknown> = Promise.resolve()
 function prepareFiles<T>(action: () => Promise<T>): Promise<T> {
@@ -30,7 +31,8 @@ function prepareFiles<T>(action: () => Promise<T>): Promise<T> {
 }
 function presentation(content: BuiltinPanel, project?: Project): Pick<PanelDefinition, 'name' | 'project'> {
   return { project, name: (language, currentProject) => content.kind === 'document' ? helpDocuments[content.documentId]
-    : content.kind === 'subagent' ? content.name : `${panelLabel(language, 'file_changes')} · ${currentProject!.name}` }
+    : content.kind === 'memory' ? panelLabel(language, 'memory_activity')
+    : content.kind === 'subagent' ? content.name : `${panelLabel(language, content.kind === 'projectMemory' ? 'project_memory' : 'file_changes')} · ${currentProject!.name}` }
 }
 export function updatePanelProject(project: Project): void { panelPages.updateProject(project) }
 let appearanceRevision = 0
@@ -42,14 +44,14 @@ export function refreshPanelAppearance(snapshot?: Pick<AppConfigSnapshot, 'setti
     // An opening page must consume the latest preparation, including its
     // languages, rather than install settings from a superseded read.
     if (revision !== appearanceRevision) return appearanceRefresh
-    const { diffViewMode, diffFoldUnchanged, diffWordWrap } = settings
-    preferences = { diffViewMode, diffFoldUnchanged, diffWordWrap }
+    const { diffViewMode, diffFoldUnchanged, diffWordWrap, showMemoryActivityInTitlebar } = settings
+    panelPages.setPreferences({ diffViewMode, diffFoldUnchanged, diffWordWrap, showMemoryActivityInTitlebar })
     const language = await resolveConfiguredLanguage(settings.language)
     const languages = await getLanguageResources()
     if (revision !== appearanceRevision) return appearanceRefresh
     setPanelLanguages(languages)
     panelPages.configure({ language: language.code,
-      theme: nativeTheme.shouldUseDarkColors ? 'dark' : 'light', fontSize: settings.fontSize }, preferences)
+      theme: nativeTheme.shouldUseDarkColors ? 'dark' : 'light', fontSize: settings.fontSize })
   }
   appearanceRefresh = prepare()
   return appearanceRefresh
@@ -59,7 +61,8 @@ export async function openBuiltinPanel(value: unknown, location: PanelLocation =
   const parsed = builtinSchema.parse(value)
   const prepare = () => runApplicationDataOperation(async () => {
     const content: BuiltinPanel = parsed.kind === 'files' ? { ...parsed, navigationId: randomUUID() } : parsed
-    const project = content.kind !== 'document' ? await getProject(content.projectId) : undefined
+    const project = content.kind !== 'document' && content.kind !== 'memory' ? await getProject(content.projectId) : undefined
+    if (content.kind === 'projectMemory' && project?.kind !== 'workspace') throw new Error('Project memory requires a workspace project.')
     validatePanelContext(content)
     await refreshPanelAppearance()
     return { ready: panelPages.open({ content, location, locations: ['sidebar', 'window'], ownerId: 'builtin', ...presentation(content, project) }) }
@@ -128,7 +131,11 @@ export function registerPanelIpc(): void {
   })
   ipcMain.handle('panels:preferences', (event, input: unknown) => {
     panelPages.assertHost(event)
-    const preferences = z.object({ diffViewMode: z.enum(['inline', 'side_by_side']), diffFoldUnchanged: z.boolean(), diffWordWrap: z.boolean() }).partial().strict().parse(input)
-    return runApplicationDataOperation(async () => { await updateSettings(preferences) })
+    const preferences = z.object({ diffViewMode: z.enum(['inline', 'side_by_side']), diffFoldUnchanged: z.boolean(), diffWordWrap: z.boolean(),
+      showMemoryActivityInTitlebar: z.boolean() }).partial().strict().parse(input)
+    return runApplicationDataOperation(async () => {
+      await updateSettings(preferences)
+      return panelPages.getPreferences()
+    })
   })
 }

@@ -22,7 +22,7 @@ During tool execution, one continuous shimmer moves across the entire tool heade
 
 The sidebar shows Projects, Simple chats, then the separate default project. Drag a project name to reorder it within its category, or a conversation name to reorder it within its project. Pinned and unpinned items sort separately; dragging cannot move items between groups. Release to save or press Esc to cancel. After manual sorting, new items appear before unpinned items, and message updates preserve the saved order. The default project stays last.
 
-Enable **Customize capabilities** in the project editor to choose prompts, context, tools, skills, and subagents. Turning it off uses all enabled capabilities and retains custom choices. Settings manages source availability; there is no global default-capability page. Coding mode controls the development workflow without increasing access permissions.
+Enable **Customize capabilities** in the project editor to choose prompts, context, tools, skills, and subagents. New projects start customization with the same available capabilities used while customization is off. Turning it off uses all enabled capabilities and retains custom choices; updated defaults do not reset saved project selections. Settings manages source availability; there is no global default-capability page. Coding mode controls the development workflow without increasing access permissions.
 
 The default project name cannot be changed. All other settings work the same as for regular projects, including its icon, color, working folders, tool access mode, model and reasoning option, coding mode, and customized capabilities. Its initial working folder is the current system user's Documents folder, with no extra subfolder created; saved folder selections are preserved. Enable “Customize capabilities” to edit project and compression prompts and capability selections. Turning it off preserves those custom settings while using the default prompt behavior and all enabled capabilities.
 
@@ -31,7 +31,9 @@ The default project name cannot be changed. All other settings work the same as 
 - Capabilities select available tools; the conversation's access mode determines when an operation needs approval. Disabling File read, File write, or Network access removes those specific tools. Commands and MCP tools may still provide similar operations.
 - Changes apply to tasks started afterward. Running tasks and tasks awaiting recovery retain their original selection.
 
-Each MCP server and plugin, plus Subagents, Skills, and Custom tools, uses **All / Custom / Off**. All includes current and future available entries. Custom includes only explicit choices and starts collapsed. Off hides the list and retains those choices. Newly added MCP servers and plugins start off in customized projects. Disabling a whole source does not lock customization: known entries remain editable but inactive. If the complete MCP catalog is unavailable, saved tools can still be deselected.
+Each MCP server and plugin, plus Subagents, Skills, and Custom tools, uses **All / Custom / Off**. All includes current and future available entries. Custom includes only explicit choices and starts collapsed. Off hides the list and retains those choices. The count shows selected items out of the total: if you select two of five items and one is later disabled, the count stays at 2/5. The disabled item cannot run.
+
+Defaults include newly available MCP servers and plugins; configurations that explicitly limit sources keep unselected new sources off. Disabling a whole source does not lock customization: known entries remain editable but inactive. If the complete MCP catalog is unavailable, saved tools can still be deselected.
 
 Skills follow global shortcut/model availability: a globally disabled use cannot be newly selected and shows no notice while unselected. Saved selections remain checked with a warning about the conflict and can be cleared. Selecting that use again requires enabling it globally. Project-local skills are independent of these global restrictions.
 
@@ -56,7 +58,7 @@ The menu beside the left-hand title area opens full prompt, compression prompt, 
 
 ### Profile
 
-Supplies the assistant's name, role, instructions, and user information from **Settings > General**, so the Agent can follow your preferences. It has no separate tool and does not allow profile edits; tool-based edits require **Update configuration**. A subagent receives profile information according to its own capabilities and any project limits.
+Supplies the assistant name, role and custom instructions from **Settings > General**. Edit custom instructions manually there. With **Update configuration** enabled, the Agent can change the assistant name, role and avatar on request. The selected memory mode handles preferences such as forms of address and response style. View and edit global preferences under **Settings > Memory**. Existing user profile values remain in configuration and are excluded from conversations and automatic memory import. Subagents receive assistant profile context according to their own capabilities and project limits.
 
 ### Runtime Environment Information
 
@@ -166,16 +168,13 @@ OpenAI Responses uses the native Codex freeform patch call and requires provider
 
 ### Memory
 
-Stores preferences, facts, and experience globally or for the current project. The following four items are independent choices.
+In **Settings → Memory**, choose **Foreground memory** or **Background extraction** (default). In foreground mode a chat model with tool support can call `update_memory` for global or current-project preferences. The call and result appear in chat. A successful write advances that chat’s progress through the current user message. Switching back resumes background extraction after that point. Chats without a successful write retain their previous progress.
 
-| Item | Function and dependencies |
-| --- | --- |
-| Automatic recall | Finds records relevant to the current user message and supplies them to the model. It calls no tool and does not automatically save memories. |
-| `read_memory` | Search or list global and current-project records. |
-| `save_to_memory` | Create or update a record with global or current-project scope. |
-| `forget_memory` | Delete a record by ID; search first if the ID is unknown. |
+Background processing extracts reusable preferences from saved workspace conversations and consolidates global and project memory. With the project's Memory capability enabled, requests include both completed preference documents. One-off requirements, code-version facts and transient progress are not permanent preferences. The first message you send after creating or switching to a chat triggers a check for unprocessed content in all other memory-enabled workspace chats. Browsing chats, sending more messages in the same chat and restarting the app do not trigger a check.
 
-Select only **Automatic recall** to use relevant existing memories, or leave it off and enable search or save tools. Clearing selections does not delete records. Search, edit, or delete them in **Settings > Memory**.
+Choose the background memory model in the upper right of **Settings → Memory**. You can change this selection in either mode. Background extraction uses the selected model. The button then shows the model name. Click it again to change or clear the selection. Without a selection, or when the model is unavailable, generation pauses and existing preferences remain readable. Changes may take time; request corrections or forgetting in conversation.
+
+Open **Workspace menu → Memory activity** below Plugins. Use **Title bar button** in the upper-right corner of the panel to toggle the shortcut. It is shown by default and animates while processing. Open it to inspect sources, stages, model, evidence, inputs, outputs and the resulting memory text in a sidebar or separate window. Closing the panel does not stop processing. Call details stay in memory until the next run starts or the app exits. The panel shows reported input and output tokens and how many calls reported usage. View and edit global Markdown under **Settings → Memory**. If memory changes while you edit, compare your draft with the latest text before saving. In the chat window, open **Workspace menu → Project memory**, just below **File changes**, to view and edit the current project’s Markdown. The panel title identifies the project, and moving between the sidebar and a separate window preserves your draft. Save or cancel your edits before closing the panel. The old memory tools are removed; old tables remain untouched and are neither read nor migrated. Fresh installations do not create them.
 
 ### Custom Tools
 
@@ -368,7 +367,7 @@ The overview in **Settings → Plugins** groups instructions, skills, and tools.
 
 Settings → Tools → Plugins lists tools grouped by plugin, with model definitions available to view and copy. Disabled plugins remain inspectable; browsing the catalog does not start plugin backends.
 
-Select plugin tools, skills and prompts together under each plugin in project and subagent capabilities with **All / Custom / Off**. All includes new contributions; Custom uses only explicit choices; Off retains those choices. Uncustomized projects use available contributions from enabled plugins, while new plugins start off in customized projects. Skills settings controls the global shortcut/model availability ceiling. The ordinary Skills group does not control plugin skills. Missing tool dependencies are shown without automatically selecting them. Plugin management controls installation, overall availability, plugin preferences, and content previews, without duplicating capability switches.
+Select plugin tools, skills and prompts together under each plugin in project and subagent capabilities with **All / Custom / Off**. All includes new contributions; Custom uses only explicit choices; Off retains those choices. Projects include available contributions from enabled plugins by default. Existing projects retain their saved selections. Skills settings controls the global shortcut/model availability ceiling. The ordinary Skills group does not control plugin skills. Missing tool dependencies are shown without automatically selecting them. Plugin management controls installation, overall availability, plugin preferences, and content previews, without duplicating capability switches.
 
 Plugin tools selected for a project or subagent run without opening plugin pages, with text, JSON, or image results handled like other tool results. Disabled plugins cannot run tools. After an update, current tool definitions are used without requiring a new conversation solely because the version changed. Cancellation or timeout asks the backend to stop that call without terminating the entire backend. Sending cancellation does not confirm that the operation has stopped; the backend's response determines the outcome.
 

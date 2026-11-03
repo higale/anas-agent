@@ -1,4 +1,5 @@
 const { panelPage } = require('./electron-panel-helpers.cjs')
+const { verifyBackgroundMemory } = require('./electron-memory.cjs')
 const { verifyPluginTools } = require('./electron-plugin-tools.cjs')
 const { verifyPluginWidgets } = require('./electron-plugin-widgets.cjs')
 const { verifyUnifiedPanels } = require('./electron-panels.cjs')
@@ -1149,6 +1150,10 @@ async function verifyCodeReview(electronApplication) {
 }
 
 async function main() {
+  if (process.argv.includes('--memory-only')) {
+    await verifyBackgroundMemory(launchApplication)
+    return
+  }
   const projectModelsOnly = process.argv.includes('--project-model-selection-only')
   if (process.argv.includes('--cleanup-only')) {
     await verifyDataCleanup(launchApplication)

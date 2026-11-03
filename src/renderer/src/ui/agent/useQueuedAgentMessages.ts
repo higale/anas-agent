@@ -1,3 +1,4 @@
+import { dispatchWorkspaceAction } from './workspaceDispatch'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AgentQueuedInput,
@@ -239,7 +240,7 @@ export function useQueuedAgentMessages({
       ...(displayText === text ? {} : { displayText }),
       attachments: attachments.map(selectedAttachmentInput)
     }
-    const item = await window.gale.agent.queuedInputs.enqueue(input)
+    const item = await dispatchWorkspaceAction(() => window.gale.agent.queuedInputs.enqueue(input))
     projectionRevisionRef.current += 1
     setMessagesByThread((current) => ({
       ...current,

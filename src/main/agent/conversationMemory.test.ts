@@ -1,41 +1,30 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { ConversationMessage } from '../../runtime/conversationMessage'
+import type { PreferenceScope } from '../../shared/preferenceMemory'
 import { createConversationMemoryProjector } from './conversationMemory'
 
-describe('native memory recall', () => {
-  it('reuses the same in-flight query, re-queries queued directions and leaves message bodies untouched', async () => {
-    let release!: () => void
-    const pending = new Promise<void>(resolve => { release = resolve })
-    const recall = vi.fn(async () => { await pending; return [{ id: 'memory', scope: 'global' as const, kind: 'fact' as const,
-      content: '<value> & detail', keywords: [], importance: 0, origin: 'user' as const, createdAt: '', updatedAt: '' }] })
-    const observe = vi.fn(), project = createConversationMemoryProjector({ enabled: true, projectId: 'project', limit: 2,
-      store: { relevantMemories: recall }, onRecall: observe })
-    const system: ConversationMessage = { kind: 'system', content: 'Instructions' }
-    const messages: ConversationMessage[] = [{ kind: 'user', content: [{ type: 'text', text: 'question' }, { type: 'text', text: 'attachment' }] }]
-    const first = project(system, messages), second = project(system, [...messages, { kind: 'tool', content: 'read result', resultFor: 'call' }])
-    release()
-    const [left, right] = await Promise.all([first, second])
-    expect(left).toEqual(right)
-    expect(left.content).toContain('&lt;value&gt; &amp; detail')
-    expect(recall).toHaveBeenCalledOnce()
-    expect(recall).toHaveBeenCalledWith('question\nattachment', 'project', 2)
-    expect(observe).toHaveBeenCalledOnce()
-    expect(observe).toHaveBeenCalledWith({ query: 'question\nattachment', memoryCount: 1,
-      promptText: expect.stringContaining('&lt;value&gt; &amp; detail') })
-    await project(system, [...messages, { kind: 'user', content: 'next question' }])
-    expect(recall).toHaveBeenCalledTimes(2)
-    expect(system.content).toBe('Instructions')
-    expect(messages).toHaveLength(1)
+describe('completed preference injection', () => {
+  it('reads both scopes each request, observes updates, and leaves history untouched', async () => {
+    let content = '<value> & detail'
+    const read = vi.fn((scope: PreferenceScope) => ({ scope, content, hash: '' }))
+    const observe = vi.fn(), project = createConversationMemoryProjector({ enabled: true, projectId: 'project',
+      store: { preferences: { read } }, onRecall: observe })
+    const system = { kind: 'system' as const, content: 'Instructions' }
+    const messages = [{ kind: 'user' as const, content: 'Question' }]
+    expect((await project(system, messages)).content).toContain('&lt;value&gt; &amp; detail')
+    expect(read.mock.calls.map(([scope]) => scope)).toEqual([{ kind: 'global' }, { kind: 'project', projectId: 'project' }])
+    content = 'Updated preference'
+    expect((await project(system, messages)).content).toContain(content)
+    content = ''
+    expect(await project(system, messages)).toBe(system)
+    expect(system.content).toBe('Instructions'); expect(messages).toEqual([{ kind: 'user', content: 'Question' }])
+    expect(observe).toHaveBeenCalledTimes(2)
   })
-
-  it('does not query disabled or empty memory input and surfaces store failures', async () => {
-    const error = new Error('memory unavailable'), recall = vi.fn(async () => { throw error })
-    const system: ConversationMessage = { kind: 'system', content: '' }
-    const options = { projectId: 'project', store: { relevantMemories: recall } }
-    expect(await createConversationMemoryProjector({ ...options, enabled: false })(system, [{ kind: 'user', content: 'question' }])).toBe(system)
-    const project = createConversationMemoryProjector({ ...options, enabled: true })
-    expect(await project(system, [{ kind: 'user', content: '  ' }])).toBe(system)
-    expect(recall).not.toHaveBeenCalled()
-    await expect(project(system, [{ kind: 'user', content: 'question' }])).rejects.toBe(error)
+  it('does not read disabled memory and surfaces document errors', async () => {
+    const read = vi.fn(() => { throw new Error('Damaged memory') })
+    const options = { projectId: 'project', store: { preferences: { read } } }
+    const system = { kind: 'system' as const, content: '' }
+    expect(await createConversationMemoryProjector({ ...options, enabled: false })(system, [])).toBe(system)
+    expect(read).not.toHaveBeenCalled()
+    await expect(createConversationMemoryProjector({ ...options, enabled: true })(system, [])).rejects.toThrow('Damaged memory')
   })
 })

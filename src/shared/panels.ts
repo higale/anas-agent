@@ -8,6 +8,8 @@ import type { AppSettings, GaleApi, LanguageResourcesSnapshot, Project } from '.
 
 export type PanelLocation = 'sidebar' | 'window'
 export type BuiltinPanel =
+  | { kind: 'memory' }
+  | { kind: 'projectMemory'; projectId: string }
   | { kind: 'document'; documentId: HelpDocumentId; anchor?: string; navigationId?: string }
   | { kind: 'files'; projectId: string; threadId?: string; runId?: string; navigationId?: string; draft?: Pick<AgentThreadCreate, 'modelConfigId' | 'modelParameterPresetId' | 'accessMode'> }
   | { kind: 'subagent'; projectId: string; threadId: string; runId: string; subagentId: string; name: string }
@@ -48,7 +50,7 @@ export interface PanelWindowApi {
   setFullScreen(fullScreen: boolean): Promise<void>
   invokeToolbarAction(id: string): Promise<void>
   open(panel: BuiltinPanel): Promise<void>
-  updatePreferences(preferences: Partial<PanelPreferences>): Promise<void>
+  updatePreferences(preferences: Partial<PanelPreferences>): Promise<PanelPreferencesSnapshot>
   review(pageId: string, request: CodeReviewRequest, navigationId: string): Promise<void>
   onCloseFailed(listener: () => void): () => void
   onChanged(listener: (state: PanelWindowShellState) => void): () => void
@@ -63,7 +65,7 @@ export interface PanelsApi {
   close(viewId: string): Promise<void>
   acknowledge(requestId: string): Promise<void>
   review(pageId: string, request: CodeReviewRequest, navigationId: string): Promise<void>
-  updatePreferences(preferences: Partial<PanelPreferences>): Promise<void>
+  updatePreferences(preferences: Partial<PanelPreferences>): Promise<PanelPreferencesSnapshot>
   cancelRequest(requestId: string): Promise<void>
   hasRequest(requestId: string): Promise<boolean>
   onChanged(listener: (views: PanelState[]) => void): () => void
@@ -71,16 +73,18 @@ export interface PanelsApi {
   onOpen(listener: (request: PanelRequest) => void): () => void
   onEscape(listener: (viewId: string) => void): () => void
 }
-export type PanelPreferences = Pick<AppSettings, 'diffViewMode' | 'diffFoldUnchanged' | 'diffWordWrap'>
+export type PanelPreferences = Pick<AppSettings, 'diffViewMode' | 'diffFoldUnchanged' | 'diffWordWrap' | 'showMemoryActivityInTitlebar'>
+export type PanelPreferencesSnapshot = PanelPreferences & { revision: number }
 /** The content renderer has only the services needed by shared presentation components. */
 export interface ContentServices {
+  preferences: import('./preferenceMemory').PreferenceMemoryApi
   app: Pick<GaleApi['app'], 'readHelp' | 'openExternalUrl'>
   files: Pick<GaleApi['files'], 'showItemInFolder' | 'readFileIcon' | 'readAttachmentPreview'>
   agent: Pick<AgentApi, 'changes' | 'activities' | 'onEvent'> & { threads: Pick<AgentApi['threads'], 'get'> }
 }
 export interface PanelContentState extends PanelWindowState {
   project?: Project
-  preferences: PanelPreferences
+  preferences: PanelPreferencesSnapshot
 }
 export function panelScope(content: PanelContent): string | undefined {
   return content.kind === 'subagent'
@@ -91,6 +95,8 @@ export function workspacePanelScope(threadId: string | undefined, projectId: str
 }
 export function panelIdentity(content: PanelContent): string {
   switch (content.kind) {
+    case 'projectMemory': return JSON.stringify([content.kind, content.projectId])
+    case 'memory': return JSON.stringify(['memory'])
     case 'plugin': return JSON.stringify([content.kind, content.pluginId, content.instanceId])
     case 'document': return JSON.stringify([content.kind, content.documentId])
     case 'files': return JSON.stringify([content.kind])

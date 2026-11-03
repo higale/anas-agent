@@ -1305,6 +1305,25 @@ describe('renderer interaction accessibility', () => {
     expect(onClose).toHaveBeenCalledOnce()
   })
 
+  it('starts new project customization with all custom tools and retains explicit changes across toggles', async () => {
+    const user = userEvent.setup(), onSave = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(window, 'gale', { configurable: true, value: { ...capabilityApis,
+      projects: { chooseSourceFolders: vi.fn(async () => ({ status: 'ok', value: ['/workspace'] })) } } })
+    render(<ProjectDialog open kind="workspace" onClose={vi.fn()} onSave={onSave} />)
+    await user.click(screen.getByRole('button', { name: 'project.add_folders' }))
+    const customize = screen.getByRole('checkbox', { name: 'project.advanced_settings' })
+    expect(customize).not.toBeChecked()
+    await user.click(customize)
+    const tools = within(screen.getByRole('radiogroup', { name: 'custom_tools.title' }))
+    expect(tools.getByRole('radio', { name: 'capabilities.all' })).toBeChecked()
+    await user.click(tools.getByRole('radio', { name: 'capabilities.off' }))
+    await user.click(customize); await user.click(customize)
+    expect(within(screen.getByRole('radiogroup', { name: 'custom_tools.title' })).getByRole('radio', { name: 'capabilities.off' })).toBeChecked()
+    await user.click(screen.getByRole('button', { name: 'project.create' }))
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ advancedSettings: true,
+      capabilities: expect.objectContaining({ customTools: expect.objectContaining({ mode: 'off' }), pluginMode: 'default', mcp: { defaultMode: 'all', servers: [] } }) }))
+  })
+
   it('edits all default workspace settings except its name and preserves drafts when customization is toggled', async () => {
     const user = userEvent.setup()
     const onSave = vi.fn().mockResolvedValue(undefined)
@@ -1570,7 +1589,14 @@ describe('renderer interaction accessibility', () => {
     expect(screen.queryByRole('tab', { name: 'settings.view_context_compression_prompt' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'project.load_default_prompt' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('checkbox', { name: 'project.advanced_settings' }))
+    await user.click(screen.getByRole('tab', { name: 'project.project_prompt' }))
+    await user.tab()
+    expect(screen.getByRole('textbox', { name: 'project.project_prompt' })).toHaveFocus()
     await user.click(screen.getByRole('tab', { name: 'settings.view_context_compression_prompt' }))
+    await user.tab()
+    expect(screen.getByRole('button', { name: 'project.load_default_prompt' })).toHaveFocus()
+    await user.tab()
+    expect(compression()).toHaveFocus()
     expect(compression()).toHaveValue('')
     await user.click(screen.getByRole('button', { name: 'project.load_default_prompt' }))
     expect((compression() as HTMLTextAreaElement).value).toContain('{conversation}')

@@ -374,15 +374,15 @@ describe('native automatic compression', () => {
   })
 
   it('does not summarize after a new request removes memories included in earlier usage', async () => {
-    const store = { relevantMemories: vi.fn(async (query: string) => query.startsWith('alpha')
-      ? [0, 1].map(id => ({ id: String(id), scope: 'project' as const, kind: 'fact' as const, importance: 3, content: 'm'.repeat(8000),
-        keywords: [], origin: 'user' as const, createdAt: '', updatedAt: '' })) : []) }
+    let memoryContent = 'm'.repeat(16000)
+    const store = { preferences: { read: (scope: import('../../shared/preferenceMemory').PreferenceScope) => ({ scope, content: scope.kind === 'global' ? memoryContent : '', hash: '' }) } }
     const project = createConversationMemoryProjector({ enabled: true, store, projectId: 'project' })
     const system: ConversationMessage = { kind: 'system', content: 'Base' }, old: ConversationMessage = { kind: 'user', content: 'alpha ' + 'a'.repeat(2400) }
     const firstSystem = await project(system, [old]), selected = { ...model, maxContextTokens: 10000, contextCompressionThreshold: 4000 / 9000 }
     const previous: ConversationMessage = { kind: 'assistant', content: 'Done', usage: { input_tokens: 4700, output_tokens: 1, total_tokens: 4701 },
       context: { modelContextKey: modelContextKey(selected), requestKey: conversationRequestKey({ messages: [old], systemMessage: firstSystem, tools: [], protocol: selected.protocol }) } }
     const history: ConversationMessage[] = [old, previous, { kind: 'user', content: 'Unrelated small question' }]
+    memoryContent = ''
     const systemMessage = await project(system, history), config = options(), prepared = vi.fn(), fetch = vi.fn(async () => response('Done'))
     config.resolveModel = async () => selected; config.providerFetch = fetch; config.onRequest = prepared
     expect(systemMessage).toEqual(system)

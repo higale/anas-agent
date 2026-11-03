@@ -13,7 +13,8 @@ describe('review from an independent file panel', () => {
     const thread = { id: 'origin-thread', projectId: 'origin-project', modelConfigId: 'thread-model' }
     const readModel = { getThread: vi.fn(() => thread) }
     const database = { readModel }
-    const storage = { conversationForThread: () => database, previewDatabase: () => database }
+    const confirmSpeech = vi.fn()
+    const storage = { captureWorkspaceSpeech: () => confirmSpeech, conversationForThread: () => database, previewDatabase: () => database }
     const submit = vi.fn(async () => ({ thread, run: { id: 'review-run' } }))
     const runtime = { getRunSubmission: vi.fn(), submitRunWithAttachments: submit,
       databaseForThread: () => database, storageForOperation: () => storage,
@@ -34,7 +35,7 @@ describe('review from an independent file panel', () => {
     vi.doMock('../agent/nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: vi.fn(function () { return runtime }) }))
     vi.doMock('../projectStore', () => ({ getProject: async () => ({ id: 'origin-project', kind: 'workspace', modelConfigId: 'project-model', accessMode: 'smart_approval' }) }))
     vi.doMock('../agent/codeReview', () => ({ captureCodeReview: capture, codeReviewPrompt: () => 'Captured review prompt' }))
-    vi.doMock('../config/appConfig', () => ({ getAppConfigSnapshot: async () => ({ defaultModelId: 'global-model' }),
+    vi.doMock('../config/appConfig', () => ({ onAppConfigChanged: vi.fn(), getAppConfigSnapshot: async () => ({ defaultModelId: 'global-model' }),
       findResolvedModelConfig: (_config: unknown, id: string) => ({ id, capabilities: { toolUse: true } }) }))
     vi.doMock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
     const { registerAgentIpcHandlers } = await import('../agent/agentIpcHandlers')
@@ -50,7 +51,7 @@ describe('review from an independent file panel', () => {
       text: 'Captured review prompt', codeReview: { id: 'captured-scope' },
       ...(draft ? { newThread: expect.objectContaining({ projectId: 'origin-project', modelConfigId: 'draft-model', modelParameterPresetId: null, accessMode: 'full_access' }) }
         : { threadId: 'origin-thread' })
-    }))
+    }), draft ? undefined : confirmSpeech)
     if (draft && !switched) expect(updateContent).toHaveBeenCalledWith('files-view', { ...content, threadId: 'origin-thread', navigationId: expect.any(String), draft: undefined })
     else expect(updateContent).not.toHaveBeenCalled()
     expect(notify).toHaveBeenCalledWith('panels:reviewStarted', 'origin-thread', { projectId: content.projectId, threadId: draft ? undefined : 'origin-thread' })

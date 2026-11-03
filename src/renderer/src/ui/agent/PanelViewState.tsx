@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { Dispatch, ReactNode, RefObject, SetStateAction } from 'react'
 
 export function createPanelReadiness() {
@@ -23,11 +23,12 @@ export function usePanelReady(ready: boolean, failed = false) {
   useLayoutEffect(() => () => gate?.remove(key), [gate, key])
 }
 
-const CheckpointContext = createContext<Set<() => void | Promise<void>> | undefined>(undefined)
+export type PanelCheckpoint = (reason: 'move' | 'close') => void | false | Promise<void | false>
+const CheckpointContext = createContext<Set<PanelCheckpoint> | undefined>(undefined)
 
 const PanelViewContext = createContext<Map<string, unknown> | undefined>(undefined)
 
-export function PanelViewState({ state, checkpoints, readiness, children }: { state?: Map<string, unknown>; checkpoints?: Set<() => void | Promise<void>>; readiness?: ReturnType<typeof createPanelReadiness>; children: ReactNode }) {
+export function PanelViewState({ state, checkpoints, readiness, children }: { state?: Map<string, unknown>; checkpoints?: Set<PanelCheckpoint>; readiness?: ReturnType<typeof createPanelReadiness>; children: ReactNode }) {
   const [local] = useState(() => state ?? new Map<string, unknown>())
   return <ReadinessContext.Provider value={readiness}><CheckpointContext.Provider value={checkpoints}><PanelViewContext.Provider value={state ?? local}>{children}</PanelViewContext.Provider></CheckpointContext.Provider></ReadinessContext.Provider>
 }
@@ -75,6 +76,25 @@ export function usePanelRef<T>(key: string, initial: T) {
   return ref
 }
 
+// The draft can be acknowledged by a save that outlives its settings page.
+// Keep only its value in the transferable view state, never the subscriptions.
+const draftListeners = new WeakMap<object, Set<() => void>>()
+export function usePanelDraft<T>(key: string): [T | undefined, Dispatch<SetStateAction<T | undefined>>] {
+  const ref = usePanelRef<T | undefined>(key, undefined)
+  const subscribe = useCallback((listener: () => void) => {
+    const listeners = draftListeners.get(ref) ?? new Set<() => void>()
+    draftListeners.set(ref, listeners)
+    listeners.add(listener)
+    return () => { listeners.delete(listener) }
+  }, [ref])
+  const value = useSyncExternalStore(subscribe, () => ref.current)
+  const setValue = useCallback((update: SetStateAction<T | undefined>) => {
+    ref.current = typeof update === 'function' ? (update as (old: T | undefined) => T | undefined)(ref.current) : update
+    draftListeners.get(ref)?.forEach(listener => listener())
+  }, [ref])
+  return [value, setValue]
+}
+
 export function usePanelDisclosure(key: string, defaultOpen: boolean) {
   const [open, setOpen] = usePanelState(`expanded:${key}`, defaultOpen)
   const [previousDefault, setPreviousDefault] = useState(defaultOpen)
@@ -87,11 +107,11 @@ export function usePanelDisclosure(key: string, defaultOpen: boolean) {
   return { open, onToggle: (event: React.SyntheticEvent<HTMLDetailsElement>) => setOpen(event.currentTarget.open) }
 }
 
-export function usePanelCheckpoint(save: () => void | Promise<void>) {
+export function usePanelCheckpoint(save: PanelCheckpoint) {
   const checkpoints = useContext(CheckpointContext)
   const latest = useRef(save); latest.current = save
   useLayoutEffect(() => {
-    const snapshot = () => latest.current()
+    const snapshot: PanelCheckpoint = reason => latest.current(reason)
     checkpoints?.add(snapshot)
     return () => { checkpoints?.delete(snapshot) }
   }, [checkpoints])

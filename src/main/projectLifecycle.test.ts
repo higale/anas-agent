@@ -1,3 +1,4 @@
+import { legacyMemory } from '../test/legacyMemoryFixture'
 import type { ExecutionToolCall } from '../runtime/executionState'
 import type { NativeConversationDatabase } from './agent/nativeConversationDatabase'
 import { toolEffectArtifactPurposes } from '../runtime/toolEffectIdentity'
@@ -64,7 +65,7 @@ describe('project deletion lifecycle', () => {
       storage.updateThread(second.id, { pinned: true })
       const otherProject = await projectStore.createProject({ kind: 'simple_chat', name: 'Other', prompt: '' })
       const other = storage.createThread({ projectId: otherProject.id })
-      await storage.memoryStore.saveMemory({ scope: 'project', projectId: project.id,
+      await legacyMemory(storage.memoryStore).saveMemory({ scope: 'project', projectId: project.id,
         kind: 'fact', content: 'Keep this project memory', keywords: ['keep'], importance: 3 }, { origin: 'user' })
 
       const result = await runtime.deleteProjectThreads(project.id)
@@ -74,7 +75,7 @@ describe('project deletion lifecycle', () => {
       expect(storage.getThread(second.id)).toBeNull()
       expect(storage.getThread(other.id)).not.toBeNull()
       expect(await projectStore.getProject(project.id)).toEqual(project)
-      await expect(storage.memoryStore.searchMemories({ scope: 'project', projectId: project.id }))
+      await expect(legacyMemory(storage.memoryStore).searchMemories({ scope: 'project', projectId: project.id }))
         .resolves.toMatchObject({ total: 1 })
       await expect(runtime.deleteProjectThreads(project.id)).resolves.toMatchObject({ deletedThreadIds: [] })
       await expect(runtime.deleteProjectThreads('missing')).rejects.toThrow('was not found')

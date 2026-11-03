@@ -17,16 +17,28 @@ const plugin: PluginSummary = { id: 'example', enabled: true, backendStatus: 'st
 const skills: SkillSnapshot = { scriptAutoApprove: false, roots: [], skills: [{ id: 'example:skill:review', name: 'review', description: 'Review', rootId: 'plugin:example',
   rootName: 'Example', source: 'plugin', shortcutAlias: 'plugin:example', dirPath: '/example/review', relativePath: 'review', linked: false,
   modelAvailable: true, userAvailable: true, scriptAutoApprove: false, requiredTools: ['example:tool:echo'] }] }
-function Harness({ initial = defaultCapabilities, plugins = [plugin], subagent = false, changed = vi.fn(), catalog = skills }: {
+function Harness({ initial = { ...defaultCapabilities, pluginMode: 'custom' }, plugins = [plugin], subagent = false, changed = vi.fn(), catalog = skills }: {
   initial?: AgentCapabilities; plugins?: PluginSummary[]; subagent?: boolean; changed?: (value: AgentCapabilities) => void; catalog?: SkillSnapshot
 }) {
   const [value, setValue] = useState(initial)
   return <PluginCapabilitySelection plugins={plugins} skills={catalog} value={value} subagent={subagent}
     onChange={next => { setValue(next); changed(next) }} />
 }
+it('keeps an ordinary user skill out of the mode, count and list of a plugin named user', async () => {
+  const userPlugin = { ...plugin, id: 'user', manifest: { ...plugin.manifest!, id: 'user', skills: [], prompts: [] } }
+  render(<Harness plugins={[userPlugin]} initial={{ ...defaultCapabilities, pluginMode: 'custom',
+    skills: { mode: 'custom', project: false, entries: [{ id: 'user:review', model: true, shortcut: true }] } }} />)
+  const region = within(screen.getByRole('region', { name: 'Example' }))
+  expect(region.getByRole('radio', { name: 'capabilities.off' })).toBeChecked()
+  await userEvent.click(region.getByRole('radio', { name: 'capabilities.custom' }))
+  const heading = region.getByRole('button', { name: 'Example' })
+  expect(heading).toHaveTextContent('0/1')
+  await userEvent.click(heading)
+  expect(region.getAllByRole('checkbox')).toEqual([region.getByRole('checkbox', { name: 'plugin__user__echo' })])
+})
 it('groups contributions and explains tool dependencies and prompt scope without locking choices', async () => {
   const changed = vi.fn()
-  render(<Harness changed={changed} initial={{ ...defaultCapabilities, skills: { mode: 'off', project: false, entries: [] }, pluginPrompts: ['example:prompt:help'] }} />)
+  render(<Harness changed={changed} initial={{ ...defaultCapabilities, pluginMode: 'custom', skills: { mode: 'off', project: false, entries: [] }, pluginPrompts: ['example:prompt:help'] }} />)
   const group = within(screen.getByRole('region', { name: 'Example' }))
   expect(group.queryByRole('checkbox')).toBeNull()
   await userEvent.click(group.getByRole('button', { name: 'Example' }))
@@ -59,7 +71,7 @@ it('starts new plugins off, collapses custom choices and retains them through al
 })
 it('fully edits disabled plugin contributions from the manifest without activating them', async () => {
   const changed = vi.fn(), disabledPlugin = { ...plugin, enabled: false }
-  render(<Harness changed={changed} plugins={[disabledPlugin]} catalog={{ ...skills, skills: [] }} initial={{ ...defaultCapabilities, pluginTools: ['example:tool:echo'] }} />)
+  render(<Harness changed={changed} plugins={[disabledPlugin]} catalog={{ ...skills, skills: [] }} initial={{ ...defaultCapabilities, pluginMode: 'custom', pluginTools: ['example:tool:echo'] }} />)
   await userEvent.click(screen.getByRole('button', { name: 'Example' }))
   expect(screen.getByRole('checkbox', { name: 'plugin__example__echo' })).toBeChecked()
   for (const name of ['plugin__example__echo', 'review capabilities.model', 'review capabilities.shortcut', 'help']) {
@@ -69,6 +81,7 @@ it('fully edits disabled plugin contributions from the manifest without activati
   }
   await userEvent.click(screen.getByRole('checkbox', { name: 'plugin__example__echo' }))
   expect(screen.getAllByText('capabilities.inactive')).toHaveLength(1)
+  expect(screen.getByRole('button', { name: 'Example' })).toHaveTextContent('3/3')
   const resolved = resolvePluginCapabilities(changed.mock.lastCall![0], [disabledPlugin])
   expect(resolved.pluginTools).toEqual([])
   expect(resolved.pluginPrompts).toEqual([])
@@ -80,7 +93,7 @@ it('fully edits disabled plugin contributions from the manifest without activati
 })
 it.each([false, true])('blocks unselected disabled plugin skill uses without warnings (subagent %s)', async subagent => {
   const changed = vi.fn()
-  render(<Harness changed={changed} subagent={subagent} initial={{ ...defaultCapabilities, pluginTools: ['example:tool:echo'] }}
+  render(<Harness changed={changed} subagent={subagent} initial={{ ...defaultCapabilities, pluginMode: 'custom', pluginTools: ['example:tool:echo'] }}
     catalog={{ ...skills, skills: skills.skills.map(skill => ({ ...skill, modelAvailable: false, userAvailable: false })) }} />)
   await userEvent.click(screen.getByRole('button', { name: 'Example' }))
   if (subagent) expect(screen.queryByRole('checkbox', { name: 'review capabilities.shortcut' })).toBeNull()
@@ -97,7 +110,7 @@ it.each([false, true])('blocks unselected disabled plugin skill uses without war
 it.each([false, true])('warns for saved conflicting plugin skill uses until they are cleared (subagent %s)', async subagent => {
   const changed = vi.fn()
   const catalog = { ...skills, skills: skills.skills.map(skill => ({ ...skill, modelAvailable: false, userAvailable: false })) }
-  const initial: AgentCapabilities = { ...defaultCapabilities, pluginTools: ['example:tool:echo'],
+  const initial: AgentCapabilities = { ...defaultCapabilities, pluginMode: 'custom', pluginTools: ['example:tool:echo'],
     skills: { ...defaultCapabilities.skills, entries: [{ id: 'example:skill:review', model: true, shortcut: true }] } }
   const view = render(<Harness changed={changed} subagent={subagent} initial={initial} catalog={catalog} />)
   await userEvent.click(screen.getByRole('button', { name: 'Example' }))
@@ -125,4 +138,17 @@ it.each([false, true])('warns for saved conflicting plugin skill uses until they
   await userEvent.click(model)
   expect(model).toBeChecked()
   expect(screen.queryByRole('alert')).toBeNull()
+})
+
+it('keeps other available plugins enabled when changing one plugin from the shared defaults', async () => {
+  const second: PluginSummary = { ...plugin, id: 'second', manifest: { ...plugin.manifest!, id: 'second', name: 'Second' } }
+  const changed = vi.fn()
+  render(<Harness initial={defaultCapabilities} plugins={[plugin, second]} changed={changed} />)
+  const firstMode = within(screen.getByRole('radiogroup', { name: 'Example' }))
+  const secondMode = within(screen.getByRole('radiogroup', { name: 'Second' }))
+  expect(firstMode.getByRole('radio', { name: 'capabilities.all' })).toBeChecked()
+  expect(secondMode.getByRole('radio', { name: 'capabilities.all' })).toBeChecked()
+  await userEvent.click(firstMode.getByRole('radio', { name: 'capabilities.off' }))
+  expect(secondMode.getByRole('radio', { name: 'capabilities.all' })).toBeChecked()
+  expect(resolvePluginCapabilities(changed.mock.lastCall![0], [plugin, second]).pluginTools).toEqual(['second:tool:echo'])
 })

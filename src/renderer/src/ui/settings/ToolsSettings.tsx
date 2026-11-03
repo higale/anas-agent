@@ -1,9 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  builtinToolCatalog,
   toolGroupOrder,
-  frameworkToolCatalog,
   orderedToolCatalog,
   runtimeToolSelectionId
 } from '@shared/toolRegistry'
@@ -28,10 +26,11 @@ interface ToolsSettingsProps {
   runtimeToolStatus: RuntimeToolStatus | undefined
 }
 
+type CatalogEntry = RuntimeToolDefinition | { name: string; description?: undefined }
 interface ToolDisplayGroup {
   id: string
   name: string
-  tools: RuntimeToolDefinition[]
+  tools: CatalogEntry[]
   disabled?: boolean
   error?: string
 }
@@ -55,7 +54,7 @@ export function mcpToolDisplayGroups(
       const matches = definitions.get(name) ?? []
       const definition = matches.shift()
       definitions.set(name, matches)
-      return definition ?? emptyToolDefinition(name)
+      return definition ?? { name }
     })
     return {
       id: `${server.id}:${server.index}`,
@@ -72,10 +71,6 @@ export function mcpToolDisplayGroups(
     })
   }
   return groups
-}
-
-function emptyToolDefinition(name: string, description = ''): RuntimeToolDefinition {
-  return { name, description, parameters: [] }
 }
 
 export function toolDefinitionText(tool: RuntimeToolDefinition): string {
@@ -106,10 +101,6 @@ export function ToolsSettings({ actionsTarget, plugins, pluginError, customTools
   const renderGroupTitle = (label: string) => (
     <strong className="settings-tool-group-title">{label}</strong>
   )
-  const runtimeToolByName = useMemo(
-    () => new Map((runtimeToolStatus?.tools ?? []).map((tool) => [runtimeToolSelectionId(tool), tool])),
-    [runtimeToolStatus]
-  )
   const mcpGroups = useMemo(
     () => mcpToolDisplayGroups(mcpStatus, mcpServers),
     [mcpServers, mcpStatus]
@@ -131,37 +122,36 @@ export function ToolsSettings({ actionsTarget, plugins, pluginError, customTools
   const catalogGroups = { mcp: mcpGroups, plugins: pluginGroups }
   const catalogLabels = { builtin: 'custom_tools.builtin', mcp: 'settings.mcp', plugins: 'plugins.title' }
   const toolDefinitions = useMemo(() => new Map([
-    ...builtinToolCatalog.map((tool): [string, RuntimeToolDefinition] => [
-      `runtime:${tool.id}`, runtimeToolByName.get(tool.id) ?? emptyToolDefinition(tool.id)
+    ...(runtimeToolStatus?.tools ?? []).map((tool): [string, RuntimeToolDefinition] => [
+      `runtime:${runtimeToolSelectionId(tool)}`, tool
     ]),
-    ...frameworkToolCatalog.map((tool): [string, RuntimeToolDefinition] => [
-      `runtime:${tool.id}`, runtimeToolByName.get(tool.id) ?? emptyToolDefinition(tool.id, t(`settings.framework_tool_${tool.id}_hint`))
-    ]),
-    ...mcpGroups.flatMap((group) => group.tools.map((tool, index): [string, RuntimeToolDefinition] => [
+    ...mcpGroups.flatMap((group) => group.tools.map((tool, index): [string, CatalogEntry] => [
       `mcp:${group.id}:${tool.name}:${index}`, tool
     ])),
-    ...pluginGroups.flatMap((group) => group.tools.map((tool, index): [string, RuntimeToolDefinition] => [
+    ...pluginGroups.flatMap((group) => group.tools.map((tool, index): [string, CatalogEntry] => [
       `plugins:${group.id}:${tool.name}:${index}`, tool
     ]))
-  ]), [runtimeToolByName, mcpGroups, pluginGroups, t])
-  const selectedTool = selectedToolKey ? toolDefinitions.get(selectedToolKey) : undefined
+  ]), [runtimeToolStatus, mcpGroups, pluginGroups])
+  const selectedEntry = selectedToolKey ? toolDefinitions.get(selectedToolKey) : undefined
+  const selectedTool = selectedEntry && 'parameters' in selectedEntry ? selectedEntry : undefined
+  const selectedName = selectedEntry?.name ?? (selectedToolKey?.startsWith('runtime:') ? selectedToolKey.slice('runtime:'.length) : undefined)
   const selectedVariant = selectedTool?.definitionVariants?.find(variant => variant.format === selectedFormat)
     ?? selectedTool?.definitionVariants?.[0]
   const smartDefinition = previewAccessMode === 'smart_approval' && selectedVariant?.format !== 'freeform'
     ? selectedTool?.smartApprovalDefinition : undefined
   const selectedToolText = smartDefinition ? JSON.stringify(smartDefinition, null, 2) : selectedVariant ? JSON.stringify(selectedVariant.definition, null, 2)
     : selectedTool ? toolDefinitionText(selectedTool) : ''
-  function renderToolRow(key: string) {
-    const tool = toolDefinitions.get(key)!
+  function renderToolRow(key: string, catalogName: string) {
+    const name = toolDefinitions.get(key)?.name ?? catalogName
     return (
       <button
-        aria-label={`${tool.name}: ${t('settings.tools_view_details')}`}
+        aria-label={`${name}: ${t('settings.tools_view_details')}`}
         className="settings-tool-catalog-row"
         key={key}
         type="button"
         onClick={() => { setSelectedFormat('json'); setSelectedToolKey(key) }}
       >
-        <code className="settings-tool-catalog-name ui-tool-name">{tool.name}</code>
+        <code className="settings-tool-catalog-name ui-tool-name">{name}</code>
       </button>
     )
   }
@@ -190,7 +180,7 @@ export function ToolsSettings({ actionsTarget, plugins, pluginError, customTools
               </div>
               {group.error && <div className="ui-note ui-note-danger" role="alert">{group.error}</div>}
               <div className="settings-tool-catalog">
-                {group.tools.map((tool, index) => renderToolRow(`${selectedGroup}:${group.id}:${tool.name}:${index}`))}
+                {group.tools.map((tool, index) => renderToolRow(`${selectedGroup}:${group.id}:${tool.name}:${index}`, tool.name))}
                 {!group.tools.length && !group.error && <div className="ui-field-hint">{t('settings.tools_mcp_server_empty')}</div>}
               </div>
             </section>)}
@@ -204,25 +194,26 @@ export function ToolsSettings({ actionsTarget, plugins, pluginError, customTools
           {toolGroupOrder.filter(group => orderedToolCatalog.some(tool => (tool.feature ?? tool.id) === group)).map(group =>
             <section className="settings-tool-catalog" key={group} aria-label={t(`settings.capability_${group}`)}>
               {renderGroupTitle(`${t(`settings.capability_${group}`)}：`)}
-              {orderedToolCatalog.filter(tool => (tool.feature ?? tool.id) === group).map(tool => renderToolRow(`runtime:${tool.id}`))}
+              {orderedToolCatalog.filter(tool => (tool.feature ?? tool.id) === group).map(tool => renderToolRow(`runtime:${tool.id}`, tool.id))}
             </section>)}
         </div>}
       />
 
-      {selectedTool && <ContentPreviewDialog title={selectedTool.name} description={t('settings.tool_definition_hint')}
+      {selectedName && <ContentPreviewDialog title={selectedName} description={t('settings.tool_definition_hint')}
         copyText={selectedToolText} onClose={() => setSelectedToolKey(undefined)}>
-        {selectedTool.smartApprovalDefinition && <div className="settings-tool-definition-formats">
+        {selectedTool?.smartApprovalDefinition && <div className="settings-tool-definition-formats">
           <SegmentedControl<AgentAccessMode> ariaLabel={t('chat.access_mode')} value={previewAccessMode} onChange={setPreviewAccessMode}
             options={(['strict_approval', 'smart_approval', 'full_access'] as const).map(value => ({ value,
               label: t(value === 'full_access' ? 'chat.access_full' : `chat.access_${value}`) }))} />
         </div>}
-        {selectedTool.definitionVariants && selectedVariant && <div className="settings-tool-definition-formats">
+        {selectedTool?.definitionVariants && selectedVariant && <div className="settings-tool-definition-formats">
           <SegmentedControl<'json' | 'freeform'> ariaLabel={t('settings.tool_definition_format')} value={selectedVariant.format} onChange={setSelectedFormat}
             options={selectedTool.definitionVariants.map(variant => ({ value: variant.format,
               label: `${selectedTool.name} (${variant.format === 'json' ? 'JSON' : 'Freeform'})` }))} />
           <small className="ui-field-hint">{t(`settings.tool_definition_${selectedVariant.format}_hint`)}</small>
         </div>}
-        <pre className="ui-code-block settings-code-preview-code">{selectedToolText}</pre>
+        {selectedTool ? <pre className="ui-code-block settings-code-preview-code">{selectedToolText}</pre>
+          : <p role="status">{t('settings.tool_definition_unavailable')}</p>}
       </ContentPreviewDialog>}
     </>
   )

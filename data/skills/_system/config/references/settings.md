@@ -2,16 +2,13 @@
 
 Call `update_config` with `config: "settings"` and one key below. Use the stored English tokens exactly even when the user speaks another language.
 
-## Assistant and user profile
+## Assistant profile
 
 | Key | Value | Meaning |
 | --- | --- | --- |
 | `profile.assistant.name` | non-empty string | Assistant display name. |
 | `profile.assistant.role` | string | Who the assistant is: identity, purpose, abilities, and character. Empty clears it. |
-| `profile.assistant.instructions` | string | Persistent behavioral instructions. Empty clears them. |
 | `profile.assistant.new_avatar_path` | non-empty image path string or `"default"` | One-time avatar request. Use an absolute path or a path relative to the active workspace to replace the avatar; use the exact string `"default"` to restore the default avatar. Supported image formats are PNG, JPG, WebP, GIF, and BMP. Anas clears this value after the attempt. |
-| `profile.user.preferred_name` | string | How the assistant should address the user. Empty uses a neutral form of address. |
-| `profile.user.personal_info` | string | Free-form profile information the user explicitly chose to store. Empty clears it. Never store authentication secrets. |
 
 For an avatar request, report success only when the tool returns `ok: true` and `avatar_updated: true`. A handled failure is cleared and is not retried by later configuration refreshes; retry only after the user asks or provides another path.
 

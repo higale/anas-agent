@@ -6,6 +6,7 @@ import { fileToolDefinitions } from './llm/fileTools'
 import { serializeToolDefinition } from './toolSchemaSerialization'
 import { runtimeToolDefinitions } from './llm/runtimeTools'
 import { modelToolDeclaration } from './agent/modelToolDeclarations'
+import { updateMemoryToolSpec } from '../runtime/preferenceMemoryTool'
 import { toolDefinitionText } from '../renderer/src/ui/settings/ToolsSettings'
 
 const subagents = [{
@@ -62,7 +63,7 @@ describe('agent tool status', () => {
     })
     const sleepPreview = status.tools.find(tool => tool.name === 'sleep')!
     const sleep = (await runtimeToolDefinitions({ enabled: true, primaryFolder: process.cwd(),
-      memory: false, network: false, shell: false })).find(tool => tool.name === 'sleep')!
+       network: false, shell: false })).find(tool => tool.name === 'sleep')!
     const displayed = JSON.parse(toolDefinitionText(sleepPreview))
     expect(displayed.parameters).not.toHaveProperty('$schema')
     expect(displayed.parameters).toHaveProperty('additionalProperties', false)
@@ -114,11 +115,16 @@ describe('agent tool status', () => {
     const tools = agentToolDefinitions(subagents)
     expect(tools.map((tool) => tool.name)).toEqual([
       'write_todos',
+      'update_memory',
       'start_subagent',
       'read_subagent',
       'wait_subagent',
       'cancel_subagent'
     ])
+    const displayed = JSON.parse(toolDefinitionText(tools.find(tool => tool.name === 'update_memory')!))
+    expect(displayed).toMatchObject({ parameters: { required: ['scope', 'content'], additionalProperties: false,
+      properties: { scope: { enum: ['global', 'project'] }, content: { type: 'string' } } } })
+    expect(modelToolDeclaration(updateMemoryToolSpec)).toHaveProperty('function', displayed)
     expect(tools.find((tool) => tool.name === 'write_todos')).toMatchObject({
       description: expect.stringContaining('create and manage a structured task list'),
       parameters: [expect.objectContaining({ name: 'todos' })]
@@ -134,7 +140,7 @@ describe('agent tool status', () => {
 
   it('keeps control tools but omits start when there is no configured subagent', () => {
     expect(agentToolDefinitions([]).map((tool) => tool.name))
-      .toEqual(['write_todos', 'read_subagent', 'wait_subagent', 'cancel_subagent'])
+      .toEqual(['write_todos', 'update_memory', 'read_subagent', 'wait_subagent', 'cancel_subagent'])
   })
 
   it('reports the same control-only contract in the runtime status preview', async () => {

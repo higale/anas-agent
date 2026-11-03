@@ -1,3 +1,4 @@
+import { legacyMemory } from '../test/legacyMemoryFixture'
 import { writeProjectFixture } from '../test/projectDirectories'
 import Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
@@ -47,7 +48,7 @@ async function fixture() {
     id: 'queued-file', threadId: thread.id, messageId: 'queued', runId: 'queued', name: 'queued.txt', path,
     mimeType: 'text/plain', size: 6, kind: 'text', available: true, textTruncated: false, contextPolicy: 'one_turn', createdAt: new Date().toISOString()
   } }])
-  await storage.memoryStore.saveMemory({ scope: 'global', kind: 'fact', content: 'Preserved memory', keywords: [], importance: 3 }, { origin: 'user' })
+  await legacyMemory(storage.memoryStore).saveMemory({ scope: 'global', kind: 'fact', content: 'Preserved memory', keywords: [], importance: 3 }, { origin: 'user' })
   const { version: _version, ...defaults } = projectDefaults
   const projects = JSON.stringify({ version: 0, projects: [{ ...defaults, id: DEFAULT_WORKSPACE_PROJECT_ID,
     kind: 'workspace', name: 'Workspace', pinned: false, collapsed: false, sourceFolders: [], restrict_subagents: false,
@@ -92,7 +93,7 @@ it('backs up committed native WAL with history, queued attachments, memory and u
   expect(database.queue.listQueuedInputs()).toMatchObject([{ id: 'queued', attachments: [{ contextPolicy: 'one_turn', size: 6 }] }])
   expect(await readFile(database.queue.listQueuedInputs()[0].attachments[0].path, 'utf8')).toBe('queued')
   expect(restored.conversationForThread(f.pending.id).runs.readRunInput({ threadId: f.pending.id, runId: f.pendingRunId })).toMatchObject({ value: { content: 'Pending' } })
-  expect((await restored.memoryStore.searchMemories({ scope: 'global' })).total).toBe(1)
+  expect((await legacyMemory(restored.memoryStore).searchMemories({ scope: 'global' })).total).toBe(1)
   expect(restored.getThread(f.thread.id)).toMatchObject({ pinned: false, modelConfigId: 'selected' })
   restored.close()
   const files = [getAgentCatalogFile(destination), getAgentConversationDatabaseFile(f.thread.id, destination)]

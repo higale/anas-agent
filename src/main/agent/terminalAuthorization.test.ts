@@ -23,7 +23,7 @@ describe('native terminal input authorization', () => {
       const callId = service.activeCallIds()[0]
       await vi.waitFor(() => expect(JSON.parse(service.read({ callId, threadId: thread.id }))).toHaveProperty('pty'))
       let accessMode: AgentAccessMode = 'full_access'
-      const tools = await runtimeToolDefinitions({ enabled: true, primaryFolder: process.cwd(), shell: true, memory: false, network: false,
+      const tools = await runtimeToolDefinitions({ enabled: true, primaryFolder: process.cwd(), shell: true,  network: false,
         mcp: false, backgroundTools: true, managedCalls: service, threadId: thread.id,
         commandShell: { executable: '/bin/zsh', name: 'zsh', family: 'posix' } })
       const write = tools.find((item) => item.name === 'write_call')!

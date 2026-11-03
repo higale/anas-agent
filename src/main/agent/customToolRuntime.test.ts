@@ -159,7 +159,7 @@ describe('custom command tools', () => {
       expect(output).toContain('TTY:true:true')
       expect(output).toContain('PROMPT:')
       expect(output).toContain('DIAGNOSTIC')
-      const tools = await runtimeToolDefinitions({ enabled: true, primaryFolder: process.cwd(), memory: false,
+      const tools = await runtimeToolDefinitions({ enabled: true, primaryFolder: process.cwd(),
         network: false, shell: false, mcp: false, backgroundTools: true, interactiveCustomTools: true,
         managedCalls: service, threadId: thread.id, toolNames: [] })
       const write = tools.find((tool) => tool.name === 'write_call')!

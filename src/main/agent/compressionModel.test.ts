@@ -41,6 +41,16 @@ function response(protocol: typeof protocols[number], text = 'Summary') {
 
 afterEach(() => vi.useRealTimers())
 
+it.each(protocols)('rejects truncated structured memory output through %s', async protocol => {
+  const raw = response(protocol, '{"action":"clear"}')
+  const body = protocol === 'anthropic_messages' ? { ...raw, stop_reason: 'max_tokens' }
+    : protocol === 'openai_responses' ? { ...raw, status: 'incomplete' }
+      : { ...raw, choices: [{ ...raw.choices![0], finish_reason: 'length' }] }
+  const generate = createCompressionModel({ ...selected, protocol }, { requireComplete: true, retry: false,
+    providerFetch: async () => Response.json(body) })
+  await expect(generate('Consolidate preferences')).rejects.toThrow(/truncated|did not complete/)
+})
+
 describe('native compression model', () => {
   it.each(protocols)('keeps %s summary text, identity, usage and pending commit separate from graph messages', async protocol => {
     const bodies: Record<string, unknown>[] = [], trace = new CodingModelTraceCollector()

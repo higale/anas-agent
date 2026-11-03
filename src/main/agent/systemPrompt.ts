@@ -68,10 +68,6 @@ export function buildProfileBlock(profile: AppProfile): string {
     profileField('role', profile.assistant.role),
     profileField('instructions', profile.assistant.instructions),
     '</assistant_profile>',
-    '<user_profile>',
-    profileField('preferred_name', profile.user.preferredName),
-    profileField('personal_info', profile.user.personalInfo),
-    '</user_profile>',
     '</profile>'
   ].join('\n')
 }

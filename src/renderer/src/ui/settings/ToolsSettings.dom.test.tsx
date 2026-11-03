@@ -95,13 +95,12 @@ describe('tool catalog', () => {
       fileWrite: ['create_directory', 'write_file', 'apply_patch', 'get_file_edit_diff', 'restore_file_edit', 'move_file', 'delete_file'],
       commandExecution: ['run_shell'],
       networkAccess: ['http_request'],
-      memory: ['read_memory', 'save_to_memory', 'forget_memory'],
       configuration: ['update_config']
     }
     for (const [group, names] of Object.entries(expected)) {
       expect(within(screen.getByRole('region', { name: `settings.capability_${group}` })).getAllByRole('button').map(button => button.textContent)).toEqual(names)
     }
-    for (const group of ['profile', 'environment', 'workspaceContext', 'applicationEnvironment', 'skills', 'memory_recall']) {
+    for (const group of ['profile', 'environment', 'workspaceContext', 'applicationEnvironment', 'skills', 'memory_recall', 'memory']) {
       expect(screen.queryByText(`settings.capability_${group}`)).not.toBeInTheDocument()
     }
   })
@@ -140,11 +139,14 @@ describe('tool catalog', () => {
   it('allows inspecting every catalog entry even before runtime definitions are available', async () => {
     const user = userEvent.setup()
     const view = render(<ToolsSettings {...props} runtimeToolStatus={undefined} />)
-    for (const name of ['start_subagent', 'write_call', 'read_call', 'read_memory']) {
+    for (const name of ['update_memory', 'start_subagent', 'write_call', 'read_call', 'read_file']) {
       const button = screen.getByRole('button', { name: `${name}: settings.tools_view_details` })
       expect(button).toBeEnabled()
       await user.click(button)
-      expect(screen.getByRole('dialog')).toHaveTextContent(`"name": "${name}"`)
+      const dialog = screen.getByRole('dialog', { name })
+      expect(within(dialog).getByRole('status')).toHaveTextContent('settings.tool_definition_unavailable')
+      expect(within(dialog).getByRole('button', { name: 'common.copy' })).toBeDisabled()
+      expect(dialog.querySelector('pre')).toBeNull()
       await user.keyboard('{Escape}')
     }
     await user.click(screen.getByRole('button', { name: 'read_call: settings.tools_view_details' }))
@@ -211,7 +213,7 @@ describe('tool catalog', () => {
       tools: [{ name: 'lookup', description: 'Look up a record.', parameters: [] }],
       toolNames: ['lookup'], errors: []
     }
-    render(<ToolsSettings {...props} mcpStatus={status} />)
+    const view = render(<ToolsSettings {...props} mcpStatus={status} />)
     await userEvent.click(screen.getByRole('button', { name: /^settings\.mcp\s*1$/ }))
     const button = screen.getByRole('button', { name: 'lookup: settings.tools_view_details' })
     expect(button).toBeEnabled()
@@ -219,5 +221,9 @@ describe('tool catalog', () => {
     expect(screen.queryByText('settings.mcp_state_recovering')).not.toBeInTheDocument()
     await userEvent.click(button)
     expect(screen.getByRole('dialog')).toHaveTextContent('Look up a record.')
+    view.rerender(<ToolsSettings {...props} mcpStatus={{ ...status, tools: [] }} />)
+    const dialog = screen.getByRole('dialog', { name: 'lookup' })
+    expect(within(dialog).getByRole('status')).toHaveTextContent('settings.tool_definition_unavailable')
+    expect(within(dialog).getByRole('button', { name: 'common.copy' })).toBeDisabled()
   })
 })

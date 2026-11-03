@@ -2,8 +2,18 @@ import { ipcRenderer } from 'electron'
 import type { ContentServices } from '@shared/panels'
 import { subscribeAgentRuntimeEvents } from './agentEventSubscription'
 
-/** The same read-only bridge is used by main and built-in content renderers. */
+/** The same content bridge is used by main and built-in content renderers. */
 export const contentServices: ContentServices = {
+  preferences: {
+    clear: () => ipcRenderer.invoke('memory:clear'),
+    save: (scope, hash, content) => ipcRenderer.invoke('memory:document:save', scope, hash, content),
+    read: scope => ipcRenderer.invoke('memory:document:read', scope),
+    activity: () => ipcRenderer.invoke('memory:activity'),
+    onChanged: listener => {
+      ipcRenderer.on('memory:changed', listener)
+      return () => ipcRenderer.removeListener('memory:changed', listener)
+    }
+  },
   app: {
     readHelp: id => ipcRenderer.invoke('app:readHelp', id),
     openExternalUrl: url => ipcRenderer.invoke('app:openExternalUrl', url)

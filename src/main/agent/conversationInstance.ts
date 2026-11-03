@@ -1,3 +1,10 @@
+import { getAppSettings } from '../config/appConfig'
+import { getProject } from '../projectStore'
+import { effectiveProjectCapabilities } from '@shared/agentCapabilities'
+import { withApplicationDataMutation } from '../applicationDataSnapshot'
+import { ToolInputError } from '../../runtime/errors'
+import { validatePreferenceText } from './preferenceMemoryStore'
+import { armCurrentAgentToolEffect } from './toolEffectScope'
 import { prepareConversationContext } from './conversationContextPreparation'
 import type { AgentThread, AgentContextStatus } from '@shared/agentTypes'
 import type { AppConfigSnapshot, Project } from '@shared/types'
@@ -59,6 +66,31 @@ export async function createConversationInstance(thread: AgentThread, database: 
   }
   const identity = { threadId: thread.id, runId: context.requestId }
   const resources = await prepareAgentRuntimeResources(thread, database, config, { ...context,
+    writeMemory: (scope, content, signal) => withApplicationDataMutation(async () => {
+      const [settings, currentProject] = await Promise.all([getAppSettings(), getProject(thread.projectId)])
+      signal?.throwIfAborted()
+      const memory = database.memoryStore.preferences
+      if (!memory || settings.memoryMode !== 'foreground' || currentProject.kind !== 'workspace' || !effectiveProjectCapabilities(currentProject).memory) {
+        throw new ToolInputError('Foreground memory is disabled.')
+      }
+      const head = owner.store.readHead(thread.id)
+      const source = head?.runId === identity.runId && head.responseRecordId
+        ? owner.store.readMessageRecord(thread.id, head.responseRecordId).value.context?.memoryWriteSource : undefined
+      if (!source || source.generation !== memory.generation()) throw new ToolInputError('This request no longer has a valid memory write source.')
+      try { validatePreferenceText(content) } catch (error) { throw new ToolInputError(String(error)) }
+      const position = owner.store.recordPosition(thread.id, source.recordId)
+      if (position === undefined) {
+        throw new ToolInputError('The memory request no longer has a current source message.')
+      }
+      const target = scope === 'global' ? { kind: 'global' as const } : { kind: 'project' as const, projectId: thread.projectId }
+      if (source.documentHashes?.[scope] !== memory.read(target).hash) {
+        throw new ToolInputError('Preference memory changed since this request. Use the updated preferences in the next request before writing.')
+      }
+      armCurrentAgentToolEffect({ kind: 'update_memory', target, recoveryMode: 'confirm' })
+      const previous = memory.cursor(thread.id, id => owner.store.recordPosition(thread.id, id) !== undefined)
+      const cursor = previous && (owner.store.recordPosition(thread.id, previous) ?? -1) > position ? previous : source.recordId
+      memory.writeForeground(target, content, thread.id, cursor)
+    }),
     configuration: owner.configuration.getRunConfiguration(identity),
     parentConfiguration: context.subagentCall ? owner.configuration.getRunConfiguration({
       threadId: context.subagentCall.parentThreadId, runId: context.subagentCall.parentRunId }) : undefined,
@@ -95,6 +127,7 @@ export async function createConversationInstance(thread: AgentThread, database: 
     try { context.onContextStatus?.(status) } catch (error) { if (!observationErrors.length) observationErrors.push(error) }
   }
   const modelOptions: ConversationModelExecutionOptions = { store: owner.store, resolveModel, systemPrompt: model => requestSystemPrompt(model).text,
+    memoryWriteGeneration: model => resources.offersMemoryWrite(model) ? database.memoryStore.preferences?.generation() : undefined,
     tools, requiresTools: () => Boolean(context.review), maxModelCalls: activeSubagent ? 0 : config.settings.maxModelCallsPerRun,
     simpleChat, review: context.review, attachments, memory, rules: includeRules ? preparation : undefined,
     manualCompression: context.manualCompression ? contextRuntime : undefined, subagentId: context.subagentCall?.id,

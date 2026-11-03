@@ -140,7 +140,7 @@ describe('user input waiting', () => {
     const controller = new AbortController()
     const tools = await runtimeToolDefinitions({ enabled: true, primaryFolder: '.', threadId: h.thread.id, runId: h.run.id,
       userInputSource: async () => context.source,
-      memory: false, network: false, shell: false, mcp: false, signal: controller.signal })
+       network: false, shell: false, mcp: false, signal: controller.signal })
     const ask = tools.find(tool => tool.name === 'request_user_input')!
     const run = h.executeCalls([ask], [
       [{ id: 'invalid', name: ask.name, args: { questions: invalid } }],
@@ -191,7 +191,7 @@ describe('user input waiting', () => {
     const controller = new AbortController()
     const tools = await runtimeToolDefinitions({ enabled: true, primaryFolder: '.', threadId: h.thread.id, runId: h.run.id,
       userInputSource: async () => context.source,
-      memory: false, network: false, shell: false, mcp: false, signal: controller.signal, backgroundTools: true })
+       network: false, shell: false, mcp: false, signal: controller.signal, backgroundTools: true })
     const ask = tools.find(tool => tool.name === 'request_user_input')!
     expect(supportsManagedTool(ask)).toBe(false)
     try {

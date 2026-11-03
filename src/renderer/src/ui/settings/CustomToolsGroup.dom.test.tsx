@@ -491,6 +491,8 @@ describe('custom tool settings', () => {
     }
     render(<Capabilities />)
     const mode = within(screen.getByRole('radiogroup', { name: 'custom_tools.title' }))
+    expect(mode.getByRole('radio', { name: 'capabilities.all' })).toBeChecked()
+    fireEvent.click(mode.getByRole('radio', { name: 'capabilities.custom' }))
     expect(screen.queryByRole('checkbox', { name: 'User submit_result' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'custom_tools.title' }))
     fireEvent.click(screen.getByRole('checkbox', { name: 'User submit_result' }))
@@ -501,7 +503,21 @@ describe('custom tool settings', () => {
     fireEvent.click(mode.getByRole('radio', { name: 'capabilities.custom' }))
     expect(screen.getByRole('checkbox', { name: 'User submit_result' })).toBeChecked()
     expect(screen.getByRole('checkbox', { name: 'User other_tool' })).not.toBeChecked()
-    if (subagent) expect(screen.getByRole('checkbox', { name: 'custom_tools.project_tools' })).not.toBeChecked()
+    if (subagent) expect(screen.getByRole('checkbox', { name: 'custom_tools.project_tools' })).toBeChecked()
+  })
+  it('shows the project tools grant in the collapsed subagent summary independently of individual tools', () => {
+    function Capabilities() {
+      const [value, setValue] = useState<AgentCapabilities>({ ...defaultCapabilities, customTools: { mode: 'custom', project: true, entries: [] } })
+      return <CapabilityEditor subagent value={value} onChange={setValue} />
+    }
+    render(<Capabilities />)
+    const heading = screen.getByRole('button', { name: 'custom_tools.title' })
+    expect(heading).toHaveAttribute('aria-expanded', 'false')
+    expect(heading).toHaveTextContent('0/0 + custom_tools.project_tools_summary')
+    fireEvent.click(heading)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'custom_tools.project_tools' }))
+    fireEvent.click(heading)
+    expect(heading).toHaveTextContent(/0\/0$/)
   })
   it.each([false, true])('groups custom tools by source and retains missing selections (%s)', subagent => {
     const tools: ToolPackage[] = [
@@ -541,10 +557,10 @@ describe('custom tool settings', () => {
     expect(screen.getByRole('checkbox', { name: 'User submit_result' })).toBeChecked()
     expect(screen.getByText('custom_tools.requires_background')).toBeVisible()
     const count = screen.getByRole('button', { name: 'custom_tools.title' }).querySelector('small')
-    expect(count).toHaveTextContent(/^0$/)
+    expect(count).toHaveTextContent(/^1\/1$/)
     view.rerender(<CapabilityEditor {...props} value={{ ...props.value, backgroundTools: true }} />)
     expect(screen.queryByText('custom_tools.requires_background')).toBeNull()
-    expect(count).toHaveTextContent(/^1$/)
+    expect(count).toHaveTextContent(/^1\/1$/)
     expect(screen.getByRole('checkbox', { name: 'User submit_result' })).toBeChecked()
   })
   it('edits disabled tools and background-dependent tools without making them effective', () => {
@@ -564,7 +580,7 @@ describe('custom tool settings', () => {
       fireEvent.click(checkbox)
       expect(checkbox).toBeChecked()
     }
-    expect(screen.getByRole('button', { name: 'custom_tools.title' }).querySelector('small')).toHaveTextContent(/^0$/)
+    expect(screen.getByRole('button', { name: 'custom_tools.title' }).querySelector('small')).toHaveTextContent(/^2\/2$/)
     expect(screen.getByText('capabilities.inactive')).toBeVisible()
     expect(screen.getByText('custom_tools.requires_background')).toBeVisible()
   })

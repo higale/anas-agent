@@ -41,6 +41,7 @@ export interface ConversationMessage {
     summary?: boolean
     modelContextKey?: unknown
     requestKey?: unknown
+    memoryWriteSource?: { generation: string; recordId: string; documentHashes?: { global: string; project: string } }
     projectRulesReceipt?: unknown
     attachmentProjection?: unknown
     attachmentBlockCount?: unknown

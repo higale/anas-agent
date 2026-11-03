@@ -46,8 +46,6 @@ const requiredCatalogColumns: Record<string, string[]> = {
   agent_run_locations: ['run_id', 'thread_id', 'owner_thread_id', 'submission_id'],
   agent_conversation_deletions: ['owner_thread_id'],
   agent_workspace_state: ['id', 'active_thread_id', 'draft_project_id', 'draft_model_config_id', 'draft_model_parameter_preset_id'],
-  agent_store_items: ['namespace_path', 'key', 'value_json', 'created_at', 'updated_at'],
-  agent_memory_fts: ['namespace_path', 'key', 'content', 'keywords']
 }
 
 export function validateCatalogSchema(database: Database.Database): void {

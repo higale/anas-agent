@@ -26,7 +26,7 @@ describe('native managed batches and durable effects', () => {
       fileChanges: h.database.resources.fileChanges, maxReadBytes: 1_000_000, toolNames: ['write_file'] })[0]
     const ask = (await runtimeToolDefinitions({ enabled: true, primaryFolder: h.root, threadId: h.thread.id, runId: h.run.id,
       userInputSource: async () => ({ projectName: 'Fixture', threadTitle: 'Queued write' }),
-      memory: false, network: false, shell: false, mcp: false, toolNames: ['request_user_input'] }))[0]
+       network: false, shell: false, mcp: false, toolNames: ['request_user_input'] }))[0]
     const pending = h.executeCalls([blocker, write, ask], [[
       ...Array.from({ length: 8 }, (_, index) => ({ id: 'block-' + index, name: blocker.name, args: {} })),
       { id: 'queued-file', name: write.name, args: { path: 'created.txt', content: 'created once', summary: 'Create a file' } }

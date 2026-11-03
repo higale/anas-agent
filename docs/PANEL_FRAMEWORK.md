@@ -9,7 +9,7 @@
 - `src/main/panels/panelHost.ts`：内置上下文、设置快照及 IPC 边界。
 - `src/renderer/src/ui/panels/PanelPageHost.tsx`：窗口内的页面集合；切换标签、会话、设置、收起和展开保留已有页面。
 - `PluginPage.tsx`：iframe 与私有 MessageChannel；主进程从页面注册记录确定插件身份。
-- `BuiltinPanelContent.tsx`：帮助、文件变化、子 Agent 的共享展示组件。
+- `BuiltinPanelContent.tsx`：帮助、文件变化、项目记忆、记忆活动与子 Agent 的共享展示组件。
 - `PanelViewState.tsx` / `panelViewSnapshot.ts`：选择、展开、滚动、跟随及 Monaco 视图状态；捕获前等待视图检查点；目标重新获取所需数据后确认就绪。隐藏标签的滚动恢复等待有效布局，隐藏期间不覆盖保存的位置。正文、文件列表和 Agent 数据重新订阅原服务。
 - `src/renderer/src/panelWindow.tsx`：普通窗口标题栏及页面宿主，保留 Windows 系统按钮和 macOS 红绿灯安全区。
 

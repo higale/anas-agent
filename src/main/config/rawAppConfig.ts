@@ -96,6 +96,9 @@ export interface RawAppSettings {
   log_level?: RuntimeLogLevel
   log_retention_days?: number
   max_model_calls_per_run?: number
+  memory_mode?: 'background' | 'foreground'
+  memory_model_id?: string | null
+  show_memory_activity_in_titlebar?: boolean
   environment_context?: Partial<{
     operating_system: boolean
     power_shell: boolean

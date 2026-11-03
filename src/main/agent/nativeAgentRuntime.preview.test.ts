@@ -141,7 +141,7 @@ describe('NativeAgentRuntime system prompt preview', () => {
         environmentContext: environmentContextFixture(),
         sidebarVisible: true,
         sidebarWidth: 260,
-      workspacePanelWidth: 480, ...diffViewSettingsFixture,
+      workspacePanelWidth: 480, memoryMode: 'background', showMemoryActivityInTitlebar: true, ...diffViewSettingsFixture,
         sidebarCollapsedSections: {
           projects: false,
           simpleChats: false
@@ -192,7 +192,7 @@ describe('NativeAgentRuntime system prompt preview', () => {
       environmentContext: environmentContextFixture(),
       sidebarVisible: true,
       sidebarWidth: 260,
-      workspacePanelWidth: 480, ...diffViewSettingsFixture,
+      workspacePanelWidth: 480, memoryMode: 'background', showMemoryActivityInTitlebar: true, ...diffViewSettingsFixture,
       sidebarCollapsedSections: {
         projects: false,
         simpleChats: false
@@ -252,7 +252,7 @@ describe('NativeAgentRuntime system prompt preview', () => {
       environmentContext: environmentContextFixture(),
       sidebarVisible: true,
       sidebarWidth: 260,
-      workspacePanelWidth: 480, ...diffViewSettingsFixture,
+      workspacePanelWidth: 480, memoryMode: 'background', showMemoryActivityInTitlebar: true, ...diffViewSettingsFixture,
       sidebarCollapsedSections: { projects: false, simpleChats: false },
       backupDir: ''
     } satisfies AppSettings
@@ -347,7 +347,7 @@ describe('NativeAgentRuntime system prompt preview', () => {
       environmentContext: environmentContextFixture(),
       sidebarVisible: true,
       sidebarWidth: 260,
-      workspacePanelWidth: 480, ...diffViewSettingsFixture,
+      workspacePanelWidth: 480, memoryMode: 'background', showMemoryActivityInTitlebar: true, ...diffViewSettingsFixture,
       sidebarCollapsedSections: { projects: false, simpleChats: false },
       backupDir: ''
     } satisfies AppSettings

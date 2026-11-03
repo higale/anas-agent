@@ -4,7 +4,7 @@ import type { PanelState } from '@shared/panels'
 import type { PanelDefinition } from './panelPages'
 
 const mocks = vi.hoisted(() => ({
-  settings: vi.fn(), languages: vi.fn(), configure: vi.fn(), open: vi.fn(),
+  settings: vi.fn(), languages: vi.fn(), configure: vi.fn(), setPreferences: vi.fn(), open: vi.fn(),
   project: vi.fn(), list: vi.fn(), updateContent: vi.fn(),
   setLanguages: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>()
 }))
@@ -18,14 +18,14 @@ vi.mock('../projectStore', () => ({ getProject: mocks.project }))
 vi.mock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
 vi.mock('../ipcSecurity', () => ({ handleMainIpc: vi.fn() }))
 vi.mock('./panelRegistry', () => ({ panelLabel: () => 'Files', setPanelLanguages: mocks.setLanguages,
-  panelPages: { open: mocks.open, configure: mocks.configure, list: mocks.list, updateContent: mocks.updateContent } }))
+  panelPages: { open: mocks.open, configure: mocks.configure, setPreferences: mocks.setPreferences, list: mocks.list, updateContent: mocks.updateContent } }))
 
 function pending<T>() {
   let resolve!: (value: T) => void
   const promise = new Promise<T>(done => { resolve = done })
   return { promise, resolve }
 }
-const settings = { language: 'en', fontSize: 14, diffViewMode: 'inline', diffFoldUnchanged: true, diffWordWrap: false } as AppSettings
+const settings = { language: 'en', fontSize: 14, diffViewMode: 'inline', diffFoldUnchanged: true, diffWordWrap: false, showMemoryActivityInTitlebar: true } as AppSettings
 const resources = { resources: {}, languages: [], langDir: '/languages' } as LanguageResourcesSnapshot
 beforeEach(() => {
   vi.resetModules(); vi.clearAllMocks(); mocks.handlers.clear()
@@ -78,6 +78,12 @@ describe('file panel follows the active workspace', () => {
 })
 
 describe('panel appearance preparation', () => {
+  it('publishes preferences even if loading language resources fails', async () => {
+    const { refreshPanelAppearance } = await import('./panelHost')
+    mocks.languages.mockRejectedValueOnce(new Error('language pack is read-only'))
+    await expect(refreshPanelAppearance({ settings: { ...settings, showMemoryActivityInTitlebar: false } })).rejects.toThrow('read-only')
+    expect(mocks.setPreferences).toHaveBeenCalledWith(expect.objectContaining({ showMemoryActivityInTitlebar: false }))
+  })
   it.each(['settings', 'languages'] as const)('opens with current preferences when %s preparation is superseded', async phase => {
     const read = pending<AppSettings>(), languages = pending<LanguageResourcesSnapshot>()
     if (phase === 'settings') mocks.settings.mockReturnValueOnce(read.promise)
@@ -87,12 +93,12 @@ describe('panel appearance preparation', () => {
     registerPanelIpc()
     const opening = openBuiltinPanel({ kind: 'files', projectId: 'project' })
     await vi.waitFor(() => expect(phase === 'settings' ? mocks.settings : mocks.languages).toHaveBeenCalledTimes(1))
-    const latest = { ...settings, language: 'zh-CN', fontSize: 18, diffWordWrap: true }
+    const latest = { ...settings, language: 'zh-CN', fontSize: 18, diffWordWrap: true, showMemoryActivityInTitlebar: false }
     await refreshPanelAppearance({ settings: latest })
     read.resolve(settings); languages.resolve({ ...resources, langDir: '/stale-languages' })
     await opening
-    expect(mocks.configure).toHaveBeenLastCalledWith({ language: 'zh-CN', theme: 'dark', fontSize: 18 },
-      { diffViewMode: 'inline', diffFoldUnchanged: true, diffWordWrap: true })
+    expect(mocks.configure).toHaveBeenLastCalledWith({ language: 'zh-CN', theme: 'dark', fontSize: 18 })
+    expect(mocks.setPreferences).toHaveBeenLastCalledWith({ diffViewMode: 'inline', diffFoldUnchanged: true, diffWordWrap: true, showMemoryActivityInTitlebar: false })
     expect(mocks.setLanguages).toHaveBeenLastCalledWith(resources)
   })
 })

@@ -106,7 +106,7 @@ describe('native managed execution lifecycle', () => {
     const h = harness(background)
     const start = vi.spyOn(h.service, 'start')
     try {
-      const native = (await runtimeToolDefinitions({ enabled: true, primaryFolder: process.cwd(), memory: false,
+      const native = (await runtimeToolDefinitions({ enabled: true, primaryFolder: process.cwd(),
         network: false, shell: false, mcp: false, backgroundTools: background, toolNames: ['sleep'] }))[0]
       const sleep = managedTool(native, h)
       let completed = false
@@ -280,7 +280,7 @@ describe('native managed execution lifecycle', () => {
       expect(JSON.parse(h.service.read({ threadId: h.threadId, callId: a })).status).toBe('running')
       expect((await h.service.readResult(b, h.threadId))?.resultFor).toBe('second')
       const controls = await runtimeToolDefinitions({ enabled: true, primaryFolder: process.cwd(), shell: false,
-        network: false, memory: false, mcp: false, backgroundTools: true,
+        network: false,  mcp: false, backgroundTools: true,
         threadId: h.threadId, managedCalls: h.service })
       const read = managedTool(controls.find((entry) => entry.name === 'read_call_output')!, h)
       const output = await invoke(read, 'read-result', { call_id: b, output_offset: 0, output_length: 100 })

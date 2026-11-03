@@ -144,7 +144,11 @@ export function CapabilityEditor({ customTools: globalTools = [], value: storedV
     ...value.skills.entries.filter((entry) => !isPluginSkillId(entry.id) && !skills?.skills.some((skill) => skill.id === entry.id)).map((entry) => ({ id: entry.id, name: entry.id, description: entry.id, unavailable: true, missing: Boolean(skills) }))
   ]
   const projectSkillsSelected = subagent && value.skills.mode === 'custom' && value.skills.project
-  const selectedSkillCount = effectiveSkills.entries.filter((entry) => entry.model || (!subagent && entry.shortcut)).length
+  const skillIds = new Set([...visibleSkills, ...missingSkills].map(skill => skill.id))
+  function isSkillSelected(id: string) {
+    const selection = selectedSkills.get(id)
+    return selection?.model || (!subagent && selection?.shortcut)
+  }
   const skillWarning = (effectiveSkills.entries.some((entry) => entry.model || (!subagent && entry.shortcut))
     || projectSkillsSelected)
     && !['run_shell', 'read_file', 'read_multiple_files'].some((id) => toolAllowed(value, id))
@@ -231,7 +235,8 @@ export function CapabilityEditor({ customTools: globalTools = [], value: storedV
               tooltip={group.flag === 'applicationEnvironment' ? t('capabilities.environment_hint') : undefined}
               onChange={(checked) => group.flag ? onChange({ ...value, [group.flag]: checked }) : setTools(group.tools.map((tool) => tool.id), checked)} />
             if (group.id === 'customTools') return <CapabilitySection key={group.id} label={group.name}
-              count={<>{customToolItems.filter(tool => !tool.shadowedBy && selectedCustomTools.entries.includes(tool.id)).length}/{customToolItems.length}</>}
+              customCount={group.tools.filter(tool => value.customTools.entries.includes(tool.id)).length} total={group.tools.length}
+              countSuffix={subagent && (value.customTools.mode ?? 'custom') === 'custom' && value.customTools.project && <> + {t('custom_tools.project_tools_summary')}</>}
               mode={value.customTools.mode ?? 'custom'} disabled={disabled}
               onChange={mode => onChange({ ...value, customTools: { ...value.customTools, mode } })}>
               <div className="ui-capability-list ui-capability-tools">
@@ -266,7 +271,7 @@ export function CapabilityEditor({ customTools: globalTools = [], value: storedV
           <strong>{t('settings.capability_mcp')}</strong>
           {mcpGroups.map(group => <CapabilitySection key={group.id} label={group.name}
             title={<><Plug className="ui-muted" size={UI_ICON_SIZE_MEDIUM} aria-hidden="true" /><span>{group.name}</span></>}
-            count={group.selection.mode === 'all' ? group.tools.filter(tool => !tool.unavailable).length : group.selection.mode === 'off' ? 0 : group.tools.filter(tool => !tool.unavailable && group.selection.tools.includes(tool.name)).length}
+            customCount={group.selection.tools.length} total={group.tools.length}
             mode={group.selection.mode === 'selected' ? 'custom' : group.selection.mode} disabled={disabled}
             reason={group.unavailable ? t('capabilities.inactive') : undefined}
             onChange={mode => onChange(setMcpServerMode(value, group.id, mode === 'custom' ? 'selected' : mode))}>
@@ -283,7 +288,8 @@ export function CapabilityEditor({ customTools: globalTools = [], value: storedV
         <SubagentSelectionEditor value={value.subagents} definitions={subagents} disabled={disabled}
           onChange={(subagents) => onChange({ ...value, subagents })} />
         <div className="ui-form-section ui-form-section-divided">
-          <CapabilitySection label={t('settings.capability_skills')} count={<>{selectedSkillCount}{projectSkillsSelected && <> + {t('settings.skill_group_project')}</>}</>}
+          <CapabilitySection label={t('settings.capability_skills')} customCount={[...skillIds].filter(isSkillSelected).length} total={skillIds.size}
+            countSuffix={projectSkillsSelected && <> + {t('settings.skill_group_project')}</>}
             mode={value.skills.mode === 'default' ? 'all' : value.skills.mode} disabled={disabled}
             reason={skillWarning ? t('settings.subagent_skills_require_file_read') : undefined}
             onChange={mode => onChange({ ...value, skills: { ...value.skills, mode: mode === 'all' ? 'default' : mode } })}>
@@ -302,7 +308,7 @@ export function CapabilityEditor({ customTools: globalTools = [], value: storedV
                   const items = (skills?.skills ?? []).filter((skill) => rootIds.has(skill.rootId))
                   if (!items.length) return null
                   return <div className="ui-form-section" key={group.id}>
-                    <strong className="ui-row"><Folder size={UI_ICON_SIZE_MEDIUM} aria-hidden="true" /><span>{group.label} <small>{effectiveSkills.entries.filter(entry => items.some(skill => skill.id === entry.id) && (entry.model || (!subagent && entry.shortcut))).length}/{items.length}</small></span></strong>
+                    <strong className="ui-row"><Folder size={UI_ICON_SIZE_MEDIUM} aria-hidden="true" /><span>{group.label} <small>{items.filter(skill => isSkillSelected(skill.id)).length}/{items.length}</small></span></strong>
                     {group.roots.map((root) => {
                       const rootItems = items.filter((skill) => skill.rootId === root.id)
                       if (!rootItems.length) return null

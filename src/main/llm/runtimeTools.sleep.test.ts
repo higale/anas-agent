@@ -3,7 +3,7 @@ import { runtimeToolDefinitions, type RuntimeToolOptions } from './runtimeTools'
 import { invokeCapability } from '../../runtime/toolInvocation'
 
 const options: RuntimeToolOptions = {
-  enabled: true, primaryFolder: process.cwd(), memory: false,
+  enabled: true, primaryFolder: process.cwd(),
   network: false, shell: false, mcp: false, backgroundTools: false,
   toolNames: ['sleep']
 }

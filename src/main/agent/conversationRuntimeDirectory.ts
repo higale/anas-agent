@@ -38,6 +38,11 @@ export class ConversationRuntimeDirectory<Connection extends ConversationStorage
     startupCleanup(runtime: Runtime): Promise<void>
   }) {}
 
+  protected readableThread(threadId: string) {
+    const thread = this.storage.getThread(threadId)
+    return thread && !this.mutatingProjects.has(thread.projectId) && !this.storage.isConversationDeleting(threadId) ? thread : undefined
+  }
+
   databaseForThread(threadId: string): Connection {
     this.assertOpen()
     const database = this.storage.conversationForThread(threadId)
@@ -282,15 +287,6 @@ export class ConversationRuntimeDirectory<Connection extends ConversationStorage
     } finally {
       this.mutatingProjects.delete(projectId)
     }
-  }
-
-  clearMemories(): number {
-    this.assertOpen()
-    if ([...this.runtimes.values()].some((runtime) => runtime.hasLiveWork())
-      || this.storage.listThreads().some((thread) => isAgentThreadLocked(thread.status))) {
-      throw new Error('Memories cannot be cleared while Agent runs are active.')
-    }
-    return this.storage.memoryStore.clearMemories()
   }
 
   getStorageUsage() { return this.storage.getStorageUsage() }

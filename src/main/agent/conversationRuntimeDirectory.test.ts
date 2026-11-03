@@ -1,3 +1,4 @@
+import { legacyMemory } from '../../test/legacyMemoryFixture'
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -117,7 +118,7 @@ it('does not report shutdown drained while a plain reader or memory write still 
   })
   const writing = h.directory.useStorage(async storage => {
     await writeGate.promise
-    return storage.memoryStore.saveMemory({ scope: 'global', kind: 'fact', content: 'Saved before close', keywords: [], importance: 3 }, { origin: 'user' })
+    return legacyMemory(storage.memoryStore).saveMemory({ scope: 'global', kind: 'fact', content: 'Saved before close', keywords: [], importance: 3 }, { origin: 'user' })
   })
   try {
     await expect(h.directory.shutdown({ timeoutMs: -1 })).rejects.toThrow('non-negative safe integer')

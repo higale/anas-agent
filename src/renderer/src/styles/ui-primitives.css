@@ -2533,7 +2533,8 @@ html.ui-tab-dragging, html.ui-tab-dragging * { cursor: grabbing !important; user
   .ui-tab-trigger { justify-content: center; gap: 0; }
 }
 
-.ui-tab-content { min-width: 0; min-height: 0; overflow: hidden; }
+/* Let controls paint their focus rings; scrolling belongs to the content itself. */
+.ui-tab-content { min-width: 0; min-height: 0; }
 .ui-tab-content[data-state="inactive"] { display: none; }
 
 .ui-detail-panel {

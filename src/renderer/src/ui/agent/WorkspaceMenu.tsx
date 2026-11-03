@@ -5,10 +5,12 @@ import { useTranslation } from 'react-i18next'
 import { pluginDisplayText, pluginIconSources, type PluginSummary } from '@shared/plugins'
 import { DropdownMenuContent, DropdownMenuRoot, DropdownMenuTrigger } from '../DropdownMenuShell'
 import { PluginIcon } from '../plugins/PluginIcon'
+import { MemoryIcon } from '../MemoryIcon'
 
-export function WorkspaceMenu({ project, plugins, onOpenPlugin, onOpenPluginSettings }: {
-  project?: { name: string; onOpenFiles(): void }
+export function WorkspaceMenu({ project, plugins, onOpenPlugin, onOpenPluginSettings, onOpenMemoryActivity }: {
+  project?: { name: string; onOpenFiles(): void; onOpenMemory?(): void }
   plugins: PluginSummary[]; onOpenPlugin?(plugin: PluginSummary): void; onOpenPluginSettings?(): void
+  onOpenMemoryActivity(): void
 }) {
   const { t, i18n } = useTranslation()
   const launchable = onOpenPlugin ? plugins.filter(item => item.enabled && !item.error && item.manifest?.ui) : []
@@ -51,6 +53,9 @@ export function WorkspaceMenu({ project, plugins, onOpenPlugin, onOpenPluginSett
           <DropdownMenu.Item className="ui-menu-item ui-menu-item-row" onSelect={project.onOpenFiles}>
             <FileDiff size={16} /><span>{t('agent.file_changes')}</span>
           </DropdownMenu.Item>
+          {project.onOpenMemory && <DropdownMenu.Item className="ui-menu-item ui-menu-item-row" onSelect={project.onOpenMemory}>
+            <MemoryIcon size={16} /><span>{t('agent.project_memory')}</span>
+          </DropdownMenu.Item>}
         </DropdownMenu.Group>}
         {project && onOpenPluginSettings && <DropdownMenu.Separator className="ui-menu-separator" />}
         {onOpenPluginSettings && <DropdownMenu.Group className="ui-menu-group" aria-label={t('plugins.title')}>
@@ -65,6 +70,10 @@ export function WorkspaceMenu({ project, plugins, onOpenPlugin, onOpenPluginSett
             <PluginIcon icon={pluginIconSources(item.id, item.manifest?.icon)} /><span className="ui-truncate">{pluginDisplayText(item, i18n.language)}</span>
           </DropdownMenu.Item>)}
         </DropdownMenu.Group>}
+        {(project || onOpenPluginSettings) && <DropdownMenu.Separator className="ui-menu-separator" />}
+        <DropdownMenu.Item className="ui-menu-item ui-menu-item-row" onSelect={onOpenMemoryActivity}>
+          <MemoryIcon size={16} /><span>{t('agent.memory_activity')}</span>
+        </DropdownMenu.Item>
       </DropdownMenuContent></DropdownMenu.Portal>
     </DropdownMenuRoot>
   </div>

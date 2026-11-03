@@ -269,7 +269,7 @@ describe('field-level recovery', () => {
     const repaired = repairDocument(file, broken)
     const expected = structuredClone(raw)
     const expectedSelection = expected.projects[0].capabilities
-    expectedSelection.skills.project = false
+    expectedSelection.skills.project = capabilities.skills.project
     expect(repaired.value).toEqual(expected)
     expect(repaired.fields).toHaveLength(3)
     expect(repaired.fields.some((field) => field.endsWith('skills.mode'))).toBe(false)
@@ -296,7 +296,7 @@ describe('field-level recovery', () => {
     raw.environment = false
     const repaired = repairScope(raw)
     expect(repaired.value).toEqual({ ...raw, subagents: capabilities.subagents,
-      skills: { mode: 'off', project: false, entries: raw.skills.entries } })
+      skills: { mode: 'off', project: capabilities.skills.project, entries: raw.skills.entries } })
     expect(repaired.fields).toEqual(expect.arrayContaining(['projects.json: projects[0].capabilities.subagents', 'projects.json: projects[0].capabilities.skills.enabled']))
     expect(raw.subagents).toBe(false)
     expect(raw.skills.enabled).toBe(false)

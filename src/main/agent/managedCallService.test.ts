@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import Database from 'better-sqlite3'
 import { NativeConversationDatabase } from './nativeConversationDatabase'
-import { SqliteMemoryStore } from './memoryStore'
+import { SqliteMemoryStore } from '../../test/legacyMemoryFixture'
 import { FileEditStore } from '../fileEditStore'
 import { toolEffectArtifactPurposes, type ToolEffectArtifactIdentity } from '../../runtime/toolEffectIdentity'
 import { nativeCapabilityFixture } from '../../test/nativeCapabilityFixture'
@@ -195,7 +195,7 @@ describe('ManagedCallService', () => {
     const h = nativeCapabilityFixture(), { service, thread, run } = h
     try {
       const available = await runtimeToolDefinitions({ enabled: true, primaryFolder: '.', threadId: thread.id, runId: run.id,
-        memory: false, network: false, shell: true, mcp: false, backgroundTools: true, managedCalls: service,
+         network: false, shell: true, mcp: false, backgroundTools: true, managedCalls: service,
         commandShell: { executable: 'pwsh', name: 'PowerShell', family: 'powershell', version: '7.5.0' } })
       const tools = available.filter(tool => ['write_call', 'read_call'].includes(tool.name))
       const result = await h.executeCalls(tools, [[{

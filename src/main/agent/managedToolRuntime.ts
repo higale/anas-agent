@@ -66,7 +66,7 @@ export function createManagedToolRuntime(definition: ToolDefinition, options: Ma
         allowBackground: options.allowBackground, retainInlineResult: effectful,
         uncertainWhenCancelledAfterDispatch: effectful && (plugin || kind !== 'shell' && kind !== 'custom'),
         serialGroup: fileMutations.has(definition.name) ? 'filesystem-writes' : definition.name === 'update_config' ? 'configuration'
-          : definition.name === 'save_to_memory' || definition.name === 'forget_memory' ? 'memory-writes' : undefined,
+          : undefined,
         execute: control => withToolExecution(control, kind === 'builtin' && effectful, async () => {
           control.signal.throwIfAborted()
           if (!effectful) control.markRunning()

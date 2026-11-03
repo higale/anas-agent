@@ -319,11 +319,11 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
                       {promptTab === 'compression' && <button type="button" className="ui-button ui-button-compact"
                         disabled={busy} onClick={loadDefaultCompressionPrompt}>{t('project.load_default_prompt')}</button>}
                     </div>
-                    <Tabs.Content value="project" className="ui-tab-content ui-field-stack ui-field-stack-fill">
+                    <Tabs.Content value="project" tabIndex={-1} className="ui-tab-content ui-field-stack ui-field-stack-fill">
                       <textarea aria-label={t('project.project_prompt')} className="ui-textarea ui-textarea-fixed ui-code-textarea ui-textarea-wrap" value={prompt}
                         maxLength={50_000} rows={2} disabled={busy} onChange={(event) => setPrompt(event.target.value)} />
                     </Tabs.Content>
-                    <Tabs.Content value="compression" className="ui-tab-content ui-field-stack ui-field-stack-fill">
+                    <Tabs.Content value="compression" tabIndex={-1} className="ui-tab-content ui-field-stack ui-field-stack-fill">
                       <textarea aria-label={t('settings.view_context_compression_prompt')} className="ui-textarea ui-textarea-fixed ui-code-textarea ui-textarea-wrap"
                         value={compressionPrompt} maxLength={COMPRESSION_PROMPT_MAX_LENGTH} rows={2} disabled={busy}
                         placeholder={t('project.compression_prompt_placeholder')} aria-invalid={Boolean(compressionError)}

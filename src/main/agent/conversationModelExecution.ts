@@ -24,6 +24,7 @@ export interface ConversationModelExecutionOptions extends Omit<ConversationComp
   resolveModel(): Promise<ResolvedModelConfig>
   systemPrompt(model: ResolvedModelConfig): string
   tools(model: ResolvedModelConfig): readonly unknown[]
+  memoryWriteGeneration?(model: ResolvedModelConfig): string | undefined
   requiresTools(): boolean | Promise<boolean>
   /** Root-run limit; the product supplies zero for subagents. */
   maxModelCalls: number
@@ -76,10 +77,12 @@ export function createConversationModelPreparation(options: ConversationModelExe
       .flatMap(message => message.id ? [message.id] : []))
     let messages = options.attachments ? await options.attachments.project(source.messages, model.capabilities.vision, included) : source.messages
     let systemMessage: ConversationMessage = { kind: 'system', content: options.systemPrompt(model) }
+    const memoryGeneration = options.memoryWriteGeneration?.(model)
     const tools = options.simpleChat ? [] : options.tools(model)
     const supervised = options.supervision ? await projectConversationSupervision(systemMessage, tools, options.supervision) : undefined
     if (supervised) systemMessage = supervised.systemMessage
-    if (options.memory) systemMessage = await options.memory(systemMessage, messages)
+    let documentHashes: { global: string; project: string } | undefined
+    if (options.memory) systemMessage = await options.memory(systemMessage, messages, hashes => { documentHashes = hashes })
     if (options.rules) systemMessage = conversationRuleSystemMessage(systemMessage, state.context, request.runId)
     if (options.simpleChat) messages = simpleConversationHistory(effectiveConversationHistory(messages, source.summary))
     const context = { messages, systemMessage, tools, modelRecovery: state.context.modelRecovery,
@@ -119,6 +122,14 @@ export function createConversationModelPreparation(options: ConversationModelExe
         const calls = (message.calls ?? []).map((call): ExecutionToolCall => ({ id: randomUUID(),
           providerCallId: call.id, name: call.name, args: call.args,
           artifacts: Object.fromEntries(toolEffectArtifactPurposes.map(purpose => [purpose, randomUUID()])) as ExecutionToolCall['artifacts'] }))
+        if (memoryGeneration && documentHashes && calls.some(call => call.name === 'update_memory')) {
+          for (let index = state.messages.length - 1; index >= 0; index--) {
+            const record = state.messages[index]
+            if (record.value.kind !== 'user' || record.value.context?.summary) continue
+            message.context = { ...message.context, memoryWriteSource: { generation: memoryGeneration, recordId: record.recordId, documentHashes } }
+            break
+          }
+        }
         observer.model({ kind: 'completed', modelId, subagentId: options.subagentId,
           message: presentConversationMessage({ ...message, calls: message.calls?.map((call, index) => ({ ...call, id: calls[index].id })) }, id),
           calls: calls.map(call => ({ id: call.id, name: call.name, args: call.args })),

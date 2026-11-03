@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import type { SubagentConfig } from '@shared/types'
-import { isSubagentConfigured, selectedSubagents, type SubagentSelection } from '@shared/subagentSelection'
+import { isSubagentConfigured, type SubagentSelection } from '@shared/subagentSelection'
 import { CheckboxField } from './CheckboxField'
 import { CapabilitySection } from './CapabilitySection'
 
@@ -20,9 +20,8 @@ export function SubagentSelectionEditor({ value, definitions, onChange, disabled
       .map((name) => ({ name, description: '', missing: true, status: 'capabilities.deleted' }))
   ]
   const selected = new Set(value.names)
-  const count = selectedSubagents(definitions, value).length
   return <div className="ui-form-section ui-form-section-divided">
-    <CapabilitySection label={t('settings.capability_subagents')} count={count} mode={value.mode === 'default' ? 'all' : value.mode} disabled={disabled}
+    <CapabilitySection label={t('settings.capability_subagents')} customCount={items.filter(item => selected.has(item.name)).length} total={items.length} mode={value.mode === 'default' ? 'all' : value.mode} disabled={disabled}
       onChange={mode => onChange({ ...value, mode: mode === 'all' ? 'default' : mode })}>
     {value.mode === 'custom' && <fieldset className="ui-capability-editor" disabled={disabled}>
       <div className="ui-capability-list">

@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { isPluginSkillId, pluginToolId, pluginPromptId, pluginToolName } from '@shared/pluginTools'
-import { resolvePluginCapabilities, resolveSkillSelection, pluginSelectionMode, type AgentCapabilities } from '@shared/agentCapabilities'
+import { pluginSelectionMode, type AgentCapabilities } from '@shared/agentCapabilities'
 import { pluginDisplayText, pluginIconSources, type PluginSummary } from '@shared/plugins'
 import type { SkillSnapshot } from '@shared/types'
 import { CheckboxField } from '../CheckboxField'
@@ -15,12 +15,11 @@ export function PluginCapabilitySelection({ value, plugins, skills, error, onCha
   error?: string; subagent?: boolean; onChange(value: AgentCapabilities): void
 }) {
   const { t, i18n } = useTranslation()
-  const effective = resolvePluginCapabilities(value, plugins, subagent)
-  const pluginSkills = resolveSkillSelection(effective.skills, skills?.skills ?? [], false, subagent, effective.pluginTools).entries.filter(entry => isPluginSkillId(entry.id))
+  const pluginSkills = value.skills.entries.filter(entry => isPluginSkillId(entry.id))
   const ids = new Set([
     ...plugins.filter(plugin => plugin.manifest && (plugin.manifest.tools.length || plugin.manifest.skills?.length || plugin.manifest.prompts?.length)).map(plugin => plugin.id),
     ...(value.plugins ?? []).map(plugin => plugin.id),
-    ...[...value.pluginTools, ...value.pluginPrompts, ...value.skills.entries.filter(entry => isPluginSkillId(entry.id)).map(skill => skill.id)].map(id => id.split(':')[0])
+    ...[...value.pluginTools, ...value.pluginPrompts, ...pluginSkills.map(skill => skill.id)].map(id => id.split(':')[0])
   ])
   const dependencyReason = (tools: string[]) => {
     const missing = tools.filter(id => !value.pluginTools.includes(id))
@@ -38,20 +37,21 @@ export function PluginCapabilitySelection({ value, plugins, skills, error, onCha
       const reason = plugin?.error || (unavailable ? t('capabilities.inactive') : '')
       const toolIds = [...new Set([...(plugin?.manifest?.tools ?? []).map(tool => pluginToolId(id, tool.id)), ...value.pluginTools.filter(tool => tool.startsWith(`${id}:`))])]
       const promptIds = [...new Set([...(plugin?.manifest?.prompts ?? []).map(prompt => pluginPromptId(id, prompt.id)), ...value.pluginPrompts.filter(prompt => prompt.startsWith(`${id}:`))])]
-      const skillIds = [...new Set([...(plugin?.manifest?.skills ?? []).map(skill => `${id}:skill:${skill.id}`), ...value.skills.entries.filter(skill => skill.id.startsWith(`${id}:`)).map(skill => skill.id)])]
+      const savedSkills = pluginSkills.filter(skill => skill.id.startsWith(`${id}:skill:`))
+      const skillIds = [...new Set([...(plugin?.manifest?.skills ?? []).map(skill => `${id}:skill:${skill.id}`), ...savedSkills.map(skill => skill.id)])]
       const total = toolIds.length + promptIds.length + skillIds.length
-      const count = toolIds.filter(tool => effective.pluginTools.includes(tool)).length + promptIds.filter(prompt => effective.pluginPrompts.includes(prompt)).length
-        + pluginSkills.filter(skill => skillIds.includes(skill.id) && (skill.model || (!subagent && skill.shortcut))).length
+      const count = toolIds.filter(tool => value.pluginTools.includes(tool)).length + promptIds.filter(prompt => value.pluginPrompts.includes(prompt)).length
+        + savedSkills.filter(skill => skill.model || (!subagent && skill.shortcut)).length
       const mode = pluginSelectionMode(value, id)
       function change(next: AgentCapabilities) {
-        onChange({ ...next, pluginMode: 'custom', plugins: next.plugins?.some(plugin => plugin.id === id)
+        onChange({ ...next, pluginMode: value.pluginMode === 'off' ? 'custom' : value.pluginMode, plugins: next.plugins?.some(plugin => plugin.id === id)
           ? next.plugins : [...(next.plugins ?? []), { id, mode }] })
       }
       function setMode(mode: 'all' | 'custom' | 'off') {
         change({ ...value, plugins: [...(value.plugins ?? []).filter(plugin => plugin.id !== id), { id, mode }] })
       }
       return <CapabilitySection key={id} label={name} title={<><PluginIcon icon={pluginIconSources(id, plugin?.manifest?.icon)} /><span>{name}</span></>}
-        count={`${count}/${total}`} mode={mode} reason={reason} onChange={setMode}>
+        customCount={count} total={total} mode={mode} reason={reason} onChange={setMode}>
           <fieldset className="ui-capability-list" aria-label={name}>
             {toolIds.length > 0 && <div className="ui-form-section">
               <strong>{t('plugins.tools')}</strong>

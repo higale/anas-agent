@@ -1,3 +1,4 @@
+import { mockPreferenceReader } from '../../test/preferenceFixture'
 import { createConversationInstance } from './conversationInstance'
 import type { RunObserver } from '../../runtime/runExecution'
 import { createProviderRequestCaptureFetch, type CapturedProviderRequest } from './providerRequestCapture'
@@ -23,7 +24,7 @@ import { resolveProviderModelConfig } from '@shared/modelConfig'
 import { defaultCapabilities, capabilityFeatures } from '@shared/agentCapabilities'
 import { config, thread, defaultWorkspaceProject, previewProvider, previewConfig } from '../../test/agentConfigurationFixture'
 import { NativeConversationDatabase } from './nativeConversationDatabase'
-import { SqliteMemoryStore } from './memoryStore'
+import { SqliteMemoryStore } from '../../test/legacyMemoryFixture'
 import { FileEditStore } from '../fileEditStore'
 import { ManagedCallService } from './managedCallService'
 import { captureAgentSystemPrompt, captureAgentModelRequest } from './conversationPreview'
@@ -306,13 +307,13 @@ describe('captureAgentSystemPrompt', () => {
     }
     const database = openDatabase()
     const previewThread = configuredThread(database, { title: 'Memory preview' })
-    const recall = vi.spyOn(database.resources.memoryStore, 'relevantMemories').mockResolvedValue([])
+    const recall = mockPreferenceReader(database.resources.memoryStore)
     const network = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unexpected network request'))
 
     try {
       await captureAgentSystemPrompt(previewThread, database.resources, snapshot)
 
-      expect(recall).toHaveBeenCalledExactlyOnceWith('hello world', previewThread.projectId, undefined)
+      expect(recall.mock.calls.map(([scope]) => scope)).toEqual([{ kind: 'global' }, { kind: 'project', projectId: previewThread.projectId }])
       expect(network).not.toHaveBeenCalled()
     } finally {
       database.close()
@@ -360,7 +361,7 @@ describe('captureAgentSystemPrompt', () => {
       const prompt = await captureAgentSystemPrompt(previewThread, database.resources, snapshot)
 
       expect(prompt).toContain('<assistant_profile>')
-      expect(prompt).toContain('<user_profile>')
+      expect(prompt).not.toContain('<user_profile>')
       expect(prompt).not.toContain('You are a Deep Agent')
       expect(prompt).not.toContain('## `write_todos`')
       expect(prompt).not.toContain('## `task` (subagent spawner)')
@@ -1074,11 +1075,11 @@ describe('native model resources during execution', () => {
       appConfigMocks.getAppConfigSnapshot.mockResolvedValue(snapshot)
       const database = openDatabase(), target = configuredThread(database)
       const run = createRun(database, target.id, 'memory-options', 'Recall project preferences.')
-      const recall = vi.spyOn(database.resources.memoryStore, 'relevantMemories').mockResolvedValue([])
+      const recall = mockPreferenceReader(database.resources.memoryStore)
       const providerFetch = vi.fn<typeof fetch>(async (_url, init) => {
         const request = JSON.parse(String(init?.body)) as { tools?: { function: { name: string } }[] }
         const selected = request.tools?.map(tool => tool.function.name) ?? []
-        for (const name of names) expect(selected.includes(name)).toBe(tools)
+        for (const name of names) expect(selected.includes(name)).toBe(false)
         return Response.json({ id: 'memory-response', object: 'chat.completion', created: 1, model: 'preview-model',
           choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'Done' } }],
           usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } })
@@ -1089,7 +1090,7 @@ describe('native model resources during execution', () => {
         try {
           const result = await instance.execution.execute('input', { threadId: target.id, runId: run.id, signal: new AbortController().signal }, observer())
           expect(result.result.status).toBe('fulfilled')
-          expect(recall).toHaveBeenCalledTimes(memory ? 1 : 0)
+          expect(recall).toHaveBeenCalledTimes(memory ? 2 : 0)
           expect(providerFetch).toHaveBeenCalledOnce()
         } finally { await instance.dispose() }
       } finally { database.close() }

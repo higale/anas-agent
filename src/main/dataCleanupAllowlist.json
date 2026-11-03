@@ -22,6 +22,7 @@
         "config/tools.json",
         "config/skills.json",
         "db/input_history.json",
+        "db/MEMORY.md",
         "db/project-deletion.json",
         "db/project-deletion.stage.json",
         "db/project-write.json"
@@ -31,6 +32,11 @@
     {
       "type": "file",
       "paths": [
+        "db/memory.sqlite",
+        "db/memory.sqlite-wal",
+        "db/memory.sqlite-shm",
+        "db/memory.sqlite-journal",
+        "db/.MEMORY.md.*.tmp",
         "db/catalog.sqlite",
         "db/catalog.sqlite-wal",
         "db/catalog.sqlite-shm",

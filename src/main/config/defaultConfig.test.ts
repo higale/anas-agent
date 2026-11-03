@@ -1,5 +1,5 @@
 import capabilities from '../../../data/config/capabilities.json'
-import { allCapabilities, capabilityFeatures, defaultCapabilities, serializeCapabilities, parseCapabilities } from '@shared/agentCapabilities'
+import { capabilityFeatures, defaultCapabilities, serializeCapabilities, parseCapabilities } from '@shared/agentCapabilities'
 import settings from '../../../data/config/settings.json'
 import mcpServers from '../../../data/config/mcp_servers.json'
 import models from '../../../data/config/models.json'
@@ -61,7 +61,7 @@ describe('bundled configuration contract', () => {
   it('ships only general-purpose as a built-in with every capability and the parent model', () => {
     expect(bundledAgents.map(agent => agent.id)).toEqual(['general-purpose'])
     const general = bundledAgents.find((subagent) => subagent.preset === 'general-purpose')
-    expect(parseCapabilities(general?.capabilities)).toEqual(allCapabilities)
+    expect(parseCapabilities(general?.capabilities)).toEqual(defaultCapabilities)
     expect(general?.model_config_id).toBeUndefined()
     expect(general?.model_parameter_preset_id).toBeUndefined()
   })
@@ -83,7 +83,7 @@ describe('bundled configuration contract', () => {
     const analyst = await readSubagentPackage(join(process.cwd(), 'data/examples/subagents/project-analyst'))
     expect(analyst.preset).toBeUndefined()
     expect(analyst).toMatchObject({
- capabilities: serializeCapabilities({ ...structuredClone(defaultCapabilities), profile: false, toolMode: 'selected', tools: [
+ capabilities: serializeCapabilities({ ...structuredClone(defaultCapabilities), profile: false, customTools: { mode: 'custom', project: false, entries: [] }, pluginMode: 'custom', toolMode: 'selected', tools: [
         'read_file',
         'read_multiple_files',
         'list_directory',

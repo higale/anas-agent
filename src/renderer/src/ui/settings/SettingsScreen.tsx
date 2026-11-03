@@ -9,7 +9,6 @@ import type {
   LanguagePackSummary,
   McpToolStatus,
   ModelProviderConfigDetail,
-  Project,
   RuntimeToolStatus,
   SkillAvailabilityUpdate,
   SkillRootSummary,
@@ -28,7 +27,10 @@ import { DeveloperHttpTraceSettings } from './DeveloperHttpTraceSettings'
 import { DeveloperActions } from './DeveloperActions'
 import { GeneralSettingsSections } from './GeneralSettingsSections'
 import { LogSettings } from './LogSettings'
+import { SegmentedControl } from '../SegmentedControl'
 import { MemorySettings } from './MemorySettings'
+import { ModelPicker } from '../model/ModelPicker'
+import { PanelViewState } from '../agent/PanelViewState'
 import { SegmentedMultiSelect } from '../SegmentedMultiSelect'
 import { formatDateTime } from '../formatDateTime'
 import { SkillsSettings } from './SkillsSettings'
@@ -39,7 +41,6 @@ import { settingsTabs, type SettingsTab } from './settingsTabs'
 import { ToolsSettings } from './ToolsSettings'
 import { PluginsSettings } from './PluginsSettings'
 import type { PluginSummary } from '@shared/plugins'
-import type { MemorySettingsState } from './useMemorySettingsState'
 
 interface SettingsScreenProps {
   plugins: PluginSummary[]
@@ -72,13 +73,12 @@ interface SettingsScreenProps {
   subagentDraft: SubagentDraft
   subagentListRef: RefObject<HTMLDivElement | null>
   editingSubagentIndex?: number
-  memory: MemorySettingsState
   modelCandidates: string[]
   modelDraft: ModelDraft
   modelListLoading: boolean
   modelListRef: RefObject<HTMLDivElement | null>
-  projects: Project[]
   settingsContentRef: RefObject<HTMLDivElement | null>
+  memorySettingsView: Map<string, unknown>
   sidebarVisible: boolean
   skills: SkillSnapshot | undefined
   systemLanguage: string
@@ -171,13 +171,12 @@ export function SettingsScreen({
   subagentDraft,
   subagentListRef,
   editingSubagentIndex,
-  memory,
   modelCandidates,
   modelDraft,
   modelListLoading,
   modelListRef,
-  projects,
   settingsContentRef,
+  memorySettingsView,
   sidebarVisible,
   skills,
   systemLanguage,
@@ -243,8 +242,8 @@ export function SettingsScreen({
   const sidebarLabel = t('chat.show_sidebar')
   const activeTabDefinition = settingsTabs.find((tab) => tab.id === activeTab)
   const pageDescription = activeTab === 'mcp' && mcpStatus
-      ? t('settings.mcp_status_summary', { servers: mcpStatus.servers.length, tools: mcpStatus.toolNames.length, checkedAt: formatDateTime(mcpStatus.checkedAt) })
-      : undefined
+    ? t('settings.mcp_status_summary', { servers: mcpStatus.servers.length, tools: mcpStatus.toolNames.length, checkedAt: formatDateTime(mcpStatus.checkedAt) })
+    : undefined
 
   return (
     <main className="workspace workspace-workbench settings-workspace ui-main" aria-label={t('settings.title')}>
@@ -267,6 +266,17 @@ export function SettingsScreen({
               <h1 className="settings-page-title">{activeTabDefinition ? t(activeTabDefinition.labelKey) : ''}</h1>
               {pageDescription && <div className="ui-field-hint">{pageDescription}</div>}
             </div>
+            {activeTab === 'memory' && <div className="ui-toolbar">
+              <SegmentedControl<'foreground' | 'background'> ariaLabel={t('settings.memory_mode')} disabled={!config}
+                value={config?.settings.memoryMode ?? 'background'} onChange={memoryMode => void onSaveSettings({ memoryMode })}
+                options={[{ value: 'foreground', label: t('settings.memory_foreground') }, { value: 'background', label: t('settings.memory_background') }]} />
+              <ModelPicker
+                standalone={{ label: t('settings.memory_model'), description: t('settings.memory_model_hint') }}
+                providers={config?.providers} selectedId={config?.settings.memoryModelId ?? undefined} disabled={!config}
+                emptyLabel={t(config ? 'settings.memory_no_model_status' : 'common.loading')}
+                onClear={() => void onSaveSettings({ memoryModelId: null })}
+                onSelect={memoryModelId => onSaveSettings({ memoryModelId })} />
+            </div>}
             {(activeTab === 'subagents' || activeTab === 'tools') && <div className="ui-toolbar" ref={setPackageActionsTarget} />}
             {activeTab === 'mcp' && <div className="ui-toolbar">
               <button className="ui-button" type="button" disabled={!config}
@@ -360,28 +370,9 @@ export function SettingsScreen({
             />
           )}
           {activeTab === 'memory' && (
-            <MemorySettings
-              draft={memory.draft}
-              items={memory.result.items}
-              kind={memory.kind}
-              listRef={memory.memoryListRef}
-              projects={projects.filter((project) => project.kind === 'workspace')}
-              query={memory.query}
-              saving={memory.saving}
-              scope={memory.scope}
-              sectionClass={sectionClass('memory', 'settings-workbench ui-workbench ui-grid-sidebar')}
-              selectedId={memory.selectedId}
-              total={memory.result.total}
-              onAutosizeInput={onAutosizeInput}
-              onDelete={memory.deleteMemory}
-              onKindChange={memory.setKind}
-              onNew={memory.startNewMemory}
-              onQueryChange={memory.setQuery}
-              onSave={memory.saveMemory}
-              onScopeChange={memory.setScope}
-              onSelect={memory.selectMemory}
-              onUpdateDraft={memory.updateMemoryDraft}
-            />
+            <PanelViewState state={memorySettingsView}>
+              <MemorySettings sectionClass={sectionClass('memory')} />
+            </PanelViewState>
           )}
 
           {activeTab === 'dev' && (

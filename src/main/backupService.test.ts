@@ -1,3 +1,4 @@
+import { legacyMemory } from '../test/legacyMemoryFixture'
 import { writeProjectFixture, readProjectFixture } from '../test/projectDirectories'
 import { readFrozenStorage } from '../test/frozenStorage'
 import nativeFs, { createWriteStream } from 'node:fs'
@@ -219,7 +220,10 @@ describe('data backup restore', () => {
         { threadId: thread.id, runId: 'run', messageId: 'run:input' }, join(dataRoot, 'db/projects/default-workspace/conversations', thread.id, 'attachments'))
       database.runs.createRun({ threadId: thread.id, runId: 'run', operation: 'agent', attachments: archived,
         message: { id: 'run:input', value: { id: 'run:input', kind: 'user', content: [{ type: 'text', text: 'Saved input' }], context: { runId: 'run' } } } })
-      await storage.memoryStore.saveMemory({ scope: 'global', kind: 'fact', content: 'Keep memory', keywords: [], importance: 3 }, { origin: 'user' })
+      await legacyMemory(storage.memoryStore).saveMemory({ scope: 'global', kind: 'fact', content: 'Keep memory', keywords: [], importance: 3 }, { origin: 'user' })
+      await writeText(join(dataRoot, 'db/MEMORY.md'), '- Preserve published preferences')
+      storage.preferences.enqueue({ threadId: thread.id, projectId: thread.projectId, title: 'Pending preferences',
+        sourceRevision: 'snapshot', lastRecordId: 'source', input: '[]', trigger: 'test' })
       const result = await saveToolResultFile('full tool result', database.resources.toolResultsRoot)
       const recovery = join(database.resources.fileEditStore.root, 'evidence.txt')
       await writeText(recovery, 'retained recovery evidence')
@@ -241,7 +245,9 @@ describe('data backup restore', () => {
       for (const [name, content] of Object.entries(sharedDocuments)) expect(await readFile(join(dataRoot, name), 'utf8')).toBe(content)
       storage = AgentStorage.openNative(dataRoot)
       expect(storage.listThreads().map(item => item.title)).toEqual(['Backed up conversation'])
-      expect((await storage.memoryStore.searchMemories({ scope: 'global' })).total).toBe(1)
+      expect((await legacyMemory(storage.memoryStore).searchMemories({ scope: 'global' })).total).toBe(1)
+      expect(storage.preferences.read({ kind: 'global' }).content).toBe('- Preserve published preferences')
+      expect(storage.preferences.jobs()).toEqual([expect.objectContaining({ stage: 'pending', title: 'Pending preferences' })])
       const restored = storage.conversationForThread(thread.id)
       expect(await readFile(restored.resources.listAttachmentsForMessages(thread.id, ['run:input'])[0].path, 'utf8')).toBe('attachment text')
       expect(await readFile(result, 'utf8')).toBe('full tool result')
@@ -505,11 +511,12 @@ describe('data backup restore', () => {
     const dataRoot = join(root, 'data')
     const resetFiles = ['db/projects/state.json', 'db/project-deletion.json', 'db/project-deletion.stage.json',
       'db/catalog.sqlite', 'db/catalog.sqlite-wal', 'db/catalog.sqlite-shm', 'db/catalog.sqlite-journal',
+      'db/memory.sqlite', 'db/memory.sqlite-wal', 'db/memory.sqlite-shm', 'db/memory.sqlite-journal',
       'db/projects/default-workspace/conversations/first/conversation.sqlite', 'db/projects/default-workspace/conversations/first/attachments/file.txt',
       'db/projects/default-workspace/conversations/first/file_edits/evidence.txt', 'db/projects/default-workspace/conversations/first/tool_results/result.txt',
       'db/projects/default-workspace/conversations/second/conversation.sqlite', 'db/projects/default-workspace/conversations/second/conversation.sqlite-wal']
     for (const name of resetFiles) await writeText(join(dataRoot, name), `broken ${name}`)
-    const untouched = ['db/input_history.json', 'db/plugins/test-plugin/state.json', 'conversations/obsolete/conversation.sqlite',
+    const untouched = ['db/MEMORY.md', 'db/input_history.json', 'db/plugins/test-plugin/state.json', 'conversations/obsolete/conversation.sqlite',
       'db/projects.json', 'db/conversations/obsolete/conversation.sqlite',
       'projects.json', 'input_history.json', 'config/settings.json', 'skills/test/SKILL.md', 'attachments/example.txt', 'sqlite/unrelated.sqlite']
     for (const name of untouched) await writeText(join(dataRoot, name), 'keep')
@@ -536,7 +543,8 @@ describe('data backup restore', () => {
       collapsed: false, sourceFolders: ['/keep/source'], capabilities, restrict_subagents: false,
       createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z' }] })
     await writeProjectFixture(dataRoot, JSON.parse(projects))
-    for (const name of ['db/catalog.sqlite', 'db/catalog.sqlite-wal', 'db/projects/default-workspace/conversations/a/conversation.sqlite']) {
+    await writeText(join(dataRoot, 'db/projects/default-workspace/MEMORY.md'), 'Project preference')
+    for (const name of ['db/catalog.sqlite', 'db/catalog.sqlite-wal', 'db/memory.sqlite', 'db/projects/default-workspace/conversations/a/conversation.sqlite']) {
       await writeText(join(dataRoot, name), 'broken database')
     }
     const service = await loadBackupService(dataRoot)
@@ -545,10 +553,12 @@ describe('data backup restore', () => {
     expect(targets).toEqual([
       { path: join(dataRoot, 'db/catalog.sqlite'), kind: 'file' },
       { path: join(dataRoot, 'db/catalog.sqlite-wal'), kind: 'file' },
+      { path: join(dataRoot, 'db/memory.sqlite'), kind: 'file' },
       { path: join(dataRoot, 'db/projects/default-workspace/conversations'), kind: 'directory' }
     ])
     const preserved = await service.resetExecutionData(() => preserveRecoveryData(dataRoot, root), targets)
     for (const target of targets) await expect(stat(target.path)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(join(dataRoot, 'db/projects/default-workspace/MEMORY.md'), 'utf8')).toBe('Project preference')
     expect(await readProjectFixture(dataRoot)).toBe(await readProjectFixture(join(preserved, 'data')))
     expect(JSON.parse(await readProjectFixture(join(preserved, 'data')))).toEqual(JSON.parse(projects))
     expect(await readFile(join(preserved, 'data/db/catalog.sqlite'), 'utf8')).toBe('broken database')
@@ -556,6 +566,19 @@ describe('data backup restore', () => {
     const storage = AgentStorage.openNative(dataRoot)
     try { expect(storage.createThread().accessMode).toBe('smart_approval') } finally { storage.close() }
     expect(await readProjectFixture(dataRoot)).toBe(await readProjectFixture(join(preserved, 'data')))
+  })
+
+  it('can reset a leftover memory database before the project store is initialized', async () => {
+    const root = await temporaryDirectory(), dataRoot = join(root, 'data')
+    const file = join(dataRoot, 'db/memory.sqlite')
+    await writeText(file, 'unusable memory database')
+    const service = await loadBackupService(dataRoot)
+    const { preserveRecoveryData } = await import('./recoveryData')
+    const targets = await service.inspectResetTargets(true)
+    expect(targets).toEqual([{ path: file, kind: 'file' }])
+    const copy = await service.resetExecutionData(() => preserveRecoveryData(dataRoot, root), targets)
+    expect(await readFile(join(copy, 'data/db/memory.sqlite'), 'utf8')).toBe('unusable memory database')
+    await expect(stat(file)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it.each(['before', 'during'])('refuses changed reset targets %s preservation without deleting files', async when => {

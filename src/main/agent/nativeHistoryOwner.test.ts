@@ -50,6 +50,19 @@ function fixture() {
 }
 
 describe('native product history revisions', () => {
+  it('rewinds the memory cursor to the retained prefix when regenerating an acknowledged turn', async () => {
+    const h = fixture()
+    try {
+      await h.complete('first'); await h.complete('second')
+      const memory = h.product.resources.memoryStore.preferences!
+      const history = h.owner.store.readHistory(h.thread.id)!.messages
+      memory.writeForeground({ kind: 'global' }, 'Saved', h.thread.id, history.at(-1)!.recordId)
+      const owner = h.product.history
+      owner.commit(owner.prepare({ threadId: h.thread.id, messageId: 'second:input', kind: 'regenerate', runId: 'again' }))
+      expect(memory.cursor(h.thread.id)).toBe(history.find(message => message.id === 'first:answer')!.recordId)
+      expect(memory.dirtyThreads()).toContain(h.thread.id)
+    } finally { h.dispose() }
+  })
   it('rejects conflicting history ownership without deleting any run or message', async () => {
     const h = fixture()
     try {

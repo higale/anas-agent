@@ -26,6 +26,7 @@ import {
 import { Fragment, memo, type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { NoFocusButton } from '../NoFocusButton'
+import { MemoryIcon } from '../MemoryIcon'
 import type {
   AgentContentBlock,
   AgentContextSummary,
@@ -858,7 +859,7 @@ function ActivityTimelineItems({
               stateKey={item.key}
               className="agent-activity-input agent-activity-memory-recall"
               key={item.key}
-              icon={<Brain size={13} />}
+              icon={<MemoryIcon size={13} />}
               label={label}
               text={item.recall.promptText}
               detail={item.recall.detail}

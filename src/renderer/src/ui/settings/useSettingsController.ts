@@ -34,8 +34,7 @@ export function useSettingsController({ config, setConfig, t }: UseSettingsContr
   })
   const profileSave = useQueuedDraftSave<AppProfileUpdate, AppConfigSnapshot>({
     merge: (previous, update) => ({
-      assistant: { ...previous?.assistant, ...update.assistant },
-      user: { ...previous?.user, ...update.user }
+      assistant: { ...previous?.assistant, ...update.assistant }
     }),
     persist: (draft) => window.gale.config.updateProfile(draft),
     onSaved: (result) => {
@@ -60,7 +59,7 @@ export function useSettingsController({ config, setConfig, t }: UseSettingsContr
       ...settingsSave.draft,
       profile: profileSave.draft ? {
         assistant: { ...config.settings.profile.assistant, ...profileSave.draft.assistant },
-        user: { ...config.settings.profile.user, ...profileSave.draft.user }
+        user: config.settings.profile.user
       } : config.settings.profile,
       speechReply: speechSave.draft ? { ...config.settings.speechReply, ...speechSave.draft } : config.settings.speechReply
     }

@@ -145,6 +145,40 @@ afterEach(() => {
   vi.resetModules()
 })
 
+describe('background memory model selection', () => {
+  it('shows the activity shortcut by default and preserves an explicit false on unrelated edits', async () => {
+    const raw = rawConfig()
+    const { appConfig, writeRawSettingsConfig } = await loadAppConfig(raw)
+    expect((await appConfig.getAppSettings()).showMemoryActivityInTitlebar).toBe(true)
+    expect(writeRawSettingsConfig).not.toHaveBeenCalled()
+    await appConfig.updateSettings({ showMemoryActivityInTitlebar: false })
+    await appConfig.updateSettings({ fontSize: 16 })
+    expect(raw.settings?.show_memory_activity_in_titlebar).toBe(false)
+    expect((await appConfig.getAppSettings()).showMemoryActivityInTitlebar).toBe(false)
+  })
+  it('defaults to background mode and retains the selected model when switching modes', async () => {
+    const { appConfig } = await loadAppConfig(rawConfig())
+    expect((await appConfig.getAppSettings()).memoryMode).toBe('background')
+    await appConfig.updateSettings({ memoryModelId: 'memory-model', memoryMode: 'foreground' })
+    expect((await appConfig.getAppSettings()).memoryMode).toBe('foreground')
+    await appConfig.updateSettings({ memoryMode: 'background' })
+    expect((await appConfig.getAppSettings()).memoryModelId).toBe('memory-model')
+  })
+  it('defaults to no selection without rewriting existing settings and persists selection and explicit clearing', async () => {
+    const raw = rawConfig()
+    const { appConfig, writeRawSettingsConfig } = await loadAppConfig(raw)
+    expect((await appConfig.getAppConfigSnapshot()).settings.memoryModelId).toBeNull()
+    expect(writeRawSettingsConfig).not.toHaveBeenCalled()
+    await appConfig.updateSettings({ memoryModelId: 'first' })
+    expect(raw.settings?.memory_model_id).toBe('first')
+    await appConfig.updateSettings({ fontSize: 16 })
+    expect((await appConfig.getAppConfigSnapshot()).settings.memoryModelId).toBe('first')
+    await appConfig.updateSettings({ memoryModelId: null })
+    expect(raw.settings?.memory_model_id).toBeNull()
+    expect((await appConfig.getAppConfigSnapshot()).defaultModelId).toBe('first')
+  })
+})
+
 describe('profile initialization', () => {
   it('materializes localized defaults exactly once when the user settings config does not exist', async () => {
     const raw = rawConfig()
@@ -754,6 +788,20 @@ describe('configuration domain writes', () => {
 })
 
 describe('generic settings configuration', () => {
+  it('rejects tool writes to custom instructions and user data, including replacement through a parent key', async () => {
+    const raw = rawConfig()
+    const { appConfig, writeRawSettingsConfig } = await loadAppConfig(raw)
+    for (const [key, value] of [
+      ['profile.assistant.instructions', 'Always do this'],
+      ['profile.user.preferred_name', 'New name'], ['profile.user.personal_info', 'New details'],
+      ['profile.user', raw.settings!.profile!.user], ['profile.assistant', raw.settings!.profile!.assistant],
+      ['profile', raw.settings!.profile]
+    ] as const) {
+      await expect(appConfig.updateConfigValue('settings', key, value)).rejects.toThrow('Only assistant name, role and avatar')
+    }
+    await expect(appConfig.updateProfile({ user: { preferredName: 'New name' } } as never)).rejects.toThrow('User profile editing is unavailable')
+    expect(writeRawSettingsConfig).not.toHaveBeenCalled()
+  })
   it('updates mapped scalar and nested values with an idempotent durable target', async () => {
     const raw = rawConfig()
     const { appConfig, toolEffectScope, writeRawSettingsConfig } = await loadAppConfig(raw)
@@ -766,12 +814,12 @@ describe('generic settings configuration', () => {
     }, () => appConfig.updateConfigValue('settings', 'theme', 'dark'))
     const profileResult = await appConfig.updateConfigValue(
       'settings',
-      'profile.user.preferred_name',
+      'profile.assistant.name',
       'Gale'
     )
     expect(raw.settings).toMatchObject({
       theme: 'dark',
-      profile: { user: { preferred_name: 'Gale' } }
+      profile: { assistant: { name: 'Gale' } }
     })
     expect(themeResult).toMatchObject({
       changed: true,
@@ -892,8 +940,9 @@ describe('profile configuration', () => {
     expect(after.settings.profile).toEqual(before.settings.profile)
   })
 
-  it('patches only supplied fields, preserves explicit empty values, and emits the saved profile', async () => {
+  it('patches assistant fields and preserves stored user information', async () => {
     const raw = rawConfig()
+    raw.settings!.profile!.user!.personal_info = 'Birthday: August 1'
     const { appConfig, toolEffectScope, writeRawSettingsConfig } = await loadAppConfig(raw)
     const listener = vi.fn()
     const unsubscribe = appConfig.onAppConfigChanged(listener)
@@ -902,8 +951,7 @@ describe('profile configuration', () => {
     const snapshot = await toolEffectScope.runWithCurrentAgentToolEffect({
       arm: (effect) => effects.push(effect)
     }, () => appConfig.updateProfile({
-      assistant: { name: '  Ananas  ', role: '' },
-      user: { personalInfo: 'Birthday: August 1' }
+      assistant: { name: '  Ananas  ', role: '' }
     }))
 
     expect(raw.settings?.profile).toEqual({
@@ -944,7 +992,7 @@ describe('profile configuration', () => {
     const raw = rawConfig()
     const { appConfig, toolEffectScope, writeRawSettingsConfig } = await loadAppConfig(raw)
     let durableEffect: import('../agent/toolEffectScope').AgentToolEffectArm | undefined
-    const update = { user: { preferredName: 'Gale' } }
+    const update = { assistant: { instructions: 'Be concise.' } }
 
     await toolEffectScope.runWithCurrentAgentToolEffect({
       arm: (effect) => { durableEffect = effect }
@@ -953,7 +1001,7 @@ describe('profile configuration', () => {
       kind: 'profile_update',
       recoveryMode: 'idempotent',
       target: {
-        fields: ['user.preferredName'],
+        fields: ['assistant.instructions'],
         beforeFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
         desiredFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/)
       }
@@ -966,7 +1014,7 @@ describe('profile configuration', () => {
     expect(replayArm).not.toHaveBeenCalled()
     expect(writeRawSettingsConfig).toHaveBeenCalledOnce()
 
-    raw.settings!.profile!.user!.preferred_name = 'Ada'
+    raw.settings!.profile!.assistant!.instructions = 'Ada'
     await expect(toolEffectScope.runWithCurrentAgentToolEffect({
       arm: (effect) => {
         if (JSON.stringify(effect) !== JSON.stringify(durableEffect)) {
@@ -975,7 +1023,7 @@ describe('profile configuration', () => {
       }
     }, () => appConfig.updateProfile(update)))
       .rejects.toThrow('durable effect target changed')
-    expect(raw.settings?.profile?.user?.preferred_name).toBe('Ada')
+    expect(raw.settings?.profile?.assistant?.instructions).toBe('Ada')
     expect(writeRawSettingsConfig).toHaveBeenCalledOnce()
   })
 
@@ -985,8 +1033,8 @@ describe('profile configuration', () => {
 
     await expect(appConfig.updateProfile({})).rejects.toThrow('At least one profile field is required.')
     await expect(appConfig.updateProfile({
-      user: { personalInfo: 42 } as never
-    })).rejects.toThrow('Profile value user.personal_info must be a string.')
+      assistant: { role: 42 } as never
+    })).rejects.toThrow('Profile value assistant.role must be a string.')
     await expect(appConfig.updateProfile({
       assistant: { name: '   ' }
     })).rejects.toThrow('Profile value assistant.name must not be empty.')
@@ -1003,9 +1051,9 @@ describe('profile configuration', () => {
     })
 
     await expect(appConfig.updateProfile({
-      user: { preferredName: 'Gale' }
+      assistant: { instructions: 'Be concise.' }
     })).resolves.toMatchObject({
-      settings: { profile: { user: { preferredName: 'Gale' } } }
+      settings: { profile: { assistant: { instructions: 'Be concise.' } } }
     })
     expect(writeRawSettingsConfig).toHaveBeenCalledOnce()
     expect(runtimeLog).toHaveBeenCalledWith(

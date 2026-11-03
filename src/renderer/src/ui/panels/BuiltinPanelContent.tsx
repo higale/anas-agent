@@ -1,4 +1,6 @@
 import { usePanelReady } from '../agent/PanelViewState'
+import { PreferenceMemoryDocument } from '../PreferenceMemoryDocument'
+import { MemoryActivityPanel } from '../agent/MemoryActivityPanel'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { BuiltinPanel } from '@shared/panels'
@@ -32,8 +34,10 @@ export function BuiltinPanelContent({ state }: { state: PanelPageContext }) {
   const content = state.view.content
   const project = state.project?.kind === 'workspace' ? state.project : undefined
   return <MarkdownWorkspaceProjectProvider projectId={project?.id}>
-    <DiffPreferences.Provider value={{ ...state.preferences, onChange: api.updatePreferences }}>
-      {content.kind === 'document' ? <HelpDocumentPanel request={content} onOpen={open} />
+    <DiffPreferences.Provider value={{ ...state.preferences, onChange: async update => { await api.updatePreferences(update) } }}>
+      {content.kind === 'memory' ? <MemoryActivityPanel preferences={state.preferences} />
+        : content.kind === 'projectMemory' ? <section className="project-memory-panel" aria-label={state.view.name}><PreferenceMemoryDocument key={content.projectId} projectId={content.projectId} /></section>
+        : content.kind === 'document' ? <HelpDocumentPanel request={content} onOpen={open} />
         : content.kind === 'files' ? <FileChangesPanel project={project} request={content}
             onReview={request => api.review(state.pageId, request, content.navigationId!)} />
           : content.kind === 'subagent' ? <SubagentContent content={content} open={open} /> : null}

@@ -228,7 +228,7 @@ export function useDataManagementState({
         Promise.all([
           ...(request.agent_unpinned_threads ? [cleanupAgentThreads()] : [])
         ]),
-        request.memories ? window.gale.memory.clear() : Promise.resolve(0)
+        request.memories ? window.gale.preferences.clear() : Promise.resolve(0)
       ])
       let failed = appResult.items.filter((item) => !item.ok).length
         + agentResults.reduce((total, item) => total + item.failed, 0)

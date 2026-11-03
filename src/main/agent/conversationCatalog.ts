@@ -1,7 +1,6 @@
 import type Database from 'better-sqlite3'
 import type { AgentThread } from '../../shared/agentTypes'
 import { readThreadRecord } from './conversationThreads'
-import { deleteProjectMemoryRecords } from './memoryStore'
 import { DEFAULT_WORKSPACE_PROJECT_ID } from '../../shared/types'
 
 /** Finish the already committed project deletion using only shared catalog
@@ -12,7 +11,6 @@ export function completeProjectCatalogDeletion(catalog: Database.Database, proje
     if (catalog.prepare('SELECT 1 FROM agent_conversations WHERE project_id = ? LIMIT 1').get(projectId)) {
       throw new Error('Cannot complete project deletion while project conversations still exist.')
     }
-    deleteProjectMemoryRecords(catalog, projectId)
     catalog.prepare(`UPDATE agent_workspace_state SET draft_project_id = ?, draft_model_config_id = NULL,
       draft_model_parameter_preset_id = NULL WHERE draft_project_id = ?`).run(DEFAULT_WORKSPACE_PROJECT_ID, projectId)
   })()

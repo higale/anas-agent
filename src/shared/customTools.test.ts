@@ -40,8 +40,8 @@ describe('custom tool definitions', () => {
       expect(parseCustomTools([serializeCustomTool(validateCustomTool({ ...definition, timeoutSeconds }))])[0].timeoutSeconds).toBe(timeoutSeconds)
     }
   })
-  it('requires explicit selection and intersects the child against its parent limit', () => {
-    expect(defaultCapabilities.customTools).toEqual({ mode: 'custom', project: false, entries: [] })
+  it('allows all by default and intersects explicit child and parent selections', () => {
+    expect(defaultCapabilities.customTools).toEqual({ mode: 'all', project: true, entries: [] })
     const resolved = { ...defaultCapabilities, skills: resolveSkillSelection(defaultCapabilities.skills, []) }
     expect(intersectCapabilities({ ...resolved, customTools: selectedTools(['a', 'b']) }, { ...resolved, customTools: selectedTools(['b', 'c']) }).customTools).toEqual(selectedTools(['b']))
   })

@@ -1,3 +1,4 @@
+import { PreferenceMemoryStore } from './agent/preferenceMemoryStore'
 import Database from 'better-sqlite3'
 import { validateRestoredTools } from './toolsStore'
 import { access, lstat, readdir } from 'node:fs/promises'
@@ -48,6 +49,7 @@ export async function validateRestoredDataDirectory(root: string): Promise<void>
   if (await exists(avatarTransformPath(root))) await readAvatarTransform(root)
   await validateRestoredSkillsDirectory(join(root, 'skills'), true)
   await validateRestoredTools(root)
+  PreferenceMemoryStore.validateDirectory(root)
   const catalog = getAgentCatalogFile(root)
   const conversationIds = AgentStorage.validateCatalogBackup(catalog, projectIds)
   const locations = new Map<string, string>()

@@ -4,7 +4,8 @@ import fs from 'stubborn-fs'
 import { shouldSkipBackupRelativePath } from './backupArchive'
 
 export const executionResetEntries = [
-  'db/catalog.sqlite', 'db/catalog.sqlite-wal', 'db/catalog.sqlite-shm', 'db/catalog.sqlite-journal'
+  'db/catalog.sqlite', 'db/catalog.sqlite-wal', 'db/catalog.sqlite-shm', 'db/catalog.sqlite-journal',
+  'db/memory.sqlite', 'db/memory.sqlite-wal', 'db/memory.sqlite-shm', 'db/memory.sqlite-journal'
 ] as const
 export const projectResetEntries = [
   'db/projects', 'db/project-write.json', 'db/project-deletion.json', 'db/project-deletion.stage.json', ...executionResetEntries

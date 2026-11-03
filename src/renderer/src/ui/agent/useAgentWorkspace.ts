@@ -1,3 +1,4 @@
+import { dispatchWorkspaceAction } from './workspaceDispatch'
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -261,7 +262,7 @@ export function useAgentWorkspace({ onAppError }: UseAgentWorkspaceOptions) {
     if (sameWorkspaceState(workspaceStateRef.current, state)) return
     workspaceStateRef.current = state
     setWorkspaceState(state)
-    void window.gale.agent.workspace.set(state)
+    void dispatchWorkspaceAction(() => window.gale.agent.workspace.set(state))
       .catch(() => {
         if (sameWorkspaceState(workspaceStateRef.current, state)) {
           workspaceStateRef.current = undefined
@@ -629,8 +630,7 @@ export function useAgentWorkspace({ onAppError }: UseAgentWorkspaceOptions) {
     const thread = activeThreadId
       ? threads.find((item) => item.id === activeThreadId)
       : undefined
-    if (thread) await loadThreadSnapshot(thread.id)
-    const submission = await window.gale.agent.runs.submit({
+    const submission = await dispatchWorkspaceAction(() => window.gale.agent.runs.submit({
       requestId: globalThis.crypto.randomUUID(),
       ...(thread
         ? { threadId: thread.id }
@@ -647,7 +647,7 @@ export function useAgentWorkspace({ onAppError }: UseAgentWorkspaceOptions) {
       displayText: displayText === text ? undefined : displayText,
       ...(review ? { review } : {}),
       attachments: attachments.map(selectedAttachmentInput)
-    })
+    }), thread ? () => loadThreadSnapshot(thread.id) : undefined)
     if (!thread) {
       threadProjectionRevisionRef.current += 1
       setThreads((current) => current.some((item) => item.id === submission.thread.id)

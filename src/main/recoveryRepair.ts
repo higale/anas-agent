@@ -2,7 +2,8 @@ import { normalizeSubagentPackageSettings } from '@shared/subagentPackages'
 import { compressionPromptError } from '@shared/summaryPrompt'
 import { requireDataVersion } from '@shared/dataVersion'
 import { UI_FONT_SIZE_MAX, UI_FONT_SIZE_MIN } from '@shared/uiPreferences'
-import { lstat, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
+import { copyFile, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import settingsDefaults from '../../data/config/settings.json'
@@ -14,10 +15,11 @@ import capabilityDefaults from '../../data/config/capabilities.json'
 import { normalizeToolSettings } from '@shared/toolPackages'
 import toolsDefaults from '../../data/config/tools.json'
 import projectDefaultsDocument from '../../data/config/projects.json'
-import { parseCapabilities, serializeCapabilities } from '@shared/agentCapabilities'
+import { defaultCapabilities, parseCapabilities, serializeCapabilities } from '@shared/agentCapabilities'
 import { errorDetail, recoverableAuxiliaryFiles, resettableConfigFiles, type RecoveryFile, type RecoveryFileStatus, type RecoveryRepairResult } from '@shared/recovery'
 import { parseInputHistoryStore } from './inputHistoryStore'
 import { inspectAvatarRepair, repairAvatarData } from './recoveryAvatar'
+import { PreferenceMemoryStore } from './agent/preferenceMemoryStore'
 import { samePath } from './pathContainment'
 import { normalizeAppConfigSnapshot } from './config/appConfig'
 import type { RawAppConfig } from './config/rawAppConfig'
@@ -31,7 +33,7 @@ import { validateExecutionStorageDirectory } from './executionStorageValidation'
 const { version: _projectDefaultsVersion, ...projectDefaults } = projectDefaultsDocument
 type RecordValue = Record<string, unknown>
 const isObject = (value: unknown): value is RecordValue => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-const projectCapabilityDefaults = serializeCapabilities(parseCapabilities(capabilityDefaults))
+const projectCapabilityDefaults = serializeCapabilities(defaultCapabilities)
 const templates: Record<string, unknown> = {
   'settings.json': settingsDefaults,
   // Provider/model defaults belong to the bundled creation template, not the
@@ -260,6 +262,24 @@ async function readRepairFile(path: string): Promise<string | undefined> {
   }
 }
 
+async function inspectMemoryWithoutProjects(root: string): Promise<void> {
+  // A read-only SQLite open can still create WAL bookkeeping. Inspect only copies.
+  const staged = await mkdtemp(join(tmpdir(), 'anas-memory-repair-check-'))
+  try {
+    await mkdir(join(staged, 'db'))
+    for (const name of ['memory.sqlite', 'memory.sqlite-wal', 'memory.sqlite-shm', 'memory.sqlite-journal', 'MEMORY.md']) {
+      const source = join(root, 'db', name)
+      const info = await lstat(source).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ENOENT') throw error
+      })
+      if (!info) continue
+      if (!info.isFile()) throw new Error(`Expected a regular preference memory file: ${source}`)
+      await copyFile(source, join(staged, 'db', name))
+    }
+    PreferenceMemoryStore.validateDirectory(staged)
+  } finally { await rm(staged, { recursive: true, force: true }) }
+}
+
 export async function inspectRecoveryRepair(dataDir: string): Promise<RecoveryRepairPlan> {
   const root = await realpath(dataDir)
   const plan: RecoveryRepairPlan = { candidates: [], issues: [], files: [] }
@@ -289,6 +309,7 @@ export async function inspectRecoveryRepair(dataDir: string): Promise<RecoveryRe
       if (before === undefined && auxiliary) continue
       if (before === undefined && file === 'projects.json') {
         await validateExecutionStorageDirectory(root, { requireEmptyConversations: true })
+        await inspectMemoryWithoutProjects(root)
         continue
       }
       const repaired = repairDocument(file, before === undefined ? {} : JSON.parse(before))

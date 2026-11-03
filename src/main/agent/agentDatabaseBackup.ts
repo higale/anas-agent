@@ -37,7 +37,14 @@ export async function snapshotAgentStorage(
   sourceDataDir: string,
   destinationDataDir: string
 ): Promise<AgentDatabaseSnapshotFile[]> {
-  return withApplicationDataSnapshot(() => copyAgentStorage(sourceDataDir, destinationDataDir))
+  return withApplicationDataSnapshot(async () => {
+    const snapshots = await copyAgentStorage(sourceDataDir, destinationDataDir)
+    const file = join(destinationDataDir, 'db', 'memory.sqlite')
+    if (await snapshotAgentDatabase(join(sourceDataDir, 'db', 'memory.sqlite'), file)) snapshots.push({
+      absPath: file, relPath: 'db/memory.sqlite', size: (await stat(file)).size
+    })
+    return snapshots
+  })
 }
 
 async function copyAgentStorage(sourceDataDir: string, destinationDataDir: string): Promise<AgentDatabaseSnapshotFile[]> {

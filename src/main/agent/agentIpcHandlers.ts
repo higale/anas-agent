@@ -5,6 +5,7 @@ import { codeReviewRequestSchema } from '@shared/codeReview'
 import type { BuiltinPanel } from '@shared/panels'
 import type { IpcMainInvokeEvent, WebContents } from 'electron'
 import { z } from 'zod/v3'
+import { withApplicationDataMutation } from '../applicationDataSnapshot'
 import { GitReadError, type GitReadErrorCode, type GitReadResponse } from '@shared/gitChanges'
 import { queryGitChanges, readGitContents, queryGitReferences } from '../gitChanges'
 import { ChangeReadLane } from '../changeReadLane'
@@ -60,15 +61,11 @@ import {
   createAgentRunSubmissionExecutionInput,
   normalizeAgentRunSubmissionId
 } from './agentRunInput'
-import { findResolvedModelConfig, getAppConfigSnapshot } from '../config/appConfig'
+import { findResolvedModelConfig, getAppConfigSnapshot, onAppConfigChanged } from '../config/appConfig'
 import { runtimeLog } from '../runtimeLogger'
 import { getProject, recoverProjectDeletion, reorderSidebar } from '../projectStore'
 import type { SidebarReorderRequest } from '@shared/sidebarOrder'
 import type {
-  MemoryItem,
-  MemorySaveRequest,
-  MemorySearchRequest,
-  MemorySearchResult,
   ProjectDeleteResult
 } from '@shared/types'
 import { handleMainIpc } from '../ipcSecurity'
@@ -120,7 +117,12 @@ function currentDatabase(threadId?: string): AgentApplicationReadModel {
 }
 
 function currentRuntime(): NativeRuntimeCoordinator {
-  if (!runtime) runtime = new NativeRuntimeCoordinator(currentStorage(), { push: publishAgentEvent })
+  if (!runtime) {
+    runtime = new NativeRuntimeCoordinator(currentStorage(), { push: publishAgentEvent })
+    runtime.onMemoryChanged = () => {
+      for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('memory:changed')
+    }
+  }
   return runtime
 }
 
@@ -411,7 +413,7 @@ function beginAgentRuntimeClose(timeoutMs: number): Promise<boolean> {
 }
 
 export function validatePanelContext(content: BuiltinPanel): void {
-  if (content.kind === 'document' || !content.threadId) return
+  if (content.kind === 'document' || content.kind === 'memory' || content.kind === 'projectMemory' || !content.threadId) return
   withConversationLeaseScope(() => {
     const database = currentDatabase(content.threadId!)
     const thread = database.getThread(content.threadId!)
@@ -422,6 +424,17 @@ export function validatePanelContext(content: BuiltinPanel): void {
 }
 
 export function registerAgentIpcHandlers(): void {
+  onAppConfigChanged(({ snapshot }) => runtime?.memory.settingsChanged(snapshot))
+  const preferenceScope = z.discriminatedUnion('kind', [z.object({ kind: z.literal('global') }).strict(),
+    z.object({ kind: z.literal('project'), projectId: z.string().min(1).max(200) }).strict()])
+  handleAgentIpc('memory:activity', () => currentRuntime().memory.snapshot())
+  handleAgentIpc('memory:document:read', (_event, value: unknown) => currentStorage().preferences.read(preferenceScope.parse(value)))
+  handleAgentIpc('memory:document:save', (_event, value: unknown, hash: string, content: string) =>
+    enqueueWorkspaceMutation(() => withApplicationDataMutation(async () => {
+      const scope = preferenceScope.parse(value)
+      if (scope.kind === 'project' && (await getProject(scope.projectId)).kind !== 'workspace') throw new Error('Project memory requires a workspace project.')
+      return currentStorage().preferences.save(scope, hash, content)
+    })))
   const userInputClients = new WeakSet<WebContents>()
   handleAgentIpc('agent:userInput:list', (event) => {
     const sender = event.sender
@@ -447,27 +460,7 @@ export function registerAgentIpcHandlers(): void {
     event,
     request: AgentEventSubscriptionRequest = {}
   ): AgentEventSubscription => subscribeAgentEvents(event.sender, request))
-  handleAgentIpc('memory:search', (
-    _event,
-    request: MemorySearchRequest = {}
-  ): Promise<MemorySearchResult> => currentRuntime().useStorage((storage) => storage.memoryStore.searchMemories(request)))
-  handleAgentIpc('memory:save', async (
-    _event,
-    request: MemorySaveRequest
-  ): Promise<MemoryItem> => enqueueWorkspaceMutation(async () => {
-    if (request.scope === 'project') {
-      if (!request.projectId) throw new Error('Project memories require a project ID.')
-      await getProject(request.projectId)
-    }
-    return currentRuntime().useStorage((storage) => storage.memoryStore.saveMemory(request, { origin: 'user' }))
-  }))
-  handleAgentIpc('memory:delete', (
-    _event,
-    id: string
-  ): Promise<void> => currentRuntime().useStorage((storage) => storage.memoryStore.deleteMemory(id)))
-  handleAgentIpc('memory:clear', (): Promise<number> => (
-    enqueueWorkspaceMutation(async () => currentRuntime().clearMemories())
-  ))
+  handleAgentIpc('memory:clear', () => enqueueWorkspaceMutation(() => currentRuntime().memory.clear()))
   handleAgentIpc('agent:workspace:get', (): AgentWorkspaceState => (
     currentStorage().getWorkspaceState()
   ))
@@ -577,7 +570,7 @@ export function registerAgentIpcHandlers(): void {
   handleAgentIpc('agent:queuedInputs:enqueue', (
     _event,
     input: AgentQueuedInputCreate
-  ): Promise<AgentQueuedInput> => currentRuntime().enqueueQueuedInput(input))
+  ): Promise<AgentQueuedInput> => pendingWorkspaceMutations.then(() => currentRuntime().enqueueQueuedInput(input)))
   handleAgentIpc('agent:queuedInputs:remove', (
     _event,
     threadId: string,
@@ -736,6 +729,7 @@ export function registerAgentIpcHandlers(): void {
     const submit = async (): Promise<AgentRunSubmission> => {
       const existing = currentRuntime().getRunSubmission(submissionId)
       if (existing) return existing
+      const confirmSpeech = input.threadId ? currentStorage().captureWorkspaceSpeech(input.threadId) : undefined
       const config = await getAppConfigSnapshot()
       const thread = input.threadId ? currentDatabase(input.threadId).getThread(input.threadId) : undefined
       if (input.threadId && !thread) throw new Error(`Thread ${input.threadId} was not found.`)
@@ -774,7 +768,7 @@ export function registerAgentIpcHandlers(): void {
         delete executionInput.displayText
       }
       subscribeAgentEvents(event.sender)
-      const result = await currentRuntime().submitRunWithAttachments(executionInput)
+      const result = await currentRuntime().submitRunWithAttachments(executionInput, confirmSpeech)
       return {
         thread: result.thread,
         run: result.run,
@@ -783,7 +777,7 @@ export function registerAgentIpcHandlers(): void {
     }
     const submission = input.newThread
       ? enqueueWorkspaceMutation(submit)
-      : submit()
+      : pendingWorkspaceMutations.then(submit)
     pendingRunSubmissions.set(submissionId, submission)
     try {
       return await submission
@@ -935,6 +929,7 @@ export async function initializeAgentRuntime(): Promise<void> {
     agentRuntimeCloseAttempt = undefined
   }
   await currentRuntime().waitForStartupCleanup()
+  currentRuntime().memory.start()
 }
 
 export async function recoverPendingProjectDeletion(): Promise<boolean> {
@@ -949,7 +944,7 @@ export async function deleteProjectLifecycle(projectId: string): Promise<Project
   return enqueueWorkspaceMutation(async () => {
     await recoverPendingProjectDeletion()
     const result = await currentRuntime().deleteProject(projectId)
-    panelPages.closeWhere(content => (content.kind === 'files' || content.kind === 'subagent') && content.projectId === projectId)
+    panelPages.closeWhere(content => 'projectId' in content && content.projectId === projectId)
     return result
   })
 }

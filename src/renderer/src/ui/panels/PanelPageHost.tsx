@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { panelIdentity, workspacePanelScope } from '@shared/panels'
 import type { PanelPageApi, PanelPageContext, PanelJson } from '@shared/panelLifecycle'
-import { createPanelReadiness, PanelViewState } from '../agent/PanelViewState'
+import { createPanelReadiness, PanelViewState, type PanelCheckpoint } from '../agent/PanelViewState'
 import { BuiltinPanelContent } from './BuiltinPanelContent'
 import { PluginPage } from './PluginPage'
 import { notice } from '../notice'
@@ -19,7 +19,7 @@ function BuiltinPage({ context, api }: { context: PanelPageContext; api: PanelPa
   else if (store.current.scope !== scope) store.current = { scope, state: new Map() }
   const state = store.current.state
   const [readiness] = useState(createPanelReadiness)
-  const [checkpoints] = useState(() => new Set<() => void | Promise<void>>())
+  const [checkpoints] = useState(() => new Set<PanelCheckpoint>())
   const root = useRef<HTMLDivElement>(null)
   useEffect(() => {
     let alive = true
@@ -34,8 +34,12 @@ function BuiltinPage({ context, api }: { context: PanelPageContext; api: PanelPa
           // Flush focused controls before capturing their latest values.
           if (root.current?.contains(document.activeElement)) (document.activeElement as HTMLElement).blur()
           await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
-          await Promise.all([...checkpoints].map(save => save()))
+          await Promise.all([...checkpoints].map(save => save('move')))
           result = snapshotViewState(state)
+        } else if (content.kind === 'projectMemory' && command.kind === 'dispose' && typeof command.payload === 'object' && command.payload
+          && 'reason' in command.payload && command.payload.reason === 'closed') {
+          const checks = await Promise.all([...checkpoints].map(save => save('close')))
+          if (checks.includes(false)) result = 'keep-open'
         }
         if (alive && !request.cancelled) await api.complete(context.pageId, command.requestId, result, false)
       })().catch(() => { if (alive && !request.cancelled) void api.complete(context.pageId, command.requestId, null, true).catch(() => undefined) })
@@ -48,7 +52,7 @@ function BuiltinPage({ context, api }: { context: PanelPageContext; api: PanelPa
       void (failed ? api.failed(context.pageId) : api.ready(context.pageId)).catch(() => undefined)
     })
     return () => { alive = false; stopReady(); stopCommand(); stopCancel() }
-  }, [api, context.pageId, state, checkpoints, readiness])
+  }, [api, context.pageId, content.kind, state, checkpoints, readiness])
   return <div ref={root} className="panel-content-root"><PanelViewState key={scope} state={state} checkpoints={checkpoints} readiness={readiness}>
     <BuiltinPanelContent state={context} />
   </PanelViewState></div>

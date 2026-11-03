@@ -5,6 +5,7 @@ vi.mock('../config/dataDir', () => ({ getDataDir: () => '/isolated-agent-ipc-dat
 
 function runtimeForStorage<T extends object>(storage: { conversationForThread: (threadId: string) => object }, runtime: T) {
   return Object.assign(runtime, {
+    memory: { settingsChanged: vi.fn(), start: vi.fn() },
     databaseForThread: storage.conversationForThread,
     storageForOperation: () => storage,
     useStorage: (operation: (storage: object) => unknown) => operation(storage)
@@ -13,7 +14,7 @@ function runtimeForStorage<T extends object>(storage: { conversationForThread: (
 
 function conversationStorage<T extends object>(database: T) {
   const connection = { ...database, readModel: database, resources: database }
-  return { ...database, conversationForThread: () => connection, conversationForRun: () => connection, previewDatabase: () => connection }
+  return { ...database, captureWorkspaceSpeech: () => null, conversationForThread: () => connection, conversationForRun: () => connection, previewDatabase: () => connection }
 }
 
 afterEach(() => {
@@ -42,7 +43,7 @@ describe('agent IPC recovery', () => {
           startCompression: dispatch, recoverRun: dispatch, resumeRun: dispatch, regenerateMessage: dispatch })
       }) }))
       vi.doMock('../projectStore', () => ({ getProject: async () => ({ kind: 'workspace' }), recoverProjectDeletion: vi.fn() }))
-      vi.doMock('../config/appConfig', () => ({ getAppConfigSnapshot: async () => ({}), findResolvedModelConfig: () => ({ id: 'model', capabilities: {} }) }))
+      vi.doMock('../config/appConfig', () => ({ onAppConfigChanged: vi.fn(), getAppConfigSnapshot: async () => ({}), findResolvedModelConfig: () => ({ id: 'model', capabilities: {} }) }))
       vi.doMock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
       const module = await import('./agentIpcHandlers')
       module.registerAgentIpcHandlers()
@@ -80,7 +81,7 @@ describe('agent IPC recovery', () => {
     vi.doMock('../ipcSecurity', () => ({ handleMainIpc: handle }))
     vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: vi.fn(() => conversationStorage(database)) } }))
     vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, runtime) }) }))
-    vi.doMock('../config/appConfig', () => ({ getAppConfigSnapshot: vi.fn(async () => ({ defaultModelId: 'model' })), findResolvedModelConfig }))
+    vi.doMock('../config/appConfig', () => ({ onAppConfigChanged: vi.fn(), getAppConfigSnapshot: vi.fn(async () => ({ defaultModelId: 'model' })), findResolvedModelConfig }))
     vi.doMock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
     const module = await import('./agentIpcHandlers')
     module.registerAgentIpcHandlers()
@@ -108,7 +109,7 @@ describe('agent IPC recovery', () => {
     vi.doMock('../ipcSecurity', () => ({ handleMainIpc: handle }))
     vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: vi.fn(() => conversationStorage(database)) } }))
     vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, { loadActivityPage }) }) }))
-    vi.doMock('../config/appConfig', () => ({ getAppConfigSnapshot: vi.fn(), findResolvedModelConfig: vi.fn() }))
+    vi.doMock('../config/appConfig', () => ({ onAppConfigChanged: vi.fn(), getAppConfigSnapshot: vi.fn(), findResolvedModelConfig: vi.fn() }))
     vi.doMock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
     const module = await import('./agentIpcHandlers')
     module.registerAgentIpcHandlers()
@@ -144,7 +145,7 @@ describe('agent IPC recovery', () => {
     vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: vi.fn(() => conversationStorage(database)) } }))
     vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, runtime) }) }))
     vi.doMock('./codeReview', () => ({ captureCodeReview: capture, codeReviewPrompt: () => 'main-owned review prompt' }))
-    vi.doMock('../config/appConfig', () => ({ getAppConfigSnapshot: vi.fn(async () => ({})), findResolvedModelConfig: vi.fn(() => ({ id: 'model', capabilities: { toolUse: true } })) }))
+    vi.doMock('../config/appConfig', () => ({ onAppConfigChanged: vi.fn(), getAppConfigSnapshot: vi.fn(async () => ({})), findResolvedModelConfig: vi.fn(() => ({ id: 'model', capabilities: { toolUse: true } })) }))
     vi.doMock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
     try {
       const module = await import('./agentIpcHandlers')
@@ -156,7 +157,7 @@ describe('agent IPC recovery', () => {
       await expect(submit(event, input)).resolves.toEqual(result)
       await expect(submit(event, input)).resolves.toEqual(result)
       expect(capture).toHaveBeenCalledExactlyOnceWith(database, review, 'project')
-      expect(runtime.submitRunWithAttachments).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ codeReview: scope, text: 'main-owned review prompt' }))
+      expect(runtime.submitRunWithAttachments).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ codeReview: scope, text: 'main-owned review prompt' }), null)
       expect(runtime.submitRunWithAttachments).not.toHaveBeenCalledWith(expect.objectContaining({ displayText: expect.any(String) }))
     } finally { vi.doUnmock('./codeReview') }
   })
@@ -171,7 +172,7 @@ describe('agent IPC recovery', () => {
     vi.doMock('../projectStore', () => ({ getProject, recoverProjectDeletion: vi.fn() }))
     vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: vi.fn() } }))
     vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, {}) }) }))
-    vi.doMock('../config/appConfig', () => ({ getAppConfigSnapshot: vi.fn(), findResolvedModelConfig: vi.fn() }))
+    vi.doMock('../config/appConfig', () => ({ onAppConfigChanged: vi.fn(), getAppConfigSnapshot: vi.fn(), findResolvedModelConfig: vi.fn() }))
     vi.doMock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
     const module = await import('./agentIpcHandlers')
     module.registerAgentIpcHandlers()
@@ -203,7 +204,7 @@ describe('agent IPC recovery', () => {
     vi.doMock('../ipcSecurity', () => ({ handleMainIpc: handle }))
     vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: vi.fn(() => conversationStorage(database)) } }))
     vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, {}) }) }))
-    vi.doMock('../config/appConfig', () => ({ getAppConfigSnapshot: vi.fn(), findResolvedModelConfig: vi.fn() }))
+    vi.doMock('../config/appConfig', () => ({ onAppConfigChanged: vi.fn(), getAppConfigSnapshot: vi.fn(), findResolvedModelConfig: vi.fn() }))
     vi.doMock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
     const module = await import('./agentIpcHandlers')
     module.registerAgentIpcHandlers()
@@ -241,7 +242,7 @@ describe('agent IPC recovery', () => {
     vi.doMock('../ipcSecurity', () => ({ handleMainIpc: handle }))
     vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: vi.fn(() => conversationStorage(database)) } }))
     vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, {}) }) }))
-    vi.doMock('../config/appConfig', () => ({
+    vi.doMock('../config/appConfig', () => ({ onAppConfigChanged: vi.fn(),
       getAppConfigSnapshot: vi.fn(),
       findResolvedModelConfig: vi.fn()
     }))
@@ -354,7 +355,7 @@ describe('agent IPC recovery', () => {
     vi.doMock('../ipcSecurity', () => ({ handleMainIpc: handle }))
     vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: vi.fn(() => conversationStorage(database)) } }))
     vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: AgentRuntime }))
-    vi.doMock('../config/appConfig', () => ({
+    vi.doMock('../config/appConfig', () => ({ onAppConfigChanged: vi.fn(),
       getAppConfigSnapshot,
       findResolvedModelConfig
     }))
@@ -384,7 +385,7 @@ describe('agent IPC recovery', () => {
         modelConfigId: 'model-1',
         modelParameterPresetId: 'thinking-on'
       })
-    }))
+    }), undefined)
     await vi.waitFor(() => expect(firstSender.send).toHaveBeenCalledOnce())
     expect(firstSender.send).toHaveBeenCalledWith(
       'agent:event',
@@ -464,7 +465,7 @@ describe('agent IPC recovery', () => {
     vi.doMock('./nativeRuntimeCoordinator', () => ({
       NativeRuntimeCoordinator: vi.fn(function AgentRuntimeMock(storage, sink) { publish = sink.push; return runtimeForStorage(storage, runtime) })
     }))
-    vi.doMock('../config/appConfig', () => ({
+    vi.doMock('../config/appConfig', () => ({ onAppConfigChanged: vi.fn(),
       getAppConfigSnapshot: vi.fn(),
       findResolvedModelConfig: vi.fn()
     }))
@@ -662,7 +663,7 @@ describe('agent IPC recovery', () => {
     vi.doMock('./nativeRuntimeCoordinator', () => ({
       NativeRuntimeCoordinator: vi.fn(function AgentRuntimeMock(storage, sink) { publish = sink.push; return runtimeForStorage(storage, runtime) })
     }))
-    vi.doMock('../config/appConfig', () => ({
+    vi.doMock('../config/appConfig', () => ({ onAppConfigChanged: vi.fn(),
       getAppConfigSnapshot: vi.fn(),
       findResolvedModelConfig: vi.fn()
     }))
@@ -785,7 +786,7 @@ describe('agent IPC recovery', () => {
         return runtimeForStorage(storage, runtime)
       })
     }))
-    vi.doMock('../config/appConfig', () => ({
+    vi.doMock('../config/appConfig', () => ({ onAppConfigChanged: vi.fn(),
       getAppConfigSnapshot,
       findResolvedModelConfig
     }))
@@ -844,7 +845,7 @@ describe('agent IPC recovery', () => {
     vi.doMock('../ipcSecurity', () => ({ handleMainIpc: handle }))
     vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: () => conversationStorage(open()) } }))
     vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: AgentRuntime }))
-    vi.doMock('../config/appConfig', () => ({
+    vi.doMock('../config/appConfig', () => ({ onAppConfigChanged: vi.fn(),
       getAppConfigSnapshot: vi.fn(),
       findResolvedModelConfig: vi.fn()
     }))
@@ -922,7 +923,7 @@ describe('agent IPC recovery', () => {
     }))
     vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: vi.fn() } }))
     vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, {}) }) }))
-    vi.doMock('../config/appConfig', () => ({
+    vi.doMock('../config/appConfig', () => ({ onAppConfigChanged: vi.fn(),
       getAppConfigSnapshot: vi.fn(),
       findResolvedModelConfig: vi.fn()
     }))

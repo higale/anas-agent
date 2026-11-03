@@ -6,14 +6,15 @@ import { UI_ICON_SIZE_SMALL } from './uiConstants'
 
 export type CapabilityMode = 'all' | 'custom' | 'off'
 
-export function CapabilitySection({ label, title, count, mode, disabled = false, reason, onChange, children }: {
-  label: string; title?: ReactNode; count?: ReactNode; mode: CapabilityMode; disabled?: boolean; reason?: string
+export function CapabilitySection({ label, title, customCount, total, countSuffix, mode, disabled = false, reason, onChange, children }: {
+  label: string; title?: ReactNode; customCount: number; total: number; countSuffix?: ReactNode; mode: CapabilityMode; disabled?: boolean; reason?: string
   onChange(mode: CapabilityMode): void; children: ReactNode
 }) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
   const contentId = useId()
-  const heading = <>{title ?? <span>{label}</span>}{count !== undefined && <small>{count}</small>}
+  const selected = mode === 'all' ? total : mode === 'off' ? 0 : customCount
+  const heading = <>{title ?? <span>{label}</span>}<small>{selected}/{total}{countSuffix}</small>
     {reason && <span className="ui-badge" data-tooltip={reason}>{t('capabilities.inactive')}</span>}</>
   return <section className="ui-form-section ui-capability-section" aria-label={label}>
     <div className="ui-form-row ui-form-row-inline">

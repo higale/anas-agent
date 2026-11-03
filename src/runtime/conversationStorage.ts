@@ -19,7 +19,7 @@ const sourceKeys: Record<keyof NonNullable<ConversationMessage['source']>, strin
 const contextKeys: Record<keyof NonNullable<ConversationMessage['context']>, string> = {
   runId: 'run_id', createdAt: 'created_at', displayText: 'display_text', directionAfterCallIds: 'direction_after_call_ids',
   skill: 'skill', reviewScope: 'review_scope', reviewReport: 'review_report', summaryId: 'summary_id', summary: 'summary',
-  modelContextKey: 'model_context_key', requestKey: 'request_key', projectRulesReceipt: 'project_rules_receipt',
+  modelContextKey: 'model_context_key', requestKey: 'request_key', projectRulesReceipt: 'project_rules_receipt', memoryWriteSource: 'memory_write_source',
   attachmentProjection: 'attachment_projection', attachmentBlockCount: 'attachment_block_count', unrecordedResult: 'unrecorded_result', resultWithheld: 'result_withheld'
 }
 
@@ -74,6 +74,14 @@ function validate(value: unknown): asserts value is ConversationMessage {
   }
   if (message.context !== undefined) {
     const context = record(message.context)
+    if (context.memoryWriteSource !== undefined) {
+      const source = record(context.memoryWriteSource)
+      if (typeof source.generation !== 'string' || typeof source.recordId !== 'string') invalid('invalid memory write source')
+      if (source.documentHashes !== undefined) {
+        const hashes = record(source.documentHashes)
+        if (typeof hashes.global !== 'string' || typeof hashes.project !== 'string') invalid('invalid memory document hashes')
+      }
+    }
     if (context.resultWithheld !== undefined && typeof context.resultWithheld !== 'boolean') invalid('invalid result withheld flag')
   }
   // Usage and context evidence are retained as reported, including unknown or

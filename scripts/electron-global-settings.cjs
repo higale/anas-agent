@@ -49,6 +49,7 @@ async function verifyGlobalSettings(launchApplication) {
       ipcMain.handle('projects:chooseSourceFolders', () => ({ status: 'ok', value: [extraFolder] }))
     }, extraFolder)
     await page.reload()
+    let globalPreferences = ''
     for (const name of projectNames) {
       await page.locator('.project-thread-group').filter({ has: page.locator('.project-thread-label', { hasText: name }) })
         .locator('.project-thread-new-chat').click()
@@ -72,9 +73,14 @@ async function verifyGlobalSettings(launchApplication) {
       await page.locator('[data-settings-tab="general"]').click()
       await expect(page.getByRole('heading', { name: 'General', exact: true })).toBeVisible()
       await expect(page.locator('[data-settings-tab="appearance"], [data-settings-tab="localData"]')).toHaveCount(0)
-      for (const heading of ['Assistant profile', 'User profile', 'Appearance', 'Data management']) {
+      for (const heading of ['Assistant profile', 'Appearance', 'Data management']) {
         await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible()
       }
+      await expect(page.getByRole('heading', { name: 'User profile', exact: true })).toHaveCount(0)
+      const instructions = page.locator('#assistant-instructions-input')
+      await instructions.fill('Use concise examples.')
+      await instructions.blur()
+      await expect.poll(() => page.evaluate(async () => (await globalThis.gale.config.get()).settings.profile.assistant.instructions)).toBe('Use concise examples.')
       const assistantName = `Assistant for ${name}`
       await page.getByRole('textbox', { name: 'Name', exact: true }).fill(assistantName)
       await page.getByRole('textbox', { name: 'Name', exact: true }).blur()
@@ -100,19 +106,20 @@ async function verifyGlobalSettings(launchApplication) {
       await expect(page.locator('.settings-skill-tree')).not.toContainText('project-search')
       await expect(page.locator('.settings-skill-tree')).not.toContainText('Project')
       await page.locator('[data-settings-tab="memory"]').click()
-      await page.getByRole('button', { name: 'New memory', exact: true }).click()
-      const editor = page.locator('.settings-memory-editor')
-      await expect(editor.getByRole('combobox', { name: 'Scope', exact: true })).toHaveValue('Global')
-      await editor.locator('textarea').fill(`Memory from ${name}`)
+      const memory = page.locator('.settings-global-memory')
+      if (globalPreferences) await expect(memory).toContainText(globalPreferences)
+      await memory.getByRole('button', { name: 'Edit', exact: true }).click()
+      const editor = memory.getByRole('region', { name: 'MEMORY.md' })
+      await editor.locator('.monaco-editor .view-lines').click()
+      await page.keyboard.press('ControlOrMeta+a')
+      globalPreferences = [globalPreferences, `Memory from ${name}`].filter(Boolean).join('\n')
+      await page.keyboard.insertText(globalPreferences)
       await editor.getByRole('button', { name: 'Save', exact: true }).click()
-      await expect.poll(() => page.evaluate(async (name) => (await globalThis.gale.memory.search()).items
-        .some((item) => item.content === `Memory from ${name}` && item.scope === 'global' && !item.projectId), name)).toBe(true)
+      await expect.poll(() => page.evaluate(async () => (await globalThis.gale.preferences.read({ kind: 'global' })).content.split(/\r?\n/))).toEqual(globalPreferences.split('\n'))
       if (process.env.ANAS_E2E_GLOBAL_SETTINGS_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_GLOBAL_SETTINGS_SCREENSHOT })
       await page.getByRole('button', { name: 'Back to app', exact: true }).click()
     }
     assert.equal(await application.evaluate(() => globalThis.__globalSettingsReloads), 2)
-    const memories = await page.evaluate(() => globalThis.gale.memory.search())
-    assert.equal(memories.total, 2)
     console.log('Global settings E2E passed: unified General page with profile/theme saves and cleanup access, project-independent pages, global skills and memories, MCP without a model, and project composer skills including edited source folders.')
   } finally {
     await application?.close()

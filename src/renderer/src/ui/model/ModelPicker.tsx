@@ -1,5 +1,5 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { Check, Settings2, Star } from 'lucide-react'
+import { Check, ChevronDown, Settings2, Star } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
 import { findProviderModelConfig, isSelectableModelConfig, resolveProviderModelConfig } from '@shared/modelConfig'
@@ -14,6 +14,7 @@ interface ModelPickerProps {
   providers: ModelProviderConfig[] | undefined
   selectedId?: string
   emptyLabel?: string
+  standalone?: { label: string; description: string }
   clearLabel?: string
   defaultModelId?: string
   disabled: boolean
@@ -39,6 +40,7 @@ export function ModelPicker({
   providers: configuredProviders,
   selectedId,
   emptyLabel,
+  standalone,
   clearLabel,
   defaultModelId,
   disabled,
@@ -161,21 +163,23 @@ export function ModelPicker({
     >
       <Trigger asChild disabled={disabled}>
         <TriggerButton
-          className="composer-model-trigger composer-model-segment"
+          className={standalone ? 'ui-button' : 'composer-model-trigger composer-model-segment'}
           type="button"
           disabled={disabled}
-          aria-label={t('chat.select_model')}
-          data-tooltip={open ? undefined : summary}
+          aria-label={standalone ? `${standalone.label} · ${label}` : t('chat.select_model')}
+          aria-description={standalone?.description}
+          data-tooltip={open ? undefined : standalone ? `${standalone.label}\n${summary}` : summary}
         >
           <span className="ui-truncate">{label}</span>
+          {standalone && <ChevronDown size={14} aria-hidden="true" />}
         </TriggerButton>
       </Trigger>
       <DropdownMenu.Portal>
         <DropdownMenuContent
           restoreFocus={!focusRef}
           className="composer-model-menu ui-menu ui-menu-list"
-          side="top"
-          align="center"
+          side={standalone ? 'bottom' : 'top'}
+          align={standalone ? 'end' : 'center'}
           sideOffset={7}
           collisionPadding={10}
           onPointerDownCapture={(event) => {

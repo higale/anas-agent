@@ -9,7 +9,7 @@ import type { AgentRunActivity } from '@shared/agentTypes'
 import type { SubagentConfig } from '@shared/types'
 import { describe, expect, it } from 'vitest'
 import { NativeConversationDatabase } from './nativeConversationDatabase'
-import { SqliteMemoryStore } from './memoryStore'
+import { SqliteMemoryStore } from '../../test/legacyMemoryFixture'
 import { FileEditStore } from '../fileEditStore'
 
 function fixture() {

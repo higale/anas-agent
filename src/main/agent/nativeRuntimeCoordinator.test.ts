@@ -1,3 +1,5 @@
+import { legacyMemory } from '../../test/legacyMemoryFixture'
+import Database from 'better-sqlite3'
 import { defaultCapabilities } from '../../shared/agentCapabilities'
 import type { ExecutionToolCall } from '../../runtime/executionState'
 import { toolEffectArtifactPurposes } from '../../runtime/toolEffectIdentity'
@@ -11,10 +13,14 @@ import { NativeAgentRuntime } from './nativeAgentRuntime'
 import { NativeConversationDatabase } from './nativeConversationDatabase'
 import { NativeRuntimeCoordinator } from './nativeRuntimeCoordinator'
 import { AgentStorage } from './agentStorage'
-import { getAgentConversationDatabaseFile } from '../config/dataDir'
+import { getAgentCatalogFile, getAgentConversationDatabaseFile } from '../config/dataDir'
 import { conversationExecution, type ConversationExecutionServices } from '../../runtime/conversationExecution'
+import { defaultWorkspaceProject, previewConfig } from '../../test/agentConfigurationFixture'
+import * as appConfig from '../config/appConfig'
+import { listProjects } from '../projectStore'
 
 vi.mock('../projectStore', () => ({
+  listProjects: vi.fn(),
   getProject: vi.fn(async (id: string) => ({ id, kind: 'workspace', sourceFolders: [] })),
   deleteProjectWithThreads: vi.fn(async (_id: string, _threads: string[], commit: (apply: () => void) => void) => commit(() => {}))
 }))
@@ -62,6 +68,111 @@ async function busyRun(database: NativeConversationDatabase, threadId: string, i
 }
 
 describe('conversation runtime routing', () => {
+  it('acknowledges the sending visit even if navigation finishes before the queue write', async () => {
+    const { storage, coordinator } = await fixture()
+    const a = storage.createThread().id, b = storage.createThread().id
+    const trigger = vi.spyOn(coordinator.memory, 'onConversationSpeech').mockResolvedValue()
+    storage.setWorkspaceState({ mode: 'thread', threadId: b })
+    const pending = coordinator.enqueueQueuedInput({ threadId: b, id: randomUUID(), text: 'From B' })
+    storage.setWorkspaceState({ mode: 'thread', threadId: a })
+    await pending
+    expect(trigger.mock.calls).toEqual([[b]])
+    await coordinator.enqueueQueuedInput({ threadId: a, id: randomUUID(), text: 'From A' })
+    expect(trigger.mock.calls).toEqual([[b], [a]])
+  })
+  it('reports queue success and triggers once despite a speech-marker write failure', async () => {
+    const { directory, storage, coordinator } = await fixture()
+    const threadId = storage.createThread().id
+    storage.setWorkspaceState({ mode: 'thread', threadId })
+    const trigger = vi.spyOn(coordinator.memory, 'onConversationSpeech').mockResolvedValue()
+    const db = new Database(getAgentCatalogFile(directory))
+    try {
+      db.exec("CREATE TRIGGER deny_marker BEFORE UPDATE ON agent_workspace_speech BEGIN SELECT RAISE(ABORT,'marker write failed'); END")
+      const id = randomUUID()
+      await expect(coordinator.enqueueQueuedInput({ threadId, id, text: 'Saved once' })).resolves.toMatchObject({ id })
+      expect(storage.conversationForThread(threadId).queue.getQueuedInput(threadId, id)?.text).toBe('Saved once')
+      db.exec('DROP TRIGGER deny_marker')
+      await coordinator.enqueueQueuedInput({ threadId, id: randomUUID(), text: 'Next' })
+      expect(db.prepare('SELECT thread_id FROM agent_workspace_speech').pluck().get()).toBe(threadId)
+      expect(trigger.mock.calls).toEqual([[threadId]])
+    } finally { db.close() }
+  })
+  it('triggers on the first accepted queued message after a switch, including a return visit', async () => {
+    const { storage, coordinator } = await fixture()
+    const a = storage.createThread().id, b = storage.createThread().id
+    const trigger = vi.spyOn(coordinator.memory, 'onConversationSpeech').mockResolvedValue()
+    storage.setWorkspaceState({ mode: 'thread', threadId: a })
+    storage.setWorkspaceState({ mode: 'thread', threadId: b })
+    const first = { threadId: b, id: randomUUID(), text: 'Hello B' }
+    await expect(coordinator.enqueueQueuedInput({ ...first, text: '' })).rejects.toThrow()
+    expect(trigger).not.toHaveBeenCalled()
+    await coordinator.enqueueQueuedInput(first)
+    await coordinator.enqueueQueuedInput({ ...first, id: randomUUID() })
+    expect(trigger.mock.calls).toEqual([[b]])
+    storage.setWorkspaceState({ mode: 'thread', threadId: a })
+    storage.setWorkspaceState({ mode: 'thread', threadId: b })
+    await coordinator.enqueueQueuedInput({ ...first, id: first.id.toUpperCase() })
+    expect(trigger).toHaveBeenCalledOnce()
+    await coordinator.enqueueQueuedInput({ ...first, id: randomUUID() })
+    expect(trigger.mock.calls).toEqual([[b], [b]])
+  })
+  it('stops reading history pages on pause and scans that same revision after resuming', async () => {
+    const project = defaultWorkspaceProject(), config = previewConfig()
+    config.settings.memoryModelId = 'preview-model'
+    vi.spyOn(appConfig, 'getAppConfigSnapshot').mockResolvedValue(config)
+    const { storage, coordinator } = await fixture()
+    const thread = storage.createThread({ title: 'Paged history', projectId: project.id })
+    const { runs } = storage.conversationForThread(thread.id), store = runs.store
+    const owner = { threadId: thread.id, runId: randomUUID() }
+    runs.createRun({ ...owner, operation: 'compression' })
+    store.start({ ...owner, expectedRevisionId: store.readHead(thread.id)?.revisionId, context: { modelCalls: 0, todos: [] },
+      messages: Array.from({ length: 205 }, (_, i) => ({ id: String(i), value: { kind: 'system', content: 'System context' } })) })
+    vi.mocked(listProjects).mockResolvedValue([project])
+    const read = store.readHistoryRange.bind(store)
+    const pages = vi.spyOn(store, 'readHistoryRange').mockImplementationOnce((...args) => {
+      config.settings.memoryModelId = null
+      coordinator.memory.settingsChanged()
+      return read(...args)
+    })
+    coordinator.memory.start()
+    await coordinator.memory.onConversationSpeech('B')
+    expect(pages).toHaveBeenCalledTimes(1)
+    expect(coordinator.memory.snapshot().status).toBe('unconfigured')
+    config.settings.memoryModelId = 'preview-model'
+    coordinator.memory.settingsChanged()
+    pages.mockClear()
+    await coordinator.memory.onConversationSpeech('C')
+    expect(pages.mock.calls.map(([, offset]) => offset)).toEqual([0, 100, 200])
+    pages.mockClear()
+    const enumerate = vi.spyOn(storage, 'listThreads')
+    await coordinator.memory.onConversationSpeech('D')
+    expect(pages).not.toHaveBeenCalled()
+    store.acceptModel({ ...owner, expectedRevisionId: store.readHead(thread.id)!.revisionId },
+      { id: 'new-answer', value: { kind: 'assistant', content: 'One appended message' } }, [], { modelCalls: 1, todos: [] })
+    await coordinator.memory.onConversationSpeech('E')
+    expect(pages.mock.calls.map(([, offset, size]) => [offset, size])).toEqual([[205, 1]])
+    expect(enumerate).not.toHaveBeenCalled()
+  })
+  it('skips deleting chats and retires simple chats without blocking eligible sources', async () => {
+    const project = defaultWorkspaceProject(), config = previewConfig()
+    config.settings.memoryModelId = 'preview-model'
+    const simple = { ...project, id: 'simple', kind: 'simple_chat' as const, prompt: '' }
+    vi.spyOn(appConfig, 'getAppConfigSnapshot').mockResolvedValue(config)
+    vi.mocked(listProjects).mockResolvedValue([project, simple])
+    const { storage, coordinator } = await fixture()
+    const createDirty = (projectId: string) => {
+      const id = storage.createThread({ projectId }).id
+      storage.preferences.markDirty(id)
+      return id
+    }
+    const removing = createDirty(project.id), simpleChat = createDirty(simple.id), eligible = createDirty(project.id)
+    storage.beginConversationDeletion(removing)
+    coordinator.memory.start()
+    await coordinator.memory.onConversationSpeech('another-chat')
+    expect(coordinator.memory.snapshot().status).toBe('idle')
+    expect(storage.preferences.dirtyThreads()).not.toContain(simpleChat)
+    expect(storage.preferences.dirtyThreads()).not.toContain(eligible)
+  })
   it('uses one runtime per conversation and reads a catalog without opening runtimes', async () => {
     const { storage, coordinator, runtimeStarts } = await fixture()
     const first = storage.createThread({ title: 'First', projectId: 'project-a' })
@@ -132,16 +243,6 @@ describe('conversation runtime routing', () => {
     }
   })
 
-  it('checks all running conversations before clearing shared memory', async () => {
-    const { storage, coordinator } = await fixture()
-    const thread = storage.createThread({ title: 'Working' })
-    const runtime = coordinator.forThread(thread.id)
-    await runtime.waitForStartupCleanup()
-    vi.spyOn(runtime, 'hasLiveWork').mockReturnValue(true)
-    const clear = vi.spyOn(storage.memoryStore, 'clearMemories')
-    expect(() => coordinator.clearMemories()).toThrow('Agent runs are active')
-    expect(clear).not.toHaveBeenCalled()
-  })
 
   it('rejects project deletion while a new conversation has not reached the catalog', async () => {
     const { storage, coordinator } = await fixture()
@@ -170,16 +271,6 @@ describe('conversation runtime routing', () => {
     await expect(coordinator.deleteProject('project-a')).resolves.toMatchObject({ deletedThreadIds: [] })
   })
 
-  it('checks unopened pending conversations before clearing shared memory', async () => {
-    const { storage, coordinator, runtimeStarts } = await fixture()
-    const thread = storage.createThread({ title: 'Approval' })
-    await busyRun(storage.conversationForThread(thread.id), thread.id, true)
-    storage.refreshConversation(thread.id)
-    const clear = vi.spyOn(storage.memoryStore, 'clearMemories')
-    expect(runtimeStarts).not.toHaveBeenCalled()
-    expect(() => coordinator.clearMemories()).toThrow('Agent runs are active')
-    expect(clear).not.toHaveBeenCalled()
-  })
 
   it('keeps runtime and storage usable when maintenance cannot drain cleanup', async () => {
     const { storage, coordinator } = await fixture()
@@ -238,7 +329,7 @@ describe('conversation runtime routing', () => {
     const gate = new Promise<void>((resolve) => { release = resolve })
     const memoryWrite = coordinator.useStorage(async (leased) => {
       await gate
-      return leased.memoryStore.saveMemory({
+      return legacyMemory(leased.memoryStore).saveMemory({
         scope: 'global', kind: 'fact', content: 'Keep this memory across maintenance', keywords: ['maintenance'], importance: 3
       }, { origin: 'user' })
     })
@@ -247,9 +338,9 @@ describe('conversation runtime routing', () => {
     const saved = await memoryWrite
     expect(saved.content).toBe('Keep this memory across maintenance')
     const maintenance = coordinator.compactDatabase()
-    expect(() => coordinator.useStorage((leased) => leased.memoryStore.searchMemories({}))).toThrow('shutting down')
+    expect(() => coordinator.useStorage((leased) => legacyMemory(leased.memoryStore).searchMemories({}))).toThrow('shutting down')
     await maintenance
-    expect((await coordinator.useStorage((leased) => leased.memoryStore.searchMemories({}))).items)
+    expect((await coordinator.useStorage((leased) => legacyMemory(leased.memoryStore).searchMemories({}))).items)
       .toEqual([expect.objectContaining({ id: saved.id })])
     expect(storage.getWorkspaceState()).toBeDefined()
   })

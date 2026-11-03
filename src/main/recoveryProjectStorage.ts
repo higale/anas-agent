@@ -1,3 +1,4 @@
+import { PreferenceMemoryStore } from './agent/preferenceMemoryStore'
 import Database from 'better-sqlite3'
 import { copyFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rename, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -236,6 +237,7 @@ async function stageProjectRepair(root: string, staged: string, before: string, 
   } else if (!files.has('db/catalog.sqlite') && [...files.keys()].some(relative => /^db\/projects\/[^/]+\/conversations\/[^/]+\/conversation\.sqlite$/.test(relative))) {
     issues.push('Catalog database is missing; conversation databases are preserved and require catalog recovery.')
   }
+  try { PreferenceMemoryStore.validateDirectory(staged) } catch (error) { issues.push(`Preference memory: ${String(error)}`) }
   return { fields, issues, verifyUnchanged }
 }
 
@@ -376,6 +378,50 @@ export async function repairProjectsForStartup(
       await rm(join(staged, 'db'), { recursive: true })
       await rename(join(salvaged, 'db'), join(staged, 'db'))
     } finally { await rm(salvaged, { recursive: true, force: true }) }
+
+    // Only the staged, fully preserved copy may be repaired. Completed Markdown
+    // survives even if job metadata cannot be salvaged.
+    const memoryPath = join(staged, 'db/memory.sqlite')
+    try { new PreferenceMemoryStore(staged) } catch (error) {
+      let recovered = false
+      try {
+        const database = new Database(memoryPath, { fileMustExist: true })
+        try {
+          database.pragma('user_version = 1')
+          database.prepare('UPDATE memory_meta SET version=1').run()
+          if (!(database.pragma('table_info(memory_meta)') as { name: string }[]).some(column => column.name === 'sources_initialized')) {
+            database.exec('ALTER TABLE memory_meta ADD COLUMN sources_initialized INTEGER NOT NULL DEFAULT 0 CHECK(sources_initialized IN (0,1))')
+          }
+          database.exec('UPDATE memory_meta SET sources_initialized=0 WHERE sources_initialized IS NULL OR sources_initialized NOT IN (0,1)')
+          database.exec('CREATE INDEX IF NOT EXISTS memory_dirty_threads ON memory_sources(thread_id) WHERE dirty=1')
+        } finally { database.close() }
+        try {
+          new PreferenceMemoryStore(staged)
+          repaired.push('Recovered memory metadata and retained publication progress.')
+        } catch (cause) {
+          const copy = new Database(memoryPath, { fileMustExist: true })
+          try { if (!copy.prepare('DELETE FROM memory_publication').run().changes) throw cause }
+          finally { copy.close() }
+          new PreferenceMemoryStore(staged)
+          repaired.push('Recovered memory job metadata; interrupted publication abandoned, current Markdown retained.')
+        }
+        recovered = true
+      } catch { /* Unreadable metadata remains in the preservation copy. */ }
+      if (!recovered) {
+        for (const suffix of ['', '-wal', '-shm', '-journal']) await isolate(memoryPath + suffix, 'Unusable memory metadata; completed Markdown retained')
+        new PreferenceMemoryStore(staged)
+        unresolved.push('Memory job history/progress could not be recovered; preserved in the original copy. Conversation evidence may be processed again.')
+      }
+      repaired.push('Memory metadata repaired: ' + String(error))
+    }
+    const memory = new PreferenceMemoryStore(staged, true)
+    for (const scope of [{ kind: 'global' } as const, ...projects.map(project => ({ kind: 'project' as const, projectId: String(project.id) }))]) {
+      try { memory.read(scope) } catch (error) {
+        const file = scope.kind === 'global' ? join(staged, 'db/MEMORY.md') : join(projectsRoot, scope.projectId, 'MEMORY.md')
+        await isolate(file, 'Unreadable preference document; original retained')
+        unresolved.push('Preference document isolated: ' + String(error))
+      }
+    }
 
     const catalogPath = join(staged, 'db/catalog.sqlite')
     let catalog: Database.Database | undefined

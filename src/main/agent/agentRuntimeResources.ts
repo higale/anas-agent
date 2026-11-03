@@ -1,3 +1,5 @@
+import { updateMemoryToolSpec } from '../../runtime/preferenceMemoryTool'
+import { defineContentTool } from '../../runtime/toolDefinition'
 import { mkdir } from 'node:fs/promises'
 import { basename } from 'node:path'
 import type { AgentThread } from '@shared/agentTypes'
@@ -40,6 +42,7 @@ import { applicationApprovalDirectories, safeApprovalFolders } from './approvalD
 import { smartApprovalPrompt, supportsApprovalParameter } from '../../runtime/smartApproval'
 
 export interface AgentResourceContext {
+  writeMemory?(scope: 'global' | 'project', content: string, signal?: AbortSignal): Promise<void>
   requestId?: string
   configuration?: RunConfiguration
   parentConfiguration?: RunConfiguration
@@ -111,8 +114,12 @@ function workspaceContext(project: WorkspaceProject): WorkspaceContext {
   }
 }
 
-async function memoryPrompt(enabled: boolean): Promise<string> {
+const foregroundRules = '<memory>Use update_memory for durable user preferences, corrections and requests to forget. Preserve unrelated entries and scope. Do not use configuration or general file tools. Confirm a change only after the tool succeeds.</memory>'
+const readOnlyRules = '<memory>Apply saved preferences. Memory writing is unavailable in this request. Do not use configuration or file tools to persist preferences.</memory>'
+
+async function memoryPrompt(enabled: boolean, foreground: boolean): Promise<string> {
   if (!enabled) return ''
+  if (foreground) return foregroundRules
   const rules = await buildMemoryRulesPrompt()
   return [
     '<memory>',
@@ -155,7 +162,7 @@ export async function prepareAgentSystemPrompt(
   if (project.sourceFolders.length === 0) throw new Error(`Project ${project.id} has no source folders.`)
   const workspace = workspaceContext(project)
   const [memory, skills, commandShell, pluginPrompts] = await Promise.all([
-    memoryPrompt(features.memory),
+    memoryPrompt(features.memory, config.settings.memoryMode === 'foreground'),
     features.skills ? buildSkillsPrompt(project.id, effective.skills, project.sourceFolders, effective.pluginTools) : Promise.resolve(''),
     shouldIncludeCommandShell(process.platform, config.settings, features)
       ? getCommandShell().then(describeCommandShell)
@@ -196,8 +203,10 @@ async function loadMcpTools(config: AppConfigSnapshot, simpleChat: boolean, capa
 export async function prepareAgentRuntimeResources(thread: AgentThread, database: ConversationResourceAccess, config: AppConfigSnapshot,
   context: AgentResourceContext, options: AgentResourceOptions) {
   const boundSelection = options.persistent || options.contextPreview
+  const memoryModes = new WeakMap<ResolvedModelConfig, AppSettings['memoryMode']>()
+  const foregroundFor = (model: ResolvedModelConfig) => (memoryModes.get(model) ?? config.settings.memoryMode) === 'foreground'
   const resolveModel = boundSelection
-    ? createAgentModelResolver(thread.id, database)
+    ? createAgentModelResolver(thread.id, database, { onResolved: (model, snapshot) => memoryModes.set(model, snapshot.settings?.memoryMode ?? 'background') })
     : async () => resolveModelSelection(thread, config, { allowDefault: true })
   const initialModel = resolveModelSelection(
     boundSelection ? resolveThreadModelSelection(thread.id, database) : thread,
@@ -321,6 +330,11 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
     ? [...builtinToolCatalog.filter((tool) => toolAllowed(capabilities, tool.id)).map((tool) => tool.id), ...mcpTools.map((tool) => tool.name)]
     : undefined
   const activeMcpTools = mcpTools
+  const canWriteMemory = toolsEnabled && features.memory && !activeSubagent && !review
+  const offersMemoryWrite = (model: ResolvedModelConfig) => canWriteMemory && model.capabilities.toolUse && foregroundFor(model)
+  const backgroundRules = features.memory && !simpleChat
+    ? (config.settings.memoryMode === 'foreground' ? await memoryPrompt(true, false) : rootSystemPrompt.sections.find(section => section.kind === 'memory')?.content)
+    : undefined
   const systemPrompt = activeSubagent
     ? {
         ...rootSystemPrompt,
@@ -374,8 +388,7 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
     enabled: toolsEnabled,
     primaryFolder: workspace.primaryFolder,
     configuration: toolsEnabled && features.configuration,
-    memory: toolsEnabled && ['read_memory', 'save_to_memory', 'forget_memory'].some((id) => toolAllowed(capabilities, id)),
-    memoryStore: database.memoryStore,
+
     projectId: thread.projectId,
     threadId: thread.id,
     runId: context.requestId,
@@ -428,33 +441,50 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
     backgroundTools: capabilities.backgroundTools,
     signal: context.signal, preview: !options.persistent
   }) : []
+  if (canWriteMemory) {
+    runtimeTools.push(defineContentTool({
+      ...updateMemoryToolSpec,
+      async execute({ scope, content }, { signal }) {
+        if (!context.writeMemory) throw new Error('Memory updates require an active conversation.')
+        await context.writeMemory(scope, content, signal)
+        return 'Memory saved.'
+      }
+    }))
+  }
   const pluginDefinitions = toolsEnabled ? await resolvePluginTools(capabilities.pluginTools) : []
   const pluginTools = toolsEnabled ? pluginToolDefinitions(pluginDefinitions, {
     preview: !options.persistent
   }) : []
   const requestSystemPrompt = (model: ResolvedModelConfig): AgentSystemPrompt => {
+    const rules = foregroundFor(model) ? (offersMemoryWrite(model) ? foregroundRules : readOnlyRules) : backgroundRules
+    let prompt = systemPrompt
+    if (rules && rootSystemPrompt.sections.some(section => section.kind === 'memory' && section.content !== rules)) {
+      const sections = rootSystemPrompt.sections.map(section => section.kind === 'memory' ? { ...section, content: rules } : section)
+      prompt = { sections, text: sections.map(section => section.content).join('\n\n') }
+      if (activeSubagent) prompt.text = buildSubagentSystemPrompt(activeSubagent, prompt)
+    }
     const provider = model.protocol === 'anthropic_messages' ? 'anthropic' : 'openai'
     const suffix = simpleChat ? undefined : [modelSystemGuidance(provider, model.model),
       toolsEnabled && model.capabilities.toolUse && accessMode() === 'smart_approval'
         ? smartApprovalPrompt(safeApprovalFolders(workspace.trustedFolders, accessMode(), approvalDirectories)) : ''
     ].filter(Boolean).join('\n\n')
     return suffix ? {
-      text: [systemPrompt.text, suffix].filter(Boolean).join('\n\n'),
-      sections: [...systemPrompt.sections, { kind: 'system_instruction', content: suffix }]
-    } : systemPrompt
+      text: [prompt.text, suffix].filter(Boolean).join('\n\n'),
+      sections: [...prompt.sections, { kind: 'system_instruction', content: suffix }]
+    } : prompt
   }
   function selectModelTools<T extends { name: string }>(model: ResolvedModelConfig, tools: readonly T[]): Array<T | Record<string, unknown>> {
     try {
       const serverTools = configuredServerTools(model)
       if (!toolsEnabled || !model.capabilities.toolUse) return []
-      return [...tools.filter(tool => model.capabilities.vision || !['view_image', 'view_multiple_images'].includes(tool.name))
+      return [...tools.filter(tool => tool.name !== 'update_memory' || offersMemoryWrite(model)).filter(tool => model.capabilities.vision || !['view_image', 'view_multiple_images'].includes(tool.name))
         .map(tool => accessMode() === 'smart_approval' && supportsApprovalParameter(tool)
           ? { ...tool, metadata: { ...('metadata' in tool ? tool.metadata as Record<string, unknown> : {}), smartApproval: true } } : tool), ...serverTools]
     } catch (cause) {
       throw new ModelSelectionError(`The selected model has invalid tool parameters: ${cause instanceof Error ? cause.message : String(cause)}. Correct its settings and send again.`, { cause })
     }
   }
-  return { resolveModel, initialModel, developerHttpTrace, activeSubagent, runConfiguration, capabilities, features, requestSystemPrompt, selectModelTools,
+  return { resolveModel, initialModel, offersMemoryWrite, developerHttpTrace, activeSubagent, runConfiguration, capabilities, features, requestSystemPrompt, selectModelTools,
     workspace, approvalDirectories, systemPrompt, simpleChatPrompt, simpleChat, toolsEnabled, review, hasUnresolvedManagedCalls,
     commandShell, shellCommandAuthorization, activeMcpTools, runtimeTools, fileTools, subagentTools, customTools, pluginTools, outputLanguage }
 }

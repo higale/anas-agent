@@ -1,6 +1,6 @@
 import { selectedTools, toolPackageFixture } from '../test/toolPackageFixture'
 import { describe, expect, it } from 'vitest'
-import { allCapabilities, pluginSelectionMode, assertResolvedCapabilities, capabilityFeatures, defaultCapabilities, intersectCapabilities, mcpToolAllowed, mcpServerSelection, removeEmptyMissingMcpSelections, setMcpServerMode, setMcpToolSelection, parseCapabilities, parseRunConfiguration, projectSkillSnapshot, resolveSkillSelection, resolvePluginCapabilities, effectiveProjectCapabilities, serializeCapabilities, serializeRunConfiguration, setToolSelection, toolAllowed, validateCapabilities, validateRunConfiguration, type AgentCapabilities } from './agentCapabilities'
+import { pluginSelectionMode, assertResolvedCapabilities, capabilityFeatures, defaultCapabilities, intersectCapabilities, mcpToolAllowed, mcpServerSelection, removeEmptyMissingMcpSelections, setMcpServerMode, setMcpToolSelection, parseCapabilities, parseRunConfiguration, projectSkillSnapshot, resolveSkillSelection, resolvePluginCapabilities, effectiveProjectCapabilities, serializeCapabilities, serializeRunConfiguration, setToolSelection, toolAllowed, validateCapabilities, validateRunConfiguration, type AgentCapabilities } from './agentCapabilities'
 import { parsePluginManifest, type PluginSummary } from './plugins'
 import type { SkillSummary, WorkspaceProject } from './types'
 import { customToolDefaults } from './customTools'
@@ -147,12 +147,12 @@ describe('scoped Agent capabilities', () => {
     expect(value.toolMode).toBe('all')
     expect(mcpToolAllowed(value, 'alpha', 'search')).toBe(true)
     expect(mcpToolAllowed(value, 'alpha', 'future')).toBe(false)
-    expect(mcpToolAllowed(value, 'beta', 'future')).toBe(false)
+    expect(mcpToolAllowed(value, 'beta', 'future')).toBe(true)
     value = setMcpServerMode(value, 'alpha', 'all')
     expect(mcpToolAllowed(value, 'alpha', 'future')).toBe(true)
     expect(mcpServerSelection(value.mcp, 'alpha').tools).toEqual(['search'])
     value = parseCapabilities(serializeCapabilities(value))
-    expect(serializeCapabilities(value).mcp).toEqual({ default_mode: 'selected', servers: [{ id: 'alpha', mode: 'all', tools: ['search'] }] })
+    expect(serializeCapabilities(value).mcp).toEqual({ default_mode: 'all', servers: [{ id: 'alpha', mode: 'all', tools: ['search'] }] })
     value = setMcpServerMode(value, 'alpha', 'selected')
     expect(mcpToolAllowed(value, 'alpha', 'future')).toBe(false)
     expect(mcpToolAllowed(value, 'alpha', 'search')).toBe(true)
@@ -243,7 +243,7 @@ describe('scoped Agent capabilities', () => {
   })
 
   it('preserves unknown MCP tools when excluding an unrelated built-in tool', () => {
-    const selection = setToolSelection(allCapabilities, ['read_multiple_files'], false)
+    const selection = setToolSelection(defaultCapabilities, ['read_multiple_files'], false)
     expect(selection).toMatchObject({ toolMode: 'except', tools: ['read_multiple_files'] })
     expect(mcpToolAllowed(selection, 'not-loaded-yet', 'search')).toBe(true)
     expect(toolAllowed(selection, 'read_multiple_files')).toBe(false)
@@ -268,18 +268,18 @@ describe('scoped Agent capabilities', () => {
     expect(defaultCapabilities.memory).toBe(true)
     expect(defaultCapabilities.tools).toEqual([])
   })
-  it.each([false, true])('keeps memory tools independent of automatic recall %s', (memory) => {
+  it.each([false, true])('does not enable preference context through obsolete saved tool IDs when memory is %s', (memory) => {
     const value = { ...structuredClone(defaultCapabilities), customTools: selectedTools(), memory, toolMode: 'selected' as const, tools: ['read_file', 'read_memory'] }
     expect(toolAllowed(value, 'read_file')).toBe(true)
     expect(toolAllowed(value, 'read_multiple_files')).toBe(false)
     expect(toolAllowed(value, 'read_memory')).toBe(true)
     expect(toolAllowed(value, 'save_to_memory')).toBe(false)
     expect(toolAllowed(value, 'forget_memory')).toBe(false)
-    expect(capabilityFeatures(value)).toMatchObject({ fileRead: true, fileWrite: false, memory: true, commandExecution: false })
+    expect(capabilityFeatures(value)).toMatchObject({ fileRead: true, fileWrite: false, memory, commandExecution: false })
     expect(capabilityFeatures({ ...value, tools: [] }).memory).toBe(memory)
     expect(parseCapabilities(serializeCapabilities(value))).toEqual(value)
   })
-  it('intersects automatic recall separately from memory tool selections', () => {
+  it('intersects preference context independently of obsolete saved tool selections', () => {
     const child = { ...structuredClone(defaultCapabilities), customTools: selectedTools(), skills: resolveSkillSelection(defaultCapabilities.skills, []) }
     const limit = { ...child, memory: false, toolMode: 'selected' as const, tools: ['read_memory'] }
     const result = intersectCapabilities(child, limit)
@@ -352,22 +352,22 @@ describe('plugin capability scope', () => {
     prompts: [{ id: 'help', path: 'help.md', scope: 'main', description: 'Help', tools: ['read'] }]
   }) }
   it('resolves all dynamically and keeps new sources and contributions out of custom selections', () => {
-    expect(pluginSelectionMode(defaultCapabilities, plugin.id)).toBe('off')
-    expect(resolvePluginCapabilities(defaultCapabilities, [plugin]).pluginTools).toEqual([])
-    const all = resolvePluginCapabilities(allCapabilities, [plugin])
+    expect(pluginSelectionMode(defaultCapabilities, plugin.id)).toBe('all')
+    expect(resolvePluginCapabilities({ ...defaultCapabilities, pluginMode: 'custom' }, [plugin]).pluginTools).toEqual([])
+    const all = resolvePluginCapabilities(defaultCapabilities, [plugin])
     expect(all.pluginTools).toEqual(['writer:tool:read', 'writer:tool:new_tool'])
     expect(all.pluginPrompts).toEqual(['writer:prompt:help'])
-    expect(resolvePluginCapabilities(allCapabilities, [plugin], true).pluginPrompts).toEqual([])
+    expect(resolvePluginCapabilities(defaultCapabilities, [plugin], true).pluginPrompts).toEqual([])
     expect(resolvePluginCapabilities(selected, [plugin]).pluginTools).toEqual(['writer:tool:read'])
     expect(resolvePluginCapabilities({ ...selected, plugins: [{ id: 'writer', mode: 'off' }] }, [plugin]).pluginTools).toEqual([])
-    expect(resolvePluginCapabilities(allCapabilities, [{ ...plugin, enabled: false }]).pluginTools).toEqual([])
+    expect(resolvePluginCapabilities(defaultCapabilities, [{ ...plugin, enabled: false }]).pluginTools).toEqual([])
     expect(parseCapabilities(serializeCapabilities(selected))).toEqual(selected)
   })
   it('uses all capabilities while project customization is off, without discarding custom choices', () => {
     const project = { advancedSettings: true, restrictSubagents: false, capabilities: { ...selected, profile: false } } as WorkspaceProject
     expect(effectiveProjectCapabilities(project)).toEqual(project.capabilities)
     project.advancedSettings = false
-    expect(effectiveProjectCapabilities(project)).toEqual(allCapabilities)
+    expect(effectiveProjectCapabilities(project)).toEqual(defaultCapabilities)
     project.advancedSettings = true
     expect(effectiveProjectCapabilities(project).pluginTools).toEqual(selected.pluginTools)
   })

@@ -1,6 +1,6 @@
 ---
 name: config
-description: "Modify Anas application settings and the assistant avatar when the user asks to change appearance, conversation defaults, environment context, speech reply, assistant identity or behavior, avatar, or user profile details. Do not use for capability selection, model/provider definitions, projects, MCP servers, subagents, Skills, or temporary instructions for only the current conversation."
+description: "Modify Anas application settings and the assistant avatar when the user asks to change appearance, conversation defaults, environment context, speech reply, assistant name, role, or avatar. Do not use for capability selection, model/provider definitions, projects, MCP servers, subagents, Skills, user preferences, or custom instructions."
 compatibility: "Requires Anas and its update_config tool implementing the settings schema in references/settings.md."
 ---
 
@@ -12,9 +12,8 @@ Use `update_config` with `config: "settings"`, one dot-separated leaf key, and t
 
 Only persist a change when the user explicitly asks for it. Modify only the requested keys. Do not edit `settings.json` through file tools, guess undocumented keys or enum values, or claim success unless the tool returns `ok: true`.
 
-For assistant and user profile settings:
+For assistant settings:
 
-- Distinguish identity (`profile.assistant.role`) from lasting behavior (`profile.assistant.instructions`).
+- Change the role only when the user asks to change the assistant’s identity or role. Custom instructions are edited manually in Settings.
 - To replace the assistant avatar, set `profile.assistant.new_avatar_path` to an absolute image path or a path relative to the active workspace. To restore the default avatar, set the same key to the exact string `"default"`. This is a one-time request: Anas applies it and clears the value before the tool returns. Do not retry a failed avatar update unless the user asks or supplies another value.
-- Store user details only when the user explicitly asks to update their profile. Never infer personal details or store passwords, tokens, private keys, or other authentication secrets.
-- Use memory rather than profile settings for ordinary facts the user asks the agent to remember without describing them as profile information.
+- For requests such as “remember this” or “from now on, answer briefly”, follow the preference in this conversation and use the memory mechanism specified in the request context. Do not write preferences to settings or use general file tools.

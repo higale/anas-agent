@@ -36,9 +36,6 @@ export const builtinToolEffectPolicies = {
   move_file: 'confirm',
   delete_file: 'confirm',
   update_config: 'idempotent',
-  read_memory: 'read',
-  save_to_memory: 'confirm',
-  forget_memory: 'idempotent'
 } as const satisfies Record<StaticBuiltinToolName, BuiltinEffectPolicy>
 
 type McpAnnotations = {
@@ -121,6 +118,7 @@ export function classifyAgentToolEffect(
       recoveryMode: annotations.idempotentHint === true ? 'idempotent' : 'confirm'
     }
   }
+  if (toolName === 'update_memory') return { recoveryMode: 'confirm' }
   const policy = builtinToolEffectPolicies[toolName as StaticBuiltinToolName]
   if (policy === 'read') return undefined
   if (policy === 'idempotent') return { recoveryMode: 'idempotent' }

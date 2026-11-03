@@ -1,3 +1,4 @@
+import { legacyMemory } from '../../test/legacyMemoryFixture'
 import Database from 'better-sqlite3'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
@@ -37,6 +38,21 @@ afterEach(async () => {
 })
 
 describe('agent conversation storage', () => {
+  it('creates no legacy memory tables on a fresh install and retains them only in existing catalogs', async () => {
+    const { root, storage } = await fixture()
+    const tables = () => {
+      const database = new Database(getAgentCatalogFile(root), { readonly: true })
+      try { return (database.prepare("SELECT name FROM sqlite_schema WHERE type='table'").all() as Array<{ name: string }>).map(row => row.name) }
+      finally { database.close() }
+    }
+    expect(tables().some(name => name === 'agent_store_items' || name.startsWith('agent_memory_fts'))).toBe(false)
+    expect(storage.preferences.jobs()).toEqual([])
+    await legacyMemory(storage.memoryStore).saveMemory({ scope: 'global', kind: 'fact', content: 'Ignored legacy memory', keywords: [], importance: 3 }, { origin: 'user' })
+    const current = reopen(root, storage)
+    expect((await legacyMemory(current.memoryStore).searchMemories()).items[0].content).toBe('Ignored legacy memory')
+    expect(current.preferences.read({ kind: 'global' }).content).toBe('')
+    expect(tables()).toContain('agent_store_items')
+  })
   it('rolls sidebar metadata and lookup changes back when a run belongs to another conversation', async () => {
     const { root, storage } = await fixture()
     const first = storage.createThread({ title: 'First' }), second = storage.createThread({ title: 'Second' })
@@ -59,7 +75,7 @@ describe('agent conversation storage', () => {
   it('starts with empty conversations and memories while leaving the old layout intact', async () => {
     const { root, storage } = await fixture()
     const oldThread = storage.createThread({ title: 'Old conversation' })
-    await storage.memoryStore.saveMemory({ scope: 'global', kind: 'fact', content: 'Old memory', keywords: [], importance: 3 }, { origin: 'user' })
+    await legacyMemory(storage.memoryStore).saveMemory({ scope: 'global', kind: 'fact', content: 'Old memory', keywords: [], importance: 3 }, { origin: 'user' })
     storage.close()
     await rename(join(root, 'db'), join(root, 'sqlite'))
     const rootConversation = join(root, 'conversations', 'abandoned')
@@ -68,7 +84,7 @@ describe('agent conversation storage', () => {
     const oldCatalog = await readFile(join(root, 'sqlite', 'catalog.sqlite'))
     const current = reopen(root, storage)
     expect(current.listThreads()).toEqual([])
-    expect((await current.memoryStore.searchMemories({ scope: 'global' })).total).toBe(0)
+    expect((await legacyMemory(current.memoryStore).searchMemories({ scope: 'global' })).total).toBe(0)
     expect(current.getWorkspaceState().mode).toBe('new_thread')
     const thread = current.createThread({ title: 'New conversation' })
     expect(existsSync(getAgentConversationDatabaseFile(thread.id, root))).toBe(true)
@@ -129,19 +145,19 @@ describe('agent conversation storage', () => {
     const { root, storage } = await fixture()
     const first = storage.createThread()
     const second = storage.createThread()
-    await storage.conversationForThread(first.id).resources.memoryStore.saveMemory({
+    await legacyMemory(storage.conversationForThread(first.id).resources.memoryStore).saveMemory({
       scope: 'global', kind: 'fact', content: 'Shared project fact', keywords: ['shared'], importance: 3
     }, { origin: 'user' })
     storage.conversationForThread(first.id).runs.createRun({ threadId: first.id, runId: 'first-run', operation: 'agent', message: { id: 'first-input', value: { id: 'first-input', kind: 'user', content: 'Question', context: { runId: 'first-run' } } } })
 
     expect(storage.conversationForThread(second.id).readModel.getRun('first-run')).toBeNull()
-    expect((await storage.conversationForThread(second.id).resources.memoryStore.searchMemories({ scope: 'global' })).total).toBe(1)
+    expect((await legacyMemory(storage.conversationForThread(second.id).resources.memoryStore).searchMemories({ scope: 'global' })).total).toBe(1)
     storage.closeConversation(first.id)
-    expect((await storage.previewDatabase().resources.memoryStore.searchMemories({ scope: 'global' })).total).toBe(1)
+    expect((await legacyMemory(storage.previewDatabase().resources.memoryStore).searchMemories({ scope: 'global' })).total).toBe(1)
     const current = reopen(root, storage)
-    expect((await current.memoryStore.searchMemories({ scope: 'global' })).total).toBe(1)
+    expect((await legacyMemory(current.memoryStore).searchMemories({ scope: 'global' })).total).toBe(1)
     expect(current.listThreads()).toHaveLength(2)
-    expect((await current.getStorageUsage()).memories.totalBytes).toBeGreaterThan(0)
+    expect((await current.getStorageUsage()).memories.hasData).toBe(false)
   })
 
   it('persists workspace selection and immutable conversation project ownership', async () => {
@@ -193,10 +209,10 @@ describe('agent conversation storage', () => {
     expect(() => storage.openConversation('unregistered-existing', { create: true })).toThrow('already exists')
   })
 
-  it('removes project memories only after its conversations have been removed', async () => {
+  it('retains ignored legacy memory after removing project conversations', async () => {
     const { storage } = await fixture()
     const thread = storage.createThread({ projectId: 'project' })
-    await storage.memoryStore.saveMemory({ scope: 'project', projectId: 'project', kind: 'fact',
+    await legacyMemory(storage.memoryStore).saveMemory({ scope: 'project', projectId: 'project', kind: 'fact',
       content: 'Project fact', keywords: ['project'], importance: 3 }, { origin: 'user' })
     expect(() => storage.completeProjectDeletion('project')).toThrow('while project conversations still exist')
     storage.beginConversationDeletion(thread.id)
@@ -205,7 +221,7 @@ describe('agent conversation storage', () => {
     storage.completeProjectDeletion('project')
 
     expect(storage.getWorkspaceState()).toEqual({ mode: 'new_thread', projectId: DEFAULT_WORKSPACE_PROJECT_ID, modelParameterPresetId: null })
-    expect((await storage.memoryStore.searchMemories({ scope: 'project', projectId: 'project' })).total).toBe(0)
+    expect((await legacyMemory(storage.memoryStore).searchMemories({ scope: 'project', projectId: 'project' })).total).toBe(1)
   })
 
   it('reports cleanup data from unpinned conversations and actual memories rather than database overhead', async () => {
@@ -216,8 +232,10 @@ describe('agent conversation storage', () => {
     expect((await storage.getStorageUsage()).conversations.hasData).toBe(true)
     storage.updateThread(thread.id, { pinned: true })
     expect((await storage.getStorageUsage()).conversations.hasData).toBe(false)
-    await storage.memoryStore.saveMemory({ scope: 'global', kind: 'fact',
+    await legacyMemory(storage.memoryStore).saveMemory({ scope: 'global', kind: 'fact',
       content: 'Stored fact', keywords: ['fact'], importance: 3 }, { origin: 'user' })
+    expect((await storage.getStorageUsage()).memories.hasData).toBe(false)
+    await writeFile(join(storage.dataDir, 'db/MEMORY.md'), '- Concise replies')
     expect((await storage.getStorageUsage()).memories.hasData).toBe(true)
   })
 

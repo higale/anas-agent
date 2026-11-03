@@ -101,7 +101,7 @@ async function collectFiles(root: string, excludePath: string, current = root, i
     if (!relPath || shouldSkipRelativePath(relPath)) continue
     const normalizedRelPath = relPath.split(sep).join('/')
     if (normalizedRelPath === backupManifestFileName) continue
-    if (/^db\/catalog\.sqlite(?:-(?:wal|shm|journal))?$/i.test(normalizedRelPath)
+    if (/^db\/(?:catalog|memory)\.sqlite(?:-(?:wal|shm|journal))?$/i.test(normalizedRelPath)
       || /^db\/projects\/[^/]+\/conversations\/[^/]+\/conversation\.sqlite(?:-(?:wal|shm|journal))?$/i.test(normalizedRelPath)) continue
     const [directory, collection, , conversations, ownerId] = normalizedRelPath.split('/')
     if (directory.toLowerCase() === 'db' && collection?.toLowerCase() === 'projects' && conversations === 'conversations' && ownerId && !includedConversations.has(ownerId)) continue
@@ -382,7 +382,10 @@ function resetData(preserveCurrentData: () => Promise<string>, executionOnly: bo
       throw new Error('Reset file list changed; refresh and confirm the current list before resetting.')
     }
     if (executionOnly) {
-      await readProjectStoreFile(getProjectStoreFile(dataDir))
+      try { await readProjectStoreFile(getProjectStoreFile(dataDir)) } catch (error) {
+        // A reset before the first project is initialized has no definitions to retain.
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      }
       for (const pending of ['db/project-deletion.json', 'db/project-deletion.stage.json']) {
         const entry = await lstat(join(dataDir, pending)).catch((error: NodeJS.ErrnoException) => {
           if (error.code === 'ENOENT') return undefined

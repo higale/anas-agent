@@ -42,10 +42,8 @@ describe('native request, model, loop and SQLite integration', () => {
           id: 'attachment', threadId: 'thread', messageId: 'user', runId: 'run', name: 'context.txt', path: attachmentPath,
           mimeType: 'text/plain', size: 27, kind: 'text', available: true, textTruncated: false, contextPolicy: 'one_turn', createdAt: '2026-10-27T00:00:00.000Z'
         }] })
-        const recall = vi.fn(async () => [{ id: 'memory', scope: 'project' as const, projectId: 'project', kind: 'fact' as const,
-          content: 'Remember <project> conventions.', keywords: ['project'], importance: 5, origin: 'user' as const,
-          createdAt: '2026-10-27T00:00:00.000Z', updatedAt: '2026-10-27T00:00:00.000Z' }])
-        const memory = createConversationMemoryProjector({ enabled: true, projectId: 'project', store: { relevantMemories: recall } })
+        const recall = vi.fn((scope: import('../../shared/preferenceMemory').PreferenceScope) => ({ scope, content: scope.kind === 'global' ? 'Remember <project> conventions.' : '', hash: '' }))
+        const memory = createConversationMemoryProjector({ enabled: true, projectId: 'project', store: { preferences: { read: recall } } })
         const fetch: typeof globalThis.fetch = async (_url, init) => {
           const body = JSON.parse(String(init?.body))
           requests.push(body)
@@ -102,9 +100,8 @@ describe('native request, model, loop and SQLite integration', () => {
         expect(observer.model).toHaveBeenCalledWith(expect.objectContaining({ kind: 'completed', calls: [expect.objectContaining({ id: store.readModelCallIds('thread', state.messages[1].recordId)[0], name: 'read' })] }))
         expect(requests.every(body => JSON.stringify(body).includes('Archived attachment content'))).toBe(true)
         expect(requests.every(body => JSON.stringify(body).includes('Remember &lt;project&gt; conventions.'))).toBe(true)
-        expect(recall).toHaveBeenCalledTimes(withDirection ? 2 : 1)
-        expect(recall).toHaveBeenNthCalledWith(1, expect.stringContaining('Archived attachment content'), 'project', undefined)
-        if (withDirection) expect(recall).toHaveBeenNthCalledWith(2, 'Then explain it', 'project', undefined)
+        expect(recall).toHaveBeenCalledWith({ kind: 'global' })
+        expect(recall).toHaveBeenCalledWith({ kind: 'project', projectId: 'project' })
         expect(state.messages[0].value.content).toBe('Read the fixture')
         expect(state.messages[0].value.context?.attachmentProjection).toBeUndefined()
         expect(invocation).toHaveBeenCalledOnce()

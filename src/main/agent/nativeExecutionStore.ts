@@ -1051,6 +1051,15 @@ export class NativeExecutionStore {
     validContext({ modelCalls: 0, todos: value.todos })
     return value
   }
+  recordPosition(threadId: string, recordId: string): number | undefined {
+    return this.database.prepare(`SELECT m.position FROM execution_message_bodies b JOIN execution_messages m
+      ON m.thread_id=b.thread_id AND m.message_id=b.message_id AND m.record_id=b.record_id
+      WHERE b.thread_id=? AND b.record_id=?`).pluck().get(threadId, recordId) as number | undefined
+  }
+  historyTail(threadId: string): { position: number; record_id: string } | undefined {
+    return this.database.prepare('SELECT position,record_id FROM execution_messages WHERE thread_id=? ORDER BY position DESC LIMIT 1')
+      .get(threadId) as { position: number; record_id: string } | undefined
+  }
   messageCount(threadId: string): number {
     return (this.database.prepare('SELECT count(*) AS total FROM execution_messages WHERE thread_id=?').get(threadId) as { total: number }).total
   }

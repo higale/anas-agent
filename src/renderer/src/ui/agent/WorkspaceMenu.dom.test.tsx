@@ -11,7 +11,7 @@ const plugin: PluginSummary = { id: 'notepad', enabled: true, showInTitlebar: tr
 
 it('groups file changes and plugins, opens the existing actions and makes the heading gear keyboard accessible', async () => {
   const user = userEvent.setup(), onOpenFiles = vi.fn(), onOpenPlugin = vi.fn(), onOpenPluginSettings = vi.fn()
-  render(<WorkspaceMenu project={{ name: 'My project', onOpenFiles }} plugins={[plugin]}
+  render(<WorkspaceMenu onOpenMemoryActivity={vi.fn()} project={{ name: 'My project', onOpenFiles }} plugins={[plugin]}
     onOpenPlugin={onOpenPlugin} onOpenPluginSettings={onOpenPluginSettings} />)
   await user.click(screen.getByRole('button', { name: 'Notepad' }))
   expect(onOpenPlugin).toHaveBeenCalledExactlyOnceWith(plugin)
@@ -32,12 +32,16 @@ it('groups file changes and plugins, opens the existing actions and makes the he
 it('retains plugin settings without launchable plugins and hides disabled, invalid and headless shortcuts', async () => {
   const items = [{ ...plugin, enabled: false }, { ...plugin, id: 'broken', error: 'Missing file' },
     { ...plugin, id: 'tools', manifest: { ...plugin.manifest!, ui: undefined } }]
-  render(<WorkspaceMenu plugins={items} onOpenPlugin={vi.fn()} onOpenPluginSettings={vi.fn()} />)
+  const openActivity = vi.fn()
+  render(<WorkspaceMenu plugins={items} onOpenPlugin={vi.fn()} onOpenPluginSettings={vi.fn()} onOpenMemoryActivity={openActivity} />)
   expect(screen.getAllByRole('button')).toHaveLength(1)
   await userEvent.click(screen.getByRole('button', { name: 'agent.workspace_menu' }))
-  expect(screen.getAllByRole('menuitem')).toHaveLength(1)
+  expect(screen.getAllByRole('menuitem')).toHaveLength(2)
   expect(screen.getByRole('menuitem', { name: 'plugins.manage' })).toBeVisible()
-  expect(screen.queryByRole('separator')).toBeNull()
+  const activity = screen.getByRole('menuitem', { name: 'agent.memory_activity' })
+  expect(screen.getByRole('separator').nextElementSibling).toBe(activity)
+  await userEvent.click(activity)
+  expect(openActivity).toHaveBeenCalledOnce()
 })
 
 it('keeps every plugin in the menu while shortcuts shrink and return with available width', async () => {
@@ -53,7 +57,7 @@ it('keeps every plugin in the menu while shortcuts shrink and return with availa
     disconnect() {}
   })
   const second = { ...plugin, id: 'other', manifest: { ...plugin.manifest!, id: 'other', name: 'Other' } }
-  render(<WorkspaceMenu plugins={[plugin, second]} onOpenPlugin={vi.fn()} onOpenPluginSettings={vi.fn()} />)
+  render(<WorkspaceMenu plugins={[plugin, second]} onOpenPlugin={vi.fn()} onOpenPluginSettings={vi.fn()} onOpenMemoryActivity={vi.fn()} />)
   expect(screen.queryByRole('button', { name: 'Notepad' })).toBeNull()
   await userEvent.click(screen.getByRole('button', { name: 'agent.workspace_menu' }))
   expect(screen.getByRole('menuitem', { name: 'Notepad' })).toBeVisible()

@@ -1,3 +1,4 @@
+import { legacyMemory } from '../test/legacyMemoryFixture'
 import { writeProjectFixture, readProjectFixture, placeFrozenConversationsInProject } from '../test/projectDirectories'
 import { restoreFrozenStorageDirectory } from '../test/frozenStorage'
 import type { AgentThread, AgentRun, AgentRuntimeEvent } from '../shared/agentTypes'
@@ -6,7 +7,7 @@ import { NativeMessageReader } from './agent/nativeMessageReader'
 import { NativeRuntimeCoordinator } from './agent/nativeRuntimeCoordinator'
 import { conversationExecution } from '../runtime/conversationExecution'
 import { FileChangeLedger } from './agent/fileChangeLedger'
-import { SqliteMemoryStore } from './agent/memoryStore'
+import { SqliteMemoryStore } from '../test/legacyMemoryFixture'
 import { readThreadRecord } from './agent/conversationThreads'
 import Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
@@ -18,6 +19,7 @@ import capabilities from '../../data/config/capabilities.json'
 import projectDefaults from '../../data/config/projects.json'
 import { DEFAULT_WORKSPACE_PROJECT_ID } from '@shared/types'
 import { AgentStorage } from './agent/agentStorage'
+import { memoryHash, PreferenceMemoryStore } from './agent/preferenceMemoryStore'
 import { getAgentCatalogFile, getAgentConversationDatabaseFile } from './config/dataDir'
 import { inspectRecoveryRepair, repairRecoveryData } from './recoveryRepair'
 import { preserveRecoveryData } from './recoveryData'
@@ -52,6 +54,30 @@ async function fixture(projectVersion = 4, variant = 'base') {
   }
   return { root, data, projects, databases, thread, metadata }
 }
+
+it('detects and repairs a missing memory initialization field without losing the cursor or pending publication', async () => {
+  const { root, data, thread } = await fixture(0)
+  const memory = new PreferenceMemoryStore(data)
+  memory.writeForeground({ kind: 'global' }, 'Before', thread.id, 'old')
+  const db = new Database(memory.databaseFile)
+  try {
+    db.exec('ALTER TABLE memory_meta DROP COLUMN sources_initialized')
+    db.prepare('INSERT INTO memory_publication VALUES (1,?)').run(JSON.stringify({
+      version: 1, state: { version: 1, generation: memory.generation(), jobs: [] }, cursors: { [thread.id]: 'next' },
+      writes: [{ scope: { kind: 'global' }, beforeHash: memoryHash('Before'), content: 'After' }]
+    }))
+  } finally { db.close() }
+  expect(() => PreferenceMemoryStore.validateDirectory(data)).toThrow(/sources_initialized/)
+  const damaged = new Database(memory.databaseFile)
+  try { damaged.exec('DROP INDEX memory_dirty_threads') } finally { damaged.close() }
+  const result = await repairRecoveryData(data, 'projects.json', () => preserveRecoveryData(data, root))
+  expect(result.unresolved).toEqual([])
+  const reopened = AgentStorage.openNative(data)
+  try {
+    expect(reopened.preferences.cursor(thread.id)).toBe('next')
+    expect(reopened.preferences.read({ kind: 'global' }).content).toBe('After')
+  } finally { reopened.close() }
+})
 
 it('repairs databases with absent optional UI state and recreates it while retaining definitions', async () => {
   const { root, data, databases } = await fixture(0)
@@ -136,7 +162,7 @@ describe('project version metadata recovery', () => {
     try {
       expect(storage.getThread(thread.id)).toMatchObject({ title: thread.title, accessMode: 'smart_approval' })
       expect(storage.conversationForThread(thread.id).getThread(thread.id)?.accessMode).toBe('smart_approval')
-      expect((await storage.memoryStore.searchMemories({ scope: 'global' })).items[0].content).toBe('Preserve this memory')
+      expect((await legacyMemory(storage.memoryStore).searchMemories({ scope: 'global' })).items[0].content).toBe('Preserve this memory')
       const created = storage.createThread({ title: 'New smart conversation' })
       expect(created.accessMode).toBe('smart_approval')
       expect(storage.getThread(created.id)?.accessMode).toBe('smart_approval')

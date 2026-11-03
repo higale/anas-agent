@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3'
 import { existsSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
 import type { AgentThread, AgentAttachmentArtifact } from '../../shared/agentTypes'
-import type { SqliteMemoryStore } from './memoryStore'
+import type { MemoryResources } from './memoryStore'
 import type { FileChangeLedger } from './fileChangeLedger'
 import type { FileEditStore } from '../fileEditStore'
 import { readThreadRecord } from './conversationThreads'
@@ -12,7 +12,7 @@ import type { AttachmentRow } from './historyRevisionResources'
 /** Business resources needed to assemble a conversation executor. No execution
  * state or framework storage is exposed through this boundary. */
 export interface ConversationResourceAccess {
-  readonly memoryStore: SqliteMemoryStore
+  readonly memoryStore: MemoryResources
   readonly fileChanges: FileChangeLedger
   readonly fileEditStore: FileEditStore
   readonly toolResultsRoot: string
@@ -49,7 +49,7 @@ export function conversationAttachmentFromRow(row: AttachmentRow, attachmentRoot
 export class ConversationResourceReader implements ConversationResourceAccess {
   readonly toolResultsRoot: string
   constructor(private readonly database: Database.Database, private readonly attachmentRoot: string,
-    readonly memoryStore: SqliteMemoryStore, readonly fileChanges: FileChangeLedger, readonly fileEditStore: FileEditStore) { this.toolResultsRoot = join(dirname(attachmentRoot), 'tool_results') }
+    readonly memoryStore: MemoryResources, readonly fileChanges: FileChangeLedger, readonly fileEditStore: FileEditStore) { this.toolResultsRoot = join(dirname(attachmentRoot), 'tool_results') }
 
   getThread(threadId: string): AgentThread | null { return readThreadRecord(this.database, threadId) }
 

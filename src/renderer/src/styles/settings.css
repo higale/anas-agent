@@ -353,10 +353,6 @@
   gap: 34px;
 }
 
-.settings-profile-user {
-  margin: 0;
-}
-
 .settings-profile .ui-form-row-wide {
   grid-template-columns: minmax(200px, 1fr) minmax(320px, 560px);
 }
@@ -524,6 +520,19 @@
   background: var(--bg-app);
 }
 
+.ui-form-section.memory-file-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.memory-file-view > .settings-detail-heading { flex: none; }
+.memory-file-view > :is(.settings-package-markdown, .ui-empty-state, .ui-code-file-editor, .settings-skill-file-content) {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
 .settings-package-metadata {
   margin-bottom: 16px;
   padding-bottom: 12px;
@@ -570,6 +579,28 @@
   height: auto;
   min-height: 0;
 }
+
+.settings-inline-file-editor {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.settings-inline-file-editor .ui-dialog-description { overflow-wrap: anywhere; }
+.settings-inline-file-editor > .settings-file-edit-body { min-height: min(28vh, 18rem); }
+.settings-inline-file-editor .ui-dialog-footer { gap: 8px; }
+
+.settings-section.settings-memory {
+  flex: 1 0 auto;
+}
+.settings-page-header > .ui-button { min-width: 0; max-width: 75%; }
+.settings-global-memory { grid-template-rows: auto 1fr; }
+.settings-global-memory > .settings-card { display: grid; }
+.settings-global-memory .settings-inline-file-editor > .settings-file-edit-body,
+.settings-global-memory .memory-file-view > :not(.settings-detail-heading) { min-height: 6lh; }
+.settings-global-memory .memory-file-view > :not(.settings-detail-heading) { contain: size; }
 
 .settings-detail-heading > div:first-child {
   display: grid;
