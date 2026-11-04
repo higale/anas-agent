@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
+import { writeJsonFileAtomic } from './atomicJson'
 import { join } from 'node:path'
 import { getCacheDir } from './config/dataDir'
 import { runtimeLog } from './runtimeLogger'
@@ -10,7 +11,7 @@ export interface ModelListCache {
   models: string[]
 }
 
-function modelListCacheFileName(endpoint: string, apiKey?: string): string {
+export function modelListCacheFileName(endpoint: string, apiKey?: string): string {
   return `${createHash('sha256')
     .update(JSON.stringify({
       endpoint,
@@ -23,7 +24,7 @@ function modelListCachePath(endpoint: string, apiKey?: string): string {
   return join(getCacheDir(), 'model_lists', modelListCacheFileName(endpoint, apiKey))
 }
 
-function parseCachedModels(value: unknown): string[] {
+export function normalizeModelList(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   const models = new Map<string, string>()
   for (const item of value) {
@@ -41,7 +42,7 @@ function parseModelListCache(value: unknown, endpoint: string): ModelListCache |
   if (record.version !== 0) return undefined
   const cachedAt = typeof record.cachedAt === 'string' ? record.cachedAt : ''
   const cacheEndpoint = typeof record.endpoint === 'string' ? record.endpoint : ''
-  const models = parseCachedModels(record.models)
+  const models = normalizeModelList(record.models)
   if (!cachedAt || cacheEndpoint !== endpoint || models.length === 0) return undefined
   return {
     cachedAt,
@@ -71,6 +72,5 @@ export async function writeModelListCache(endpoint: string, apiKey: string | und
     endpoint,
     models
   }
-  await mkdir(join(getCacheDir(), 'model_lists'), { recursive: true })
-  await writeFile(modelListCachePath(endpoint, apiKey), JSON.stringify({ version: 0, ...cache }, null, 2), 'utf8')
+  await writeJsonFileAtomic(modelListCachePath(endpoint, apiKey), { version: 0, ...cache })
 }

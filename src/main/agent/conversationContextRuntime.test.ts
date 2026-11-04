@@ -56,6 +56,14 @@ describe('native context status and manual compression', () => {
           breakdown: { ...status.breakdown, messageTokens: 8 } })
     })
 
+  it('passes shell and regex replacement tokens to the summarizer verbatim', async () => {
+    const state = source()
+    const code = "echo $$; substitution tokens $& $` $'"
+    state.messages[0].content = code
+    await createConversationContextRuntime(options()).compress(state, new AbortController().signal)
+    expect(mocks.generate.mock.calls[0][0]).toContain(code)
+  })
+
   it('maps repeated manual compression to raw history and preserves pending image transactions', async () => {
     const state = source()
     state.messages.push({ id: 'next', kind: 'user', content: 'Inspect this' },

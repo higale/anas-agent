@@ -92,9 +92,17 @@ describe('agent database snapshots', () => {
     await expect(snapshotAgentStorage(await temporaryDirectory(), await temporaryDirectory())).resolves.toEqual([])
   })
 
+  it('ignores unrelated entries in the conversation directory when no catalog exists', async () => {
+    const source = await temporaryDirectory()
+    const conversations = dirname(dirname(getAgentConversationDatabaseFile('example', source)))
+    await mkdir(conversations, { recursive: true })
+    await writeFile(join(conversations, '.DS_Store'), 'metadata')
+    await expect(snapshotAgentStorage(source, await temporaryDirectory())).resolves.toEqual([])
+  })
+
   it('does not silently omit conversation files when their catalog is missing', async () => {
     const source = await temporaryDirectory()
     await openDatabase(getAgentConversationDatabaseFile('orphan', source))
-    await expect(snapshotAgentStorage(source, await temporaryDirectory())).rejects.toThrow('without an agent catalog')
+    await expect(snapshotAgentStorage(source, await temporaryDirectory())).rejects.toThrow('no catalog')
   })
 })

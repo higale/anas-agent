@@ -1,7 +1,8 @@
 import Database from 'better-sqlite3'
-import { lstat, mkdir, readdir, stat } from 'node:fs/promises'
+import { lstat, mkdir, stat } from 'node:fs/promises'
 import { dirname, join, relative, sep } from 'node:path'
-import { getAgentCatalogFile, getAgentConversationDatabaseFile, getProjectsDir } from '../config/dataDir'
+import { getAgentCatalogFile, getAgentConversationDatabaseFile } from '../config/dataDir'
+import { validateExecutionStorageDirectory } from '../executionStorageValidation'
 import { withApplicationDataSnapshot } from '../applicationDataSnapshot'
 
 export interface AgentDatabaseSnapshotFile {
@@ -50,18 +51,7 @@ export async function snapshotAgentStorage(
 async function copyAgentStorage(sourceDataDir: string, destinationDataDir: string): Promise<AgentDatabaseSnapshotFile[]> {
   const catalogPath = getAgentCatalogFile(destinationDataDir)
   if (!await snapshotAgentDatabase(getAgentCatalogFile(sourceDataDir), catalogPath)) {
-    const projects = await readdir(getProjectsDir(sourceDataDir), { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') return []
-      throw error
-    })
-    for (const project of projects) {
-      if (!project.isDirectory()) continue
-      const conversations = await readdir(join(getProjectsDir(sourceDataDir), project.name, 'conversations')).catch((error: NodeJS.ErrnoException) => {
-        if (error.code === 'ENOENT') return []
-        throw error
-      })
-      if (conversations.length) throw new Error('Conversation databases exist without an agent catalog.')
-    }
+    await validateExecutionStorageDirectory(sourceDataDir)
     return []
   }
   const catalog = new Database(catalogPath, { fileMustExist: true })

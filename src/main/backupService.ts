@@ -1,6 +1,9 @@
 import { executionResetEntries, projectResetEntries, rename, writeRestoreJournal, rollbackRestore, swapRestoredData, recoverInterruptedDataRestoreExcept, enqueueDataReplacement, type RestoreJournal } from './dataReplacement'
 export { replaceProjectData } from './dataReplacement'
-import { createWriteStream } from 'node:fs'
+import { createReadStream, createWriteStream, type ReadStream } from 'node:fs'
+import type { Readable } from 'node:stream'
+import { finished, pipeline } from 'node:stream/promises'
+import { inspectZipForExport } from './zipArchive'
 import { app } from 'electron'
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat } from 'node:fs/promises'
 import { isProjectStorageEntry } from './projectStorageEntries'
@@ -14,7 +17,7 @@ import { readRawConfig } from './config/rawAppConfig'
 import { normalizeAppProfile } from './config/profileConfig'
 import { snapshotAgentStorage } from './agent/agentDatabaseBackup'
 import {
-  backupManifest, backupManifestFileName, extractBackupArchive,
+  backupArchiveLimits, backupManifest, backupManifestFileName, extractBackupArchive,
   shouldSkipBackupRelativePath
 } from './backupArchive'
 import { validateRestoredDataDirectory } from './dataRestoreValidation'
@@ -89,7 +92,12 @@ function isInsideDirectory(parent: string, child: string): boolean {
   return childPath === parentPath || childPath.startsWith(`${parentPath}${sep}`)
 }
 
-type BackupSourceEntry = { absPath: string; relPath: string; size: number; kind?: 'directory'; linkTarget?: string }
+type BackupSourceEntry = { absPath: string; relPath: string; size: number; mode?: number; mtime?: Date; kind?: 'directory'; linkTarget?: string }
+
+async function regularBackupFile(absPath: string, relPath: string): Promise<BackupSourceEntry> {
+  const { size, mode, mtime } = await stat(absPath)
+  return { absPath, relPath, size, mode, mtime }
+}
 
 async function collectFiles(root: string, excludePath: string, current = root, includedConversations: ReadonlySet<string> = new Set()): Promise<BackupSourceEntry[]> {
   const entries = await readdir(current, { withFileTypes: true })
@@ -120,19 +128,53 @@ async function collectFiles(root: string, excludePath: string, current = root, i
         files.push({ absPath, relPath: normalizedRelPath, size: 0, linkTarget: relative(canonicalRoot, target).split(sep).join('/') })
       }
     } else if (entry.isFile()) {
-      const info = await stat(absPath)
-      files.push({
-        absPath,
-        relPath: normalizedRelPath,
-        size: info.size
-      })
+      files.push(await regularBackupFile(absPath, normalizedRelPath))
     }
   }
   return files
 }
 
+async function writeBackupArchive(path: string, files: BackupSourceEntry[], storeUncompressed: ReadonlySet<string>): Promise<void> {
+  const zip = new ZipFile()
+  const stream = zip.outputStream as Readable
+  zip.on('error', (error: Error) => stream.destroy(error))
+  const completed = pipeline(stream, createWriteStream(path, { mode: 0o600 }))
+  let reader: ReadStream | undefined
+  try {
+    zip.addBuffer(Buffer.from(`${JSON.stringify(backupManifest)}\n`), backupManifestFileName)
+    for (const file of files) {
+      if (file.kind === 'directory') zip.addEmptyDirectory(file.relPath)
+      else if (file.linkTarget !== undefined) {
+        const target = relative(dirname(file.relPath), file.linkTarget).split(sep).join('/') || '.'
+        zip.addBuffer(Buffer.from(target), file.relPath, { mode: 0o120777 })
+      } else {
+        zip.addReadStreamLazy(file.relPath, {
+          size: file.size, mtime: file.mtime, mode: file.mode, compress: !storeUncompressed.has(file.relPath)
+        }, callback => {
+          reader = createReadStream(file.absPath)
+          reader.on('error', error => zip.emit('error', error))
+          callback(null, reader)
+        })
+      }
+    }
+    zip.end()
+    await completed
+  } catch (error) {
+    zip.emit('error', error)
+    reader?.destroy()
+    await Promise.allSettled(reader ? [finished(reader), completed] : [completed])
+    throw error
+  }
+}
+
 export async function createDataBackupZip(targetPath: string): Promise<DataBackupResult> {
   return withApplicationDataSnapshot(() => createDataBackupSnapshot(targetPath))
+}
+
+async function removeBackupTemporaryDirectory(path: string): Promise<void> {
+  await rm(path, { recursive: true, force: true }).catch(error => {
+    runtimeLog('warn', 'backup', 'Failed to remove temporary backup files.', { path, error })
+  })
 }
 
 async function createDataBackupSnapshot(targetPath: string): Promise<DataBackupResult> {
@@ -143,38 +185,31 @@ async function createDataBackupSnapshot(targetPath: string): Promise<DataBackupR
   try {
     const databaseSnapshots = await snapshotAgentStorage(dataDir, snapshotDir)
     const includedConversations = new Set(databaseSnapshots.flatMap(file => file.conversationIds ?? []))
-    const entries: BackupSourceEntry[] = [...await collectFiles(dataDir, resolvedZipPath, dataDir, includedConversations), ...databaseSnapshots]
+    const entries = await collectFiles(dataDir, resolvedZipPath, dataDir, includedConversations)
+    for (const file of databaseSnapshots) entries.push(await regularBackupFile(file.absPath, file.relPath))
     const includedTargets = new Set(entries.filter(entry => entry.linkTarget === undefined).map(entry => entry.relPath))
     const files = entries.filter(entry => entry.linkTarget === undefined || includedTargets.has(entry.linkTarget))
 
     await mkdir(dirname(resolvedZipPath), { recursive: true })
-    await new Promise<void>((resolvePromise, reject) => {
-      const zip = new ZipFile()
-      zip.addBuffer(Buffer.from(`${JSON.stringify(backupManifest)}\n`), backupManifestFileName)
-      const output = createWriteStream(resolvedZipPath)
-      output.on('close', resolvePromise)
-      output.on('error', reject)
-      zip.outputStream.on('error', reject)
-      zip.outputStream.pipe(output)
-      for (const file of files) {
-        if (file.kind === 'directory') zip.addEmptyDirectory(file.relPath)
-        else if (file.linkTarget !== undefined) {
-          const target = relative(dirname(file.relPath), file.linkTarget).split(sep).join('/') || '.'
-          zip.addBuffer(Buffer.from(target), file.relPath, { mode: 0o120777 })
-        } else zip.addFile(file.absPath, file.relPath)
+    const staging = await mkdtemp(join(dirname(resolvedZipPath), '.anas-backup-'))
+    try {
+      const staged = join(staging, 'backup.zip')
+      const storeUncompressed = new Set<string>()
+      await writeBackupArchive(staged, files, storeUncompressed)
+      await inspectZipForExport(staged, backupArchiveLimits, storeUncompressed)
+      if (storeUncompressed.size) {
+        await writeBackupArchive(staged, files, storeUncompressed)
+        await inspectZipForExport(staged, backupArchiveLimits)
       }
-      zip.end()
-    })
-
-    const info = await stat(resolvedZipPath)
-    return {
-      path: resolvedZipPath,
-      backupDir: dirname(resolvedZipPath),
-      fileCount: files.filter(file => file.kind !== 'directory').length,
-      size: info.size
+      const { size } = await stat(staged)
+      await rename(staged, resolvedZipPath)
+      return { path: resolvedZipPath, backupDir: dirname(resolvedZipPath),
+        fileCount: files.filter(file => file.kind !== 'directory').length, size }
+    } finally {
+      await removeBackupTemporaryDirectory(staging)
     }
   } finally {
-    await rm(snapshotDir, { recursive: true, force: true })
+    await removeBackupTemporaryDirectory(snapshotDir)
   }
 }
 

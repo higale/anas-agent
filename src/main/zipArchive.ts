@@ -4,7 +4,7 @@ import { dirname, posix, resolve, sep, win32 } from 'node:path'
 import { Transform, Writable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { crc32 } from 'node:zlib'
-import { openPromise, type Entry } from 'yauzl'
+import { openPromise, type ZipFile, type Entry } from 'yauzl'
 
 const unixFileTypeMask = 0xf000
 const unixRegularFile = 0x8000
@@ -75,7 +75,8 @@ function safeExtractionPath(root: string, relPath: string): string {
 function validateEntryBudget(
   entry: Entry,
   limits: ZipArchiveLimits,
-  totalDeclaredBytes: number
+  totalDeclaredBytes: number,
+  storeUncompressed?: Set<string>
 ): number {
   if (!entry.canDecodeFileData()) {
     throw new Error(`ZIP archive entry uses an unsupported encoding: ${entry.fileName}`)
@@ -94,7 +95,8 @@ function validateEntryBudget(
       ? Number.POSITIVE_INFINITY
       : entry.uncompressedSize / entry.compressedSize
     if (ratio > limits.maxCompressionRatio) {
-      throw new Error(`ZIP archive entry exceeds the compression ratio limit: ${entry.fileName}`)
+      if (!storeUncompressed) throw new Error(`ZIP archive entry exceeds the compression ratio limit: ${entry.fileName}`)
+      storeUncompressed.add(entry.fileName)
     }
   }
   return nextTotal
@@ -136,50 +138,74 @@ function byteBudgetTransform(
   })
 }
 
-export async function extractZipArchive(
-  sourcePath: string,
-  targetRoot: string,
-  limits: ZipArchiveLimits,
-  options: { skipPath?(path: string): boolean; validatePath?(path: string): void } = {}
-): Promise<ExtractedZipArchive> {
+async function openLimitedZip(sourcePath: string, limits: ZipArchiveLimits) {
   const sourceInfo = await stat(sourcePath)
   if (!sourceInfo.isFile()) throw new Error('ZIP archive is not a regular file.')
   if (sourceInfo.size > limits.maxArchiveBytes) {
     throw new Error('ZIP archive exceeds the compressed size limit.')
   }
 
-  const zip = await openPromise(sourcePath, {
+  return openPromise(sourcePath, {
     autoClose: true,
     lazyEntries: true,
     decodeStrings: true,
     validateEntrySizes: true,
     strictFileNames: true
   })
-  const entryNames = new Set<string>()
+}
+
+interface ZipEntryOptions {
+  skipPath?(path: string): boolean
+  validatePath?(path: string): void
+}
+
+async function* checkedEntries(zip: ZipFile, limits: ZipArchiveLimits, options: ZipEntryOptions & { storeUncompressed?: Set<string> }) {
   const collisionKeys = new Set<string>()
-  const links: Array<{ name: string; path: string; target: string; resolvedTarget: string }> = []
   let entryCount = 0
-  let fileCount = 0
   let totalDeclaredBytes = 0
+  for await (const entry of zip.eachEntry()) {
+    entryCount += 1
+    if (entryCount > limits.maxEntries) {
+      throw new Error('ZIP archive contains too many entries.')
+    }
+    const name = normalizedEntryName(entry, limits)
+    const collisionKey = name.toLowerCase()
+    if (collisionKeys.has(collisionKey)) {
+      throw new Error(`ZIP archive contains a duplicate entry path: ${name}`)
+    }
+    collisionKeys.add(collisionKey)
+    const kind = entryKind(entry)
+    totalDeclaredBytes = validateEntryBudget(entry, limits, totalDeclaredBytes, options.storeUncompressed)
+    options.validatePath?.(name)
+    if (options.skipPath?.(name)) continue
+    if (kind === 'link' && entry.uncompressedSize > limits.maxPathBytes) throw new Error(`ZIP link target is too long: ${name}`)
+    yield { entry, name, kind }
+  }
+}
+
+/** Check the staged archive against the import limits without extracting its payload. */
+export async function inspectZipForExport(path: string, limits: ZipArchiveLimits, storeUncompressed?: Set<string>): Promise<void> {
+  const zip = await openLimitedZip(path, limits)
+  try {
+    for await (const _entry of checkedEntries(zip, limits, { storeUncompressed })) { /* validate all entries */ }
+  } finally { zip.close() }
+}
+
+export async function extractZipArchive(
+  sourcePath: string,
+  targetRoot: string,
+  limits: ZipArchiveLimits,
+  options: ZipEntryOptions = {}
+): Promise<ExtractedZipArchive> {
+  const zip = await openLimitedZip(sourcePath, limits)
+  const entryNames = new Set<string>()
+  const links: Array<{ name: string; path: string; target: string; resolvedTarget: string }> = []
+  let fileCount = 0
   let totalBytes = 0
 
   try {
     await mkdir(targetRoot, { recursive: true })
-    for await (const entry of zip.eachEntry()) {
-      entryCount += 1
-      if (entryCount > limits.maxEntries) {
-        throw new Error('ZIP archive contains too many entries.')
-      }
-      const name = normalizedEntryName(entry, limits)
-      options.validatePath?.(name)
-      const collisionKey = name.toLowerCase()
-      if (collisionKeys.has(collisionKey)) {
-        throw new Error(`ZIP archive contains a duplicate entry path: ${name}`)
-      }
-      collisionKeys.add(collisionKey)
-      const kind = entryKind(entry)
-      totalDeclaredBytes = validateEntryBudget(entry, limits, totalDeclaredBytes)
-      if (options.skipPath?.(name)) continue
+    for await (const { entry, name, kind } of checkedEntries(zip, limits, options)) {
       if (kind === 'directory') {
         if (entry.uncompressedSize !== 0) throw new Error(`ZIP directory contains unexpected data: ${name}`)
         await mkdir(safeExtractionPath(targetRoot, name), { recursive: true })
@@ -189,7 +215,6 @@ export async function extractZipArchive(
 
       const targetPath = safeExtractionPath(targetRoot, name)
       await mkdir(dirname(targetPath), { recursive: true })
-      if (kind === 'link' && entry.uncompressedSize > limits.maxPathBytes) throw new Error(`ZIP link target is too long: ${name}`)
       const linkChunks: Buffer[] = []
       const source = await zip.openReadStreamPromise(entry)
       await pipeline(

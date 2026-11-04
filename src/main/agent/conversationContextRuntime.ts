@@ -14,14 +14,11 @@ import type {
   AgentSystemPrompt,
   AgentSystemPromptSectionKind
 } from './systemPrompt'
-import {
-  summaryPromptForLanguage,
-  type SummaryOutputLanguage
-} from '@shared/summaryPrompt'
+import type { SummaryOutputLanguage } from '@shared/summaryPrompt'
 import { countConversationTokens, conversationContextTokens, conversationUsageSnapshot, projectConversationToolImages } from './conversationContext'
 import type { ModelInputBudgetOptions } from '../../runtime/modelInputBudget'
 import { projectRulesText, type ProjectRulesSnapshot } from '../../runtime/projectRules'
-import { conversationSummaryTranscript, conversationPendingImageStart, effectiveConversationHistory, projectConversationToolHistory, type ConversationSummary } from './conversationHistoryProjection'
+import { summaryInputPrompt, conversationPendingImageStart, effectiveConversationHistory, projectConversationToolHistory, type ConversationSummary } from './conversationHistoryProjection'
 
 export interface ConversationContextSource {
   modelRecovery?: import('../../shared/modelRecovery').ModelRecoveryState
@@ -67,16 +64,6 @@ function hasRawSummarySource(messages: ConversationMessage[]): boolean {
   return messages.some((message) =>
     message.context?.summary !== true
   )
-}
-
-function summaryInputPrompt(
-  messages: ConversationMessage[],
-  outputLanguage: SummaryOutputLanguage,
-  codingMode: boolean,
-  compressionPrompt?: string
-): string {
-  return summaryPromptForLanguage(outputLanguage, codingMode, compressionPrompt)
-    .replace('{conversation}', conversationSummaryTranscript(messages))
 }
 
 async function messagesForSummary(

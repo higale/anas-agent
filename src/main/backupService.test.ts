@@ -422,6 +422,75 @@ describe('data backup restore', () => {
     expect(await readFile(join(previousRoot, 'tools/new_tool/TOOL.json'), 'utf8')).toBe('new tool after backup')
   })
 
+  it('round-trips highly compressible data through the normal backup limits', async () => {
+    const root = await temporaryDirectory(), dataRoot = join(root, 'data')
+    await mkdir(dataRoot)
+    const bytes = Buffer.alloc(2 * 1024 * 1024)
+    await writeFile(join(dataRoot, 'fixture.bin'), bytes)
+    const service = await loadBackupService(dataRoot)
+    const result = await service.createDataBackupZip(join(root, 'backup.zip'))
+    const { extractBackupArchive } = await import('./backupArchive')
+    const extracted = join(root, 'restored')
+    await extractBackupArchive(result.path, extracted)
+    expect((await readFile(join(extracted, 'fixture.bin'))).equals(bytes)).toBe(true)
+  })
+
+  it('preserves the previous ZIP and releases its snapshot when a source disappears during export', async () => {
+    const root = await temporaryDirectory(), dataRoot = join(root, 'data')
+    const source = join(dataRoot, 'source.txt'), target = join(root, 'backup.zip')
+    await writeText(source, 'original')
+    const service = await loadBackupService(dataRoot)
+    await service.createDataBackupZip(target)
+    const original = await readFile(target)
+    // Remove the enumerated file before yazl starts streaming file contents.
+    const end = ZipFile.prototype.end
+    const spy = vi.spyOn(ZipFile.prototype, 'end').mockImplementationOnce(function (this: ZipFile, ...args) {
+      nativeFs.unlinkSync(source)
+      end.apply(this, args)
+    })
+    try { await expect(service.createDataBackupZip(target)).rejects.toMatchObject({ code: 'ENOENT' }) }
+    finally { spy.mockRestore() }
+    expect(await readFile(target)).toEqual(original)
+    expect((await readdir(root)).sort()).toEqual(['backup.zip', 'data'])
+    await writeText(source, 'retry')
+    await service.createDataBackupZip(target)
+    const { extractBackupArchive } = await import('./backupArchive')
+    const restored = join(root, 'restored')
+    await extractBackupArchive(target, restored)
+    expect(await readFile(join(restored, 'source.txt'), 'utf8')).toBe('retry')
+  })
+
+  it.each([true, false])('keeps the export outcome when cleaning staging and snapshot directories fails (commit: %s)', async commit => {
+    const root = await temporaryDirectory(), data = join(root, 'data'), target = join(root, 'backup.zip')
+    await writeText(join(data, 'marker'), 'new')
+    await writeZip(target, [{ name: 'marker', data: 'old' }])
+    const log = vi.fn()
+    vi.doMock('./runtimeLogger', () => ({ runtimeLog: log }))
+    vi.doMock('node:fs/promises', async original => ({
+      ...await original<typeof import('node:fs/promises')>(),
+      rm: async (path: string, options: Parameters<typeof rm>[1]) => {
+        if (/[\\/]\.?anas-backup-[a-zA-Z0-9]{6}$/.test(path)) {
+          temporaryDirectories.push(path)
+          throw Object.assign(new Error('busy temporary directory'), { code: 'EBUSY' })
+        }
+        await rm(path, options)
+      }
+    }))
+    try {
+      const service = await loadBackupService(data, undefined, (_source, dest) => !commit && dest === target ? 'EIO' : false)
+      const backup = service.createDataBackupZip(target)
+      if (commit) await expect(backup).resolves.toMatchObject({ path: target })
+      else await expect(backup).rejects.toMatchObject({ code: 'EIO' })
+      expect(log.mock.calls.filter(([level]) => level === 'warn')).toHaveLength(2)
+      const { extractBackupArchive } = await import('./backupArchive')
+      await extractBackupArchive(target, join(root, 'restored'))
+      expect(await readFile(join(root, 'restored/marker'), 'utf8')).toBe(commit ? 'new' : 'old')
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.doUnmock('./runtimeLogger')
+    }
+  })
+
   it('keeps referenced attachment files until the ZIP has finished while background cleanup waits', async () => {
     const root = await temporaryDirectory()
     const dataRoot = join(root, 'data')

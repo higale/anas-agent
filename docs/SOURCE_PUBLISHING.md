@@ -9,7 +9,7 @@ GitHub 目标仓库：`higale/anas-agent`。日常开发仓库与公开仓库拥
 3. 提交本次开发结果，确认工作区干净。从项目根目录执行 `git archive --format=zip --output=../Anas-source.zip HEAD`，导出该提交的源码。未提交修改和未跟踪文件不在快照内。
 4. 拉取公开仓库的最新提交，确认其工作区干净。将快照解压到临时目录，再同步到公开仓库；同步必须包含删除的文件，且保留目标仓库自己的 `.git`。检查解析后的源、目标目录，禁止将日常工作区或它的 `.git` 当作清理目标。
 5. 在公开仓库检查 `git diff --stat` 和实际差异，确认只包含要发布的源码。保留 `LICENSE`、`THIRD_PARTY_NOTICES.md`、`data/licenses/`、锁文件和依赖补丁。`data/.env` 是随程序分发的示例模板，不能填入个人配置。
-6. 使用 `git add -A` 暂存本次快照并检查 `git diff --cached`。提交标题为 `Release <version>`，正文用简短条目概括自上次同步以来的累计修改，以本次实际差异为准，覆盖主要功能、修复和必要的配置或文档变更，不只描述最后一次开发提交。发布说明优先描述普通用户能感知的变化，少用内部接口、函数名和实现术语；不将提交说明的编写规范本身列为发布条目。再创建 `v<version>` 标签。没有内容变更时不创建重复提交；已有标签不能覆盖。
+6. 使用 `git add -A` 暂存本次快照并检查 `git diff --cached`。提交标题为 `Release <version>`，正文用简短条目概括自上次同步以来的累计修改，以本次实际差异为准，覆盖主要功能、修复和必要的配置或文档变更，不只描述最后一次开发提交。Release 说明用中英文简要列出本次用户能感知的改动；不将提交说明的编写规范本身列为发布条目。再创建 `v<version>` 标签。没有内容变更时不创建重复提交；已有标签不能覆盖。
 7. 明确推送公开仓库的 `main` 和本次 `v<version>` 标签。不要使用 `--mirror` 或 `--all`。标签触发自动打包，三个平台全部成功后由工作流创建 GitHub Release 并上传文件；无需提前创建 Release。
 8. 三平台构建及 GitHub Release 发布成功后，核对 Release 的实际构建提交，并确认其文件树与导出的开发提交一致。在开发仓库用 `git update-ref` 创建或前移 `refs/anas/github/v<version>` 普通引用，指向该已发布源码对应的开发提交，再明确推送到开发远端。同版本重试成功也必须更新，不能继续用首次同步位置计算开发差异。更新前确认旧基点是新基点的祖先，用旧对象 ID 校验本地更新，并以明确的 `--force-with-lease=<引用>:<远端旧对象ID>` 推送，防止覆盖并发更新。只同步源码、构建失败或尚未发布时不前移；不得将未发布的当前 HEAD 冒充发布基点。开发仓库不创建发布或同步标签，此引用不推送 GitHub；公开版本标签仍不可移动。
 
@@ -18,17 +18,6 @@ GitHub 目标仓库：`higale/anas-agent`。日常开发仓库与公开仓库拥
 发布前对最终导出的源码快照检查密钥、个人路径、私有服务地址和误收录的用户数据；另外检查 `data/` 等打包资源中的未跟踪文件，Git 忽略规则不会自动成为打包排除规则。只发布检查过的快照，不复制开发仓库的 `.git`、运行数据或构建日志。
 
 公开仓库的提交和附注标签会公开作者、提交者的姓名与邮箱。首次提交前，在公开仓库单独配置预期的公开署名和 GitHub 提供的 noreply 邮箱，不直接沿用开发仓库的私人邮箱；这些仓库级配置无需更改日常开发身份。
-
-## 后续发布的升级提醒
-
-后续每份 Release 说明的中英文部分都保留简短的跨版本提醒，分别链接 [4.x 升级数据说明](../data/help/UPGRADE_TO_4.zh-CN.md)和[英文版](../data/help/UPGRADE_TO_4.en.md)。说明 4.0 的历史布局变化和跨入 4.x 时的影响；不要将其写成每次更新都会丢失数据，也不要用 4.x 的手动恢复范围承诺 5.0 兼容旧数据库。5.0 的全新数据库边界保留简短提醒，手动复制步骤集中在 [5.0 升级数据说明](../data/help/UPGRADE_TO_5.zh-CN.md)和[英文版](../data/help/UPGRADE_TO_5.en.md)，Release 只引用文档。本次发布另有兼容性影响时，单独说明，不能用历史提醒代替。
-
-GitHub Release 正文使用完整链接，避免相对路径落到 Release 页面下：
-
-- 中文：`https://github.com/higale/anas-agent/blob/main/data/help/UPGRADE_TO_4.zh-CN.md`
-- 英文：`https://github.com/higale/anas-agent/blob/main/data/help/UPGRADE_TO_4.en.md`
-
-5.0 文档使用同一公开路径前缀，文件名分别为 `UPGRADE_TO_5.zh-CN.md` 和 `UPGRADE_TO_5.en.md`。维护上述固定路径；同步源码时一并发布文档。无需每次复制完整恢复步骤，也不再让用户到旧 Release 中查找说明。
 
 ## 开发标记
 
@@ -57,4 +46,4 @@ git fetch origin
 
 推送的标签必须精确匹配 `package.json` 的 `vMAJOR.MINOR.PATCH`，普通分支推送不会触发打包。工作流进入默认分支后，可在 Actions > Build release packages > Run workflow 手动运行；`release_tag` 留空时仅验证，构建产物保留 14 天。修复发布故障后，可选择修复后的分支并填写原版本标签，重新执行全部三平台检查和发布；标签须与 package 版本一致且已存在，不移动标签，Release 说明记录实际构建提交。上传中断留下的草稿在全部构建成功后补齐并发布；已公开的 Release 拒绝覆盖。
 
-本地仍可运行 `npm run pack`、`npm run pack:mac:release` 或 `npm run pack:win:release`，与 CI 使用相同配置。macOS 未公证应用的首次启动说明随 Release 提供，不能将 ad-hoc 校验结果表述为通过 Gatekeeper 公证验证。
+本地仍可运行 `npm run pack`、`npm run pack:mac:release` 或 `npm run pack:win:release`，与 CI 使用相同配置。macOS 未公证应用的首次启动说明见[用户指南](../data/help/USER_GUIDE.zh-CN.md#打开下载的-macos-应用)，不能将 ad-hoc 校验结果表述为通过 Gatekeeper 公证验证。

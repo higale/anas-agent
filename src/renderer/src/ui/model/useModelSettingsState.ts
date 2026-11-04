@@ -17,8 +17,7 @@ import {
   validateProviderModelDraft
 } from './modelDraft'
 import type { ModelDraft } from './modelDraft'
-import { useCachedModelCandidates } from './useCachedModelCandidates'
-import { useModelCandidateRefresh } from './useModelCandidateRefresh'
+import { useModelCandidates } from './useModelCandidates'
 
 type ProviderDraftFields = Pick<ModelDraft,
   'name' | 'iconData' | 'protocol' | 'baseUrl' | 'modelListUrl' | 'apiKey' | 'providerParametersJson'>
@@ -68,15 +67,9 @@ export function useModelSettingsState({
     withFailedProviderDraft(savedModelConfigToDraft(...args))
   ), [withFailedProviderDraft])
   const modelNoticeId = 'settings-model-status'
-  const [modelCandidates, setModelCandidates] = useCachedModelCandidates({
-    draft: modelDraft,
-    enabled: settingsOpen && settingsTab === 'model'
-  })
-  const { modelListLoading, refreshModelCandidates } = useModelCandidateRefresh({
-    modelDraft,
-    setModelCandidates,
-    t
-  })
+  const { modelCandidates, modelListLoading, refreshModelCandidates } = useModelCandidates(
+    modelDraft, settingsOpen && settingsTab === 'model', t
+  )
 
   useEffect(() => {
     modelDraftRef.current = modelDraft
@@ -162,7 +155,6 @@ export function useModelSettingsState({
     const model = provider?.models[0]
     if (!provider) return
     modelAutosave.revise(`provider:${provider.id}`)
-    setModelCandidates([])
     setEditingModelIndex(index)
     setEditingProviderModelIndex(undefined)
     const draft = providerConfigToDraft(provider, model)
@@ -243,12 +235,6 @@ export function useModelSettingsState({
 
   function updateModelDraft(update: Partial<ModelDraft>): void {
     const nextDraft = { ...modelDraftRef.current, ...update }
-    const modelCandidateSourceUpdate = update.name !== undefined
-      || update.protocol !== undefined
-      || update.baseUrl !== undefined
-      || update.modelListUrl !== undefined
-      || update.apiKey !== undefined
-    if (modelCandidateSourceUpdate) setModelCandidates([])
     modelDraftRef.current = nextDraft
     if (nextDraft.providerId && failedProviderDrafts.current.has(nextDraft.providerId)) {
       failedProviderDrafts.current.set(nextDraft.providerId, providerDraftFields(nextDraft))

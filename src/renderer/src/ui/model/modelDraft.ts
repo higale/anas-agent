@@ -294,7 +294,7 @@ export function validateProviderModelDraft(draft: ModelDraft, t: TFunction): str
   return undefined
 }
 
-export function buildModelListRequest(draft: ModelDraft): ModelListRequest | undefined {
+export function buildModelListRequest(draft: Pick<ModelDraft, 'providerId' | 'baseUrl' | 'name' | 'modelListUrl' | 'protocol' | 'apiKey'>): ModelListRequest | undefined {
   if (!draft.baseUrl.trim()) return undefined
   return {
     providerId: draft.providerId,

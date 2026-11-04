@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ZipFile } from 'yazl'
+import { inspectZipForExport } from './zipArchive'
 import {
   backupArchiveLimits,
   extractBackupArchive,
@@ -93,6 +94,16 @@ afterEach(async () => {
 })
 
 describe('backup archive extraction', () => {
+  it('checks link targets against the same byte limit before publishing or extracting a ZIP', async () => {
+    const root = await temporaryDirectory(), archive = join(root, 'backup.zip')
+    const target = 'dir/file'
+    await writeZip(archive, [{ name: 'link', data: Buffer.from(target), mode: 0o120777 }])
+    const strict = limits({ maxPathBytes: Buffer.byteLength(target) - 1 })
+    await expect(inspectZipForExport(archive, limits({ maxPathBytes: Buffer.byteLength(target) }))).resolves.toBeUndefined()
+    await expect(inspectZipForExport(archive, strict)).rejects.toThrow('ZIP link target is too long')
+    await expectRejectedAndClean(archive, join(root, 'restored'), 'ZIP link target is too long', strict)
+  })
+
   it('excludes developer HTTP traces from backup creation and restore', () => {
     expect(shouldSkipBackupRelativePath('dev/model-http/request/response-body.sse')).toBe(true)
     expect(shouldSkipBackupRelativePath('log/current.log')).toBe(true)

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TFunction } from 'i18next'
 import { ModelEditor } from './ModelEditor'
 import { emptyModelDraft } from './modelDraft'
-import { useModelCandidateRefresh } from './useModelCandidateRefresh'
+import { useModelCandidates } from './useModelCandidates'
 import { notice } from '../notice'
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
@@ -67,11 +67,9 @@ describe('model API key input', () => {
   })
 
   it('reports which variable is missing when refreshing the model list', async () => {
-    vi.stubGlobal('gale', { config: { fetchModels: vi.fn().mockRejectedValue(new Error("Error invoking remote method 'config:fetchModels': Error: API key environment variable MY_CREDENTIAL is missing or empty.")) } })
+    vi.stubGlobal('gale', { config: { getCachedModels: vi.fn().mockResolvedValue(null), fetchModels: vi.fn().mockRejectedValue(new Error("Error invoking remote method 'config:fetchModels': Error: API key environment variable MY_CREDENTIAL is missing or empty.")) } })
     const t = vi.fn((key: string) => key) as unknown as TFunction
-    const { result } = renderHook(() => useModelCandidateRefresh({
-      modelDraft: { ...emptyModelDraft(), baseUrl: 'https://example.test/v1', apiKey: '${MY_CREDENTIAL}' }, setModelCandidates: vi.fn(), t
-    }))
+    const { result } = renderHook(() => useModelCandidates( { ...emptyModelDraft(), baseUrl: 'https://example.test/v1', apiKey: '${MY_CREDENTIAL}' }, true, t))
     await act(async () => result.current.refreshModelCandidates())
     expect(t).toHaveBeenCalledWith('settings.api_key_variable_missing', { name: 'MY_CREDENTIAL' })
     expect(notice.error).toHaveBeenCalledWith('settings.api_key_variable_missing')

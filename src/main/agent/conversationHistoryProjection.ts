@@ -1,3 +1,4 @@
+import { summaryPromptForLanguage, type SummaryOutputLanguage } from '@shared/summaryPrompt'
 import type { ConversationMessage } from '../../runtime/conversationMessage'
 import { summaryTranscript, type SummaryTranscriptMessage } from '../../runtime/compression'
 import { compressionRetention, pendingToolImageStart, simpleChatAssistantContent, simpleChatUserContent,
@@ -24,6 +25,16 @@ export function projectConversationToolHistory(messages: ConversationMessage[]):
     kind: 'tool', resultFor: item.missingResult.callId, name: item.missingResult.name, resultStatus: 'error',
     content: unrecordedToolResultText, context: { unrecordedResult: true }
   })
+}
+
+export function summaryInputPrompt(
+  messages: ConversationMessage[],
+  outputLanguage: SummaryOutputLanguage,
+  codingMode: boolean,
+  compressionPrompt?: string
+): string {
+  return summaryPromptForLanguage(outputLanguage, codingMode, compressionPrompt)
+    .replace('{conversation}', () => conversationSummaryTranscript(messages))
 }
 
 export function conversationSummaryTranscript(messages: ConversationMessage[]): string {

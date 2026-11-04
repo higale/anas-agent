@@ -1,7 +1,7 @@
 import type { ResolvedModelConfig } from '@shared/types'
 import { contextCompressionTriggerTokens } from '@shared/contextWindow'
 import { modelContextKey } from '@shared/modelConfig'
-import { summaryPromptForLanguage, type SummaryOutputLanguage } from '@shared/summaryPrompt'
+import type { SummaryOutputLanguage } from '@shared/summaryPrompt'
 import type { ConversationMessage } from '../../runtime/conversationMessage'
 import { compactLatestToolResults } from '../../runtime/conversationHistory'
 import { prepareCompression, stageCompressionSummary, type CompressionTrackingCallbacks, type ManualContextCompression } from '../../runtime/compression'
@@ -9,7 +9,7 @@ import { isModelContextOverflow, ModelRequestChangedError, ModelSelectionError }
 import type { ObserveConversationProgress } from '../../providers/conversationStream'
 import { createCompressionModel } from './compressionModel'
 import { conversationContextTokens, conversationHistoryFacts, countConversationTokens, projectConversationToolImages } from './conversationContext'
-import { conversationSummaryTranscript, effectiveConversationHistory, projectConversationToolHistory, selectConversationRetention,
+import { summaryInputPrompt, effectiveConversationHistory, projectConversationToolHistory, selectConversationRetention,
   type ConversationSummary } from './conversationHistoryProjection'
 import { prepareConversationModelCall, type PreparedConversationContext } from './conversationRequest'
 import type { ConversationModelOptions } from './conversationModel'
@@ -76,8 +76,8 @@ export async function invokeConversationWithCompression(model: ResolvedModelConf
       requestRole: `${options.requestRole ?? 'main'}-compression`,
       beforeRequest: async () => { if (JSON.stringify(model) !== JSON.stringify(await options.resolveModel())) throw new ModelRequestChangedError() }
     })
-    const prompt = summaryPromptForLanguage(options.outputLanguage, options.codingMode === true, options.compressionPrompt)
-      .replace('{conversation}', conversationSummaryTranscript(effective.slice(0, selection.cutoffIndex)))
+    const prompt = summaryInputPrompt(effective.slice(0, selection.cutoffIndex), options.outputLanguage,
+      options.codingMode === true, options.compressionPrompt)
     const generated = await generate(prompt, options.signal, preparation)
     options.signal.throwIfAborted()
     if (!generated.text.trim()) throw new ModelSelectionError('Context compression returned an empty summary. The current history has not been replaced.')

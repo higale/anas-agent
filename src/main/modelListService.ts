@@ -1,6 +1,6 @@
 import { getModelProviderConfig } from './config/appConfig'
 import { resolveModelApiKey } from './config/apiKeys'
-import { readModelListCache, writeModelListCache } from './modelListCache'
+import { modelListCacheFileName, normalizeModelList, readModelListCache, writeModelListCache } from './modelListCache'
 import { requireModelProtocol } from '@shared/modelConfig'
 import { resolveModelListEndpoint } from '@shared/modelListEndpoint'
 import type { ModelListRequest, ModelListResponse, ModelProviderConfig } from '@shared/types'
@@ -67,8 +67,7 @@ export async function getCachedAvailableModels(request: ModelListRequest): Promi
     : null
 }
 
-export async function fetchAvailableModels(request: ModelListRequest): Promise<ModelListResponse> {
-  const { endpoint, apiKey } = await modelListRequestRuntime(request)
+async function requestModelList({ endpoint, apiKey }: ModelListRequestRuntime): Promise<string[]> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 10000)
   try {
@@ -76,18 +75,42 @@ export async function fetchAvailableModels(request: ModelListRequest): Promise<M
     const response = await fetch(endpoint, { headers, signal: controller.signal })
     const text = await response.text()
     if (!response.ok) throw new Error(`HTTP ${response.status}: ${text.slice(0, 240)}`)
-    const models = modelListItems(JSON.parse(text))
-      .map(modelListItemId)
-      .filter((id): id is string => id !== undefined)
+    const models = normalizeModelList(modelListItems(JSON.parse(text)).map(modelListItemId))
     if (models.length === 0) throw new Error('No models were returned.')
-    await writeModelListCache(endpoint, apiKey, models)
-    const cache = await readModelListCache(endpoint, apiKey)
-    if (!cache) throw new Error('Model list cache was not written.')
-    return { models: cache.models }
+    return models
   } catch (error) {
     if ((error as Error).name === 'AbortError') throw new Error('Model list request timed out.')
     throw error
   } finally {
     clearTimeout(timeout)
+  }
+}
+
+// Assign order before resolving provider settings, which can also finish out of order.
+let nextRefreshId = 0
+let activeRefreshes = 0
+const cacheWrites = new Map<string, { latestId: number; pending: Promise<void> }>()
+
+export async function fetchAvailableModels(request: ModelListRequest): Promise<ModelListResponse> {
+  const id = ++nextRefreshId
+  activeRefreshes++
+  try {
+    const runtime = await modelListRequestRuntime(request)
+    const key = modelListCacheFileName(runtime.endpoint, runtime.apiKey)
+    const writes = cacheWrites.get(key) ?? { latestId: id, pending: Promise.resolve() }
+    writes.latestId = Math.max(writes.latestId, id)
+    cacheWrites.set(key, writes)
+    const models = await requestModelList(runtime)
+    if (writes.latestId === id) {
+      const published = writes.pending.then(() => {
+        if (writes.latestId === id) return writeModelListCache(runtime.endpoint, runtime.apiKey, models)
+      })
+      writes.pending = published.catch(() => undefined)
+      await published
+    }
+    return { models }
+  } finally {
+    // A still-resolving older refresh may yet resolve to any cached key.
+    if (--activeRefreshes === 0) cacheWrites.clear()
   }
 }
