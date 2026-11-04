@@ -1211,7 +1211,16 @@
   font-size: var(--font-size-small);
 }
 
+.composer-access-slot {
+  display: flex;
+  align-items: center;
+  flex: 1 1 0;
+  min-width: var(--control-height);
+}
+
 .composer-access-trigger {
+  flex: none;
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -1225,6 +1234,17 @@
   font-size: var(--font-size-small);
   font-weight: 650;
   line-height: var(--font-line-height-small);
+}
+
+.composer-access-trigger[data-icon-only] > span {
+  display: none;
+}
+
+.composer-access-trigger[data-icon-only] {
+  gap: 2px;
+  width: var(--control-height);
+  justify-content: center;
+  padding: 0;
 }
 
 .composer-simple-mode {

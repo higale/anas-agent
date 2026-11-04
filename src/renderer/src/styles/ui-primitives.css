@@ -875,8 +875,7 @@ button.ui-icon-box {
   cursor: pointer;
 }
 
-.ui-icon-box img,
-.ui-dialog-icon img {
+.ui-icon-box img {
   position: absolute;
   inset: 0;
   width: 100%;

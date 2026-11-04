@@ -205,10 +205,10 @@ async function verifyModelSelection(launchApplication) {
     // An approval keeps the same persisted run ID across resumed execution.
     // Changing the profile while waiting must preview the resumed prompt now.
     await page.keyboard.press('Escape')
-    const access = page.getByRole('button', { name: 'Tool access', exact: true })
+    const access = page.getByRole('button', { name: 'Approval mode', exact: true })
     await access.click()
     await page.getByRole('menuitem', { name: /^Strict approval/ }).click()
-    await expect(access).toHaveText('Strict approval')
+    await expect(access).toHaveAccessibleDescription('Strict approval')
     await page.locator('[data-agent-composer-input]').fill('Request a theme change, then continue after the approval decision.')
     await page.getByRole('button', { name: 'Send', exact: true }).click()
     await expect.poll(() => requests.length, { timeout: 20_000 }).toBe(3)

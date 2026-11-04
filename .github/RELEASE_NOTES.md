@@ -1,9 +1,7 @@
-## Anas v5.1.2
+## Anas v5.1.3
 
-- 备份导出失败时保留原备份。修复高压缩率文件可能无法恢复、目录中的无关文件可能阻止备份的问题。
-- 手动和自动压缩对话时，提示词会保留原文中的 `$$`、`$&` 等字符。
-- 切换供应商或连续刷新模型列表时，迟到的旧请求不会覆盖当前列表或较新的缓存。
+- 修复“编辑项目”窗口裁切自定义 SVG 图标的问题，图标按原始比例居中显示。
+- “工具权限”更名为“审批模式”，选项为“严格审批”“智能审批”和“跳过审批”。聊天工具栏空间不足时收起模式名称，保留盾牌和下拉箭头。悬停或用键盘聚焦可查看当前模式。
 
-- Failed exports preserve the existing backup. Highly compressible files can be restored, and unrelated directory entries no longer block backups.
-- Manual and automatic conversation compression preserve literal text such as `$$` and `$&` in the summarization prompt.
-- When switching providers or refreshing repeatedly, late responses no longer overwrite the current model list or a newer cache entry.
+- Custom SVG icons now appear centered at their original aspect ratio in the Edit project dialog.
+- Tool access is now called Approval mode, with Strict approval, Smart approval, and Skip approval as the choices. When space is tight, the chat toolbar shows the shield and dropdown arrow. Hover over the button or focus it with the keyboard to see the current mode.

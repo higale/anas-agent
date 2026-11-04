@@ -24,7 +24,7 @@ The sidebar shows Projects, Simple chats, then the separate default project. Dra
 
 Enable **Customize capabilities** in the project editor to choose prompts, context, tools, skills, and subagents. New projects start customization with the same available capabilities used while customization is off. Turning it off uses all enabled capabilities and retains custom choices; updated defaults do not reset saved project selections. Settings manages source availability; there is no global default-capability page. Coding mode controls the development workflow without increasing access permissions.
 
-The default project name cannot be changed. All other settings work the same as for regular projects, including its icon, color, working folders, tool access mode, model and reasoning option, coding mode, and customized capabilities. Its initial working folder is the current system user's Documents folder, with no extra subfolder created; saved folder selections are preserved. Enable “Customize capabilities” to edit project and compression prompts and capability selections. Turning it off preserves those custom settings while using the default prompt behavior and all enabled capabilities.
+The default project name cannot be changed. All other settings work the same as for regular projects, including its icon, color, working folders, approval mode, model and reasoning option, coding mode, and customized capabilities. Its initial working folder is the current system user's Documents folder, with no extra subfolder created; saved folder selections are preserved. Enable “Customize capabilities” to edit project and compression prompts and capability selections. Turning it off preserves those custom settings while using the default prompt behavior and all enabled capabilities.
 
 Click the project icon to choose a built-in icon or upload an image. Project and provider icons use the same import rules: raster images are center-cropped to a square of up to 128 × 128 pixels without enlarging small images. SVGs retain their vector format. Choose a built-in icon to switch back, then save the project.
 
@@ -116,7 +116,7 @@ The tool can upload or download files independently of **File read** and **File 
 
 Provides `update_config` to change supported application settings at your request, such as the theme, font size, and profile. It currently supports application settings fields, not arbitrary changes to project, model, or MCP configuration files.
 
-It does not require **File write**. **Strict approval** requires confirmation for each call; **Smart approval** uses the model’s assessment; **Full access** skips that prompt.
+It does not require **File write**. **Strict approval** requires confirmation for each call; **Smart approval** uses the model’s assessment; **Skip approval** skips that prompt.
 
 ### User Interaction
 
@@ -271,15 +271,15 @@ Set Vision and Tool use to match the model's actual capabilities. Turning Tool u
 
 Project Customize capabilities selects available tools; the model's Tool use setting determines whether it can call them. See [Projects And Capabilities](#projects-and-capabilities) for functions and dependencies.
 
-Below the folders in project settings, choose the default tool access mode on the left and the model and reasoning option on the right. New conversations inherit this mode and can override it beside the input. Changing the project default does not affect existing conversations. An omitted setting defaults to Smart approval; Customize capabilities does not need to be enabled.
+Below the folders in project settings, choose the default approval mode on the left and the model and reasoning option on the right. New conversations inherit this mode and can override it beside the input. Changing the project default does not affect existing conversations. An omitted setting defaults to Smart approval; Customize capabilities does not need to be enabled.
 
-Conversations offer three access modes:
+The approval mode button below the message input shows the full name when it fits and keeps the shield and dropdown arrow when space is limited. Hover over it or focus it with the keyboard to see the current mode. Open the menu for a description of each mode.
 
 - **Strict approval**: verified reads anywhere and writes inside project, application temporary, or system temporary directories run automatically. Enabled Skill script exemptions still apply. Other operations require confirmation.
 - **Smart approval**: the default. In addition to strict-mode exemptions, writes inside Desktop, Downloads, Documents, and Pictures are allowed. The model assesses remaining operations; omission requests confirmation. Code-verified safe operations always run automatically. Freeform patches use target checks only and require confirmation for writes outside safe directories.
-- **Full access**: skips pre-execution permission approval while retaining validation, cancellation, and recovery confirmation. Change modes beside the input; queued calls recheck the current mode before dispatch, while operations already started are not interrupted.
+- **Skip approval**: skips pre-execution permission approval while retaining validation, cancellation, and recovery confirmation. Change modes beside the input; queued calls recheck the current mode before dispatch, while operations already started are not interrupted.
 
-Only Smart approval adds the required `needs_approval` parameter to model-facing JSON tool definitions. The model must explicitly provide it on every call; execution still falls back to `true` if it is omitted. Automatic code exemptions take priority, then remaining operations use the model’s value. Strict approval, Full access, and Freeform patches do not expose this parameter. Tool details in Settings let you switch modes and patch formats to inspect their definitions. Mode changes preserve historical call arguments; queued calls recheck the current mode before execution.
+Only Smart approval adds the required `needs_approval` parameter to model-facing JSON tool definitions. The model must explicitly provide it on every call; execution still falls back to `true` if it is omitted. Automatic code exemptions take priority, then remaining operations use the model’s value. Strict approval, Skip approval, and Freeform patches do not expose this parameter. Tool details in Settings let you switch modes and patch formats to inspect their definitions. Mode changes preserve historical call arguments; queued calls recheck the current mode before execution.
 
 An external operation with an uncertain outcome still requires confirmation before retrying. A conversation awaiting confirmation cannot accept messages, history edits, regeneration, or compression. Other conversations remain available.
 

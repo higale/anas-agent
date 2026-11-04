@@ -312,7 +312,7 @@ export function ChatComposer({
                       onChange={onChangeAccessMode}
                     />
                   )}
-              <span className="composer-toolbar-spacer" />
+              {simpleChatEnabled && <span className="composer-toolbar-spacer" />}
               <ComposerSpeechReplyToggle
                 disabled={!config}
                 enabled={config?.settings.speechReply.enabled ?? false}
