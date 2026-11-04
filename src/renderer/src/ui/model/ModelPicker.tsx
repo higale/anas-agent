@@ -2,6 +2,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { Check, ChevronDown, Settings2, Star } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
+import { contextCompressionTriggerTokens } from '@shared/contextWindow'
 import { findProviderModelConfig, isSelectableModelConfig, resolveProviderModelConfig } from '@shared/modelConfig'
 import type { ModelProviderConfig, ResolvedModelConfig } from '@shared/types'
 import { DropdownMenuContent, DropdownMenuRoot, DropdownMenuTrigger } from '../DropdownMenuShell'
@@ -90,7 +91,10 @@ export function ModelPicker({
         output: model.maxOutputTokens > 0 ? number.format(model.maxOutputTokens) : t('chat.model_summary_output_unset')
       }),
       model.contextCompressionEnabled
-        ? t('chat.model_summary_compression_on', { percent: number.format(Math.round(model.contextCompressionThreshold * 100)) })
+        ? t('chat.model_summary_compression_on', {
+          percent: number.format(Math.round(model.contextCompressionThreshold * 100)),
+          tokens: number.format(contextCompressionTriggerTokens(model.maxContextTokens, model.maxOutputTokens, model.contextCompressionThreshold))
+        })
         : t('chat.model_summary_compression_off'),
       t('chat.model_summary_capabilities', {
         stream: state(model.stream), vision: state(model.capabilities.vision), tools: state(model.capabilities.toolUse)

@@ -10,9 +10,9 @@ const model: ResolvedModelConfig = { ...defaultModelConfig, id: 'model',
   maxContextTokens: 4096, maxOutputTokens: 1024,
   contextCompressionEnabled: true, contextCompressionThreshold: 0.95 }
 const status: AgentContextStatus = {
-  modelContextKey: modelContextKey(model), includeProjectRules: true,
+  modelContextKey: modelContextKey(model),
   modelConfigId: 'model', maxContextTokens: 4096, maxOutputTokens: 1024, inputCapacityTokens: 3072,
-  compressionEnabled: true, compressionThreshold: 0.95, compressionThresholdTokens: 2816,
+  compressionEnabled: true, compressionThreshold: 0.95, compressionThresholdTokens: 2918,
   estimatedInputTokens: 50, currentContextTokens: 100,
   serverUsage: { inputTokens: 80, outputTokens: 20, totalTokens: 100 },
   compressionApplied: false, manualCompressionAvailable: true,
@@ -28,7 +28,7 @@ describe('context window limits', () => {
       maxContextTokens: 80_000, maxOutputTokens: 4_000, inputCapacityTokens: 76_000,
       compressionEnabled: true, compressionThreshold: 0.5, compressionThresholdTokens: 38_000
     })
-    expect(contextBudgetForModel(model, true)?.compressionThresholdTokens).toBe(2816)
+    expect(contextBudgetForModel(model)?.compressionThresholdTokens).toBe(2918)
     expect(contextBudgetForModel(undefined)).toBeUndefined()
     expect(contextBudgetForModel({ ...model, maxOutputTokens: model.maxContextTokens })).toBeUndefined()
   })
@@ -50,15 +50,10 @@ describe('context window limits', () => {
     expect(contextWindowUsageRatio(50, 100, 50)).toBe(0)
     expect(contextCompressionTriggerTokens(50, 100, 0.8)).toBe(1)
   })
-  it('preserves the runtime compression point capped by project-rule headroom', () => {
-    const projected = contextStatusForModel(status, model)!
-    expect(projected.compressionThresholdTokens).toBe(2816)
-    expect(contextCompressionTriggerTokens(4096, 1024, 0.95)).toBe(2918)
-  })
   it('requires a fresh projection for a different model and updates budget-only edits immediately', () => {
     expect(contextStatusForModel(status, { ...model, id: 'new', maxContextTokens: 10_000 })).toBeUndefined()
-    expect(contextStatusForModel(status, { ...model, maxContextTokens: 3000 })?.compressionThresholdTokens).toBe(1720)
-    expect(contextStatusForModel({ ...status, includeProjectRules: false }, { ...model, maxOutputTokens: 2048 })?.compressionThresholdTokens).toBe(1945)
+    expect(contextStatusForModel(status, { ...model, maxContextTokens: 3000 })?.compressionThresholdTokens).toBe(1877)
+    expect(contextStatusForModel(status, { ...model, maxOutputTokens: 2048 })?.compressionThresholdTokens).toBe(1945)
   })
   it('retains provider usage for budget edits but waits for reestimation after identity edits', () => {
     expect(contextStatusForModel(status, { ...model, maxContextTokens: 10_000 })?.serverUsage).toEqual(status.serverUsage)

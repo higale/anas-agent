@@ -18,6 +18,7 @@ interface ProjectBase extends ProjectModelSelection {
   id: string
   name: string
   icon?: ProjectIconName
+  iconData?: string
   iconColor?: ProjectIconColor
   pinned: boolean
   collapsed: boolean
@@ -72,6 +73,7 @@ export interface WorkspaceProjectRequest extends ProjectModelSelection {
   prompt: string
   name: string
   icon?: ProjectIconName
+  iconData?: string
   iconColor?: ProjectIconColor
   sourceFolders: string[]
   capabilities: AgentCapabilities
@@ -82,6 +84,7 @@ export interface SimpleChatProjectRequest extends ProjectModelSelection {
   kind: 'simple_chat'
   name: string
   icon?: ProjectIconName
+  iconData?: string
   iconColor?: ProjectIconColor
   prompt: string
 }

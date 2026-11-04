@@ -1,11 +1,10 @@
 import type { ResolvedModelConfig } from '@shared/types'
 import type { CodeReviewSnapshot } from '@shared/codeReview'
 import { modelContextKey } from '@shared/modelConfig'
-import { projectRuleInputBudget } from '@shared/contextWindow'
 import type { ConversationMessage } from '../../runtime/conversationMessage'
 import { contentText } from '../../runtime/inputContent'
 import { codeReviewToolDeclaration } from '../../runtime/codeReviewReport'
-import { InvalidModelToolCallError, ModelOutputLimitError, ModelRequestChangedError, ModelSelectionError, ProjectRulesError, ProjectRulesRequestBudgetError } from '../../runtime/errors'
+import { InvalidModelToolCallError, ModelOutputLimitError, ModelRequestChangedError, ModelSelectionError, ProjectRulesError } from '../../runtime/errors'
 import { projectRulesText, ruleScopeIds, type ProjectRulesSnapshot } from '../../runtime/projectRules'
 import { conversationContentBlocks } from '../../providers/conversationInput'
 import { createConversationModel, type ConversationModelOptions } from './conversationModel'
@@ -72,11 +71,9 @@ export async function prepareConversationModelCall(model: ResolvedModelConfig, c
     while (start > 0 && messages[start].context?.skill === true && messages[start - 1].kind === 'user') start--
     const task = end < 0 ? [] : messages.slice(start, end + 1)
     const counting = { protocol: model.protocol, parameters: model.parameters }
-    const budget = projectRuleInputBudget(model.maxContextTokens - model.maxOutputTokens)
+    const budget = model.maxContextTokens - model.maxOutputTokens
     const minimum = countConversationTokens([systemMessage, ...task], tools, counting)
-    if (minimum > budget) throw new ProjectRulesError(`Rules for ${snapshot.activeScopes.join(', ')} plus system instructions, tools and required task context need about ${minimum} input tokens; safe capacity is ${budget}.`)
-    const total = countConversationTokens(input, tools, counting)
-    if (total > budget) throw new ProjectRulesRequestBudgetError(total, budget)
+    if (minimum > budget) throw new ProjectRulesError(`Rules for ${snapshot.activeScopes.join(', ')} plus system instructions, tools and required task context need about ${minimum} input tokens; input capacity is ${budget}.`)
     const withoutRules = text ? systemText.replace(`\n\n${text}`, '') : systemText
     rulesReceipt = { runId: options.runId, scopes: ruleScopeIds(snapshot), budget,
       minimumTokens: countConversationTokens([{ kind: 'system', content: withoutRules }, ...task], tools, counting) }

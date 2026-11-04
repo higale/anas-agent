@@ -51,7 +51,7 @@ export function ProjectDetailsContent({
   return (
     <>
       <header className="project-details-header">
-        <ProjectIcon color={project.iconColor} icon={project.icon} kind={project.kind} size={16} />
+        <ProjectIcon iconData={project.iconData} color={project.iconColor} icon={project.icon} kind={project.kind} size={16} />
         <strong className={defaultWorkspace ? 'project-default-workspace-name' : undefined}>{project.name}</strong>
         <div className="ui-row">
           {statuses.map(({ Icon, label, enabled }) => {

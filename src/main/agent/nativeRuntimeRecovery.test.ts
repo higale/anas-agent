@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { AgentRuntimeEvent } from '../../shared/agentTypes'
 import type { ExecutionToolCall } from '../../runtime/executionState'
 import { conversationExecution, type ConversationExecutionServices } from '../../runtime/conversationExecution'
-import { ProjectRulesRequestBudgetError, ModelSelectionError, ModelRequestChangedError } from '../../runtime/errors'
+import { ProjectRulesError, ModelSelectionError, ModelRequestChangedError } from '../../runtime/errors'
 import { toolEffectArtifactPurposes } from '../../runtime/toolEffectIdentity'
 import { NativeConversationDatabase } from './nativeConversationDatabase'
 import { NativeAgentRuntime } from './nativeAgentRuntime'
@@ -158,7 +158,7 @@ describe('native runtime durable recovery', () => {
       h.db.runs.store.finishBatch(h.scope())
       const services = h.services(), execute = vi.fn(services.executeTool)
       services.executeTool = execute
-      services.prepareModel = async () => { throw new ProjectRulesRequestBudgetError(2000, 1500) }
+      services.prepareModel = async () => { throw new ProjectRulesError('Required rules exceed the input capacity of 1500.') }
       const handle = h.host().recoverRun(h.identity.threadId, instance(services))!
       expect((await handle.completed).status).toBe('failed'); await handle.drained
       expect(execute).not.toHaveBeenCalled()

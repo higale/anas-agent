@@ -32,6 +32,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { ProjectIconColor, ProjectIconName, ProjectKind } from '@shared/types'
+import { IconImage } from '../IconImage'
 import { defaultProjectIcon } from '@shared/projectAppearance'
 
 const projectIcons: Record<ProjectIconName, LucideIcon> = {
@@ -68,6 +69,7 @@ const projectIcons: Record<ProjectIconName, LucideIcon> = {
 }
 
 interface ProjectIconProps {
+  iconData?: string
   className?: string
   color?: ProjectIconColor
   icon?: ProjectIconName
@@ -75,7 +77,8 @@ interface ProjectIconProps {
   size: number
 }
 
-export function ProjectIcon({ className, color, icon, kind, size }: ProjectIconProps) {
+export function ProjectIcon({ className, color, icon, iconData, kind, size }: ProjectIconProps) {
+  if (iconData) return <IconImage data={iconData} size={size} className={className} />
   const Icon = projectIcons[icon ?? defaultProjectIcon(kind)]
 
   return (

@@ -144,6 +144,24 @@ describe('ConversationContextRuntime', () => {
       new AbortController().signal)).rejects.toThrow('required instructions still exceed')
   })
 
+  it('checks the manual summary against the Responses request including its tool declarations', async () => {
+    const selected = { ...model, protocol: 'openai_responses' as const }
+    const systemPrompt = 'Project instructions. '.repeat(800)
+    const tools = ['lookup', 'find', 'list', 'read'].map(name => ({
+      type: 'function', name, description: 'Find a record', parameters: { type: 'object', properties: {} }
+    }))
+    const runtime = createConversationContextRuntime({ model: selected, systemPrompt, tools })
+    const values = { messages: [{ kind: 'user' as const, content: 'Summarize' }] }
+    const signal = new AbortController().signal
+    const summary = await runtime.compress(values, signal)
+    const required = countConversationTokens([{ kind: 'system', content: systemPrompt },
+      { kind: 'user', content: summary.modelContent }], tools, { protocol: selected.protocol })
+    selected.maxContextTokens = selected.maxOutputTokens + required
+    await expect(runtime.compress(values, signal)).resolves.toMatchObject({ inputTokensAfter: required })
+    selected.maxContextTokens -= 1
+    await expect(runtime.compress(values, signal)).rejects.toThrow('still exceed the selected model')
+  })
+
   it('counts Responses instructions once in status and manual compression statistics', async () => {
     const selected = { ...model, protocol: 'openai_responses' as const, parameters: { instructions: 'Persistent model instructions '.repeat(80) } }
     const runtime = createConversationContextRuntime({ model: selected, systemPrompt: 'System', tools: [] })
@@ -508,11 +526,11 @@ describe('ConversationContextRuntime', () => {
       { kind: 'assistant' as const, content: 'Long result '.repeat(4000) }, { kind: 'user' as const, content: 'Continue' }] }, new AbortController().signal)).rejects.toThrow('without dropping source context')
     expect(invokeMock).not.toHaveBeenCalled()
   })
-  it('starts compression before the coding request guard on small context windows', async () => {
+  it('uses the configured compression threshold in both modes on small context windows', async () => {
     const smallModel = { ...model, maxContextTokens: 4096, maxOutputTokens: 1024, contextCompressionThreshold: 0.95 }
     const coding = createConversationContextRuntime({ model: smallModel, tools: [], systemPrompt: '', includeProjectRules: true })
     const ordinary = createConversationContextRuntime({ model: smallModel, tools: [], systemPrompt: '' })
-    expect((await coding.status({ messages: [] })).compressionThresholdTokens).toBe(2816)
+    expect((await coding.status({ messages: [] })).compressionThresholdTokens).toBe(2918)
     expect((await ordinary.status({ messages: [] })).compressionThresholdTokens).toBe(2918)
   })
   it('counts projected rules only when coding mode is active, ignoring prior-mode stored rules', async () => {

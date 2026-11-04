@@ -182,8 +182,6 @@
 }
 
 .project-appearance-footer {
-  display: flex;
-  justify-content: flex-end;
   margin-top: 12px;
 }
 

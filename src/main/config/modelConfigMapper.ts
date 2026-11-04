@@ -18,7 +18,7 @@ import {
   resolveModelParameterPresets,
   resolveProviderModelConfig
 } from '@shared/modelConfig'
-import { normalizeProviderIconData } from '@shared/providerIcon'
+import { normalizeIconData } from '@shared/iconImage'
 import type { RawModelProviderConfig, RawProviderModelConfig } from './rawAppConfig'
 
 const minMaxContextTokens = 2000
@@ -142,7 +142,7 @@ export function rawModelProviderFromSave(
   return {
     id,
     name: requireString(provider.name, 'provider.name'),
-    icon_data: normalizeProviderIconData(provider.iconData === undefined ? existing?.icon_data : provider.iconData, 'provider.iconData'),
+    icon_data: normalizeIconData(provider.iconData === undefined ? existing?.icon_data : provider.iconData, 'provider.iconData'),
     protocol,
     base_url: requireString(provider.baseUrl, 'provider.baseUrl'),
     model_list_url: provider.modelListUrl === undefined
@@ -292,7 +292,7 @@ export function normalizeModelProvider(raw: RawModelProviderConfig, index: numbe
   return {
     id: normalizeConfigId(raw.id, `${path}.id`),
     name: requireString(raw.name, `${path}.name`),
-    iconData: normalizeProviderIconData(raw.icon_data, `${path}.icon_data`),
+    iconData: normalizeIconData(raw.icon_data, `${path}.icon_data`),
     protocol,
     baseUrl: requireString(raw.base_url, `${path}.base_url`),
     modelListUrl: raw.model_list_url === undefined ? '' : requireString(raw.model_list_url, `${path}.model_list_url`),

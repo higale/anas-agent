@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { errorCauses, isModelContextOverflow, ModelRequestChangedError, ModelSelectionError, ProjectRulesRequestBudgetError } from './errors'
+import { errorCauses, isModelContextOverflow, ModelRequestChangedError, ModelSelectionError, ProjectRulesError } from './errors'
 import { invokeModelWithRetry, classifyModelRetryError, modelRetryDelay } from './modelRetry'
 
 afterEach(() => vi.useRealTimers())
@@ -25,7 +25,7 @@ describe('model request policy without a host or framework', () => {
     await expect(invokeModelWithRetry(invoke, { initialDelayMs: 0 })).rejects.toBe(envelope)
     expect(invoke).toHaveBeenCalledOnce()
     expect(classifyModelRetryError(new Error('timeout', {
-      cause: new ProjectRulesRequestBudgetError(100, 50)
+      cause: new ProjectRulesError('Required rules exceed input capacity.')
     }))).toEqual({ retry: false })
   })
 

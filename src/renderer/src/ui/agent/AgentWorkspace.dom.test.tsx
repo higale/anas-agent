@@ -258,7 +258,7 @@ describe('AgentWorkspace', () => {
     const contextStatus: AgentContextStatus = {
       runId: 'run-1', modelConfigId: model.id, modelContextKey: modelContextKey(model),
       maxContextTokens: 2_500, maxOutputTokens: 1_500, inputCapacityTokens: 1_000,
-      estimatedInputTokens: 200, currentContextTokens: 200, includeProjectRules: false,
+      estimatedInputTokens: 200, currentContextTokens: 200,
       compressionEnabled: true, compressionThreshold: 0.95, compressionThresholdTokens: 950,
       compressionApplied: false, manualCompressionAvailable: true,
       breakdown: { profileTokens: 0, systemInstructionTokens: 0, runtimeContextTokens: 0,
@@ -294,7 +294,6 @@ describe('AgentWorkspace', () => {
       await act(async () => finish[nextPreview++]({ ...contextStatus, estimatedInputTokens: 300, currentContextTokens: 300 }))
       expect(screen.getByText('≈ 300')).toBeInTheDocument()
     }
-    // Editing coding mode cannot change the saved continuation's rule budget.
     expect(screen.getByText('chat.context_auto_compress_at').parentElement).toHaveTextContent('950 · 95%')
 
     const idle = { ...snapshot, thread: { ...snapshot.thread, status: 'idle' as const } }
@@ -302,15 +301,15 @@ describe('AgentWorkspace', () => {
     expect(reader).toHaveBeenCalledWith('thread-1')
     expect(meter).toHaveAttribute('aria-busy', 'true')
     expect(screen.queryByText('≈ 200')).toBeNull()
-    await act(async () => finish[nextPreview++]({ ...contextStatus, includeProjectRules: true,
+    await act(async () => finish[nextPreview++]({ ...contextStatus,
       estimatedInputTokens: 400, currentContextTokens: 400 }))
     expect(screen.getByText('≈ 400')).toBeInTheDocument()
-    expect(screen.getByText('chat.context_auto_compress_at').parentElement).toHaveTextContent('744 · 74.4%')
+    expect(screen.getByText('chat.context_auto_compress_at').parentElement).toHaveTextContent('950 · 95%')
 
     rerender(<AgentWorkspace {...props} run={undefined} snapshot={idle} config={config}
       projects={[{ ...changed, prompt: 'Updated while idle.' }]} />)
     expect(meter).toHaveAttribute('aria-busy', 'true')
-    await act(async () => finish[nextPreview++]({ ...contextStatus, includeProjectRules: true,
+    await act(async () => finish[nextPreview++]({ ...contextStatus,
       estimatedInputTokens: 300, currentContextTokens: 300 }))
     expect(screen.getByText('≈ 300')).toBeInTheDocument()
   })

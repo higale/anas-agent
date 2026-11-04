@@ -87,8 +87,8 @@ describe('native project rules in durable tool execution', () => {
   it('dispatches calls against their originating rule budget before enforcing a changed model window', async () => {
     const h = await fixture(), write = capability('delete_file', z.object({ path: z.string() }))
     h.definitions.push(write.definition); h.batches.push([writeCall('write', join(h.root, 'a'))], [])
-    h.observer.model = event => { if (event.kind === 'completed') h.selected.maxContextTokens = 1100 }
-    await expect(h.run()).rejects.toThrow('safe capacity is 0')
+    h.observer.model = event => { if (event.kind === 'completed') h.selected.maxContextTokens = 1010 }
+    await expect(h.run()).rejects.toThrow('input capacity is 10')
     expect(write.execute).toHaveBeenCalledOnce(); expect(h.fetch).toHaveBeenCalledOnce()
   })
 
@@ -228,8 +228,8 @@ describe('native project rules in durable tool execution', () => {
   })
 
   it('rejects an oversized rule union but allows model-selected independent batches', async () => {
-    const h = await fixture(2000), write = capability('delete_file', z.object({ path: z.string() }))
-    await mkdir(join(h.root, 'other')); await writeFile(join(h.root, 'child/AGENTS.md'), 'A '.repeat(1500)); await writeFile(join(h.root, 'other/AGENTS.md'), 'B '.repeat(1500))
+    const h = await fixture(3000), write = capability('delete_file', z.object({ path: z.string() }))
+    await mkdir(join(h.root, 'other')); await writeFile(join(h.root, 'child/AGENTS.md'), 'A '.repeat(3000)); await writeFile(join(h.root, 'other/AGENTS.md'), 'B '.repeat(3000))
     const a = join(h.root, 'child/a'), b = join(h.root, 'other/b')
     h.definitions.push(write.definition); h.batches.push([writeCall('batch-a', a), writeCall('batch-b', b)], [writeCall('select-a', a)], [writeCall('write-a', a)], [writeCall('select-b', b)], [writeCall('write-b', b)], [])
     const messages = await h.run()
@@ -262,7 +262,7 @@ describe('native project rules in durable tool execution', () => {
     expect(write.execute).not.toHaveBeenCalled(); expect(h.fetch).toHaveBeenCalledOnce()
   })
 
-  it('compacts a complete tool result against capacity reserved for adopted rules', async () => {
+  it('compacts a complete tool result when adopted rules and history exceed input capacity', async () => {
     const h = await fixture(4000), write = capability('delete_file', z.object({ path: z.string() }), vi.fn(async () => 'SUCCESS '.repeat(400)))
     await writeFile(join(h.root, 'child/AGENTS.md'), 'R '.repeat(6100))
     h.selected.contextCompressionEnabled = true; h.selected.contextCompressionThreshold = 0.75

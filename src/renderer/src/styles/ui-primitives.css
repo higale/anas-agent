@@ -867,6 +867,8 @@ details[open] > .ui-disclosure-trigger .ui-disclosure-count > .ui-disclosure-che
   color: var(--ui-icon-color, var(--text-soft));
 }
 
+.ui-icon-image { display: block; flex: none; object-fit: contain; }
+
 button.ui-icon-box {
   padding: 0;
   border: 0;

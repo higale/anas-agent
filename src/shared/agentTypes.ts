@@ -287,7 +287,6 @@ export interface AgentContextStatus {
   runId?: string
   modelConfigId: string
   modelContextKey?: string
-  includeProjectRules?: boolean
   estimatedInputTokens: number
   /** Current effective context, including additions after a valid provider snapshot. */
   currentContextTokens: number

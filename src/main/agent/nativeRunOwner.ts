@@ -358,8 +358,10 @@ export class NativeRunOwner {
         if ((run.operation === 'compression') !== (message === undefined)) throw new Error('The saved input does not match the run operation.')
         if (message && message.value.context?.runId !== owner.runId) throw new Error('Invalid owned user input.')
         const history = state ?? this.store.readHistory(owner.threadId)
-        this.store.start({ ...owner, expectedRevisionId: history?.revisionId, context: { ...history?.context, modelCalls: 0, todos: message ? [] : history?.context.todos ?? [] },
-          messages: message ? [message] : [] })
+        // Compression measures the previous rule snapshot. Discovery and approvals belong to a single run.
+        this.store.start({ ...owner, expectedRevisionId: history?.revisionId, messages: message ? [message] : [],
+          context: { ...history?.context, modelCalls: 0, todos: message ? [] : history?.context.todos ?? [],
+            projectRules: message ? undefined : history?.context.projectRules, rulePreparation: undefined } })
         state = this.store.load(owner.threadId)!
       } else if (input) throw new Error('Accepted execution still has an unconsumed input intent.')
       const rows = this.database.prepare('SELECT interrupt_id,response_json FROM agent_run_resume_intents WHERE run_id=? ORDER BY interrupt_id')

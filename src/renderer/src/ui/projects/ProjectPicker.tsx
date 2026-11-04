@@ -43,6 +43,7 @@ export function ProjectPicker({
         >
           {selectedProject
             ? <ProjectIcon
+                iconData={selectedProject.iconData}
                 color={selectedProject.iconColor}
                 icon={selectedProject.icon}
                 kind={selectedProject.kind}
@@ -72,7 +73,7 @@ export function ProjectPicker({
                 key={project.id}
                 onSelect={() => onSelectProject(project.id)}
               >
-                <ProjectIcon color={project.iconColor} icon={project.icon} kind={project.kind} size={15} />
+                <ProjectIcon iconData={project.iconData} color={project.iconColor} icon={project.icon} kind={project.kind} size={15} />
                 <span className={`ui-truncate${isDefaultWorkspaceProject(project) ? ' project-default-workspace-name' : ''}`}>
                   {project.name}
                 </span>

@@ -19,7 +19,7 @@ import { presentConversationMessage } from './conversationPresentation'
 import { projectConversationSupervision, reconcileConversationSupervision, type ConversationSupervisionOptions } from './conversationSupervision'
 import { annotateModelFailure } from '../../runtime/modelRecoveryDiagnostics'
 
-export interface ConversationModelExecutionOptions extends Omit<ConversationCompressionOptions, 'runId' | 'signal' | 'observe' | 'resolveModel' | 'includeProjectRules'> {
+export interface ConversationModelExecutionOptions extends Omit<ConversationCompressionOptions, 'runId' | 'signal' | 'observe' | 'resolveModel'> {
   store: Pick<ConversationExecutionServices['store'], 'readMessageRecord'>
   resolveModel(): Promise<ResolvedModelConfig>
   systemPrompt(model: ResolvedModelConfig): string
@@ -103,7 +103,7 @@ export function createConversationModelPreparation(options: ConversationModelExe
           requestId: request.runId, requestRole: options.requestRole, streaming: options.streaming, timeoutMs: options.timeoutMs,
           runId: request.runId, signal: request.signal, resolveModel: options.resolveModel,
           outputLanguage: options.outputLanguage, codingMode: options.codingMode, compressionPrompt: options.compressionPrompt,
-          includeProjectRules: Boolean(options.rules), enabled: options.simpleChat ? false : options.enabled,
+          enabled: options.simpleChat ? false : options.enabled,
           compressionTracking: options.compressionTracking, saveToolResult: options.saveToolResult,
           onRequest: options.onRequest,
           observe: event => {

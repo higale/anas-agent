@@ -81,7 +81,7 @@ export function ThreadTopbar({
             type="button"
             aria-label={t('project.show_details', { name: project.name })}
           >
-            <ProjectIcon color={project.iconColor} icon={project.icon} kind={project.kind} size={15} />
+            <ProjectIcon iconData={project.iconData} color={project.iconColor} icon={project.icon} kind={project.kind} size={15} />
           </NoFocusButton>
         </ProjectDetailsMenu>
       )}

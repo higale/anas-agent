@@ -25,7 +25,7 @@ import { captureCodeReview } from '../main/agent/codeReview'
 import { codeReviewToolDeclaration } from '../runtime/codeReviewReport'
 import { queryGitChanges } from '../main/gitChanges'
 import { codingTasks, pendingCodingEvaluations, type CodingTask } from './codingTasks'
-import { changedSources, checkModelRequest, checkTaskFiles, fixturePath, scriptBinding, scoreReview, toolResultsFromMessages, snapshotFiles, sourceFingerprints, toolOutputFailed, writeFixture, type CodingEvaluationResult } from './codingResults'
+import { changedSources, checkModelRequest, checkTaskFiles, fixturePath, scriptBinding, scoreReview, snapshotFiles, sourceFingerprints, toolOutputFailed, writeFixture, type CodingEvaluationResult } from './codingResults'
 import packageInfo from '../../package.json'
 import { getResolvedModelConfig, saveSubagent } from '../main/config/appConfig'
 import { CodingModelTraceCollector } from './codingModelTrace'
@@ -134,7 +134,6 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
     const expectedRunFailures: string[] = []
     let root: string | undefined
     let pluginBackends: PluginBackends | undefined
-    let searchWorkspace: string | undefined
     let runtime: NativeRuntimeCoordinator | undefined
     let storage: AgentStorage<NativeConversationDatabase> | undefined
     let database: NativeConversationDatabase | undefined
@@ -143,6 +142,7 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
     const observedRuns = new Map<string, string>()
     const recordedToolResults = new Set<string>()
     const failedToolResults = new Set<string>()
+    const shellEventOutputs = new Map<string, unknown>()
     const searchCalls = new Map<string, SearchExpectation>()
     const executedToolsByActor = new Map<string, Set<string>>()
     function recordToolResult(id: string, name: string, output: unknown, source: 'tool-event' | 'history', failed = false) {
@@ -152,12 +152,6 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
       }
       if (recordedToolResults.has(id)) return
       recordedToolResults.add(id)
-      const search = searchCalls.get(id)
-      if (search && searchWorkspace && source === 'tool-event') {
-        const evidence = checkSearchOutput(searchWorkspace, output, search)
-        result.searchOutputs.push({ callId: id, name, ...evidence,
-          passed: evidence.passed && !failed && isCommandShellToolName(name) })
-      }
       const text = typeof output === 'string' ? output : JSON.stringify(output) ?? String(output)
       result.toolOutputs.push({ name, excerpt: text.slice(0, 4000), source })
     }
@@ -177,7 +171,6 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
       root = await mkdtemp(join(tmpdir(), 'anas-coding-eval-'))
       root = await realpath(root)
       const workspace = join(root, 'workspace')
-      searchWorkspace = workspace
       signal.throwIfAborted()
       await prepareConfig(root, task)
       // A desktop process keeps one plugin runtime. Each isolated sample instead
@@ -317,6 +310,7 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
           const executed = executedToolsByActor.get(actor) ?? new Set<string>()
           executed.add(event.call.name)
           executedToolsByActor.set(actor, executed)
+          if (searchCalls.size && isCommandShellToolName(event.call.name)) shellEventOutputs.set(event.call.id, event.output)
           recordToolResult(event.call.id, event.call.name, event.output, 'tool-event')
           if (task.externalChange && !externalChangeInjected && result.toolOutputs.length === task.externalChange.afterTool) {
             for (const [name, content] of Object.entries(task.externalChange.files)) await writeFile(fixturePath(workspace, name), content)
@@ -337,16 +331,24 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
         signal.throwIfAborted()
         // Include committed preflight failures before compression removes them
         // from the next model request; observations are not the state owner.
-        for (const threadId of [thread.id, ...listChildCalls().map((call) => call.childThreadId)]) {
-          const snapshot = await runtime!.getSnapshot(threadId)
-          for (const activity of snapshot.activities) for (const tool of activity.tools) {
-            if (tool.status === 'completed' && tool.output !== undefined) {
-              recordToolResult(tool.call.id, tool.call.name, tool.output, 'history')
+        const run = await handle.completed
+        for (const { threadId, runId } of [{ threadId: run.threadId, runId: run.id },
+          ...listChildCalls().map(call => ({ threadId: call.childThreadId, runId: call.childRunId }))]) {
+          const messages = database!.messages.runMessages(runId)
+          const names = new Map(messages.flatMap(message => (message.toolCalls ?? []).map(call => [call.id, call.name] as const)))
+          for (const message of messages) {
+            if (message.role !== 'tool' || !message.toolCallId) continue
+            const name = names.get(message.toolCallId)
+            const saved = database!.messages.payload(threadId, message.id)
+            if (!name || !saved) throw new Error('Committed tool result has no owning call or message body.')
+            const search = saved.resultFor && searchCalls.get(saved.resultFor)
+            if (search && shellEventOutputs.has(message.toolCallId)) {
+              const evidence = checkSearchOutput(workspace, shellEventOutputs.get(message.toolCallId), search)
+              result.searchOutputs.push({ callId: message.toolCallId, name, ...evidence,
+                passed: evidence.passed && saved.resultStatus !== 'error' && isCommandShellToolName(name) })
+              shellEventOutputs.delete(message.toolCallId)
             }
-          }
-          const messages = database!.runs.store.readHistory(threadId)!.messages.map(record => record.value)
-          for (const tool of toolResultsFromMessages(messages ?? [])) {
-            recordToolResult(tool.id, tool.name, tool.output, 'history', tool.failed)
+            recordToolResult(message.toolCallId, name, saved.content, 'history', saved.resultStatus === 'error')
           }
         }
       }

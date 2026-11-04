@@ -49,13 +49,12 @@ async function verifyModelSelection(launchApplication) {
   try {
     await mkdir(join(profile, 'config'), { recursive: true })
     await mkdir(workspace)
-    await writeFile(join(root, 'approval.txt'), 'Controlled approval target outside the workspace.\n')
     const settings = structuredClone(settingsDefaults)
     settings.language = 'en'
     settings.environment_context.custom_information = 'Controlled local model selection test.'
     await writeFile(join(profile, 'config', 'settings.json'), `${JSON.stringify(settings)}\n`)
     const capabilities = { ...structuredClone(capabilityDefaults), application_environment: false,
-      background_tools: false, subagents: { mode: 'off', names: [] }, planning: true, tool_mode: 'selected', tools: ['read_file'],
+      background_tools: false, subagents: { mode: 'off', names: [] }, planning: true, tool_mode: 'selected', tools: ['update_config'],
       profile: true, environment: false, workspace: false, memory: false,
       skills: { mode: 'off', project: false, entries: [] },
       mcp: { default_mode: 'selected', servers: [] } }
@@ -97,6 +96,8 @@ async function verifyModelSelection(launchApplication) {
     await modelPicker.click()
     await page.getByRole('menuitemradio', { name: /^Model A(?: |$)/ }).click()
     await expect(modelPicker).toHaveText('Model A')
+    await modelPicker.hover()
+    await expect(page.getByRole('tooltip')).toContainText('80% (32,000)')
     await page.locator('[data-agent-composer-input]').fill('Verify the model selected for the next request.')
     await page.getByRole('button', { name: 'Send', exact: true }).click()
     await expect.poll(() => requests.length, { timeout: 20_000 }).toBe(1)
@@ -204,12 +205,15 @@ async function verifyModelSelection(launchApplication) {
     // An approval keeps the same persisted run ID across resumed execution.
     // Changing the profile while waiting must preview the resumed prompt now.
     await page.keyboard.press('Escape')
-    await page.evaluate((threadId) => globalThis.gale.agent.threads.setAccessMode(threadId, 'strict_approval'), snapshot.thread.id)
-    await page.locator('[data-agent-composer-input]').fill('Pause for the controlled file approval, then continue.')
+    const access = page.getByRole('button', { name: 'Tool access', exact: true })
+    await access.click()
+    await page.getByRole('menuitem', { name: /^Strict approval/ }).click()
+    await expect(access).toHaveText('Strict approval')
+    await page.locator('[data-agent-composer-input]').fill('Request a theme change, then continue after the approval decision.')
     await page.getByRole('button', { name: 'Send', exact: true }).click()
     await expect.poll(() => requests.length, { timeout: 20_000 }).toBe(3)
-    finishRequest(2, { id: 'approval-read', type: 'function', function: { name: 'read_file',
-      arguments: JSON.stringify({ path: join(root, 'approval.txt') }) } })
+    finishRequest(2, { id: 'approve-theme', type: 'function', function: { name: 'update_config',
+      arguments: JSON.stringify({ config: 'settings', key: 'theme', value: 'dark' }) } })
     const approval = page.locator('.agent-approval')
     await expect(approval).toBeVisible()
     const interrupted = await page.evaluate((threadId) => globalThis.gale.agent.threads.get(threadId), snapshot.thread.id)

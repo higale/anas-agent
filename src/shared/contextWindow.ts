@@ -33,17 +33,11 @@ export function contextCompressionTriggerTokens(
   )
 }
 
-export function projectRuleInputBudget(inputCapacityTokens: number): number {
-  const capacity = finiteNonNegative(inputCapacityTokens)
-  return Math.max(0, capacity - Math.max(256, Math.ceil(capacity * 0.05)))
-}
-
 export type AgentContextBudget = Pick<AgentContextStatus, 'maxContextTokens' | 'maxOutputTokens' | 'inputCapacityTokens'
   | 'compressionEnabled' | 'compressionThreshold' | 'compressionThresholdTokens'>
 
 export function contextBudgetForModel(
-  model: ResolvedModelConfig | undefined,
-  includeProjectRules = false
+  model: ResolvedModelConfig | undefined
 ): AgentContextBudget | undefined {
   if (!model || !isSelectableModelConfig(model)) return undefined
   const maxContextTokens = model.maxContextTokens
@@ -63,10 +57,7 @@ export function contextBudgetForModel(
     inputCapacityTokens,
     compressionEnabled: model.contextCompressionEnabled,
     compressionThreshold: model.contextCompressionThreshold,
-    compressionThresholdTokens: Math.min(
-      contextCompressionTriggerTokens(maxContextTokens, maxOutputTokens, model.contextCompressionThreshold),
-      includeProjectRules ? projectRuleInputBudget(inputCapacityTokens) : inputCapacityTokens
-    )
+    compressionThresholdTokens: contextCompressionTriggerTokens(maxContextTokens, maxOutputTokens, model.contextCompressionThreshold)
   }
 }
 
@@ -74,7 +65,7 @@ export function contextStatusForModel(
   status: AgentContextStatus | undefined,
   model: ResolvedModelConfig | undefined
 ): AgentContextStatus | undefined {
-  const budget = contextBudgetForModel(model, status?.includeProjectRules)
+  const budget = contextBudgetForModel(model)
   if (!status || !model || !budget) return undefined
   // A different protocol or parameter set changes the request projection.
   // Only the runtime can recalculate it from the complete native history.

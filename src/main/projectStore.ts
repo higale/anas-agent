@@ -1,3 +1,4 @@
+import { normalizeIconData } from '@shared/iconImage'
 import { normalizeCompressionPrompt } from '@shared/summaryPrompt'
 import type { AgentAccessMode, AgentThread } from '@shared/agentTypes'
 import { orderProjectThreads, reorderSidebarItems, type SidebarReorderRequest } from '@shared/sidebarOrder'
@@ -17,8 +18,6 @@ import {
   DEFAULT_WORKSPACE_PROJECT_ID,
   type Project,
   type ProjectCreateRequest,
-  type ProjectIconColor,
-  type ProjectIconName,
   type ProjectModelSelection,
   type ProjectStateUpdate,
   type ProjectUpdateRequest
@@ -72,6 +71,7 @@ function requireProject(value: unknown, index: number): Project {
   if (
     typeof project.id !== 'string' || !project.id.trim()
     || typeof project.name !== 'string' || !project.name.trim()
+    || 'iconData' in project
     || (project.icon !== undefined && (typeof project.icon !== 'string' || !projectIconNames.has(project.icon)))
     || (project.iconColor !== undefined && (typeof project.iconColor !== 'string' || !projectIconColors.has(project.iconColor)))
     || typeof project.pinned !== 'boolean'
@@ -92,7 +92,7 @@ function requireProject(value: unknown, index: number): Project {
   } else {
     throw new Error(`Project ${index + 1} has an invalid format.`)
   }
-  const { model_config_id, model_parameter_preset_id, capabilities, restrict_subagents, advanced_settings, coding_mode, compression_prompt, access_mode, sort_order, thread_order, ...metadata } = project
+  const { icon_data, model_config_id, model_parameter_preset_id, capabilities, restrict_subagents, advanced_settings, coding_mode, compression_prompt, access_mode, sort_order, thread_order, ...metadata } = project
   if (sort_order !== undefined && (typeof sort_order !== 'number' || !Number.isSafeInteger(sort_order))) {
     throw new Error(`Project ${index + 1} has an invalid sort order.`)
   }
@@ -110,6 +110,7 @@ function requireProject(value: unknown, index: number): Project {
   if (project.kind === 'workspace' && typeof coding_mode !== 'boolean') throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Invalid project coding mode.')
   return {
     ...metadata, ...selection,
+    ...(icon_data !== undefined ? { iconData: normalizeIconData(icon_data) } : {}),
     ...(sort_order !== undefined ? { sortOrder: sort_order } : {}),
     ...(thread_order !== undefined ? { threadOrder: thread_order } : {}),
     ...(project.kind === 'workspace' ? { accessMode: validateProjectAccessMode(access_mode), capabilities: parseCapabilities(capabilities), restrictSubagents: restrict_subagents, advancedSettings: advanced_settings, codingMode: coding_mode, compressionPrompt: normalizeCompressionPrompt(compression_prompt), prompt: validateProjectPrompt(project.prompt) } : {})
@@ -231,7 +232,7 @@ export function serializeProjectStore(store: StoredProjects): { version: 0; proj
   return {
     version: store.version,
     projects: store.projects.map((project) => {
-      const { modelConfigId, modelParameterPresetId, sortOrder, threadOrder, ...metadata } = project
+      const { iconData, modelConfigId, modelParameterPresetId, sortOrder, threadOrder, ...metadata } = project
       const stored = { ...metadata } as Record<string, unknown>
       delete stored.capabilities
       delete stored.restrictSubagents
@@ -241,6 +242,7 @@ export function serializeProjectStore(store: StoredProjects): { version: 0; proj
       delete stored.codingMode
       return {
         ...stored,
+        ...(iconData ? { icon_data: iconData } : {}),
         ...(sortOrder !== undefined ? { sort_order: sortOrder } : {}),
         ...(threadOrder !== undefined ? { thread_order: threadOrder } : {}),
         ...(project.kind === 'workspace' && project.accessMode && project.accessMode !== 'smart_approval'
@@ -414,11 +416,16 @@ function validateProjectModelSelection(request: {
   }
 }
 
-function validateProjectAppearance(request: ProjectCreateRequest): {
-  icon?: ProjectIconName
-  iconColor?: ProjectIconColor
-} {
-  const appearance: { icon?: ProjectIconName; iconColor?: ProjectIconColor } = {}
+function validateProjectAppearance(request: ProjectCreateRequest): Pick<Project, 'icon' | 'iconColor' | 'iconData'> {
+  const appearance: Pick<Project, 'icon' | 'iconColor' | 'iconData'> = {}
+  if (request.iconData !== undefined) {
+    try {
+      const data = normalizeIconData(request.iconData)
+      if (data) appearance.iconData = data
+    } catch {
+      throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Project icon image is invalid.')
+    }
+  }
   if (request.icon !== undefined) {
     if (typeof request.icon !== 'string' || !projectIconNames.has(request.icon)) {
       throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Project icon is invalid.')
@@ -549,6 +556,7 @@ export async function updateProject(projectId: string, request: ProjectUpdateReq
     const appearance = validateProjectAppearance(request)
     const currentMetadata = { ...current }
     delete currentMetadata.icon
+    delete currentMetadata.iconData
     delete currentMetadata.iconColor
     delete currentMetadata.modelConfigId
     delete currentMetadata.modelParameterPresetId

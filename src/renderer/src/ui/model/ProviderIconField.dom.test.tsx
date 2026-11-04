@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { notice } from '../notice'
 import { ProviderIconField } from './ProviderIconField'
 import { modelTemplates } from '@shared/modelTemplates'
-import { maxProviderSvgBytes } from '@shared/providerIcon'
+import { maxIconSvgBytes } from '@shared/iconImage'
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 vi.mock('../notice', () => ({ notice: { error: vi.fn() } }))
@@ -78,12 +78,12 @@ describe('provider icon uploads', () => {
     const onChange = vi.fn()
     const view = render(<ProviderIconField iconData="" onChange={onChange} />)
     fireEvent.change(view.container.querySelector('input')!, { target: { files: [new File(['broken'], 'icon.svg')] } })
-    await waitFor(() => expect(notice.error).toHaveBeenCalledWith('settings.provider_icon_invalid'))
+    await waitFor(() => expect(notice.error).toHaveBeenCalledWith('settings.image_icon_invalid'))
     expect(onChange).not.toHaveBeenCalled()
   })
 
   it.each([
-    { name: 'icon.svg', contents: new Uint8Array(maxProviderSvgBytes + 1), error: 'svg_too_large' },
+    { name: 'icon.svg', contents: new Uint8Array(maxIconSvgBytes + 1), error: 'svg_too_large' },
     { name: 'icon.avif', contents: 'avif', error: 'unsupported_type' },
     { name: 'icon.jpg', contents: pngBytes, error: 'invalid' },
     { name: 'icon.bmp', contents: pngBytes, error: 'invalid' },
@@ -99,21 +99,21 @@ describe('provider icon uploads', () => {
     const onChange = vi.fn()
     const view = render(<ProviderIconField iconData={pngData} onChange={onChange} />)
     fireEvent.change(view.container.querySelector('input')!, { target: { files: [new File([contents], name)] } })
-    await waitFor(() => expect(notice.error).toHaveBeenCalledWith(`settings.provider_icon_${error}`))
+    await waitFor(() => expect(notice.error).toHaveBeenCalledWith(`settings.image_icon_${error}`))
     expect(onChange).not.toHaveBeenCalled()
   })
 
   it('preserves SVG bytes at the 1 MB boundary regardless of dimensions', async () => {
     dimensions = { width: 4096, height: 2048 }
-    const contents = ' '.repeat(maxProviderSvgBytes)
+    const contents = ' '.repeat(maxIconSvgBytes)
     const onChange = vi.fn()
     const view = render(<ProviderIconField iconData="" onChange={onChange} />)
     fireEvent.change(view.container.querySelector('input')!, { target: { files: [new File([contents], 'icon.svg')] } })
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(`data:image/svg+xml;base64,${Buffer.from(contents).toString('base64')}`))
   })
 
-  it('preserves a 512 pixel square PNG without re-encoding', async () => {
-    dimensions = { width: 512, height: 512 }
+  it('preserves a 128 pixel square PNG without re-encoding', async () => {
+    dimensions = { width: 128, height: 128 }
     const onChange = vi.fn()
     const view = render(<ProviderIconField iconData="" onChange={onChange} />)
     fireEvent.change(view.container.querySelector('input')!, { target: { files: [new File([pngBytes], 'icon.png')] } })
@@ -145,9 +145,9 @@ describe('provider icon uploads', () => {
   })
 
   it.each([
-    { width: 1200, height: 800, x: 200, y: 0, side: 800, output: 512 },
-    { width: 200, height: 400, x: 0, y: 100, side: 200, output: 200 },
-    { width: 513, height: 513, x: 0, y: 0, side: 513, output: 512 }
+    { width: 1200, height: 800, x: 200, y: 0, side: 800, output: 128 },
+    { width: 200, height: 400, x: 0, y: 100, side: 200, output: 128 },
+    { width: 129, height: 129, x: 0, y: 0, side: 129, output: 128 }
   ])('center-crops and shrinks a $width × $height PNG without enlarging it', async ({ width, height, x, y, side, output }) => {
     dimensions = { width, height }
     const drawImage = vi.fn()
@@ -162,7 +162,7 @@ describe('provider icon uploads', () => {
     const view = render(<ProviderIconField iconData="" onChange={onChange} />)
     // PNG is limited by output dimensions, not by the SVG file-size limit.
     fireEvent.drop(view.container.querySelector('.ui-avatar')!, {
-      dataTransfer: { files: [new File([pngBytes, new Uint8Array(maxProviderSvgBytes)], 'icon.png')] }
+      dataTransfer: { files: [new File([pngBytes, new Uint8Array(maxIconSvgBytes)], 'icon.png')] }
     })
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(pngData))
     expect(drawImage).toHaveBeenCalledWith(expect.anything(), x, y, side, side, 0, 0, output, output)
@@ -174,7 +174,7 @@ describe('provider icon uploads', () => {
     const onChange = vi.fn()
     const view = render(<ProviderIconField iconData={pngData} onChange={onChange} />)
     fireEvent.change(view.container.querySelector('input')!, { target: { files: [new File([pngBytes], 'icon.png')] } })
-    await waitFor(() => expect(notice.error).toHaveBeenCalledWith('settings.provider_icon_processing_failed'))
+    await waitFor(() => expect(notice.error).toHaveBeenCalledWith('settings.image_icon_processing_failed'))
     expect(onChange).not.toHaveBeenCalled()
   })
 

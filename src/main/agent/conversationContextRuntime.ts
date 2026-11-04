@@ -4,7 +4,7 @@ import type { ManualContextCompression } from '../../runtime/compression'
 import { observeModelRetry } from './modelRetryLogging'
 import type { ConversationMessage } from '../../runtime/conversationMessage'
 import type { AgentContextStatus } from '@shared/agentTypes'
-import { contextCompressionTriggerTokens, projectRuleInputBudget } from '@shared/contextWindow'
+import { contextCompressionTriggerTokens } from '@shared/contextWindow'
 import { modelContextKey } from '@shared/modelConfig'
 import type { ModelProtocol, ResolvedModelConfig } from '@shared/types'
 import { createCompressionModel } from './compressionModel'
@@ -137,22 +137,18 @@ export function createConversationContextRuntime(options: {
     systemTokens.memory += memoryTokens
     systemTokens.system_instruction += systemTokenTotal - baseSystemTokenTotal - memoryTokens
     const inputCapacityTokens = model.maxContextTokens - model.maxOutputTokens
-    const requestedCompressionThresholdTokens = contextCompressionTriggerTokens(
+    const compressionThresholdTokens = contextCompressionTriggerTokens(
       model.maxContextTokens,
       model.maxOutputTokens,
       model.contextCompressionThreshold
     )
-    const compressionThresholdTokens = options.includeProjectRules
-      ? Math.min(requestedCompressionThresholdTokens, projectRuleInputBudget(inputCapacityTokens))
-      : requestedCompressionThresholdTokens
     const key = modelContextKey(model)
-    const toolDefinitionTokens = approximateTokens([], tools)
+    const toolDefinitionTokens = approximateTokens([], tools, model.protocol)
     const messageTokens = approximateTokens(messages, undefined, model.protocol)
     return {
       runId: options.requestId,
       modelConfigId: model.id,
       modelContextKey: key,
-      includeProjectRules: options.includeProjectRules === true,
       estimatedInputTokens: systemTokenTotal + toolDefinitionTokens + messageTokens,
       currentContextTokens: conversationContextTokens({ messages, systemMessage, tools, modelContextKey: key, protocol: model.protocol, parameters: model.parameters }),
       serverUsage: conversationUsageSnapshot(messages, key)?.usage,
@@ -307,10 +303,7 @@ export function createConversationContextRuntime(options: {
       : afterMessages
     const afterStatus = statusFromMessages(projectedAfterMessages, model,
       await projectedRequest(values, requestSourceMessages(rawMessages, [...projectedMessages, ...projectedAfterMessages]), model))
-    const inputLimit = options.includeProjectRules
-      ? projectRuleInputBudget(afterStatus.inputCapacityTokens)
-      : afterStatus.inputCapacityTokens
-    if (afterStatus.estimatedInputTokens > inputLimit) {
+    if (afterStatus.currentContextTokens > afterStatus.inputCapacityTokens) {
       throw new ModelSelectionError('The compressed conversation and required instructions still exceed the selected model’s input capacity. Choose a larger-context model; the current history has not been replaced.')
     }
 

@@ -1,5 +1,5 @@
 import type { ResolvedModelConfig } from '@shared/types'
-import { contextCompressionTriggerTokens, projectRuleInputBudget } from '@shared/contextWindow'
+import { contextCompressionTriggerTokens } from '@shared/contextWindow'
 import { modelContextKey } from '@shared/modelConfig'
 import { summaryPromptForLanguage, type SummaryOutputLanguage } from '@shared/summaryPrompt'
 import type { ConversationMessage } from '../../runtime/conversationMessage'
@@ -15,7 +15,6 @@ import { prepareConversationModelCall, type PreparedConversationContext } from '
 import type { ConversationModelOptions } from './conversationModel'
 import { codeReviewToolDeclaration } from '../../runtime/codeReviewReport'
 import { withResponseTools } from './modelToolDeclarations'
-import { projectRulesRequestBudget } from './projectRules'
 import { modelRecoveryFeedback } from '../../runtime/modelOutputRecovery'
 
 type Summary = ManualContextCompression & { id: string }
@@ -33,7 +32,6 @@ export interface ConversationCompressionOptions extends ConversationModelOptions
   outputLanguage: SummaryOutputLanguage
   codingMode?: boolean
   compressionPrompt?: string
-  includeProjectRules?: boolean
   enabled?: boolean
   compressionTracking: CompressionTrackingCallbacks
   saveToolResult(content: string): Promise<string>
@@ -51,8 +49,7 @@ export async function invokeConversationWithCompression(model: ResolvedModelConf
   const messages = projectConversationToolHistory(effective)
   const tools = withResponseTools(context.tools, context.review ? [codeReviewToolDeclaration(context.review.id)] : [])
   const inputCapacityTokens = model.maxContextTokens - model.maxOutputTokens
-  const trigger = contextCompressionTriggerTokens(model.maxContextTokens, model.maxOutputTokens, model.contextCompressionThreshold)
-  const threshold = options.includeProjectRules ? Math.min(trigger, projectRuleInputBudget(inputCapacityTokens)) : trigger
+  const threshold = contextCompressionTriggerTokens(model.maxContextTokens, model.maxOutputTokens, model.contextCompressionThreshold)
   const invoke = async (messages: ConversationMessage[]) => {
     const request = await prepareConversationModelCall(model, { ...context, messages, tools }, options)
     options.onRequest?.(model, { messages: request.messages, systemMessage: request.systemMessage, tools: request.tools })
@@ -94,13 +91,12 @@ export async function invokeConversationWithCompression(model: ResolvedModelConf
     let finalMessages = projectConversationToolHistory([summaryMessage, ...effective.slice(selection.cutoffIndex)])
     let result: Awaited<ReturnType<typeof invoke>>
     try { result = await invoke(finalMessages) } catch (error) {
-      const ruleBudget = projectRulesRequestBudget(error)
-      if (ruleBudget === undefined && !isModelContextOverflow(error)) throw error
+      if (!isModelContextOverflow(error)) throw error
       const facts = conversationHistoryFacts(finalMessages).map((fact, index) => ({ ...fact, content: finalMessages[index].content }))
-      const replacements = await compactLatestToolResults(facts, ruleBudget ?? inputCapacityTokens, indices =>
+      const replacements = await compactLatestToolResults(facts, inputCapacityTokens, indices =>
         countConversationTokens([context.systemMessage, ...finalMessages.map((message, index) => indices.includes(index) ? { ...message, content: '' } : message), ...feedback],
           tools, { protocol: model.protocol, parameters: model.parameters }), options.saveToolResult)
-      if (!replacements.length) throw ruleBudget === undefined ? new PreservedContextOverflowError() : error
+      if (!replacements.length) throw new PreservedContextOverflowError()
       finalMessages = [...finalMessages]
       for (const { index, content } of replacements) finalMessages[index] = { ...finalMessages[index], content }
       try { result = await invoke(finalMessages) } catch (retryError) {

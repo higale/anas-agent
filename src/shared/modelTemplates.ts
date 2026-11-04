@@ -1,4 +1,4 @@
-import { normalizeProviderIconData } from './providerIcon'
+import { normalizeIconData } from './iconImage'
 import { requireDataVersion } from './dataVersion'
 import rawModelTemplates from '../../data/config/model-templates.json'
 import {
@@ -88,7 +88,7 @@ function parseTemplateConfig(
     templateId,
     label,
     name: requireString(config.name, `${path}.name`),
-    iconData: normalizeProviderIconData(config.icon_data, `${path}.icon_data`),
+    iconData: normalizeIconData(config.icon_data, `${path}.icon_data`),
     protocol: requireModelProtocol(config.protocol, `${path}.protocol`),
     baseUrl: requireString(config.base_url, `${path}.base_url`),
     modelListUrl: requireString(config.model_list_url, `${path}.model_list_url`),

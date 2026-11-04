@@ -1,4 +1,4 @@
-import { ProjectRulesError, ProjectRulesRequestBudgetError, isProjectRulesError, errorCauses } from '../../runtime/errors'
+import { ProjectRulesError, isProjectRulesError } from '../../runtime/errors'
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { lstat, open, opendir, realpath } from 'node:fs/promises'
@@ -8,10 +8,6 @@ import { isSameOrInsideDirectory } from '../pathContainment'
 import { canonicalizeAbsolutePath } from '../workspacePath'
 
 export const projectRuleLimits = { fileBytes: 64 * 1024, totalBytes: 512 * 1024, directories: 256, depth: 256, entries: 10_000 }
-
-export function projectRulesRequestBudget(error: unknown): number | undefined {
-  return errorCauses(error).find((cause): cause is ProjectRulesRequestBudgetError => cause instanceof ProjectRulesRequestBudgetError)?.inputCapacityTokens
-}
 
 function missing(error: unknown): boolean {
   return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')

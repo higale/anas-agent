@@ -1,3 +1,4 @@
+import { IconImage } from '../IconImage'
 import { ServerCog } from 'lucide-react'
 
 interface ProviderIconProps {
@@ -7,6 +8,6 @@ interface ProviderIconProps {
 
 export function ProviderIcon({ iconData, size = 18 }: ProviderIconProps) {
   return iconData
-    ? <img className="provider-icon" src={iconData} alt="" width={size} height={size} draggable={false} />
+    ? <IconImage data={iconData} size={size} />
     : <ServerCog aria-hidden="true" className="provider-icon" size={size} />
 }

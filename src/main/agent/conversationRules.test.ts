@@ -7,11 +7,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentAccessMode } from '@shared/agentTypes'
 import type { ResolvedModelConfig } from '@shared/types'
 import type { ExecutionContext, ExecutionPendingCall, ExecutionState } from '../../runtime/executionState'
-import { ProjectRulesError, ProjectRulesRequestBudgetError } from '../../runtime/errors'
+import { ProjectRulesError, ModelContextOverflowError } from '../../runtime/errors'
 import { projectRulesText, ruleScopeIds } from '../../runtime/projectRules'
 import { toolEffectArtifactPurposes } from '../../runtime/toolEffectIdentity'
 import { NativeExecutionStore, nativeExecutionSchema } from './nativeExecutionStore'
 import { conversationRuleSystemMessage, conversationRuleToolRejection, prepareConversationRules, preflightConversationRules, type ConversationRulesOptions } from './conversationRules'
+import { countConversationTokens } from './conversationContext'
 import { prepareConversationModelCall } from './conversationRequest'
 
 vi.mock('../config/apiKeys', () => ({ resolveModelApiKey: (model: ResolvedModelConfig) => model.apiKey }))
@@ -69,7 +70,7 @@ describe('native project rules and durable preparation approval', () => {
     const config = { runId: 'run', signal: new AbortController().signal, resolveModel: async () => selected, providerFetch: fetch }
     await (await prepareConversationModelCall(selected, input, config)).invoke()
     selected.parameters.instructions = 'x'.repeat(24000)
-    await expect(prepareConversationModelCall(selected, input, config)).rejects.toThrow('safe capacity')
+    await expect(prepareConversationModelCall(selected, input, config)).rejects.toThrow('input capacity')
     expect(fetch).toHaveBeenCalledOnce()
   })
 
@@ -78,22 +79,25 @@ describe('native project rules and durable preparation approval', () => {
     const messages: ConversationMessage[] = [{ kind: 'user', content: 'Inspect' }, { kind: 'assistant', content: '', calls: [{ id: 'image', name: 'capture', args: {} }] },
       { kind: 'tool', resultFor: 'image', content: [{ type: 'text', text: 'Image metadata '.repeat(100) },
         { type: 'image', source_type: 'base64', data: 'AA==', mime_type: 'image/png' }] }, { kind: 'user', content: 'Continue' }]
-    const selected: ResolvedModelConfig = { ...model, protocol: 'openai_responses', maxContextTokens: 3000 }
+    const chatTokens = countConversationTokens([input.systemMessage, ...messages], input.tools, { protocol: 'openai_chat_completions' })
+    const selected: ResolvedModelConfig = { ...model, protocol: 'openai_responses', maxContextTokens: model.maxOutputTokens + chatTokens - 1 }
     const fetch = vi.fn(async () => Response.json({ id: 'response', object: 'response', created_at: 1, status: 'completed', model: 'fixture',
       output: [{ id: 'message', type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'Done', annotations: [] }] }] }))
     const config = { runId: 'run', signal: new AbortController().signal, resolveModel: async () => selected, providerFetch: fetch }
     await (await prepareConversationModelCall(selected, { ...input, messages }, config)).invoke()
     selected.protocol = 'openai_chat_completions'
-    await expect(prepareConversationModelCall(selected, { ...input, messages }, config)).rejects.toThrow('safe capacity is 1744')
+    await expect(prepareConversationModelCall(selected, { ...input, messages }, config)).rejects.toBeInstanceOf(ModelContextOverflowError)
     expect(fetch).toHaveBeenCalledOnce()
   })
 
-  it('checks changed model capacity on the next request using the same frozen rules', async () => {
-    const { input } = await requestFixture(), snapshot = structuredClone(input.projectRules), selected = { ...model, maxContextTokens: 21000 }
+  it('accepts frozen rules at the input limit and rejects them when capacity drops by one', async () => {
+    const { input } = await requestFixture(), snapshot = structuredClone(input.projectRules)
+    const required = countConversationTokens([input.systemMessage, ...input.messages], input.tools, { protocol: model.protocol })
+    const selected = { ...model, maxContextTokens: model.maxOutputTokens + required }
     const fetch = vi.fn(async () => chatResponse()), config = { runId: 'run', signal: new AbortController().signal, resolveModel: async () => selected, providerFetch: fetch }
     await (await prepareConversationModelCall(selected, input, config)).invoke()
-    selected.maxContextTokens = 1100
-    await expect(prepareConversationModelCall(selected, input, config)).rejects.toThrow('safe capacity is 0')
+    selected.maxContextTokens -= 1
+    await expect(prepareConversationModelCall(selected, input, config)).rejects.toBeInstanceOf(ProjectRulesError)
     expect(fetch).toHaveBeenCalledOnce()
     expect(input.projectRules).toEqual(snapshot)
   })
@@ -102,7 +106,7 @@ describe('native project rules and durable preparation approval', () => {
     const { input } = await requestFixture(), selected = { ...model, maxContextTokens: 3000 }, fetch = vi.fn(async () => chatResponse())
     const tools = [{ type: 'function', function: { name: 'report', description: 'x'.repeat(16000), parameters: { type: 'object', properties: {} } } }]
     await expect(prepareConversationModelCall(selected, { ...input, tools }, { runId: 'run', signal: new AbortController().signal,
-      resolveModel: async () => selected, providerFetch: fetch })).rejects.toThrow('safe capacity is 1744')
+      resolveModel: async () => selected, providerFetch: fetch })).rejects.toThrow('input capacity is 2000')
     expect(fetch).not.toHaveBeenCalled()
   })
 
@@ -208,7 +212,7 @@ describe('native project rules and durable preparation approval', () => {
     await expect(prepareConversationModelCall(model, { ...input, systemMessage: { kind: 'system', content: 'Rules removed' } }, config)).rejects.toThrow('removed')
     await expect(prepareConversationModelCall(model, { ...input, projectRules: { ...input.projectRules!, runId: 'other' } }, config)).rejects.toThrow('another run')
     await expect(prepareConversationModelCall(model, { ...input, messages: [{ kind: 'user', content: 'huge task '.repeat(9000) }] }, config)).rejects.toBeInstanceOf(ProjectRulesError)
-    await expect(prepareConversationModelCall(model, { ...input, messages: [{ kind: 'user', content: 'history '.repeat(9000) }, { kind: 'assistant', content: 'old' }, ...input.messages] }, config)).rejects.toBeInstanceOf(ProjectRulesRequestBudgetError)
+    await expect(prepareConversationModelCall(model, { ...input, messages: [{ kind: 'user', content: 'history '.repeat(9000) }, { kind: 'assistant', content: 'old' }, ...input.messages] }, config)).rejects.toBeInstanceOf(ModelContextOverflowError)
     expect(fetch).toHaveBeenCalledOnce()
   })
 

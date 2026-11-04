@@ -460,16 +460,18 @@ describe('project store', () => {
   })
 
   it('persists project appearance and clears it when automatic defaults are selected', async () => {
-    const { createProject, updateProject } = await import('./projectStore')
+    const { createProject, updateProject, listProjects } = await import('./projectStore')
+    const iconData = 'data:image/svg+xml;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>').toString('base64')
     const project = await createProject({
       kind: 'simple_chat',
       name: 'Styled chat',
       icon: 'heart',
       iconColor: 'pink',
+      iconData,
       prompt: ''
     })
 
-    expect(project).toMatchObject({ icon: 'heart', iconColor: 'pink' })
+    expect((await listProjects()).find(item => item.id === project.id)).toMatchObject({ icon: 'heart', iconColor: 'pink', iconData })
 
     const updated = await updateProject(project.id, {
       kind: 'simple_chat',
@@ -478,6 +480,8 @@ describe('project store', () => {
     })
     expect(updated).not.toHaveProperty('icon')
     expect(updated).not.toHaveProperty('iconColor')
+    expect((await listProjects()).find(item => item.id === project.id)).not.toHaveProperty('iconData')
+    await expect(updateProject(project.id, { ...updated, iconData: 'file:///outside.png' })).rejects.toThrow('Project icon image is invalid.')
 
     await expect(createProject({
       kind: 'simple_chat',

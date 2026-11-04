@@ -57,6 +57,7 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
   const promptInputId = useId()
   const [name, setName] = useState('')
   const [icon, setIcon] = useState<ProjectIconName>()
+  const [iconData, setIconData] = useState<string>()
   const [iconColor, setIconColor] = useState<ProjectIconColor>()
   const [projectTools, setProjectTools] = useState<ToolSnapshot>()
   const [sourceFolders, setSourceFolders] = useState<string[]>([])
@@ -74,6 +75,7 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
   const [accessMode, setAccessMode] = useState<AgentAccessMode>('smart_approval')
   const [modelConfigId, setModelConfigId] = useState<string>()
   const [modelParameterPresetId, setModelParameterPresetId] = useState<string | null>()
+  const [iconPending, setIconPending] = useState(false)
   const [busy, setBusy] = useState(false)
   const [dragActive, setDragActive] = useState(false)
   const nameInputRef = useRef<HTMLInputElement | null>(null)
@@ -88,6 +90,7 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
     const preferences = {
       name: name.trim() || t('project.untitled_name'),
       ...(icon ? { icon } : {}),
+      ...(iconData ? { iconData } : {}),
       ...(iconColor ? { iconColor } : {}),
       ...(modelConfigId ? { modelConfigId, modelParameterPresetId } : {})
     }
@@ -96,7 +99,7 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
       : { ...preferences, kind: 'workspace', sourceFolders,
         capabilities: config ? removeEmptyMissingMcpSelections(capabilities, new Set(config.mcpServers.map((server) => server.id))) : capabilities,
         restrictSubagents, prompt, advancedSettings, codingMode, ...(accessMode !== 'smart_approval' ? { accessMode } : {}), ...(compressionPrompt.trim() ? { compressionPrompt } : {}) }
-  }, [accessMode, advancedSettings, capabilities, codingMode, compressionPrompt, config, icon, iconColor, modelConfigId,
+  }, [accessMode, advancedSettings, capabilities, codingMode, compressionPrompt, config, icon, iconColor, iconData, modelConfigId,
     modelParameterPresetId, name, prompt, restrictSubagents, simpleChat, sourceFolders, t])
 
   useEffect(() => {
@@ -104,6 +107,7 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
     const initialCodingMode = project?.kind === 'workspace' ? project.codingMode : kind === 'coding' || defaultProjectSettings.codingMode
     setName(project?.name ?? '')
     setIcon(project ? project.icon : initialCodingMode ? defaultProjectIcon(projectKind, initialCodingMode) : undefined)
+    setIconData(project?.iconData)
     setIconColor(project?.iconColor)
     setSourceFolders(project?.kind === 'workspace' ? project.sourceFolders : [])
     setPrompt(project?.prompt ?? defaultProjectSettings.prompt)
@@ -232,7 +236,7 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
 
   async function handleSubmit(event: FormEvent): Promise<void> {
     event.preventDefault()
-    if (compressionError) return
+    if (compressionError || iconPending) return
     if ((!simpleChat && sourceFolders.length === 0) || busy) return
     setBusy(true)
     try {
@@ -265,6 +269,11 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
                 <div className="ui-form-section ui-form-section-fill">
                   <header className="ui-dialog-header project-dialog-header">
                     <ProjectAppearancePicker
+                      key={project?.id ?? kind}
+                      disabled={busy}
+                      onPendingChange={setIconPending}
+                      iconData={iconData}
+                      onChangeImage={setIconData}
                       color={iconColor}
                       icon={icon}
                       kind={projectKind}
@@ -471,7 +480,7 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
               <button
                 className="ui-button ui-button-compact ui-button-primary"
                 type="submit"
-                disabled={busy || Boolean(compressionError) || (!simpleChat && sourceFolders.length === 0)}
+                disabled={busy || iconPending || Boolean(compressionError) || (!simpleChat && sourceFolders.length === 0)}
               >
                 {editing ? <Save size={14} /> : <Plus size={14} />}
                 <span>{t(editing ? 'common.save' : simpleChat ? 'project.create_simple_chat' : 'project.create')}</span>

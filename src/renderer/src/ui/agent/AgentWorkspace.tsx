@@ -161,9 +161,7 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
       liveStatus: props.run?.liveContextStatus }
   )
   const contextBudget = props.snapshot?.contextStatus && selectedPresetValid
-    ? contextBudgetForModel(selectedModel, continuationRunId && props.snapshot.contextStatus.runId === continuationRunId
-      ? contextStatus?.includeProjectRules ?? props.snapshot.contextStatus.includeProjectRules
-      : selectedProject?.kind === 'workspace' && selectedProject.codingMode) : undefined
+    ? contextBudgetForModel(selectedModel) : undefined
   const showApprovalPanel = props.run?.status === 'interrupted'
     && interruptActions(props.run.interrupts).length > 0
   const sidebarLabel = t('chat.show_sidebar')

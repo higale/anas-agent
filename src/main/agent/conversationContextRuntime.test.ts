@@ -44,7 +44,7 @@ describe('native context status and manual compression', () => {
       const status = await native.status({ messages })
       // Observable totals recorded against the legacy runtime before removing its test dependency.
       expect(status).toEqual({
-        runId: 'run', modelConfigId: 'fixture', modelContextKey: expect.any(String), includeProjectRules: false,
+        runId: 'run', modelConfigId: 'fixture', modelContextKey: expect.any(String),
         estimatedInputTokens: 17, currentContextTokens: 17, maxContextTokens: 10000, maxOutputTokens: 1000,
         inputCapacityTokens: 9000, compressionEnabled: true, compressionThreshold: 0.8,
         compressionThresholdTokens: 7200, compressionApplied: false, manualCompressionAvailable: true,

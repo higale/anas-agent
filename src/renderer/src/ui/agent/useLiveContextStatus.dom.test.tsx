@@ -152,7 +152,7 @@ describe('useLiveContextStatus', () => {
   })
 
   it.each(['profile', 'prompt', 'attachments'] as const)('reprojects an interrupted continuation after its %s changes', async (change) => {
-    const reader = vi.fn().mockResolvedValue({ ...contextStatus(model, 300), includeProjectRules: false })
+    const reader = vi.fn().mockResolvedValue(contextStatus(model, 300))
     installStatusReader(reader)
     const reported = contextStatus()
     const config = { settings: { profile: { assistant: { instructions: 'Original profile.' } }, attachmentTextMaxChars: 1000 } } as AppConfigSnapshot
@@ -164,12 +164,10 @@ describe('useLiveContextStatus', () => {
     if (change === 'profile') changedConfig.settings.profile.assistant.instructions = 'Expanded profile context.'
     if (change === 'attachments') changedConfig.settings.attachmentTextMaxChars = 5000
     const changedProject = { ...project, codingMode: true, ...(change === 'prompt' ? { prompt: 'Expanded project context.' } : {}) }
-    reader.mockResolvedValue({ ...contextStatus(model, 900), includeProjectRules: false })
+    reader.mockResolvedValue(contextStatus(model, 900))
     rerender({ currentConfig: changedConfig, currentProject: changedProject })
     expect(result.current).toBeUndefined()
     await waitFor(() => expect(result.current?.estimatedInputTokens).toBe(900))
-    // The runtime still owns the saved run's coding/capability configuration.
-    expect(result.current?.includeProjectRules).toBe(false)
   })
 
   it('rejects old reports and pending previews when the same run resumes, then accepts a new live report', async () => {

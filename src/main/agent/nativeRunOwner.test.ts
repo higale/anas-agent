@@ -568,22 +568,29 @@ describe('native durable input and resume owner', () => {
     } finally { h.dispose() }
   })
 
-  it('preserves the existing plan for manual compression but clears it for a new user turn', async () => {
+  it('preserves the plan and rule snapshot for compression while keeping rule preparation run-scoped', async () => {
     const h = fixture()
     try {
       h.owner.saveInput(h.identity, input()); await h.owner.enter('input', h.identity)
       const todos = [{ content: 'Finish the existing task', status: 'in_progress' as const }]
-      h.owner.store.prepareContext(h.scope(), { modelCalls: 2, todos })
+      const projectRules = { runId: h.identity.runId, trustedFolders: [], roots: [], directories: [], documents: [],
+        activeScopes: [], initialScopes: [], blockedCalls: [], rejectedCalls: [], checkedWrites: [], blockedReason: '', fatalError: '' }
+      h.owner.store.prepareContext(h.scope(), { modelCalls: 2, todos, projectRules,
+        rulePreparation: { runId: h.identity.runId, initialized: true, reads: [] } })
       h.owner.store.finish(h.scope(), 'completed')
       const compression = { threadId: h.identity.threadId, runId: h.submissions.createRun(h.identity.threadId, 'compress', 'compression').id }
       h.owner.saveInput(compression); h.reopen(); await h.owner.enter('input', compression)
       const state = h.owner.store.load(compression.threadId)!
-      expect(state.context).toMatchObject({ modelCalls: 0, todos })
+      expect(state.context).toMatchObject({ modelCalls: 0, todos, projectRules })
+      expect(state.context.rulePreparation).toBeUndefined()
       expect(state.messages.map(message => message.id)).toEqual(['run:input'])
       h.owner.store.finish({ ...compression, expectedRevisionId: state.revisionId }, 'completed')
       const next = { threadId: h.identity.threadId, runId: h.submissions.createRun(h.identity.threadId, 'next').id }
       h.owner.saveInput(next, input(next.runId)); h.reopen(); await h.owner.enter('input', next)
-      expect(h.owner.store.load(next.threadId)!.context.todos).toEqual([])
+      const nextContext = h.owner.store.load(next.threadId)!.context
+      expect(nextContext.todos).toEqual([])
+      expect(nextContext.projectRules).toBeUndefined()
+      expect(nextContext.rulePreparation).toBeUndefined()
     } finally { h.dispose() }
   })
 

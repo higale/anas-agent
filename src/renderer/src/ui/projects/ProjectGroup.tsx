@@ -68,7 +68,7 @@ export function ProjectGroup({
             aria-label={t(project.collapsed ? 'project.expand' : 'project.collapse', { name: project.name })}
             onClick={() => void onToggleCollapsed(project)}
           >
-            {!defaultWorkspace && <ProjectIcon color={project.iconColor} icon={project.icon} kind={project.kind} size={15} />}
+            {(!defaultWorkspace || project.iconData) && <ProjectIcon iconData={project.iconData} color={project.iconColor} icon={project.icon} kind={project.kind} size={15} />}
             <span className="ui-truncate">
               {defaultWorkspace ? t('common.default') : project.name}
             </span>

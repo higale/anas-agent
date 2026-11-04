@@ -1280,6 +1280,32 @@ describe('renderer interaction accessibility', () => {
     })
   })
 
+  it('saves the selected project image only after decoding finishes', async () => {
+    const user = userEvent.setup(), onSave = vi.fn().mockResolvedValue(preferredProject)
+    let decoded!: () => void
+    const decode = vi.fn(() => new Promise<void>(resolve => { decoded = resolve }))
+    vi.stubGlobal('Image', class { naturalWidth = 16; naturalHeight = 16; decode = decode })
+    try {
+      render(<ProjectDialog open kind="simple_chat" onClose={vi.fn()} onSave={onSave} />)
+      const submit = screen.getByRole('button', { name: 'project.create_simple_chat' })
+      await user.click(screen.getByRole('button', { name: 'project.choose_icon' }))
+      fireEvent.change(screen.getByLabelText('project.upload_icon', { selector: 'input' }), {
+        target: { files: [new File(['<svg/>'], 'icon.svg', { type: 'image/svg+xml' })] }
+      })
+      await waitFor(() => expect(decode).toHaveBeenCalled())
+      await user.click(screen.getByRole('button', { name: 'common.done' }))
+      expect(submit).toBeDisabled()
+      fireEvent.submit(submit.closest('form')!)
+      expect(onSave).not.toHaveBeenCalled()
+      decoded()
+      await waitFor(() => expect(submit).toBeEnabled())
+      await user.click(submit)
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ iconData: 'data:image/svg+xml;base64,PHN2Zy8+' }))
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it.each([false, true])('shows the save failure reason in a notice and allows correcting the name (editing: %s)', async (editing) => {
     const user = userEvent.setup()
     const onClose = vi.fn()

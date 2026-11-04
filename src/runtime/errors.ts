@@ -77,12 +77,6 @@ export class ProjectRulesError extends Error {
   }
 }
 
-export class ProjectRulesRequestBudgetError extends ProjectRulesError {
-  constructor(tokens: number, readonly inputCapacityTokens: number) {
-    super(`Final model request needs about ${tokens} input tokens; safe capacity is ${inputCapacityTokens}, including reply reserve and estimation margin.`)
-  }
-}
-
 export function isProjectRulesError(error: unknown): boolean {
   return errorCauses(error).some((cause) => cause instanceof ProjectRulesError || ('name' in cause && cause.name === 'ProjectRulesError'))
 }
