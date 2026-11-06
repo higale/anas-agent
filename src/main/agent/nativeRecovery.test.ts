@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { NativeConversationDatabase } from './nativeConversationDatabase'
+import { displayTransaction } from './activityDisplayProjection'
 import { SqliteMemoryStore } from '../../test/legacyMemoryFixture'
 import { FileEditStore } from '../fileEditStore'
 import { defaultCapabilities } from '../../shared/agentCapabilities'
@@ -148,7 +149,7 @@ describe('native startup ownership recovery', () => {
     try {
       const parent = h.submit('parent')
       h.db.managed.createManagedCall({ id: 'task', ...parent, kind: 'builtin', summary: 'Task' })
-      h.sql(sql => sql.exec('DELETE FROM agent_run_input_intents'))
+      h.sql(sql => displayTransaction(sql, () => sql.exec('DELETE FROM agent_run_input_intents'))())
       expect(() => h.db.recover()).toThrow('neither saved input nor its own execution')
       expect(h.db.managed.getManagedCall('task', parent.threadId)!.status).toBe('preparing')
       expect(h.db.readCatalogSnapshot('parent')!.thread.status).toBe('running')

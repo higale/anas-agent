@@ -148,21 +148,6 @@ export const conversationResourceSchema = `
       CREATE INDEX IF NOT EXISTS agent_context_summaries_run_sequence_idx
         ON agent_context_summaries (run_id, sequence);
 
-      CREATE TABLE IF NOT EXISTS agent_memory_recalls (
-        run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
-        recall_id TEXT NOT NULL,
-        sequence INTEGER NOT NULL,
-        query TEXT NOT NULL CHECK (length(query) > 0),
-        prompt_text TEXT NOT NULL CHECK (length(prompt_text) > 0),
-        memory_count INTEGER NOT NULL CHECK (memory_count > 0),
-        agent_name TEXT,
-        created_at TEXT NOT NULL,
-        PRIMARY KEY (run_id, recall_id)
-      );
-
-      CREATE INDEX IF NOT EXISTS agent_memory_recalls_run_sequence_idx
-        ON agent_memory_recalls (run_id, sequence);
-
       CREATE TABLE IF NOT EXISTS agent_attachments (
         id TEXT PRIMARY KEY,
         thread_id TEXT NOT NULL REFERENCES agent_threads(id) ON DELETE CASCADE,

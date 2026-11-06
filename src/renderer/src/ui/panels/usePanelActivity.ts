@@ -35,7 +35,11 @@ export function usePanelActivity(threadId: string, runId: string, subagentId: st
       if (owner !== threadId || id !== runId) return
       const lean = displayEvent(event)
       if (refresh) buffered.push(lean)
-      setRun(previous => previous ? boundedDisplayRun(threadId, applyRunActivityEvent(previous, lean)) : previous)
+      setRun(previous => {
+        if (!previous) return previous
+        const updated = applyRunActivityEvent(previous, lean)
+        return updated === previous ? previous : boundedDisplayRun(threadId, updated)
+      })
       if (['run_completed', 'run_failed', 'run_cancelled', 'run_interrupted', 'run_settled', 'run_recovery_failed'].includes(event.type)) {
         void synchronize(true).catch(reason => { if (active) setError(reason) })
       }

@@ -1,3 +1,4 @@
+import { displayTransaction } from './activityDisplayProjection'
 import { requireObjectToolCall } from '../../runtime/toolInput'
 import { collectNativeMessageBodies } from './nativeMessageCleanup'
 import { handoffNativeFileEdits } from './nativeFileEditCleanup'
@@ -23,6 +24,7 @@ import { createThreadRecord, readThreadRecord } from './conversationThreads'
 import { SubagentTaskStore, type SubagentSubmission } from './subagentTaskStore'
 import { presentConversationMessage } from './conversationPresentation'
 import type { RunConfiguration } from '../../shared/agentCapabilities'
+import { activityMessageHeader } from './activityDirectoryIndex'
 
 interface RunOwner { threadId: string; runId: string }
 interface RunRow { id: string; thread_id: string; status: string; operation: string; error: string | null; cancellation_requested: number }
@@ -67,8 +69,10 @@ export class NativeRunOwner {
     this.submissions = new RunSubmissionStore(database)
     this.subagents = new SubagentTaskStore(database)
     this.store = new NativeExecutionStore(database, commit => {
-      this.commit(commit)
-      committed?.(commit)
+      displayTransaction(database, () => {
+        this.commit(commit)
+        committed?.(commit)
+      })()
     }, effect => Boolean(database.prepare(`SELECT 1 FROM agent_managed_calls WHERE id=? AND thread_id=? AND run_id=?
       AND detached_at IS NOT NULL AND status IN ('preparing','running')`).get(effect.artifacts['managed-call'], effect.threadId, effect.runId)))
   }
@@ -157,24 +161,26 @@ export class NativeRunOwner {
   /** Called only after live work has drained, or at startup before dispatch.
    * A never-accepted input is discarded without manufacturing visible history. */
   completeCancellation(owner: RunOwner): boolean {
-    this.changed()
-    return this.database.transaction(() => {
-      const run = this.requireRun(owner)
-      if (!['running', 'interrupted'].includes(run.status)) return false
-      if (!run.cancellation_requested) throw new Error('Cancellation requires its saved request.')
-      const state = this.store.load(owner.threadId)
-      if (state?.runId === run.id) {
-        this.store.finish({ ...owner, expectedRevisionId: state.revisionId }, 'cancelled')
-      } else {
-        if (this.database.prepare('DELETE FROM agent_run_input_intents WHERE run_id=?').run(run.id).changes !== 1) {
-          throw new Error('Unaccepted cancellation requires its saved input.')
+    return displayTransaction(this.database, () => {
+      this.changed()
+      return this.database.transaction(() => {
+        const run = this.requireRun(owner)
+        if (!['running', 'interrupted'].includes(run.status)) return false
+        if (!run.cancellation_requested) throw new Error('Cancellation requires its saved request.')
+        const state = this.store.load(owner.threadId)
+        if (state?.runId === run.id) {
+          this.store.finish({ ...owner, expectedRevisionId: state.revisionId }, 'cancelled')
+        } else {
+          if (this.database.prepare('DELETE FROM agent_run_input_intents WHERE run_id=?').run(run.id).changes !== 1) {
+            throw new Error('Unaccepted cancellation requires its saved input.')
+          }
+          const time = new Date().toISOString()
+          this.database.prepare("UPDATE agent_runs SET status='cancelled',error=NULL,updated_at=? WHERE id=?").run(time, run.id)
+          this.database.prepare("UPDATE agent_threads SET status='idle',updated_at=? WHERE id=?").run(time, owner.threadId)
+          this.database.prepare('INSERT OR IGNORE INTO agent_file_edit_cleanup_outbox(run_id) VALUES (?)').run(run.id)
         }
-        const time = new Date().toISOString()
-        this.database.prepare("UPDATE agent_runs SET status='cancelled',error=NULL,updated_at=? WHERE id=?").run(time, run.id)
-        this.database.prepare("UPDATE agent_threads SET status='idle',updated_at=? WHERE id=?").run(time, owner.threadId)
-        this.database.prepare('INSERT OR IGNORE INTO agent_file_edit_cleanup_outbox(run_id) VALUES (?)').run(run.id)
-      }
-      return true
+        return true
+      })()
     })()
   }
 
@@ -235,14 +241,18 @@ export class NativeRunOwner {
    * submission transaction. Regeneration supplies the revised user message;
    * no framework message class or history-edit policy is interpreted here. */
   saveInput(owner: RunOwner, message?: ExecutionMessageInput): void {
-    this.database.transaction(() => {
-      const run = this.requireRun(owner), state = this.store.load(owner.threadId)
-      if (run.status !== 'running' || state?.runId === owner.runId) throw new Error('This run can no longer accept a new input intent.')
-      validateInput(owner.runId, run.operation, message)
-      const serialized = encodeExecutionInput(message)
-      const existing = this.database.prepare('SELECT input_json FROM agent_run_input_intents WHERE run_id=?').get(owner.runId) as { input_json: string } | undefined
-      if (existing && existing.input_json !== serialized) throw new Error('The run already owns a different saved input.')
-      this.database.prepare('INSERT OR IGNORE INTO agent_run_input_intents(run_id,input_json) VALUES (?,?)').run(owner.runId, serialized)
+    return displayTransaction(this.database, () => {
+      this.database.transaction(() => {
+        const run = this.requireRun(owner), state = this.store.load(owner.threadId)
+        if (run.status !== 'running' || state?.runId === owner.runId) throw new Error('This run can no longer accept a new input intent.')
+        validateInput(owner.runId, run.operation, message)
+        const serialized = encodeExecutionInput(message)
+        const existing = this.database.prepare('SELECT input_json FROM agent_run_input_intents WHERE run_id=?').get(owner.runId) as { input_json: string } | undefined
+        if (existing && existing.input_json !== serialized) throw new Error('The run already owns a different saved input.')
+        const display = message ? { id: message.id, header: activityMessageHeader(owner.threadId, owner.runId, message.id, message.value, []) } : null
+        this.database.prepare('INSERT OR IGNORE INTO agent_run_input_intents(run_id,input_json,display_json) VALUES (?,?,?)')
+          .run(owner.runId, serialized, display ? JSON.stringify(display) : null)
+      })()
     })()
   }
 
@@ -333,14 +343,16 @@ export class NativeRunOwner {
   }
 
   retryModel(input: AgentModelRetryInput): void {
-    this.changed()
-    this.database.transaction(() => {
-      const run = this.requireRun(input)
-      const latest = this.database.prepare('SELECT id FROM agent_runs WHERE thread_id=? ORDER BY sequence DESC LIMIT 1').get(input.threadId) as { id: string } | undefined
-      if (run.status !== 'failed' || run.operation !== 'agent' || latest?.id !== run.id) throw new Error('Only the latest failed model request can be retried.')
-      this.database.prepare("UPDATE agent_runs SET status='running',error=NULL,cancellation_requested=0 WHERE id=?").run(run.id)
-      this.store.retryModel(input, input.withholdToolResults)
-      if (input.withholdToolResults) collectNativeMessageBodies(this.database, input.threadId)
+    return displayTransaction(this.database, () => {
+      this.changed()
+      this.database.transaction(() => {
+        const run = this.requireRun(input)
+        const latest = this.database.prepare('SELECT id FROM agent_runs WHERE thread_id=? ORDER BY sequence DESC LIMIT 1').get(input.threadId) as { id: string } | undefined
+        if (run.status !== 'failed' || run.operation !== 'agent' || latest?.id !== run.id) throw new Error('Only the latest failed model request can be retried.')
+        this.database.prepare("UPDATE agent_runs SET status='running',error=NULL,cancellation_requested=0 WHERE id=?").run(run.id)
+        this.store.retryModel(input, input.withholdToolResults)
+        if (input.withholdToolResults) collectNativeMessageBodies(this.database, input.threadId)
+      })()
     })()
   }
 

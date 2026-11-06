@@ -1,14 +1,13 @@
 import type Database from 'better-sqlite3'
 import type { AgentRun, AgentRunStatus, AgentRunActivity, AgentSubagentActivity, AgentModelActivity,
   AgentToolActivity, AgentToolCall, AgentContextSummary, AgentMemoryRecall } from '../../shared/agentTypes'
-import { modelRoundSql } from './runActivityMetadata'
-import type { AgentActivityPageInput, AgentActivityDetailReference, AgentActivityDetail } from '../../shared/agentTypes'
+import { hasMemoryRecallHistory, modelRoundSql, orderedMemoryRecallRows } from './runActivityMetadata'
+import type { AgentActivityDetailReference, AgentActivityDetail } from '../../shared/agentTypes'
 import { decodeExecutionValue } from '../../runtime/executionValue'
-import { activityInitialSize } from '../../shared/activityDisplay'
 
 export interface ActivityPayloadReader {
   model(runId: string, modelId: string, messageId: string | undefined, subagentId?: string): Pick<AgentModelActivity, 'text' | 'reasoning' | 'reasoningSummary' | 'toolCallIds' | 'recovery'>
-  tool(runId: string, callId: string, name: string, subagentId?: string): { call: AgentToolCall; output?: unknown }
+  tool(runId: string, callId: string, name: string, subagentId?: string, summaryOnly?: boolean): { call: AgentToolCall; output?: unknown }
 }
 
 type ActivityRow = {
@@ -101,7 +100,7 @@ export type ContextSummaryRow = {
   created_at: string
 }
 
-export type MemoryRecallRow = {
+type MemoryRecallRow = {
   run_id: string
   recall_id: string
   sequence: number
@@ -127,7 +126,7 @@ export function contextSummaryFromRow(row: ContextSummaryRow): AgentContextSumma
   }
 }
 
-export function memoryRecallFromRow(row: MemoryRecallRow): AgentMemoryRecall {
+function memoryRecallFromRow(row: MemoryRecallRow): AgentMemoryRecall {
   return {
     id: row.recall_id,
     sequence: row.sequence,
@@ -143,7 +142,10 @@ export function memoryRecallFromRow(row: MemoryRecallRow): AgentMemoryRecall {
 /** Product timeline queries over native message projections.
  * Payload ownership and decoding belong to the supplied message reader. */
 export class RunActivityReader {
-  constructor(private readonly database: Database.Database, private readonly payload: ActivityPayloadReader) {}
+  private readonly hasMemoryRecallHistory: boolean
+  constructor(private readonly database: Database.Database, private readonly payload: ActivityPayloadReader) {
+    this.hasMemoryRecallHistory = hasMemoryRecallHistory(database)
+  }
 
   private requireThread(threadId: string): void {
     if (!this.database.prepare('SELECT 1 FROM agent_threads WHERE id=?').get(threadId)) throw new Error(`Thread ${threadId} was not found.`)
@@ -191,21 +193,14 @@ export class RunActivityReader {
 
   getRunActivity(runId: string): AgentRunActivity|undefined {
     const run = this.getRun(runId)
-    return run ? this.readActivities(run.threadId,[runId])[0] : undefined
+    return run ? this.readActivities(run.threadId, [runId], { includeMemoryHistory: true })[0] : undefined
   }
 
   getRunActivityWindow(runId: string, options: { beforeSequence?: number } = {}): AgentRunActivity {
     const run = this.requireRun(runId)
     const before = options.beforeSequence ?? Number.MAX_SAFE_INTEGER
     if (!Number.isSafeInteger(before) || before < 0) throw new Error('The activity window cursor is invalid.')
-    return this.readActivities(run.threadId, [runId], before)[0]
-  }
-
-  getDisplayPage(input: AgentActivityPageInput): AgentRunActivity {
-    const run = this.requireRun(input.runId)
-    if (run.threadId !== input.threadId) throw new Error('Activity run belongs to another conversation.')
-    return this.readActivities(input.threadId, [input.runId], input.before ?? Number.MAX_SAFE_INTEGER,
-      input.limit ?? activityInitialSize, input.after, input.subagentId ?? null)[0]
+    return this.readActivities(run.threadId, [runId], { beforeSequence: before })[0]
   }
 
   getDisplayDetail(input: AgentActivityDetailReference): AgentActivityDetail {
@@ -220,7 +215,7 @@ export class RunActivityReader {
     } else if (input.kind === 'subagent') {
       const child = this.getSubagentActivity(input.runId, input.id)
       if (child) return { result: child.result, error: child.error }
-    } else if (input.kind === 'summary' || input.kind === 'memory') {
+    } else if (input.kind === 'summary' || (input.kind === 'memory' && this.hasMemoryRecallHistory)) {
       const query = input.kind === 'summary'
         ? 'SELECT summary_text AS text FROM agent_context_summaries WHERE run_id=? AND summary_id=?'
         : 'SELECT prompt_text AS text FROM agent_memory_recalls WHERE run_id=? AND recall_id=?'
@@ -230,16 +225,16 @@ export class RunActivityReader {
     throw new Error('Activity detail was not found.')
   }
 
-  getModelActivity(runId: string, modelId: string): AgentModelActivity | undefined {
+  getModelActivity(runId: string, modelId: string, knownRound?: number): AgentModelActivity | undefined {
     const row = this.database.prepare(`
-      SELECT model.run_id, model.model_id, message.message_id, model.sequence, ${modelRoundSql} AS model_round,
+      SELECT model.run_id, model.model_id, message.message_id, model.sequence, ${knownRound === undefined ? modelRoundSql : '@round'} AS model_round,
         model.subagent_id, model.status, timing.started_at, timing.completed_at
       FROM agent_model_activities model
       JOIN agent_activity_timing timing ON timing.run_id = model.run_id
         AND timing.activity_key = 'model:' || model.model_id
       LEFT JOIN agent_model_messages message ON message.run_id = model.run_id AND message.model_id = model.model_id
-      WHERE model.run_id = ? AND model.model_id = ?
-    `).get(runId, modelId) as ModelActivityRow | undefined
+      WHERE model.run_id = @runId AND model.model_id = @modelId
+    `).get({ runId, modelId, ...(knownRound === undefined ? {} : { round: knownRound }) }) as ModelActivityRow | undefined
     return row ? {
       id: row.model_id, messageId: row.message_id ?? undefined, sequence: row.sequence, round: row.model_round,
       status: row.status, subagentId: row.subagent_id ?? undefined,
@@ -327,7 +322,7 @@ export class RunActivityReader {
     return row?.sequence
   }
 
-  getToolActivity(runId: string, callId: string, subagentId?: string): AgentToolActivity | undefined {
+  getToolActivity(runId: string, callId: string, subagentId?: string, summaryOnly = false): AgentToolActivity | undefined {
     const row = this.database.prepare(`
       SELECT activity.sequence, activity.name, activity.status,
         timing.started_at, timing.completed_at,
@@ -343,7 +338,7 @@ export class RunActivityReader {
       'sequence' | 'name' | 'status' | 'started_at' | 'completed_at' | 'approval_interrupt_id' | 'approval_action_index'> | undefined
     if (!row) return undefined
     return {
-      ...this.payload.tool(runId, callId, row.name, subagentId),
+      ...this.payload.tool(runId, callId, row.name, subagentId, summaryOnly),
       sequence: row.sequence,
       status: row.status,
       subagentId,
@@ -356,10 +351,14 @@ export class RunActivityReader {
   }
 
   getActivitiesForThread(threadId: string): AgentRunActivity[] {
-    return this.readActivities(threadId)
+    return this.readActivities(threadId, undefined, { includeMemoryHistory: true })
   }
 
-  private readActivities(threadId: string, runIds?: string[], beforeSequence = Number.MAX_SAFE_INTEGER, limit = 100, afterSequence?: number, displayAgent?: string | null): AgentRunActivity[] {
+  private readActivities(threadId: string, runIds?: string[], options: {
+    beforeSequence?: number; includeMemoryHistory?: boolean
+  } = {}): AgentRunActivity[] {
+    const { beforeSequence = Number.MAX_SAFE_INTEGER } = options
+    const includeMemoryHistory = options.includeMemoryHistory && this.hasMemoryRecallHistory
     this.requireThread(threadId)
     const runRows = this.database.prepare(`
       SELECT
@@ -389,29 +388,23 @@ export class RunActivityReader {
       }
     ]))
     const windows = runRows.map((run) => {
-      const source = `SELECT sequence FROM agent_activities WHERE run_id=@runId ${displayAgent !== undefined ? 'AND parent_subagent_id IS @agent' : ''}
-        UNION ALL SELECT sequence FROM agent_model_activities WHERE run_id=@runId ${displayAgent !== undefined ? 'AND subagent_id IS @agent' : ''}
-        UNION ALL SELECT sequence FROM agent_context_summaries WHERE run_id=@runId ${displayAgent ? 'AND 0' : ''}
-        UNION ALL SELECT sequence FROM agent_memory_recalls WHERE run_id=@runId ${displayAgent ? 'AND 0' : ''}`
-      const scope = { runId: run.run_id, ...(displayAgent !== undefined ? { agent: displayAgent } : {}) }
+      const source = `SELECT sequence FROM agent_activities WHERE run_id=@runId
+        UNION ALL SELECT sequence FROM agent_model_activities WHERE run_id=@runId
+        UNION ALL SELECT sequence FROM agent_context_summaries WHERE run_id=@runId
+        ${includeMemoryHistory ? `UNION ALL SELECT sequence FROM ${orderedMemoryRecallRows} WHERE run_id=@runId` : ''}`
+      const scope = { runId: run.run_id }
       const candidates = this.database.prepare(`SELECT sequence FROM (${source})
-        WHERE sequence < @before AND (@after IS NULL OR sequence > @after)
-        ORDER BY sequence ${afterSequence === undefined ? 'DESC' : 'ASC'} LIMIT @limit`).all({
-          ...scope, before: beforeSequence, after: afterSequence ?? null, limit: limit + 1 }) as Array<{ sequence: number }>
-      const selected = candidates.slice(0, limit).sort((a, b) => b.sequence - a.sequence)
+        WHERE sequence < @before ORDER BY sequence DESC LIMIT 101`).all({ ...scope, before: beforeSequence }) as Array<{ sequence: number }>
+      const selected = candidates.slice(0, 100)
       const total = this.database.prepare(`SELECT count(*) AS count FROM (${source})`).get(scope) as { count: number }
       const start = selected.at(-1)?.sequence ?? beforeSequence
       runs.get(run.run_id)!.activityWindow = {
         startSequence: selected.length ? start : null, endSequence: selected[0]?.sequence ?? null,
-        totalCount: total.count, hasEarlier: afterSequence === undefined ? candidates.length > selected.length
-          : Boolean(this.database.prepare(`SELECT 1 FROM (${source}) WHERE sequence < @start LIMIT 1`).get({ ...scope, start })),
-        ...(displayAgent !== undefined ? { hasLater: selected.length > 0 && Boolean(this.database.prepare(
-          `SELECT 1 FROM (${source}) WHERE sequence > @end LIMIT 1`).get({ ...scope, end: selected[0].sequence })) } : {})
+        totalCount: total.count, hasEarlier: candidates.length > selected.length
       }
-      return { runId: run.run_id, start, before: afterSequence === undefined ? beforeSequence : (selected[0]?.sequence ?? afterSequence) + 1 }
+      return { runId: run.run_id, start, before: beforeSequence }
     })
-    const windowParameters = { threadId, runIds: runIds === undefined ? null : JSON.stringify(runIds), windows: JSON.stringify(windows),
-      filterAgent: displayAgent === undefined ? 0 : 1, agent: displayAgent ?? null }
+    const windowParameters = { threadId, runIds: runIds === undefined ? null : JSON.stringify(runIds), windows: JSON.stringify(windows) }
     const rows = this.database.prepare(`
       SELECT
         activity.run_id,
@@ -447,7 +440,6 @@ export class RunActivityReader {
         ON activity.kind = 'subagent'
         AND subagent.id = activity.activity_id
       WHERE run.thread_id = @threadId AND (@runIds IS NULL OR run.id IN (SELECT value FROM json_each(@runIds)))
-        AND (@filterAgent=0 OR activity.parent_subagent_id IS @agent)
       ORDER BY run.rowid ASC, activity.sequence ASC
     `).all(windowParameters) as ActivityRow[]
 
@@ -523,7 +515,6 @@ export class RunActivityReader {
         ON message.run_id = model.run_id
         AND message.model_id = model.model_id
       WHERE run.thread_id = @threadId AND (@runIds IS NULL OR run.id IN (SELECT value FROM json_each(@runIds)))
-        AND (@filterAgent=0 OR model.subagent_id IS @agent)
       ORDER BY run.rowid ASC, model.sequence ASC
     `).all(windowParameters) as ModelActivityRow[]
     for (const row of modelRows) {
@@ -542,7 +533,7 @@ export class RunActivityReader {
       })
     }
 
-    const memoryRecallRows = this.database.prepare(`
+    const memoryRecallRows = includeMemoryHistory ? this.database.prepare(`
       SELECT
         recall.run_id,
         recall.recall_id,
@@ -552,15 +543,14 @@ export class RunActivityReader {
         recall.memory_count,
         recall.agent_name,
         recall.created_at
-      FROM agent_memory_recalls recall
+      FROM ${orderedMemoryRecallRows} recall
       INNER JOIN agent_runs run ON run.id = recall.run_id
       INNER JOIN json_each(@windows) page_window ON json_extract(page_window.value, '$.runId')=run.id
         AND recall.sequence >= json_extract(page_window.value, '$.start')
         AND recall.sequence < json_extract(page_window.value, '$.before')
       WHERE run.thread_id = @threadId AND (@runIds IS NULL OR run.id IN (SELECT value FROM json_each(@runIds)))
-        AND (@filterAgent=0 OR @agent IS NULL)
       ORDER BY run.rowid ASC, recall.sequence ASC
-    `).all(windowParameters) as MemoryRecallRow[]
+    `).all(windowParameters) as MemoryRecallRow[] : []
     for (const row of memoryRecallRows) {
       const run = runs.get(row.run_id)
       if (!run) throw new Error(`Memory recall run ${row.run_id} was not loaded.`)
@@ -591,7 +581,6 @@ export class RunActivityReader {
         AND summary.sequence >= json_extract(page_window.value, '$.start')
         AND summary.sequence < json_extract(page_window.value, '$.before')
       WHERE run.thread_id = @threadId AND (@runIds IS NULL OR run.id IN (SELECT value FROM json_each(@runIds)))
-        AND (@filterAgent=0 OR @agent IS NULL)
       ORDER BY run.rowid ASC, summary.sequence ASC
     `).all(windowParameters) as ContextSummaryRow[]
     for (const row of summaryRows) {
@@ -654,12 +643,6 @@ export class RunActivityReader {
         detailsDeferred: true
       })
       run.subagents.sort((left, right) => left.sequence - right.sequence)
-    }
-    if (displayAgent !== undefined) for (const run of runs.values()) {
-      run.models = run.models.filter(item => (item.subagentId ?? null) === displayAgent)
-      run.tools = run.tools.filter(item => (item.subagentId ?? null) === displayAgent)
-      run.subagents = run.subagents.filter(item => (item.parentSubagentId ?? null) === displayAgent)
-      if (displayAgent) { run.memoryRecalls = []; run.summaries = [] }
     }
     return [...runs.values()]
   }

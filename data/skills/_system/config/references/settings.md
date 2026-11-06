@@ -45,6 +45,8 @@ For an avatar request, report success only when the tool returns `ok: true` and 
 | `attachment_text_max_chars` | integer from `1000` through `2000000` |
 | `attachment_text_overflow` | `"truncate"` or `"error"` |
 | `max_model_calls_per_run` | integer from `0` through `9999`; `0` means no application limit |
+| `running_process_display` | `expanded` (default) or `collapsed`; applies to reasoning/tool groups during execution; preceding groups collapse when a reply appears, and remaining groups collapse when the run ends |
+| `show_model_rounds` | boolean; defaults to `true`; shows round labels and model duration |
 
 New conversations choose the project model, then the global default, then the previously selected model; otherwise the model remains unselected. Existing conversations and restored drafts keep their selection.
 

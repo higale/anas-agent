@@ -2,21 +2,27 @@ import Database from 'better-sqlite3'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import type { ExecutionMessageInput, ExecutionToolCall } from '../../runtime/executionState'
+import { conversationMessageRecordId, encodeConversationMessage } from '../../runtime/conversationStorage'
 import { toolEffectArtifactPurposes } from '../../runtime/toolEffectIdentity'
 import { defaultCapabilities } from '@shared/agentCapabilities'
-import type { AgentRunActivity } from '@shared/agentTypes'
+import type { AgentRunActivity, AgentRuntimeEvent } from '@shared/agentTypes'
 import type { SubagentConfig } from '@shared/types'
 import { describe, expect, it } from 'vitest'
 import { NativeConversationDatabase } from './nativeConversationDatabase'
 import { SqliteMemoryStore } from '../../test/legacyMemoryFixture'
 import { FileEditStore } from '../fileEditStore'
+import { displayTransaction } from './activityDisplayProjection'
+import { rebuildActivityDirectory } from './activityDirectoryIndex'
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'anas-native-activity-window-')), memory = new Database(':memory:')
-  const file = join(root, 'conversation.sqlite'), database = NativeConversationDatabase.open(file, {
-    attachmentRoot: join(root, 'attachments'), memoryStore: new SqliteMemoryStore(memory), fileEditStore: new FileEditStore(join(root, 'file_edits')) })
-  return { database,
+  const file = join(root, 'conversation.sqlite'), options = {
+    attachmentRoot: join(root, 'attachments'), memoryStore: new SqliteMemoryStore(memory), fileEditStore: new FileEditStore(join(root, 'file_edits')) }
+  let database = NativeConversationDatabase.open(file, options)
+  return { get database() { return database },
+    reopen() { database.close(); database = NativeConversationDatabase.open(file, options); return database },
     sql(action: (raw: Database.Database) => void) { const raw = new Database(file); try { action(raw) } finally { raw.close() } },
     close() { database.close(); memory.close(); rmSync(root, { recursive: true, force: true }) }
   }
@@ -60,32 +66,184 @@ function config(): SubagentConfig {
 }
 
 describe('run activity windows', () => {
-  it('reads both directions in bounded pages and keeps evicted bodies available from the database', async () => {
+  it('does not report a healthy display directory as damaged when rebuild visits calls in a different order', async () => {
     const h = fixture(), { database } = h
     try {
-      const thread = database.createThread()
-      const run = await createRun(database, thread.id, 'paged-run')
-      for (let index = 0; index < 750; index++) database.messages.observations.recordMemoryRecall(run.id,
-        { id: `recall-${index}`, query: 'query', promptText: `BODY_${index}`, memoryCount: 1 })
-      const source = database.messages.activities
-      const latest = source.getDisplayPage({ threadId: thread.id, runId: run.id })
-      const first = source.getDisplayPage({ threadId: thread.id, runId: run.id, after: -1 })
-      expect(first.activityWindow).toMatchObject({ startSequence: 0, endSequence: 299, hasEarlier: false, hasLater: true })
-      expect(first.memoryRecalls?.[0].id).toBe('recall-0')
-      expect(latest.activityWindow).toMatchObject({ hasEarlier: true, hasLater: false })
-      const lastFullPage = source.getDisplayPage({ threadId: thread.id, runId: run.id, after: 649, limit: 100 })
-      expect(lastFullPage.activityWindow).toMatchObject({ startSequence: 650, endSequence: 749, hasLater: false })
-      expect(latest.memoryRecalls).toHaveLength(300)
-      expect(latest.activityWindow).toMatchObject({ startSequence: 450, endSequence: 749, totalCount: 750 })
-      const earlier = source.getDisplayPage({ threadId: thread.id, runId: run.id, before: 450, limit: 100 })
-      expect(earlier.activityWindow).toMatchObject({ startSequence: 350, endSequence: 449 })
-      const later = source.getDisplayPage({ threadId: thread.id, runId: run.id, after: 449, limit: 100 })
-      expect(later.memoryRecalls?.map(item => item.id)).toEqual(latest.memoryRecalls!.slice(0, 100).map(item => item.id))
-      expect(source.getDisplayDetail({ threadId: thread.id, runId: run.id, kind: 'memory', id: 'recall-0' })).toEqual({ text: 'BODY_0' })
-      expect(() => source.getDisplayPage({ threadId: 'other', runId: run.id })).toThrow('another conversation')
-      expect(() => source.getDisplayDetail({ threadId: 'other', runId: run.id, kind: 'memory', id: 'recall-0' })).toThrow('another conversation')
+      const thread = database.createThread(), run = await createRun(database, thread.id, 'repair-order')
+      const calls = ['zeta', 'alpha'].map(id => ({ id, name: 'lookup', args: {} }))
+      await putMessages(database, thread.id, [
+        { id: 'request', value: { kind: 'assistant', content: 'Checking', calls, context: { runId: run.id } } },
+        ...calls.map(call => ({ id: `result-${call.id}`, value: { kind: 'tool' as const, resultFor: call.id, content: 'Found', context: { runId: run.id } } }))
+      ], run.id)
+      database.runs.store.finish(scope(database, thread.id, run.id), 'completed')
+      h.sql(raw => {
+        expect(rebuildActivityDirectory(raw)).toBe(false)
+        expect(rebuildActivityDirectory(raw)).toBe(false)
+        raw.prepare("UPDATE agent_display_items SET group_id='missing' WHERE item_key='model-tool:root:message:request:1'").run()
+        expect(rebuildActivityDirectory(raw)).toBe(true)
+        expect(rebuildActivityDirectory(raw)).toBe(false)
+        raw.prepare("UPDATE agent_display_groups SET item_json=json_set(item_json,'$.key','wrong')").run()
+        expect(rebuildActivityDirectory(raw)).toBe(true)
+        expect(rebuildActivityDirectory(raw)).toBe(false)
+        raw.prepare("UPDATE agent_display_groups SET item_json='null'").run()
+        expect(rebuildActivityDirectory(raw)).toBe(true)
+        expect(rebuildActivityDirectory(raw)).toBe(false)
+        raw.pragma('ignore_check_constraints = ON')
+        raw.prepare("UPDATE agent_display_groups SET item_json='broken'").run()
+        raw.pragma('ignore_check_constraints = OFF')
+        expect(rebuildActivityDirectory(raw)).toBe(true)
+        expect(rebuildActivityDirectory(raw)).toBe(false)
+        const group = raw.prepare('SELECT group_id FROM agent_display_groups ORDER BY sequence LIMIT 1').get() as { group_id: string }
+        raw.prepare("UPDATE agent_display_groups SET group_id='',item_json=json_set(item_json,'$.key','') WHERE group_id=?").run(group.group_id)
+        raw.prepare("UPDATE agent_display_items SET group_id='' WHERE group_id=?").run(group.group_id)
+        expect(rebuildActivityDirectory(raw)).toBe(true)
+        expect(rebuildActivityDirectory(raw)).toBe(false)
+      })
     } finally { h.close() }
   })
+
+  it('drops uncommitted display drafts on reopen while keeping committed reasoning and replies', async () => {
+    const h = fixture(), { database } = h
+    try {
+      const thread = database.createThread(), run = await createRun(database, thread.id, 'restart-display')
+      await putMessages(database, thread.id, [{ id: 'saved', value: { kind: 'assistant', content: [
+        { type: 'reasoning', reasoning: 'Saved reasoning' }, { type: 'text', text: 'Saved reply' }
+      ], context: { runId: run.id } } }], run.id)
+      database.messages.observations.recordModel(run.id, { id: 'streaming', status: 'running', text: 'Unsaved reply', reasoning: 'Unsaved reasoning', toolCallIds: [] })
+      database.messages.observations.recordToolProgress(run.id, 'streaming', [{ index: 0, name: 'read_file', characterCount: 40, complete: false }])
+      const input = { threadId: thread.id, runId: run.id, requestId: 'restart' }, signal = new AbortController().signal
+      const before = await database.activityDirectory.read(input, signal)
+      expect(before.items.filter(item => item.type === 'reply')).toHaveLength(2)
+      const reopened = h.reopen(), after = await reopened.activityDirectory.read(input, signal)
+      expect(after.items.filter(item => item.type === 'reply')).toMatchObject([{ model: { messageId: 'saved' } }])
+      const group = after.items.filter(item => item.type === 'process').at(-1)!
+      const members = await reopened.activityDirectory.read({ ...input, parentId: group.key }, signal)
+      expect(members.items).toMatchObject([{ type: 'entry', item: { type: 'model', model: { id: 'streaming', hasText: false, hasReasoning: false } } }])
+      expect(reopened.messages.activities.getDisplayDetail({ ...input, kind: 'model', id: 'message:saved' })).toMatchObject({ text: 'Saved reply', reasoning: 'Saved reasoning' })
+    } finally { h.close() }
+  })
+
+  it('keeps a skill activity readable before and after the input is committed', async () => {
+    const h = fixture(), { database } = h
+    try {
+      const thread = database.createThread(), runId = 'skill-run', id = 'skill-input'
+      database.runs.createRun({ threadId: thread.id, runId, operation: 'agent', message: {
+        id, value: { id, kind: 'user', content: 'Expanded review instructions', context: { runId, displayText: '/review changes' } }
+      } })
+      const input = { threadId: thread.id, runId, requestId: 'test' }
+      const before = await database.activityDirectory.read(input, new AbortController().signal)
+      expect(before.items).toMatchObject([{ type: 'entry', item: { type: 'skill', invocation: {
+        name: 'review', promptText: '', detail: { id, kind: 'skill' }
+      } } }])
+      expect(database.messages.runInputMessage(thread.id, runId)?.skillInvocation?.promptText).toBe('Expanded review instructions')
+      await database.runs.enter('input', { threadId: thread.id, runId })
+      database.runs.store.finish(scope(database, thread.id, runId), 'completed')
+      expect(database.messages.submittedUserMessage(runId)).toBeUndefined()
+      const after = await database.activityDirectory.read(input, new AbortController().signal)
+      expect(after.items).toEqual(before.items)
+      expect(database.messages.runInputMessage(thread.id, runId)?.skillInvocation?.promptText).toBe('Expanded review instructions')
+      expect(() => database.messages.runInputMessage('another-thread', runId)).toThrow('another conversation')
+    } finally { h.close() }
+  })
+
+  it('returns complete reply directories and empty unchanged revisions', async () => {
+    const h = fixture(), { database } = h
+    try {
+      const thread = database.createThread(), run = await createRun(database, thread.id, 'replies')
+      await putMessages(database, thread.id, Array.from({ length: 120 }, (_, index) => ({
+        id: 'answer-' + index, value: { kind: 'assistant', content: 'Answer ' + index, context: { runId: run.id } }
+      })), run.id)
+      const input = { threadId: thread.id, runId: run.id, requestId: 'test' }, signal = new AbortController().signal
+      const first = await database.activityDirectory.read(input, signal)
+      expect(first.items).toHaveLength(120)
+      expect(first.items[0]).toMatchObject({ type: 'reply', model: { text: '', hasText: true } })
+      expect(await database.activityDirectory.read({ ...input, version: first.version }, signal)).toEqual({
+        version: first.version, baseVersion: first.version, items: [], removed: []
+      })
+      await expect(database.activityDirectory.read({ ...input, threadId: 'other' }, signal)).rejects.toThrow('another conversation')
+      expect(database.messages.activities.getDisplayDetail({ ...input, kind: 'model', id: 'message:answer-0' })).toEqual({ text: 'Answer 0', reasoning: '' })
+    } finally { h.close() }
+  })
+
+  it('keeps a long process whole across raw batches, pages its members and never scans tool results', async () => {
+    const h = fixture(), { database } = h
+    try {
+      const thread = database.createThread(), run = await createRun(database, thread.id, 'group-run')
+      const calls = Array.from({ length: 150 }, (_, index) => ({ id: `call-${index}`, name: 'lookup', args: { query: `Lookup ${index}` } }))
+      await putMessages(database, thread.id, [
+        { id: 'request', value: { kind: 'assistant', content: '', calls, context: { runId: run.id } } },
+        ...calls.map((call): ExecutionMessageInput => ({ id: `result-${call.id}`, value: { kind: 'tool', resultFor: call.id, content: 'Large result'.repeat(1000), context: { runId: run.id } } })),
+        { id: 'answer', value: { kind: 'assistant', content: 'Following reply', context: { runId: run.id } } }
+      ], run.id)
+      h.sql(raw => raw.prepare("UPDATE execution_message_bodies SET value=? WHERE message_id LIKE 'result-%'").run(Buffer.from('Unreadable tool result')))
+      const input = { threadId: thread.id, runId: run.id, requestId: 'test' }
+      const signal = new AbortController().signal, source = database.activityDirectory
+      const outline = await source.read(input, signal)
+      expect(outline.items).toHaveLength(2)
+      const group = outline.items[0]
+      expect(group).toMatchObject({ type: 'process', hasTools: true })
+      expect(outline.items[1]).toMatchObject({ type: 'reply', model: { messageId: 'answer' } })
+      const first = await source.read({ ...input, parentId: group.key }, signal)
+      expect(first.items).toHaveLength(151)
+      expect(first.items[1]).toMatchObject({ type: 'entry', key: 'model-tool:root:message:request:0', item: { tool: { call: { args: { summary: 'Lookup 0' } } } } })
+      expect(JSON.stringify(first)).not.toContain('Large result')
+      expect(() => database.messages.activities.getDisplayDetail({ ...input, kind: 'tool', id: calls[0].id })).toThrow()
+    } finally { h.close() }
+  })
+
+  it('yields long scans to cancellation without returning a truncated group', async () => {
+    const h = fixture(), { database } = h
+    try {
+      const thread = database.createThread(), run = await createRun(database, thread.id, 'cancel-run')
+      for (let index = 0; index < 300; index++) database.messages.observations.recordTool(run.id, { id: `call-${index}`, name: 'lookup', args: {} }, 'running')
+      const controller = new AbortController()
+      const outline = await database.activityDirectory.read({ threadId: thread.id, runId: run.id, requestId: 'outline' }, controller.signal)
+      const promise = database.activityDirectory.read({ threadId: thread.id, runId: run.id, requestId: 'test', parentId: outline.items[0].key }, controller.signal)
+      setImmediate(() => controller.abort())
+      await expect(promise).rejects.toThrow(/abort/i)
+    } finally { h.close() }
+  })
+
+  it('reads 10000 display headers without decoding bodies and yields to cancellation', async () => {
+    const h = fixture(), { database } = h
+    try {
+      const thread = database.createThread(), run = await createRun(database, thread.id, 'scan-run')
+      // Build an isolated read fixture directly, avoiding execution of artificial
+      // model/tool rounds. Invalid bodies prove reads use only display headers.
+      h.sql(raw => displayTransaction(raw, () => {
+        const body = raw.prepare('INSERT INTO execution_message_bodies(thread_id,record_id,message_id,value) VALUES (?,?,?,?)')
+        const payload = raw.prepare('INSERT INTO agent_message_payloads(thread_id,message_id,run_id,record_id) VALUES (?,?,?,?)')
+        const model = raw.prepare("INSERT INTO agent_model_activities(run_id,model_id,sequence,status) VALUES (?,?,?,'completed')")
+        const message = raw.prepare('INSERT INTO agent_model_messages(run_id,model_id,message_id) VALUES (?,?,?)')
+        const timing = raw.prepare('INSERT INTO agent_activity_timing VALUES (?,?,?,?)')
+        const header = raw.prepare('INSERT INTO agent_display_headers VALUES (?,?,?)')
+        for (let index = 0; index <= 10000; index++) {
+          const id = randomUUID(), value = encodeConversationMessage({ kind: 'assistant',
+            content: index === 10000 ? [{ type: 'text', text: 'Following reply' }] : [{ type: 'reasoning', reasoning: 'Thought '.repeat(128) }],
+            source: { contentFormat: 'portable', metadata: {}, extras: {} },
+            context: { runId: run.id } }), recordId = conversationMessageRecordId(id, value)
+          body.run(thread.id, recordId, id, Buffer.from('Not decoded by directory reads')); payload.run(thread.id, id, run.id, recordId)
+          header.run(thread.id, id, JSON.stringify({ kind: 'assistant', hasText: index === 10000, hasReasoning: index < 10000,
+            reasoningSummary: 'Inspecting workspace changes. '.repeat(8).slice(0, 240), calls: [] }))
+          model.run(run.id, id, index); message.run(run.id, id, id); timing.run(run.id, `model:${id}`, run.createdAt, run.createdAt)
+        }
+      })())
+      let ticks = 0
+      const heartbeat = setInterval(() => { ticks++ }, 1), started = performance.now()
+      try {
+        const page = await database.activityDirectory.read({ threadId: thread.id, runId: run.id, requestId: 'test' }, new AbortController().signal)
+        expect(page.items).toMatchObject([{ type: 'process', hasThought: true }, { type: 'reply', model: { hasText: true } }])
+        expect(page.items).toHaveLength(2)
+        expect(JSON.stringify(page).length).toBeLessThan(10_000)
+        const members = await database.activityDirectory.read({ threadId: thread.id, runId: run.id, requestId: 'members', parentId: page.items[0].key }, new AbortController().signal)
+        expect(members.items).toHaveLength(10000)
+        expect(ticks).toBeGreaterThan(1)
+        process.stdout.write(`Activity scan: 10001 display headers, ${(performance.now() - started).toFixed(0)}ms, ${ticks} event-loop ticks, ${JSON.stringify(page).length} transport characters\n`)
+        expect(await database.activityDirectory.read({ threadId: thread.id, runId: run.id, requestId: 'unchanged', version: page.version }, new AbortController().signal))
+          .toEqual({ version: page.version, baseVersion: page.version, items: [], removed: [] })
+      } finally { clearInterval(heartbeat) }
+    } finally { h.close() }
+  }, 20000)
 
   it('provides complete in-flight reasoning independently of display clients', async () => {
     const h = fixture(), { database } = h
@@ -102,6 +260,32 @@ describe('run activity windows', () => {
     } finally { h.close() }
   })
 
+  it('keeps the same tool card identity from streamed arguments through committed execution', async () => {
+    const h = fixture(), { database } = h
+    try {
+      const thread = database.createThread(), run = await createRun(database, thread.id, 'draft-run')
+      const model = { id: 'draft-model', status: 'running' as const, text: '', reasoning: '', toolCallIds: [] }
+      database.messages.observations.recordModel(run.id, model)
+      database.activityProjection.rememberToolCallProgress({ type: 'model_tool_calls', threadId: thread.id, runId: run.id,
+        modelId: model.id, progress: [{ index: 0, name: 'lookup', characterCount: 9, complete: false }] })
+      const input = { threadId: thread.id, runId: run.id, requestId: 'test' }
+      const signal = new AbortController().signal
+      const before = await database.activityDirectory.read(input, signal)
+      const members = await database.activityDirectory.read({ ...input, parentId: before.items[0].key }, signal)
+      const call = { id: 'accepted-call', name: 'lookup', args: { query: 'value' } }
+      database.messages.observations.recordModel(run.id, { ...model, status: 'completed', messageId: 'request', toolCallIds: [call.id] })
+      await putMessages(database, thread.id, [
+        { id: 'request', value: { kind: 'assistant', content: '', calls: [call], context: { runId: run.id } } },
+        { id: 'result', value: { kind: 'tool', resultFor: call.id, content: 'Done', context: { runId: run.id } } }
+      ], run.id)
+      const after = await database.activityDirectory.read(input, signal)
+      const settled = await database.activityDirectory.read({ ...input, parentId: after.items[0].key }, signal)
+      expect(after.items[0].key).toBe(before.items[0].key)
+      expect(settled.items.map(item => item.key)).toEqual(members.items.map(item => item.key))
+      expect(settled.items[1]).toMatchObject({ item: { tool: { status: 'completed', call: { id: call.id } } } })
+    } finally { h.close() }
+  })
+
   it('reads a child stream from its owner without retaining ancestor copies after commit', async () => {
     const h = fixture(), { database } = h
     try {
@@ -111,7 +295,14 @@ describe('run activity windows', () => {
       const observer = database.activityProjection.observer(child.childRunId, child.childThreadId,
         { push(event) { database.subagentProjection.projectEvent(child, event) } })
       const modelId = observer.startModel()
+      const input = { threadId: thread.id, runId: run.id, subagentId: child.id, requestId: 'child-stream' }, signal = new AbortController().signal
+      const initial = await database.activityDirectory.read(input, signal)
       observer.model({ kind: 'delta', channel: 'reasoning', modelId, text: 'Child live reasoning' })
+      const reasoning = await database.activityDirectory.read({ ...input, version: initial.version }, signal)
+      expect(reasoning.items).toMatchObject([{ type: 'process', hasThought: true, active: { model: { hasReasoning: true } } }])
+      observer.model({ kind: 'delta', channel: 'text', modelId, text: 'Child live reply' })
+      const replying = await database.activityDirectory.read(input, signal)
+      expect(replying.items).toMatchObject([{ type: 'process' }, { type: 'reply', model: { id: modelId, hasText: true } }])
       expect(database.messages.activities.getDisplayDetail({ threadId: thread.id, runId: run.id, kind: 'model', id: modelId, subagentId: child.id }))
         .toMatchObject({ reasoning: 'Child live reasoning' })
       await database.runs.enter('input', { threadId: child.childThreadId, runId: child.childRunId })
@@ -123,6 +314,44 @@ describe('run activity windows', () => {
       expect(database.messages.observations.pendingModel(child.childRunId, modelId)).toBeUndefined()
       expect(database.messages.observations.pendingModel(run.id, modelId)).toBeUndefined()
       expect(database.messages.activities.getDisplayDetail({ threadId: thread.id, runId: run.id, kind: 'model', id: modelId, subagentId: child.id })).toMatchObject({ text: 'Answer' })
+      const page = await database.activityDirectory.read({ threadId: thread.id, runId: run.id, requestId: 'test', subagentId: child.id }, new AbortController().signal)
+      expect(page.items).toMatchObject([{ type: 'reply', model: { messageId: 'child-answer', subagentId: child.id } }])
+    } finally { h.close() }
+  })
+
+  it('propagates nested child display changes to every ancestor without revising directories for later text chunks', async () => {
+    const h = fixture(), { database } = h
+    try {
+      const thread = database.createThread(), run = await createRun(database, thread.id, 'nested-stream')
+      const parent = database.runs.createSubagentCall({ id: 'parent', ownerThreadId: thread.id, parentThreadId: thread.id, parentRunId: run.id,
+        childThreadId: 'parent-thread', childRunId: 'parent-run', config: config(), description: 'Parent', childThread: {} })
+      await database.runs.enter('input', { threadId: parent.childThreadId, runId: parent.childRunId })
+      const child = database.runs.createSubagentCall({ id: 'leaf', parentSubagentId: parent.id, ownerThreadId: thread.id,
+        parentThreadId: parent.childThreadId, parentRunId: parent.childRunId, childThreadId: 'leaf-thread', childRunId: 'leaf-run',
+        config: config(), description: 'Leaf', childThread: {} })
+      const observer = database.activityProjection.observer(child.childRunId, child.childThreadId, { push(event) {
+        let projected: AgentRuntimeEvent | undefined = event
+        for (const carrier of [child, parent]) if (projected) projected = database.subagentProjection.projectEvent(carrier, projected)
+      } })
+      const modelId = observer.startModel(), signal = new AbortController().signal
+      const inputs = [
+        { threadId: thread.id, runId: run.id, subagentId: child.id, requestId: 'root-copy' },
+        { threadId: parent.childThreadId, runId: parent.childRunId, subagentId: child.id, requestId: 'parent-copy' },
+        { threadId: child.childThreadId, runId: child.childRunId, requestId: 'owner' }
+      ]
+      for (const input of inputs) expect((await database.activityDirectory.read(input, signal)).items).toHaveLength(1)
+      observer.model({ kind: 'delta', channel: 'reasoning', modelId, text: 'Nested reasoning' })
+      for (const input of inputs) expect((await database.activityDirectory.read(input, signal)).items)
+        .toMatchObject([{ type: 'process', hasThought: true, active: { model: { id: modelId, hasReasoning: true } } }])
+      observer.model({ kind: 'delta', channel: 'text', modelId, text: 'Nested reply' })
+      const replying = await Promise.all(inputs.map(input => database.activityDirectory.read(input, signal)))
+      for (const update of replying) expect(update.items).toMatchObject([{ type: 'process' }, { type: 'reply', model: { id: modelId, hasText: true } }])
+      observer.model({ kind: 'delta', channel: 'text', modelId, text: ' continues' })
+      for (const [index, input] of inputs.entries()) expect(await database.activityDirectory.read({ ...input, version: replying[index].version }, signal))
+        .toMatchObject({ version: replying[index].version, items: [], removed: [] })
+      observer.model({ kind: 'tool_input', modelId, progress: [{ index: 0, name: 'read_file', characterCount: 12, complete: false }] })
+      for (const input of inputs) expect((await database.activityDirectory.read(input, signal)).items)
+        .toMatchObject([{ type: 'process' }, { type: 'reply' }, { type: 'process', active: { type: 'tool', progress: { characterCount: 12 } } }])
     } finally { h.close() }
   })
 
@@ -134,7 +363,9 @@ describe('run activity windows', () => {
       for (const id of ['first-run', 'second-run']) {
         const run = await createRun(database, thread.id, id)
         runIds.push(run.id)
-        for (let index = 0; index < 120; index += 1) database.messages.observations.recordMemoryRecall(run.id, { id: `recall-${index}`, query: 'query', promptText: `${id}-${index}`, memoryCount: 1 })
+        await putMessages(database, thread.id, Array.from({ length: 120 }, (_, index) => ({
+          id: `${id}-answer-${index}`, value: { kind: 'assistant', content: `Answer ${index}`, context: { runId: run.id } }
+        })), run.id)
         database.runs.store.finish(scope(database, thread.id, run.id), 'failed', 'The provider stopped.')
       }
       const pages = database.messages.activities.getActivitiesForRuns(thread.id, runIds)
@@ -157,7 +388,6 @@ describe('run activity windows', () => {
         const call = { id: `call-${index}`, name: 'lookup', args: { index } }
         database.messages.observations.recordModel(run.id, { id: `model-${index}`, messageId: `model-message-${index}`, status: 'completed', text: '', reasoning: '', toolCallIds: [call.id] })
         database.messages.observations.recordTool(run.id, call, 'completed')
-        database.messages.observations.recordMemoryRecall(run.id, { id: `recall-${index}`, query: `query-${index}`, promptText: `memory-${index}`, memoryCount: 1 })
         database.summaries.recordContextSummaryStarted(run.id, `summary-${index}`)
         database.summaries.stageContextSummary(run.id, `summary-${index}`, { summaryText: `summary body-${index}` })
         const child = database.runs.createSubagentCall({ id: `subagent-${index}`, ownerThreadId: thread.id, parentThreadId: thread.id, parentRunId: run.id,
@@ -170,9 +400,9 @@ describe('run activity windows', () => {
       const reader = database.messages.activities
       let page = reader.getActivitiesForRuns(thread.id, [run.id])[0]
       expect(fullSequences(page)).toHaveLength(100)
-      expect(page.activityWindow).toMatchObject({ totalCount: 325, hasEarlier: true })
-      expect(page.models[0].text).toBe('model body-45')
-      expect(page.models[0].round).toBe(46)
+      expect(page.activityWindow).toMatchObject({ totalCount: 260, hasEarlier: true })
+      expect(page.models[0].text).toBe('model body-40')
+      expect(page.models[0].round).toBe(41)
       const all = [page]
       while (page.activityWindow!.hasEarlier) {
         const before = page.activityWindow!.startSequence!
@@ -180,16 +410,15 @@ describe('run activity windows', () => {
         expect(fullSequences(page).every((sequence) => sequence < before)).toBe(true)
         all.push(page)
       }
-      expect(all.map((entry) => fullSequences(entry).length)).toEqual([100, 100, 100, 25])
-      expect(all.flatMap(fullSequences).sort((a, b) => a - b)).toEqual(Array.from({ length: 325 }, (_, index) => index))
+      expect(all.map((entry) => fullSequences(entry).length)).toEqual([100, 100, 60])
+      expect(all.flatMap(fullSequences).sort((a, b) => a - b)).toEqual(Array.from({ length: 260 }, (_, index) => index))
       expect(all.at(-1)!.models[0].text).toBe('model body-0')
       expect(all.at(-1)!.models[0].round).toBe(1)
       expect(all.at(-1)!.tools[0].output).toBe('tool body-0')
       expect(all.at(-1)!.summaries![0].summaryText).toBe('summary body-0')
-      expect(all.at(-1)!.memoryRecalls![0].promptText).toBe('memory-0')
       expect(reader.getModelActivity(run.id, 'model-0')?.text).toBe('model body-0')
       expect(reader.getToolActivity(run.id, 'call-0')).toMatchObject({ call: { args: { index: 0 } }, output: 'tool body-0' })
-      expect(reader.getRunActivityWindow(run.id, { beforeSequence: 0 }).activityWindow).toEqual({ startSequence: null, endSequence: null, totalCount: 325, hasEarlier: false })
+      expect(reader.getRunActivityWindow(run.id, { beforeSequence: 0 }).activityWindow).toEqual({ startSequence: null, endSequence: null, totalCount: 260, hasEarlier: false })
       expect(() => reader.getRunActivityWindow(run.id, { beforeSequence: -1 })).toThrow()
       expect(() => reader.getRunActivityWindow(run.id, { beforeSequence: 1.5 })).toThrow()
     } finally { h.close() }
@@ -264,7 +493,13 @@ describe('run activity windows', () => {
         parentSubagentId: parent.id, childThreadId: 'child-thread', childRunId: 'child-run', config: config(), description: 'Review child.', childThread: { title: 'Child', projectId: thread.projectId }
       })
       database.runs.subagents.finish({ subagentId: parent.id, ownerThreadId: thread.id, status: 'completed', result: 'large result '.repeat(10000) })
-      for (let index = 0; index < 110; index += 1) database.messages.observations.recordMemoryRecall(run.id, { id: `recall-${index}`, query: 'query', promptText: 'memory', memoryCount: 1 })
+      const input = { threadId: thread.id, runId: run.id, requestId: 'test' }
+      const signal = new AbortController().signal
+      expect((await database.activityDirectory.read(input, signal)).items).toMatchObject([{ type: 'entry', item: { subagent: { id: parent.id } } }])
+      expect((await database.activityDirectory.read({ ...input, subagentId: parent.id }, signal)).items).toMatchObject([{ type: 'entry', item: { subagent: { id: child.id } } }])
+      expect((await database.activityDirectory.read({ ...input, subagentId: child.id }, signal)).items).toEqual([])
+      await expect(database.activityDirectory.read({ ...input, subagentId: 'unknown' }, signal)).rejects.toThrow('another run')
+      for (let index = 0; index < 110; index += 1) database.summaries.recordContextSummaryStarted(run.id, `summary-${index}`)
       const latest = database.messages.activities.getRunActivityWindow(run.id)
       expect(fullSequences(latest)).toHaveLength(100)
       expect(latest.subagents).toEqual(expect.arrayContaining([

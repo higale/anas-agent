@@ -1,3 +1,4 @@
+import { displayTransaction } from './activityDisplayProjection'
 import type { PreferenceMemoryStore } from './preferenceMemoryStore'
 import type Database from 'better-sqlite3'
 import { isAgentThreadLocked } from '../../shared/agentTypes'
@@ -174,7 +175,7 @@ export class NativeHistoryOwner {
   commit(revision: NativeHistoryRevision): { run?: AgentRun } {
     const contains = (recordId: string) => this.owner.store.recordPosition(revision.threadId, recordId) !== undefined
     let staged = false
-    const result = this.database.transaction(() => {
+    const result = displayTransaction(this.database, () => {
       this.assertMutable(revision.threadId)
       const history = this.history(revision.threadId)
       if (history.revisionId !== revision.revisionId) throw new Error('Conversation history changed before the revision could be committed.')
@@ -238,6 +239,8 @@ export class NativeHistoryOwner {
       this.resources.restoreAttachments(plan, run.id)
       return { run }
     })()
+    // Resolve the separate memory database's intent only after both history
+    // and its display projection have committed. Failure leaves it retryable.
     if (staged) this.memory?.cursor(revision.threadId, contains)
     return result
   }

@@ -7,6 +7,8 @@ import { parseProjectStore, readProjectStoreFile, writeProjectStoreDocument } fr
 import { AgentStorage } from './agent/agentStorage'
 import { catalogVersion, catalogConversationColumns, catalogConversationSchema, catalogConversationIndexes, validateCatalogAccessMode, validateCatalogSchema } from './agent/catalogSchema'
 import { NativeConversationDatabase } from './agent/nativeConversationDatabase'
+import { nativeConversationSchemaVersion } from './agent/nativeStorageValidation'
+import { rebuildActivityDirectory } from './agent/activityDirectoryIndex'
 import { replaceProjectData } from './backupService'
 import { repairArchivedFileChangeVersions } from './recoveryFileChanges'
 import { getProjectDir, getProjectStoreFile } from './config/dataDir'
@@ -178,7 +180,7 @@ async function stageProjectRepair(root: string, staged: string, before: string, 
         if (files.has(`${relative}${suffix}`)) await copyFile(`${original}${suffix}`, `${probe}${suffix}`)
       }
       let version: number
-      const targetVersion = relative === 'db/catalog.sqlite' ? catalogVersion : 1
+      const targetVersion = relative === 'db/catalog.sqlite' ? catalogVersion : nativeConversationSchemaVersion
       let repairedFields: string[] = []
       const database = new Database(probe, { fileMustExist: true })
       try {
@@ -195,7 +197,10 @@ async function stageProjectRepair(root: string, staged: string, before: string, 
           }
         }
         database.pragma(`user_version = ${targetVersion}`)
-        if (relative !== 'db/catalog.sqlite') repairedFields = await repairArchivedFileChangeVersions(database, join(root, dirname(relative)))
+        if (relative !== 'db/catalog.sqlite') {
+          repairedFields = await repairArchivedFileChangeVersions(database, join(root, dirname(relative)))
+          if (rebuildActivityDirectory(database)) repairedFields.push('display directory')
+        }
         const checkpoint = database.pragma('wal_checkpoint(TRUNCATE)') as Array<{ busy: number }>
         if (checkpoint.some((result) => result.busy)) throw new Error('SQLite snapshot is busy.')
         database.pragma('journal_mode = DELETE')

@@ -37,6 +37,7 @@ function config(): AppConfigSnapshot {
       logLevel: 'info',
       logRetentionDays: 14,
       maxModelCallsPerRun: 0,
+      runningProcessDisplay: 'expanded', showModelRounds: true,
       environmentContext: environmentContextFixture(),
       sidebarVisible: true,
       sidebarWidth: 260,

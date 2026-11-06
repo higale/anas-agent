@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { defaultCapabilities } from '../../shared/agentCapabilities'
 import type { ExecutionMessageInput, ExecutionToolCall } from '../../runtime/executionState'
@@ -13,6 +13,8 @@ import { NativeRunOwner } from './nativeRunOwner'
 import { NativeMessageProjection } from './nativeMessageProjection'
 import { NativeMessageReader } from './nativeMessageReader'
 import { NativeExecutionStore } from './nativeExecutionStore'
+import { validateNativeConversationSchema } from './nativeDatabaseSchema'
+import { NativeConversationDatabase } from './nativeConversationDatabase'
 
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), 'anas-native-message-projection-'))
@@ -420,18 +422,69 @@ it('reads only the latest native activity body while polling beside megabytes of
   } finally { h.dispose() }
 })
 
-it('preserves the exact memory recall prompt once in native activity across reopening', async () => {
+it('opens new conversations without a memory snapshot table and preserves existing snapshot history', async () => {
+  const h = fixture()
+  try {
+    const tables = () => h.database.prepare("SELECT name FROM sqlite_schema WHERE name LIKE 'agent_memory_recalls%'").all()
+    expect(tables()).toEqual([])
+    await h.owner.enter('input', h.identity)
+    expect(() => h.reader().activities.getDisplayDetail({ ...h.identity, kind: 'memory', id: 'old' })).toThrow('Activity detail was not found')
+    expect(tables()).toEqual([])
+    h.database.exec(`
+      CREATE TABLE IF NOT EXISTS agent_memory_recalls (
+        run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+        recall_id TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        query TEXT NOT NULL CHECK (length(query) > 0),
+        prompt_text TEXT NOT NULL CHECK (length(prompt_text) > 0),
+        memory_count INTEGER NOT NULL CHECK (memory_count > 0),
+        agent_name TEXT,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (run_id, recall_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS agent_memory_recalls_run_sequence_idx
+        ON agent_memory_recalls (run_id, sequence);
+    `)
+    h.database.prepare("INSERT INTO agent_memory_recalls VALUES ('run','old',7,'query','Saved preferences',1,NULL,'2026-08-26')").run()
+    const insertDamaged = h.database.prepare("INSERT INTO agent_memory_recalls VALUES ('run',?,?,'query','Retained archive',1,NULL,'2026-08-26')")
+    for (const [i, sequence] of ['broken', -1, 7.5, Number.MAX_SAFE_INTEGER].entries()) insertDamaged.run(`damaged-${i}`, sequence)
+    h.reopen()
+    validateNativeConversationSchema(h.database)
+    const reader = h.reader()
+    const added = reader.observations.recordModel('run', { id: 'new', status: 'running', text: '', reasoning: '', toolCallIds: [] })
+    expect(added.sequence).toBe(8)
+    const history = reader.activities.getRunActivity('run')
+    expect(history?.memoryRecalls).toMatchObject([{ id: 'old', sequence: 7, promptText: 'Saved preferences' }])
+    expect(history?.activityWindow?.totalCount).toBe(2)
+    expect(reader.activities.getDisplayDetail({ ...h.identity, kind: 'memory', id: 'damaged-0' })).toEqual({ text: 'Retained archive' })
+    expect(reader.activities.getDisplayDetail({ ...h.identity, kind: 'memory', id: 'old' })).toEqual({ text: 'Saved preferences' })
+    for (const page of [
+      reader.activities.getRunActivityWindow('run'),
+      reader.activities.getActivitiesForRuns(h.identity.threadId, ['run'])[0]
+    ]) {
+      expect(page.memoryRecalls).toBeUndefined()
+      expect(page.activityWindow).toMatchObject({ startSequence: 8, endSequence: 8, totalCount: 1, hasEarlier: false })
+    }
+  } finally { h.dispose() }
+})
+
+it('preserves an unreadable recall archive without blocking backup validation, paging or new activity', async () => {
   const h = fixture()
   try {
     await h.owner.enter('input', h.identity)
-    const recall = { id: 'recall', query: 'How should this project build?',
-      promptText: '<relevant_memories>\nnpm run build\n</relevant_memories>', memoryCount: 1, agentName: 'general-purpose' }
-    const observations = h.reader().observations
-    const first = observations.recordMemoryRecall('run', recall)
-    expect(observations.recordMemoryRecall('run', recall)).toEqual(first)
-    expect(h.reader().activities.getRunActivity('run')?.memoryRecalls).toEqual([{ ...first, ...recall }])
+    h.database.exec(`CREATE TABLE agent_memory_recalls(run_id TEXT, recall_id TEXT, prompt_text TEXT);
+      INSERT INTO agent_memory_recalls VALUES ('run','old','Archived preferences')`)
     h.reopen()
-    expect(h.reader().activities.getRunActivity('run')?.memoryRecalls).toEqual([{ ...first, ...recall }])
+    const { threadId } = h.identity
+    NativeConversationDatabase.validateBackup(h.database.name, join(dirname(h.database.name), 'attachments'),
+      new Set([h.product.getThread(threadId)!.projectId]), threadId)
+    const reader = h.reader()
+    const added = reader.observations.recordModel('run', { id: 'new', status: 'running', text: '', reasoning: '', toolCallIds: [] })
+    expect(reader.activities.getRunActivityWindow(h.identity.runId).models).toMatchObject([{ id: 'new', sequence: added.sequence }])
+    expect(reader.activities.getRunActivity('run')?.memoryRecalls).toBeUndefined()
+    expect(() => reader.activities.getDisplayDetail({ ...h.identity, kind: 'memory', id: 'old' })).toThrow('Activity detail was not found')
+    expect(h.database.prepare('SELECT prompt_text FROM agent_memory_recalls').pluck().all()).toEqual(['Archived preferences'])
   } finally { h.dispose() }
 })
 
@@ -547,7 +600,7 @@ it.each([false, true])('rebuilds colliding v1 links without rewriting native his
     const snapshot = h.product.readSnapshot(h.identity.threadId)
     expect(snapshot.activities[0].tools.map(tool => [tool.call.id, tool.output])).toEqual([['first', 'first'], ['second', 'second']])
     expect(h.owner.store.readHistory(h.identity.threadId)).toEqual(original)
-    expect(h.database.pragma('user_version', { simple: true })).toBe(1)
+    expect(h.database.pragma('user_version', { simple: true })).toBe(3)
     h.reopen(); expect(h.product.recover()).toEqual([])
     expect(h.product.readSnapshot(h.identity.threadId)).toEqual(snapshot)
   } finally { h.dispose() }

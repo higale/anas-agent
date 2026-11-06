@@ -101,28 +101,57 @@ describe('agent IPC recovery', () => {
   it('validates activity cursors and confines subagent details to the selected run and thread', async () => {
     const handlers = new Map<string, (...args: unknown[]) => unknown>()
     const handle = vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => { handlers.set(channel, handler) })
-    const loadActivityPage = vi.fn(() => ({ runId: 'run', models: [], tools: [], subagents: [] }))
+    const result = { version: '1', items: [], removed: [] }
+    const loadActivityDirectory = vi.fn((_input: unknown, _signal: AbortSignal): Promise<typeof result> => Promise.resolve(result))
     const database = {
+      messages: { runInputMessage: vi.fn(() => ({ id: 'skill-input', skillInvocation: { promptText: 'Full skill instructions' } })) },
       getRun: vi.fn((id: string) => id === 'run' ? { threadId: 'thread' } : undefined),
       getSubagentActivity: vi.fn((_runId: string, id: string) => id === 'child' ? { id: 'child', result: 'complete result' } : undefined)
     }
     vi.doMock('../ipcSecurity', () => ({ handleMainIpc: handle }))
     vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: vi.fn(() => conversationStorage(database)) } }))
-    vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, { loadActivityPage }) }) }))
+    vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: vi.fn(function (storage) { return runtimeForStorage(storage, { loadActivityDirectory }) }) }))
     vi.doMock('../config/appConfig', () => ({ onAppConfigChanged: vi.fn(), getAppConfigSnapshot: vi.fn(), findResolvedModelConfig: vi.fn() }))
     vi.doMock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
     const module = await import('./agentIpcHandlers')
     module.registerAgentIpcHandlers()
-    const earlier = handlers.get('agent:activities:page')!
-    expect(earlier({}, { threadId: 'thread', runId: 'run', before: 120 })).toEqual({ runId: 'run', models: [], tools: [], subagents: [] })
-    expect(loadActivityPage).toHaveBeenCalledExactlyOnceWith({ threadId: 'thread', runId: 'run', before: 120 })
-    earlier({}, { threadId: 'thread', runId: 'run', after: -1, limit: 300 })
-    expect(loadActivityPage).toHaveBeenLastCalledWith({ threadId: 'thread', runId: 'run', after: -1, limit: 300 })
-    expect(() => earlier({}, { threadId: 'thread', runId: 'run', after: -2 })).toThrow()
-    expect(() => earlier({}, { threadId: 'thread', runId: 'run', before: 100, after: -1 })).toThrow()
-    for (const beforeSequence of [-1, 1.5, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
-      expect(() => earlier({}, { threadId: 'thread', runId: 'run', before: beforeSequence })).toThrow()
-    }
+    const earlier = handlers.get('agent:activities:directory')!
+    const sender = { once: vi.fn() }, event = { sender }
+    const pageInput = { threadId: 'thread', runId: 'run', requestId: 'read' }
+    await expect(earlier(event, pageInput)).resolves.toEqual(result)
+    expect(loadActivityDirectory).toHaveBeenCalledExactlyOnceWith(pageInput, expect.any(AbortSignal))
+    await expect(earlier(event, { ...pageInput, limit: 50 })).rejects.toThrow()
+    await expect(earlier(event, { ...pageInput, members: true })).rejects.toThrow()
+    // A cancellation belongs to the requesting window, including reused IDs.
+    loadActivityDirectory.mockImplementation((_input, signal) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+    }))
+    const cancelled = earlier(event, pageInput)
+    const cancellation = expect(cancelled).resolves.toEqual({ cancelled: true })
+    const signal = loadActivityDirectory.mock.calls.at(-1)![1]
+    handlers.get('agent:activities:cancel')!({ sender: { once: vi.fn() } }, 'read')
+    expect(signal.aborted).toBe(false)
+    handlers.get('agent:activities:cancel')!(event, 'read')
+    await cancellation
+    const replaced = earlier(event, pageInput)
+    const replacing = earlier(event, pageInput)
+    await expect(replaced).resolves.toEqual({ cancelled: true })
+    expect(loadActivityDirectory.mock.calls.at(-1)![1].aborted).toBe(false)
+    handlers.get('agent:activities:cancel')!(event, 'read')
+    await expect(replacing).resolves.toEqual({ cancelled: true })
+    const abandoned = earlier(event, { ...pageInput, requestId: 'closed-window' })
+    const closed = expect(abandoned).resolves.toEqual({ cancelled: true })
+    sender.once.mock.calls.find(call => call[0] === 'destroyed')![1]()
+    await closed
+    loadActivityDirectory.mockRejectedValueOnce(new Error('database read failed'))
+    await expect(earlier({ sender: { once: vi.fn() } }, pageInput)).rejects.toThrow('database read failed')
+    loadActivityDirectory.mockImplementationOnce((_input, signal) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new Error('independent storage failure')), { once: true })
+    }))
+    const failed = earlier(event, pageInput)
+    const failure = expect(failed).rejects.toThrow('independent storage failure')
+    handlers.get('agent:activities:cancel')!(event, 'read')
+    await failure
     const detail = handlers.get('agent:activities:subagent')!
     const input = { threadId: 'thread', runId: 'run', subagentId: 'child' }
     expect(detail({}, input)).toMatchObject({ id: 'child', result: undefined, detailsDeferred: true, detail: { id: 'child', kind: 'subagent' } })
@@ -130,6 +159,10 @@ describe('agent IPC recovery', () => {
     expect(() => detail({}, { ...input, runId: 'missing' })).toThrow('another conversation')
     expect(() => detail({}, { ...input, subagentId: 'missing' })).toThrow('not found')
     expect(database.getSubagentActivity).toHaveBeenCalledTimes(2)
+    const skill = handlers.get('agent:activities:detail')!
+    expect(skill({}, { threadId: 'thread', runId: 'run', kind: 'skill', id: 'skill-input' })).toEqual({ text: 'Full skill instructions' })
+    expect(database.messages.runInputMessage).toHaveBeenCalledWith('thread', 'run')
+    expect(() => skill({}, { threadId: 'thread', runId: 'run', kind: 'skill', id: 'another-input' })).toThrow('another run')
   })
 
   it('captures a review once before submission and ignores renderer-supplied snapshots', async () => {
@@ -695,8 +728,8 @@ describe('agent IPC recovery', () => {
       replay: Array<{ event: unknown }>
     }
     expect(resumedReplay.replay.map(({ event }) => event)).toEqual(expect.arrayContaining([
-      { ...initialDelta, delta: { ...initialDelta.delta, text: '' } },
-      { ...resumedDelta, delta: { ...resumedDelta.delta, text: '' } }
+      { ...initialDelta, delta: { ...initialDelta.delta, text: '', hasText: true } },
+      { ...resumedDelta, delta: { ...resumedDelta.delta, text: '', hasText: true } }
     ]))
     expect(resumedReplay.replay[0]?.event).toMatchObject({ type: 'run_started' })
 

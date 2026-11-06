@@ -24,6 +24,17 @@ export class NativeMessageReader {
     return message ? presentConversationMessage(message.value, message.id) : undefined
   }
 
+  /** The input intent is consumed by the first commit. Its original body stays
+   * owned by the run even when compression removes it from visible history. */
+  runInputMessage(threadId: string, runId: string) {
+    if (this.activities.getRun(runId)?.threadId !== threadId) throw new Error('Activity run belongs to another conversation.')
+    const row = this.database.prepare(`SELECT message_id FROM agent_message_payloads
+      WHERE thread_id=? AND run_id=? ORDER BY body_sequence LIMIT 1`).get(threadId, runId) as { message_id: string } | undefined
+    if (!row) return this.submittedUserMessage(runId)
+    const record = this.payloadRecord(threadId, row.message_id, runId)
+    return record?.value.kind === 'user' ? this.present(threadId, record) : undefined
+  }
+
   committedDirections(threadId: string, runId: string, messageIds?: readonly string[]) {
     const prefix = `${runId}:direction:`
     const rows = this.database.prepare(`SELECT record_id,message_id FROM agent_message_index WHERE thread_id=? AND run_id=?
@@ -62,12 +73,19 @@ export class NativeMessageReader {
     this.observations = new RunActivityObservations(database)
     this.activities = new RunActivityReader(database, {
       model: (runId, modelId, messageId, subagentId) => this.modelPayload(runId, modelId, messageId, subagentId),
-      tool: (runId, callId, name, subagentId) => this.toolPayload(runId, callId, name, subagentId)
+      tool: (runId, callId, name, subagentId, summaryOnly) => this.toolPayload(runId, callId, name, subagentId, summaryOnly)
     })
   }
 
   payload(threadId: string, messageId: string) {
     return this.payloadRecord(threadId, messageId)?.value
+  }
+
+  displayMessageDetail(threadId: string, runId: string, id: string) {
+    if (this.activities.getRun(runId)?.threadId !== threadId) throw new Error('Activity run belongs to another conversation.')
+    const record = this.payloadRecord(threadId, id, runId)
+    if (!record) throw new Error('Activity message was not found.')
+    return { message: this.present(threadId, record) }
   }
 
   private payloadRecord(threadId: string, messageId: string, runId?: string) {
@@ -114,16 +132,17 @@ export class NativeMessageReader {
     }
   }
 
-  private toolPayload: ActivityPayloadReader['tool'] = (runId, callId, name, subagentId) => {
+  private toolPayload: ActivityPayloadReader['tool'] = (runId, callId, name, subagentId, summaryOnly) => {
     const source = this.activitySource(runId, subagentId)
     const link = this.database.prepare('SELECT model_message_id,tool_message_id FROM agent_tool_messages WHERE thread_id=? AND run_id=? AND call_id=?')
       .get(source.threadId, source.runId, callId) as { model_message_id: string | null; tool_message_id: string | null } | undefined
     const model = link?.model_message_id ? this.payloadRecord(source.threadId, link.model_message_id, source.runId) : undefined
     const call = model ? this.present(source.threadId, model).toolCalls?.find(call => call.id === callId) : undefined
-    const result = link?.tool_message_id ? this.payloadRecord(source.threadId, link.tool_message_id, source.runId) : undefined
+    const readResult = !summaryOnly || name === 'start_subagent'
+    const result = readResult && link?.tool_message_id ? this.payloadRecord(source.threadId, link.tool_message_id, source.runId) : undefined
     const pending = this.observations.pendingTool(runId, callId, subagentId)
     return { call: { id: callId, name: call?.name ?? name, args: call?.args ?? pending?.call.args ?? {} },
-      output: result ? presentToolResult(this.present(source.threadId, result).content) : pending?.output }
+      output: result ? presentToolResult(this.present(source.threadId, result).content) : readResult ? pending?.output : undefined }
   }
 
   runMessages(runId: string) { return this.selectedMessages(runId) }
@@ -155,10 +174,14 @@ export class NativeMessageReader {
         ORDER BY response.position DESC LIMIT 1`).get(threadId, record.recordId) as { record_id: string } | undefined
       if (batch) directionIds = this.store.readModelCallIds(threadId, batch.record_id)
     }
-    return presentConversationMessage({ ...message,
+    const model = message.kind === 'assistant' ? this.database.prepare(`SELECT model.model_id AS id FROM agent_model_activities model
+      JOIN agent_model_messages link ON link.run_id=model.run_id AND link.model_id=model.model_id
+      JOIN agent_runs run ON run.id=model.run_id WHERE run.thread_id=? AND model.subagent_id IS NULL AND link.message_id=?`)
+      .get(threadId, record.id) as { id: string } | undefined : undefined
+    return { ...presentConversationMessage({ ...message,
       ...(directionIds ? { context: { ...message.context, directionAfterCallIds: directionIds } } : {}),
       ...(ids ? { calls: message.calls!.map((call, index) => ({ ...call, id: ids[index] })) } : {}),
-      ...(result ? { resultFor: result.call_id } : {}) }, record.id)
+      ...(result ? { resultFor: result.call_id } : {}) }, record.id), ...(model ? { activityModelId: model.id } : {}) }
   }
 
   activityMessages(runId: string, activity: AgentRunActivity) {

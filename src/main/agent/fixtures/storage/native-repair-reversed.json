@@ -1,9 +1,9 @@
 {
   "name": "native-repair-reversed",
-  "schemaVersion": 1,
+  "schemaVersion": 3,
   "format": "directory",
-  "bytes": 989769,
-  "sha256": "efe5f269f2d6e9d919963feeb7bff995b3c4924a724d0ab35ba325068438e9a0",
+  "bytes": 1071689,
+  "sha256": "717d4807d35ce75d237b8e5ea1160be3380ca145cfce5043706f10f1de7382cf",
   "metadata": {
     "version": 1,
     "value": [
@@ -116,6 +116,11 @@
     "pathSanitization": {
       "description": "Replace the Windows fixture username with user and recalculate affected definition hashes and references; all other rows, identities, content and recovery state are unchanged.",
       "sourceSha256": "df0ca426c31495adaf6ad6a8b5c72ef6735765f1cf8aa14ba775c8a47dab6186"
+    },
+    "groupDirectory": {
+      "sourceSchemaVersion": 2,
+      "sourceSha256": "019271b7bc006425c5833f944d01cc71ac3afd28de4b05c2af51609ac902ee8d",
+      "description": "Offline v3 display index creation; all pre-existing execution and resource rows verified unchanged."
     }
   }
 }

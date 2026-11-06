@@ -44,7 +44,7 @@ describe('native conversation database creation', () => {
     } finally { if (database.open) database.close(); rmSync(root, { recursive: true, force: true }) }
   })
 
-  it.each([0, 2, 99])('rejects unsupported version %i without replacing existing content', version => {
+  it.each([0, 1, 2, 99])('rejects unsupported version %i without replacing existing content', version => {
     const root = mkdtempSync(join(tmpdir(), 'anas-native-schema-version-')), file = join(root, 'conversation.sqlite')
     let database = new Database(file)
     try {
@@ -68,7 +68,7 @@ describe('native conversation database creation', () => {
     const reopen = () => { database.close(); database = new Database(file); initializeNativeConversationStorage(database); return services() }
     try {
       initializeNativeConversationStorage(database)
-      expect(database.pragma('user_version', { simple: true })).toBe(1)
+      expect(database.pragma('user_version', { simple: true })).toBe(3)
       expect(database.prepare("SELECT name FROM sqlite_schema WHERE name IN ('current_state','message_bodies','agent_effect_journal','pending_writes')").all()).toEqual([])
       expect(database.prepare("SELECT name FROM pragma_table_info('agent_runs') WHERE name LIKE '%checkpoint%'").all()).toEqual([])
       let current = services()

@@ -28,7 +28,7 @@ type ScrollBoundaryState = {
 
 const boundaryEpsilon = 1
 
-export type ActivityBoundaryRequest = { edge: 'first' | 'latest'; onPosition?(): void }
+export const scrollLayoutEvent = 'timeline-layout'
 
 export function scrollBoundaryState(
   panel: Pick<HTMLElement, 'clientHeight' | 'scrollHeight' | 'scrollTop'>
@@ -72,6 +72,7 @@ export function useScrollBoundaryNavigation({
   followOutputRef,
   panelRef,
   followThreshold = 48,
+  virtualized = false,
   resetKey
 }: {
   contentRef: RefObject<HTMLElement | null>
@@ -80,6 +81,7 @@ export function useScrollBoundaryNavigation({
   followOutputRef: FollowOutputState
   panelRef: RefObject<HTMLElement | null>
   followThreshold?: number
+  virtualized?: boolean
   resetKey?: unknown
 }) {
   const [boundaries, setBoundaries] = useState<ScrollBoundaryState>({
@@ -88,10 +90,30 @@ export function useScrollBoundaryNavigation({
     hasOverflow: false
   })
   const [userInteracted, setUserInteracted] = useState(false)
-  const previousPositionRef = useRef({ scrollTop: 0 })
+  const previousPositionRef = useRef({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 })
   const scrollbarDragRef = useRef(false)
   const scrollbarReleaseFrameRef = useRef<number | undefined>(undefined)
   const touchYRef = useRef<number | undefined>(undefined)
+
+  const updateBoundaries = useCallback(() => {
+    const panel = panelRef.current
+    if (!panel) return
+    const next = scrollBoundaryState(panel)
+    setBoundaries((current) => sameBoundaryState(current, next) ? current : next)
+  }, [panelRef])
+
+  const onScroll = useCallback(() => {
+    const panel = panelRef.current
+    if (!panel) return
+    previousPositionRef.current = updateFollowOutputAfterScroll(
+      panel,
+      followOutputRef,
+      previousPositionRef.current,
+      scrollbarDragRef.current,
+      followThreshold
+    )
+    updateBoundaries()
+  }, [followOutputRef, followThreshold, panelRef, updateBoundaries])
 
   useEffect(() => {
     scrollbarDragRef.current = false
@@ -112,10 +134,7 @@ export function useScrollBoundaryNavigation({
       // Chromium can deliver a track click's first scroll after pointerup.
       // Keep its intent through that frame, never until unrelated layout work.
       scrollbarReleaseFrameRef.current = window.requestAnimationFrame(() => {
-        const panel = panelRef.current
-        if (panel) previousPositionRef.current = updateFollowOutputAfterScroll(
-          panel, followOutputRef, previousPositionRef.current, true, followThreshold
-        )
+        onScroll()
         scrollbarReleaseFrameRef.current = undefined
         scrollbarDragRef.current = false
       })
@@ -129,14 +148,7 @@ export function useScrollBoundaryNavigation({
       window.removeEventListener('pointercancel', cancelDrag, true)
       window.removeEventListener('blur', cancelDrag)
     }
-  }, [followOutputRef, followThreshold, panelRef])
-
-  const updateBoundaries = useCallback(() => {
-    const panel = panelRef.current
-    if (!panel) return
-    const next = scrollBoundaryState(panel)
-    setBoundaries((current) => sameBoundaryState(current, next) ? current : next)
-  }, [panelRef])
+  }, [onScroll])
 
   useEffect(() => {
     if (!enabled) return
@@ -145,17 +157,22 @@ export function useScrollBoundaryNavigation({
     if (!panel || !content) return
     previousPositionRef.current = followOutputPosition(panel)
     updateBoundaries()
+    if (virtualized) {
+      const layout = () => { previousPositionRef.current = followOutputPosition(panel); updateBoundaries() }
+      panel.addEventListener(scrollLayoutEvent, layout)
+      return () => panel.removeEventListener(scrollLayoutEvent, layout)
+    }
     return observeFollowOutputGrowth(panel, content, followOutputRef, {
       onResize: updateBoundaries
     })
-  }, [contentRef, enabled, followOutputRef, panelRef, updateBoundaries])
+  }, [contentRef, enabled, followOutputRef, panelRef, updateBoundaries, virtualized])
 
   useEffect(() => {
-    if (!enabled || contentVersion === undefined) return
+    if (!enabled || virtualized || contentVersion === undefined) return
     const panel = panelRef.current
     if (!panel) return
     if (scrollToFollowOutput(panel, followOutputRef)) updateBoundaries()
-  }, [contentVersion, enabled, followOutputRef, panelRef, updateBoundaries])
+  }, [contentVersion, enabled, followOutputRef, panelRef, updateBoundaries, virtualized])
 
   const markUserInteraction = useCallback((upward: boolean) => {
     // Pause on input, before the browser scrolls or output changes the geometry.
@@ -168,18 +185,6 @@ export function useScrollBoundaryNavigation({
     if (!pauseFollowOutputForContentToggle(event.target, followOutputRef)) return
     setUserInteracted(true)
   }, [followOutputRef])
-  const onScroll = useCallback(() => {
-    const panel = panelRef.current
-    if (!panel) return
-    previousPositionRef.current = updateFollowOutputAfterScroll(
-      panel,
-      followOutputRef,
-      previousPositionRef.current,
-      scrollbarDragRef.current,
-      followThreshold
-    )
-    updateBoundaries()
-  }, [followOutputRef, followThreshold, panelRef, updateBoundaries])
   const onPointerDown = useCallback<PointerEventHandler<HTMLElement>>((event) => {
     const panel = event.currentTarget
     const scrollbarWidth = Math.max(panel.offsetWidth - panel.clientWidth, 4)
@@ -208,7 +213,8 @@ export function useScrollBoundaryNavigation({
   const onKeyDown = useCallback((event: KeyboardEvent) => {
     if (event.defaultPrevented || event.altKey) return
     if (event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]')) return
-    if (['ArrowUp', 'PageUp', 'Home'].includes(event.key) || (event.key === ' ' && event.shiftKey)) markUserInteraction(true)
+    const upward = ['ArrowUp', 'PageUp', 'Home'].includes(event.key) || (event.key === ' ' && event.shiftKey)
+    if (upward || ['ArrowDown', 'PageDown', 'End'].includes(event.key) || event.key === ' ') markUserInteraction(upward)
   }, [markUserInteraction])
   useEffect(() => {
     const panel = panelRef.current
@@ -221,20 +227,14 @@ export function useScrollBoundaryNavigation({
     if (!panel) return
     followOutputRef.current = false
     setUserInteracted(true)
-    if (panel.dispatchEvent(new CustomEvent<ActivityBoundaryRequest>('activity-boundary', { cancelable: true, detail: { edge: 'first' } }))) {
-      panel.scrollTo({ top: 0, behavior: 'instant' })
-    }
+    panel.scrollTo({ top: 0, behavior: 'instant' })
   }, [followOutputRef, panelRef])
   const scrollToBottom = useCallback(() => {
     const panel = panelRef.current
     if (!panel) return
-    followOutputRef.current = false
+    followOutputRef.current = true
     setUserInteracted(true)
-    const onPosition = () => { followOutputRef.current = true }
-    if (panel.dispatchEvent(new CustomEvent<ActivityBoundaryRequest>('activity-boundary', { cancelable: true, detail: { edge: 'latest', onPosition } }))) {
-      panel.scrollTo({ top: panel.scrollHeight, behavior: 'instant' })
-      onPosition()
-    }
+    panel.scrollTo({ top: panel.scrollHeight, behavior: 'instant' })
   }, [followOutputRef, panelRef])
 
   return {

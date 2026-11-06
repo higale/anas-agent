@@ -6,6 +6,10 @@
 
 **Upgrading from 5.0.0 to 5.0.1:** The catalog changes from v1 to v2; conversation databases remain v1. Backups containing the old catalog cannot be restored directly; repair the original data directory and create a new backup. If startup reports a catalog version or access-mode constraint error, select project data repair on the recovery page. Original files are preserved before the catalog is repaired; invalid permission values use the default Smart approval mode. This does not convert legacy framework databases or replay tools. Do not change only the version number.
 
+## Upgrading to 5.2.0: Activity display redesign
+
+This redesign requires a new **v3 conversation database**. Existing conversations must be cleared by the user; the app does not migrate or automatically delete them. Backups containing v1 or v2 conversations cannot be restored. Configuration, project definitions, Skills, tools, plugins, and the separate memory database keep their formats. Preserve any old data you need; do not change database version numbers manually. Backup, preservation, and explicit repair remain available for v3 data.
+
 ## Upgrading to 5.0.2
 
 Reset all projects and conversations.

@@ -191,8 +191,9 @@ describe('projectTurnTimeline', () => {
     })
   })
 
-  it('projects recalled memory at its durable activity sequence', () => {
+  it('keeps recorded memory injections out of the historical activity timeline', () => {
     const run = completedRun()
+    const beforeRecall = projectRunActivityItems(run, new Map(), messages)
     run.memoryRecalls = [{
       id: 'recall-1',
       sequence: 0,
@@ -202,10 +203,7 @@ describe('projectTurnTimeline', () => {
       createdAt: '2026-08-26T00:00:00.000Z'
     }]
 
-    expect(projectRunActivityItems(run, new Map(), messages).at(0)).toMatchObject({
-      type: 'memory',
-      recall: { id: 'recall-1', promptText: expect.stringContaining('MEMORY') }
-    })
+    expect(projectRunActivityItems(run, new Map(), messages)).toEqual(beforeRecall)
   })
 
   it('keeps a live candidate expanded after its user input', () => {

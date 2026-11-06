@@ -106,9 +106,10 @@ afterEach(async () => {
   vi.doUnmock('./agent/agentDatabaseBackup')
   vi.doUnmock('./dataRestoreValidation')
   vi.resetModules()
-  await Promise.all(temporaryDirectories.splice(0).map((directory) => (
-    rm(directory, { recursive: true, force: true })
-  )))
+  // Fault-injection tests can retain a staging directory inside the fixture.
+  for (const directory of temporaryDirectories.splice(0).reverse()) {
+    await rm(directory, { recursive: true, force: true })
+  }
 })
 
 describe('data backup restore', () => {

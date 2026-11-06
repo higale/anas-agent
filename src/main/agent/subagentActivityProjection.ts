@@ -1,3 +1,4 @@
+import { displayTransaction } from './activityDisplayProjection'
 import type Database from 'better-sqlite3'
 import type { AgentModelActivity, AgentToolActivity, AgentSubagentActivity, AgentToolCall, AgentToolApproval, AgentRuntimeEvent } from '../../shared/agentTypes'
 import type { SubagentTaskStore, AgentSubagentCallRecord } from './subagentTaskStore'
@@ -105,25 +106,27 @@ export class SubagentActivityProjection {
       subagentId: string
     }
   ): AgentModelActivity {
-    const carrier = this.subagents.require(carrierSubagentId, ownerThreadId)
-    this.subagents.requireDescendant(carrier, model.subagentId)
-    const project = this.database.transaction(() => {
-      let direct: AgentModelActivity | undefined
-      for (const [index, ancestor] of this.subagents.chain(carrier).entries()) {
-        const recorded = this.observations.recordModel(ancestor.parentRunId, model)
-        if (index === 0) direct = recorded
-        else if (direct) {
-          this.alignProjectedActivityTiming(
-            ancestor.parentRunId,
-            `model:${model.id}`,
-            direct
-          )
+    return displayTransaction(this.database, () => {
+      const carrier = this.subagents.require(carrierSubagentId, ownerThreadId)
+      this.subagents.requireDescendant(carrier, model.subagentId)
+      const project = this.database.transaction(() => {
+        let direct: AgentModelActivity | undefined
+        for (const [index, ancestor] of this.subagents.chain(carrier).entries()) {
+          const recorded = this.observations.recordModel(ancestor.parentRunId, model)
+          if (index === 0) direct = recorded
+          else if (direct) {
+            this.alignProjectedActivityTiming(
+              ancestor.parentRunId,
+              `model:${model.id}`,
+              direct
+            )
+          }
         }
-      }
-      if (!direct) throw new Error(`Subagent ${carrierSubagentId} has no projection target.`)
-      return direct
-    })
-    return project()
+        if (!direct) throw new Error(`Subagent ${carrierSubagentId} has no projection target.`)
+        return direct
+      })
+      return project()
+    })()
   }
 
   recordProjectedToolActivity(
@@ -134,31 +137,33 @@ export class SubagentActivityProjection {
     projectedSubagentId: string,
     output?: unknown
   ): AgentToolActivity {
-    const carrier = this.subagents.require(carrierSubagentId, ownerThreadId)
-    this.subagents.requireDescendant(carrier, projectedSubagentId)
-    const project = this.database.transaction(() => {
-      let direct: AgentToolActivity | undefined
-      for (const [index, ancestor] of this.subagents.chain(carrier).entries()) {
-        const recorded = this.observations.recordTool(
-          ancestor.parentRunId,
-          call,
-          status,
-          projectedSubagentId,
-          output
-        )
-        if (index === 0) direct = recorded
-        else if (direct) {
-          this.alignProjectedActivityTiming(
+    return displayTransaction(this.database, () => {
+      const carrier = this.subagents.require(carrierSubagentId, ownerThreadId)
+      this.subagents.requireDescendant(carrier, projectedSubagentId)
+      const project = this.database.transaction(() => {
+        let direct: AgentToolActivity | undefined
+        for (const [index, ancestor] of this.subagents.chain(carrier).entries()) {
+          const recorded = this.observations.recordTool(
             ancestor.parentRunId,
-            toolActivityKey(call.id, projectedSubagentId),
-            direct
+            call,
+            status,
+            projectedSubagentId,
+            output
           )
+          if (index === 0) direct = recorded
+          else if (direct) {
+            this.alignProjectedActivityTiming(
+              ancestor.parentRunId,
+              toolActivityKey(call.id, projectedSubagentId),
+              direct
+            )
+          }
         }
-      }
-      if (!direct) throw new Error(`Subagent ${carrierSubagentId} has no projection target.`)
-      return direct
-    })
-    return project()
+        if (!direct) throw new Error(`Subagent ${carrierSubagentId} has no projection target.`)
+        return direct
+      })
+      return project()
+    })()
   }
 
   recordProjectedToolApproval(
@@ -168,36 +173,38 @@ export class SubagentActivityProjection {
     approval: AgentToolApproval,
     projectedSubagentId: string
   ): AgentToolActivity {
-    const carrier = this.subagents.require(carrierSubagentId, ownerThreadId)
-    this.subagents.requireDescendant(carrier, projectedSubagentId)
-    const project = this.database.transaction(() => {
-      let direct: AgentToolActivity | undefined
-      for (const [index, ancestor] of this.subagents.chain(carrier).entries()) {
-        const recorded = this.observations.recordTool(
-          ancestor.parentRunId,
-          call,
-          'running',
-          projectedSubagentId
-        )
-        this.observations.recordToolApproval(
-          ancestor.parentRunId,
-          call.id,
-          approval,
-          projectedSubagentId
-        )
-        if (index === 0) direct = recorded
-        else if (direct) {
-          this.alignProjectedActivityTiming(
+    return displayTransaction(this.database, () => {
+      const carrier = this.subagents.require(carrierSubagentId, ownerThreadId)
+      this.subagents.requireDescendant(carrier, projectedSubagentId)
+      const project = this.database.transaction(() => {
+        let direct: AgentToolActivity | undefined
+        for (const [index, ancestor] of this.subagents.chain(carrier).entries()) {
+          const recorded = this.observations.recordTool(
             ancestor.parentRunId,
-            toolActivityKey(call.id, projectedSubagentId),
-            direct
+            call,
+            'running',
+            projectedSubagentId
           )
+          this.observations.recordToolApproval(
+            ancestor.parentRunId,
+            call.id,
+            approval,
+            projectedSubagentId
+          )
+          if (index === 0) direct = recorded
+          else if (direct) {
+            this.alignProjectedActivityTiming(
+              ancestor.parentRunId,
+              toolActivityKey(call.id, projectedSubagentId),
+              direct
+            )
+          }
         }
-      }
-      if (!direct) throw new Error(`Subagent ${carrierSubagentId} has no projection target.`)
-      return { ...direct, approval }
-    })
-    return project()
+        if (!direct) throw new Error(`Subagent ${carrierSubagentId} has no projection target.`)
+        return { ...direct, approval }
+      })
+      return project()
+    })()
   }
 
   private alignProjectedActivityTiming(

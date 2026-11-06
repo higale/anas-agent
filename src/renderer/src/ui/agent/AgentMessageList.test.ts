@@ -1,16 +1,21 @@
-import { createElement } from 'react'
+import { createElement, type ComponentProps } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentMessage, AgentRunActivity } from '@shared/agentTypes'
+import { displayActivityPage } from '@shared/activityDisplay'
 import {
-  AgentMessageList,
+  AgentMessageList as MessageList,
   formatCompactTokens,
   messageRetryAction
 } from './AgentMessageList'
 import type { AgentRunView } from './useAgentWorkspace'
+import { ActivityPreferences } from './ActivityPreferences'
+
+const AgentMessageList = (props: ComponentProps<typeof MessageList>) => createElement(ActivityPreferences,
+  { value: { runningProcessDisplay: 'collapsed', showModelRounds: true } }, createElement(MessageList, props))
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => key })
+  useTranslation: () => ({ i18n: { resolvedLanguage: 'en' }, t: (key: string) => key })
 }))
 
 const commonProps = {
@@ -70,12 +75,12 @@ describe('AgentMessageList', () => {
     }))
 
     expect(html).toContain('LIVE_REPLY')
-    expect(html).toContain('<span>round 1</span>')
+    expect(html).not.toContain('<span>round 1</span>')
     expect(html).toContain('agent-activity-model-message')
     expect(html).not.toContain('agent-process')
     expect(html).not.toContain('agent-activity-range collapsed')
     expect(html).toContain('agent-activity-range-status')
-    expect(html).toContain('agent.run_replying')
+    expect(html).toContain('agent.run_elapsed_active')
     expect(html).not.toContain('agent-activity-range-toggle')
     expect(html).not.toContain('agent.collapse_activity')
   })
@@ -83,55 +88,50 @@ describe('AgentMessageList', () => {
   it('does not render a message container for whitespace-only model text', () => {
     const run = liveActivity()
     run.models[0].text = '\n\n\n'
-    const html = renderToStaticMarkup(createElement(AgentMessageList, {
-      ...commonProps,
-      messages,
-      activities: [],
-      run
-    }))
-
-    expect(html).toContain('<span class="agent-activity-summary-label">reasoning</span>')
-    expect(html).not.toContain('agent-activity-model-message')
+    for (const record of [run, displayActivityPage('thread', run)]) {
+      const html = renderToStaticMarkup(createElement(AgentMessageList, { ...commonProps, messages, activities: [record] }))
+      expect(html).toContain('reasoning')
+      expect(html).not.toContain('agent-activity-model-message')
+    }
   })
 
-  it('shows a completed reasoning summary after the reasoning title', () => {
+  it('shows the same collapsed label for live and deferred reasoning', () => {
     const run = liveActivity()
-    run.models[0] = {
-      ...run.models[0],
-      status: 'completed',
-      reasoningSummary: 'Checked the protocol response.'
+    run.models[0] = { ...run.models[0], status: 'completed', text: '', reasoningSummary: 'Checked the response.' }
+    for (const model of [run.models[0], { ...run.models[0], reasoning: '', hasReasoning: true,
+      detail: { kind: 'model' as const, id: 'model-1', runId: run.runId, threadId: 'thread' } }]) {
+      const html = renderToStaticMarkup(createElement(AgentMessageList, { ...commonProps, messages, activities: [{ ...run, models: [model] }] }))
+      expect(html).toContain('agent.process_thought')
+      expect(html).not.toContain('Checked the response.')
+      expect(html).not.toContain('<pre>')
     }
-    const html = renderToStaticMarkup(createElement(AgentMessageList, {
-      ...commonProps,
-      messages,
-      activities: [],
-      run
-    }))
-
-    expect(html).toContain(
-      '<span>reasoning</span><span class="agent-activity-argument">Checked the protocol response.</span>'
-    )
-    expect(html).not.toContain('<pre>REASONING</pre>')
   })
 
-  it('shows an ellipsis when the reasoning summary repeats the full reasoning', () => {
-    const run = liveActivity()
-    run.models[0] = {
-      ...run.models[0],
-      status: 'completed',
-      reasoningSummary: '  REASONING\n'
-    }
-    const html = renderToStaticMarkup(createElement(AgentMessageList, {
-      ...commonProps,
-      messages,
-      activities: [],
-      run
+  it('keeps tools in one process group across a whitespace-only reply in live and historical records', () => {
+    const run = activity('completed')
+    run.models[0] = { ...run.models[0], text: ' \n', toolCallIds: ['after'] }
+    run.tools = ['before', 'after'].map((id, index) => ({
+      sequence: index * 2, status: 'completed', call: { id, name: 'probe', args: {} }
     }))
+    for (const record of [run, displayActivityPage('thread', run)]) {
+      const html = renderToStaticMarkup(createElement(AgentMessageList, { ...commonProps, messages, activities: [record] }))
+      expect(html.match(/agent-activity-process/g)).toHaveLength(1)
+      expect(html).toContain('agent.process_thought_tools')
+      expect(html).not.toContain('agent-activity-model-message')
+    }
+  })
 
-    expect(html).toContain(
-      '<span>reasoning</span><span class="agent-activity-argument">...</span>'
-    )
-    expect(html).not.toContain('<pre>REASONING</pre>')
+  it.each([undefined, 'Inspect the project tree'])('keeps individual tool arguments and summaries out of the group title (%s)', summary => {
+    const run = activity('completed')
+    run.models[0] = { ...run.models[0], status: 'completed', reasoning: '', text: '', toolCallIds: ['tree'] }
+    run.tools = [{ sequence: 2, status: 'completed', call: { id: 'tree', name: 'directory_tree',
+      args: { path: 'my-project-folder', summary } } }]
+    for (const record of [run, displayActivityPage('thread', run)]) {
+      const html = renderToStaticMarkup(createElement(AgentMessageList, { ...commonProps, messages, activities: [record] }))
+      expect(html).toContain('agent.process_tools')
+      expect(html).not.toContain('my-project-folder')
+      if (summary) expect(html).not.toContain(summary)
+    }
   })
 
   it('distinguishes a Skill shortcut from a generic file tool call', () => {
@@ -171,8 +171,12 @@ describe('AgentMessageList', () => {
     expect(toolSummary).toContain('lucide-wrench')
   })
 
-  it('renders recalled memory with the same expandable input treatment as a Skill', () => {
+  it('keeps the live conversation unchanged when preferences are injected', () => {
     const run = liveActivity()
+    const renderRun = () => renderToStaticMarkup(createElement(AgentMessageList, {
+      ...commonProps, messages, activities: [], run
+    }))
+    const beforeRecall = renderRun()
     run.memoryRecalls = [{
       id: 'recall-1',
       sequence: 0,
@@ -182,17 +186,7 @@ describe('AgentMessageList', () => {
       agentName: 'general-purpose',
       createdAt: '2026-08-26T00:00:00.000Z'
     }]
-    const html = renderToStaticMarkup(createElement(AgentMessageList, {
-      ...commonProps,
-      messages,
-      activities: [],
-      run
-    }))
-
-    expect(html).toContain('agent-activity-input agent-activity-memory-recall')
-    expect(html).toContain('lucide-brain')
-    expect(html).toContain('agent.memory_recall · general-purpose')
-    expect(html).not.toContain('MEMORY_PROMPT')
+    expect(renderRun()).toBe(beforeRecall)
   })
 
   it('does not allow an interrupted turn to collapse while approval is pending', () => {
@@ -224,7 +218,7 @@ describe('AgentMessageList', () => {
     }))
 
     expect(html).toContain('agent-activity-range collapsed')
-    expect(html).toContain('1 model round · 0 tool calls')
+    expect(html).toContain('agent.run_elapsed')
     expect(html.indexOf('agent-activity-range collapsed')).toBeLessThan(html.indexOf('FINAL_REPLY'))
     expect(html).not.toContain('LIVE_REPLY')
   })
@@ -300,7 +294,7 @@ describe('AgentMessageList', () => {
     expect(html).not.toContain('Model call limits exceeded')
   })
 
-  it('renders adjacent delegations as one compact subagent group', () => {
+  it('renders adjacent delegations as ordered independent labeled triggers', () => {
     const run: AgentRunView = {
       ...activity('running'),
       status: 'running',
@@ -360,7 +354,6 @@ describe('AgentMessageList', () => {
       /<button class="agent-subagent-activity-trigger labeled"[^>]*>/g
     ) ?? []
 
-    expect(html.match(/agent-activity-subagent-group/g)).toHaveLength(1)
     expect(labeledTriggers).toHaveLength(2)
     expect(html.match(/data-agent-subagent-trigger=""/g)).toHaveLength(2)
     expect(html).not.toContain('role="button"')
@@ -369,6 +362,7 @@ describe('AgentMessageList', () => {
     expect(html).toContain('data-status="completed"')
     expect(html).toContain('web-researcher')
     expect(html).toContain('docs-reviewer')
+    expect(html.indexOf('web-researcher')).toBeLessThan(html.indexOf('docs-reviewer'))
     expect(html).toContain('Inspect framework integration')
     expect(html).not.toContain('call read_file')
     expect(html).toContain('Completed')
@@ -426,8 +420,8 @@ describe('AgentMessageList', () => {
     expect(disclosureTag(html, 'agent-activity-result')).not.toContain('open=""')
   })
 
-  it('renders the concrete command shell with its terminal icon, name, and summary', () => {
-    const run = activity('completed')
+  it.each(['running', 'completed'] as const)('shows the shell name and summary with the icon for its %s state', status => {
+    const run = activity(status)
     run.tools.push({
       call: {
         id: 'shell-1',
@@ -438,9 +432,9 @@ describe('AgentMessageList', () => {
         }
       },
       sequence: 2,
-      status: 'completed',
+      status,
       startedAt: '2026-08-04T10:00:00.000Z',
-      completedAt: '2026-08-04T10:00:00.312Z'
+      completedAt: status === 'completed' ? '2026-08-04T10:00:00.312Z' : undefined
     })
 
     const html = renderToStaticMarkup(createElement(AgentMessageList, {
@@ -449,16 +443,16 @@ describe('AgentMessageList', () => {
       activities: [run]
     }))
 
-    const toolSummary = html.match(/agent-activity-tool"><summary[^>]*>([\s\S]*?)<\/summary>/)?.[1] ?? ''
-    expect(html).toContain('lucide-terminal')
+    const toolSummary = html.match(/agent-activity-tool[^"]*"><summary[^>]*>([\s\S]*?)<\/summary>/)?.[1] ?? ''
+    expect(toolSummary).toContain(status === 'running' ? 'lucide-terminal' : 'lucide-activity')
     expect(html).toContain('<code>pwsh</code>')
     expect(toolSummary).toContain('Query Shanghai weather via wttr.in')
     expect(toolSummary).not.toContain('curl wttr.in/Shanghai')
     expect(html).not.toContain('agent.call')
   })
 
-  it('renders http_request with its network icon, name, and URL summary', () => {
-    const run = activity('completed')
+  it.each(['running', 'completed'] as const)('shows the HTTP tool name and URL with the icon for its %s state', status => {
+    const run = activity(status)
     run.tools.push({
       call: {
         id: 'http-1',
@@ -466,9 +460,9 @@ describe('AgentMessageList', () => {
         args: { url: 'https://example.com/image.png' }
       },
       sequence: 2,
-      status: 'completed',
+      status,
       startedAt: '2026-08-04T10:00:00.000Z',
-      completedAt: '2026-08-04T10:00:00.056Z'
+      completedAt: status === 'completed' ? '2026-08-04T10:00:00.056Z' : undefined
     })
 
     const html = renderToStaticMarkup(createElement(AgentMessageList, {
@@ -477,8 +471,8 @@ describe('AgentMessageList', () => {
       activities: [run]
     }))
 
-    const toolSummary = html.match(/agent-activity-tool"><summary[^>]*>([\s\S]*?)<\/summary>/)?.[1] ?? ''
-    expect(html).toContain('lucide-globe')
+    const toolSummary = html.match(/agent-activity-tool[^"]*"><summary[^>]*>([\s\S]*?)<\/summary>/)?.[1] ?? ''
+    expect(toolSummary).toContain(status === 'running' ? 'lucide-globe' : 'lucide-activity')
     expect(html).toContain('<code>http_request</code>')
     expect(toolSummary).toContain('https://example.com/image.png')
   })

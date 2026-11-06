@@ -63,6 +63,28 @@ describe('native product history revisions', () => {
       expect(memory.dirtyThreads()).toContain(h.thread.id)
     } finally { h.dispose() }
   })
+  it.each(['truncate', 'regenerate'] as const)('preserves the memory cursor when the %s display transaction rolls back', async kind => {
+    const h = fixture()
+    try {
+      await h.complete('first'); await h.complete('second')
+      const memory = h.product.resources.memoryStore.preferences!
+      const history = h.owner.store.readHistory(h.thread.id)!
+      const cursor = history.messages.at(-1)!.recordId
+      const retained = history.messages.find(message => message.id === 'first:answer')!.recordId
+      memory.writeForeground({ kind: 'global' }, 'Saved', h.thread.id, cursor)
+      const owner = new NativeHistoryOwner(h.sql, h.owner, memory)
+      const revision = owner.prepare({ threadId: h.thread.id, messageId: 'second:input', kind, runId: 'again' })
+      const directory = h.sql.prepare('SELECT * FROM agent_display_items ORDER BY run_id,agent_id,item_key').all()
+      h.sql.exec("CREATE TRIGGER fail_display_commit BEFORE DELETE ON agent_display_changes BEGIN SELECT RAISE(ABORT,'display commit failed'); END")
+      expect(() => owner.commit(revision)).toThrow('display commit failed')
+      expect(h.owner.store.readHistory(h.thread.id)).toEqual(history)
+      expect(h.sql.prepare('SELECT * FROM agent_display_items ORDER BY run_id,agent_id,item_key').all()).toEqual(directory)
+      expect(memory.cursor(h.thread.id, record => h.owner.store.recordPosition(h.thread.id, record) !== undefined)).toBe(cursor)
+      h.sql.exec('DROP TRIGGER fail_display_commit')
+      owner.commit(revision)
+      expect(memory.cursor(h.thread.id)).toBe(retained)
+    } finally { h.dispose() }
+  })
   it('rejects conflicting history ownership without deleting any run or message', async () => {
     const h = fixture()
     try {

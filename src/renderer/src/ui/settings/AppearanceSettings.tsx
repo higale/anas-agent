@@ -1,6 +1,6 @@
 import { Globe } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import type { ChatContentWidth, LanguagePackSummary } from '@shared/types'
+import type { LanguagePackSummary } from '@shared/types'
 import { UI_FONT_SIZE_MAX, UI_FONT_SIZE_MIN, normalizeUiFontSize } from '@shared/uiPreferences'
 import { RangeField } from '../RangeField'
 import { SearchableOptionPicker } from '../SearchableOptionPicker'
@@ -19,21 +19,15 @@ export function normalizeTheme(value?: string): ThemeMode {
   return value === 'light' || value === 'dark' ? value : 'system'
 }
 
-export function normalizeChatContentWidth(value?: string): ChatContentWidth {
-  return value === 'wide' || value === 'adaptive' ? value : 'narrow'
-}
-
 interface AppearanceSettingsProps {
   languageOptions: LanguagePackSummary[]
   languageValue: string
   systemLanguage: string
   themeValue?: string
   fontSizeValue?: number
-  chatContentWidthValue?: string
   onSaveLanguage: (language: string) => void | Promise<void>
   onSaveTheme: (theme: ThemeMode) => void | Promise<void>
   onSaveFontSize: (fontSize: number) => void | Promise<void>
-  onSaveChatContentWidth: (width: ChatContentWidth) => void | Promise<void>
 }
 
 export function AppearanceSettings({
@@ -42,11 +36,9 @@ export function AppearanceSettings({
   systemLanguage,
   themeValue,
   fontSizeValue,
-  chatContentWidthValue,
   onSaveLanguage,
   onSaveTheme,
-  onSaveFontSize,
-  onSaveChatContentWidth
+  onSaveFontSize
 }: AppearanceSettingsProps) {
   const { t } = useTranslation()
   const fontSize = normalizeUiFontSize(fontSizeValue)
@@ -62,11 +54,6 @@ export function AppearanceSettings({
     { value: 'system', label: t('settings.theme_system') },
     { value: 'light', label: t('settings.theme_light') },
     { value: 'dark', label: t('settings.theme_dark') }
-  ]
-  const chatContentWidthOptions = [
-    { value: 'narrow', label: t('settings.chat_content_width_narrow') },
-    { value: 'wide', label: t('settings.chat_content_width_wide') },
-    { value: 'adaptive', label: t('settings.chat_content_width_adaptive') }
   ]
 
   return (
@@ -116,19 +103,6 @@ export function AppearanceSettings({
         formatValue={(value) => `${value} px`}
         onChange={(value) => void onSaveFontSize(normalizeUiFontSize(value))}
       />
-      <div className="ui-form-row ui-form-row-narrow ui-form-row-fit-control">
-        <span>
-          <strong>{t('settings.chat_content_width')}</strong>
-          <small>{t('settings.chat_content_width_hint')}</small>
-        </span>
-        <SegmentedControl
-          ariaLabel={t('settings.chat_content_width')}
-          minWidth="var(--settings-control-width-narrow-preferred)"
-          options={chatContentWidthOptions}
-          value={normalizeChatContentWidth(chatContentWidthValue)}
-          onChange={(width) => void onSaveChatContentWidth(normalizeChatContentWidth(width))}
-        />
-      </div>
     </SettingsGroup>
   )
 }

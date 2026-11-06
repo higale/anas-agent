@@ -12,6 +12,7 @@ import { ChangeReadLane } from '../changeReadLane'
 import { captureCodeReview, codeReviewPrompt } from './codeReview'
 import { readRoundContents } from './roundChanges'
 import { randomUUID } from 'node:crypto'
+import type { ActivityDirectoryResult } from '@shared/activityDirectory'
 import { writeFile } from 'node:fs/promises'
 import type {
   AgentAccessMode,
@@ -47,8 +48,7 @@ import type {
   AgentWorkspaceState
 } from '@shared/agentTypes'
 import { compactToolCallProgress } from '@shared/agentEventReplay'
-import { displayActivityPage, displayEvent, displaySnapshot, displayRunSummary, displayTool, activityReference, activityInitialSize } from '@shared/activityDisplay'
-import { presentConversationMessage } from './conversationPresentation'
+import { displayEvent, displaySnapshot, displayRunSummary, displayTool, activityReference } from '@shared/activityDisplay'
 import type { AgentSubagentCallRecord } from './subagentTaskStore'
 import type { AgentApplicationReadModel } from './agentApplicationTypes'
 import { NativeRuntimeCoordinator } from './nativeRuntimeCoordinator'
@@ -656,22 +656,38 @@ export function registerAgentIpcHandlers(): void {
     return displayRunSummary(parsed.threadId, currentRuntime().loadEarlierActivities({ ...parsed, beforeSequence: Number.MAX_SAFE_INTEGER }))
   })
   const activityScope = { threadId: z.string().min(1), runId: z.string().min(1) }
-  handleAgentIpc('agent:activities:page', (_event, input: unknown): AgentRunActivity => {
-    const parsed = z.object({ ...activityScope, subagentId: z.string().min(1).optional(), before: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
-      after: z.number().int().min(-1).max(Number.MAX_SAFE_INTEGER).optional(), limit: z.number().int().min(1).max(activityInitialSize).optional() })
-      .strict().refine(value => value.before === undefined || value.after === undefined).parse(input)
-    return displayActivityPage(parsed.threadId, currentRuntime().loadActivityPage(parsed))
+  const activityReads = new WeakMap<WebContents, Map<string, AbortController>>()
+  handleAgentIpc('agent:activities:directory', async (event, input: unknown): Promise<ActivityDirectoryResult> => {
+    const parsed = z.object({ ...activityScope, requestId: z.string().min(1), subagentId: z.string().min(1).optional(),
+      parentId: z.string().min(1).optional(), version: z.string().min(1).optional() }).strict().parse(input)
+    let reads = activityReads.get(event.sender)
+    if (!reads) {
+      reads = new Map(); activityReads.set(event.sender, reads)
+      const owned = reads
+      event.sender.once('destroyed', () => { for (const controller of owned.values()) controller.abort(); owned.clear() })
+    }
+    reads.get(parsed.requestId)?.abort()
+    const controller = new AbortController(); reads.set(parsed.requestId, controller)
+    try { return await currentRuntime().loadActivityDirectory(parsed, controller.signal) }
+    catch (error) {
+      if (controller.signal.aborted && error === controller.signal.reason) return { cancelled: true }
+      throw error
+    }
+    finally { if (reads.get(parsed.requestId) === controller) reads.delete(parsed.requestId) }
+  })
+  handleAgentIpc('agent:activities:cancel', (event, input: unknown) => {
+    const requestId = z.string().min(1).parse(input)
+    activityReads.get(event.sender)?.get(requestId)?.abort()
   })
   handleAgentIpc('agent:activities:detail', (_event, input: unknown) => {
-    const parsed = z.object({ ...activityScope, kind: z.enum(['model', 'tool', 'summary', 'memory', 'skill', 'subagent']),
+    const parsed = z.object({ ...activityScope, kind: z.enum(['model', 'tool', 'summary', 'memory', 'skill', 'subagent', 'message']),
       id: z.string().min(1), subagentId: z.string().min(1).optional(),
-      field: z.enum(['text', 'reasoning', 'args', 'output', 'result', 'error']).optional() }).strict().parse(input)
+      field: z.enum(['text', 'reasoning', 'args', 'output', 'result', 'error', 'message']).optional() }).strict().parse(input)
     const database = currentRuntime().databaseForThread(parsed.threadId)
+    if (parsed.kind === 'message') return database.messages.displayMessageDetail(parsed.threadId, parsed.runId, parsed.id)
     if (parsed.kind === 'skill') {
-      if (database.messages.activities.getRun(parsed.runId)?.threadId !== parsed.threadId) throw new Error('Activity run belongs to another conversation.')
-      const message = database.messages.payload(parsed.threadId, parsed.id)
-      if (message?.context?.runId !== parsed.runId) throw new Error('Activity message belongs to another run.')
-      const presented = message && presentConversationMessage(message, parsed.id)
+      const presented = database.messages.runInputMessage(parsed.threadId, parsed.runId)
+      if (presented?.id !== parsed.id) throw new Error('Activity message belongs to another run.')
       if (!presented?.skillInvocation) throw new Error('Skill activity was not found.')
       return { text: presented.skillInvocation.promptText }
     }

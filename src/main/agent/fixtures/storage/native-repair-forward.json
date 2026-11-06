@@ -1,9 +1,9 @@
 {
   "name": "native-repair-forward",
-  "schemaVersion": 1,
+  "schemaVersion": 3,
   "format": "directory",
-  "bytes": 978849,
-  "sha256": "056c5c2f898417c6e920d8b158685a8bd2126c6535c6bd874a0eed5e5188dfc2",
+  "bytes": 1060769,
+  "sha256": "a79ec6d6bdbf94d347d3b4426a1a6446325b3988ffef40dd3311175fbfb343bd",
   "metadata": {
     "version": 1,
     "value": [
@@ -118,6 +118,11 @@
     "pathSanitization": {
       "description": "Replace the Windows fixture username with user and recalculate affected definition hashes and references; all other rows, identities, content and recovery state are unchanged.",
       "sourceSha256": "d2be8d405b382ade3254732975c4eaaed3fc34d74cfbffdffa8b7cc569897c9d"
+    },
+    "groupDirectory": {
+      "sourceSchemaVersion": 2,
+      "sourceSha256": "c4d3449500ff0ef70ba2449669c480558f8335bf419a9f0b70ab48ff9ed0514f",
+      "description": "Offline v3 display index creation; all pre-existing execution and resource rows verified unchanged."
     }
   }
 }

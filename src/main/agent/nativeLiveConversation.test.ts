@@ -7,6 +7,7 @@ import { expect, it, vi } from 'vitest'
 import type { ResolvedModelConfig } from '../../shared/types'
 import type { AgentRuntimeEvent } from '../../shared/agentTypes'
 import { conversationExecution, type ConversationExecutionServices } from '../../runtime/conversationExecution'
+import { createConversationMemoryProjector } from './conversationMemory'
 import { createConversationModelPreparation } from './conversationModelExecution'
 import { NativeConversationDatabase } from './nativeConversationDatabase'
 import { NativeRunHost } from './nativeRunHost'
@@ -41,8 +42,11 @@ it.each(['completed', 'failed', 'cancelled'] as const)('publishes native chat, m
   const owner = { threadId: randomUUID(), runId: randomUUID() }, inputId = `${owner.runId}:input`, events: AgentRuntimeEvent[] = []
   const host = new NativeRunHost(database, new ManagedCallService(database.managed, database.results), { push: event => events.push(event) })
   const secondRequest = deferred(), release = deferred(), todos = [{ content: 'Finish task', status: 'in_progress' as const }]
-  const recall = { query: 'Build preferences', promptText: '<relevant_memories>Use npm run build</relevant_memories>', memoryCount: 1 }
+  let preference = 'Use npm run build'
+  const memory = createConversationMemoryProjector({ enabled: true, projectId: 'project',
+    store: { preferences: { read: scope => ({ scope, content: preference, hash: preference }) } } })
   const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+    preference = 'Use npm run verify'
     if (fetch.mock.calls.length === 1) return stream({ content: 'Working', reasoning_content: 'Check the plan', tool_calls: [
       { index: 0, id: 'plan-call', type: 'function', function: { name: 'write_todos', arguments: JSON.stringify({ todos }) } }
     ] }, true)
@@ -53,7 +57,7 @@ it.each(['completed', 'failed', 'cancelled'] as const)('publishes native chat, m
   database.runs.createThreadAndRun({ ...owner, thread: {}, submissionId: randomUUID(), message: { id: inputId,
     value: { id: inputId, kind: 'user', content: 'Help with task', context: { runId: owner.runId } } } })
   const prepare = createConversationModelPreparation({ store: database.runs.store, resolveModel: async () => model,
-    systemPrompt: () => 'Instructions', tools: () => [], requiresTools: () => false, maxModelCalls: 0, providerFetch: fetch,
+    systemPrompt: () => 'Instructions', memory, tools: () => [], requiresTools: () => false, maxModelCalls: 0, providerFetch: fetch,
     streaming: true, outputLanguage: { code: 'en', name: 'English' }, compressionTracking: {},
     saveToolResult: async () => { throw new Error('Unexpected overflow') } })
   const executed = vi.fn<ConversationExecutionServices['executeTool']>(async (call, _state, _request, observer) => {
@@ -63,25 +67,24 @@ it.each(['completed', 'failed', 'cancelled'] as const)('publishes native chat, m
     return { kind: 'result', message: { id: 'plan-result', value: { kind: 'tool', resultFor: call.providerCallId, content: 'Plan saved' } }, update: { todos } }
   })
   try {
-    const handle = host.start(owner, 'input', async callbacks => {
+    const handle = host.start(owner, 'input', async () => {
       const services: ConversationExecutionServices = { store: database.runs.store, enter: database.execution.enter,
-        prepareModel: async (state, request, observer) => {
-          if (!state.context.modelCalls) callbacks.onMemoryRecall(recall)
-          return prepare(state, request, observer)
-        }, afterModel: async () => ({ kind: 'complete' }), prepareTools: async state => ({ calls: state.calls.map(call => ({ callId: call.id, args: call.args })) }),
+        prepareModel: prepare, afterModel: async () => ({ kind: 'complete' }), prepareTools: async state => ({ calls: state.calls.map(call => ({ callId: call.id, args: call.args })) }),
         executeTool: executed, directions: async () => [], drain: async () => {}, retry: { maxRetries: 0 } }
       return { execution: conversationExecution(services), dispose: async () => {} }
     })
     await secondRequest.promise
+    const prompts = fetch.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).messages[0].content)
+    expect(prompts[0]).toContain('Use npm run build')
+    expect(prompts[1]).toContain('Use npm run verify')
+    expect(prompts[1]).not.toContain('Use npm run build')
     const types = events.map(event => event.type), starts = events.filter(event => event.type === 'model_started')
     expect(starts).toHaveLength(2)
-    expect(types.indexOf('run_started')).toBeLessThan(types.indexOf('memory_recalled'))
-    expect(types.indexOf('memory_recalled')).toBeLessThan(types.indexOf('model_started'))
     expect(types.indexOf('tool_completed')).toBeLessThan(types.lastIndexOf('model_started'))
     expect(events).toContainEqual(expect.objectContaining({ type: 'todos_updated', todos }))
     const live = host.readSnapshot(owner.threadId)
     expect(live.todos).toEqual(todos)
-    expect(live.activities[0].memoryRecalls).toMatchObject([recall])
+    expect(live.activities[0].memoryRecalls ?? []).toEqual([])
     expect(live.activities[0].models.at(-1)).toMatchObject({ status: 'running', text: '' })
     expect(live.activities[0].tools).toMatchObject([{ status: 'completed', output: 'Plan saved' }])
     if (outcome === 'cancelled') expect(host.cancel(owner)).toBe(true)

@@ -27,6 +27,8 @@
   "log_level": "info",
   "log_retention_days": 14,
   "max_model_calls_per_run": 0,
+  "running_process_display": "expanded",
+  "show_model_rounds": true,
   "memory_mode": "background",
   "memory_model_id": null,
   "show_memory_activity_in_titlebar": true,

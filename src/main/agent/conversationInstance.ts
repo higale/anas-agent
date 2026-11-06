@@ -21,7 +21,6 @@ import { prepareAgentRuntimeResources, createAgentAccessModeResolver, type Agent
 import { createManagedToolRuntime, type ManagedResultStorage } from './managedToolRuntime'
 import { withPluginToolResources } from './pluginPackageResources'
 import { stripConversationAttachments } from './conversationAttachments'
-import type { MemoryRecallDetails } from './conversationMemory'
 import { createConversationModelPreparation, conversationContextSource, type ConversationModelExecutionOptions } from './conversationModelExecution'
 import { createConversationToolExecutor, type ConversationToolExecutionOptions } from './conversationToolExecution'
 import { prepareConversationToolBatch, type ConversationToolPreparationOptions } from './conversationToolPreparation'
@@ -53,7 +52,6 @@ export interface ConversationInstanceContext extends Omit<AgentResourceContext, 
   review?: CodeReviewSnapshot
   manualCompression?: boolean
   onContextStatus?(status: AgentContextStatus): void
-  onMemoryRecall?(details: MemoryRecallDetails & { agentName?: string }): void
   providerFetch?: typeof fetch
 }
 

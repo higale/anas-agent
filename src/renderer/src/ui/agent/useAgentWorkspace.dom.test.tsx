@@ -402,6 +402,19 @@ describe('useAgentWorkspace startup restoration', () => {
     await waitFor(() => expect(api.setWorkspace).toHaveBeenCalledTimes(2))
   })
 
+  it('keeps the workspace projection stable while a visible reply continues streaming', async () => {
+    const api = installAgentApi({ mode: 'thread', threadId: thread.id })
+    api.getThread.mockResolvedValue(runningSnapshot('Reply'))
+    const { result } = renderHook(() => useAgentWorkspace({ onAppError: vi.fn() }))
+    await waitFor(() => expect(result.current.activeRun?.models).toHaveLength(1))
+    const previous = result.current.activeRun
+    act(() => {
+      for (let index = 0; index < 1000; index++) api.emit({ type: 'model_delta', threadId: thread.id, runId: 'run-1',
+        modelId: 'model-1', delta: { type: 'text', text: 'more' } })
+    })
+    expect(result.current.activeRun).toBe(previous)
+  })
+
   it('projects argument snapshots without creating executable tools, then clears them', async () => {
     const initial = runningSnapshot('')
     initial.activities[0].models[0].round = 42

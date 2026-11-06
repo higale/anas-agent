@@ -145,6 +145,24 @@ it('repairs native version fields through preserved directory replacement withou
   expect(restored.conversationForThread(f.pending.id).runs.readRunInput({ threadId: f.pending.id, runId: f.pendingRunId })).toMatchObject({ value: { content: 'Pending' } })
 }, 20_000)
 
+it('rebuilds damaged display metadata only through preserved explicit repair', async () => {
+  const f = await fixture(); f.storage.close()
+  mutate(f.file, 'DELETE FROM agent_display_headers')
+  mutate(f.pendingFile, 'UPDATE agent_run_input_intents SET display_json=NULL')
+  const before = await readFile(f.file)
+  await expect(validateRestoredDataDirectory(f.root)).rejects.toThrow(/display (header|projection)/)
+  const inspection = await inspectProjectStorageRepair(f.root, f.projects, f.projects)
+  expect(inspection.issues).toEqual([])
+  expect(inspection.fields.filter(field => field.includes('display directory'))).toHaveLength(2)
+  expect(await readFile(f.file)).toEqual(before)
+  const preserved = await directory()
+  const result = await repairProjectStorage(f.root, f.projects, f.projects, () => preserveRecoveryData(f.root, preserved))
+  expect(result.unresolved).toEqual([])
+  await validateRestoredDataDirectory(f.root)
+  const restored = open(f.root)
+  expect(restored.conversationForThread(f.thread.id).readSnapshot(f.thread.id).messages).toEqual(f.snapshot.messages)
+})
+
 it('preserves an unrepairable native conversation and salvages independent version errors', async () => {
   const f = await fixture(); f.storage.close()
   mutate(f.file, 'PRAGMA foreign_keys=OFF; DELETE FROM execution_message_bodies')
@@ -156,6 +174,6 @@ it('preserves an unrepairable native conversation and salvages independent versi
   expect(await readFile(f.file)).toEqual(damaged)
   expect(await readFile(join(result.preservationPath, 'data/db/projects/default-workspace/conversations', f.thread.id, 'conversation.sqlite'))).toEqual(damaged)
   const raw = new Database(f.pendingFile, { readonly: true })
-  try { expect(raw.pragma('user_version', { simple: true })).toBe(1) } finally { raw.close() }
+  try { expect(raw.pragma('user_version', { simple: true })).toBe(3) } finally { raw.close() }
   NativeConversationDatabase.validateBackup(f.pendingFile, getAgentAttachmentsDir(f.pending.id, f.root), new Set([DEFAULT_WORKSPACE_PROJECT_ID]), f.pending.id)
 })

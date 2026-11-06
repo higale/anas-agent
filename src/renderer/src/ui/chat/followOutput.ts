@@ -1,11 +1,18 @@
+import { createContext } from 'react'
+
 export type FollowOutputState = {
   current: boolean
 }
+
+/** The scroll container owns follow intent, including while its layout is hidden. */
+export const FollowOutputContext = createContext<FollowOutputState | undefined>(undefined)
 
 type ScrollPanel = Pick<HTMLElement, 'clientHeight' | 'scrollHeight' | 'scrollTop'>
 
 export type FollowOutputPosition = {
   scrollTop: number
+  scrollHeight: number
+  clientHeight: number
 }
 
 type FollowOutputObserverOptions = {
@@ -21,7 +28,9 @@ export function isNearScrollBottom(panel: ScrollPanel, threshold = 96): boolean 
 
 export function followOutputPosition(panel: ScrollPanel): FollowOutputPosition {
   return {
-    scrollTop: panel.scrollTop
+    scrollTop: panel.scrollTop,
+    scrollHeight: panel.scrollHeight,
+    clientHeight: panel.clientHeight
   }
 }
 
@@ -33,12 +42,17 @@ export function updateFollowOutputAfterScroll(
   threshold = 96
 ): FollowOutputPosition {
   const currentPosition = followOutputPosition(panel)
+  // Native anchoring can increase scrollTop while preserving the reading
+  // position. A layout-driven scroll must not resume a paused follower.
+  const layoutChanged = currentPosition.scrollHeight !== previousPosition.scrollHeight
+    || currentPosition.clientHeight !== previousPosition.clientHeight
   if (
     currentPosition.scrollTop < previousPosition.scrollTop
     && userInitiated
   ) {
     followOutput.current = false
-  } else if (currentPosition.scrollTop > previousPosition.scrollTop && isNearScrollBottom(panel, threshold)) {
+  } else if (currentPosition.scrollTop > previousPosition.scrollTop
+    && (userInitiated || !layoutChanged) && isNearScrollBottom(panel, threshold)) {
     followOutput.current = true
   }
   return currentPosition

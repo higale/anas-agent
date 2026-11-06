@@ -95,16 +95,18 @@ export function usePanelDraft<T>(key: string): [T | undefined, Dispatch<SetState
   return [value, setValue]
 }
 
-export function usePanelDisclosure(key: string, defaultOpen: boolean) {
-  const [open, setOpen] = usePanelState(`expanded:${key}`, defaultOpen)
-  const [previousDefault, setPreviousDefault] = useState(defaultOpen)
-  // A running entry opens by default and collapses on completion. Between
-  // status transitions, preserve the reader's choice, including after remount.
-  if (previousDefault !== defaultOpen) {
-    setPreviousDefault(defaultOpen)
-    setOpen(defaultOpen)
+export function usePanelDisclosure(key: string, defaultOpen: boolean, phase?: boolean) {
+  const [state, setState] = usePanelState(`expanded:${key}`, { defaultOpen, phase, open: defaultOpen })
+  // Default-open changes or an explicit process phase reset the choice once.
+  // Otherwise retain the reader's choice across virtualization.
+  if (state.defaultOpen !== defaultOpen || state.phase !== phase) setState({ defaultOpen, phase, open: defaultOpen })
+  return {
+    open: state.open,
+    onToggle(event: React.SyntheticEvent<HTMLDetailsElement>) {
+      if (event.target !== event.currentTarget) return
+      if (event.currentTarget.open !== state.open) setState({ defaultOpen, phase, open: event.currentTarget.open })
+    }
   }
-  return { open, onToggle: (event: React.SyntheticEvent<HTMLDetailsElement>) => setOpen(event.currentTarget.open) }
 }
 
 export function usePanelCheckpoint(save: PanelCheckpoint) {

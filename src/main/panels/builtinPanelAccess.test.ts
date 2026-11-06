@@ -22,12 +22,16 @@ describe('built-in panel context boundaries', () => {
     expect(builtinPanelCanInvoke(files, 'agent:changes:roundContents', [{ threadId: 'thread-b' }])).toBe(false)
     expect(builtinPanelCanInvoke({ kind: 'files', projectId: 'project-a' }, 'agent:changes:rounds', [{}])).toBe(false)
   })
-  it('binds activity pagination and deferred details to the selected run', () => {
-    for (const channel of ['agent:activities:get', 'agent:activities:subagent', 'agent:activities:page', 'agent:activities:detail']) {
+  it('binds activity directories and deferred details to the selected run', () => {
+    for (const channel of ['agent:activities:get', 'agent:activities:subagent', 'agent:activities:directory', 'agent:activities:detail']) {
       expect(builtinPanelCanInvoke(subagent, channel, [{ threadId: 'thread-a', runId: 'run-a' }])).toBe(true)
       expect(builtinPanelCanInvoke(subagent, channel, [{ threadId: 'thread-a', runId: 'run-b' }])).toBe(false)
       expect(builtinPanelCanInvoke(subagent, channel, [{ threadId: 'thread-b', runId: 'run-a' }])).toBe(false)
     }
+  })
+  it('allows subagent pages to cancel their own pending activity reads', () => {
+    expect(builtinPanelCanInvoke(subagent, 'agent:activities:cancel', ['request-a'])).toBe(true)
+    expect(builtinPanelCanInvoke(files, 'agent:activities:cancel', ['request-a'])).toBe(false)
   })
   it('resolves image previews in the original project only', () => {
     expect(builtinPanelCanInvoke(subagent, 'files:readAttachmentPreview', ['result.png', { projectId: 'project-a' }])).toBe(true)

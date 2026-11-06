@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { boundedDisplayRun, displayActivityPage, displayRunSummary, displayEvent } from './activityDisplay'
 import { applyRunActivityEvent } from './agentActivityProjection'
-import type { AgentRunActivity } from './agentTypes'
+import type { AgentRunActivity, AgentRuntimeEvent } from './agentTypes'
 
 function run(): AgentRunActivity {
   return { runId: 'r', operation: 'agent', status: 'completed', createdAt: '', updatedAt: '',
@@ -39,6 +39,19 @@ describe('activity display ownership', () => {
       .toMatchObject({ delta: { text: '' } })
     expect(JSON.stringify(displayEvent({ type: 'model_completed', threadId: 'thread', runId: 'r', model: run().models[0] }))).not.toContain('_BODY')
   })
+  it('preserves visible text across replay projections and original spacing in raw deltas', () => {
+    const source = run()
+    source.models[0] = { ...source.models[0], status: 'running', text: '' }
+    let raw = source, projected = displayActivityPage('thread', source)
+    for (const [text, visible] of [[' \n', false], ['  reply', true], ['\t', true]] as const) {
+      const event: AgentRuntimeEvent = { type: 'model_delta', threadId: 'thread', runId: 'r', modelId: 'm', delta: { type: 'text', text } }
+      raw = applyRunActivityEvent(raw, event)
+      projected = applyRunActivityEvent(projected, displayEvent(displayEvent(event)))
+      expect(projected.models[0]).toMatchObject({ hasText: visible, text: '' })
+      expect(displayActivityPage('thread', raw).models[0].hasText).toBe(visible)
+    }
+    expect(raw.models[0].text).toBe(' \n  reply\t')
+  })
   it('keeps total counts through eviction without recounting replayed completions', () => {
     let current = boundedDisplayRun('thread', { ...run(), models: [], tools: [], subagents: [], summaries: [], memoryRecalls: [] })
     for (let sequence = 0; sequence < 700; sequence++) current = boundedDisplayRun('thread', applyRunActivityEvent(current,
@@ -49,6 +62,22 @@ describe('activity display ownership', () => {
       { type: 'tool_completed', threadId: 'thread', runId: 'r', sequence: 0, call: { id: '0', name: 'probe', args: 'BODY' }, output: 'RESULT' }))
     expect(current.display?.toolCount).toBe(700)
     expect(current.tools).toHaveLength(500)
+  })
+
+  it.each(['text', 'reasoning'] as const)('does not republish unchanged %s visibility for every streamed token', channel => {
+    const source = run()
+    source.models[0] = { ...source.models[0], status: 'running', text: '', reasoning: '' }
+    const empty = displayActivityPage('thread', source)
+    const event: AgentRuntimeEvent = { type: 'model_delta', threadId: 'thread', runId: 'r', modelId: 'm',
+      delta: { type: channel, text: 'first' } }
+    const visible = applyRunActivityEvent(empty, displayEvent(event))
+    expect(visible).not.toBe(empty)
+    expect(visible.models[0][channel === 'text' ? 'hasText' : 'hasReasoning']).toBe(true)
+    for (let index = 0; index < 1000; index++) expect(applyRunActivityEvent(visible, displayEvent(event))).toBe(visible)
+    expect(applyRunActivityEvent(source, event).models[0][channel]).toBe('first')
+    expect(applyRunActivityEvent(visible, { ...event, subagentId: 'other' })).toBe(visible)
+    const completed = { ...visible, models: visible.models.map(model => ({ ...model, status: 'completed' as const })) }
+    expect(applyRunActivityEvent(completed, event)).toBe(completed)
   })
 
 })

@@ -126,7 +126,7 @@ it('routes native submissions, hidden children and queues from committed notific
   expect(AgentStorage.validateCatalogBackup(getAgentCatalogFile(root), new Set([thread.projectId]))).toEqual([thread.id])
   const raw = new Database(getAgentConversationDatabaseFile(thread.id, root), { readonly: true })
   try {
-    expect(raw.pragma('user_version', { simple: true })).toBe(1)
+    expect(raw.pragma('user_version', { simple: true })).toBe(3)
     expect(raw.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name IN ('message_bodies','checkpoints')").all()).toEqual([])
   } finally { raw.close() }
 })

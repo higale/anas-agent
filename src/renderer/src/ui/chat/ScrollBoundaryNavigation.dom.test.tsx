@@ -27,36 +27,6 @@ function scrollHarness() {
 }
 
 describe('scroll boundary navigation', () => {
-  it('keeps automatic following paused until a handled bottom navigation has positioned its page', () => {
-    const { panel, getByText, following } = scrollHarness()
-    panel.scrollTo = vi.fn()
-    let positioned!: () => void
-    panel.addEventListener('activity-boundary', event => {
-      positioned = (event as CustomEvent).detail.onPosition
-      event.preventDefault()
-    })
-    fireEvent.click(getByText('Last'))
-    expect(following.current).toBe(false)
-    expect(panel.scrollTo).not.toHaveBeenCalled()
-    act(() => positioned())
-    expect(following.current).toBe(true)
-  })
-
-  it('lets activity paging own the positioning instead of starting a competing scroll', () => {
-    const { panel, getByText, following } = scrollHarness()
-    panel.scrollTo = vi.fn()
-    const edges: string[] = []
-    panel.addEventListener('activity-boundary', event => {
-      edges.push((event as CustomEvent).detail.edge)
-      event.preventDefault()
-    })
-    fireEvent.click(getByText('First'))
-    expect(following.current).toBe(false)
-    fireEvent.click(getByText('Last'))
-    expect(edges).toEqual(['first', 'latest'])
-    expect(panel.scrollTo).not.toHaveBeenCalled()
-  })
-
   it('scrolls directly to the panel boundary when no activity window handles it', () => {
     const { panel, getByText } = scrollHarness()
     panel.scrollTo = vi.fn()
@@ -97,6 +67,34 @@ describe('scroll boundary navigation', () => {
     expect(following.current).toBe(false)
     fireEvent.wheel(panel, { deltaY: 10 })
     panel.scrollTop = 700
+    fireEvent.scroll(panel)
+    expect(following.current).toBe(true)
+  })
+
+  it('keeps following paused when native anchoring adjusts a near-bottom reading position', () => {
+    const { panel, following } = scrollHarness()
+    fireEvent.wheel(panel, { deltaY: -10 })
+    panel.scrollTop = 690
+    fireEvent.scroll(panel)
+    expect(following.current).toBe(false)
+    Object.defineProperty(panel, 'scrollHeight', { configurable: true, value: 1200 })
+    panel.scrollTop = 890
+    fireEvent.scroll(panel)
+    expect(following.current).toBe(false)
+    fireEvent.wheel(panel, { deltaY: 10 })
+    panel.scrollTop = 900
+    fireEvent.scroll(panel)
+    expect(following.current).toBe(true)
+  })
+
+  it('resumes after keyboard navigation to the bottom following content growth', () => {
+    const { panel, following } = scrollHarness()
+    fireEvent.wheel(panel, { deltaY: -10 })
+    panel.scrollTop = 690
+    fireEvent.scroll(panel)
+    Object.defineProperty(panel, 'scrollHeight', { configurable: true, value: 1200 })
+    fireEvent.keyDown(panel, { key: 'End' })
+    panel.scrollTop = 900
     fireEvent.scroll(panel)
     expect(following.current).toBe(true)
   })

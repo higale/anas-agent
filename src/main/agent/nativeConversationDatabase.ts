@@ -1,4 +1,6 @@
 import { SubagentActivityProjection } from './subagentActivityProjection'
+import { ActivityDirectoryReader } from './activityDirectoryReader'
+import { activityDisplayProjection } from './activityDisplayProjection'
 import { randomUUID } from 'node:crypto'
 import { ResourceCleanupStore } from './resourceCleanupStore'
 import { BackgroundTaskStore } from './backgroundTaskStore'
@@ -63,6 +65,7 @@ export class NativeConversationDatabase {
   readonly messages: NativeMessageReader
   readonly subagentProjection: SubagentActivityProjection
   readonly activityProjection: RunActivityProjection
+  readonly activityDirectory: ActivityDirectoryReader
   readonly results: NativeManagedResults
   readonly background: BackgroundTaskStore
   readonly managed: ManagedCallStore
@@ -82,6 +85,7 @@ export class NativeConversationDatabase {
       assertCleanupStorageIntegrity(database)
     })()
     database.pragma('journal_mode=WAL')
+    activityDisplayProjection(database).resetTransient()
     const projection = new NativeMessageProjection(database)
     this.runs = new NativeRunOwner(database, commit => {
       projection.commit(commit)
@@ -103,6 +107,7 @@ export class NativeConversationDatabase {
     this.queue = new QueuedInputStore(database, attachmentRoot, () => this.notifyChanged())
     this.summaries = new ContextSummaryStore(database)
     this.activityProjection = new RunActivityProjection(this.messages.activities, this.messages.observations, this.summaries)
+    this.activityDirectory = new ActivityDirectoryReader(database)
     this.subagentProjection = new SubagentActivityProjection(database, this.runs.subagents, this.messages.observations, this.messages.activities, this.activityProjection)
     this.resources = new ConversationResourceReader(database, attachmentRoot, options.memoryStore,
       new FileChangeLedger(database, options.onFileChanges, (threadId, runId) => this.messages.roundSummary(threadId, runId)), options.fileEditStore)
@@ -164,12 +169,12 @@ export class NativeConversationDatabase {
     assertCleanupStorageIntegrity(this.database)
   }
 
-  readActivityWindow(threadId: string, runId: string, beforeSequence: number, options: NativeSnapshotOptions = {}, page?: import('../../shared/agentTypes').AgentActivityPageInput): AgentRunActivity {
+  readActivityWindow(threadId: string, runId: string, beforeSequence: number, options: NativeSnapshotOptions = {}): AgentRunActivity {
     if (!Number.isSafeInteger(beforeSequence) || beforeSequence < 0) throw new Error('The activity window cursor is invalid.')
     return this.database.transaction(() => {
       const run = this.messages.activities.getRun(runId)
       if (!run || run.threadId !== threadId) throw new Error(`Run ${runId} was not found in thread ${threadId}.`)
-      const activity = page ? this.messages.activities.getDisplayPage(page) : this.messages.activities.getRunActivityWindow(runId, { beforeSequence })
+      const activity = this.messages.activities.getRunActivityWindow(runId, { beforeSequence })
       const normalized = normalizeRootActivityProjection(activity, rootActivityEvidence(this.messages.activityMessages(runId, activity), runId),
         options.executingRunId === runId, new RunActivityMetadata(this.database).canonicalChildren(runId), options.activeSubagentIds)
       return this.decorateActivity(normalized, options)

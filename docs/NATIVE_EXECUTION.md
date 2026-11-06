@@ -29,7 +29,7 @@
 
 应用数据字段使用 snake_case，TypeScript 使用 camelCase，边界显式转换。供应商原始载荷保留其协议字段，不混入应用状态字段。非 JSON 附件值必须显式编码，至少保留当前已支持的 Map、Set、Uint8Array、日期、正则和错误数据；不让任意业务 JSON 被误识别成内部存储标记。
 
-`runtime/conversationMessage.ts` 定义应用消息数据，`providers/conversationInput.ts` 由它生成三种模型协议的请求；实际模型发送与容量估算已使用该路径。完整内容、调用、原生回放、artifact 和应用上下文分别保存，显示块只是派生结果。原生产品使用执行版本 v1。
+`runtime/conversationMessage.ts` 定义应用消息数据，`providers/conversationInput.ts` 由它生成三种模型协议的请求；实际模型发送与容量估算已使用该路径。完整内容、调用、原生回放、artifact 和应用上下文分别保存，显示块只是派生结果。当前会话数据库为 v3，显示目录与正文在同一事务中提交，执行仍以正文为准。
 
 当前编码用无歧义的结构保存类型，分别验证普通对象与类型值的往返，不将普通业务 JSON 误识别成内部标记。
 

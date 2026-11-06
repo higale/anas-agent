@@ -34,16 +34,13 @@ async function verifyCurrentStorage(repositoryRoot, executablePath) {
         }
         return originalCompile.call(this, content, filename)
       }
-      globalThis.__anasStorageProbe = { snapshots: [], activityPages: [], nativeRequire }
+      globalThis.__anasStorageProbe = { snapshots: [], activityDirectories: [], nativeRequire }
       const originalHandle = ipcMain.handle.bind(ipcMain)
       ipcMain.handle = (channel, handler) => originalHandle(channel, async (...args) => {
         const started = performance.now()
         try {
           const value = await handler(...args)
-          if (channel === 'agent:activities:page') globalThis.__anasStorageProbe.activityPages.push({
-            beforeSequence: args[1].before, limit: args[1].limit, startSequence: value.activityWindow.startSequence,
-            count: value.models.length + value.tools.length + value.subagents.length + (value.summaries?.length || 0) + (value.memoryRecalls?.length || 0)
-          })
+          if (channel === 'agent:activities:directory' && !value.cancelled) globalThis.__anasStorageProbe.activityDirectories.push({ count: value.items.length, version: value.version })
           return value
         }
         finally {
@@ -127,6 +124,23 @@ async function verifyCurrentStorage(repositoryRoot, executablePath) {
     await longThread.click()
     await expect(page.locator('.topbar')).toContainText('Storage long conversation')
     const initialSnapshot = await page.evaluate((id) => globalThis.gale.agent.threads.get(id), seeded.threads[0])
+    // Hold only this read so cancellation can be tested across the real IPC
+    // boundary without depending on which database yield wins the race.
+    await application.evaluate(() => {
+      const runtime = globalThis.__anasStorageAccess.currentRuntime(), read = runtime.loadActivityDirectory.bind(runtime)
+      globalThis.__anasStorageProbe.restoreDirectory = () => { runtime.loadActivityDirectory = read }
+      runtime.loadActivityDirectory = (input, signal) => input.requestId === 'cancel-probe'
+        ? new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }))
+        : read(input, signal)
+    })
+    try {
+      const cancelled = await page.evaluate(async ({ threadId, runId }) => {
+        const pending = globalThis.gale.agent.activities.directory({ threadId, runId, requestId: 'cancel-probe' })
+        await globalThis.gale.agent.activities.cancel('cancel-probe')
+        return pending
+      }, { threadId: seeded.threads[0], runId: initialSnapshot.activities[0].runId })
+      assert.deepEqual(cancelled, { cancelled: true }, 'Intentional cancellation resolves without an Electron handler error.')
+    } finally { await application.evaluate(() => globalThis.__anasStorageProbe.restoreDirectory()) }
     assert.equal(initialSnapshot.messageWindow.total, count)
     assert.ok(initialSnapshot.messages.length < count, 'The UI snapshot must page the real database, not load the entire conversation.')
     const initialActivity = initialSnapshot.activities[0]
@@ -138,15 +152,10 @@ async function verifyCurrentStorage(repositoryRoot, executablePath) {
       if (await toggle.count()) await toggle.click()
     }
     await expandActivities()
-    await expect.poll(() => page.locator('.agent-activity-model').count()).toBeGreaterThan(0)
-    const initialVisibleActivities = await page.locator('.agent-activity-model').count()
-    await page.getByRole('button', { name: /^(加载更早活动|Load earlier activities)$/ }).click()
-    await expect.poll(() => page.locator('.agent-activity-model').count()).toBeGreaterThan(initialVisibleActivities)
-    const pages = await application.evaluate(() => globalThis.__anasStorageProbe.activityPages)
-    assert.ok(pages.some(item => item.limit === 300), 'Expanding must read a bounded latest page through real IPC.')
-    const earlierPage = pages.find(item => item.beforeSequence !== undefined)
-    assert.equal(earlierPage.count, 100)
-    assert.ok(earlierPage.startSequence < earlierPage.beforeSequence)
+    await expect.poll(() => page.locator('.agent-activity-model-message').count()).toBeGreaterThan(0)
+    const directories = await application.evaluate(() => globalThis.__anasStorageProbe.activityDirectories)
+    assert.ok(directories.some(item => item.count >= count / 2 - 1), 'The real directory includes the complete run metadata.')
+    assert.ok(await page.locator('[data-timeline-row]').count() < 150, 'The complete directory mounts only viewport rows.')
 
     await page.evaluate(() => {
       const probe = globalThis.__anasStorageFrames = { gaps: [], last: performance.now(), running: true }
@@ -216,8 +225,10 @@ async function verifyCurrentStorage(repositoryRoot, executablePath) {
       await longThread.click()
       await expect(page.locator('.topbar')).toContainText('Storage long conversation')
       await expandActivities()
-      await expect.poll(() => page.locator('.agent-activity-model').count()).toBeGreaterThan(0)
-      assert.ok(await page.locator('.agent-activity-model').count() <= 500, 'Reopening must not accumulate prior activity pages.')
+      // Concurrent writes can move the original run outside the message window.
+      // Reopening shows current replies; offscreen historical bodies stay unmounted.
+      await expect.poll(() => page.locator('.message-sequence.assistant').count()).toBeGreaterThan(0)
+      assert.ok(await page.locator('[data-timeline-row]').count() < 150, 'Reopening mounts only the viewport.')
       const snapshot = await page.evaluate((id) => globalThis.gale.agent.threads.get(id), seeded.threads[0])
       assert.ok(snapshot.messageWindow.total > count)
       assert.ok(snapshot.messages.length < count)
@@ -229,7 +240,7 @@ async function verifyCurrentStorage(repositoryRoot, executablePath) {
       const max = (values) => Math.max(0, ...values)
       return { hydrateMs: probe.hydrateMs, appendCount: probe.appendMs.length, appendMaxMs: max(probe.appendMs),
         mainDelayMaxMs: max(probe.delays), snapshotMaxMs: max(probe.snapshots), finalCount: probe.finalCount,
-        activityPages: probe.activityPages, error: probe.error }
+        activityDirectories: probe.activityDirectories, error: probe.error }
     })
     const frameMaxMs = await page.evaluate(() => { const probe = globalThis.__anasStorageFrames; probe.running = false; return Math.max(0, ...probe.gaps) })
     console.log('Native storage timings:', JSON.stringify({ ...result, frameMaxMs, interactionMs }))

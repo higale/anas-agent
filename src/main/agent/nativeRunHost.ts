@@ -302,8 +302,8 @@ export class NativeRunHost {
     return this.database.readActivityWindow(threadId, runId, beforeSequence, this.snapshotOptions(threadId))
   }
 
-  loadActivityPage(input: import('../../shared/agentTypes').AgentActivityPageInput) {
-    return this.database.readActivityWindow(input.threadId, input.runId, input.before ?? Number.MAX_SAFE_INTEGER, this.snapshotOptions(input.threadId), input)
+  loadActivityDirectory(input: import('../../shared/activityDirectory').ActivityDirectoryInput, signal: AbortSignal) {
+    return this.database.activityDirectory.read(input, signal)
   }
 
   async readSnapshotWithPreviews(threadId: string, primaryFolder?: string, startIndex?: number) {

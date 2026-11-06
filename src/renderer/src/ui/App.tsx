@@ -1,7 +1,7 @@
 import { userGuideId } from '@shared/helpDocuments'
 import { unwrapProjectResult } from '@shared/projectOperation'
 import { UserInputDialog } from './agent/UserInputDialog'
-import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { FormEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import { getLanguageOptions, systemLanguagePreference } from '../i18n'
 import {
@@ -75,11 +75,6 @@ import { AppIssueTray, InitialAppGate } from './InitialAppStatus'
 import { initialAppCriticalPhase } from './initialAppLoad'
 import { DataRestoreView } from './DataRestoreView'
 
-type ChatScrollSnapshot = {
-  bottomDistance: number
-  top: number
-}
-
 function orderProjects(projects: Project[]): Project[] {
   return [...projects].sort(compareProjects)
 }
@@ -140,8 +135,6 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
   const [memorySettingsView] = useState(() => new Map<string, unknown>())
   const mcpListRef = useRef<HTMLDivElement | null>(null)
   const followOutputRef = useRef(true)
-  const nextFollowOutputScrollBehaviorRef = useRef<ScrollBehavior>('smooth')
-  const chatScrollSnapshotRef = useRef<ChatScrollSnapshot | undefined>(undefined)
   const zoomHudTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const sidebarSectionMutationPendingRef = useRef(false)
   const submissionLockRef = useRef(new SynchronousSubmissionLock())
@@ -182,7 +175,6 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
     setInput
   } = useComposerDrafts(composerDraftKey, draftProject?.kind === 'workspace' ? draftProject.accessMode : undefined)
   const speech = useAgentSpeech(config?.settings.speechReply, agent.activeThreadId)
-  const generationBusy = agent.activeRun?.status === 'running'
   const threadLocked = submissionBusy || Boolean(agent.activeRun)
     || isAgentThreadLocked(agent.activeThread?.status)
   const { modelConfigId: draftModelConfigId, modelParameterPresetId: draftModelParameterPresetId } = draftModelSelection
@@ -304,35 +296,11 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
     settingsTab,
     t
   ])
-  useLayoutEffect(() => {
-    if (settingsOpen) return
-    const panel = chatPanelRef.current
-    const snapshot = chatScrollSnapshotRef.current
-    if (!panel || !snapshot) return
-    chatScrollSnapshotRef.current = undefined
-    if (snapshot.bottomDistance < 96) {
-      panel.scrollTop = panel.scrollHeight
-      return
-    }
-    panel.scrollTop = Math.min(snapshot.top, Math.max(0, panel.scrollHeight - panel.clientHeight))
-  }, [settingsOpen])
-
-  function captureChatScrollSnapshot(): void {
-    const panel = chatPanelRef.current
-    if (!panel) return
-    chatScrollSnapshotRef.current = {
-      bottomDistance: panel.scrollHeight - panel.scrollTop - panel.clientHeight,
-      top: panel.scrollTop
-    }
-  }
-
   function openSettings(): void {
-    if (!settingsOpen) captureChatScrollSnapshot()
     setSettingsOpen(true)
   }
 
   function openGeneralSettings(): void {
-    if (!settingsOpen) captureChatScrollSnapshot()
     setAppMenuOpen(false)
     setSettingsTab('general')
     setSettingsOpen(true)
@@ -517,7 +485,6 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
   }), [reloadPanelThreads, openPanelThread, ensureModelDraftCanLeave, closeSettings, t])
 
   async function openModelSettings(): Promise<void> {
-    if (!settingsOpen) captureChatScrollSnapshot()
     const selectedProvider = config?.providers.find((provider) => (
       provider.models.some((model) => model.id === selectedModelId)
     ))
@@ -644,19 +611,13 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
   })
   useEffect(() => resetComposerSuggestions(), [composerDraftKey, resetComposerSuggestions])
   const { handleAutosizeInput } = useAppLayoutEffects({
-    busy: generationBusy,
-    chatPanelRef,
     composerInputRef,
     editingMcpIndex,
-    error: agent.activeError,
-    followOutputRef,
     input,
     mcpArgsText: mcpDraft.argsText,
     mcpEnvText: mcpDraft.envText,
     mcpListRef,
     mcpServerCount: config?.mcpServers.length,
-    messages: agent.activeSnapshot?.messages,
-    nextFollowOutputScrollBehaviorRef,
     settingsContentRef,
     settingsOpen,
     settingsTab,
@@ -682,7 +643,6 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
   async function openThread(threadId: string): Promise<void> {
     speech.stop()
     followOutputRef.current = true
-    nextFollowOutputScrollBehaviorRef.current = 'auto'
     await agent.openThread(threadId)
     focusAfterRender(composerInputRef)
   }
@@ -699,7 +659,6 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
     )
     speech.stop()
     followOutputRef.current = true
-    nextFollowOutputScrollBehaviorRef.current = 'auto'
     draftModelInitializedRef.current = Boolean(config && project)
     setDraftModelSelection(defaults)
     agent.startNewThread(

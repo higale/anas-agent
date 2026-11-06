@@ -73,7 +73,7 @@ export interface PanelsApi {
   onOpen(listener: (request: PanelRequest) => void): () => void
   onEscape(listener: (viewId: string) => void): () => void
 }
-export type PanelPreferences = Pick<AppSettings, 'diffViewMode' | 'diffFoldUnchanged' | 'diffWordWrap' | 'showMemoryActivityInTitlebar'>
+export type PanelPreferences = Pick<AppSettings, 'diffViewMode' | 'diffFoldUnchanged' | 'diffWordWrap' | 'showMemoryActivityInTitlebar' | 'runningProcessDisplay' | 'showModelRounds'>
 export type PanelPreferencesSnapshot = PanelPreferences & { revision: number }
 /** The content renderer has only the services needed by shared presentation components. */
 export interface ContentServices {

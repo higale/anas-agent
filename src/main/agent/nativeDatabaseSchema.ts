@@ -7,9 +7,13 @@ import { nativeRunOwnerSchema } from './nativeRunOwner'
 import { nativeManagedResultSchema } from './nativeManagedResults'
 import { nativeMessageProjectionSchema, nativeMessageReleaseSchema } from './nativeMessageProjection'
 import { nativeConversationSchemaVersion } from './nativeStorageValidation'
+import { activityDirectorySchema } from './activityDirectoryIndex'
+import { activityGroupSchema } from './activityGroupIndex'
+import { activityDisplayChangeSchema } from './activityDisplayChanges'
 
 const schema = conversationIdentitySchema() + conversationResourceSchema + fileChangeLedgerSchema
   + nativeExecutionSchema + nativeRunOwnerSchema + nativeManagedResultSchema + nativeMessageProjectionSchema + nativeMessageReleaseSchema
+  + activityDirectorySchema + activityGroupSchema + activityDisplayChangeSchema
 
 function tables(database: Database.Database) {
   return (database.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as Array<{ name: string }>)

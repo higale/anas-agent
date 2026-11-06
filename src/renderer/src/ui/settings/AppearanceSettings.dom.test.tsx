@@ -15,17 +15,15 @@ describe('appearance settings layout', () => {
         systemLanguage="system"
         themeValue="dark"
         fontSizeValue={15}
-        chatContentWidthValue="wide"
         onSaveLanguage={vi.fn()}
         onSaveTheme={vi.fn()}
         onSaveFontSize={vi.fn()}
-        onSaveChatContentWidth={vi.fn()}
       />
     )
 
     const card = document.querySelector('.settings-card')
     expect(card).toBeInTheDocument()
-    expect(card?.children).toHaveLength(4)
+    expect(card?.children).toHaveLength(3)
     expect(screen.getByRole('heading', { level: 2, name: 'settings.appearance' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'settings.language' })).toBeInTheDocument()
     expect(screen.getByRole('radiogroup', { name: 'settings.theme' })).toBeInTheDocument()
@@ -37,7 +35,6 @@ describe('appearance settings layout', () => {
     expect(fontSizeInput).toHaveAttribute('aria-valuemax', '18')
     expect(Array.from(card?.children ?? []).every((row) => row.classList.contains('ui-form-row-narrow'))).toBe(true)
     expect(fontSizeInput.closest('.ui-range-row')).toHaveClass('ui-form-row-narrow')
-    expect(screen.getByRole('radiogroup', { name: 'settings.chat_content_width' })).toBeInTheDocument()
-    expect(screen.getByRole('radio', { name: 'settings.chat_content_width_wide' })).toBeChecked()
+    expect(screen.queryByRole('radiogroup', { name: 'settings.chat_content_width' })).toBeNull()
   })
 })

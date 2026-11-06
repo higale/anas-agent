@@ -89,7 +89,7 @@ describe('follow output', () => {
     expect(updateFollowOutputAfterScroll(
       panel,
       followOutput,
-      { scrollTop: 300 },
+      { scrollTop: 300, scrollHeight: 600, clientHeight: 300 },
       false,
       48
     )).toEqual(followOutputPosition(panel))
@@ -103,7 +103,7 @@ describe('follow output', () => {
     updateFollowOutputAfterScroll(
       panel,
       followOutput,
-      { scrollTop: 300 },
+      { scrollTop: 300, scrollHeight: 1000, clientHeight: 300 },
       false,
       48
     )
@@ -118,7 +118,7 @@ describe('follow output', () => {
     let previousPosition = updateFollowOutputAfterScroll(
       panel,
       followOutput,
-      { scrollTop: 300 },
+      { scrollTop: 300, scrollHeight: 900, clientHeight: 300 },
       true,
       48
     )
@@ -146,7 +146,7 @@ describe('follow output', () => {
     updateFollowOutputAfterScroll(
       panel,
       followOutput,
-      { scrollTop: 600 },
+      { scrollTop: 600, scrollHeight: 900, clientHeight: 300 },
       true,
       96
     )
@@ -162,7 +162,7 @@ describe('follow output', () => {
     updateFollowOutputAfterScroll(
       panel,
       followOutput,
-      { scrollTop: 600 },
+      { scrollTop: 600, scrollHeight: 1500, clientHeight: 300 },
       false,
       96
     )

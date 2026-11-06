@@ -235,6 +235,12 @@ function normalizeMemoryModelId(value: unknown): string | null {
   return value
 }
 
+function normalizeRunningProcessDisplay(value: unknown): AppSettings['runningProcessDisplay'] {
+  if (value === undefined) return 'expanded'
+  if (value !== 'expanded' && value !== 'collapsed') throw new Error('settings.running_process_display must be expanded or collapsed.')
+  return value
+}
+
 function normalizeSettings(raw: RawAppConfig): AppSettings {
   const settings = raw.settings
   if (!settings) throw new Error('Config settings are missing.')
@@ -250,6 +256,8 @@ function normalizeSettings(raw: RawAppConfig): AppSettings {
     logLevel: normalizeRuntimeLogLevel(settings.log_level),
     logRetentionDays: normalizeLogRetentionDays(settings.log_retention_days),
     maxModelCallsPerRun: normalizeMaxModelCallsPerRun(settings.max_model_calls_per_run),
+    runningProcessDisplay: normalizeRunningProcessDisplay(settings.running_process_display),
+    showModelRounds: settings.show_model_rounds === undefined || requireBoolean(settings.show_model_rounds, 'settings.show_model_rounds'),
     memoryMode: normalizeMemoryMode(settings.memory_mode),
     memoryModelId: normalizeMemoryModelId(settings.memory_model_id),
     showMemoryActivityInTitlebar: settings.show_memory_activity_in_titlebar === undefined || requireBoolean(settings.show_memory_activity_in_titlebar, 'settings.show_memory_activity_in_titlebar'),
@@ -401,6 +409,8 @@ function rawSettingsFromSnapshot(snapshot: AppConfigSnapshot): RawAppSettings {
     log_level: settings.logLevel,
     log_retention_days: settings.logRetentionDays,
     max_model_calls_per_run: settings.maxModelCallsPerRun,
+    running_process_display: settings.runningProcessDisplay,
+    show_model_rounds: settings.showModelRounds,
     memory_mode: settings.memoryMode,
     memory_model_id: settings.memoryModelId ?? null,
     show_memory_activity_in_titlebar: settings.showMemoryActivityInTitlebar,
@@ -851,6 +861,10 @@ export async function updateSettings(settings: AppSettingsUpdate): Promise<AppCo
       max_model_calls_per_run: settings.maxModelCallsPerRun === undefined
         ? raw.settings?.max_model_calls_per_run
         : normalizeMaxModelCallsPerRun(settings.maxModelCallsPerRun),
+      running_process_display: settings.runningProcessDisplay === undefined
+        ? raw.settings?.running_process_display : normalizeRunningProcessDisplay(settings.runningProcessDisplay),
+      show_model_rounds: settings.showModelRounds === undefined
+        ? raw.settings?.show_model_rounds : requireBoolean(settings.showModelRounds, 'settings.show_model_rounds'),
       memory_mode: settings.memoryMode === undefined ? raw.settings?.memory_mode : normalizeMemoryMode(settings.memoryMode),
       memory_model_id: settings.memoryModelId === undefined
         ? raw.settings?.memory_model_id

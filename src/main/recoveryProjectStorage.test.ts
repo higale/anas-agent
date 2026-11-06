@@ -94,15 +94,15 @@ it('repairs databases with absent optional UI state and recreates it while retai
   expect(JSON.parse(await readFile(join(data, 'db/projects/state.json'), 'utf8')).version).toBe(0)
   for (const [index, file] of databases.entries()) {
     const db = new Database(file, { readonly: true })
-    try { expect(db.pragma('user_version', { simple: true })).toBe(index === 0 ? 2 : 1) } finally { db.close() }
+    try { expect(db.pragma('user_version', { simple: true })).toBe(index === 0 ? 2 : 3) } finally { db.close() }
   }
 })
 
-async function archivedChangeFixture(version: number | undefined, databaseVersion = 1, restore = false, deletedInverse = false) {
+async function archivedChangeFixture(version: number | undefined, databaseVersion = 3, restore = false, deletedInverse = false) {
   const value = await fixture(0, deletedInverse ? 'deleted-inverse' : restore ? 'reversed' : 'forward')
-  for (const file of value.databases) {
+  for (const [index, file] of value.databases.entries()) {
     const raw = new Database(file)
-    raw.pragma('user_version = 1')
+    raw.pragma(`user_version = ${index === 0 ? 2 : 3}`)
     raw.close()
   }
   const { run, inverseRunId, target: archivedTarget } = value.metadata
@@ -111,7 +111,7 @@ async function archivedChangeFixture(version: number | undefined, databaseVersio
   const target = join(value.root, 'edited.txt')
   await writeFile(target, restore ? 'before\n' : 'after\n')
   if (deletedInverse) {
-    if (version !== 0 || databaseVersion !== 1 || !value.metadata.operationId) throw new Error('Deleted inverse fixture must retain its valid saved evidence.')
+    if (version !== 0 || databaseVersion !== 3 || !value.metadata.operationId) throw new Error('Deleted inverse fixture must retain its valid saved evidence.')
     return { ...value, run, target, archivedTarget, inverseRunId, operationId: value.metadata.operationId }
   }
   const raw = new Database(value.databases[1])
@@ -266,7 +266,7 @@ describe('project version metadata recovery', () => {
   })
 
   it.each(['metadata', 'definition'])('handles a deleted inverse round during %s version repair', async field => {
-    const { root, data, databases, thread, run, operationId } = await archivedChangeFixture(0, 1, true, true)
+    const { root, data, databases, thread, run, operationId } = await archivedChangeFixture(0, 3, true, true)
     NativeConversationDatabase.validateBackup(databases[1], join(data, 'db', 'projects', 'default-workspace', 'conversations', thread.id, 'attachments'), new Set([thread.projectId]), thread.id)
     const raw = new Database(databases[1])
     let row: { definition_json: string; metadata_json: string }
@@ -439,7 +439,7 @@ describe('project version metadata recovery', () => {
     const storage = AgentStorage.openNative(data)
     try { expect(storage.listThreads()).toHaveLength(1) } finally { storage.close() }
     const db = new Database(databases[1], { readonly: true })
-    try { expect(db.pragma('user_version', { simple: true })).toBe(1) } finally { db.close() }
+    try { expect(db.pragma('user_version', { simple: true })).toBe(3) } finally { db.close() }
   })
 
   it('validates a copied WAL without checkpointing or changing the original database', async () => {
@@ -453,7 +453,7 @@ describe('project version metadata recovery', () => {
       const plan = await inspectRecoveryRepair(data)
       const status = plan.files.find(file => file.name === 'projects.json')!
       expect(status.error).toBeUndefined()
-      expect(status.repairableFields.some(field => field.endsWith('user_version (9 → 1)'))).toBe(true)
+      expect(status.repairableFields.some(field => field.endsWith('user_version (9 → 3)'))).toBe(true)
       expect(await readFile(databases[1])).toEqual(before)
       expect(await readFile(`${databases[1]}-wal`)).toEqual(wal)
     } finally { db.close() }
@@ -481,7 +481,7 @@ describe('project version metadata recovery', () => {
     expect(JSON.parse(await readProjectFixture(join(result.preservationPath!, 'data')))).toEqual(projects)
     for (const [index, path] of databases.entries()) {
       const db = new Database(path, { readonly: true })
-      try { expect(db.pragma('user_version', { simple: true })).toBe(index === 0 ? 2 : 1) } finally { db.close() }
+      try { expect(db.pragma('user_version', { simple: true })).toBe(index === 0 ? 2 : 3) } finally { db.close() }
       const saved = join(result.preservationPath!, 'data', path.slice(data.length + 1))
       expect(await readFile(saved)).toEqual(before[index])
     }

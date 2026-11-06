@@ -33,7 +33,7 @@ async function expectAppearanceWidths(appearance) {
     const { right, width } = element.getBoundingClientRect()
     return { right, width }
   }))
-  assert.equal(bounds.length, 3)
+  assert.equal(bounds.length, 2)
   assert.ok(Math.abs(bounds[0].width - 240) < 0.5, 'The language picker must retain its original width regardless of segment labels or font size.')
   for (const boundsOfControl of bounds.slice(1)) {
     assert.ok(boundsOfControl.width >= bounds[0].width - 0.5, 'Segments must use the language picker width as their minimum and may grow independently.')
@@ -43,6 +43,24 @@ async function expectAppearanceWidths(appearance) {
   assert.ok(fontRail)
   assert.ok(Math.abs(fontRail.width - bounds[0].width) < 0.5, 'The visible font slider rail must match the language picker width.')
   assert.ok(Math.abs(fontRail.x + fontRail.width - bounds[0].right) < 0.5, 'The visible font slider rail must align with the language picker.')
+}
+
+async function expectChatDisplayLayout(group, height) {
+  await expectHeight(group.getByRole('radiogroup'), height)
+  await expectChildrenInside(group.locator('.ui-form-row, .ui-segmented-control'))
+  const layout = await group.locator('.settings-card').evaluate(card => ({
+    width: card.clientWidth,
+    rows: [...card.children].map(row => ({
+      width: row.getBoundingClientRect().width,
+      columns: globalThis.getComputedStyle(row).gridTemplateColumns.split(' ').length,
+      controlRight: row.lastElementChild.getBoundingClientRect().right
+    }))
+  }))
+  for (const row of layout.rows) assert.ok(Math.abs(row.width - layout.width) < 0.5,
+    'Every chat display row and its separator must span the card width.')
+  const inline = layout.rows.filter(row => row.columns === 2)
+  if (inline.length) assert.ok(Math.max(...inline.map(row => row.controlRight)) - Math.min(...inline.map(row => row.controlRight)) < 0.5,
+    'Chat display controls must share the same trailing edge.')
 }
 
 async function verifySegmentMinimumWidth(locator) {
@@ -248,6 +266,14 @@ async function verifyControlLayout(launchApplication) {
         await appearance.screenshot({ path: `${process.env.ANAS_E2E_CONTROL_LAYOUT_SCREENSHOT}.${fontSize}.png` })
       }
 
+      await expect(page.getByRole('radiogroup', { name: 'Chat content width', exact: true })).toHaveCount(0)
+      await page.locator('[data-settings-tab="chatMode"]').click()
+      const chatDisplay = page.locator('.settings-group').filter({ has: page.getByRole('heading', { name: 'Chat display', exact: true }) })
+      await expectChatDisplayLayout(chatDisplay, height)
+      if (fontSize === 14 && process.env.ANAS_E2E_CONTROL_LAYOUT_SCREENSHOT) {
+        await chatDisplay.screenshot({ path: `${process.env.ANAS_E2E_CONTROL_LAYOUT_SCREENSHOT}.chat.en.png` })
+      }
+
       for (const tab of ['tools', 'skills']) {
         await page.locator(`[data-settings-tab="${tab}"]`).click()
         await expectHeight(page.locator('.settings-skill-tree-row:visible'), height)
@@ -265,6 +291,15 @@ async function verifyControlLayout(launchApplication) {
     assert.equal(JSON.parse(await readFile(join(root, 'config/settings.json'), 'utf8')).font_size, 18)
 
     await page.locator('[data-settings-tab="chatMode"]').click()
+    await page.getByRole('radiogroup', { name: 'Chat content width', exact: true }).getByText('Wide', { exact: true }).click()
+    await page.getByRole('radiogroup', { name: 'Running process display', exact: true }).getByText('Collapsed', { exact: true }).click()
+    const modelRounds = page.getByRole('radiogroup', { name: 'Show model rounds', exact: true })
+    await expect(modelRounds.getByRole('radio', { name: 'Show', exact: true })).toBeChecked()
+    await modelRounds.getByText('Hide', { exact: true }).click()
+    await expect.poll(async () => {
+      const saved = JSON.parse(await readFile(join(root, 'config/settings.json'), 'utf8'))
+      return [saved.chat_content_width, saved.running_process_display, saved.show_model_rounds]
+    }).toEqual(['wide', 'collapsed', false])
     const speedHandle = page.getByRole('slider', { name: 'Speed', exact: true })
     const speedRow = page.locator('.ui-range-row').filter({ has: speedHandle })
     await speedRow.scrollIntoViewIfNeeded()
@@ -286,6 +321,9 @@ async function verifyControlLayout(launchApplication) {
     await page.locator('[data-settings-tab="general"]').click()
     await page.locator('[data-settings-tab="chatMode"]').click()
     await expect(speedHandle).toHaveAttribute('aria-valuenow', '1.05')
+    await expect(page.getByRole('radio', { name: 'Wide', exact: true })).toBeChecked()
+    await expect(page.getByRole('radio', { name: 'Collapsed', exact: true })).toBeChecked()
+    await expect(modelRounds.getByRole('radio', { name: 'Hide', exact: true })).toBeChecked()
     await page.locator('[data-settings-tab="general"]').click()
 
     // A narrow window and maximum font must retain usable fields, tree controls, and toolbars.
@@ -342,10 +380,17 @@ async function verifyControlLayout(launchApplication) {
         if (fontSize === 14 && process.env.ANAS_E2E_CONTROL_LAYOUT_SCREENSHOT) {
           await chineseAppearance.screenshot({ path: `${process.env.ANAS_E2E_CONTROL_LAYOUT_SCREENSHOT}.zh.${windowWidth}.png` })
         }
+        await page.locator('[data-settings-tab="chatMode"]').click()
+        const chatDisplay = page.locator('.settings-group').filter({ has: page.getByRole('heading', { name: '聊天显示', exact: true }) })
+        await expectChatDisplayLayout(chatDisplay, Math.max(30, fontSize + 18))
+        if (fontSize === 14 && process.env.ANAS_E2E_CONTROL_LAYOUT_SCREENSHOT) {
+          await chatDisplay.screenshot({ path: `${process.env.ANAS_E2E_CONTROL_LAYOUT_SCREENSHOT}.chat.zh.${windowWidth}.png` })
+        }
+        await page.locator('[data-settings-tab="general"]').click()
       }
     }
     assert.deepEqual(errors, [])
-    console.log('Control layout passed: live font sizes 10–18, slider marks/drag/keyboard, fractional speech speed persistence, light/dark themes, fields, segment minimum widths, independent appearance control sizing, menu/options, trees, narrow-window containment, stable .env editing scroll and native textarea sizing.')
+    console.log('Control layout passed: live font sizes 10–18, slider marks/drag/keyboard, fractional speech speed persistence, light/dark themes, fields, segment minimum widths, appearance and chat display alignment, chat preference persistence, menu/options, trees, narrow-window containment, stable .env editing scroll and native textarea sizing.')
   } finally {
     if (application) await application.close()
     await rm(root, { recursive: true, force: true })

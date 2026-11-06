@@ -138,13 +138,11 @@
   font-size: var(--font-size-small);
 }
 
-.agent-activity-range,
-.agent-activity-timeline {
+.agent-activity-range {
   display: contents;
 }
 
 .agent-activity-range-boundary,
-.agent-activity-window,
 .agent-activity-model,
 .agent-activity-disclosure,
 .agent-activity-subagent-group,
@@ -158,6 +156,14 @@
 .agent-activity-range-boundary {
   margin-top: 5px;
   margin-bottom: 5px;
+}
+
+.agent-timeline-member {
+  box-sizing: border-box;
+  width: min(var(--workspace-content-max-width, 760px), 100%);
+  margin-inline: auto;
+  padding-left: 16px;
+  border-left: 1px solid var(--border-muted);
 }
 
 .agent-activity-range-boundary-bottom {

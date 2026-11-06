@@ -7,19 +7,13 @@ type MutableRef<T> = {
 }
 
 type AppLayoutEffectsOptions = {
-  busy: boolean
-  chatPanelRef: MutableRef<HTMLElement | null>
   composerInputRef: MutableRef<HTMLTextAreaElement | null>
   editingMcpIndex: number | undefined
-  error: string | undefined
-  followOutputRef: MutableRef<boolean>
   input: string
   mcpListRef: MutableRef<HTMLDivElement | null>
   mcpServerCount: number | undefined
-  messages: unknown
   mcpArgsText: string
   mcpEnvText: string
-  nextFollowOutputScrollBehaviorRef: MutableRef<ScrollBehavior>
   settingsContentRef: MutableRef<HTMLDivElement | null>
   settingsOpen: boolean
   settingsTab: string
@@ -28,19 +22,13 @@ type AppLayoutEffectsOptions = {
 }
 
 export function useAppLayoutEffects({
-  busy,
-  chatPanelRef,
   composerInputRef,
   editingMcpIndex,
-  error,
-  followOutputRef,
   input,
   mcpListRef,
   mcpServerCount,
-  messages,
   mcpArgsText,
   mcpEnvText,
-  nextFollowOutputScrollBehaviorRef,
   settingsContentRef,
   settingsOpen,
   settingsTab,
@@ -93,22 +81,6 @@ export function useAppLayoutEffects({
     if (!settingsOpen) return
     if (settingsContentRef.current) settingsContentRef.current.scrollTop = 0
   }, [settingsContentRef, settingsOpen, settingsTab])
-
-  useEffect(() => {
-    if (!followOutputRef.current) return
-    const panel = chatPanelRef.current
-    if (!panel) return
-    const behavior = busy ? 'auto' : nextFollowOutputScrollBehaviorRef.current
-    nextFollowOutputScrollBehaviorRef.current = 'smooth'
-    panel.scrollTo({ top: panel.scrollHeight, behavior })
-  }, [
-    messages,
-    busy,
-    error,
-    chatPanelRef,
-    followOutputRef,
-    nextFollowOutputScrollBehaviorRef
-  ])
 
   useEffect(() => {
     if (settingsTab === 'mcp' && mcpServerCount !== undefined && editingMcpIndex === mcpServerCount - 1) {

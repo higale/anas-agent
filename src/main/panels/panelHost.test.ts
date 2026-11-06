@@ -25,7 +25,7 @@ function pending<T>() {
   const promise = new Promise<T>(done => { resolve = done })
   return { promise, resolve }
 }
-const settings = { language: 'en', fontSize: 14, diffViewMode: 'inline', diffFoldUnchanged: true, diffWordWrap: false, showMemoryActivityInTitlebar: true } as AppSettings
+const settings = { language: 'en', fontSize: 14, diffViewMode: 'inline', diffFoldUnchanged: true, diffWordWrap: false, showMemoryActivityInTitlebar: true, runningProcessDisplay: 'expanded', showModelRounds: true } as AppSettings
 const resources = { resources: {}, languages: [], langDir: '/languages' } as LanguageResourcesSnapshot
 beforeEach(() => {
   vi.resetModules(); vi.clearAllMocks(); mocks.handlers.clear()
@@ -98,7 +98,7 @@ describe('panel appearance preparation', () => {
     read.resolve(settings); languages.resolve({ ...resources, langDir: '/stale-languages' })
     await opening
     expect(mocks.configure).toHaveBeenLastCalledWith({ language: 'zh-CN', theme: 'dark', fontSize: 18 })
-    expect(mocks.setPreferences).toHaveBeenLastCalledWith({ diffViewMode: 'inline', diffFoldUnchanged: true, diffWordWrap: true, showMemoryActivityInTitlebar: false })
+    expect(mocks.setPreferences).toHaveBeenLastCalledWith({ diffViewMode: 'inline', diffFoldUnchanged: true, diffWordWrap: true, showMemoryActivityInTitlebar: false, runningProcessDisplay: 'expanded', showModelRounds: true })
     expect(mocks.setLanguages).toHaveBeenLastCalledWith(resources)
   })
 })

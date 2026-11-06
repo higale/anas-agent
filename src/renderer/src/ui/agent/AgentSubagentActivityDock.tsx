@@ -4,6 +4,7 @@ import { Ban, Bot, CircleCheck, CircleX, LoaderCircle, ShieldAlert, Wrench } fro
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AgentRunActivity, AgentSubagentActivityStatus } from '@shared/agentTypes'
 import {
+  hasVisibleModelText,
   subagentDescription,
   toolProvidedSummary,
   visibleToolsForAgent
@@ -37,7 +38,7 @@ export function subagentActivityDetails(run: AgentRunActivity, subagentId: strin
   const currentModel = models
     .filter((model) => model.status === 'running')
     .sort((left, right) => right.sequence - left.sequence)[0]
-  const hasReplyText = Boolean(currentModel?.text.trim() || currentModel?.hasText)
+  const hasReplyText = Boolean(currentModel && hasVisibleModelText(currentModel))
   const hasReasoning = Boolean(currentModel?.reasoning.trim() || currentModel?.hasReasoning)
 
   return {

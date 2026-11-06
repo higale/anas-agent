@@ -1,9 +1,15 @@
+import type { ChatContentWidth } from './types'
+
 export const UI_FONT_SIZE_MIN = 10
 export const UI_FONT_SIZE_MAX = 18
 export const UI_FONT_SIZE_DEFAULT = 14
 export const SIDEBAR_WIDTH_MIN = 220
 export const SIDEBAR_WIDTH_MAX = 420
 export const SIDEBAR_WIDTH_DEFAULT = 260
+
+export function normalizeChatContentWidth(value?: string): ChatContentWidth {
+  return value === 'wide' || value === 'adaptive' ? value : 'narrow'
+}
 
 export function normalizeUiFontSize(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return UI_FONT_SIZE_DEFAULT

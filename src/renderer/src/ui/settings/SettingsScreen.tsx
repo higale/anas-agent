@@ -315,11 +315,9 @@ export function SettingsScreen({
                 systemLanguage,
                 themeValue: config?.settings.theme,
                 fontSizeValue: config?.settings.fontSize,
-                chatContentWidthValue: config?.settings.chatContentWidth,
                 onSaveLanguage,
                 onSaveTheme: (theme) => onSaveSettings({ theme }),
-                onSaveFontSize: (fontSize) => onSaveSettings({ fontSize }),
-                onSaveChatContentWidth: (chatContentWidth) => onSaveSettings({ chatContentWidth })
+                onSaveFontSize: (fontSize) => onSaveSettings({ fontSize })
               }}
               data={{
                 backupDir, dataDirectoryUsage, storageUsageLoading,

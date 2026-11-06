@@ -1,5 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto'
-import type { AgentRuntimeEvent, AgentThreadSnapshot, AgentRunActivity, AgentToolCall, AgentMemoryRecall, AgentContextStatus } from '../../shared/agentTypes'
+import { randomUUID } from 'node:crypto'
+import type { AgentRuntimeEvent, AgentThreadSnapshot, AgentRunActivity, AgentToolCall, AgentContextStatus } from '../../shared/agentTypes'
 import type { ModelRunObservation } from '../../runtime/modelEvents'
 import type { ToolRunObservation } from '../../runtime/toolEvents'
 import type { RunObserver, RunToolApproval, RunCommitFacts } from '../../runtime/runExecution'
@@ -38,7 +38,6 @@ function toolInputTodos(name: string, input: unknown): AgentThreadSnapshot['todo
 export class RunActivityProjection {
   private readonly publishedContextSummaries = new Map<string, Set<string>>()
   private readonly publishedToolCompletions = new Map<string, Set<string>>()
-  private readonly toolCallProgress = new Map<string, Map<string, Extract<AgentRuntimeEvent, { type: 'model_tool_calls' }>>>()
   constructor(private readonly reader: RunActivityReader, private readonly observations: RunActivityObservations,
     private readonly summaries: ContextSummaryStore) {}
 
@@ -51,13 +50,6 @@ export class RunActivityProjection {
       onContextStatus: (status: AgentContextStatus) => {
         this.observations.recordContextStatus(threadId, status)
         queue.push({ type: 'context_status_updated', runId, threadId, status })
-      },
-      onMemoryRecall: (details: Pick<AgentMemoryRecall, 'query' | 'promptText' | 'memoryCount' | 'agentName'>) => {
-        const id = createHash('sha256').update(JSON.stringify([
-          details.agentName ?? '', details.query, details.promptText, details.memoryCount
-        ])).digest('hex')
-        const recall = this.observations.recordMemoryRecall(runId, { id, ...details })
-        queue.push({ type: 'memory_recalled', runId, threadId, recall })
       }
     }
   }
@@ -103,20 +95,15 @@ export class RunActivityProjection {
   releaseRun(runId: string): void {
     this.publishedContextSummaries.delete(runId)
     this.publishedToolCompletions.delete(runId)
-    this.toolCallProgress.delete(runId)
     this.observations.releaseRun(runId)
   }
 
   decorate(activity: AgentRunActivity): AgentRunActivity {
-    const progress = this.toolCallProgress.get(activity.runId)
-    if (!progress) return activity
-    return {
-      ...activity,
-      models: activity.models.map((model) => ({
-        ...model,
-        toolCallProgress: progress.get(JSON.stringify([model.subagentId, model.id]))?.progress
-      }))
-    }
+    const models = activity.models.map(model => {
+      const toolCallProgress = this.observations.pendingToolProgress(activity.runId, model.id)
+      return toolCallProgress ? { ...model, toolCallProgress } : model
+    })
+    return models.some((model, index) => model !== activity.models[index]) ? { ...activity, models } : activity
   }
 
 
@@ -156,12 +143,7 @@ export class RunActivityProjection {
   }
 
   rememberToolCallProgress(event: Extract<AgentRuntimeEvent, { type: 'model_tool_calls' }>): void {
-    const key = JSON.stringify([event.subagentId, event.modelId])
-    const progress = this.toolCallProgress.get(event.runId) ?? new Map()
-    if (event.progress.length) progress.set(key, event)
-    else progress.delete(key)
-    if (progress.size) this.toolCallProgress.set(event.runId, progress)
-    else this.toolCallProgress.delete(event.runId)
+    this.observations.recordToolProgress(event.runId, event.modelId, event.progress)
   }
 
   private ensureToolActivity(

@@ -1,9 +1,9 @@
 {
   "name": "native-repair-base",
-  "schemaVersion": 1,
+  "schemaVersion": 3,
   "format": "directory",
-  "bytes": 978849,
-  "sha256": "9abb6edb6988daa2c1f6f9376ee70173f9fdecdf745c5386aeafe225f3d518d6",
+  "bytes": 1060769,
+  "sha256": "51bc110fe9b3468ec4098ce290e72806042cbe999624158651c38695af803856",
   "metadata": {
     "version": 1,
     "value": [
@@ -72,6 +72,11 @@
     "description": "Frozen native execution v1 repair fixture; no runtime upgrade code required.",
     "sourceFixture": "repair-project-base",
     "sourceSha256": "c86cc7db76d120c6840f3268d72cdc7558fe6654a8b94348e8010d2119655285",
-    "converterSource": "anas-next 553fded with portable file-history path validation"
+    "converterSource": "anas-next 553fded with portable file-history path validation",
+    "groupDirectory": {
+      "sourceSchemaVersion": 2,
+      "sourceSha256": "de379a0385399b780c3e6450757e8879badf61fca3e88dda5b22af01bcfce10e",
+      "description": "Offline v3 display index creation; all pre-existing execution and resource rows verified unchanged."
+    }
   }
 }

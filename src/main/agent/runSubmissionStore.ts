@@ -1,9 +1,12 @@
+import { displayTransaction } from './activityDisplayProjection'
 import { parseRunConfiguration, serializeRunConfiguration, type RunConfiguration } from '../../shared/agentCapabilities'
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
 import { isAgentThreadLocked, type AgentRun, type AgentThreadStatus } from '../../shared/agentTypes'
 import { AgentThreadLockedError } from './agentErrors'
 import type { ArchivedAgentAttachment } from './agentAttachmentStore'
+import { decodeExecutionInput } from '../../runtime/executionInput'
+import { activityMessageHeader } from './activityDirectoryIndex'
 
 /** Creates the product run, saved input and archived attachment references in
  * one transaction. Input encoding belongs to the execution boundary. */
@@ -42,41 +45,45 @@ export class RunSubmissionStore {
     inputJson?: string,
     submissionId?: string
   ): AgentRun {
-    const now = new Date().toISOString()
-    const run: AgentRun = {
-      id: runId,
-      threadId,
-      operation,
-      status: 'running',
-      createdAt: now,
-      updatedAt: now
-    }
-    const create = this.database.transaction((): AgentRun => {
-      const thread = this.database.prepare('SELECT status FROM agent_threads WHERE id=?').get(threadId) as { status: AgentThreadStatus } | undefined
-      if (!thread) throw new Error(`Thread ${threadId} was not found.`)
-      if (isAgentThreadLocked(thread.status)) throw new AgentThreadLockedError(threadId, 'start another run')
-      this.database.prepare(`
-        INSERT INTO agent_runs (id, submission_id, thread_id, operation, status, created_at, updated_at)
-        VALUES (@id, @submissionId, @threadId, @operation, @status, @createdAt, @updatedAt)
-      `).run({ ...run, submissionId: submissionId ?? null })
-      this.database.prepare(`
-        UPDATE agent_threads
-        SET status = 'running', updated_at = ?
-        WHERE id = ?
-      `).run(now, threadId)
-      if (inputJson !== undefined) {
+    return displayTransaction(this.database, () => {
+      const now = new Date().toISOString()
+      const run: AgentRun = {
+        id: runId,
+        threadId,
+        operation,
+        status: 'running',
+        createdAt: now,
+        updatedAt: now
+      }
+      const create = this.database.transaction((): AgentRun => {
+        const thread = this.database.prepare('SELECT status FROM agent_threads WHERE id=?').get(threadId) as { status: AgentThreadStatus } | undefined
+        if (!thread) throw new Error(`Thread ${threadId} was not found.`)
+        if (isAgentThreadLocked(thread.status)) throw new AgentThreadLockedError(threadId, 'start another run')
         this.database.prepare(`
-          INSERT INTO agent_run_input_intents (run_id, input_json)
-          VALUES (?, ?)
-        `).run(run.id, inputJson)
-      }
-      if (attachments.some(({ artifact }) => artifact.messageId !== `${runId}:input`)) {
-        throw new Error(`Initial attachments do not belong to run input ${runId}.`)
-      }
-      this.insertAttachments(run, attachments)
-      return run
-    })
-    return create()
+          INSERT INTO agent_runs (id, submission_id, thread_id, operation, status, created_at, updated_at)
+          VALUES (@id, @submissionId, @threadId, @operation, @status, @createdAt, @updatedAt)
+        `).run({ ...run, submissionId: submissionId ?? null })
+        this.database.prepare(`
+          UPDATE agent_threads
+          SET status = 'running', updated_at = ?
+          WHERE id = ?
+        `).run(now, threadId)
+        if (inputJson !== undefined) {
+          const message = decodeExecutionInput(inputJson)
+          const display = message ? { id: message.id, header: activityMessageHeader(threadId, run.id, message.id, message.value, []) } : null
+          this.database.prepare(`
+            INSERT INTO agent_run_input_intents (run_id, input_json, display_json)
+            VALUES (?, ?, ?)
+          `).run(run.id, inputJson, display ? JSON.stringify(display) : null)
+        }
+        if (attachments.some(({ artifact }) => artifact.messageId !== `${runId}:input`)) {
+          throw new Error(`Initial attachments do not belong to run input ${runId}.`)
+        }
+        this.insertAttachments(run, attachments)
+        return run
+      })
+      return create()
+    })()
   }
 
   /** The caller owns the run creation/attachment append transaction. */

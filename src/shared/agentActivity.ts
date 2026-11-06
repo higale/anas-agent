@@ -4,6 +4,11 @@ import type {
   AgentToolActivity
 } from './agentTypes'
 
+/** Display records can carry visibility after the text itself has been released. */
+export function hasVisibleModelText(value: { text: string; hasText?: boolean }): boolean {
+  return value.hasText === true || /\S/.test(value.text)
+}
+
 export function delegationToolForSubagent(
   activity: AgentRunActivity,
   subagent: AgentSubagentActivity

@@ -313,6 +313,8 @@ export interface AgentContextStatus {
 }
 
 export interface AgentMessage {
+  /** Display identity shared with the corresponding streamed reply. */
+  activityModelId?: string
   codeReview?: CodeReviewPresentation
   id: string
   role: 'user' | 'assistant' | 'tool' | 'system'
@@ -418,20 +420,13 @@ export interface AgentActivityWindowInput {
 }
 
 export interface AgentActivityDetailReference extends AgentRunReferenceInput {
-  kind: 'model' | 'tool' | 'summary' | 'memory' | 'skill' | 'subagent'
+  kind: 'model' | 'tool' | 'summary' | 'memory' | 'skill' | 'subagent' | 'message'
   id: string
   subagentId?: string
 }
 
-export interface AgentActivityPageInput extends AgentRunReferenceInput {
-  subagentId?: string
-  before?: number
-  /** -1 reads from the beginning, including sequence 0. */
-  after?: number
-  limit?: number
-}
-
 export interface AgentActivityDetail {
+  message?: AgentMessage
   text?: string
   reasoning?: string
   args?: unknown
@@ -573,7 +568,8 @@ export interface AgentApi {
     loadEarlier(input: AgentMessageWindowInput): Promise<AgentThreadSnapshot>
   }
   activities: {
-    page(input: AgentActivityPageInput): Promise<AgentRunActivity>
+    directory(input: import('./activityDirectory').ActivityDirectoryInput): Promise<import('./activityDirectory').ActivityDirectoryResult>
+    cancel(requestId: string): Promise<void>
     detail(input: AgentActivityDetailReference & { field?: keyof AgentActivityDetail }): Promise<AgentActivityDetail>
     get(input: AgentRunReferenceInput): Promise<AgentRunActivity>
     subagent(input: AgentRunReferenceInput & { subagentId: string }): Promise<AgentSubagentActivity>
@@ -591,6 +587,11 @@ export interface AgentApi {
   ): () => void
 }
 
+/** Lightweight text deltas keep only whether their discarded body had visible content. */
+type AgentModelDelta =
+  | (Extract<AgentContentBlock, { type: 'text' }> & { hasText?: boolean })
+  | Extract<AgentContentBlock, { type: 'reasoning' }>
+
 export type AgentRuntimeEvent =
   | { type: 'file_changes'; runId: string; threadId: string }
   | { type: 'run_started'; run: AgentRun; newUserTurn: true; userMessage: AgentMessage }
@@ -604,7 +605,7 @@ export type AgentRuntimeEvent =
   | { type: 'run_settled'; runId: string; threadId: string; operation: AgentRun['operation']; status: AgentRunStatus }
   | { type: 'direction_applied'; runId: string; threadId: string; queuedInputId: string; message: AgentMessage }
   | { type: 'model_started'; runId: string; threadId: string; model: AgentModelActivity }
-  | { type: 'model_delta'; runId: string; threadId: string; modelId: string; subagentId?: string; delta: Extract<AgentContentBlock, { type: 'text' | 'reasoning' }> }
+  | { type: 'model_delta'; runId: string; threadId: string; modelId: string; subagentId?: string; delta: AgentModelDelta }
   | { type: 'model_tool_calls'; runId: string; threadId: string; modelId: string; subagentId?: string; progress: AgentToolCallProgress[] }
   | { type: 'model_completed'; runId: string; threadId: string; model: AgentModelActivity }
   | { type: 'tool_started'; runId: string; threadId: string; call: AgentToolCall; sequence: number; subagentId?: string; startedAt?: string }
@@ -612,7 +613,6 @@ export type AgentRuntimeEvent =
   | { type: 'tool_completed'; runId: string; threadId: string; call: AgentToolCall; sequence: number; output: unknown; subagentId?: string; startedAt?: string; completedAt?: string }
   | { type: 'todos_updated'; runId: string; threadId: string; todos: AgentTodo[] }
   | { type: 'subagent_updated'; runId: string; threadId: string; subagent: AgentSubagentActivity }
-  | { type: 'memory_recalled'; runId: string; threadId: string; recall: AgentMemoryRecall }
   | { type: 'context_compression_started'; runId: string; threadId: string; summary: AgentContextSummary }
   | { type: 'context_compression_completed'; runId: string; threadId: string; summary: AgentContextSummary }
   | { type: 'context_compression_discarded'; runId: string; threadId: string; summaryId: string }

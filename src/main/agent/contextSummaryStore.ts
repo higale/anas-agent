@@ -1,3 +1,4 @@
+import { displayTransaction } from './activityDisplayProjection'
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
 import type { AgentContextSummary } from '../../shared/agentTypes'
@@ -78,25 +79,27 @@ export class ContextSummaryStore {
   }
 
   recordContextSummaryStarted(runId: string, summaryId: string = randomUUID()): AgentContextSummary {
-    this.requireRun(runId)
-    const sequence = this.activityMetadata.nextSequence(runId)
-    const createdAt = timestamp()
-    this.database.prepare(`
-      INSERT INTO agent_context_summaries (
-        run_id,
-        summary_id,
+    return displayTransaction<AgentContextSummary>(this.database, () => {
+      this.requireRun(runId)
+      const sequence = this.activityMetadata.nextSequence(runId)
+      const createdAt = timestamp()
+      this.database.prepare(`
+        INSERT INTO agent_context_summaries (
+          run_id,
+          summary_id,
+          sequence,
+          status,
+          created_at
+        ) VALUES (?, ?, ?, 'running', ?)
+      `).run(runId, summaryId, sequence, createdAt)
+      return {
+        id: summaryId,
         sequence,
-        status,
-        created_at
-      ) VALUES (?, ?, ?, 'running', ?)
-    `).run(runId, summaryId, sequence, createdAt)
-    return {
-      id: summaryId,
-      sequence,
-      status: 'running',
-      summaryText: '',
-      createdAt
-    }
+        status: 'running',
+        summaryText: '',
+        createdAt
+      }
+    })()
   }
 
   stageContextSummary(
@@ -104,37 +107,39 @@ export class ContextSummaryStore {
     summaryId: string,
     details: StagedContextSummaryDetails
   ): AgentContextSummary {
-    this.requireRun(runId)
-    const result = this.database.prepare(`
-      UPDATE agent_context_summaries
-      SET summary_text = @summaryText,
-          model_content = @modelContent,
-          cutoff_index = @cutoffIndex,
-          activated_after_message_index = @activatedAfterMessageIndex,
-          covered_through_message_id = @coveredThroughMessageId,
-          first_preserved_message_id = @firstPreservedMessageId,
-          input_tokens_before = @inputTokensBefore,
-          input_tokens_after = @inputTokensAfter
-      WHERE run_id = @runId
-        AND summary_id = @summaryId
-        AND status = 'running'
-        AND committed_checkpoint_id IS NULL
-    `).run({
-      runId,
-      summaryId,
-      summaryText: details.summaryText,
-      modelContent: details.modelContent ?? '',
-      cutoffIndex: details.cutoffIndex ?? null,
-      activatedAfterMessageIndex: details.activatedAfterMessageIndex ?? null,
-      coveredThroughMessageId: details.coveredThroughMessageId ?? null,
-      firstPreservedMessageId: details.firstPreservedMessageId ?? null,
-      inputTokensBefore: details.inputTokensBefore ?? null,
-      inputTokensAfter: details.inputTokensAfter ?? null
-    })
-    if (result.changes !== 1) {
-      throw new Error(`Context summary ${summaryId} is not available for staging in run ${runId}.`)
-    }
-    return this.requireContextSummary(runId, summaryId)
+    return displayTransaction(this.database, () => {
+      this.requireRun(runId)
+      const result = this.database.prepare(`
+        UPDATE agent_context_summaries
+        SET summary_text = @summaryText,
+            model_content = @modelContent,
+            cutoff_index = @cutoffIndex,
+            activated_after_message_index = @activatedAfterMessageIndex,
+            covered_through_message_id = @coveredThroughMessageId,
+            first_preserved_message_id = @firstPreservedMessageId,
+            input_tokens_before = @inputTokensBefore,
+            input_tokens_after = @inputTokensAfter
+        WHERE run_id = @runId
+          AND summary_id = @summaryId
+          AND status = 'running'
+          AND committed_checkpoint_id IS NULL
+      `).run({
+        runId,
+        summaryId,
+        summaryText: details.summaryText,
+        modelContent: details.modelContent ?? '',
+        cutoffIndex: details.cutoffIndex ?? null,
+        activatedAfterMessageIndex: details.activatedAfterMessageIndex ?? null,
+        coveredThroughMessageId: details.coveredThroughMessageId ?? null,
+        firstPreservedMessageId: details.firstPreservedMessageId ?? null,
+        inputTokensBefore: details.inputTokensBefore ?? null,
+        inputTokensAfter: details.inputTokensAfter ?? null
+      })
+      if (result.changes !== 1) {
+        throw new Error(`Context summary ${summaryId} is not available for staging in run ${runId}.`)
+      }
+      return this.requireContextSummary(runId, summaryId)
+    })()
   }
 
   getCommittedContextSummary(runId: string, summaryId: string): StoredContextSummary|undefined {
@@ -143,11 +148,13 @@ export class ContextSummaryStore {
   }
 
   deleteContextSummary(runId: string, summaryId: string): void {
-    this.requireRun(runId)
-    this.database.prepare(`
-      DELETE FROM agent_context_summaries
-      WHERE run_id = ? AND summary_id = ?
-    `).run(runId, summaryId)
+    return displayTransaction(this.database, () => {
+      this.requireRun(runId)
+      this.database.prepare(`
+        DELETE FROM agent_context_summaries
+        WHERE run_id = ? AND summary_id = ?
+      `).run(runId, summaryId)
+    })()
   }
 
   private requireContextSummaryRow(runId: string, summaryId: string): ContextSummaryRow {

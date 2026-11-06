@@ -70,7 +70,7 @@ export class PanelPages {
   onChanged(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
   private watched = new WeakSet<BrowserWindow>()
   private appearance = { language: 'en', theme: 'light' as 'light' | 'dark', fontSize: 14 }
-  private preferences: PanelPreferencesSnapshot = { revision: 0, diffViewMode: 'inline', diffFoldUnchanged: true, diffWordWrap: true, showMemoryActivityInTitlebar: true }
+  private preferences: PanelPreferencesSnapshot = { revision: 0, diffViewMode: 'inline', diffFoldUnchanged: true, diffWordWrap: true, showMemoryActivityInTitlebar: true, runningProcessDisplay: 'expanded', showModelRounds: true }
 
   constructor(private readonly loadLanguages: () => Promise<LanguageResourcesSnapshot>) {}
   private view(entry: Entry): PanelState {

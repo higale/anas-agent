@@ -36,6 +36,7 @@ const settings = {
   logLevel: 'info',
   logRetentionDays: 14,
   maxModelCallsPerRun: 100,
+      runningProcessDisplay: 'expanded', showModelRounds: true,
   environmentContext: environmentContextFixture(),
   sidebarVisible: true,
   sidebarWidth: 260,

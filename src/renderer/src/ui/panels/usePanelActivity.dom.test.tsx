@@ -20,6 +20,21 @@ beforeEach(() => {
   } } })
 })
 describe('independent activity projection', () => {
+  it('keeps the panel projection stable while already-visible model bodies stream', async () => {
+    const initial = activity()
+    initial.models = [{ id: 'model', subagentId: 'child', sequence: 2, status: 'running', text: 'Reply', reasoning: 'Thought', toolCallIds: [] }]
+    get.mockResolvedValue(initial)
+    const view = renderHook(() => usePanelActivity('thread-a', 'run-a', 'child'))
+    await act(synchronize)
+    const previous = view.result.current.run
+    act(() => {
+      for (let index = 0; index < 1000; index++) receive({ type: 'model_delta', threadId: 'thread-a', runId: 'run-a',
+        modelId: 'model', subagentId: 'child', delta: { type: index % 2 ? 'text' : 'reasoning', text: 'more' } })
+    })
+    expect(view.result.current.run).toBe(previous)
+    act(() => receive({ type: 'model_completed', threadId: 'thread-a', runId: 'run-a', model: { ...initial.models[0], status: 'completed' } }))
+    expect(view.result.current.run?.models[0].status).toBe('completed')
+  })
   it('loads a historical selected child even outside the latest activity window, without recovering a run', async () => {
     const view = renderHook(() => usePanelActivity('thread-a', 'run-a', 'child'))
     await act(synchronize)

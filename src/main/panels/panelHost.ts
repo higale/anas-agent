@@ -44,8 +44,8 @@ export function refreshPanelAppearance(snapshot?: Pick<AppConfigSnapshot, 'setti
     // An opening page must consume the latest preparation, including its
     // languages, rather than install settings from a superseded read.
     if (revision !== appearanceRevision) return appearanceRefresh
-    const { diffViewMode, diffFoldUnchanged, diffWordWrap, showMemoryActivityInTitlebar } = settings
-    panelPages.setPreferences({ diffViewMode, diffFoldUnchanged, diffWordWrap, showMemoryActivityInTitlebar })
+    const { diffViewMode, diffFoldUnchanged, diffWordWrap, showMemoryActivityInTitlebar, runningProcessDisplay, showModelRounds } = settings
+    panelPages.setPreferences({ diffViewMode, diffFoldUnchanged, diffWordWrap, showMemoryActivityInTitlebar, runningProcessDisplay, showModelRounds })
     const language = await resolveConfiguredLanguage(settings.language)
     const languages = await getLanguageResources()
     if (revision !== appearanceRevision) return appearanceRefresh
@@ -132,7 +132,7 @@ export function registerPanelIpc(): void {
   ipcMain.handle('panels:preferences', (event, input: unknown) => {
     panelPages.assertHost(event)
     const preferences = z.object({ diffViewMode: z.enum(['inline', 'side_by_side']), diffFoldUnchanged: z.boolean(), diffWordWrap: z.boolean(),
-      showMemoryActivityInTitlebar: z.boolean() }).partial().strict().parse(input)
+      showMemoryActivityInTitlebar: z.boolean(), runningProcessDisplay: z.enum(['expanded', 'collapsed']), showModelRounds: z.boolean() }).partial().strict().parse(input)
     return runApplicationDataOperation(async () => {
       await updateSettings(preferences)
       return panelPages.getPreferences()

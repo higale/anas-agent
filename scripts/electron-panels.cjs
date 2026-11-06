@@ -22,6 +22,7 @@ async function verifyUnifiedPanels() {
       const handle = ipcMain.handle.bind(ipcMain)
       ipcMain.handle = (channel, callback) => handle(channel, async (...args) => {
         if (channel === 'app:readHelp' && globalThis.__failHelp) throw new Error('Controlled help read failure')
+        if (channel === 'agent:activities:directory' && globalThis.__failActivityDirectory) throw new Error('Controlled activity read failure')
         if (channel === 'app:readHelp' && globalThis.__pauseHelp) {
           globalThis.__pauseHelp = false
           globalThis.__helpPending = true
@@ -108,6 +109,7 @@ async function verifyUnifiedPanels() {
       { kind: 'subagent', projectId: fixture.projectId, threadId: fixture.threadId, runId: fixture.runId, subagentId: 'child', name: 'Panel child' }
     ]) {
       console.log('Checking panel', content.kind)
+      if (content.kind === 'subagent') await application.evaluate(() => { globalThis.__failActivityDirectory = true })
       await main.evaluate(content => globalThis.gale.panels.open(content), content)
       const source = await panelPage(application, content.kind)
       const state = (await main.evaluate(() => globalThis.gale.panels.pages.list())).find(item => item.view.content.kind === content.kind)
@@ -115,7 +117,16 @@ async function verifyUnifiedPanels() {
         await expect(source.locator('.ui-document-panel h1')).toBeVisible()
         await source.locator('.ui-document-panel').evaluate(node => { node.scrollTop = 300; node.dispatchEvent(new Event('scroll')) })
       }
-      if (content.kind === 'subagent') await expect(source.locator('.agent-subagent-panel-title')).toContainText('Panel child')
+      if (content.kind === 'subagent') {
+        await expect(source.locator('.agent-subagent-panel-title')).toContainText('Panel child')
+        // An empty child starts with a zero-height directory status. A failed
+        // read must still mount that row and expose its retry action.
+        const failure = source.locator('.agent-subagent-panel [role="alert"]')
+        await expect(failure).toBeVisible()
+        await application.evaluate(() => { globalThis.__failActivityDirectory = false })
+        await failure.getByRole('button', { name: 'Retry', exact: true }).click()
+        await expect(failure).toHaveCount(0)
+      }
       for (let round = 0; round < 2; round++) {
         console.log('Moving', content.kind, round)
         await expect(main.getByRole('button', { name: 'Move to window', exact: true })).toHaveCount(0)
@@ -126,6 +137,11 @@ async function verifyUnifiedPanels() {
         assert.notEqual(page.pageId, state.pageId)
         assert.equal(page.panelId, state.panelId)
         assert.equal(await target.evaluate(() => typeof globalThis.gale), 'undefined')
+        if (content.kind === 'subagent') {
+          // Exercise the real content-renderer permission boundary. Unknown
+          // IDs are a harmless no-op, scoped to this window by the handler.
+          await target.evaluate(() => globalThis.panelWindow.services.agent.activities.cancel('completed-panel-read'))
+        }
         const header = await target.locator('.panel-window-titlebar').boundingBox()
         const body = await target.locator('.panel-window-slot').boundingBox()
         assert.ok(header.height >= 36 && body.y >= header.y + header.height)

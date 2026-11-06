@@ -33,7 +33,6 @@ import {
   threadErrorFor,
   updateThreadError
 } from './threadErrors'
-import { throwIfAborted } from './messagePagination'
 import { mergeActivityPage, preserveEarlierActivities } from './activityPagination'
 import { projectInitialAgentSubmission } from './agentSubmissionProjection'
 import { useQueuedAgentMessages } from './useQueuedAgentMessages'
@@ -467,7 +466,7 @@ export function useAgentWorkspace({ onAppError }: UseAgentWorkspaceOptions) {
       })
       return
     }
-    if (['memory_recalled', 'model_started', 'model_completed', 'context_compression_started',
+    if (['model_started', 'model_completed', 'context_compression_started',
       'context_compression_completed', 'context_compression_discarded', 'model_delta', 'model_tool_calls',
       'tool_started', 'tool_approval_requested', 'tool_completed', 'subagent_updated'].includes(event.type)) {
       setRuns(current => {
@@ -818,7 +817,7 @@ export function useAgentWorkspace({ onAppError }: UseAgentWorkspaceOptions) {
     threadId: string,
     signal: AbortSignal
   ): Promise<void> => {
-    throwIfAborted(signal)
+    signal.throwIfAborted()
     const snapshot = snapshots[threadId]
     if (!snapshot || snapshot.messageWindow.remaining <= 0) return
     const guard = snapshotReadinessRef.current.guard(threadId)
@@ -826,7 +825,7 @@ export function useAgentWorkspace({ onAppError }: UseAgentWorkspaceOptions) {
       threadId,
       beforeIndex: snapshot.messageWindow.startIndex
     })
-    throwIfAborted(signal)
+    signal.throwIfAborted()
     if (guard.isCurrent()) acceptSnapshot(earlier)
   }, [acceptSnapshot, snapshots])
 

@@ -1,5 +1,5 @@
 import type { AgentRunActivity, AgentRuntimeEvent } from './agentTypes'
-import { applySubagentActivityUpdate } from './agentActivity'
+import { applySubagentActivityUpdate, hasVisibleModelText } from './agentActivity'
 
 function upsert<T>(items: T[], value: T, matches: (item: T) => boolean): T[] {
   return items.some(matches) ? items.map(item => matches(item) ? value : item) : [...items, value]
@@ -11,7 +11,6 @@ function reduceRunActivityEvent<T extends AgentRunActivity>(run: T, event: Agent
     error: event.run.error, updatedAt: event.run.updatedAt, backgroundCleanup: event.run.backgroundCleanup }
   if (!('runId' in event) || event.runId !== run.runId) return run
   switch (event.type) {
-    case 'memory_recalled': return { ...run, memoryRecalls: upsert(run.memoryRecalls ?? [], event.recall, item => item.id === event.recall.id) }
     case 'context_compression_started':
     case 'context_compression_completed': return { ...run, summaries: upsert(run.summaries ?? [], event.summary, item => item.id === event.summary.id) }
     case 'context_compression_discarded': return { ...run, summaries: run.summaries?.filter(item => item.id !== event.summaryId) }
@@ -23,13 +22,23 @@ function reduceRunActivityEvent<T extends AgentRunActivity>(run: T, event: Agent
       return { ...run, models: upsert(run.models, model, matches) }
     }
     case 'model_delta':
-    case 'model_tool_calls': return { ...run, models: run.models.map(model => {
-      if (model.id !== event.modelId || model.subagentId !== event.subagentId) return model
-      if (event.type === 'model_tool_calls') return { ...model, toolCallProgress: event.progress }
-      if (model.status === 'completed') return model
-      return event.delta.type === 'reasoning' ? { ...model, hasReasoning: true, reasoning: model.reasoning + event.delta.text }
-        : { ...model, hasText: true, text: model.text + event.delta.text }
-    }) }
+    case 'model_tool_calls': {
+      const index = run.models.findIndex(model => model.id === event.modelId && model.subagentId === event.subagentId)
+      if (index < 0) return run
+      const model = run.models[index]
+      if (event.type === 'model_delta') {
+        if (model.status === 'completed') return run
+        const visibilityUnchanged = event.delta.type === 'reasoning' ? model.hasReasoning
+          : model.hasText || !hasVisibleModelText(event.delta)
+        // Body-free display events invalidate their detail owner separately.
+        // The run only changes when its visibility does, or it carries raw text.
+        if (!event.delta.text && visibilityUnchanged) return run
+      }
+      const updated = event.type === 'model_tool_calls' ? { ...model, toolCallProgress: event.progress }
+        : event.delta.type === 'reasoning' ? { ...model, hasReasoning: true, reasoning: model.reasoning + event.delta.text }
+          : { ...model, hasText: model.hasText || hasVisibleModelText(event.delta), text: model.text + event.delta.text }
+      return { ...run, models: run.models.map((item, at) => at === index ? updated : item) }
+    }
     case 'tool_started':
     case 'tool_approval_requested':
     case 'tool_completed': return { ...run, tools: upsert(run.tools, {

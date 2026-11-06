@@ -16,7 +16,7 @@ import { WorkspaceMenu } from './WorkspaceMenu'
 import { MemoryActivityButton } from './MemoryActivityPanel'
 import type { PluginSummary } from '@shared/plugins'
 import { workspacePanelGroup, workspacePanelScope, type WorkspacePanelsController } from './useWorkspacePanels'
-import { WORKSPACE_PANEL_WIDTH_DEFAULT } from '@shared/uiPreferences'
+import { normalizeChatContentWidth, WORKSPACE_PANEL_WIDTH_DEFAULT } from '@shared/uiPreferences'
 import { interruptActions } from './agentApproval'
 import { AgentMessageList } from './AgentMessageList'
 import type { AgentRunView } from './useAgentWorkspace'
@@ -33,7 +33,8 @@ import {
 import type { AgentSpeechState } from '../speech/useAgentSpeech'
 import { useTranslation } from 'react-i18next'
 import { ThreadTopbar } from './ThreadTopbar'
-import { normalizeChatContentWidth } from '../settings/AppearanceSettings'
+import { ActivityPreferences } from './ActivityPreferences'
+import { PanelViewState } from './PanelViewState'
 
 interface AgentWorkspaceProps {
   plugins?: PluginSummary[]
@@ -180,6 +181,7 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
     <MarkdownWorkspaceProjectProvider
       projectId={selectedProject?.kind === 'workspace' ? selectedProject.id : undefined}
     >
+      <ActivityPreferences value={{ runningProcessDisplay: props.config?.settings.runningProcessDisplay ?? 'expanded', showModelRounds: props.config?.settings.showModelRounds ?? true }}>
       <DiffPreferences.Provider value={{
         diffViewMode: props.config?.settings.diffViewMode ?? 'inline',
         diffFoldUnchanged: props.config?.settings.diffFoldUnchanged ?? true,
@@ -238,6 +240,7 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
         </div>
       </header>
       <div className="agent-chat-body">
+      <PanelViewState key={props.activeThreadId}>
       <AgentMessageList
         onOpenChanges={(runId) => {
           const threadId = props.activeThreadId
@@ -263,6 +266,7 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
         onOpenSubagent={openSubagent}
         onSpeak={props.onSpeak}
       />
+      </PanelViewState>
       {showApprovalPanel && props.run && (
         <AgentApprovalPanel
           error={props.error}
@@ -343,6 +347,7 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
       </div>
       </main>
       </DiffPreferences.Provider>
+      </ActivityPreferences>
     </MarkdownWorkspaceProjectProvider>
   )
 }

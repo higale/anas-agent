@@ -62,6 +62,16 @@ function rawConfig(): RawAppConfig {
   }
 }
 
+it('defaults optional process preferences and preserves explicit collapsed and hidden rounds through saves', async () => {
+  const raw = rawConfig(), { appConfig, writeRawSettingsConfig } = await loadAppConfig(raw)
+  expect((await appConfig.getAppConfigSnapshot()).settings).toMatchObject({ runningProcessDisplay: 'expanded', showModelRounds: true })
+  const saved = await appConfig.updateSettings({ runningProcessDisplay: 'collapsed', showModelRounds: false })
+  expect(saved.settings).toMatchObject({ runningProcessDisplay: 'collapsed', showModelRounds: false })
+  expect(writeRawSettingsConfig).toHaveBeenLastCalledWith(expect.objectContaining({ settings: expect.objectContaining({ running_process_display: 'collapsed', show_model_rounds: false }) }))
+  expect((await appConfig.updateSettings({ theme: 'dark' })).settings).toMatchObject({ runningProcessDisplay: 'collapsed', showModelRounds: false })
+  await expect(appConfig.updateSettings({ runningProcessDisplay: 'invalid' as 'expanded' })).rejects.toThrow('running_process_display')
+})
+
 function rawProvider(id: string, name: string) {
   return {
     id: `${id}-provider`,

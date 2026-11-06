@@ -601,6 +601,8 @@ export interface AppSettings {
   logLevel: RuntimeLogLevel
   logRetentionDays: number
   maxModelCallsPerRun: number
+  runningProcessDisplay: 'expanded' | 'collapsed'
+  showModelRounds: boolean
   /** No selection pauses background memory generation; never inherits the chat model. */
   memoryMode: 'background' | 'foreground'
   memoryModelId?: string | null

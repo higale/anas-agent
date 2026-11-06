@@ -35,7 +35,8 @@ export const contentServices: ContentServices = {
     },
     threads: { get: threadId => ipcRenderer.invoke('agent:threads:get', threadId) },
     activities: {
-      page: input => ipcRenderer.invoke('agent:activities:page', input),
+      directory: input => ipcRenderer.invoke('agent:activities:directory', input),
+      cancel: requestId => ipcRenderer.invoke('agent:activities:cancel', requestId),
       detail: input => ipcRenderer.invoke('agent:activities:detail', input),
       get: input => ipcRenderer.invoke('agent:activities:get', input),
       subagent: input => ipcRenderer.invoke('agent:activities:subagent', input)

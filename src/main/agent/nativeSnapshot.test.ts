@@ -72,7 +72,7 @@ describe('native product snapshot', () => {
     } finally { database.close(); global.close(); rmSync(root, { recursive: true, force: true }) }
   })
 
-  it('keeps recalled memory and discarded compression visible consistently across reopen', async () => {
+  it('keeps discarded compression out of the snapshot across reopen', async () => {
     const root = mkdtempSync(join(tmpdir(), 'anas-native-context-events-')), file = join(root, 'conversation.sqlite')
     const global = new Database(':memory:'), options = { attachmentRoot: join(root, 'attachments'),
       memoryStore: new SqliteMemoryStore(global), fileEditStore: new FileEditStore(join(root, 'file_edits')) }
@@ -83,8 +83,6 @@ describe('native product snapshot', () => {
         message: { id: 'run:input', value: { id: 'run:input', kind: 'user', content: 'Task', context: { runId: 'run' } } } })
       await database.runs.enter('input', identity)
       const callbacks = database.activityProjection.contextCallbacks('run', 'thread', { push: event => events.push(event) })
-      const details = { query: 'Workspace preference', promptText: 'Use LF line endings', memoryCount: 1 }
-      callbacks.onMemoryRecall(details); callbacks.onMemoryRecall(details)
       const summaryId = callbacks.onCompressionStart!()
       callbacks.onCompressionCompleted!(summaryId, 'Uncommitted summary', { modelContent: 'Uncommitted summary', cutoffIndex: 0,
         activatedAfterMessageIndex: 0, inputTokensBefore: 20, inputTokensAfter: 5 })
@@ -93,9 +91,7 @@ describe('native product snapshot', () => {
       callbacks.onCompressionFailed!(summaryId)
       expect(events.at(-1)).toMatchObject({ type: 'context_compression_discarded', summaryId })
       const snapshot = database.readSnapshot('thread')
-      expect(snapshot.activities[0].memoryRecalls).toMatchObject([details])
       expect(snapshot.activities[0].summaries ?? []).toEqual([])
-      expect(() => callbacks.onMemoryRecall({ ...details, memoryCount: 0 })).toThrow('positive integer')
       database.close(); database = NativeConversationDatabase.open(file, options)
       expect(database.readSnapshot('thread')).toEqual(snapshot)
     } finally { database.close(); global.close(); rmSync(root, { recursive: true, force: true }) }

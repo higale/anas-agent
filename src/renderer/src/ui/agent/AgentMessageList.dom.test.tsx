@@ -1,14 +1,24 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentMessage, AgentRunActivity } from '@shared/agentTypes'
-import { AgentMessageList, AgentSubagentPanel } from './AgentMessageList'
+import { AgentMessageList as MessageList, AgentSubagentPanel as SubagentPanel } from './AgentMessageList'
+import type { ComponentProps } from 'react'
+import { ActivityPreferences } from './ActivityPreferences'
 import { AgentSubagentActivityTrigger } from './AgentSubagentActivityDock'
 import { PanelViewState } from './PanelViewState'
 import * as contentServiceModule from '../panels/contentServices'
 import { backgroundCleanupCompleted, backgroundCleanupStarted, backgroundTasksPendingError } from '@shared/backgroundCleanup'
+import { activityAtomsFromItems, ActivityGroupBuilder, isProcessAtom } from '@shared/activityView'
+import { projectRunActivityItems } from '@shared/agentTimeline'
+import type { ActivityDirectoryInput } from '@shared/activityDirectory'
+
+// Existing disclosure cases exercise the collapsed preference explicitly.
+const AgentMessageList = (props: ComponentProps<typeof MessageList>) => <ActivityPreferences value={{ runningProcessDisplay: 'collapsed', showModelRounds: true }}><MessageList {...props} /></ActivityPreferences>
+const AgentSubagentPanel = (props: ComponentProps<typeof SubagentPanel>) => <ActivityPreferences value={{ runningProcessDisplay: 'collapsed', showModelRounds: true }}><SubagentPanel {...props} /></ActivityPreferences>
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string, options?: { summary?: string; index?: number; seconds?: number }) => options?.seconds !== undefined
+  useTranslation: () => ({ i18n: { resolvedLanguage: 'en' }, t: (key: string, options?: { summary?: string; index?: number; seconds?: number; duration?: string }) => options?.duration
+    ? `${key}: ${options.duration}` : options?.seconds !== undefined
     ? `${key}: ${options.seconds}` : options?.index
     ? `${key} ${options.index}` : options?.summary
     ? `${key}: ${options.summary}`
@@ -40,6 +50,240 @@ function activity(status: 'running' | 'completed'): AgentRunActivity {
   }
 }
 
+function expand(details: HTMLDetailsElement): void {
+  fireEvent.click(details.querySelector('summary')!)
+  fireEvent(details, new Event('toggle'))
+}
+
+describe('process display preferences', () => {
+  it('ticks from the run start without new activity, includes waiting, freezes on completion, and releases its timer', () => {
+    vi.useFakeTimers()
+    const start = Date.parse('2026-11-06T00:00:00Z')
+    vi.setSystemTime(start)
+    const run = { ...activity('running'), createdAt: new Date(start).toISOString(), updatedAt: new Date(start).toISOString() }
+    const content = () => <MessageList title="Thread" messages={messages} activities={[{ ...run }]} panelRef={{ current: null }}
+      followOutputRef={{ current: true }} speech={{ status: 'idle' }} onSpeak={vi.fn()} />
+    const view = render(content())
+    const elapsed = () => view.container.querySelector('.agent-run-elapsed')
+    try {
+      expect(elapsed()).toHaveTextContent('agent.run_elapsed_active: 0s')
+      act(() => vi.advanceTimersByTime(3000))
+      expect(elapsed()).toHaveTextContent('agent.run_elapsed_active: 3s')
+      view.rerender(<MessageList title="Thread" messages={messages} activities={[{ ...run, status: 'interrupted' }]} panelRef={{ current: null }}
+        followOutputRef={{ current: true }} speech={{ status: 'idle' }} onSpeak={vi.fn()} />)
+      act(() => vi.advanceTimersByTime(2000))
+      expect(elapsed()).toHaveTextContent('agent.run_elapsed_active: 5s')
+      expect(view.container.querySelector('.agent-activity-range-status')).toHaveTextContent('agent.run_waiting_for_approval')
+      vi.setSystemTime(start + 24000)
+      act(() => vi.advanceTimersByTime(1000))
+      expect(elapsed()).toHaveTextContent('agent.run_elapsed_active: 25s')
+      run.status = 'completed'; run.updatedAt = new Date(start + 25000).toISOString()
+      view.rerender(content())
+      act(() => vi.advanceTimersByTime(5000))
+      expect(elapsed()).toHaveTextContent('agent.run_elapsed: 25s')
+      view.unmount()
+      expect(vi.getTimerCount()).toBe(0)
+      run.status = 'running'
+      const reopened = render(content())
+      expect(reopened.container.querySelector('.agent-run-elapsed')).toHaveTextContent('agent.run_elapsed_active: 30s')
+      reopened.unmount()
+      expect(vi.getTimerCount()).toBe(0)
+    } finally { view.unmount(); vi.useRealTimers() }
+  })
+  it.each([
+    ['expanded', false], ['collapsed', false], ['expanded', true], ['collapsed', true]
+  ] as const)('closes preceding process groups at the first reply, preserving later manual choices (%s, child=%s)', (mode, child) => {
+    const run = activity('running'), subagentId = child ? 'child' : undefined
+    if (child) run.subagents = [{ id: 'child', name: 'Child', sequence: 0, status: 'running' }]
+    run.tools[0].subagentId = subagentId
+    run.models = [{ id: 'reasoner', subagentId, sequence: 0, round: 1, status: 'running', text: '', reasoning: 'Thinking', toolCallIds: ['tool-1'] }]
+    const content = () => <ActivityPreferences value={{ runningProcessDisplay: mode, showModelRounds: true }}>
+      {child ? <SubagentPanel run={{ ...run }} subagentId="child" /> : <MessageList title="Thread" messages={messages} activities={[{ ...run }]}
+        panelRef={{ current: null }} followOutputRef={{ current: true }} speech={{ status: 'idle' }} onSpeak={vi.fn()} />}
+    </ActivityPreferences>
+    const view = render(content())
+    const groups = () => [...view.container.querySelectorAll<HTMLDetailsElement>('.agent-activity-process')]
+    expect(groups()[0].open).toBe(mode === 'expanded')
+    if (!groups()[0].open) expand(groups()[0])
+    run.models.push({ id: 'reply', subagentId, sequence: 2, round: 2, status: 'running', text: 'First reply', reasoning: '', toolCallIds: [] })
+    view.rerender(content())
+    expect(run.status).toBe('running')
+    expect(groups()[0].open).toBe(false)
+    expect(view.container.querySelector('.agent-timeline-member')).toBeNull()
+    expand(groups()[0])
+    run.models[1] = { ...run.models[1], text: 'First reply continues' }
+    view.rerender(content())
+    expect(groups()[0].open).toBe(true)
+    run.models.push({ id: 'next', subagentId, sequence: 3, round: 3, status: 'running', text: '', reasoning: 'Next thought', toolCallIds: [] })
+    view.rerender(content())
+    expect(groups()).toHaveLength(2)
+    expect(groups()[1].open).toBe(mode === 'expanded')
+    if (!groups()[1].open) expand(groups()[1])
+    run.models[2] = { ...run.models[2], text: 'Next reply' }
+    view.rerender(content())
+    expect(groups()[0].open).toBe(true)
+    expect(groups()[1].open).toBe(false)
+    run.status = 'completed'
+    if (child) run.subagents[0].status = 'completed'
+    view.rerender(content())
+    expect(groups()[0].open).toBe(true)
+    expect(groups()[1].open).toBe(false)
+  })
+  it('also closes an expanded standalone tool when the following reply appears', () => {
+    const run = activity('running')
+    const content = () => <MessageList title="Thread" messages={messages} activities={[{ ...run }]} panelRef={{ current: null }}
+      followOutputRef={{ current: true }} speech={{ status: 'idle' }} onSpeak={vi.fn()} />
+    const view = render(content())
+    const tool = () => view.container.querySelector<HTMLDetailsElement>('.agent-activity-tool')!
+    expand(tool()); expect(tool().open).toBe(true)
+    run.models = [{ id: 'reply', sequence: 2, status: 'completed', text: 'Reply', reasoning: '', toolCallIds: [] }]
+    view.rerender(content())
+    // The reply closes the process even while the enclosing run remains active.
+    const group = view.container.querySelector<HTMLDetailsElement>('.agent-activity-process')!
+    expect(group.open).toBe(false)
+    expand(group)
+    expect(tool().open).toBe(false)
+    expand(tool()); view.rerender(content())
+    expect(tool().open).toBe(true)
+  })
+  it('uses total run elapsed time for the outer fold regardless of member durations', () => {
+    const run = activity('completed')
+    run.updatedAt = '2026-08-19T00:01:40.000Z'
+    run.tools[0] = { ...run.tools[0], startedAt: run.createdAt, completedAt: '2026-08-19T00:00:02.000Z' }
+    const view = render(<MessageList title="Thread" messages={messages} activities={[run]} panelRef={{ current: null }}
+      followOutputRef={{ current: true }} speech={{ status: 'idle' }} onSpeak={vi.fn()} />)
+    expect(view.container.querySelector('.agent-activity-range-toggle[aria-expanded]')).toHaveTextContent('agent.run_elapsed: 1m 40s')
+  })
+  it.each(['expanded', 'collapsed'] as const)('uses %s during execution, collapses on finish, and retains later manual choices', mode => {
+    const running = activity('running')
+    running.models = [{ id: 'reasoner', sequence: 0, round: 1, status: 'running', text: '', reasoning: 'Thinking', toolCallIds: ['tool-1'] }]
+    const completed: AgentRunActivity = { ...running, status: 'completed', tools: running.tools.map(tool => ({ ...tool, status: 'completed' })),
+      models: [{ ...running.models[0], status: 'completed' }, { id: 'final-model', messageId: 'final', sequence: 2, round: 2,
+        status: 'completed', text: 'Finished', reasoning: '', toolCallIds: [] }] }
+    const props = { title: 'Thread', panelRef: { current: null }, followOutputRef: { current: true }, speech: { status: 'idle' as const }, onSpeak: vi.fn() }
+    const content = (run: AgentRunActivity) => <ActivityPreferences value={{ runningProcessDisplay: mode, showModelRounds: true }}>
+      <MessageList {...props} activities={[run]} messages={run.status === 'running' ? messages : [...messages,
+        { id: 'final', activityModelId: 'final-model', runId: run.runId, role: 'assistant', content: [{ type: 'text', text: 'Finished' }] }]} />
+    </ActivityPreferences>
+    const view = render(content(running))
+    const group = () => view.container.querySelector<HTMLDetailsElement>('.agent-activity-process')!
+    expect(group().open).toBe(mode === 'expanded')
+    const toggle = () => { fireEvent.click(group().querySelector('summary')!); fireEvent(group(), new Event('toggle')) }
+    if (!group().open) toggle()
+    view.rerender(content(completed))
+    const outer = view.container.querySelector<HTMLButtonElement>('.agent-activity-range-toggle[aria-expanded]')!
+    expect(outer).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(outer)
+    expect(group().open).toBe(false)
+    expect(group().querySelector('summary')).toHaveTextContent('agent.process_thought_tools')
+    toggle(); expect(group().open).toBe(true)
+    view.rerender(content({ ...completed }))
+    expect(group().open).toBe(true)
+    view.rerender(content(running))
+    expect(group().open).toBe(mode === 'expanded')
+    view.rerender(content(completed))
+    expect(view.container.querySelector('.agent-activity-range-toggle[aria-expanded]')).toHaveAttribute('aria-expanded', 'false')
+  })
+  it('hides round metadata while retaining recovery status and the original reasoning label', () => {
+    const run = activity('running'); run.tools = []
+    run.models = [{ id: 'reasoner', sequence: 0, round: 9, status: 'running', text: '', reasoning: 'Thinking', toolCallIds: [],
+      recovery: { reason: 'invalid_tool_call', attempts: 1, retryAt: Date.now() + 1000 } }]
+    const view = render(<ActivityPreferences value={{ runningProcessDisplay: 'expanded', showModelRounds: false }}>
+      <MessageList title="Thread" messages={messages} activities={[run]} panelRef={{ current: null }} followOutputRef={{ current: true }}
+        speech={{ status: 'idle' }} onSpeak={vi.fn()} />
+    </ActivityPreferences>)
+    expect(screen.queryByText('round 9')).toBeNull()
+    expect(screen.getAllByRole('status')).toHaveLength(1)
+    expect(view.container.querySelectorAll('.agent-spin')).toHaveLength(1)
+    expect(view.container.querySelector('.agent-activity-model > header')).toBeNull()
+    expect(view.container.querySelector('.agent-activity-reasoning > summary')).toHaveTextContent('reasoning')
+  })
+  it.each([false, true])('hides empty groups after a reply or scope completion, retaining live waiting and recovery (child=%s)', child => {
+    const run = activity('running'), subagentId = child ? 'child' : undefined
+    run.tools = []
+    if (child) run.subagents = [{ id: 'child', name: 'Child', sequence: 0, status: 'running' }]
+    run.models = [{ id: 'model', subagentId, sequence: 1, round: 1, status: 'running', text: '', reasoning: '', toolCallIds: [] }]
+    const content = () => <ActivityPreferences value={{ runningProcessDisplay: 'expanded', showModelRounds: false }}>
+      {child ? <SubagentPanel run={{ ...run }} subagentId="child" /> : <MessageList title="Thread" messages={messages} activities={[{ ...run }]}
+        panelRef={{ current: null }} followOutputRef={{ current: true }} speech={{ status: 'idle' }} onSpeak={vi.fn()} />}
+    </ActivityPreferences>
+    const view = render(content())
+    expect(view.container.querySelector('.agent-activity-process > summary')).toHaveTextContent('agent.process_waiting')
+    expect(view.container.querySelectorAll('.virtual-timeline .agent-spin')).toHaveLength(1)
+    expect(view.container.querySelector('.agent-timeline-member')).toBeNull()
+    run.models[0].recovery = { reason: 'invalid_tool_call', attempts: 1, retryAt: Date.now() + 1000 }
+    view.rerender(content())
+    expect(view.container.querySelector('.agent-activity-process > summary')).toHaveTextContent('agent.model_recovery_invalid_tool_call')
+    delete run.models[0].recovery
+    run.models[0].text = 'Visible reply'
+    view.rerender(content())
+    expect(screen.getByText('Visible reply')).toBeInTheDocument()
+    expect(view.container.querySelector('.agent-activity-process')).toBeNull()
+    expect(view.container.querySelector('.agent-activity-model')).toBeNull()
+    run.models[0].text = ''
+    if (child) run.subagents[0].status = 'completed'
+    else run.status = 'completed'
+    view.rerender(content())
+    expect(view.container.querySelector('.agent-activity-process')).toBeNull()
+  })
+  it('filters empty directory groups before reading members, preserves thought/tool content, and restores rounds on preference changes', async () => {
+    const fixture = activity('completed')
+    fixture.tools[0].sequence = 4
+    fixture.models = [
+      { id: 'reply', sequence: 1, round: 1, status: 'completed', text: 'Visible reply', reasoning: '', toolCallIds: [] },
+      { id: 'empty', sequence: 2, round: 2, status: 'completed', text: '', reasoning: '', toolCallIds: ['tool-1'] },
+      { id: 'thought', sequence: 3, round: 3, status: 'completed', text: '', reasoning: '', hasReasoning: true,
+        toolCallIds: [], detail: { threadId: 'thread', runId: fixture.runId, kind: 'model', id: 'thought' } }
+    ]
+    const atoms = activityAtomsFromItems(projectRunActivityItems(fixture, new Map(), []))
+    const builder = new ActivityGroupBuilder()
+    const outline = [...atoms.flatMap(atom => builder.push(atom)), ...builder.finish()]
+    const directory = vi.fn(async (input: ActivityDirectoryInput) => {
+      const group = outline.find(node => node.type === 'process' && node.key === input.parentId)
+      const items = group ? atoms.filter(atom => isProcessAtom(atom) && atom.position.sequence >= group.start.sequence && atom.position.sequence <= group.end.sequence)
+        .map(atom => ({ ...atom, key: atom.position.key, start: atom.position, end: atom.position })) : outline
+      return { version: '1', items, removed: [] }
+    })
+    const detail = vi.fn().mockResolvedValue({ reasoning: 'Deferred thought' })
+    const service = vi.spyOn(contentServiceModule, 'contentServices').mockReturnValue({ agent: {
+      activities: { directory, detail, cancel: vi.fn(async () => {}) },
+      onEvent: (_listener: unknown, synchronize: () => Promise<void>) => { void synchronize(); return vi.fn() }
+    } } as unknown as ReturnType<typeof contentServiceModule.contentServices>)
+    const run = { ...fixture, models: [], tools: [], display: { modelCount: 3, toolCount: 1, subagentCount: 0 } }
+    const content = (showModelRounds: boolean) => <ActivityPreferences value={{ runningProcessDisplay: 'expanded', showModelRounds }}>
+      <MessageList title="Thread" navigationKey="thread" messages={messages} activities={[run]}
+        panelRef={{ current: null }} followOutputRef={{ current: true }} speech={{ status: 'idle' }} onSpeak={vi.fn()} />
+    </ActivityPreferences>
+    const view = render(content(false))
+    try {
+      await screen.findByText('Visible reply')
+      const groups = () => [...view.container.querySelectorAll<HTMLDetailsElement>('.agent-activity-process')]
+      expect(groups()).toHaveLength(1)
+      expect(groups()[0].querySelector('summary')).toHaveTextContent('agent.process_thought_tools')
+      expect(directory).toHaveBeenCalledTimes(1)
+      expand(groups()[0])
+      await waitFor(() => expect(view.container.querySelector('.agent-activity-reasoning')).not.toBeNull())
+      expect(directory).toHaveBeenCalledTimes(2)
+      expect(detail).not.toHaveBeenCalled()
+      expect(view.container.querySelectorAll('.agent-timeline-member')).toHaveLength(2)
+      expect(view.container.querySelectorAll('.agent-activity-model')).toHaveLength(1)
+      expect(view.container.querySelector('.agent-activity-tool')).not.toBeNull()
+      expand(view.container.querySelector<HTMLDetailsElement>('.agent-activity-reasoning')!)
+      await screen.findByText('Deferred thought')
+      view.rerender(content(true))
+      expect(groups()).toHaveLength(2)
+      expect(screen.getByText('round 2')).toBeInTheDocument()
+      expand(groups()[0])
+      await screen.findByText('round 1')
+      view.rerender(content(false))
+      expect(groups()).toHaveLength(1)
+      expect(screen.queryByText(/^round /)).toBeNull()
+      expect(view.container.querySelectorAll('.agent-timeline-member')).toHaveLength(2)
+      expect(screen.getByText('Visible reply')).toBeInTheDocument()
+    } finally { view.unmount(); service.mockRestore() }
+  })
+})
+
 describe('sleep countdown', () => {
   const props = { title: 'Thread', messages, panelRef: { current: null }, followOutputRef: { current: true },
     speech: { status: 'idle' as const }, onSpeak: vi.fn() }
@@ -66,6 +310,8 @@ describe('sleep countdown', () => {
     act(() => vi.advanceTimersByTime(3000))
     const reopened = render(<AgentMessageList {...props} activities={[run]} />)
     expect(screen.getByRole('timer')).toHaveTextContent('agent.sleep_remaining: 6')
+    // Deliver the native details toggle task before checking the countdown's timer cleanup.
+    act(() => vi.advanceTimersByTime(0))
     reopened.unmount()
     expect(vi.getTimerCount()).toBe(0)
   })
@@ -76,12 +322,13 @@ describe('sleep countdown', () => {
     act(() => vi.advanceTimersByTime(10_000))
     expect(screen.getByRole('timer')).toHaveTextContent('agent.sleep_finishing')
     expect(view.container.querySelector('.agent-activity-result')).toBeNull()
-    expect(vi.getTimerCount()).toBe(0)
+    expect(vi.getTimerCount()).toBe(1) // The run elapsed clock continues while awaiting the tool result.
     const completed = { ...run, tools: [{ ...run.tools[0], status: 'completed' as const,
       completedAt: '2026-10-11T12:00:15Z', output: { status: 'completed', elapsed_seconds: 15 } }] }
     view.rerender(<AgentMessageList {...props} activities={[completed]} />)
     expect(screen.queryByRole('timer')).toBeNull()
     expect(view.container.querySelector('.agent-activity-tool > summary')).toHaveTextContent('15 s')
+    expect(view.container.querySelector('.agent-activity-tool > summary .lucide-activity')).toBeVisible()
   })
 
   it.each(['cancelled', 'failed', 'completed'] as const)('stops on a %s run even if tool activity has not settled', (status) => {
@@ -155,16 +402,116 @@ describe('running tool shimmer', () => {
     run.models = [{ id: 'model', sequence: 0, status: 'running', text: '', reasoning: '', toolCallIds: [],
       toolCallProgress: [{ index: 0, name: 'read_file', characterCount: 20, complete: false }] }]
     const view = render(<AgentMessageList {...props} activities={[run]} />)
-    expect(view.container.querySelector('.agent-activity-tool')).toHaveTextContent('read_file')
+    expect(view.container.querySelector('.agent-activity-process > summary')).toHaveTextContent('read_file')
     expect(view.container.querySelector(runningContent)).toBeNull()
   })
 })
 
 describe('AgentMessageList tool disclosure', () => {
-  function expand(details: HTMLDetailsElement): void {
-    fireEvent.click(details.querySelector('summary')!)
-    fireEvent(details, new Event('toggle'))
+  function members(group: Element) {
+    const key = group.closest<HTMLElement>('[data-timeline-row]')!.dataset.timelineRow
+    const rows = () => [...group.ownerDocument.querySelectorAll<HTMLElement>('[data-timeline-parent]')].filter(row => row.dataset.timelineParent === key)
+    return {
+      querySelector: <T extends Element = Element>(selector: string): T | null => rows().map(row => row.querySelector<T>(selector)).find(Boolean) ?? null,
+      querySelectorAll: <T extends Element = Element>(selector: string): T[] => rows().flatMap(row => [...row.querySelectorAll<T>(selector)])
+    }
   }
+  function retainedList(run: AgentRunActivity) {
+    return <PanelViewState><AgentMessageList title="Thread" messages={messages} activities={[run]}
+      panelRef={{ current: null }} followOutputRef={{ current: true }} speech={{ status: 'idle' }} onSpeak={vi.fn()} /></PanelViewState>
+  }
+
+  it.each(['approval', 'input'] as const)('preserves inspected details and the stable process after %s is resolved', (kind) => {
+    const run = activity('running')
+    const tool = run.tools[0]
+    const call = kind === 'input' ? { ...tool.call, name: 'request_user_input' } : tool.call
+    run.models = [{ id: 'm', status: 'completed', sequence: 0, text: '', reasoning: 'Earlier reasoning', toolCallIds: [call.id] }]
+    const waiting = { ...run, tools: [{ ...tool, call, approval: kind === 'approval'
+      ? { status: 'pending_approval' as const, interruptId: 'i', actionIndex: 0 } : undefined }] }
+    const resumed = { ...run, tools: [{ ...tool, call, status: kind === 'input' ? 'completed' as const : tool.status }] }
+    for (const inspecting of [false, true]) {
+      const view = render(retainedList(waiting))
+      const card = view.container.querySelector<HTMLDetailsElement>('.agent-activity-tool')!
+      if (inspecting) {
+        expand(card)
+        expand(card.querySelector<HTMLDetailsElement>('.agent-activity-arguments')!)
+      }
+      const body = card.querySelector('pre')
+      view.rerender(retainedList(resumed))
+      if (inspecting) {
+        expect(view.container.querySelector('.agent-activity-arguments pre')).toBe(body)
+        expect(body).toHaveTextContent('test')
+        expect(view.container.querySelector('.agent-activity-model')).toBeVisible()
+        expand(view.container.querySelector<HTMLDetailsElement>('.agent-activity-process')!)
+      }
+      expect(view.container.querySelector('.agent-activity-tool')).toBeNull()
+      expect(view.container.querySelectorAll('.agent-activity-process')).toHaveLength(1)
+      view.unmount()
+    }
+  })
+
+  it.each([false, true])('preserves the inspected tool when a second tool arrives (inspecting=%s)', (inspecting) => {
+    const run = activity('running')
+    const view = render(retainedList(run))
+    const first = view.container.querySelector<HTMLDetailsElement>('.agent-activity-tool')!
+    if (inspecting) {
+      expand(first)
+      expand(first.querySelector<HTMLDetailsElement>('.agent-activity-arguments')!)
+    }
+    const body = first.querySelector('pre')
+    view.rerender(retainedList({ ...run, tools: [...run.tools, { ...run.tools[0], sequence: 2,
+      call: { id: 'tool-2', name: 'second', args: {} } }] }))
+    const group = view.container.querySelector<HTMLDetailsElement>('.agent-activity-process')!
+    expect(group.open).toBe(inspecting)
+    if (!inspecting) expand(group)
+    const cards = members(group).querySelectorAll<HTMLDetailsElement>('.agent-activity-tool')
+    expect(cards[0].open).toBe(inspecting)
+    expect(cards[1].open).toBe(false)
+    if (inspecting) {
+      expect(cards[0].querySelector('pre')).toBe(body)
+      expect(body).toHaveTextContent('test')
+    }
+  })
+
+  it('keeps the following tool mounted and exposes pending approval on the stable group header', () => {
+    const run = activity('running')
+    const first = run.tools[0]
+    run.tools = [first, { ...first, sequence: 2, call: { ...first.call, id: 'later' } }]
+    const view = render(retainedList(run))
+    const group = view.container.querySelector<HTMLDetailsElement>('.agent-activity-process')!
+    expand(group)
+    const later = members(group).querySelectorAll<HTMLDetailsElement>('.agent-activity-tool')[1]
+    expand(later)
+    expand(later.querySelector<HTMLDetailsElement>('.agent-activity-arguments')!)
+    const body = later.querySelector('pre')
+    expect(body).toHaveTextContent('test')
+    view.rerender(retainedList({ ...run, tools: [{ ...first,
+      approval: { status: 'pending_approval', interruptId: 'i', actionIndex: 0 } }, run.tools[1]] }))
+    expect(members(group).querySelector('.agent-activity-arguments pre')).toBe(body)
+    expand(group)
+    expect(group.querySelector('summary .lucide-shield-alert')).toBeVisible()
+    expand(group)
+    expect(view.container.querySelector('.agent-activity-tool > summary .lucide-shield-alert')).toBeVisible()
+  })
+
+  it('collapses reasoning completed while its group was closed and remembers a subsequent manual expansion', () => {
+    const run = activity('running')
+    run.models = [{ id: 'model', sequence: 0, status: 'running', text: '', reasoning: 'Reasoning body', toolCallIds: [] }]
+    const view = render(retainedList(run))
+    const group = view.container.querySelector<HTMLDetailsElement>('.agent-activity-process')!
+    expand(group)
+    expect(members(group).querySelector('pre')).toHaveTextContent('Reasoning body')
+    expand(group)
+    view.rerender(retainedList({ ...run, models: [{ ...run.models[0], status: 'completed' }] }))
+    expand(group)
+    const reasoning = members(group).querySelector<HTMLDetailsElement>('.agent-activity-reasoning')!
+    expect(reasoning.open).toBe(false)
+    expect(members(group).querySelector('pre')).toBeNull()
+    expand(reasoning)
+    expand(group)
+    expand(group)
+    expect(members(group).querySelector('pre')).toHaveTextContent('Reasoning body')
+  })
 
   it.each([false, true])('unmounts closed reasoning and reopens the latest text (retained panel=%s)', (retained) => {
     const run = activity('running')
@@ -176,7 +523,11 @@ describe('AgentMessageList tool disclosure', () => {
       return retained ? <PanelViewState state={state}>{list}</PanelViewState> : list
     }
     const view = render(content())
-    const details = view.container.querySelector<HTMLDetailsElement>('.agent-activity-reasoning')!
+    const group = view.container.querySelector<HTMLDetailsElement>('.agent-activity-process')!
+    expect(group.open).toBe(false)
+    expect(members(group).querySelector('.agent-activity-reasoning')).toBeNull()
+    expand(group)
+    const details = members(group).querySelector<HTMLDetailsElement>('.agent-activity-reasoning')!
     expect(details.querySelector('pre')).toHaveTextContent('Initial reasoning')
     expand(details)
     expect(details.open).toBe(false)
@@ -193,24 +544,35 @@ describe('AgentMessageList tool disclosure', () => {
     expand(details)
     view.rerender(content())
     expect(details.querySelector('pre')).toHaveTextContent('Initial reasoning followed by streamed text')
+    expand(group)
+    expect(members(group).querySelector('.agent-activity-reasoning')).toBeNull()
+    expect(members(group).querySelector('.agent-activity-tool')).toBeNull()
   })
 
-  it('mounts only the expanded memory entry even with hundreds of collapsed entries', () => {
-    const run = activity('running')
-    run.memoryRecalls = Array.from({ length: 300 }, (_, index) => ({
-      id: `recall-${index}`, sequence: index + 2, query: '', promptText: `MEMORY_${index}`, memoryCount: 1,
-      createdAt: run.createdAt
-    }))
-    const view = render(<AgentMessageList title="Thread" messages={messages} activities={[run]}
-      panelRef={{ current: null }} followOutputRef={{ current: true }} speech={{ status: 'idle' }} onSpeak={vi.fn()} />)
-    const entries = view.container.querySelectorAll<HTMLDetailsElement>('.agent-activity-memory-recall')
-    expect(entries).toHaveLength(300)
-    expect(view.container.querySelectorAll('pre')).toHaveLength(0)
-    expand(entries[123])
-    expect(view.container.querySelectorAll('pre')).toHaveLength(1)
-    expect(entries[123].querySelector('pre')).toHaveTextContent('MEMORY_123')
-    expand(entries[123])
-    expect(view.container.querySelectorAll('pre')).toHaveLength(0)
+  it('reads only the selected process detail and unsubscribes when the whole group closes', async () => {
+    const run = activity('completed')
+    const tool = run.tools[0]
+    tool.detail = { threadId: 'thread', runId: run.runId, kind: 'tool', id: tool.call.id }
+    delete tool.output
+    run.models = [{ id: 'm', sequence: 0, status: 'completed', text: '', reasoning: '', hasReasoning: true,
+      toolCallIds: [tool.call.id], detail: { ...tool.detail, kind: 'model', id: 'm' } }]
+    const stop = vi.fn(), detail = vi.fn().mockResolvedValue({ args: {}, output: 'Tool output' })
+    const service = vi.spyOn(contentServiceModule, 'contentServices').mockReturnValue({ agent: { activities: { detail },
+      onEvent: (_listener: unknown, synchronize: () => Promise<void>) => { void synchronize(); return stop }
+    } } as unknown as ReturnType<typeof contentServiceModule.contentServices>)
+    try {
+      const view = render(<AgentMessageList title="Thread" messages={messages} activities={[run]}
+        panelRef={{ current: null }} followOutputRef={{ current: true }} speech={{ status: 'idle' }} onSpeak={vi.fn()} />)
+      const group = view.container.querySelector<HTMLDetailsElement>('.agent-activity-process')!
+      expand(group)
+      expect(detail).not.toHaveBeenCalled()
+      expand(members(group).querySelector<HTMLDetailsElement>('.agent-activity-tool')!)
+      await waitFor(() => expect(members(group).querySelector('.agent-activity-result')).not.toBeNull())
+      expect(detail.mock.calls).toEqual([[{ ...tool.detail, field: undefined }]])
+      expand(group)
+      expect(stop).toHaveBeenCalledOnce()
+      expect(members(group).querySelector('.agent-activity-tool')).toBeNull()
+    } finally { service.mockRestore() }
   })
 
   it('unmounts summary Markdown on completion and reads updated content on reopening', () => {
@@ -427,7 +789,7 @@ describe('AgentMessageList tool disclosure', () => {
     expect(screen.queryByRole('status')).toBeNull()
   })
 
-  it('marks counts as loaded while earlier activities remain and removes the qualifier after the last page', () => {
+  it('uses run elapsed time independently of the number of loaded activities', () => {
     const run = activity('completed')
     run.models = [{ id: 'model-1', messageId: 'assistant-1', sequence: 2, status: 'completed',
       text: 'FINAL_REPLY', reasoning: '', toolCallIds: [] }]
@@ -440,32 +802,119 @@ describe('AgentMessageList tool disclosure', () => {
       speech: { status: 'idle' as const }, onSpeak: vi.fn()
     }
     const { rerender } = render(<AgentMessageList {...props} activities={[run]} />)
-    expect(screen.getByRole('button', { name: /agent.loaded_activity_summary: 1 model round · 1 tool call/ })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'agent.run_elapsed: 1s' })).toBeVisible()
 
     rerender(<AgentMessageList {...props} activities={[{
       ...run, activityWindow: { startSequence: 0, endSequence: 1, totalCount: 2, hasEarlier: false }
     }]} />)
-    expect(screen.getByRole('button', { name: /1 model round · 1 tool call/ })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'agent.run_elapsed: 1s' })).toBeVisible()
     expect(screen.queryByText(/agent.loaded_activity_summary/)).toBeNull()
   })
 
   it('keeps rendered model rounds stable when an earlier page arrives and leaves drafts unnumbered', () => {
     const run = activity('running')
+    run.tools = []
     run.models = [{ id: 'model-101', round: 101, sequence: 200, status: 'running',
       text: 'Current model', reasoning: '', toolCallIds: [] }]
     const props = { title: 'Thread', messages, panelRef: { current: null }, followOutputRef: { current: true },
       speech: { status: 'idle' as const }, onSpeak: vi.fn() }
-    const { rerender } = render(<AgentMessageList {...props} activities={[run]} />)
+    const { rerender, container } = render(<AgentMessageList {...props} activities={[run]} />)
+    expand(container.querySelector<HTMLDetailsElement>('.agent-activity-process')!)
     expect(screen.getByText('round 101')).toBeVisible()
     rerender(<AgentMessageList {...props} activities={[{ ...run, models: [
       { ...run.models[0], id: 'model-100', round: 100, sequence: 198, status: 'completed' },
       ...run.models,
       { ...run.models[0], id: 'draft', round: undefined, sequence: 202 }
     ] }]} />)
+    container.querySelectorAll<HTMLDetailsElement>('.agent-activity-process:not([open])').forEach(expand)
     expect(screen.getByText('round 100')).toBeVisible()
     expect(screen.getByText('round 101')).toBeVisible()
     expect(screen.getByText('round', { exact: true })).toBeVisible()
     expect(screen.queryByText('round 1', { exact: true })).toBeNull()
+  })
+
+  it('collapses all intervening rounds between two visible replies and restores their headers in order', () => {
+    const run = activity('completed')
+    const model = { id: 'm1', round: 1, sequence: 0, status: 'completed' as const,
+      startedAt: '2026-11-04T12:00:00.000Z', completedAt: '2026-11-04T12:00:01.900Z',
+      reasoning: '', text: 'First reply', toolCallIds: ['tool-1'] }
+    run.models = [model, { ...model, id: 'm2', round: 2, sequence: 2, text: '', toolCallIds: ['sleep'] },
+      { ...model, id: 'm3', round: 3, sequence: 4, reasoning: 'Reasoning detail', text: 'Next reply', toolCallIds: [] }]
+    run.tools.push({ ...run.tools[0], sequence: 3, call: { id: 'sleep', name: 'sleep', args: { seconds: 1 } } })
+    const view = render(<AgentMessageList title="Thread" messages={messages} activities={[run]}
+      panelRef={{ current: null }} followOutputRef={{ current: true }} speech={{ status: 'idle' }} onSpeak={vi.fn()} />)
+    const timeline = view.container.querySelector('.virtual-timeline')!
+    expect([...timeline.querySelectorAll('[data-activity-item]')].map(row => row.textContent)).toEqual(['agent.process_model', 'First reply', 'agent.process_thought_tools', 'Next reply'])
+    const group = timeline.querySelectorAll<HTMLDetailsElement>('.agent-activity-process')[1]
+    expand(group)
+    const headers = members(group).querySelectorAll('.agent-activity-model > header')
+    expect([...headers].map(header => header.textContent)).toEqual(['round 2· 1.9 s', 'round 3· 1.9 s'])
+    expect([...headers].every(header => header.closest('[data-timeline-parent]')?.getAttribute('data-timeline-parent') === group.closest('[data-timeline-row]')?.getAttribute('data-timeline-row'))).toBe(true)
+    expect(members(group).querySelector('pre')).toBeNull()
+    expand(group)
+    expect(members(group).querySelector('.agent-activity-model')).toBeNull()
+  })
+
+  it('splits adjacent process steps at visible model replies and user guidance', () => {
+    const run = activity('completed')
+    const model = { id: 'm', status: 'completed' as const, sequence: 0, round: 1,
+      startedAt: '2026-11-04T12:00:00.000Z', completedAt: '2026-11-04T12:00:01.900Z', reasoning: 'Hidden reasoning', text: 'Progress update', toolCallIds: [] }
+    run.models = [model, { ...model, id: 'm2', round: 2, text: '', sequence: 3 }]
+    run.tools.push({ ...run.tools[0], sequence: 2, call: { ...run.tools[0].call, id: 't2' } },
+      { ...run.tools[0], sequence: 4, call: { ...run.tools[0].call, id: 't3' } })
+    const direction = { ...messages[0], id: 'direction', directionAfterToolCallIds: ['t2'], content: [{ type: 'text' as const, text: 'Please stop editing' }] }
+    const view = render(<AgentMessageList title="Thread" messages={[...messages, direction]} activities={[run]}
+      panelRef={{ current: null }} followOutputRef={{ current: true }} speech={{ status: 'idle' }} onSpeak={vi.fn()} />)
+    const rows = view.container.querySelectorAll('[data-activity-item]')
+    expect([...rows].map(row => row.textContent)).toEqual(['agent.process_thought', 'Progress update',
+      'agent.process_tools', 'Please stop editing', 'agent.process_thought_tools'])
+    const firstProcess = rows[0].querySelector<HTMLDetailsElement>('details')!
+    expand(firstProcess)
+    const header = screen.getByText('round 1').closest('header')!
+    const reasoning = members(firstProcess).querySelector<HTMLDetailsElement>('.agent-activity-reasoning')!
+    expect(header.closest('[data-timeline-parent]')).toHaveAttribute('data-timeline-parent', firstProcess.closest('[data-timeline-row]')!.getAttribute('data-timeline-row')!)
+    expect(header).toHaveTextContent('1.9 s')
+    expect(reasoning.querySelector('summary')).toHaveTextContent('reasoning')
+    expect(reasoning.open).toBe(false)
+    expect(reasoning.querySelector('pre')).toBeNull()
+    expand(reasoning)
+    expect(reasoning.querySelector('pre')).toHaveTextContent('Hidden reasoning')
+    expect(reasoning).not.toContainElement(header)
+    expect(view.container.querySelector('.agent-activity-tool')).toBeNull()
+  })
+
+  it('updates the collapsed icon from the current step, including reasoning after a previous tool', () => {
+    const run = activity('running')
+    const props = { title: 'Thread', messages, panelRef: { current: null }, followOutputRef: { current: true },
+      speech: { status: 'idle' as const }, onSpeak: vi.fn() }
+    run.models = [{ id: 'm1', round: 1, sequence: 0, status: 'running', text: '', reasoning: '', toolCallIds: [] }]
+    const tool = { ...run.tools[0], call: { ...run.tools[0].call, name: 'pwsh', args: { summary: 'Inspect the workspace' } } }
+    run.tools = []
+    const view = render(<AgentMessageList {...props} activities={[run]} />)
+    const header = view.container.querySelector('.agent-activity-process > summary')!
+    const icon = (name: string) => header.querySelector(`.agent-activity-summary-icon .lucide-${name}`)
+    const update = () => view.rerender(<AgentMessageList {...props} activities={[{ ...run }]} />)
+    expect(icon('clock')).toBeVisible()
+    run.models[0] = { ...run.models[0], status: 'completed', toolCallIds: [tool.call.id] }
+    run.tools = [tool]
+    update()
+    expect(icon('terminal')).toBeVisible()
+    expect(header).toHaveTextContent('pwsh')
+    expect(header).toHaveTextContent('Inspect the workspace')
+    expect(header).not.toHaveTextContent('agent.tool_call')
+    run.tools = [{ ...tool, status: 'completed' }]
+    run.models.push({ ...run.models[0], id: 'm2', round: 2, sequence: 2, status: 'running', reasoning: 'Thinking', reasoningSummary: 'Consider next action', toolCallIds: [] })
+    update()
+    expect(icon('brain')).toBeVisible()
+    expect(header).toHaveTextContent('reasoning')
+    expect(header).toHaveTextContent('Consider next action')
+    expect(header).not.toHaveTextContent('Inspect the workspace')
+    run.status = 'completed'
+    update()
+    expect(icon('activity')).toBeVisible()
+    expand(header.closest('details')!)
+    expect(view.container.querySelector('.agent-activity-tool > summary .lucide-terminal')).toBeVisible()
+    expect(view.container.querySelector('.agent-activity-tool > summary')).toHaveTextContent('Inspect the workspace')
   })
 
   it.each([false, true])('only permits expansion after complete arguments arrive (late ID=%s)', (lateId) => {
@@ -480,10 +929,12 @@ describe('AgentMessageList tool disclosure', () => {
       toolCallProgress: [{ index: 2, callId: lateId ? undefined : 'tool-1', name: 'apply_patch', characterCount: 15, complete: false }]
     }]
     const view = render(<AgentMessageList {...props} activities={[run]} />)
+    expand(view.container.querySelector<HTMLDetailsElement>('.agent-activity-process')!)
     const card = view.container.querySelector<HTMLDetailsElement>('.agent-activity-tool')!
     const summary = card.querySelector('summary')!
     expect(summary).toHaveAttribute('aria-disabled', 'true')
     expect(card.textContent).toContain('agent.tool_arguments_generating')
+    expect(view.container.querySelector('.agent-activity-process > summary')).toHaveTextContent('agent.tool_arguments_generating')
     expect(screen.queryByText('agent.tool_call_freeform')).toBeNull()
     expand(card)
     for (const key of ['Enter', ' ']) {
@@ -564,6 +1015,7 @@ describe('AgentMessageList tool disclosure', () => {
       toolCallProgress: [{ index: 0, name: 'apply_patch', characterCount: 50, complete: false }] }]
     const props = { title: 'Thread', messages, panelRef: { current: null }, followOutputRef: { current: true }, speech: { status: 'idle' as const }, onSpeak: vi.fn() }
     const view = render(<AgentMessageList {...props} activities={[run]} />)
+    expand(view.container.querySelector<HTMLDetailsElement>('.agent-activity-process')!)
     expect(view.container.querySelector('summary[aria-disabled="true"]')).not.toBeNull()
     run.models[0].toolCallProgress = []
     view.rerender(<AgentMessageList {...props} activities={[{ ...run, status: 'failed' }]} />)

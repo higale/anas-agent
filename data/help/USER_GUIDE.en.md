@@ -339,6 +339,8 @@ Automatic speech reads the main model's reply in chunks. If a subsequent tool ca
 
 ## Conversations And Context
 
+In **Settings → Conversation → Chat display**, adjust chat content width, running process display, and model round information. Processes can open expanded or collapsed; they collapse when a new reply appears or the run ends, and can be reopened manually. Model round information shows each model call's number and duration.
+
 The Agent page has projects and conversations on the left, chat in the center, and a right workspace for Help, subagents, and File changes. Drag the divider to resize or maximize the right pane; narrow windows use a resizable drawer. Collapsing the pane or switching conversations preserves tabs and view positions. Closing a subagent tab does not stop its task.
 
 Right-click a Help, File changes, subagent, or plugin tab and choose **Move to window** to detach it. Use the window titlebar icon to move it back to the sidebar. Moving preserves page state and connections. File changes uses one panel that follows the current project and conversation, with the project name in its title. Switching projects keeps the sidebar open; reopening a detached panel focuses its existing window. Select the run and file again after switching context. Detached subagent panels stay bound to their original project and conversation; moving back returns to that conversation.

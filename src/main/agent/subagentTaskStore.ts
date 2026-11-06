@@ -1,3 +1,4 @@
+import { displayTransaction } from './activityDisplayProjection'
 import type Database from 'better-sqlite3'
 import type { AgentThreadCreate, AgentSubagentActivity } from '../../shared/agentTypes'
 import { DEFAULT_WORKSPACE_PROJECT_ID, type SubagentConfig, type SubagentPreset } from '../../shared/types'
@@ -177,87 +178,89 @@ export class SubagentTaskStore {
   }
 
   create(input: SubagentSubmission, inputJson: string, armEffect?: () => void): AgentSubagentCallRecord {
-    requireNonEmptyText(input.id, 'Subagent ID')
-    requireNonEmptyText(input.ownerThreadId, 'Subagent owner thread ID')
-    requireNonEmptyText(input.parentThreadId, 'Subagent parent thread ID')
-    requireNonEmptyText(input.parentRunId, 'Subagent parent run ID')
-    requireNonEmptyText(input.childThreadId, 'Subagent child thread ID')
-    requireNonEmptyText(input.childRunId, 'Subagent child run ID')
-    requireNonEmptyText(input.description, 'Subagent description')
-    const config = normalizeSubagentConfigSnapshot(input.config)
-    const parentRun = this.requireRun(input.parentRunId)
-    if (parentRun.threadId !== input.parentThreadId) {
-      throw new Error(`Run ${input.parentRunId} does not belong to thread ${input.parentThreadId}.`)
-    }
-    if (parentRun.status !== 'running') {
-      throw new Error(`Run ${input.parentRunId} is not accepting subagents.`)
-    }
-    const ownerThread = this.requireThread(input.ownerThreadId)
-    if (input.parentSubagentId) {
-      const parentSubagent = this.require(
-        input.parentSubagentId,
-        input.ownerThreadId
-      )
-      if (
-        parentSubagent.childThreadId !== input.parentThreadId
-        || parentSubagent.childRunId !== input.parentRunId
-      ) {
-        throw new Error(`Subagent ${input.parentSubagentId} does not own run ${input.parentRunId}.`)
+    return displayTransaction(this.database, () => {
+      requireNonEmptyText(input.id, 'Subagent ID')
+      requireNonEmptyText(input.ownerThreadId, 'Subagent owner thread ID')
+      requireNonEmptyText(input.parentThreadId, 'Subagent parent thread ID')
+      requireNonEmptyText(input.parentRunId, 'Subagent parent run ID')
+      requireNonEmptyText(input.childThreadId, 'Subagent child thread ID')
+      requireNonEmptyText(input.childRunId, 'Subagent child run ID')
+      requireNonEmptyText(input.description, 'Subagent description')
+      const config = normalizeSubagentConfigSnapshot(input.config)
+      const parentRun = this.requireRun(input.parentRunId)
+      if (parentRun.threadId !== input.parentThreadId) {
+        throw new Error(`Run ${input.parentRunId} does not belong to thread ${input.parentThreadId}.`)
       }
-    } else if (input.ownerThreadId !== input.parentThreadId) {
-      throw new Error('A root subagent call must be started by its owning conversation.')
-    }
-    if (
-      (input.childThread.projectId ?? DEFAULT_WORKSPACE_PROJECT_ID)
-      !== ownerThread.projectId
-    ) {
-      throw new Error('A subagent thread must belong to its owning conversation project.')
-    }
-    if (readThreadRecord(this.database, input.childThreadId)) {
-      throw new Error(`Thread ${input.childThreadId} already exists.`)
-    }
-    if (this.database.prepare('SELECT 1 FROM agent_runs WHERE id=?').get(input.childRunId)) {
-      throw new Error(`Run ${input.childRunId} already exists.`)
-    }
-    const duplicateCall = this.database.prepare(`
-      SELECT 1 FROM agent_subagent_calls WHERE id = ?
-    `).get(input.id)
-    if (duplicateCall) throw new Error(`Subagent ${input.id} already exists.`)
-    defaultTitle(input.childThread.title)
-    accessModeColumns(input.childThread.accessMode ?? 'smart_approval')
-    const now = new Date().toISOString()
-    return this.database.transaction(() => {
-      armEffect?.()
-      createThreadRecord(this.database, input.childThread, input.childThreadId)
-      this.database.prepare(`
-        INSERT INTO agent_hidden_threads (thread_id, kind)
-        VALUES (?, 'subagent')
-      `).run(input.childThreadId)
-      new RunSubmissionStore(this.database).createRun(input.childThreadId, input.childRunId, 'agent', [], inputJson)
-      this.database.prepare(`
-        INSERT INTO agent_subagent_calls (
-          id, owner_thread_id, parent_thread_id, parent_run_id,
-          parent_subagent_id, child_thread_id, child_run_id,
-          agent_name, config_json, description, status, result_text, error,
-          created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', NULL, NULL, ?, ?)
-      `).run(
-        input.id,
-        input.ownerThreadId,
-        input.parentThreadId,
-        input.parentRunId,
-        input.parentSubagentId ?? null,
-        input.childThreadId,
-        input.childRunId,
-        config.name,
-        JSON.stringify(config),
-        input.description,
-        now,
-        now
-      )
-      const call = this.require(input.id, input.ownerThreadId)
-      this.recordCallActivity(call)
-      return call
+      if (parentRun.status !== 'running') {
+        throw new Error(`Run ${input.parentRunId} is not accepting subagents.`)
+      }
+      const ownerThread = this.requireThread(input.ownerThreadId)
+      if (input.parentSubagentId) {
+        const parentSubagent = this.require(
+          input.parentSubagentId,
+          input.ownerThreadId
+        )
+        if (
+          parentSubagent.childThreadId !== input.parentThreadId
+          || parentSubagent.childRunId !== input.parentRunId
+        ) {
+          throw new Error(`Subagent ${input.parentSubagentId} does not own run ${input.parentRunId}.`)
+        }
+      } else if (input.ownerThreadId !== input.parentThreadId) {
+        throw new Error('A root subagent call must be started by its owning conversation.')
+      }
+      if (
+        (input.childThread.projectId ?? DEFAULT_WORKSPACE_PROJECT_ID)
+        !== ownerThread.projectId
+      ) {
+        throw new Error('A subagent thread must belong to its owning conversation project.')
+      }
+      if (readThreadRecord(this.database, input.childThreadId)) {
+        throw new Error(`Thread ${input.childThreadId} already exists.`)
+      }
+      if (this.database.prepare('SELECT 1 FROM agent_runs WHERE id=?').get(input.childRunId)) {
+        throw new Error(`Run ${input.childRunId} already exists.`)
+      }
+      const duplicateCall = this.database.prepare(`
+        SELECT 1 FROM agent_subagent_calls WHERE id = ?
+      `).get(input.id)
+      if (duplicateCall) throw new Error(`Subagent ${input.id} already exists.`)
+      defaultTitle(input.childThread.title)
+      accessModeColumns(input.childThread.accessMode ?? 'smart_approval')
+      const now = new Date().toISOString()
+      return this.database.transaction(() => {
+        armEffect?.()
+        createThreadRecord(this.database, input.childThread, input.childThreadId)
+        this.database.prepare(`
+          INSERT INTO agent_hidden_threads (thread_id, kind)
+          VALUES (?, 'subagent')
+        `).run(input.childThreadId)
+        new RunSubmissionStore(this.database).createRun(input.childThreadId, input.childRunId, 'agent', [], inputJson)
+        this.database.prepare(`
+          INSERT INTO agent_subagent_calls (
+            id, owner_thread_id, parent_thread_id, parent_run_id,
+            parent_subagent_id, child_thread_id, child_run_id,
+            agent_name, config_json, description, status, result_text, error,
+            created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', NULL, NULL, ?, ?)
+        `).run(
+          input.id,
+          input.ownerThreadId,
+          input.parentThreadId,
+          input.parentRunId,
+          input.parentSubagentId ?? null,
+          input.childThreadId,
+          input.childRunId,
+          config.name,
+          JSON.stringify(config),
+          input.description,
+          now,
+          now
+        )
+        const call = this.require(input.id, input.ownerThreadId)
+        this.recordCallActivity(call)
+        return call
+      })()
     })()
   }
 
@@ -270,31 +273,33 @@ export class SubagentTaskStore {
     result?: unknown,
     error?: string
   ): AgentSubagentActivity {
-    const terminal = status === 'completed' || status === 'failed' || status === 'cancelled'
-    const payload = {
-      status,
-      ...(status === 'completed' && result !== undefined ? { result } : {}),
-      ...(error === undefined ? {} : { error })
-    }
-    const activity = this.activityMetadata.upsert({
-      runId,
-      key: `subagent:${id}`,
-      kind: 'subagent',
-      id,
-      parentSubagentId,
-      name,
-      status: terminal ? 'completed' : 'running',
-      outputJson: JSON.stringify({status})
-    })
-    return {
-      id,
-      name,
-      status,
-      parentSubagentId,
-      ...(payload.result === undefined ? {} : { result: payload.result }),
-      ...(payload.error === undefined ? {} : { error: payload.error }),
-      ...activity
-    }
+    return displayTransaction(this.database, () => {
+      const terminal = status === 'completed' || status === 'failed' || status === 'cancelled'
+      const payload = {
+        status,
+        ...(status === 'completed' && result !== undefined ? { result } : {}),
+        ...(error === undefined ? {} : { error })
+      }
+      const activity = this.activityMetadata.upsert({
+        runId,
+        key: `subagent:${id}`,
+        kind: 'subagent',
+        id,
+        parentSubagentId,
+        name,
+        status: terminal ? 'completed' : 'running',
+        outputJson: JSON.stringify({status})
+      })
+      return {
+        id,
+        name,
+        status,
+        parentSubagentId,
+        ...(payload.result === undefined ? {} : { result: payload.result }),
+        ...(payload.error === undefined ? {} : { error: payload.error }),
+        ...activity
+      }
+    })()
   }
 
   project(
@@ -302,33 +307,35 @@ export class SubagentTaskStore {
     ownerThreadId: string,
     activity: Omit<AgentSubagentActivity, 'sequence' | 'startedAt' | 'completedAt'>
   ): AgentSubagentActivity {
-    const carrier = this.require(carrierSubagentId, ownerThreadId)
-    this.requireDescendant(carrier, activity.id)
-    const project = this.database.transaction(() => {
-      let direct: AgentSubagentActivity | undefined
-      for (const [index, ancestor] of this.chain(carrier).entries()) {
-        const recorded = this.activity(
-          ancestor.parentRunId,
-          activity.id,
-          activity.name,
-          activity.status,
-          activity.parentSubagentId,
-          activity.result,
-          activity.error
-        )
-        if (index === 0) direct = recorded
-        else if (direct) {
-          this.alignTiming(
+    return displayTransaction(this.database, () => {
+      const carrier = this.require(carrierSubagentId, ownerThreadId)
+      this.requireDescendant(carrier, activity.id)
+      const project = this.database.transaction(() => {
+        let direct: AgentSubagentActivity | undefined
+        for (const [index, ancestor] of this.chain(carrier).entries()) {
+          const recorded = this.activity(
             ancestor.parentRunId,
-            `subagent:${activity.id}`,
-            direct
+            activity.id,
+            activity.name,
+            activity.status,
+            activity.parentSubagentId,
+            activity.result,
+            activity.error
           )
+          if (index === 0) direct = recorded
+          else if (direct) {
+            this.alignTiming(
+              ancestor.parentRunId,
+              `subagent:${activity.id}`,
+              direct
+            )
+          }
         }
-      }
-      if (!direct) throw new Error(`Subagent ${carrierSubagentId} has no projection target.`)
-      return direct
-    })
-    return project()
+        if (!direct) throw new Error(`Subagent ${carrierSubagentId} has no projection target.`)
+        return direct
+      })
+      return project()
+    })()
   }
 
   recordCallActivity(call: AgentSubagentCallRecord): AgentSubagentActivity {
@@ -399,21 +406,23 @@ export class SubagentTaskStore {
     ownerThreadId: string,
     result: string
   ): { call: AgentSubagentCallRecord; activity: AgentSubagentActivity } {
-    return this.database.transaction(() => {
-      const existing = this.require(subagentId, ownerThreadId)
-      if (existing.status !== 'completed') {
-        throw new Error(`Subagent ${subagentId} is not completed.`)
-      }
-      this.database.prepare(`
-        UPDATE agent_subagent_calls
-        SET result_text = ?, updated_at = ?
-        WHERE id = ?
-          AND owner_thread_id = ?
-          AND status = 'completed'
-          AND result_text IS NULL
-      `).run(result, new Date().toISOString(), subagentId, ownerThreadId)
-      const call = this.require(subagentId, ownerThreadId)
-      return { call, activity: this.recordCallActivity(call) }
+    return displayTransaction(this.database, () => {
+      return this.database.transaction(() => {
+        const existing = this.require(subagentId, ownerThreadId)
+        if (existing.status !== 'completed') {
+          throw new Error(`Subagent ${subagentId} is not completed.`)
+        }
+        this.database.prepare(`
+          UPDATE agent_subagent_calls
+          SET result_text = ?, updated_at = ?
+          WHERE id = ?
+            AND owner_thread_id = ?
+            AND status = 'completed'
+            AND result_text IS NULL
+        `).run(result, new Date().toISOString(), subagentId, ownerThreadId)
+        const call = this.require(subagentId, ownerThreadId)
+        return { call, activity: this.recordCallActivity(call) }
+      })()
     })()
   }
 
@@ -424,31 +433,33 @@ export class SubagentTaskStore {
     result?: string
     error?: string
   }): AgentSubagentCallTransition | undefined {
-    const now = new Date().toISOString()
-    return this.database.transaction(() => {
-      this.require(input.subagentId, input.ownerThreadId)
-      const updated = this.database.prepare(`
-        UPDATE agent_subagent_calls
-        SET status = @status,
-            result_text = @result,
-            error = @error,
-            updated_at = @updatedAt
-        WHERE id = @id
-          AND owner_thread_id = @ownerThreadId
-          AND status IN ('running', 'interrupted')
-      `).run({
-        id: input.subagentId,
-        ownerThreadId: input.ownerThreadId,
-        status: input.status,
-        result: input.status === 'completed' ? input.result ?? null : null,
-        error: input.status === 'failed' ? input.error ?? null : null,
-        updatedAt: now
-      })
-      if (updated.changes === 0) return undefined
-      const call = this.require(input.subagentId, input.ownerThreadId)
-      const activity = this.recordCallActivity(call)
-      this.settleProjectedActivities(call.id, activity.completedAt ?? now)
-      return { call, activity }
+    return displayTransaction(this.database, () => {
+      const now = new Date().toISOString()
+      return this.database.transaction(() => {
+        this.require(input.subagentId, input.ownerThreadId)
+        const updated = this.database.prepare(`
+          UPDATE agent_subagent_calls
+          SET status = @status,
+              result_text = @result,
+              error = @error,
+              updated_at = @updatedAt
+          WHERE id = @id
+            AND owner_thread_id = @ownerThreadId
+            AND status IN ('running', 'interrupted')
+        `).run({
+          id: input.subagentId,
+          ownerThreadId: input.ownerThreadId,
+          status: input.status,
+          result: input.status === 'completed' ? input.result ?? null : null,
+          error: input.status === 'failed' ? input.error ?? null : null,
+          updatedAt: now
+        })
+        if (updated.changes === 0) return undefined
+        const call = this.require(input.subagentId, input.ownerThreadId)
+        const activity = this.recordCallActivity(call)
+        this.settleProjectedActivities(call.id, activity.completedAt ?? now)
+        return { call, activity }
+      })()
     })()
   }
 
@@ -456,16 +467,18 @@ export class SubagentTaskStore {
     subagentId: string,
     ownerThreadId: string
   ): AgentSubagentCallTransition | undefined {
-    return this.database.transaction(() => {
-      this.require(subagentId, ownerThreadId)
-      const updated = this.database.prepare(`
-        UPDATE agent_subagent_calls
-        SET status = 'interrupted', error = NULL, updated_at = ?
-        WHERE id = ? AND owner_thread_id = ? AND status = 'running'
-      `).run(new Date().toISOString(), subagentId, ownerThreadId)
-      if (updated.changes === 0) return undefined
-      const call = this.require(subagentId, ownerThreadId)
-      return { call, activity: this.recordCallActivity(call) }
+    return displayTransaction(this.database, () => {
+      return this.database.transaction(() => {
+        this.require(subagentId, ownerThreadId)
+        const updated = this.database.prepare(`
+          UPDATE agent_subagent_calls
+          SET status = 'interrupted', error = NULL, updated_at = ?
+          WHERE id = ? AND owner_thread_id = ? AND status = 'running'
+        `).run(new Date().toISOString(), subagentId, ownerThreadId)
+        if (updated.changes === 0) return undefined
+        const call = this.require(subagentId, ownerThreadId)
+        return { call, activity: this.recordCallActivity(call) }
+      })()
     })()
   }
 
@@ -473,21 +486,23 @@ export class SubagentTaskStore {
     subagentId: string,
     ownerThreadId: string
   ): AgentSubagentCallTransition | undefined {
-    return this.database.transaction(() => {
-      this.require(subagentId, ownerThreadId)
-      const updated = this.database.prepare(`
-        UPDATE agent_subagent_calls
-        SET status = 'running', error = NULL, updated_at = ?
-        WHERE id = ?
-          AND owner_thread_id = ?
-          AND (
-            status = 'interrupted'
-            OR (status = 'running' AND error IS NOT NULL)
-          )
-      `).run(new Date().toISOString(), subagentId, ownerThreadId)
-      if (updated.changes === 0) return undefined
-      const call = this.require(subagentId, ownerThreadId)
-      return { call, activity: this.recordCallActivity(call) }
+    return displayTransaction(this.database, () => {
+      return this.database.transaction(() => {
+        this.require(subagentId, ownerThreadId)
+        const updated = this.database.prepare(`
+          UPDATE agent_subagent_calls
+          SET status = 'running', error = NULL, updated_at = ?
+          WHERE id = ?
+            AND owner_thread_id = ?
+            AND (
+              status = 'interrupted'
+              OR (status = 'running' AND error IS NOT NULL)
+            )
+        `).run(new Date().toISOString(), subagentId, ownerThreadId)
+        if (updated.changes === 0) return undefined
+        const call = this.require(subagentId, ownerThreadId)
+        return { call, activity: this.recordCallActivity(call) }
+      })()
     })()
   }
 
@@ -496,20 +511,22 @@ export class SubagentTaskStore {
     ownerThreadId: string,
     error: string
   ): AgentSubagentCallTransition | undefined {
-    requireNonEmptyText(error, 'Subagent recovery error')
-    return this.database.transaction(() => {
-      this.require(subagentId, ownerThreadId)
-      const updated = this.database.prepare(`
-        UPDATE agent_subagent_calls
-        SET error = ?, updated_at = ?
-        WHERE id = ?
-          AND owner_thread_id = ?
-          AND status IN ('running', 'interrupted')
-          AND error IS NOT ?
-      `).run(error, new Date().toISOString(), subagentId, ownerThreadId, error)
-      if (updated.changes === 0) return undefined
-      const call = this.require(subagentId, ownerThreadId)
-      return { call, activity: this.recordCallActivity(call) }
+    return displayTransaction(this.database, () => {
+      requireNonEmptyText(error, 'Subagent recovery error')
+      return this.database.transaction(() => {
+        this.require(subagentId, ownerThreadId)
+        const updated = this.database.prepare(`
+          UPDATE agent_subagent_calls
+          SET error = ?, updated_at = ?
+          WHERE id = ?
+            AND owner_thread_id = ?
+            AND status IN ('running', 'interrupted')
+            AND error IS NOT ?
+        `).run(error, new Date().toISOString(), subagentId, ownerThreadId, error)
+        if (updated.changes === 0) return undefined
+        const call = this.require(subagentId, ownerThreadId)
+        return { call, activity: this.recordCallActivity(call) }
+      })()
     })()
   }
 
@@ -538,55 +555,57 @@ export class SubagentTaskStore {
     subagentId: string,
     completedAt: string
   ): void {
-    this.database.prepare(`
-      UPDATE agent_activity_timing
-      SET completed_at = COALESCE(completed_at, ?)
-      WHERE EXISTS (
-        SELECT 1
-        FROM agent_model_activities AS model
-        WHERE model.run_id = agent_activity_timing.run_id
-          AND agent_activity_timing.activity_key = 'model:' || model.model_id
-          AND model.subagent_id = ?
-          AND model.status = 'running'
-      )
-    `).run(completedAt, subagentId)
-    this.database.prepare(`
-      UPDATE agent_model_activities
-      SET status = 'completed'
-      WHERE subagent_id = ? AND status = 'running'
-    `).run(subagentId)
+    return displayTransaction(this.database, () => {
+      this.database.prepare(`
+        UPDATE agent_activity_timing
+        SET completed_at = COALESCE(completed_at, ?)
+        WHERE EXISTS (
+          SELECT 1
+          FROM agent_model_activities AS model
+          WHERE model.run_id = agent_activity_timing.run_id
+            AND agent_activity_timing.activity_key = 'model:' || model.model_id
+            AND model.subagent_id = ?
+            AND model.status = 'running'
+        )
+      `).run(completedAt, subagentId)
+      this.database.prepare(`
+        UPDATE agent_model_activities
+        SET status = 'completed'
+        WHERE subagent_id = ? AND status = 'running'
+      `).run(subagentId)
 
-    this.database.prepare(`
-      UPDATE agent_activity_timing
-      SET completed_at = COALESCE(completed_at, ?)
-      WHERE EXISTS (
-        SELECT 1
-        FROM agent_activities AS activity
-        WHERE activity.run_id = agent_activity_timing.run_id
-          AND activity.activity_key = agent_activity_timing.activity_key
-          AND activity.kind = 'tool'
-          AND activity.parent_subagent_id = ?
-          AND activity.status = 'running'
-      )
-    `).run(completedAt, subagentId)
-    this.database.prepare(`
-      DELETE FROM agent_tool_approvals
-      WHERE EXISTS (
-        SELECT 1
-        FROM agent_activities AS activity
-        WHERE activity.run_id = agent_tool_approvals.run_id
-          AND activity.activity_key = agent_tool_approvals.activity_key
-          AND activity.kind = 'tool'
-          AND activity.parent_subagent_id = ?
-      )
-    `).run(subagentId)
-    this.database.prepare(`
-      UPDATE agent_activities
-      SET status = 'completed'
-      WHERE kind = 'tool'
-        AND parent_subagent_id = ?
-        AND status = 'running'
-    `).run(subagentId)
+      this.database.prepare(`
+        UPDATE agent_activity_timing
+        SET completed_at = COALESCE(completed_at, ?)
+        WHERE EXISTS (
+          SELECT 1
+          FROM agent_activities AS activity
+          WHERE activity.run_id = agent_activity_timing.run_id
+            AND activity.activity_key = agent_activity_timing.activity_key
+            AND activity.kind = 'tool'
+            AND activity.parent_subagent_id = ?
+            AND activity.status = 'running'
+        )
+      `).run(completedAt, subagentId)
+      this.database.prepare(`
+        DELETE FROM agent_tool_approvals
+        WHERE EXISTS (
+          SELECT 1
+          FROM agent_activities AS activity
+          WHERE activity.run_id = agent_tool_approvals.run_id
+            AND activity.activity_key = agent_tool_approvals.activity_key
+            AND activity.kind = 'tool'
+            AND activity.parent_subagent_id = ?
+        )
+      `).run(subagentId)
+      this.database.prepare(`
+        UPDATE agent_activities
+        SET status = 'completed'
+        WHERE kind = 'tool'
+          AND parent_subagent_id = ?
+          AND status = 'running'
+      `).run(subagentId)
+    })()
   }
 
 }

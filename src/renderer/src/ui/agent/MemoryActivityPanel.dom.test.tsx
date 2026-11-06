@@ -8,7 +8,7 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => k
 vi.mock('../notice', () => ({ notice: { error: vi.fn() } }))
 
 function preferences(revision: number, showMemoryActivityInTitlebar: boolean): PanelPreferencesSnapshot {
-  return { revision, showMemoryActivityInTitlebar, diffViewMode: 'inline', diffFoldUnchanged: true, diffWordWrap: true }
+  return { revision, showMemoryActivityInTitlebar, diffViewMode: 'inline', diffFoldUnchanged: true, diffWordWrap: true, runningProcessDisplay: 'expanded', showModelRounds: true }
 }
 
 async function openPanel(updatePreferences: () => Promise<PanelPreferencesSnapshot>) {

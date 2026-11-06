@@ -23,10 +23,9 @@ import {
   Trash2,
   Wrench
 } from 'lucide-react'
-import { Fragment, memo, type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, type ReactNode, type RefObject, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { NoFocusButton } from '../NoFocusButton'
-import { MemoryIcon } from '../MemoryIcon'
 import type {
   AgentContentBlock,
   AgentContextSummary,
@@ -51,6 +50,7 @@ import {
 import type { SelectedAttachment } from '@shared/types'
 import { AttachmentGrid } from '../chat/AttachmentGrid'
 import { ScrollBoundaryControls, useScrollBoundaryNavigation } from '../chat/ScrollBoundaryNavigation'
+import { FollowOutputContext } from '../chat/followOutput'
 import { MarkdownText } from '../chat/MarkdownText'
 import { ImageLightbox } from '../chat/ImageLightbox'
 import { toolResultImages } from './toolResultImages'
@@ -63,13 +63,18 @@ import {
 import type { AgentRunView } from './useAgentWorkspace'
 import type { AgentSpeechState } from '../speech/useAgentSpeech'
 import { notice } from '../notice'
-import { MessagePaginationCoordinator, runMessagePagination } from './messagePagination'
 import { localizeAgentError } from './agentErrorMessage'
 import { usePanelDisclosure, usePanelRef, usePanelScroll } from './PanelViewState'
 import { ActivityDetail } from './ActivityDetail'
-import { ActivityWindow } from './ActivityWindow'
+import { VirtualTimeline, type TimelineRow } from '../chat/VirtualTimeline'
+import { DelayedLoading } from '../DelayedLoading'
+import { useActivityDirectories } from './useActivityDirectories'
+import { ActivityDirectoryStore, directoryScopeKey, type DirectoryScope } from './activityDirectoryStore'
+import { activityAtomsFromItems, ActivityGroupBuilder, compareActivityPositions, isProcessAtom, type ActivityGroup, type ActivityViewItem } from '@shared/activityView'
 import { CodeFileEditor, largeTextThreshold } from '../CodeFileEditor'
 import type { AgentActivityDetailReference, AgentActivityDetail } from '@shared/agentTypes'
+import { ActivityPreferences } from './ActivityPreferences'
+import { scopeIsRunning, useActivityDisclosures, type ActivityDisclosures } from './useActivityDisclosures'
 
 interface AgentMessageListProps {
   onOpenChanges?(runId: string): void
@@ -412,6 +417,7 @@ function ActivityDisclosure({
   label,
   text = '',
   defaultOpen = false,
+  phase,
   className = '',
   bodyClassName = '',
   statusIndicator,
@@ -427,6 +433,7 @@ function ActivityDisclosure({
   label: ReactNode
   text?: string
   defaultOpen?: boolean
+  phase?: boolean
   className?: string
   bodyClassName?: string
   statusIndicator?: ReactNode
@@ -437,7 +444,7 @@ function ActivityDisclosure({
   detail?: AgentActivityDetailReference
   field?: keyof AgentActivityDetail
 }) {
-  const disclosure = usePanelDisclosure(stateKey, defaultOpen)
+  const disclosure = usePanelDisclosure(stateKey, defaultOpen, phase)
   if (!renderWhenEmpty && !detail && !text.trim() && !children) return null
   const body = !disabled && disclosure.open ? (
     <>
@@ -629,52 +636,53 @@ function SleepCountdown({ deadline }: { deadline: number }) {
   </small>
 }
 
-function ToolActivityDisclosure({
-  tool,
-  progress,
-  active
-}: {
+interface ToolDisclosureInput {
+  standalone?: boolean
+  processActive?: boolean
   tool: AgentRunActivity['tools'][number]
   progress?: import('@shared/agentTypes').AgentToolCallProgress
   active: boolean
-}) {
+}
+
+function ToolActivityLabel({ tool, progress }: Pick<ToolDisclosureInput, 'tool' | 'progress'>) {
   const { t } = useTranslation()
   const presentation = toolPresentation(tool.call)
-  // Native freeform calls retain LangChain's { input: string } envelope.
   const args = tool.call.args
   const freeform = tool.freeform ?? (tool.call.name === 'apply_patch' && args !== null && typeof args === 'object'
     && !Array.isArray(args) && Object.keys(args).length === 1 && 'input' in args && typeof args.input === 'string'
   )
   const summary = toolArgumentSummary(tool.call.args)
   const duration = activityDuration(tool.startedAt, tool.completedAt)
+  return <>
+    {!presentation.title ? <span>{t('agent.tool_call')}</span> : presentation.codeTitle
+      ? <code>{presentation.title}</code> : <span>{presentation.title}</span>}
+    {freeform && <span className="ui-badge ui-badge-inline" data-tooltip={t('agent.tool_call_freeform_hint')}>{t('agent.tool_call_freeform')}</span>}
+    {presentation.showArgumentSummary && summary && <span className="agent-activity-argument">{summary}</span>}
+    {duration && <small>· {duration}</small>}
+    {progress && <small>· {t(progress.complete ? 'agent.tool_arguments_ready' : 'agent.tool_arguments_generating', { count: progress.characterCount })}</small>}
+  </>
+}
+
+function ToolActivityDisclosure({ tool, progress, active, standalone = false, processActive }: ToolDisclosureInput) {
+  const presentation = toolPresentation(tool.call)
   const waitingForApproval = tool.approval?.status === 'pending_approval'
   const executing = active && tool.status === 'running' && !tool.completedAt && !progress && !waitingForApproval
   const shimmer = executing && tool.call.name !== 'request_user_input'
-  const showSummary = Boolean(presentation.showArgumentSummary && summary)
   const deadline = executing ? sleepDeadline(tool) : undefined
   return (
     <ActivityDisclosure
       stateKey={`tool:${tool.call.id}`}
+      phase={processActive}
       className={`agent-activity-tool${shimmer ? ' agent-tool-running' : ''}`}
       bodyClassName="agent-activity-tool-body"
       disabled={Boolean(progress)}
-      icon={presentation.icon}
+      icon={standalone && (!active || tool.status !== 'running') ? <Activity size={13} /> : presentation.icon}
       statusIndicator={waitingForApproval
         ? <ShieldAlert size={13} />
         : active && tool.status === 'running'
           ? deadline !== undefined ? <SleepCountdown key={`${tool.call.id}:${deadline}`} deadline={deadline} /> : <LoaderCircle className="agent-spin" size={13} />
           : undefined}
-      label={(
-        <>
-          {!presentation.title ? <span>{t('agent.tool_call')}</span> : presentation.codeTitle
-            ? <code>{presentation.title}</code>
-            : <span>{presentation.title}</span>}
-          {freeform && <span className="ui-badge ui-badge-inline" data-tooltip={t('agent.tool_call_freeform_hint')}>{t('agent.tool_call_freeform')}</span>}
-          {showSummary && <span className="agent-activity-argument">{summary}</span>}
-          {duration && <small>· {duration}</small>}
-          {progress && <small>· {t(progress.complete ? 'agent.tool_arguments_ready' : 'agent.tool_arguments_generating', { count: progress.characterCount })}</small>}
-        </>
-      )}
+      label={<ToolActivityLabel tool={tool} progress={progress} />}
       renderWhenEmpty
     >
       {() => tool.detail
@@ -700,176 +708,193 @@ function ToolActivityBody({ tool, detail }: { tool: AgentRunActivity['tools'][nu
   </>
 }
 
-type SubagentTimelineItem = Extract<TurnTimelineActivityItem, { type: 'subagent' }>
-type TimelineRenderItem = Exclude<TurnTimelineActivityItem, SubagentTimelineItem> | {
-  type: 'subagent-group'
-  key: string
-  items: SubagentTimelineItem[]
+type ModelItem = Extract<TurnTimelineActivityItem, { type: 'model' }>
+
+function toolIsActive(run: AgentRunActivity, tool: AgentRunActivity['tools'][number]) {
+  return (run.status === 'running' || run.status === 'interrupted') && (!tool.subagentId || run.subagents.some(child =>
+    child.id === tool.subagentId && (child.status === 'running' || child.status === 'interrupted')))
 }
 
-function groupAdjacentSubagents(items: TurnTimelineActivityItem[]): TimelineRenderItem[] {
-  const grouped: TimelineRenderItem[] = []
-  for (const item of items) {
-    if (item.type !== 'subagent') {
-      grouped.push(item)
-      continue
-    }
-    const previous = grouped.at(-1)
-    if (previous?.type === 'subagent-group') {
-      previous.items.push(item)
-    } else {
-      grouped.push({ type: 'subagent-group', key: `subagents:${item.key}`, items: [item] })
-    }
-  }
-  return grouped
+function ReasoningActivityLabel({ model }: { model: ModelItem['model'] }) {
+  const summary = reasoningTitleSummary(model.reasoning, model.reasoningSummary)
+  return <><span>reasoning</span>{summary && <span className="agent-activity-argument">{summary}</span>}</>
 }
 
-function ActivityTimelineItems({
-  run,
-  items,
-  onOpenSubagent
-}: {
-  run: AgentRunActivity
-  items: TurnTimelineActivityItem[]
-  onOpenSubagent?(runId: string, subagentId: string): void
-}) {
+function modelIsActive(run: AgentRunActivity, model: ModelItem['model']): boolean {
+  return model.status === 'running' && run.status === 'running'
+    && (!model.subagentId || run.subagents.some(child => child.id === model.subagentId && child.status === 'running'))
+}
+
+function activeProcessItem(group: ActivityGroup, run: AgentRunActivity) {
+  const candidate = group.attention ?? group.active
+  return candidate?.type === 'tool' ? toolIsActive(run, candidate.tool) ? candidate : undefined
+    : candidate?.type === 'model' && modelIsActive(run, candidate.model) ? candidate : undefined
+}
+
+function ModelActivityDetails({ item, run }: { item: ModelItem; run: AgentRunActivity }) {
   const { t } = useTranslation()
+  const { showModelRounds } = useContext(ActivityPreferences)
+  const duration = activityDuration(item.model.startedAt, item.model.completedAt)
+  const active = modelIsActive(run, item.model)
   return (
-    <section className="agent-activity-timeline">
-      {groupAdjacentSubagents(items).map((item) => {
-        if (item.type === 'model') {
-          const duration = activityDuration(item.model.startedAt, item.model.completedAt)
-          const reasoningSummary = reasoningTitleSummary(
-            item.model.reasoning,
-            item.model.reasoningSummary
-          )
-          return (
-            <Fragment key={item.key}>
-              <section className="agent-activity-model">
-                <header>
-                  <span>{item.round === undefined ? 'round' : `round ${item.round}`}</span>
-                  {duration && <small>· {duration}</small>}
-                  {item.model.recovery && item.model.status === 'running' && run.status === 'running' && item.model.id === run.models.at(-1)?.id && (
-                    <small role="status">{t(`agent.model_recovery_${item.model.recovery.reason}`, { count: item.model.recovery.attempts })}</small>
-                  )}
-                  {item.model.status === 'running' && run.status === 'running'
-                    && (!item.model.recovery || item.model.id === run.models.at(-1)?.id) && (
-                    <LoaderCircle className="agent-spin" size={13} />
-                  )}
-                </header>
-                {(item.model.reasoning || item.model.hasReasoning) && (
-                  <ActivityDisclosure
-                    stateKey={`reasoning:${item.model.id}`}
-                    className="agent-activity-reasoning"
-                    defaultOpen={item.model.status === 'running'}
-                    icon={<Brain size={13} />}
-                    label={reasoningSummary
-                      ? (
-                          <>
-                            <span>reasoning</span>
-                            <span className="agent-activity-argument">
-                              {reasoningSummary}
-                            </span>
-                          </>
-                        )
-                      : 'reasoning'}
-                    text={item.model.reasoning}
-                    detail={item.model.detail}
-                    field="reasoning"
-                  />
-                )}
-              </section>
-              {item.showText && (item.model.text.trim() || item.model.hasText) && (
-                <div className="message-sequence assistant agent-activity-model-message">
-                  <article className="message-row assistant">
-                    <div className="bubble ui-surface">
-                      {item.model.detail ? <ActivityDetail reference={item.model.detail} field="text">{value => <MarkdownText text={String(value ?? '')} />}</ActivityDetail>
-                        : <MarkdownText text={item.model.text} />}
-                    </div>
-                  </article>
-                </div>
-              )}
-            </Fragment>
-          )
-        }
-        if (item.type === 'tool') {
-          return (
-            <ToolActivityDisclosure
-              key={item.key}
-              tool={item.tool}
-              progress={item.progress}
-              active={(run.status === 'running' || run.status === 'interrupted') && (!item.tool.subagentId || run.subagents.some(subagent =>
-                subagent.id === item.tool.subagentId && (subagent.status === 'running' || subagent.status === 'interrupted')))}
-            />
-          )
-        }
-        if (item.type === 'direction') {
-          return (
-            <div
-              className="message-sequence user agent-activity-direction-message"
-              data-message-id={item.message.id}
-              key={item.key}
-            >
-              <article className="message-row user">
-                <div className="bubble ui-surface">
-                  <ContentBlocks message={item.message} />
-                </div>
-              </article>
-            </div>
-          )
-        }
-        if (item.type === 'subagent-group') {
-          return (
-            <div className="agent-activity-subagent-group" key={item.key}>
-              {item.items.map((entry) => (
-                <AgentSubagentActivityTrigger
-                  key={entry.key}
-                  run={run}
-                  subagentId={entry.subagent.id}
-                  variant="labeled"
-                  onOpenSubagent={(runId, subagentId) => onOpenSubagent?.(runId, subagentId)}
-                />
-              ))}
-            </div>
-          )
-        }
-        if (item.type === 'summary') {
-          return <ContextSummaryItem key={item.key} summary={item.summary} number={item.number} />
-        }
-        if (item.type === 'skill') {
-          return (
-            <ActivityDisclosure
-              stateKey={item.key}
-              className="agent-activity-input agent-activity-skill-input"
-              key={item.key}
-              icon={<FileText size={13} />}
-              label={`/${item.invocation.name}${item.invocation.args ? ` ${item.invocation.args}` : ''}`}
-              text={item.invocation.promptText}
-              detail={item.invocation.detail}
-            />
-          )
-        }
-        if (item.type === 'memory') {
-          const label = [
-            t('agent.memory_recall', { count: item.recall.memoryCount }),
-            item.recall.agentName
-          ].filter(Boolean).join(' · ')
-          return (
-            <ActivityDisclosure
-              stateKey={item.key}
-              className="agent-activity-input agent-activity-memory-recall"
-              key={item.key}
-              icon={<MemoryIcon size={13} />}
-              label={label}
-              text={item.recall.promptText}
-              detail={item.recall.detail}
-            />
-          )
-        }
-        return null
-      })}
+    <section className="agent-activity-model">
+      {showModelRounds && <header>
+        <span>{item.round === undefined ? 'round' : `round ${item.round}`}</span>
+        {duration && <small>· {duration}</small>}
+        {item.model.recovery && active && item.model.id === run.models.at(-1)?.id && (
+          <small role="status">{t(`agent.model_recovery_${item.model.recovery.reason}`, { count: item.model.recovery.attempts })}</small>
+        )}
+        {active
+          && (!item.model.recovery || item.model.id === run.models.at(-1)?.id) && (
+          <LoaderCircle className="agent-spin" size={13} />
+        )}
+      </header>}
+      {(item.model.reasoning || item.model.hasReasoning) && (
+        <ActivityDisclosure
+          stateKey={`reasoning:${item.model.id}`}
+          className="agent-activity-reasoning"
+          defaultOpen={item.model.status === 'running'}
+          icon={<Brain size={13} />}
+          label={<ReasoningActivityLabel model={item.model} />}
+          text={item.model.reasoning}
+          detail={item.model.detail}
+          field="reasoning"
+        />
+      )}
     </section>
   )
+}
+
+function ProcessGroup({ group, run, expanded, onExpanded }: { group: ActivityGroup; run: AgentRunActivity; expanded: boolean; onExpanded(open: boolean): void }) {
+  const { t } = useTranslation()
+  const active = activeProcessItem(group, run)
+  const thinking = active?.type === 'model' && (active.model.hasReasoning || Boolean(active.model.reasoning))
+  let label: ReactNode = group.hasThought ? t(group.hasTools ? 'agent.process_thought_tools' : 'agent.process_thought')
+    : t(group.hasTools ? 'agent.process_tools' : 'agent.process_model')
+  if (active?.type === 'tool') label = <ToolActivityLabel tool={active.tool} progress={active.progress} />
+  else if (active?.type === 'model') label = thinking ? <ReasoningActivityLabel model={active.model} /> : t('agent.process_waiting')
+  const recovery = active?.type === 'model' ? active.model.recovery : undefined
+  const deadline = active?.type === 'tool' && !active.progress ? sleepDeadline(active.tool) : undefined
+  let icon: ReactNode = <Activity size={13} />
+  if (recovery) icon = <RotateCcw size={13} />
+  else if (active?.type === 'tool') icon = active.tool.approval ? <ShieldAlert size={13} /> : toolPresentation(active.tool.call).icon
+  else if (active?.type === 'model') icon = thinking ? <Brain size={13} /> : <Clock size={13} />
+  return <details className="agent-activity-disclosure agent-activity-process" open={expanded}
+    onToggle={event => { if (event.target === event.currentTarget && event.currentTarget.open !== expanded) onExpanded(event.currentTarget.open) }}>
+    <summary tabIndex={-1} onMouseDown={event => event.preventDefault()}>
+      <span className="agent-activity-summary-content">
+        <span className="agent-activity-summary-icon">{icon}</span>
+        <span className="agent-activity-summary-label">{recovery ? <span role="status">{t(`agent.model_recovery_${recovery.reason}`, { count: recovery.attempts })}</span> : label}</span>
+        <span className="agent-activity-summary-status">{deadline !== undefined ? <SleepCountdown deadline={deadline} /> : active && <LoaderCircle className="agent-spin" size={13} />}</span>
+      </span>
+      <ChevronRight className="agent-activity-disclosure-chevron" size={13} />
+    </summary>
+  </details>
+}
+
+function ActivityViewNode({ node, run, standalone, processActive, onOpenSubagent }: {
+  node: Exclude<ActivityViewItem, ActivityGroup>; run: AgentRunActivity; standalone?: boolean; processActive?: boolean
+  onOpenSubagent?(runId: string, subagentId: string): void
+}) {
+  if (node.type === 'reply') return <div className="message-sequence assistant agent-activity-model-message">
+    <article className="message-row assistant"><div className="bubble ui-surface">
+      {node.model.detail ? <ActivityDetail reference={node.model.detail} field="text">{value => <MarkdownText text={String(value ?? '')} />}</ActivityDetail>
+        : <MarkdownText text={node.model.text} />}
+    </div></article>
+  </div>
+  const item = node.item
+  if (item.type === 'model') return <ModelActivityDetails item={item} run={run} />
+  if (item.type === 'tool') return <ToolActivityDisclosure tool={item.tool} progress={item.progress} active={toolIsActive(run, item.tool)} standalone={standalone} processActive={processActive} />
+  if (item.type === 'direction') return <div className="message-sequence user agent-activity-direction-message" data-message-id={item.message.id}>
+    <article className="message-row user"><div className="bubble ui-surface"><>{item.detail ? <ActivityDetail reference={item.detail}>{value => value.message && <ContentBlocks message={value.message} />}</ActivityDetail> : <ContentBlocks message={item.message} />}</></div></article>
+  </div>
+  if (item.type === 'subagent') return <div className="agent-activity-subagent-group">
+    <AgentSubagentActivityTrigger run={{ ...run, subagents: [...run.subagents.filter(child => child.id !== item.subagent.id), item.subagent] }}
+      subagentId={item.subagent.id} variant="labeled" onOpenSubagent={(runId, id) => onOpenSubagent?.(runId, id)} />
+  </div>
+  if (item.type === 'summary') return <ContextSummaryItem summary={item.summary} number={item.number} />
+  return <ActivityDisclosure stateKey={item.key} className="agent-activity-input agent-activity-skill-input" icon={<FileText size={13} />}
+    label={`/${item.invocation.name}${item.invocation.args ? ` ${item.invocation.args}` : ''}`} text={item.invocation.promptText} detail={item.invocation.detail} />
+}
+
+function DirectoryStatus({ store, scope }: { store: ActivityDirectoryStore; scope: DirectoryScope }) {
+  const { t } = useTranslation(), view = store.view(scope)
+  if (view.error) return <div className="agent-activity-error" role="alert">{t('agent.load_activities_failed')}
+    <NoFocusButton onClick={() => store.retry(scope)}>{t('common.retry')}</NoFocusButton></div>
+  return view.loading && !view.initialized ? <DelayedLoading /> : null
+}
+
+const activityRowKey = (scope: DirectoryScope, key: string) => `${scope.runId}:${scope.subagentId ?? 'root'}:${key}`
+const messageRowKey = (message: AgentMessage) => message.activityModelId && message.runId
+  ? activityRowKey({ runId: message.runId }, `text:model:root:${message.activityModelId}`) : `message:${message.id}`
+
+function activitySource(scope: DirectoryScope, run: AgentRunActivity, store?: ActivityDirectoryStore, messages: AgentMessage[] = []) {
+  // Optimistic previews without a persisted conversation use the same grouping
+  // contract. All persisted activity comes exclusively from the directory API.
+  const atoms = store ? [] : activityAtomsFromItems(projectRunActivityItems(run, new Map(), messages, scope.subagentId))
+  const builder = new ActivityGroupBuilder()
+  const nodes = store ? store.view(scope).items : [...atoms.flatMap(atom => builder.push(atom)), ...builder.finish()]
+  // Reply boundaries are already in the outline. No member or body reads.
+  const lastReply = nodes.filter(node => node.type === 'reply').at(-1)?.start
+  const running = scopeIsRunning(run, scope)
+  const groups = nodes.flatMap(node => node.type === 'process' ? [{ scope, key: node.key,
+    active: running && (!lastReply || compareActivityPositions(node.end, lastReply) > 0) }] : [])
+  return { scope, run, store, atoms, nodes, groups }
+}
+
+/** Expansion projects a complete directory into flat rows. Every row in a
+ * panel shares one virtualizer and one scroll intent owner. */
+function activityRows({ source, scopes, disclosures, runningProcessDisplay, showModelRounds, parentKey, omitted, onOpenSubagent }: {
+  source: ReturnType<typeof activitySource>; scopes: DirectoryScope[]
+  disclosures: ActivityDisclosures; runningProcessDisplay: 'expanded' | 'collapsed'; showModelRounds: boolean
+  parentKey?: string; omitted?: ReadonlySet<string>; onOpenSubagent?(runId: string, id: string): void
+}): TimelineRow[] {
+  const rows: TimelineRow[] = []
+  const { scope, run, store, atoms, nodes, groups } = source
+  const activeGroups = new Set(groups.filter(group => group.active).map(group => group.key))
+  if (store) { scopes.push(scope); rows.push({ key: `directory:${directoryScopeKey(scope)}`, content: <DirectoryStatus store={store} scope={scope} />, estimatedHeight: 0, parentKey }) }
+  const add = (node: Exclude<ActivityViewItem, ActivityGroup>, parent: string | undefined, group?: ActivityGroup) => {
+    const key = activityRowKey(scope, node.key)
+    if (omitted?.has(key)) return
+    // Live model status belongs to the group title. Hidden rounds must not
+    // leave a member row containing only a spinner or duplicated retry text.
+    if (!showModelRounds && node.type === 'entry' && node.item.type === 'model'
+      && !node.item.model.hasReasoning && !node.item.model.reasoning) return
+    const single = group?.start.key === group?.end.key && group?.first.type === 'tool'
+    rows.push({ key, activityKey: node.key, parentKey: parent, estimatedHeight: node.type === 'reply' ? 120 : 40,
+      className: group && !single ? 'agent-timeline-member' : undefined,
+      content: <div onClickCapture={event => {
+        const target = event.target instanceof Element ? event.target.closest('summary') : null
+        if (group && !single && target && target.getAttribute('aria-disabled') !== 'true') disclosures.set(scope, group.key, true)
+      }} onToggle={event => {
+        if (single && event.target instanceof HTMLDetailsElement && event.target.classList.contains('agent-activity-tool')) disclosures.set(scope, group!.key, event.target.open)
+      }}><ActivityViewNode node={node} run={run} standalone={single} processActive={group ? activeGroups.has(group.key) : undefined} onOpenSubagent={onOpenSubagent} /></div> })
+  }
+  for (const node of nodes) {
+    if (node.type !== 'process') { add(node, parentKey); continue }
+    // The outline already describes content and live status. Omit empty groups
+    // before selecting member scopes, without reading their members or bodies.
+    if (!showModelRounds && !node.hasThought && !node.hasTools && !activeProcessItem(node, run)) continue
+    const key = activityRowKey(scope, node.key), single = node.start.key === node.end.key && node.first.type === 'tool'
+    const running = activeGroups.has(node.key)
+    const open = disclosures.open(scope, node.key, running && (runningProcessDisplay === 'expanded' || Boolean(node.attention)))
+    if (single) {
+      add({ type: 'entry', item: node.first, position: node.start, key: node.first.key, start: node.start, end: node.end }, parentKey, node)
+      continue
+    }
+    rows.push({ key, activityKey: node.key, parentKey, content: <ProcessGroup group={node} run={run} expanded={open} onExpanded={value => disclosures.set(scope, node.key, value)} /> })
+    if (!open) continue
+    const childScope = { ...scope, parentId: node.key }
+    if (store) {
+      scopes.push(childScope)
+      rows.push({ key: `directory:${directoryScopeKey(childScope)}`, content: <DirectoryStatus store={store} scope={childScope} />, estimatedHeight: 0, parentKey: key })
+    }
+    const members = store ? store.view(childScope).items : atoms.filter(atom => isProcessAtom(atom)
+      && compareActivityPositions(atom.position, node.start) >= 0 && compareActivityPositions(atom.position, node.end) <= 0)
+      .map(atom => ({ ...atom, key: atom.position.key, start: atom.position, end: atom.position }))
+    for (const child of members) if (child.type !== 'process') add(child, key, node)
+  }
+  return rows
 }
 
 export function AgentSubagentPanel({
@@ -884,10 +909,13 @@ export function AgentSubagentPanel({
   threadId?: string
 }) {
   const { t } = useTranslation()
+  const directories = useActivityDirectories(threadId)
+  const source = run && subagentId ? activitySource({ runId: run.runId, subagentId }, run, threadId ? directories : undefined) : undefined
+  const disclosures = useActivityDisclosures(`subagent:${threadId}:${subagentId}`, run ? [run] : [], source?.groups ?? [])
+  const { runningProcessDisplay, showModelRounds } = useContext(ActivityPreferences)
   const panelRef = useRef<HTMLDivElement | null>(null)
   const contentRef = useRef<HTMLDivElement | null>(null)
-  const followOutputRef = usePanelRef('followOutput', true)
-  const opened = usePanelRef('opened', false)
+  const followOutputRef = usePanelRef('followOutput', run?.subagents.some(child => child.id === subagentId && (child.status === 'running' || child.status === 'interrupted')) ?? false)
   const onScroll = usePanelScroll(panelRef, Boolean(run))
   const subagent = run?.subagents.find((item) => item.id === subagentId)
   const open = Boolean(run && subagent)
@@ -897,27 +925,15 @@ export function AgentSubagentPanel({
     enabled: open,
     followOutputRef,
     panelRef,
-    resetKey: subagentId
+    resetKey: subagentId, virtualized: true
   })
 
-  useEffect(() => {
-    const panel = panelRef.current
-    if (!open || !panel) return
-    if (run?.display && threadId) {
-      const active = subagent?.status === 'running' || subagent?.status === 'interrupted'
-      if (!opened.current || !active) followOutputRef.current = active
-      opened.current = true
-      return
-    }
-    if (opened.current) return
-    opened.current = true
-    followOutputRef.current = true
-    const frame = window.requestAnimationFrame(() => {
-      panel.scrollTop = panel.scrollHeight
-    })
-    return () => window.cancelAnimationFrame(frame)
-  }, [open, subagentId, opened, followOutputRef, run?.display, threadId, subagent?.status])
 
+  const scopes: DirectoryScope[] = []
+  const rows = source && subagent ? activityRows({ source,
+    scopes, disclosures, runningProcessDisplay, showModelRounds, onOpenSubagent }) : []
+  const scopeKey = JSON.stringify(scopes)
+  useEffect(() => { directories.sync(JSON.parse(scopeKey) as DirectoryScope[]) }, [directories, scopeKey])
   if (!run || !subagent) return null
   const delegationTool = delegationToolForSubagent(run, subagent)
   const summary = activitySummaryLabel(run, subagent.id, t)
@@ -931,10 +947,9 @@ export function AgentSubagentPanel({
   const displayedStatus = recoveryError
     ? 'Recovery error'
     : subagentStatusLabel(subagent.status)
-  const items = projectRunActivityItems(run, new Map(), [], subagent.id)
 
   return (
-    <section className="ui-detail-panel agent-subagent-panel">
+    <FollowOutputContext value={followOutputRef}><section className="ui-detail-panel agent-subagent-panel">
           <header className="agent-subagent-panel-header">
             <div className="agent-subagent-panel-title">
               <AgentSubagentStatusIcon
@@ -957,6 +972,7 @@ export function AgentSubagentPanel({
               aria-label={subagent.name}
               tabIndex={-1}
               ref={panelRef}
+              style={{ overflowAnchor: 'none' }}
               onClickCapture={navigation.onClickCapture}
               onPointerDown={navigation.onPointerDown}
               onScroll={() => { navigation.onScroll(); onScroll() }}
@@ -965,17 +981,10 @@ export function AgentSubagentPanel({
               onWheel={navigation.onWheel}
             >
               <div ref={contentRef}>
-                {delegationTool && <ToolActivityDisclosure tool={delegationTool} active={run.status === 'running' || run.status === 'interrupted'} />}
-                {run.display && threadId ? <ActivityWindow threadId={threadId} run={run} subagentId={subagentId}>{page => {
-                  const owned = { ...page, subagents: [...page.subagents, subagent] }
-                  return <ActivityTimelineItems run={owned} items={projectRunActivityItems(owned, new Map(), [], subagentId)} onOpenSubagent={onOpenSubagent} />
-                }}</ActivityWindow> : <>
-                <ActivityTimelineItems
-                  run={run}
-                  items={items}
-                  onOpenSubagent={onOpenSubagent}
-                />
-                </>}
+                <VirtualTimeline rows={[
+                  ...(delegationTool ? [{ key: 'delegation', content: <ToolActivityDisclosure tool={delegationTool} active={run.status === 'running' || run.status === 'interrupted'} /> }] : []),
+                  ...rows,
+                  { key: 'result', content: <>
                 {subagent.detailsDeferred && !subagent.detail && <LoaderCircle className="agent-spin" size={14} aria-label={t('common.loading')} />}
                 {subagent.status === 'completed' && (!subagent.detailsDeferred || subagent.detail) && (
                   <ActivityDisclosure
@@ -1000,6 +1009,8 @@ export function AgentSubagentPanel({
                     renderWhenEmpty
                   />
                 )}
+                  </> }
+                ]} panelRef={panelRef} followOutput={followOutputRef} resetKey={subagentId} />
               </div>
             </div>
             <ScrollBoundaryControls
@@ -1010,7 +1021,7 @@ export function AgentSubagentPanel({
               onScrollToTop={navigation.scrollToTop}
             />
           </div>
-    </section>
+    </section></FollowOutputContext>
   )
 }
 
@@ -1041,7 +1052,7 @@ function activitySummaryLabel(
       ? [activityCountLabel(subagentCount, 'subagent')]
       : [])
   ].join(' · ')
-  return run.activityWindow?.hasEarlier
+  return !counts && run.activityWindow?.hasEarlier
     ? t('agent.loaded_activity_summary', { summary })
     : summary
 }
@@ -1056,21 +1067,7 @@ function rangeLabel(
   if (range.run.status === 'completed' && !range.finalMessageId) {
     return t('agent.run_completed_without_reply')
   }
-  if (range.run.status === 'running') {
-    return range.run.models.length > 0
-      ? t('agent.run_replying')
-      : t('agent.run_preparing')
-  }
-  const summary = [
-    activityCountLabel(range.modelCount, 'model round'),
-    activityCountLabel(range.toolCount, 'tool call'),
-    ...(range.subagentCount > 0
-      ? [activityCountLabel(range.subagentCount, 'subagent')]
-      : [])
-  ].join(' · ')
-  return !range.run.display && range.run.activityWindow?.hasEarlier
-    ? t('agent.loaded_activity_summary', { summary })
-    : summary
+  return t('agent.process_model')
 }
 
 function activityDuration(startedAt?: string, completedAt?: string): string | undefined {
@@ -1081,99 +1078,53 @@ function activityDuration(startedAt?: string, completedAt?: string): string | un
   return `${(milliseconds / 1_000).toFixed(milliseconds < 10_000 ? 1 : 0)} s`
 }
 
-function AgentActivityRange({
-  range,
-  onOpenSubagent,
-  threadId,
-  messages = []
-}: {
-  range: TurnTimelineActivityRange
-  onOpenSubagent?(runId: string, subagentId: string): void
-  threadId?: string
-  messages?: AgentMessage[]
+function RunElapsed({ run }: { run: AgentRunActivity }) {
+  const { t, i18n } = useTranslation()
+  const active = run.status === 'running' || run.status === 'interrupted'
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    if (!active) return
+    const update = () => setNow(Date.now())
+    update()
+    const timer = window.setInterval(update, 1000)
+    return () => window.clearInterval(timer)
+  }, [active, run.runId])
+  const elapsed = Math.max(0, Math.floor(((active ? now : Date.parse(run.updatedAt)) - Date.parse(run.createdAt)) / 1_000))
+  const duration = Number.isFinite(elapsed) ? [
+    [Math.floor(elapsed / 3600), 'hour'], [Math.floor(elapsed % 3600 / 60), 'minute'], [elapsed % 60, 'second']
+  ].filter(([value, unit]) => value || unit === 'second' && elapsed === 0)
+    .map(([value, unit]) => new Intl.NumberFormat(i18n.resolvedLanguage ?? 'en', { style: 'unit', unit: String(unit), unitDisplay: 'narrow' }).format(Number(value))).join(' ') : undefined
+  return <span className="agent-run-elapsed">{duration ? t(active ? 'agent.run_elapsed_active' : 'agent.run_elapsed', { duration }) : t('agent.process_model')}</span>
+}
+
+function ActivityRangeHeader({ range, expanded, onExpanded }: {
+  range: TurnTimelineActivityRange; expanded: boolean; onExpanded(open: boolean): void
 }) {
   const { t } = useTranslation()
-  const [expanded, setExpanded] = useState(range.startsExpanded)
-  const previousStatusRef = useRef(range.run.status)
-  const topToggleRef = useRef<HTMLButtonElement | null>(null)
-  const summary = rangeLabel(range, t)
   const canCollapse = range.run.status !== 'running' && range.run.status !== 'interrupted'
-  const statusChanged = previousStatusRef.current !== range.run.status
-  const effectiveExpanded = canCollapse
-    ? statusChanged ? range.startsExpanded : expanded
-    : true
+  return <section className={`agent-activity-range ${expanded ? 'expanded' : 'collapsed'}`}>
+    <div className="agent-activity-range-boundary agent-activity-range-boundary-top">
+      {canCollapse ? <NoFocusButton className="agent-activity-range-toggle" type="button" aria-expanded={expanded}
+        data-scroll-follow-toggle onClick={() => onExpanded(!expanded)}>
+        <RunElapsed run={range.run} />
+        {(range.run.status !== 'completed' || !range.finalMessageId) && <small>{rangeLabel(range, t)}</small>}
+        <ChevronRight className="agent-activity-range-chevron" size={13} />
+      </NoFocusButton> : <div className="agent-activity-range-status">
+        <RunElapsed run={range.run} />
+        {range.run.status === 'interrupted' && <small>{rangeLabel(range, t)}</small>}
+      </div>}
+    </div>
+  </section>
+}
 
-  useEffect(() => {
-    const previousStatus = previousStatusRef.current
-    previousStatusRef.current = range.run.status
-    if (previousStatus !== range.run.status) setExpanded(range.startsExpanded)
-  }, [range.run.status, range.startsExpanded])
-
-  const collapseFromBottom = (): void => {
-    setExpanded(false)
-    window.requestAnimationFrame(() => {
-      topToggleRef.current?.scrollIntoView({ block: 'nearest' })
-    })
-  }
-
-  return (
-    <section className={`agent-activity-range ${effectiveExpanded ? 'expanded' : 'collapsed'}`}>
-      <div className="agent-activity-range-boundary agent-activity-range-boundary-top">
-        {canCollapse
-          ? (
-              <NoFocusButton
-                className="agent-activity-range-toggle"
-                type="button"
-                aria-expanded={effectiveExpanded}
-                data-scroll-follow-toggle
-                ref={topToggleRef}
-                onClick={() => setExpanded((current) => !current)}
-              >
-                <Activity size={14} />
-                <span>{summary}</span>
-                <time dateTime={range.run.updatedAt}>{formatMessageTime(range.run.updatedAt)}</time>
-                <ChevronRight className="agent-activity-range-chevron" size={13} />
-              </NoFocusButton>
-            )
-          : (
-              <div className="agent-activity-range-status">
-                {range.run.status === 'running'
-                  ? <LoaderCircle className="agent-spin" size={14} />
-                  : <Activity size={14} />}
-                <span>{summary}</span>
-                <time dateTime={range.run.updatedAt}>{formatMessageTime(range.run.updatedAt)}</time>
-              </div>
-            )}
-      </div>
-      {effectiveExpanded && (
-        <>
-          {range.run.display && threadId ? <ActivityWindow threadId={threadId} run={range.run}>{page =>
-            <ActivityTimelineItems run={page} items={projectRunActivityItems(page, new Map(), messages)} onOpenSubagent={onOpenSubagent} />
-          }</ActivityWindow> : <>
-          <ActivityTimelineItems
-            run={range.run}
-            items={range.items}
-            onOpenSubagent={onOpenSubagent}
-          />
-          </>}
-          {canCollapse && (
-            <div className="agent-activity-range-boundary agent-activity-range-boundary-bottom">
-              <NoFocusButton
-                className="agent-activity-range-toggle agent-activity-range-collapse-button"
-                type="button"
-                aria-label={t('agent.collapse_activity')}
-                data-scroll-follow-toggle
-                data-tooltip={t('agent.collapse_activity')}
-                onClick={collapseFromBottom}
-              >
-                <ChevronUp size={14} />
-              </NoFocusButton>
-            </div>
-          )}
-        </>
-      )}
-    </section>
-  )
+function ActivityRangeFooter({ collapse }: { collapse(): void }) {
+  const { t } = useTranslation()
+  return <div className="agent-activity-range-boundary agent-activity-range-boundary-bottom">
+    <NoFocusButton className="agent-activity-range-toggle agent-activity-range-collapse-button" type="button"
+      aria-label={t('agent.collapse_activity')} data-scroll-follow-toggle data-tooltip={t('agent.collapse_activity')} onClick={collapse}>
+      <ChevronUp size={14} />
+    </NoFocusButton>
+  </div>
 }
 
 function ModelRetryActions({ retry, onRetry }: { retry: AgentModelRetryState; onRetry(withhold: boolean): Promise<void> }) {
@@ -1221,7 +1172,9 @@ export function AgentMessageList({
   const { t } = useTranslation()
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const contentRef = useRef<HTMLDivElement | null>(null)
-  const paginationRef = useRef(new MessagePaginationCoordinator())
+  const paginationRef = useRef<AbortController | undefined>(undefined)
+  const directories = useActivityDirectories(navigationKey)
+  const { runningProcessDisplay, showModelRounds } = useContext(ActivityPreferences)
   const navigationKeyRef = useRef(navigationKey)
   navigationKeyRef.current = navigationKey
   const navigation = useScrollBoundaryNavigation({
@@ -1229,52 +1182,72 @@ export function AgentMessageList({
     followOutputRef,
     followThreshold: 96,
     panelRef,
-    resetKey: navigationKey
+    resetKey: navigationKey, virtualized: true
   })
   const timeline = projectTurnTimeline(messages, activities, run)
+  const previewMessages = [...messages.filter(message => message.role === 'user'), ...timeline.entries.flatMap(entry => entry.type === 'message' && entry.message.role === 'assistant' ? [entry.message] : [])]
+  const sources = new Map(timeline.entries.flatMap(entry => entry.type === 'activity-range'
+    ? [[entry.key, activitySource({ runId: entry.run.runId }, entry.run, navigationKey ? directories : undefined, previewMessages)] as const] : []))
+  const disclosures = useActivityDisclosures(`timeline:${navigationKey}`, [...sources.values()].map(source => source.run),
+    [...sources.values()].flatMap(source => source.groups))
   const errorRenderedInTimeline = Boolean(error && timeline.entries.some((entry) =>
     entry.type === 'error' && entry.message === error
   ))
 
   useEffect(() => {
-    const pagination = paginationRef.current
-    pagination.invalidate()
+    paginationRef.current?.abort(); paginationRef.current = undefined
     setLoadingEarlier(false)
-    return () => pagination.invalidate()
+    return () => paginationRef.current?.abort()
   }, [navigationKey])
 
   const loadEarlier = async (): Promise<void> => {
     const threadId = navigationKey
-    if (!onLoadEarlier || loadingEarlier || !threadId) return
-    const panel = panelRef.current
-    if (!panel) return
-    const request = paginationRef.current.begin(threadId, panel)
-    setLoadingEarlier(true)
-    try {
-      await runMessagePagination({
-        request,
-        threadId,
-        panel,
-        currentThreadId: () => navigationKeyRef.current,
-        currentPanel: () => panelRef.current,
-        load: (signal) => onLoadEarlier({ threadId, signal }),
-        onError: (failedThreadId, error) => onLoadEarlierError?.(failedThreadId, error),
-        fallbackError: t('agent.load_earlier_failed'),
-        schedule: (callback) => window.requestAnimationFrame(callback)
-      })
+    if (!onLoadEarlier || paginationRef.current || !threadId) return
+    const request = new AbortController(); paginationRef.current = request; setLoadingEarlier(true)
+    try { await onLoadEarlier({ threadId, signal: request.signal }) }
+    catch {
+      if (!request.signal.aborted && navigationKeyRef.current === threadId) onLoadEarlierError?.(threadId, t('agent.load_earlier_failed'))
     } finally {
-      if (request.isCurrent(navigationKeyRef.current, panelRef.current)) {
-        setLoadingEarlier(false)
-      }
+      if (paginationRef.current === request) { paginationRef.current = undefined; setLoadingEarlier(false) }
     }
   }
+  const scopes: DirectoryScope[] = []
+  const omitted = new Set(timeline.entries.flatMap(entry => entry.type === 'message' ? [messageRowKey(entry.message)] : []))
+  const rows: TimelineRow[] = timeline.entries.flatMap((entry): TimelineRow[] => {
+    if (entry.type === 'error') {
+      const retry = modelRetries?.find(item => item.runId === entry.runId)
+      return [{ key: entry.key, content: <div className="agent-activity-error" role="alert" data-native-context-menu="text">
+        <div>{localizeAgentError(entry.message, t)}</div>
+        {retry && onRetryModel && !run && <ModelRetryActions key={retry.revisionId} retry={retry} onRetry={withhold => onRetryModel(retry, withhold)} />}
+      </div> }]
+    }
+    if (entry.type === 'cleanup') return [{ key: entry.key, content: <BackgroundCleanupDisclosure entry={entry} /> }]
+    if (entry.type === 'summary') return [{ key: entry.key, content: <ContextSummaryItem summary={entry.summary} number={entry.number} /> }]
+    if (entry.type === 'activity-range') {
+      const active = entry.run.status === 'running' || entry.run.status === 'interrupted'
+      const scope = { runId: entry.run.runId }
+      const open = active || disclosures.open(scope, entry.key, entry.startsExpanded)
+      return [
+        { key: entry.key, content: <ActivityRangeHeader range={entry} expanded={open} onExpanded={value => disclosures.set(scope, entry.key, value)} /> },
+        ...(open ? activityRows({ source: sources.get(entry.key)!,
+          scopes, disclosures, runningProcessDisplay, showModelRounds, parentKey: entry.key, omitted, onOpenSubagent }) : []),
+        ...(open && !active ? [{ key: `${entry.key}:collapse`, parentKey: entry.key, content: <ActivityRangeFooter collapse={() => disclosures.set(scope, entry.key, false)} /> }] : [])
+      ]
+    }
+    return [{ key: messageRowKey(entry.message), estimatedHeight: 120, content: <MessageItem
+      message={entry.message} roundUserMessageId={entry.roundUserMessageId} actionsDisabled={Boolean(run)} speech={speech}
+      onDeleteRound={onDeleteRound} onEditUserMessage={onEditUserMessage} onRegenerate={onRegenerate} onSpeak={onSpeak} onOpenChanges={onOpenChanges} /> }]
+  })
+  const scopeKey = JSON.stringify(scopes)
+  useEffect(() => { directories.sync(JSON.parse(scopeKey) as DirectoryScope[]) }, [directories, scopeKey])
   return (
-    <div className="scroll-boundary-frame agent-message-scroll-frame">
+    <FollowOutputContext value={followOutputRef}><div className="scroll-boundary-frame agent-message-scroll-frame">
       <section
         className="agent-message-panel workspace-content-scroll"
         aria-label={title}
         tabIndex={-1}
         ref={panelRef}
+        style={{ overflowAnchor: 'none' }}
         onClickCapture={navigation.onClickCapture}
         onPointerDown={navigation.onPointerDown}
         onScroll={navigation.onScroll}
@@ -1296,48 +1269,7 @@ export function AgentMessageList({
               {t('agent.load_earlier_messages', { count: earlierMessageCount })}
             </NoFocusButton>
           )}
-          {timeline.entries.map((entry) => {
-            if (entry.type === 'error') {
-              const modelRetry = modelRetries?.find(retry => retry.runId === entry.runId)
-              return <div className="agent-activity-error" role="alert" key={entry.key} data-native-context-menu="text">
-                <div>{localizeAgentError(entry.message, t)}</div>
-                {modelRetry?.runId === entry.runId && onRetryModel && !run && (
-                  <ModelRetryActions key={modelRetry.revisionId} retry={modelRetry} onRetry={withhold => onRetryModel(modelRetry, withhold)} />
-                )}
-              </div>
-            }
-            if (entry.type === 'cleanup') {
-              return <BackgroundCleanupDisclosure key={entry.key} entry={entry} />
-            }
-            if (entry.type === 'summary') {
-              return <ContextSummaryItem key={entry.key} summary={entry.summary} number={entry.number} />
-            }
-            if (entry.type === 'activity-range') {
-              return (
-                <AgentActivityRange
-                  key={entry.key}
-                  range={entry}
-                  threadId={navigationKey}
-                  messages={messages}
-                  onOpenSubagent={onOpenSubagent}
-                />
-              )
-            }
-            return (
-              <MessageItem
-                key={entry.key}
-                message={entry.message}
-                roundUserMessageId={entry.roundUserMessageId}
-                actionsDisabled={Boolean(run)}
-                speech={speech}
-                onDeleteRound={onDeleteRound}
-                onEditUserMessage={onEditUserMessage}
-                onRegenerate={onRegenerate}
-                onSpeak={onSpeak}
-                onOpenChanges={onOpenChanges}
-              />
-            )
-          })}
+          <VirtualTimeline rows={rows} panelRef={panelRef} followOutput={followOutputRef} resetKey={navigationKey} />
           {error && !errorRenderedInTimeline && (
             <div className="thread-title error" data-native-context-menu="text">
               {localizeAgentError(error, t)}
@@ -1352,6 +1284,6 @@ export function AgentMessageList({
         onScrollToBottom={navigation.scrollToBottom}
         onScrollToTop={navigation.scrollToTop}
       />
-    </div>
+    </div></FollowOutputContext>
   )
 }

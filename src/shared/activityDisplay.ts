@@ -1,8 +1,7 @@
 import type { AgentMessage, AgentRunActivity, AgentThreadSnapshot, AgentModelActivity, AgentToolActivity, AgentActivityDetailReference, AgentRuntimeEvent } from './agentTypes'
 import { agentModelReplyDisposition } from './agentReplyLifecycle'
+import { hasVisibleModelText } from './agentActivity'
 
-export const activityInitialSize = 300
-export const activityPageSize = 100
 export const activityWindowLimit = 500
 // Copy the small prefix: V8 sliced strings can otherwise retain a huge body.
 const caption = (value: string | undefined) => value === undefined ? undefined : [...value.slice(0, 240)].join('')
@@ -21,7 +20,7 @@ export function activityReference(threadId: string, runId: string, kind: AgentAc
 }
 
 export function displayModel(threadId: string, runId: string, model: AgentModelActivity): AgentModelActivity {
-  return { ...model, text: '', reasoning: '', hasText: model.hasText || Boolean(model.text),
+  return { ...model, text: '', reasoning: '', hasText: hasVisibleModelText(model),
     hasReasoning: model.hasReasoning || Boolean(model.reasoning), reasoningSummary: caption(model.reasoningSummary),
     detail: activityReference(threadId, runId, 'model', model.id, model.subagentId) }
 }
@@ -81,15 +80,14 @@ export function displayEvent(event: AgentRuntimeEvent): AgentRuntimeEvent {
   if (event.type === 'run_started' && event.userMessage) return { ...event, userMessage: displayMessage(event.run.threadId, event.userMessage) }
   if ('snapshot' in event && event.snapshot) return { ...event, snapshot: displaySnapshot(event.snapshot) }
   if (event.type === 'model_started' || event.type === 'model_completed') return { ...event, model: displayModel(event.threadId, event.runId, event.model) }
-  if (event.type === 'model_delta') return { ...event, delta: { ...event.delta, text: '' } }
+  if (event.type === 'model_delta') return { ...event, delta: event.delta.type === 'text'
+    ? { type: 'text', text: '', hasText: hasVisibleModelText(event.delta) } : { ...event.delta, text: '' } }
   if (event.type === 'tool_started' || event.type === 'tool_completed' || event.type === 'tool_approval_requested') {
     const tool = displayTool(event.threadId, event.runId, { ...event, status: event.type === 'tool_completed' ? 'completed' : 'running' })
     return { ...event, call: tool.call, ...('output' in event ? { output: tool.output } : {}) }
   }
   if (event.type === 'subagent_updated') return { ...event, subagent: { ...event.subagent, delegation: event.subagent.delegation && displayTool(event.threadId, event.runId, event.subagent.delegation), result: undefined,
     error: caption(event.subagent.error), detailsDeferred: true, detail: activityReference(event.threadId, event.runId, 'subagent', event.subagent.id) } }
-  if (event.type === 'memory_recalled') return { ...event, recall: { ...event.recall, query: '', promptText: '',
-    detail: activityReference(event.threadId, event.runId, 'memory', event.recall.id) } }
   if (event.type === 'context_compression_started' || event.type === 'context_compression_completed') return { ...event, summary: { ...event.summary, summaryText: '',
     detail: activityReference(event.threadId, event.runId, 'summary', event.summary.id) } }
   return event

@@ -14,7 +14,7 @@ function readFrozen<Metadata>(name: string, format: 'sqlite' | 'directory'): { b
   const root = new URL('../main/agent/fixtures/storage/', import.meta.url)
   const manifest = JSON.parse(readFileSync(new URL(`${name}.json`, root), 'utf8'))
   const bytes = gunzipSync(readFileSync(new URL(`${name}.${format}.gz`, root)))
-  if (manifest.name !== name || ![0, 1].includes(manifest.schemaVersion) || manifest.bytes !== bytes.length
+  if (manifest.name !== name || ![0, 1, 2, 3].includes(manifest.schemaVersion) || manifest.bytes !== bytes.length
     || (format === 'directory' && manifest.format !== 'directory')
     || createHash('sha256').update(bytes).digest('hex') !== manifest.sha256) {
     throw new Error(`Frozen storage fixture ${name} does not match its manifest.`)

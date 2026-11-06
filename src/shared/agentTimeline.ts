@@ -2,12 +2,13 @@ import { agentModelReplyDisposition } from './agentReplyLifecycle'
 import type { AgentBackgroundCleanup } from './backgroundCleanup'
 import {
   delegationToolForSubagent,
+  hasVisibleModelText,
   visibleToolsForAgent
 } from './agentActivity'
 import type {
+  AgentActivityDetailReference,
   AgentContextSummary,
   AgentMessage,
-  AgentMemoryRecall,
   AgentModelActivity,
   AgentRunActivity,
   AgentSkillInvocation,
@@ -57,16 +58,11 @@ export interface TurnTimelineSkillItem {
   invocation: AgentSkillInvocation
 }
 
-export interface TurnTimelineMemoryItem {
-  type: 'memory'
-  key: string
-  recall: AgentMemoryRecall
-}
-
 export interface TurnTimelineDirectionItem {
   type: 'direction'
   key: string
   message: AgentMessage
+  detail?: AgentActivityDetailReference
 }
 
 export interface TurnTimelineErrorItem {
@@ -88,7 +84,6 @@ export type TurnTimelineActivityItem =
   | TurnTimelineSubagentItem
   | TurnTimelineSummaryItem
   | TurnTimelineSkillItem
-  | TurnTimelineMemoryItem
   | TurnTimelineDirectionItem
 
 export interface TurnTimelineActivityRange {
@@ -199,7 +194,7 @@ export function projectRunActivityItems(
       && message.runId === run.runId
     )
     if (messageVisible && !model.reasoning && !model.hasReasoning) return
-    if (!model.reasoning && !model.hasReasoning && !model.text && !model.hasText && model.toolCallIds.length === 0 && model.status !== 'running') {
+    if (!model.reasoning && !model.hasReasoning && !hasVisibleModelText(model) && model.toolCallIds.length === 0 && model.status !== 'running') {
       return
     }
     items.push({
@@ -256,15 +251,6 @@ export function projectRunActivityItems(
       priority: 3
     }))
   if (!agentId) {
-    for (const recall of run.memoryRecalls ?? []) {
-      items.push({
-        type: 'memory',
-        key: `memory:${recall.id}`,
-        recall,
-        sequence: recall.sequence,
-        priority: 0
-      })
-    }
     for (const summary of run.summaries ?? []) {
       if (summary.firstPreservedActivitySequence === undefined) continue
       items.push({

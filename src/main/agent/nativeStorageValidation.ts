@@ -3,8 +3,10 @@ import { isDeepStrictEqual } from 'node:util'
 import { decodeExecutionInput } from '../../runtime/executionInput'
 import { NativeExecutionStore } from './nativeExecutionStore'
 import { validateNativeManagedResult } from './nativeManagedResults'
+import { activityMessageHeader } from './activityDirectoryIndex'
+import { validateActivityGroupIndex } from './activityGroupIndex'
 
-export const nativeConversationSchemaVersion = 1
+export const nativeConversationSchemaVersion = 3
 
 /** Opening/recovery checks the current owners and pending commands. Historical
  * bodies are checked by readMessageRecord when consumed; offline validation
@@ -12,6 +14,7 @@ export const nativeConversationSchemaVersion = 1
 export function validateNativeExecutionHeads(database: Database.Database): void {
   const store = new NativeExecutionStore(database)
   const fail = (detail: string): never => { throw new Error(`Invalid native execution storage: ${detail}.`) }
+  if (database.prepare('SELECT 1 FROM agent_display_changes LIMIT 1').get()) fail('display projection has uncommitted changes')
   // These owners participate in restart reconciliation. Do not scan the
   // historical message/effect tables just to open a display window.
   for (const table of ['agent_managed_calls', 'agent_managed_call_observations', 'execution_calls']) {
@@ -37,11 +40,13 @@ export function validateNativeExecutionHeads(database: Database.Database): void 
       }
     }
   }
-  for (const row of database.prepare(`SELECT intent.run_id,intent.input_json,run.thread_id,run.operation,run.status
+  for (const row of database.prepare(`SELECT intent.run_id,intent.input_json,intent.display_json,run.thread_id,run.operation,run.status
     FROM agent_run_input_intents intent LEFT JOIN agent_runs run ON run.id=intent.run_id`).all() as Array<{
-    run_id: string; input_json: string; thread_id: string | null; operation: string; status: string
+    run_id: string; input_json: string; display_json: string | null; thread_id: string | null; operation: string; status: string
   }>) {
     const message = decodeExecutionInput(row.input_json)
+    if (row.thread_id && row.display_json !== (message
+      ? JSON.stringify({ id: message.id, header: activityMessageHeader(row.thread_id, row.run_id, message.id, message.value, []) }) : null)) fail('saved input display header differs from input')
     if (!row.thread_id || row.status !== 'running' || (row.operation === 'compression') !== (message === undefined)
       || message && message.value.context?.runId !== row.run_id || store.readHead(row.thread_id)?.runId === row.run_id) {
       fail('saved input contradicts its owner or acceptance')
@@ -65,6 +70,7 @@ export function validateNativeExecutionHeads(database: Database.Database): void 
 export function validateNativeExecutionStorage(database: Database.Database): void {
   database.transaction(() => {
     validateNativeExecutionHeads(database)
+    validateActivityGroupIndex(database)
     const fail = (detail: string): never => { throw new Error(`Invalid native execution storage: ${detail}.`) }
     if (!isDeepStrictEqual(database.pragma('quick_check'), [{ quick_check: 'ok' }])
       || (database.pragma('foreign_key_check') as unknown[]).length) fail('SQLite integrity failure')
@@ -91,6 +97,10 @@ export function validateNativeExecutionStorage(database: Database.Database): voi
       thread_id: string; message_id: string; run_id: string | null; record_id: string; body_sequence: number | null
     }>) {
       const message = store.readMessageRecord(row.thread_id, row.record_id)
+      const display = database.prepare('SELECT header_json FROM agent_display_headers WHERE thread_id=? AND message_id=?')
+        .get(row.thread_id, row.message_id) as { header_json: string } | undefined
+      if (!display || display.header_json !== JSON.stringify(activityMessageHeader(row.thread_id, row.run_id ?? '', row.message_id,
+        message.value, message.value.calls?.length ? store.readModelCallIds(row.thread_id, row.record_id) : []))) fail('display header differs from its message')
       if (message.id !== row.message_id || row.body_sequence === null || !Number.isSafeInteger(row.body_sequence) || row.body_sequence < 0
         || row.run_id !== null && !database.prepare('SELECT 1 FROM agent_runs WHERE id=? AND thread_id=?').get(row.run_id, row.thread_id)
         || message.value.context?.runId !== undefined && message.value.context.runId !== row.run_id) fail('activity body has invalid ownership or ordering')

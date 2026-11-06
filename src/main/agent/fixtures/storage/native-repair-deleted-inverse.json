@@ -1,9 +1,9 @@
 {
   "name": "native-repair-deleted-inverse",
-  "schemaVersion": 1,
+  "schemaVersion": 3,
   "format": "directory",
-  "bytes": 978849,
-  "sha256": "cbffb7300388030ef7065c781b526617743a983ee69dc5f423f97c21a195cfa5",
+  "bytes": 1060769,
+  "sha256": "2bc17c3344f67242a5b0ce514c6a032c596ac3d962163c5824b0096610798f39",
   "metadata": {
     "version": 1,
     "value": [
@@ -116,6 +116,11 @@
     "pathSanitization": {
       "description": "Replace the Windows fixture username with user and recalculate affected definition hashes and references; all other rows, identities, content and recovery state are unchanged.",
       "sourceSha256": "364124a83797a696052f19eca3dd09b9430db47d50d22b0d1c083a9bdd6e27e5"
+    },
+    "groupDirectory": {
+      "sourceSchemaVersion": 2,
+      "sourceSha256": "cd89feafecd4fcf16a03ea03443ac95468fe221ee3c4be5a241bb82b5b5a75c3",
+      "description": "Offline v3 display index creation; all pre-existing execution and resource rows verified unchanged."
     }
   }
 }

@@ -54,8 +54,15 @@ async function verifyModelRetry(launchApplication) {
     application = await launchApplication(profile)
     let page = await application.firstWindow()
     const readToolActivities = snapshot => page.evaluate(async ({ threadId, runIds }) => {
-      const pages = await Promise.all(runIds.map(runId => globalThis.gale.agent.activities.page({ threadId, runId, limit: 300 })))
-      return Promise.all(pages.flatMap(activity => activity.tools).map(async tool => ({ ...tool,
+      const pages = await Promise.all(runIds.map(async runId => {
+        const input = { threadId, runId, requestId: crypto.randomUUID() }
+        const directory = await globalThis.gale.agent.activities.directory(input)
+        const groups = await Promise.all(directory.items.filter(item => item.type === 'process').map(group =>
+          globalThis.gale.agent.activities.directory({ ...input, parentId: group.key, requestId: crypto.randomUUID() })))
+        return [...directory.items, ...groups.flatMap(group => group.items)]
+          .flatMap(item => item.type === 'entry' && item.item.type === 'tool' ? [item.item.tool] : [])
+      }))
+      return Promise.all(pages.flat().map(async tool => ({ ...tool,
         ...(await globalThis.gale.agent.activities.detail({ ...tool.detail, field: 'output' })) })))
     }, { threadId: snapshot.thread.id, runIds: snapshot.activities.map(activity => activity.runId) })
     page.setDefaultTimeout(20_000)
@@ -93,6 +100,7 @@ async function verifyModelRetry(launchApplication) {
       assert.doesNotMatch(result.content, /PRIVATE_RESULT_/)
     }
     assert.deepEqual(tools(requests[3]).map(result => result.tool_call_id), ['left', 'right'])
+    await page.locator('.agent-activity-process:not([open]) > summary').first().click()
     const firstTool = page.locator('.agent-activity-tool').first()
     await firstTool.locator(':scope > summary').click()
     await firstTool.locator('.agent-activity-result > summary').click()

@@ -15,8 +15,10 @@ export function builtinPanelCanInvoke(panel: BuiltinPanel, channel: string, args
   if (panel.kind === 'document') return false
   const input = args[0] as Record<string, unknown> | undefined
   if (channel === 'agent:events:subscribe' || channel === 'agent:changes:cancelRead') return true
+  // The activity handler resolves request IDs within the sending WebContents.
+  if (channel === 'agent:activities:cancel') return panel.kind === 'subagent'
   if (channel === 'agent:threads:get') return !!panel.threadId && args[0] === panel.threadId
-  if (['agent:activities:get', 'agent:activities:subagent', 'agent:activities:page', 'agent:activities:detail'].includes(channel)) {
+  if (['agent:activities:get', 'agent:activities:subagent', 'agent:activities:directory', 'agent:activities:detail'].includes(channel)) {
     return panel.kind === 'subagent' && input?.threadId === panel.threadId && input.runId === panel.runId
   }
   if (panel.kind !== 'files') return false

@@ -13,16 +13,10 @@ export async function buildMemoryRulesPrompt(): Promise<string> {
   return `<memory_rules>\n${content}\n</memory_rules>`
 }
 
-export interface MemoryRecallDetails {
-  query: string
-  promptText: string
-  memoryCount: number
-}
-export interface MemoryRecallOptions {
+interface MemoryRecallOptions {
   enabled: boolean
   store: { preferences?: { read(scope: PreferenceScope): PreferenceDocument } }
   projectId: string
-  onRecall?(details: MemoryRecallDetails): void
 }
 
 function xmlText(value: string): string {
@@ -32,7 +26,6 @@ function xmlText(value: string): string {
 /** Read the completed Markdown snapshot on every request, including tool rounds.
  * Pending candidates are never injected. History remains unchanged. */
 export function createConversationMemoryProjector(options: MemoryRecallOptions) {
-  let observed = ''
   return async (system: ConversationMessage, _messages: readonly ConversationMessage[],
     onRead?: (hashes: { global: string; project: string }) => void): Promise<ConversationMessage> => {
     if (!options.enabled || !options.store.preferences) return system
@@ -50,7 +43,6 @@ export function createConversationMemoryProjector(options: MemoryRecallOptions) 
       ].join('\n')),
       '</user_preferences>'
     ].join('\n')
-    if (observed !== promptText) { observed = promptText; options.onRecall?.({ query: 'Global and project preferences', promptText, memoryCount: documents.length }) }
     return { kind: 'system', content: `${contentText(conversationContentBlocks(system))}\n\n${promptText}` }
   }
 }
