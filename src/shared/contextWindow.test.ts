@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentContextStatus } from './agentTypes'
-import { contextBudgetForModel, contextCompressionTriggerTokens, contextStatusForModel, contextWindowUsageRatio } from './contextWindow'
+import { contextBudgetForModel, contextCompressionTriggerTokens, contextStatusForModel } from './contextWindow'
 import { defaultModelConfig, modelContextKey } from './modelConfig'
 import type { ResolvedModelConfig } from './types'
 
@@ -32,22 +32,14 @@ describe('context window limits', () => {
     expect(contextBudgetForModel(undefined)).toBeUndefined()
     expect(contextBudgetForModel({ ...model, maxOutputTokens: model.maxContextTokens })).toBeUndefined()
   })
-  it('measures actual context against usable input capacity without consuming the reserve', () => {
-    expect(contextWindowUsageRatio(0, 32_000, 128_000)).toBe(0)
-    expect(contextWindowUsageRatio(4_000, 32_000, 128_000)).toBeCloseTo(1 / 24)
-    expect(contextWindowUsageRatio(96_000, 32_000, 128_000)).toBe(1)
-  })
   it('triggers at the configured fraction of usable capacity even with a large reserve', () => {
     expect(contextCompressionTriggerTokens(128_000, 32_000, 0.8)).toBe(76_800)
-    expect(contextWindowUsageRatio(76_800, 32_000, 128_000)).toBe(0.8)
     expect(contextCompressionTriggerTokens(10_000, 6_000, 0.5)).toBe(2_000)
   })
   it('keeps invalid capacities finite and prevents negative trigger budgets', () => {
     for (const capacity of [0, NaN, Infinity]) {
-      expect(contextWindowUsageRatio(50, 100, capacity)).toBe(0)
       expect(contextCompressionTriggerTokens(capacity, 100, 0.8)).toBe(1)
     }
-    expect(contextWindowUsageRatio(50, 100, 50)).toBe(0)
     expect(contextCompressionTriggerTokens(50, 100, 0.8)).toBe(1)
   })
   it('requires a fresh projection for a different model and updates budget-only edits immediately', () => {

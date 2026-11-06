@@ -358,7 +358,7 @@ describe('renderer interaction accessibility', () => {
       <ThreadSidebarContent
         loading={false}
         projects={[]}
-        sidebarCollapsedSections={{ projects: false, simpleChats: false }}
+        sidebarCollapsedSections={{ pinnedProjects: false, projects: false, simpleChats: false }}
         threads={[]}
         onDeleteProject={vi.fn()}
         onDeleteProjectThreads={vi.fn()}
@@ -978,7 +978,7 @@ describe('renderer interaction accessibility', () => {
       <ThreadList
         loading={false}
         projects={[project]}
-        sidebarCollapsedSections={{ projects: false, simpleChats: false }}
+        sidebarCollapsedSections={{ pinnedProjects: false, projects: false, simpleChats: false }}
         threads={[thread]}
         onDeleteProject={vi.fn()}
         onDeleteProjectThreads={vi.fn()}
@@ -1173,6 +1173,7 @@ describe('renderer interaction accessibility', () => {
     })
     function Fixture() {
       const [sidebarCollapsedSections, setSidebarCollapsedSections] = useState({
+        pinnedProjects: false,
         projects: false,
         simpleChats: false
       })

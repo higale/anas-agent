@@ -143,6 +143,7 @@
   },
   "project": {
     "projects": "项目",
+    "pinned_projects": "置顶",
     "select": "选择项目",
     "create": "新建项目",
     "simple_chat": "简易对话",
@@ -287,6 +288,7 @@
     "context_window": "上下文",
     "context_window_title": "当前上下文窗口占用",
     "context_input_usage": "≈ {{used}} / {{capacity}} 可用 · {{percent}}%",
+    "context_compression_usage": "≈ {{used}} / {{capacity}} 压缩点 · {{percent}}%",
     "context_current_window": "上次请求用量",
     "context_local_estimate": "本地预估",
     "context_input_tokens": "输入 Token",

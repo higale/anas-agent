@@ -197,6 +197,7 @@ function normalizeSidebarCollapsedSections(raw: RawAppConfig): SidebarCollapsedS
   const sections = raw.settings?.sidebar_collapsed_sections
   if (!sections) throw new Error('Config setting settings.sidebar_collapsed_sections is missing.')
   return {
+    pinnedProjects: requireBoolean(sections.pinned_projects === undefined ? false : sections.pinned_projects, 'settings.sidebar_collapsed_sections.pinned_projects'),
     projects: requireBoolean(sections.projects, 'settings.sidebar_collapsed_sections.projects'),
     simpleChats: requireBoolean(sections.simple_chats, 'settings.sidebar_collapsed_sections.simple_chats')
   }
@@ -431,6 +432,7 @@ function rawSettingsFromSnapshot(snapshot: AppConfigSnapshot): RawAppSettings {
     diff_fold_unchanged: settings.diffFoldUnchanged,
     diff_word_wrap: settings.diffWordWrap,
     sidebar_collapsed_sections: {
+      pinned_projects: settings.sidebarCollapsedSections.pinnedProjects,
       projects: settings.sidebarCollapsedSections.projects,
       simple_chats: settings.sidebarCollapsedSections.simpleChats
     },
@@ -894,6 +896,7 @@ export async function updateSettings(settings: AppSettingsUpdate): Promise<AppCo
         : normalizeSidebarWidth(settings.sidebarWidth),
       sidebar_collapsed_sections: settings.sidebarCollapsedSections
           ? {
+            pinned_projects: settings.sidebarCollapsedSections.pinnedProjects,
             projects: settings.sidebarCollapsedSections.projects,
             simple_chats: settings.sidebarCollapsedSections.simpleChats
           }

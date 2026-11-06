@@ -2,6 +2,7 @@ import { ChevronRight, MoreHorizontal, Plus } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { isDefaultWorkspaceProject, type Project } from '@shared/types'
+import { projectSidebarGroup } from '@shared/sidebarOrder'
 import { NoFocusButton } from '../NoFocusButton'
 import { ProjectDetailsContextMenu, ProjectDetailsMenu } from './ProjectDetailsMenu'
 import { ProjectIcon } from './ProjectIcon'
@@ -45,7 +46,7 @@ export function ProjectGroup({
     <section className="project-thread-group" data-default-workspace={defaultWorkspace ? true : undefined}
       data-sidebar-sort-id={sortable ? project.id : undefined}
       data-sidebar-sort-kind={sortable ? 'project' : undefined}
-      data-sidebar-sort-group={sortable ? project.kind : undefined}
+      data-sidebar-sort-group={sortable ? projectSidebarGroup(project) : undefined}
       data-sidebar-sort-pinned={sortable ? String(project.pinned) : undefined}>
       <ProjectDetailsContextMenu
         project={project}
@@ -57,7 +58,6 @@ export function ProjectGroup({
       >
         <div
           className="project-thread-heading"
-          data-pinned={project.pinned ? true : undefined}
           data-selected={selected && !defaultWorkspace ? true : undefined}
         >
           <NoFocusButton

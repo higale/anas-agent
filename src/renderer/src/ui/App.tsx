@@ -80,6 +80,7 @@ function orderProjects(projects: Project[]): Project[] {
 }
 
 const expandedSidebarSections: SidebarCollapsedSections = {
+  pinnedProjects: false,
   projects: false,
   simpleChats: false
 }
@@ -835,7 +836,7 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
 
   async function createProject(request: ProjectCreateRequest): Promise<Project> {
     const project = unwrapProjectResult(await window.gale.projects.create(request))
-    setProjects((items) => orderProjects([project, ...items]))
+    setProjects(await window.gale.projects.list())
     startNewThread(project.id, project)
     return project
   }
@@ -939,7 +940,8 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
   async function updateProjectState(project: Project, update: ProjectStateUpdate): Promise<void> {
     try {
       const updated = await window.gale.projects.updateState(project.id, update)
-      setProjects((items) => orderProjects(items.map((item) => item.id === updated.id ? updated : item)))
+      if (update.pinned !== undefined) setProjects(await window.gale.projects.list())
+      else setProjects((items) => orderProjects(items.map((item) => item.id === updated.id ? updated : item)))
       setAppError(undefined)
     } catch {
       setAppError(t('project.failed_update'))

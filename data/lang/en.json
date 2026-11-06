@@ -143,6 +143,7 @@
   },
   "project": {
     "projects": "Projects",
+    "pinned_projects": "Pinned",
     "select": "Select project",
     "create": "New project",
     "simple_chat": "Simple chat",
@@ -287,6 +288,7 @@
     "context_window": "Context",
     "context_window_title": "Current context window usage",
     "context_input_usage": "≈ {{used}} / {{capacity}} usable · {{percent}}%",
+    "context_compression_usage": "≈ {{used}} / {{capacity}} compression point · {{percent}}%",
     "context_current_window": "Last request usage",
     "context_local_estimate": "Local estimate",
     "context_input_tokens": "Input tokens",

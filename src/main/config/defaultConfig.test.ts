@@ -29,6 +29,7 @@ describe('bundled configuration contract', () => {
     expect(snapshot.subagents).toHaveLength(bundledAgents.length)
     expect(snapshot.defaultModel).toBeUndefined()
     expect(snapshot.settings.sidebarCollapsedSections).toEqual({
+      pinnedProjects: false,
       projects: false,
       simpleChats: false
     })

@@ -1,7 +1,7 @@
 import { normalizeIconData } from '@shared/iconImage'
 import { normalizeCompressionPrompt } from '@shared/summaryPrompt'
 import type { AgentAccessMode, AgentThread } from '@shared/agentTypes'
-import { orderProjectThreads, reorderSidebarItems, type SidebarReorderRequest } from '@shared/sidebarOrder'
+import { orderProjectThreads, projectSidebarGroup, reorderSidebarItems, type SidebarReorderRequest } from '@shared/sidebarOrder'
 import { ProjectOperationFailure } from '@shared/projectOperation'
 import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
@@ -325,10 +325,14 @@ function sortProjects(projects: Project[]): Project[] {
 
 function placeAtGroupStart(project: Project, projects: Project[]): void {
   const group = sortProjects(projects.filter((item) => item.id !== project.id
-    && item.id !== DEFAULT_WORKSPACE_PROJECT_ID && item.kind === project.kind && item.pinned === project.pinned))
+    && item.id !== DEFAULT_WORKSPACE_PROJECT_ID && projectSidebarGroup(item) === projectSidebarGroup(project)))
   delete project.sortOrder
   const positions = group.flatMap((item) => item.sortOrder === undefined ? [] : [item.sortOrder])
-  if (positions.length) {
+  if (positions.length && positions.length < group.length) {
+    // Merged pin groups may contain both automatic and manually ordered items.
+    group.forEach((item, index) => { item.sortOrder = index })
+    project.sortOrder = -1
+  } else if (positions.length) {
     project.sortOrder = Math.min(...positions) - 1
     if (!Number.isSafeInteger(project.sortOrder)) throw new Error('Project sort order exceeds the supported range.')
   }
@@ -348,7 +352,7 @@ export async function reorderSidebar(
     const store = await readStore()
     if (request.kind === 'project') {
       const group = sortProjects(store.projects.filter((project) => project.id !== DEFAULT_WORKSPACE_PROJECT_ID
-        && project.kind === request.groupId && project.pinned === request.pinned))
+        && projectSidebarGroup(project) === request.groupId && project.pinned === request.pinned))
       reorderSidebarItems(group, request).forEach((project, index) => { project.sortOrder = index })
     } else {
       const project = store.projects.find((item) => item.id === request.groupId)

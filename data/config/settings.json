@@ -46,6 +46,7 @@
   "sidebar_width": 260,
   "workspace_panel_width": 480,
   "sidebar_collapsed_sections": {
+    "pinned_projects": false,
     "projects": false,
     "simple_chats": false
   },

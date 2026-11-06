@@ -171,6 +171,7 @@ describe('domain config storage', () => {
         custom_information: ''
       },
       sidebar_collapsed_sections: {
+        pinned_projects: false,
         projects: false,
         simple_chats: false
       },
@@ -232,6 +233,7 @@ describe('domain config storage', () => {
         custom_information: 'Local environment'
       },
       sidebar_collapsed_sections: {
+        pinned_projects: false,
         projects: true,
         simple_chats: false
       }

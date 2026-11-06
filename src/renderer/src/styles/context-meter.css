@@ -77,39 +77,13 @@
   background: var(--border-muted);
 }
 
-.context-meter-bar-reserve,
-.context-meter-bar-used,
-.context-meter-bar-threshold {
+.context-meter-bar-used {
   position: absolute;
   top: 0;
   bottom: 0;
-}
-
-.context-meter-bar-used {
   left: 0;
-  z-index: 1;
-  width: var(--context-current-percent);
+  width: var(--context-percent);
   background: var(--control-mark);
-}
-
-.context-meter-bar-reserve {
-  right: 0;
-  z-index: 2;
-  width: var(--context-reserve-percent);
-  border-left: 1px solid color-mix(in srgb, var(--text-muted) 45%, transparent);
-  background: repeating-linear-gradient(
-    -45deg,
-    color-mix(in srgb, var(--text-muted) 58%, transparent) 0 2px,
-    transparent 2px 4px
-  );
-}
-
-.context-meter-bar-threshold {
-  left: var(--context-threshold-percent);
-  z-index: 3;
-  width: 1px;
-  background: var(--text);
-  opacity: 0.72;
 }
 
 .context-meter-row {

@@ -43,6 +43,7 @@ function config(): AppConfigSnapshot {
       sidebarWidth: 260,
       workspacePanelWidth: 480, memoryMode: 'background', showMemoryActivityInTitlebar: true, ...diffViewSettingsFixture,
       sidebarCollapsedSections: {
+        pinnedProjects: false,
         projects: false,
         simpleChats: false
       },

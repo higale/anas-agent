@@ -211,8 +211,9 @@ export function ThreadList({
   }
 
   const defaultProject = projects.find(isDefaultWorkspaceProject)
-  const workspaceProjects = projects.filter((project) => project.kind === 'workspace' && !isDefaultWorkspaceProject(project))
-  const simpleChatProjects = projects.filter((project) => project.kind === 'simple_chat')
+  const pinnedProjects = projects.filter((project) => project.pinned && !isDefaultWorkspaceProject(project))
+  const workspaceProjects = projects.filter((project) => !project.pinned && project.kind === 'workspace' && !isDefaultWorkspaceProject(project))
+  const simpleChatProjects = projects.filter((project) => !project.pinned && project.kind === 'simple_chat')
 
   if (loading && !projects.length && !threads.length) {
     return (
@@ -225,6 +226,16 @@ export function ThreadList({
   return (
     <nav ref={listRef} className="thread-list ui-list ui-scroll-list" aria-label={t('chat.threads')} tabIndex={-1}
       onPointerDown={drag.onPointerDown} onClickCapture={drag.onClickCapture}>
+      {pinnedProjects.length > 0 && (
+        <CollapsibleThreadSection
+          collapsed={sidebarCollapsedSections.pinnedProjects}
+          label={t('project.pinned_projects')}
+          section="pinnedProjects"
+          onToggle={onToggleSidebarSection}
+        >
+          {pinnedProjects.map(renderProject)}
+        </CollapsibleThreadSection>
+      )}
       {workspaceProjects.length > 0 && (
         <CollapsibleThreadSection
           collapsed={sidebarCollapsedSections.projects}

@@ -118,6 +118,7 @@ export interface RawAppSettings {
   diff_fold_unchanged?: boolean
   diff_word_wrap?: boolean
   sidebar_collapsed_sections?: Partial<{
+    pinned_projects: boolean
     projects: boolean
     simple_chats: boolean
   }>

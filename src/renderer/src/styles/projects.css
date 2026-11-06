@@ -416,22 +416,6 @@
   color: var(--text);
 }
 
-.project-thread-heading[data-pinned] {
-  overflow: hidden;
-}
-
-.project-thread-heading[data-pinned]::before {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 0;
-  height: 0;
-  border-top: 8px solid var(--accent);
-  border-right: 8px solid transparent;
-  content: '';
-  pointer-events: none;
-}
-
 .project-thread-label {
   display: grid;
   grid-template-columns: var(--thread-list-leading-width) minmax(0, 1fr);

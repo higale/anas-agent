@@ -144,6 +144,7 @@ describe('NativeAgentRuntime system prompt preview', () => {
         sidebarWidth: 260,
       workspacePanelWidth: 480, memoryMode: 'background', showMemoryActivityInTitlebar: true, ...diffViewSettingsFixture,
         sidebarCollapsedSections: {
+          pinnedProjects: false,
           projects: false,
           simpleChats: false
         },
@@ -196,6 +197,7 @@ describe('NativeAgentRuntime system prompt preview', () => {
       sidebarWidth: 260,
       workspacePanelWidth: 480, memoryMode: 'background', showMemoryActivityInTitlebar: true, ...diffViewSettingsFixture,
       sidebarCollapsedSections: {
+        pinnedProjects: false,
         projects: false,
         simpleChats: false
       },
@@ -256,7 +258,7 @@ describe('NativeAgentRuntime system prompt preview', () => {
       sidebarVisible: true,
       sidebarWidth: 260,
       workspacePanelWidth: 480, memoryMode: 'background', showMemoryActivityInTitlebar: true, ...diffViewSettingsFixture,
-      sidebarCollapsedSections: { projects: false, simpleChats: false },
+      sidebarCollapsedSections: { pinnedProjects: false, projects: false, simpleChats: false },
       backupDir: ''
     } satisfies AppSettings
     previewMocks.getAppConfigSnapshot.mockResolvedValue({ customTools: [],
@@ -352,7 +354,7 @@ describe('NativeAgentRuntime system prompt preview', () => {
       sidebarVisible: true,
       sidebarWidth: 260,
       workspacePanelWidth: 480, memoryMode: 'background', showMemoryActivityInTitlebar: true, ...diffViewSettingsFixture,
-      sidebarCollapsedSections: { projects: false, simpleChats: false },
+      sidebarCollapsedSections: { pinnedProjects: false, projects: false, simpleChats: false },
       backupDir: ''
     } satisfies AppSettings
     const config: AppConfigSnapshot = { customTools: [],

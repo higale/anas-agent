@@ -45,17 +45,30 @@ const status: AgentContextStatus = {
 }
 
 describe('ComposerContextMeter interactions', () => {
-  it('shows the effective runtime compression point and hides its marker when compression is off', async () => {
+  it('updates the usage denominator and detail ratios when compression is toggled', async () => {
     const user = userEvent.setup()
     const { rerender } = render(<ComposerContextMeter compressionBusy={false} disabled={false} onCompress={vi.fn()}
       status={{ ...status, compressionThresholdTokens: 6300 }} />)
     await user.click(screen.getByRole('button', { name: /chat.context_window_title/ }))
     expect(screen.getByText('chat.context_auto_compress_at').parentElement).toHaveTextContent('6.3k · 70%')
     expect(screen.getByText('chat.context_input_capacity').parentElement).toHaveTextContent('9k')
-    expect(document.querySelector('.context-meter-bar-threshold')).not.toBeNull()
+    const trigger = screen.getByRole('button', { name: /chat.context_window_title/ })
+    const total = screen.getByText(/^chat.context_compression_usage:/)
+    expect(total).toHaveTextContent('"capacity":"6.3k","percent":79.4')
+    expect(trigger).toHaveAccessibleName(`chat.context_window_title: ${total.textContent}`)
+    expect(trigger.style.getPropertyValue('--context-percent')).toBe('79.4%')
+    expect(total.parentElement?.style.getPropertyValue('--context-percent')).toBe('79.4%')
+    await user.click(screen.getByText('chat.context_local_estimate'))
+    expect(screen.getByText('chat.context_conversation_group').parentElement).toHaveTextContent('≈ 3k · 47.6%')
     rerender(<ComposerContextMeter compressionBusy={false} disabled={false} onCompress={vi.fn()}
       status={{ ...status, compressionEnabled: false }} />)
-    expect(document.querySelector('.context-meter-bar-threshold')).toBeNull()
+    const disabledTotal = screen.getByText(/^chat.context_input_usage:/)
+    expect(disabledTotal).toHaveTextContent('"capacity":"9k","percent":55.6')
+    expect(trigger).toHaveAccessibleName(`chat.context_window_title: ${disabledTotal.textContent}`)
+    expect(trigger.style.getPropertyValue('--context-percent')).toBe('55.6%')
+    expect(disabledTotal.parentElement?.style.getPropertyValue('--context-percent')).toBe('55.6%')
+    expect(screen.getByText('chat.context_auto_compress_at').parentElement).toHaveTextContent('common.off')
+    expect(screen.getByText('chat.context_conversation_group').parentElement).toHaveTextContent('≈ 3k · 33.3%')
   })
   it('expands current-window and local-estimate details independently', async () => {
     const user = userEvent.setup()

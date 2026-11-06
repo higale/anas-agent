@@ -154,6 +154,59 @@ describe('project store', () => {
     expect((await store.getProject(a.id)).updatedAt).toBe(a.updatedAt)
   })
 
+  it('persists one pinned order across project kinds and returns unpinned projects to their own group', async () => {
+    const store = await import('./projectStore')
+    const defaults = await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)
+    const workspace = await store.createProject({ ...defaults, name: 'Workspace' })
+    const chat = await store.createProject({ kind: 'simple_chat', name: 'Chat', prompt: '' })
+    const otherChat = await store.createProject({ kind: 'simple_chat', name: 'Other chat', prompt: '' })
+    await store.updateProjectState(workspace.id, { pinned: true })
+    await store.updateProjectState(chat.id, { pinned: true })
+    const request = { kind: 'project' as const, groupId: 'pinned', pinned: true, id: chat.id, beforeId: workspace.id }
+    await store.reorderSidebar(request, () => [])
+    expect((await store.listProjects()).filter(project => project.pinned).map(project => project.id)).toEqual([chat.id, workspace.id])
+    await store.updateProjectState(otherChat.id, { pinned: true })
+    expect((await store.listProjects()).filter(project => project.pinned).map(project => project.id)).toEqual([otherChat.id, chat.id, workspace.id])
+    await store.reorderSidebar({ ...request, id: workspace.id, beforeId: chat.id }, () => [])
+    expect((await store.listProjects()).filter(project => project.pinned).map(project => project.id)).toEqual([otherChat.id, workspace.id, chat.id])
+    await store.updateProjectState(chat.id, { pinned: false })
+    const before = await readSnapshot()
+    await expect(store.reorderSidebar(request, () => [])).rejects.toThrow('target changed')
+    expect(JSON.parse(await readSnapshot())).toEqual(JSON.parse(before))
+    await store.updateProjectState(otherChat.id, { pinned: false })
+    await store.reorderSidebar({ ...request, groupId: 'simple_chat', pinned: false, id: chat.id, beforeId: otherChat.id }, () => [])
+    expect((await store.listProjects()).map(project => project.id)).toEqual([workspace.id, chat.id, otherChat.id, DEFAULT_WORKSPACE_PROJECT_ID])
+  })
+
+  it.each(['workspace', 'simple_chat'] as const)('prepends a new %s pin to mixed ordering without changing the existing relative order', async kind => {
+    const store = await import('./projectStore')
+    const defaults = await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)
+    const a = await store.createProject({ ...defaults, name: 'Ordered A' })
+    const b = await store.createProject({ ...defaults, name: 'Ordered B' })
+    const c = await store.createProject({ kind: 'simple_chat', name: 'Automatic C', prompt: '' })
+    const d = await store.createProject(kind === 'workspace'
+      ? { ...defaults, name: 'New pin D' } : { kind, name: 'New pin D', prompt: '' })
+    const previous = JSON.parse(await readSnapshot())
+    for (const [id, sortOrder] of [[a.id, 0], [b.id, 1], [c.id, undefined]] as const) {
+      const project = previous.projects.find((item: Project) => item.id === id)
+      project.pinned = true
+      if (sortOrder === undefined) delete project.sort_order
+      else project.sort_order = sortOrder
+    }
+    await writeSnapshot(JSON.stringify(previous))
+    const pinnedIds = async () => (await store.listProjects()).filter(project => project.pinned).map(project => project.id)
+    expect(await pinnedIds()).toEqual([c.id, a.id, b.id])
+
+    await store.updateProjectState(d.id, { pinned: true })
+
+    expect(await pinnedIds()).toEqual([d.id, c.id, a.id, b.id])
+    // Editing a formerly automatic member must retain the normalized order.
+    await store.updateProject(c.id, { kind: 'simple_chat', name: 'Renamed C', prompt: '' })
+    expect(await pinnedIds()).toEqual([d.id, c.id, a.id, b.id])
+    expect(await store.getProject(a.id)).toMatchObject({ updatedAt: a.updatedAt, collapsed: a.collapsed })
+    expect(await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)).toEqual(defaults)
+  })
+
   it('saves default project conversation order and rejects cross-project, cross-pin and deleted targets without writing', async () => {
     const store = await import('./projectStore')
     const project = await store.createProject({ kind: 'simple_chat', name: 'Other', prompt: '' })

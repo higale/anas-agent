@@ -4,7 +4,7 @@ import { Calculator, ChevronRight, Cloud } from 'lucide-react'
 import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AgentContextStatus } from '@shared/agentTypes'
-import { contextWindowUsageRatio, type AgentContextBudget } from '@shared/contextWindow'
+import type { AgentContextBudget } from '@shared/contextWindow'
 import { NoFocusButton } from '../NoFocusButton'
 import {
   UI_POPOVER_COLLISION_PADDING,
@@ -24,22 +24,8 @@ function tokenCountLabel(value: number): string {
   return String(value)
 }
 
-function usagePercent(status: AgentContextStatus): number {
-  const currentWindowTokens = status.currentContextTokens
-  return Math.max(
-    0,
-    Math.min(100, Math.round(
-      contextWindowUsageRatio(
-        currentWindowTokens,
-        status.maxOutputTokens,
-        status.maxContextTokens
-      ) * 1000
-    ) / 10)
-  )
-}
-
 function tokenPercent(tokens: number, capacity: number): number {
-  if (!Number.isFinite(capacity) || capacity <= 0) return 0
+  if (!Number.isFinite(tokens) || !Number.isFinite(capacity) || capacity <= 0) return 0
   return Math.max(0, Math.min(100, tokens / capacity * 100))
 }
 
@@ -55,28 +41,22 @@ export function ComposerContextMeter({
   if (!limits) return null
 
   const currentWindowTokens = status?.currentContextTokens ?? 0
-  const percent = status ? usagePercent(status) : 0
-  const currentContextPercent = tokenPercent(
-    Math.min(currentWindowTokens, limits.inputCapacityTokens),
-    limits.maxContextTokens
-  )
-  const reservePercent = tokenPercent(limits.maxOutputTokens, limits.maxContextTokens)
-  const thresholdPercent = tokenPercent(limits.compressionThresholdTokens, limits.maxContextTokens)
+  const usageCapacity = limits.compressionEnabled
+    ? limits.compressionThresholdTokens
+    : limits.inputCapacityTokens
+  const percent = Math.round(tokenPercent(currentWindowTokens, usageCapacity) * 10) / 10
   const compressionPercent = tokenPercent(limits.compressionThresholdTokens, limits.inputCapacityTokens)
   const style = {
-    '--context-percent': `${percent}%`,
-    '--context-current-percent': `${currentContextPercent}%`,
-    '--context-reserve-percent': `${reservePercent}%`,
-    '--context-threshold-percent': `${thresholdPercent}%`
+    '--context-percent': `${percent}%`
   } as CSSProperties
-  const totalLabel = status ? t('chat.context_input_usage', {
+  const totalLabel = status ? t(limits.compressionEnabled ? 'chat.context_compression_usage' : 'chat.context_input_usage', {
     used: tokenCountLabel(currentWindowTokens),
-    capacity: tokenCountLabel(limits.inputCapacityTokens),
+    capacity: tokenCountLabel(usageCapacity),
     percent
   }) : t('common.loading')
   const tokenDetail = (tokens: number): string => {
-    const ratio = limits.inputCapacityTokens > 0
-      ? tokens / limits.inputCapacityTokens * 100
+    const ratio = usageCapacity > 0
+      ? tokens / usageCapacity * 100
       : 0
     const ratioLabel = ratio > 0 && ratio < 0.1 ? '<0.1%' : `${ratio.toFixed(1)}%`
     return `≈ ${tokenCountLabel(tokens)} · ${ratioLabel}`
@@ -126,8 +106,6 @@ export function ComposerContextMeter({
           <strong className="context-meter-total">{totalLabel}</strong>
           <div className="context-meter-bar" aria-hidden="true">
             <span className="context-meter-bar-used" />
-            <span className="context-meter-bar-reserve" />
-            {limits.compressionEnabled && <span className="context-meter-bar-threshold" />}
           </div>
           <div className="context-meter-row">
             <span>{t('chat.context_model_window')}</span>

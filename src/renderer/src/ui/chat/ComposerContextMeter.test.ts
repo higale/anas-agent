@@ -42,29 +42,38 @@ describe('ComposerContextMeter', () => {
     const html = renderToStaticMarkup(createElement(ComposerContextMeter, {
       compressionBusy: false, disabled: false, onCompress: () => {},
       status: { ...status, currentContextTokens: 0, estimatedInputTokens: 0,
-        maxContextTokens: 128000, maxOutputTokens: 32000, inputCapacityTokens: 96000 }
+        maxContextTokens: 128000, maxOutputTokens: 32000, inputCapacityTokens: 96000,
+        compressionThresholdTokens: 76800 }
     }))
     expect(html).toContain('--context-percent:0%')
-    expect(html).toContain('--context-current-percent:0%')
-    expect(html).toContain('--context-reserve-percent:25%')
     expect(html).toContain('&quot;used&quot;:&quot;0&quot;')
   })
-  it('uses current context over usable capacity and excludes output reserve', () => {
+  it.each([
+    { compressionEnabled: true, capacity: '7.2k', percent: 97.2, label: 'context_compression_usage' },
+    { compressionEnabled: false, capacity: '9k', percent: 77.8, label: 'context_input_usage' }
+  ])('uses $label as the displayed capacity', ({ compressionEnabled, capacity, percent, label }) => {
     const html = renderToStaticMarkup(createElement(ComposerContextMeter, {
       compressionBusy: false,
       disabled: false,
-      status,
+      status: { ...status, compressionEnabled },
       onCompress: () => {}
     }))
 
-    expect(html).toContain('--context-percent:77.8%')
-    expect(html).toContain('--context-current-percent:70%')
-    expect(html).not.toContain('--context-reserve-start-percent')
-    expect(html).toContain('--context-reserve-percent:10%')
-    expect(html).toContain('--context-threshold-percent:72%')
+    expect(html).toContain(`--context-percent:${percent}%`)
+    expect(html).toContain(`chat.${label}`)
     expect(html).toContain('&quot;used&quot;:&quot;7k&quot;')
-    expect(html).toContain('&quot;capacity&quot;:&quot;9k&quot;')
-    expect(html).toContain('&quot;percent&quot;:77.8')
+    expect(html).toContain(`&quot;capacity&quot;:&quot;${capacity}&quot;`)
+    expect(html).toContain(`&quot;percent&quot;:${percent}`)
+  })
+
+  it.each([7200, 8000])('shows a full meter at or above the compression point (%i tokens)', (tokens) => {
+    const html = renderToStaticMarkup(createElement(ComposerContextMeter, {
+      compressionBusy: false, disabled: false, onCompress: () => {},
+      status: { ...status, currentContextTokens: tokens }
+    }))
+    expect(html).toContain('--context-percent:100%')
+    expect(html).toContain('&quot;percent&quot;:100')
+    expect(html).toContain(`&quot;used&quot;:&quot;${tokens / 1000}k&quot;`)
   })
 
   it('does not replace current context with the previous request usage', () => {
@@ -82,11 +91,9 @@ describe('ComposerContextMeter', () => {
       onCompress: () => {}
     }))
 
-    expect(html).toContain('--context-percent:77.8%')
-    expect(html).toContain('--context-current-percent:70%')
-    expect(html).not.toContain('--context-reserve-start-percent')
+    expect(html).toContain('--context-percent:97.2%')
     expect(html).toContain('&quot;used&quot;:&quot;7k&quot;')
-    expect(html).toContain('&quot;percent&quot;:77.8')
+    expect(html).toContain('&quot;percent&quot;:97.2')
   })
 
   it('rounds k values to two decimal places without trailing zeroes', () => {
@@ -98,12 +105,13 @@ describe('ComposerContextMeter', () => {
         estimatedInputTokens: 11_345,
         currentContextTokens: 11_345,
         maxContextTokens: 128_765,
-        inputCapacityTokens: 127_765
+        inputCapacityTokens: 127_765,
+        compressionThresholdTokens: 102_212
       },
       onCompress: () => {}
     }))
 
     expect(html).toContain('&quot;used&quot;:&quot;11.35k&quot;')
-    expect(html).toContain('&quot;capacity&quot;:&quot;127.77k&quot;')
+    expect(html).toContain('&quot;capacity&quot;:&quot;102.21k&quot;')
   })
 })

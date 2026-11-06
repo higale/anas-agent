@@ -396,20 +396,36 @@ describe('configuration domain writes', () => {
 
     const snapshot = await appConfig.updateSettings({
       sidebarCollapsedSections: {
+        pinnedProjects: true,
         projects: true,
         simpleChats: false
       }
     })
 
     expect(raw.settings?.sidebar_collapsed_sections).toEqual({
+      pinned_projects: true,
       projects: true,
       simple_chats: false
     })
     expect(snapshot.settings.sidebarCollapsedSections).toEqual({
+      pinnedProjects: true,
       projects: true,
       simpleChats: false
     })
     expect(writeRawSettingsConfig).toHaveBeenCalledOnce()
+  })
+
+  it('defaults the new pinned section to expanded without resetting existing section choices', async () => {
+    const raw = rawConfig()
+    raw.settings!.sidebar_collapsed_sections = { projects: true, simple_chats: false }
+    const { appConfig } = await loadAppConfig(raw)
+    expect((await appConfig.getAppConfigSnapshot()).settings.sidebarCollapsedSections)
+      .toEqual({ pinnedProjects: false, projects: true, simpleChats: false })
+    const snapshot = await appConfig.updateSettings({
+      sidebarCollapsedSections: { pinnedProjects: false, projects: false, simpleChats: true }
+    })
+    expect(snapshot.settings.sidebarCollapsedSections).toEqual({ pinnedProjects: false, projects: false, simpleChats: true })
+    expect(raw.settings!.sidebar_collapsed_sections).toEqual({ pinned_projects: false, projects: false, simple_chats: true })
   })
 
   it('preserves wide workspace panes while enforcing pane minimums and sidebar bounds', async () => {

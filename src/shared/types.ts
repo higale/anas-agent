@@ -531,6 +531,7 @@ export interface SpeechRendererDiagnostics {
 export type RuntimeLogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'off'
 export type AttachmentTextOverflowMode = 'truncate' | 'error'
 export interface SidebarCollapsedSections {
+  pinnedProjects: boolean
   projects: boolean
   simpleChats: boolean
 }

@@ -6,16 +6,6 @@ function finiteNonNegative(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0
 }
 
-export function contextWindowUsageRatio(
-  currentContextTokens: number,
-  responseReserveTokens: number,
-  maxContextTokens: number
-): number {
-  const capacity = finiteNonNegative(maxContextTokens) - finiteNonNegative(responseReserveTokens)
-  if (capacity <= 0) return 0
-  return finiteNonNegative(currentContextTokens) / capacity
-}
-
 export function contextCompressionTriggerTokens(
   maxContextTokens: number,
   responseReserveTokens: number,
