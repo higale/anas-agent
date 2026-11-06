@@ -1,4 +1,4 @@
-import { Globe } from 'lucide-react'
+import { Globe, Monitor, Moon, Sun } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { LanguagePackSummary } from '@shared/types'
 import { UI_FONT_SIZE_MAX, UI_FONT_SIZE_MIN, normalizeUiFontSize } from '@shared/uiPreferences'
@@ -51,9 +51,9 @@ export function AppearanceSettings({
     }))
   ]
   const themePickerOptions = [
-    { value: 'system', label: t('settings.theme_system') },
-    { value: 'light', label: t('settings.theme_light') },
-    { value: 'dark', label: t('settings.theme_dark') }
+    { value: 'system', label: t('settings.theme_system'), icon: <Monitor size="1em" /> },
+    { value: 'light', label: t('settings.theme_light'), icon: <Sun size="1em" /> },
+    { value: 'dark', label: t('settings.theme_dark'), icon: <Moon size="1em" /> }
   ]
 
   return (

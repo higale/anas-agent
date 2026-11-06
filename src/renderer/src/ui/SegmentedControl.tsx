@@ -1,8 +1,8 @@
-import { useId, type CSSProperties } from 'react'
+import { useId, type CSSProperties, type ReactNode } from 'react'
 
 interface SegmentedControlProps<T extends string> {
   ariaLabel: string
-  options: ReadonlyArray<{ value: T; label: string; disabled?: boolean }>
+  options: ReadonlyArray<{ value: T; label: string; icon?: ReactNode; disabled?: boolean }>
   value: T
   onChange(value: T): void
   disabled?: boolean
@@ -19,7 +19,7 @@ export function SegmentedControl<T extends string>({ ariaLabel, options, value, 
       <input className="ui-visually-hidden" type="radio" name={name} value={option.value}
         checked={value === option.value} disabled={disabled || option.disabled}
         onChange={() => onChange(option.value)} />
-      <span>{option.label}</span>
+      <span>{option.icon && <span className="ui-segmented-icon" aria-hidden="true">{option.icon}</span>}{option.label}</span>
     </label>)}
   </div>
 }

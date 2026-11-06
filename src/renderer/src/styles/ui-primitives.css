@@ -2147,6 +2147,11 @@ button.ui-avatar:has(> img):focus-visible,
   color: var(--success);
 }
 
+.ui-segmented-icon {
+  display: inline-flex;
+  margin-inline-end: 6px;
+}
+
 .ui-segmented-option > span {
   display: inline-flex;
   flex: 1;

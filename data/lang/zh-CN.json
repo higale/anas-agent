@@ -579,7 +579,7 @@
     "language_hint": "选择应用界面语言。",
     "theme": "主题",
     "theme_hint": "选择应用颜色模式。",
-    "theme_system": "跟随系统",
+    "theme_system": "系统",
     "theme_light": "浅色",
     "theme_dark": "深色",
     "font_size": "字体大小",
