@@ -1,7 +1,8 @@
 import type { DiffContents } from '@shared/diffContents'
 import type Database from 'better-sqlite3'
 import type { FileChangeQuery, FileChangeQueryResult, FileChangeRoundListInput, FileChangeRoundListResult,
-  RoundFileChange, RoundFileChangesInput, RoundFileChangesResult } from '@shared/fileChanges'
+  RoundFileChange, RoundFileChangesInput, RoundFileChangesResult, RoundChangeAvailability, RoundChangeAvailabilityInput } from '@shared/fileChanges'
+import { roundAvailabilityBatchSize } from '@shared/fileChanges'
 import { isDeepStrictEqual } from 'node:util'
 import { decodePatchRecord, encodePatchDefinition, encodePatchMetadata, filePatchDefinitionSchema, filePatchRecordMetadataSchema, patchTextHash, validatePatchTransaction, type FilePatchEditRecord } from '../filePatchRecord'
 import { projectFileChanges, type FileChangeSource } from './fileChangeProjection'
@@ -71,6 +72,7 @@ export const fileChangeLedgerSchema = `
 
 interface StoredChange { revision: number; definition_json: string; metadata_json: string }
 interface ScopedRun { id: string; thread_id: string; status: string; actor: string; change_revision: number; unsettled: number }
+const roundRunLimit = 4096
 export interface FileChangeEvent {
   sequence: number
   entry_index: number
@@ -84,6 +86,34 @@ export class FileChangeLedger {
     private readonly readRoundSummary?: (threadId: string, runId: string) => string) {}
 
   notifyChanged(runId: string): void { this.onChange?.(runId) }
+
+  roundAvailability(input: RoundChangeAvailabilityInput): RoundChangeAvailability[] {
+    if (!input.threadId || !input.runIds.length || input.runIds.length > roundAvailabilityBatchSize
+      || input.runIds.some(id => !id || id.length > 256)) throw new Error('Round availability query exceeds its bounds.')
+    return this.database.transaction(() => [...new Set(input.runIds)].map((runId): RoundChangeAvailability => {
+      const owner = this.database.prepare('SELECT thread_id, operation FROM agent_runs WHERE id = ?').get(runId) as
+        { thread_id: string; operation: string } | undefined
+      if (owner && owner.thread_id !== input.threadId) throw new Error('File change run does not belong to this conversation.')
+      if (!owner || owner.operation !== 'agent') return { runId, state: 'empty', relatedRunIds: [runId] }
+      const runs = this.runScope(runId, roundRunLimit + 1), relatedRunIds = runs.map(run => run.id)
+      if (runs.length > roundRunLimit) return { runId, state: 'unknown', relatedRunIds }
+      const ids = JSON.stringify(relatedRunIds)
+      // Confirmed writes use the event index. A write later restored still has
+      // history to inspect. No file snapshots or diff projections are loaded.
+      const applied = this.database.prepare(`SELECT 1 FROM agent_file_change_events
+        WHERE phase = 'applied' AND request_id IN (SELECT value FROM json_each(?)) LIMIT 1`).get(ids)
+      // Match queryRoundFiles' inclusion of in-progress/conflicted entries,
+      // while excluding merely prepared or restored-without-writing entries.
+      const unresolved = !applied && this.database.prepare(`SELECT 1 FROM agent_file_changes change,
+        json_each(change.metadata_json, '$.transaction.entries') entry
+        WHERE change.request_id IN (SELECT value FROM json_each(?))
+          AND (json_type(entry.value, '$.after') = 'object'
+            OR json_extract(entry.value, '$.state') NOT IN ('pending', 'restored')) LIMIT 1`).get(ids)
+      const state = applied || unresolved ? 'available'
+        : runs.some(run => run.status === 'running' || run.status === 'interrupted' || run.unsettled) ? 'pending' : 'empty'
+      return { runId, state, relatedRunIds }
+    }))()
+  }
 
   listRounds(input: FileChangeRoundListInput): FileChangeRoundListResult {
     const limit = input.limit ?? 20
@@ -134,9 +164,9 @@ export class FileChangeLedger {
       throw new Error('Round file change query exceeds its bounds.')
     }
     return this.database.transaction(() => {
-      const runs = this.runScope(input.runId, 4097)
+      const runs = this.runScope(input.runId, roundRunLimit + 1)
       if (!runs.length) throw new Error('File change run was not found.')
-      if (runs.length > 4096) throw new Error('Round file change scope exceeds 4096 runs.')
+      if (runs.length > roundRunLimit) throw new Error(`Round file change scope exceeds ${roundRunLimit} runs.`)
       const version = patchTextHash(JSON.stringify(runs))
       if (input.version && input.version !== version) throw new Error('File change history changed; restart pagination.')
       const ids = JSON.stringify(runs.map((run) => run.id)), runMap = new Map(runs.map((run) => [run.id, run]))

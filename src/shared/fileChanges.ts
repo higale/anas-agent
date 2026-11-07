@@ -56,6 +56,15 @@ export interface FileChangeRoundListInput { threadId: string; after?: number; li
 export interface FileChangeRound { runId: string; createdAt: string; summary: string; status: string }
 export interface FileChangeRoundListResult { rounds: FileChangeRound[]; hasMore: boolean; nextAfter?: number; selectedRound?: FileChangeRound | null }
 
+export const roundAvailabilityBatchSize = 32
+export interface RoundChangeAvailabilityInput { threadId: string; runIds: string[] }
+export interface RoundChangeAvailability {
+  runId: string
+  state: 'available' | 'pending' | 'empty' | 'unknown'
+  /** Includes descendants so their events invalidate the owning shortcut. */
+  relatedRunIds: string[]
+}
+
 export interface RoundFileChangesInput {
   runId: string
   filePath?: string

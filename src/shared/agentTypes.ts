@@ -520,6 +520,7 @@ export interface AgentEventSubscription {
 export interface AgentApi {
   userInput: import('./userInput').UserInputApi
   changes: {
+    availability(input: import('./fileChanges').RoundChangeAvailabilityInput): Promise<import('./fileChanges').RoundChangeAvailability[]>
     gitContents(input: import('./gitChanges').GitContentInput, requestId: string): Promise<import('./diffContents').DiffContents>
     gitReferences(input: import('./gitChanges').GitReferenceQuery, requestId: string): Promise<import('./gitChanges').GitReadResponse<import('./gitChanges').GitReferenceResult>>
     rounds(input: import('./fileChanges').FileChangeRoundListInput, requestId: string): Promise<import('./fileChanges').FileChangeRoundListResult>

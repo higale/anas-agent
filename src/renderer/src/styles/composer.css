@@ -1288,11 +1288,30 @@
   width: min(340px, calc(100vw - 24px));
 }
 
-.composer-access-menu-label {
+.composer-access-menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 3px 9px 5px;
+}
+
+.composer-access-menu-label {
   color: var(--text-muted);
   font-size: var(--font-size-small);
   font-weight: 650;
+}
+
+.composer-access-menu-help {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-small);
+  font-weight: 400;
+}
+
+.composer-access-menu-help[data-highlighted] {
+  color: var(--text);
+  text-decoration: underline;
 }
 
 .composer-access-item {

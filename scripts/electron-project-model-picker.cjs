@@ -2,6 +2,7 @@ const { mkdtemp, rm } = require('node:fs/promises')
 const { tmpdir } = require('node:os')
 const { join } = require('node:path')
 const { expect } = require('playwright/test')
+const { panelPage } = require('./electron-panel-helpers.cjs')
 
 async function expectInsideWindow(menu) {
   await expect.poll(() => menu.evaluate((element) => {
@@ -39,6 +40,45 @@ async function verifyApprovalButtonLayout(page, language, full, tooltip) {
   await expect(button).toBeFocused()
   await toolbar.evaluate(element => element.style.removeProperty('max-width'))
   await expect(button).toHaveText(full, { useInnerText: true })
+}
+
+async function verifyPermissionHelp(application, page, language) {
+  const documentId = `USER_GUIDE.${language}.md`
+  const anchor = language === 'zh-CN' ? '工具与授权' : 'tools-and-approval'
+  const trigger = page.locator('.composer .composer-access-trigger')
+  let viewId
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await trigger.click()
+    const menu = page.locator('.composer-access-menu')
+    const help = menu.getByRole('menuitem', { name: language === 'zh-CN' ? '详细说明' : 'Learn more', exact: true })
+    const label = await menu.locator('.composer-access-menu-label').boundingBox()
+    const link = await help.boundingBox()
+    expect(link.x).toBeGreaterThan(label.x + label.width)
+    expect(Math.abs(link.y + link.height / 2 - label.y - label.height / 2)).toBeLessThan(2)
+    if (!attempt && process.env.ANAS_E2E_PERMISSION_SCREENSHOT) {
+      await menu.screenshot({ path: `${process.env.ANAS_E2E_PERMISSION_SCREENSHOT}-${language}.png` })
+    }
+    await help.focus()
+    await help.press('Enter')
+    await expect(menu).not.toBeVisible()
+    const reader = await panelPage(application, 'document')
+    const panel = reader.locator(`.panel-page:visible [id="document-${anchor}"]`)
+    await expect(panel).toBeInViewport()
+    const views = await page.evaluate(() => globalThis.gale.panels.list())
+    const documents = views.filter(view => view.content.kind === 'document' && view.content.documentId === documentId)
+    expect(documents).toHaveLength(1)
+    expect(documents[0].location).toBe('sidebar')
+    viewId = documents[0].viewId
+    await expect(trigger).toHaveAccessibleDescription(language === 'zh-CN' ? '完全访问' : 'Full access')
+    if (!attempt) {
+      await reader.locator('.panel-page:visible .ui-document-panel').evaluate(element => { element.scrollTop = 0 })
+      if (language === 'en') {
+        await page.evaluate(id => globalThis.gale.panels.move(id, 'window'), viewId)
+        await page.bringToFront()
+      }
+    }
+  }
+  await page.evaluate(id => globalThis.gale.panels.close(id), viewId)
 }
 
 async function verifyProjectModelPicker(launchApplication) {
@@ -79,24 +119,26 @@ async function verifyProjectModelPicker(launchApplication) {
     await page.locator('.project-thread-group[data-default-workspace] .project-thread-more').click()
     await page.locator('.project-details-action').filter({ hasText: 'Edit' }).click()
     const dialog = page.locator('.project-dialog')
-    const access = dialog.getByRole('button', { name: 'Approval mode', exact: true })
+    const access = dialog.getByRole('button', { name: 'Permission mode', exact: true })
     await expect(access).toHaveText('Smart approval')
     await access.click()
     await expectInsideWindow(page.locator('.composer-access-menu'))
-    await page.getByRole('menuitem', { name: /^Skip approval/ }).click()
-    await expect(access).toHaveText('Skip approval')
+    await page.getByRole('menuitem', { name: /^Full access/ }).click()
+    await expect(access).toHaveText('Full access')
     await expect(access).toBeFocused()
     await dialog.getByRole('button', { name: 'Save', exact: true }).click()
     const composerAccess = page.locator('.composer .composer-access-trigger')
-    await expect(composerAccess).toHaveAccessibleDescription('Skip approval')
-    await verifyApprovalButtonLayout(page, 'zh-CN', '跳过审批', '审批模式：跳过审批')
-    await verifyApprovalButtonLayout(page, 'en', 'Skip approval', 'Approval mode: Skip approval')
+    await expect(composerAccess).toHaveAccessibleDescription('Full access')
+    await verifyApprovalButtonLayout(page, 'zh-CN', '完全访问', '权限模式：完全访问')
+    await verifyPermissionHelp(application, page, 'zh-CN')
+    await verifyApprovalButtonLayout(page, 'en', 'Full access', 'Permission mode: Full access')
+    await verifyPermissionHelp(application, page, 'en')
     await composerAccess.click()
     await page.getByRole('menuitem', { name: /^Smart approval/ }).click()
     await expect(composerAccess).toHaveAccessibleDescription('Smart approval')
     await page.locator('.project-thread-group[data-default-workspace] .project-thread-more').click()
     await page.locator('.project-details-action').filter({ hasText: 'Edit' }).click()
-    await expect(access).toHaveText('Skip approval')
+    await expect(access).toHaveText('Full access')
     await access.click()
     await page.getByRole('menuitem', { name: /^Strict approval/ }).click()
     await expect(access).toHaveText('Strict approval')
@@ -104,7 +146,7 @@ async function verifyProjectModelPicker(launchApplication) {
     await expect(composerAccess).toHaveAccessibleDescription('Smart approval')
     await expect.poll(() => page.evaluate(async () => (await globalThis.gale.projects.list()).find(p => p.id === 'default-workspace').accessMode)).toBe('full_access')
     await page.reload()
-    await expect(composerAccess).toHaveAccessibleDescription('Skip approval')
+    await expect(composerAccess).toHaveAccessibleDescription('Full access')
     await page.locator('.project-thread-group[data-default-workspace] .project-thread-more').click()
     await page.locator('.project-details-action').filter({ hasText: 'Edit' }).click()
     await dialog.getByRole('button', { name: 'Select model', exact: true }).click()

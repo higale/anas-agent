@@ -78,18 +78,26 @@ async function installRoundChangesFixture(application, directory) {
       [oldRun]: [['export const greeting = "initial"\n', 'export const greeting = "before"\n']]
     }
     const versionFor = (runId) => (runId === newRun ? 'b' : 'a').repeat(64)
-    const snapshot = { thread, messages: rounds.slice().reverse().map((round) => ({ id: `${round.runId}-answer`, role: 'assistant', runId: round.runId,
-      content: [{ type: 'text', text: round.summary }] })), todos: [], interrupts: [],
+    const snapshot = { thread, messages: [...rounds.slice().reverse().map((round) => ({ id: `${round.runId}-answer`, role: 'assistant', runId: round.runId,
+      content: [{ type: 'text', text: round.summary }] })),
+      { id: 'empty-answer', role: 'assistant', runId: 'empty-run', content: [{ type: 'text', text: 'No recorded edits' }] },
+      { id: 'pending-answer', role: 'assistant', runId: 'pending-run', content: [{ type: 'text', text: 'Waiting for edits' }] }], todos: [], interrupts: [],
       activities: [{ runId: rounds[0].runId, operation: 'agent', status: 'completed', createdAt: now, updatedAt: now, models: [], tools: [],
         subagents: [{ id: 'fixture-child', name: 'Fixture child', sequence: 1, status: 'completed', result: 'Child recorded result' }] }],
-      messageWindow: { startIndex: 0, shown: 2, total: 2, remaining: 0 } }
-    const probe = globalThis.__anasRoundProbe = { contents: [], files: [], rounds: [], submission: undefined }
+      messageWindow: { startIndex: 0, shown: 4, total: 4, remaining: 0 } }
+    const probe = globalThis.__anasRoundProbe = { availability: [], contents: [], files: [], rounds: [], submission: undefined }
     for (const [channel, handler] of [
       ['agent:threads:list', () => [thread]], ['agent:threads:get', () => snapshot],
       ['agent:workspace:get', () => ({ mode: 'thread', threadId: thread.id })],
       ['agent:runs:recover', (_event, threadId) => {
         if (threadId !== thread.id) throw new Error('Unexpected conversation in fixture recovery')
         return false
+      }],
+      ['agent:changes:availability', (_event, input) => {
+        if (input.threadId !== thread.id) throw new Error('Unexpected conversation in availability query')
+        probe.availability.push(input)
+        return input.runIds.map(runId => ({ runId, relatedRunIds: [runId],
+          state: runId === 'empty-run' ? 'empty' : runId === 'pending-run' ? 'pending' : 'available' }))
       }],
       ['agent:changes:rounds', (_event, input) => {
         if (input.threadId !== thread.id) throw new Error('Unexpected conversation in round list')
@@ -130,6 +138,16 @@ async function verifyRoundChangesInApplication(application, directory, { nonGit 
   await page.evaluate(() => globalThis.gale.config.updateSettings({ language: 'en' }))
   await page.reload()
   await expect(page.locator('[data-agent-composer-input]')).toBeVisible({ timeout: 45000 })
+  const emptyShortcut = page.locator('[data-message-id="empty-answer"]').getByRole('button', { name: 'Run changes', exact: true })
+  const pendingShortcut = page.locator('[data-message-id="pending-answer"]').getByRole('button', { name: 'Run changes', exact: true })
+  await expect(page.locator('[data-message-id="empty-answer"]')).toBeVisible()
+  await expect(emptyShortcut).toHaveCount(0)
+  await expect(pendingShortcut).toBeDisabled()
+  await expect(pendingShortcut).toHaveAttribute('data-tooltip', /still active/)
+  const initialReads = await application.evaluate(() => globalThis.__anasRoundProbe)
+  assert.ok(initialReads.availability.length > 0)
+  assert.equal(initialReads.files.length, 0, 'Shortcut checks must not load file lists.')
+  assert.equal(initialReads.contents.length, 0, 'Shortcut checks must not load file bodies.')
   await page.getByRole('button', { name: /^(工作区菜单|Workspace menu)$/ }).click()
   await page.getByRole('menuitem', { name: 'File changes', exact: true }).click()
   const contentPage = await panelPage(application, 'files')
@@ -186,7 +204,7 @@ async function verifyRoundChangesInApplication(application, directory, { nonGit 
   await writeFile(paths[0], 'export const greeting = "edited after opening"\n')
   await panel.getByRole('button', { name: 'Refresh', exact: true }).click()
   await expect.poll(async () => (await monacoState(application, contentPage)).models).toContain('export const greeting = "edited after opening"\n')
-  const shortcuts = page.getByRole('button', { name: 'Run changes', exact: true })
+  const shortcuts = page.getByRole('button', { name: 'Run changes', exact: true, disabled: false })
   await shortcuts.last().click()
   await expect(page.getByRole('tablist').getByRole('tab')).toHaveCount(1)
   await expect(runs).toHaveValue(/Update greeting with child help/)

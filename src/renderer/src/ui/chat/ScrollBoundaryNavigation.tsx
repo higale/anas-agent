@@ -192,7 +192,9 @@ export function useScrollBoundaryNavigation({
       if (scrollbarReleaseFrameRef.current !== undefined) window.cancelAnimationFrame(scrollbarReleaseFrameRef.current)
       scrollbarReleaseFrameRef.current = undefined
       scrollbarDragRef.current = true
-      markUserInteraction(false)
+      // A native track click can scroll after the release frame. Capture the
+      // reading intent now so a layout update cannot pull it back to the bottom.
+      markUserInteraction(true)
     }
   }, [markUserInteraction])
   const onTouchStart = useCallback<TouchEventHandler<HTMLElement>>((event) => {

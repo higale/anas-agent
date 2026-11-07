@@ -1,5 +1,5 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentMessage, AgentRunActivity } from '@shared/agentTypes'
 import { AgentMessageList as MessageList, AgentSubagentPanel as SubagentPanel } from './AgentMessageList'
 import type { ComponentProps } from 'react'
@@ -11,6 +11,7 @@ import { backgroundCleanupCompleted, backgroundCleanupStarted, backgroundTasksPe
 import { activityAtomsFromItems, ActivityGroupBuilder, isProcessAtom } from '@shared/activityView'
 import { projectRunActivityItems } from '@shared/agentTimeline'
 import type { ActivityDirectoryInput } from '@shared/activityDirectory'
+import { notice } from '../notice'
 
 // Existing disclosure cases exercise the collapsed preference explicitly.
 const AgentMessageList = (props: ComponentProps<typeof MessageList>) => <ActivityPreferences value={{ runningProcessDisplay: 'collapsed', showModelRounds: true }}><MessageList {...props} /></ActivityPreferences>
@@ -1006,6 +1007,132 @@ describe('AgentMessageList tool disclosure', () => {
     const args = card.querySelector<HTMLDetailsElement>('.agent-activity-arguments')!
     expand(args)
     expect(args.querySelector('pre')?.textContent).toBe('{}')
+  })
+
+  it.each([
+    ['{"ok":true,"exitCode":0,"stdout":"bl 2.3.0\\n","stderr":"warning\\n"}',
+      '{\n  "ok": true,\n  "exitCode": 0,\n  "stdout": "bl 2.3.0\\n",\n  "stderr": "warning\\n"\n}'],
+    [' \n[{"id":9007199254740993,"id":1.2300e+40,"text":"{,} [\\"x\\"] \\u4e2d"},[],{},null,true,-0]\t',
+      '[\n  {\n    "id": 9007199254740993,\n    "id": 1.2300e+40,\n    "text": "{,} [\\"x\\"] \\u4e2d"\n  },\n  [],\n  {},\n  null,\n  true,\n  -0\n]']
+  ])('formats complete JSON strings in arguments and results without changing values: %s', (source, formatted) => {
+    const run = activity('completed')
+    run.tools[0].call.args = source
+    run.tools[0].output = source
+    const view = render(<AgentMessageList title="Thread" messages={[]} activities={[run]}
+      panelRef={{ current: null }} followOutputRef={{ current: true }} speech={{ status: 'idle' }} onSpeak={vi.fn()} />)
+    const card = view.container.querySelector<HTMLDetailsElement>('.agent-activity-tool')!
+    expand(card)
+    for (const selector of ['.agent-activity-arguments', '.agent-activity-result']) {
+      const section = card.querySelector<HTMLDetailsElement>(selector)!
+      expect(section.querySelector('pre')).toBeNull()
+      expand(section)
+      expect(section.querySelector('pre')?.textContent).toBe(formatted)
+      expand(section)
+      expect(section.querySelector('pre')).toBeNull()
+    }
+    expect(run.tools[0].call.args).toBe(source)
+    expect(run.tools[0].output).toBe(source)
+  })
+
+  it.each(['log: {"ok":true}\n', '{"ok":true}\nnext line', '{"ok":', '[1,]', '{"ok": true, /* comment */}',
+    '123', 'true', 'null', '"text"', '  plain text\n', '{}', '[]'])('preserves non-structured text or empty JSON: %s', output => {
+    const run = activity('completed')
+    run.tools[0].output = output
+    const view = render(<AgentMessageList title="Thread" messages={[]} activities={[run]}
+      panelRef={{ current: null }} followOutputRef={{ current: true }} speech={{ status: 'idle' }} onSpeak={vi.fn()} />)
+    const card = view.container.querySelector<HTMLDetailsElement>('.agent-activity-tool')!
+    expand(card)
+    const result = card.querySelector<HTMLDetailsElement>('.agent-activity-result')!
+    expand(result)
+    expect(result.querySelector('pre')?.textContent).toBe(output)
+  })
+
+  describe('activity copy actions', () => {
+    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+    const writeText = vi.fn<(text: string) => Promise<void>>()
+    beforeEach(() => {
+      writeText.mockReset().mockResolvedValue(undefined)
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+      vi.spyOn(notice, 'success').mockReturnValue(1)
+      vi.spyOn(notice, 'error').mockReturnValue(1)
+    })
+    afterEach(() => {
+      if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard)
+      else Reflect.deleteProperty(navigator, 'clipboard')
+    })
+    function tool(output: unknown) {
+      const run = activity('completed')
+      run.tools[0].output = output
+      const view = render(<AgentMessageList title="Thread" messages={[]} activities={[run]}
+        panelRef={{ current: null }} followOutputRef={{ current: true }} speech={{ status: 'idle' }} onSpeak={vi.fn()} />)
+      const card = view.container.querySelector<HTMLDetailsElement>('.agent-activity-tool')!
+      expand(card)
+      return card
+    }
+    it('copies the latest streamed reasoning verbatim and releases the copy action when collapsed', async () => {
+      const run = activity('running')
+      run.tools = []
+      run.models = [{ id: 'model', sequence: 0, status: 'running', text: '', reasoning: ' {"plan":"first"}\n', toolCallIds: [] }]
+      const content = () => <AgentMessageList title="Thread" messages={messages} activities={[{ ...run }]}
+        panelRef={{ current: null }} followOutputRef={{ current: true }} speech={{ status: 'idle' }} onSpeak={vi.fn()} />
+      const view = render(content())
+      expand(view.container.querySelector<HTMLDetailsElement>('.agent-activity-process')!)
+      const section = view.container.querySelector<HTMLDetailsElement>('.agent-activity-reasoning')!
+      const copy = () => within(section).getByRole('button', { name: 'common.copy' })
+      expect(section.querySelector('pre')?.textContent).toBe(run.models[0].reasoning)
+      fireEvent.click(copy())
+      await waitFor(() => expect(writeText).toHaveBeenLastCalledWith(run.models[0].reasoning))
+      run.models[0] = { ...run.models[0], reasoning: run.models[0].reasoning + 'Next step\n' }
+      view.rerender(content())
+      expect(section.querySelector('pre')?.textContent).toBe(run.models[0].reasoning)
+      fireEvent.click(copy())
+      await waitFor(() => expect(writeText).toHaveBeenLastCalledWith(run.models[0].reasoning))
+      expect(section.open).toBe(true)
+      expand(section)
+      expect(section.querySelector('pre')).toBeNull()
+      expect(within(section).queryByRole('button', { name: 'common.copy' })).toBeNull()
+    })
+    it('shows copy actions only in expanded content and copies without toggling the folds', async () => {
+      const card = tool('{"ok":true,"id":9007199254740993}')
+      for (const [selector, text] of [
+        ['.agent-activity-arguments', '{\n  "query": "test"\n}'],
+        ['.agent-activity-result', '{\n  "ok": true,\n  "id": 9007199254740993\n}']
+      ]) {
+        const section = card.querySelector<HTMLDetailsElement>(selector)!
+        expect(within(section).queryByRole('button', { name: 'common.copy' })).toBeNull()
+        expand(section)
+        fireEvent.click(within(section).getByRole('button', { name: 'common.copy' }))
+        await waitFor(() => expect(writeText).toHaveBeenLastCalledWith(text))
+        await waitFor(() => expect(notice.success).toHaveBeenCalledWith('chat.message_copied'))
+        expect(section.open).toBe(true)
+        expect(card.open).toBe(true)
+        expect(section.querySelector('pre')?.textContent).toBe(text)
+        fireEvent.click(section.querySelector('summary')!)
+        fireEvent(section, new Event('toggle'))
+        expect(within(section).queryByRole('button', { name: 'common.copy' })).toBeNull()
+        expect(section.querySelector('pre')).toBeNull()
+      }
+    })
+    it('copies a complete multiline result', async () => {
+      const text = 'Unmodified tool output\n'.repeat(1_000)
+      const card = tool(text)
+      const section = card.querySelector<HTMLDetailsElement>('.agent-activity-result')!
+      expand(section)
+      fireEvent.click(within(section).getByRole('button', { name: 'common.copy' }))
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith(text))
+      expect(section.open).toBe(true)
+    })
+    it('reports a clipboard failure without closing the result or announcing success', async () => {
+      writeText.mockRejectedValue(new Error('Clipboard unavailable'))
+      const card = tool('plain output')
+      const section = card.querySelector<HTMLDetailsElement>('.agent-activity-result')!
+      expand(section)
+      fireEvent.click(within(section).getByRole('button', { name: 'common.copy' }))
+      await waitFor(() => expect(notice.error).toHaveBeenCalledWith('chat.failed_copy_message'))
+      expect(notice.success).not.toHaveBeenCalled()
+      expect(section.open).toBe(true)
+      expect(card.open).toBe(true)
+    })
   })
 
   it('removes an interrupted argument reception without exposing partial input', () => {

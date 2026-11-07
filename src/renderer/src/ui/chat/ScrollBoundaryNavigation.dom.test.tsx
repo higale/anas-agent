@@ -150,6 +150,23 @@ describe('scroll boundary navigation', () => {
     expect(following.current).toBe(true)
   })
 
+  it('pauses at scrollbar input even when the native scroll arrives after the release frame', () => {
+    let release!: FrameRequestCallback
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => { release = callback; return 1 })
+    const { panel, following } = scrollHarness()
+    fireEvent.pointerDown(panel, { clientX: 0 })
+    fireEvent.pointerUp(window)
+    act(() => release(0))
+    // Native track scrolling can be delivered more than one frame after release.
+    expect(following.current).toBe(false)
+    panel.scrollTop = 600
+    fireEvent.scroll(panel)
+    expect(following.current).toBe(false)
+    panel.scrollTop = 700
+    fireEvent.scroll(panel)
+    expect(following.current).toBe(true)
+  })
+
   it('does not pause for a disabled tool argument disclosure', () => {
     const summary = document.createElement('summary'), following = { current: true }
     summary.setAttribute('aria-disabled', 'true')

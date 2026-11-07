@@ -431,6 +431,33 @@
   margin-top: 8px;
 }
 
+.agent-activity-trace-body {
+  position: relative;
+  min-height: 30px;
+  margin-top: 5px;
+  padding-right: 30px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-surface) 72%, var(--bg-panel));
+}
+
+.agent-activity-disclosure .agent-activity-trace-body pre {
+  margin: 0;
+  background: transparent;
+}
+
+.agent-activity-trace-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  opacity: 0.4;
+  transition: opacity 160ms ease;
+}
+
+.agent-activity-trace-copy:hover,
+.agent-activity-trace-copy:focus-visible {
+  opacity: 1;
+}
+
 .agent-activity-disclosure {
   min-width: 0;
   font-size: var(--font-size-small);

@@ -1,9 +1,11 @@
-## Anas v5.2.2
+## Anas v5.2.3
 
-- 置顶项目汇总到侧栏最上方的独立分组，支持折叠和跨项目类型排序，并移除项目左上角的置顶标记。
-- 修复混合手动与自动排序时，新置顶项目未排在组首的问题，并立即刷新侧栏顺序。
-- 开启自动压缩时，上下文使用率以压缩点为分母；关闭时以可用上下文为分母，数字、圆环、进度条和明细比例保持一致。
+- 工具参数和返回值中的 JSON 字符串支持缩进显示，保留数字和转义内容；推理、参数与结果展开后提供半透明复制按钮。
+- “本回合改动”按记录和运行状态显示：有记录时可用，运行或收尾中暂无记录时置灰，确认无记录后隐藏；按可见回合批量查询，超出读取范围时保持置灰。
+- “审批模式”更名为“权限模式”，“跳过审批”更名为“完全访问”，权限行为不变；对话权限菜单增加“详细说明”，在侧栏定位到“工具与授权”。
+- 修复原生滚动条事件延迟时可能重新跳回底部的问题，按下滚动条即暂停跟随。
 
-- Pinned projects now appear in a separate group at the top of the sidebar, with collapsible contents and ordering across project types. Removed the corner pin marker.
-- Fixed newly pinned projects not appearing first when manual and automatic ordering were mixed, and refresh the sidebar order immediately.
-- Context usage now uses the compression point as its denominator when automatic compression is enabled, or usable context when disabled. The percentage, ring, progress bar, and detail ratios stay consistent.
+- JSON strings in tool arguments and results are now indented while preserving numbers and escapes. Expanded reasoning, arguments, and results include a translucent copy button.
+- The round changes shortcut is enabled when records exist, disabled while execution or cleanup is pending without records, and hidden once the entire round is confirmed empty. Queries are batched for visible rounds, and scopes beyond the reader limit remain disabled.
+- Renamed “Approval mode” to “Permission mode” and “Skip approval” to “Full access” without changing permission behavior. The conversation permission menu now includes “Learn more”, opening the guide at “Tools And Approval” in the sidebar.
+- Fixed delayed native scrollbar events potentially pulling the reader back to the bottom. Pressing the scrollbar now pauses output following immediately.

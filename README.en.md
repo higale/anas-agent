@@ -28,7 +28,7 @@ Anas is a local desktop AI agent with support for multiple models, projects, too
 
 1. Download the appropriate package from [GitHub Releases](https://github.com/higale/anas-agent/releases). On Windows, extract it and run `Anas/Anas.exe`, keeping the complete folder. On macOS, choose the DMG for your Mac's architecture, drag Anas into Applications, and launch it.
 2. Add a provider in **Settings > Model**, enter its API URL and key, and configure the models you want to use. No model service credentials are bundled.
-3. Create a conversation or project, select a model below the message input, and configure working folders and the approval mode for your task.
+3. Create a conversation or project, select a model below the message input, and configure working folders and the permission mode for your task.
 
 ### Opening the macOS download
 

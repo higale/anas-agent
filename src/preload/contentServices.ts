@@ -25,6 +25,7 @@ export const contentServices: ContentServices = {
   },
   agent: {
     changes: {
+      availability: input => ipcRenderer.invoke('agent:changes:availability', input),
       gitContents: (input, requestId) => ipcRenderer.invoke('agent:changes:gitContents', input, requestId),
       gitReferences: (input, requestId) => ipcRenderer.invoke('agent:changes:gitReferences', input, requestId),
       rounds: (input, requestId) => ipcRenderer.invoke('agent:changes:rounds', input, requestId),

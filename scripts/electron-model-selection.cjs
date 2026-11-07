@@ -205,7 +205,7 @@ async function verifyModelSelection(launchApplication) {
     // An approval keeps the same persisted run ID across resumed execution.
     // Changing the profile while waiting must preview the resumed prompt now.
     await page.keyboard.press('Escape')
-    const access = page.getByRole('button', { name: 'Approval mode', exact: true })
+    const access = page.getByRole('button', { name: 'Permission mode', exact: true })
     await access.click()
     await page.getByRole('menuitem', { name: /^Strict approval/ }).click()
     await expect(access).toHaveAccessibleDescription('Strict approval')

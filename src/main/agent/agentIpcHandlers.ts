@@ -9,6 +9,7 @@ import { withApplicationDataMutation } from '../applicationDataSnapshot'
 import { GitReadError, type GitReadErrorCode, type GitReadResponse } from '@shared/gitChanges'
 import { queryGitChanges, readGitContents, queryGitReferences } from '../gitChanges'
 import { ChangeReadLane } from '../changeReadLane'
+import { roundAvailabilityBatchSize } from '@shared/fileChanges'
 import { captureCodeReview, codeReviewPrompt } from './codeReview'
 import { readRoundContents } from './roundChanges'
 import { randomUUID } from 'node:crypto'
@@ -479,6 +480,7 @@ export function registerAgentIpcHandlers(): void {
   const roundsQuery = z.object({ threadId, selectedRunId: threadId.optional(),
     after: z.number().int().positive().safe().optional(), limit: z.number().int().min(1).max(100).optional()
   }).strict()
+  const availabilityQuery = z.object({ threadId, runIds: z.array(threadId).min(1).max(roundAvailabilityBatchSize) }).strict()
   const roundFilesQuery = z.object({ threadId, runId: threadId, filePath: filePath.optional(),
     after: filePath.optional(), limit: z.number().int().min(1).max(100).optional(), version: digest.optional()
   }).strict()
@@ -507,6 +509,11 @@ export function registerAgentIpcHandlers(): void {
     signal.throwIfAborted()
     if (project.kind !== 'workspace' || !project.sourceFolders.includes(query.sourceFolder)) throw new Error('Git source folder does not belong to the selected project.')
   }
+  handleAgentIpc('agent:changes:availability', async (_event, input: unknown) => {
+    const query = availabilityQuery.parse(input)
+    await new Promise<void>(resolve => setImmediate(resolve))
+    return currentDatabase(query.threadId).fileChanges.roundAvailability(query)
+  })
   handleAgentIpc('agent:changes:rounds', (event, input: unknown, requestId: unknown) => {
     const query = roundsQuery.parse(input)
     return lane(event, 'rounds').read(z.string().uuid().parse(requestId), async (signal) => {

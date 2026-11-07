@@ -11,7 +11,6 @@ import {
   Clock,
   Copy,
   FileText,
-  FileDiff,
   Globe,
   Image as ImageIcon,
   Info,
@@ -75,6 +74,8 @@ import { CodeFileEditor, largeTextThreshold } from '../CodeFileEditor'
 import type { AgentActivityDetailReference, AgentActivityDetail } from '@shared/agentTypes'
 import { ActivityPreferences } from './ActivityPreferences'
 import { scopeIsRunning, useActivityDisclosures, type ActivityDisclosures } from './useActivityDisclosures'
+import { RoundChangesButton, useRoundChangeAvailability } from './RoundChangesButton'
+import type { RoundChangeAvailabilityStore } from './roundChangeAvailabilityStore'
 
 interface AgentMessageListProps {
   onOpenChanges?(runId: string): void
@@ -218,9 +219,11 @@ function MessageItem({
   onEditUserMessage,
   onRegenerate,
   onSpeak,
-  onOpenChanges
+  onOpenChanges,
+  changeAvailability
 }: {
   onOpenChanges?(runId: string): void
+  changeAvailability?: RoundChangeAvailabilityStore
   message: AgentMessage
   roundUserMessageId?: string
   actionsDisabled: boolean
@@ -278,9 +281,7 @@ function MessageItem({
             <div className="message-meta">
               {hasActions && (
                 <div className="message-actions">
-                  {canShowChanges && <NoFocusButton className="ui-tool-button ui-tool-button-muted" type="button"
-                    aria-label={t('agent.recorded_changes')} data-tooltip={t('agent.recorded_changes')}
-                    onClick={() => onOpenChanges?.(message.runId!)}><FileDiff size={16} /></NoFocusButton>}
+                  {canShowChanges && <RoundChangesButton runId={message.runId!} store={changeAvailability} onOpen={onOpenChanges!} />}
                   {canEdit && onEditUserMessage && (
                     <NoFocusButton
                       className="ui-tool-button ui-tool-button-muted"
@@ -396,7 +397,30 @@ function ContextSummaryItem({
 
 function formatTraceValue(value: unknown): string {
   if (value === undefined) return ''
-  if (typeof value === 'string') return value
+  if (typeof value === 'string') {
+    const source = value.trim()
+    if (source[0] !== '{' && source[0] !== '[') return value
+    try {
+      JSON.parse(source)
+      // Validate JSON, then change only structural whitespace. Reserializing
+      // parsed values would alter large numbers, duplicate keys and escapes.
+      const compact = source.replace(/("(?:\\.|[^"\\])*")|\s+/g, '$1')
+      let depth = 0
+      const newline = () => '\n' + '  '.repeat(depth)
+      return compact.replace(/("(?:\\.|[^"\\])*")|[{}[\],:]/g, (token: string, quoted: string | undefined, offset: number) => {
+        if (quoted) return token
+        if (token === '{' || token === '[') {
+          depth++
+          return token + (compact[offset + 1] === '}' || compact[offset + 1] === ']' ? '' : newline())
+        }
+        if (token === '}' || token === ']') {
+          depth--
+          return (compact[offset - 1] === '{' || compact[offset - 1] === '[' ? '' : newline()) + token
+        }
+        return token === ',' ? ',' + newline() : ': '
+      })
+    } catch { return value }
+  }
   try {
     return JSON.stringify(value, null, 2)
   } catch {
@@ -448,7 +472,7 @@ function ActivityDisclosure({
   if (!renderWhenEmpty && !detail && !text.trim() && !children) return null
   const body = !disabled && disclosure.open ? (
     <>
-      {detail ? <ActivityDetail reference={detail} field={field}>{value => <ToolTraceBody value={value} />}</ActivityDetail> : <>
+      {detail ? <ActivityDetail reference={detail} field={field}>{value => <ActivityTraceBody value={value} />}</ActivityDetail> : <>
       {text.trim() && (
         <div className="native-context-menu-text" data-native-context-menu="text">
           <pre>{text}</pre>
@@ -509,7 +533,7 @@ function BackgroundCleanupDisclosure({ entry }: { entry: TurnTimelineCleanupItem
         ? <LoaderCircle className="agent-spin" size={13} role="status" aria-label={t('agent.background_cleanup_started')} />
         : undefined}
     >
-      {() => <ToolTraceBody value={localizeAgentError(cleanup.report, t)} />}
+      {() => <ActivityTraceBody value={localizeAgentError(cleanup.report, t)} />}
     </ActivityDisclosure>
   )
 }
@@ -552,11 +576,26 @@ function toolPresentation(call: AgentToolCall): ToolPresentation {
   }
 }
 
-const ToolTraceBody = memo(function ToolTraceBody({ value }: { value: unknown }) {
+const ActivityTraceBody = memo(function ActivityTraceBody({ value, copyable = false, plainText = false }: {
+  value: unknown; copyable?: boolean; plainText?: boolean
+}) {
   const { t } = useTranslation()
-  const text = useMemo(() => formatTraceValue(value), [value])
-  return <div className="native-context-menu-text" data-native-context-menu="text">{text.length >= largeTextThreshold
-    ? <CodeFileEditor path={t('agent.activity_content')} content={text} /> : <pre>{text}</pre>}</div>
+  const text = useMemo(() => plainText ? String(value ?? '') : formatTraceValue(value), [value, plainText])
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+      notice.success(t('chat.message_copied'))
+    } catch { notice.error(t('chat.failed_copy_message')) }
+  }
+  return <div className={copyable ? 'agent-activity-trace-body' : 'native-context-menu-text'} data-native-context-menu="text">
+    {text.length >= largeTextThreshold
+      ? <CodeFileEditor path={t('agent.activity_content')} content={text} /> : <pre>{text}</pre>}
+    {copyable && <NoFocusButton type="button" className="agent-activity-trace-copy ui-icon-button ui-icon-button-xs"
+      aria-label={t('common.copy')} data-tooltip={t('common.copy')} disabled={value === undefined}
+      onClick={event => { event.stopPropagation(); void copy() }}>
+      <Copy size={13} />
+    </NoFocusButton>}
+  </div>
 })
 
 function ToolResultDisclosure({ tool, output }: { tool: AgentRunActivity['tools'][number]; output: unknown }) {
@@ -593,7 +632,7 @@ function ToolResultDisclosure({ tool, output }: { tool: AgentRunActivity['tools'
           </span>
         )}
       >
-        {() => <ToolTraceBody value={output} />}
+        {() => <ActivityTraceBody value={output} copyable />}
       </ActivityDisclosure>
       {imageIndex !== undefined && (
         <ImageLightbox
@@ -701,7 +740,7 @@ function ToolActivityBody({ tool, detail }: { tool: AgentRunActivity['tools'][nu
         icon={<Braces size={13} />}
         label="arguments"
       >
-        {() => <ToolTraceBody value={detail.args} />}
+        {() => <ActivityTraceBody value={detail.args} copyable />}
       </ActivityDisclosure>
     )}
     {tool.status === 'completed' && <ToolResultDisclosure tool={tool} output={detail.output} />}
@@ -756,10 +795,11 @@ function ModelActivityDetails({ item, run }: { item: ModelItem; run: AgentRunAct
           defaultOpen={item.model.status === 'running'}
           icon={<Brain size={13} />}
           label={<ReasoningActivityLabel model={item.model} />}
-          text={item.model.reasoning}
-          detail={item.model.detail}
-          field="reasoning"
-        />
+        >
+          {() => item.model.detail
+            ? <ActivityDetail reference={item.model.detail} field="reasoning">{value => <ActivityTraceBody value={value} plainText copyable />}</ActivityDetail>
+            : <ActivityTraceBody value={item.model.reasoning} plainText copyable />}
+        </ActivityDisclosure>
       )}
     </section>
   )
@@ -1174,6 +1214,7 @@ export function AgentMessageList({
   const contentRef = useRef<HTMLDivElement | null>(null)
   const paginationRef = useRef<AbortController | undefined>(undefined)
   const directories = useActivityDirectories(navigationKey)
+  const changeAvailability = useRoundChangeAvailability(navigationKey, Boolean(onOpenChanges))
   const { runningProcessDisplay, showModelRounds } = useContext(ActivityPreferences)
   const navigationKeyRef = useRef(navigationKey)
   navigationKeyRef.current = navigationKey
@@ -1235,7 +1276,7 @@ export function AgentMessageList({
       ]
     }
     return [{ key: messageRowKey(entry.message), estimatedHeight: 120, content: <MessageItem
-      message={entry.message} roundUserMessageId={entry.roundUserMessageId} actionsDisabled={Boolean(run)} speech={speech}
+      message={entry.message} roundUserMessageId={entry.roundUserMessageId} actionsDisabled={Boolean(run)} speech={speech} changeAvailability={changeAvailability}
       onDeleteRound={onDeleteRound} onEditUserMessage={onEditUserMessage} onRegenerate={onRegenerate} onSpeak={onSpeak} onOpenChanges={onOpenChanges} /> }]
   })
   const scopeKey = JSON.stringify(scopes)

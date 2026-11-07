@@ -10,13 +10,15 @@ interface ComposerAccessPickerProps {
   disabled: boolean
   accessMode: AgentAccessMode
   onChange(accessMode: AgentAccessMode): void
+  onOpenHelp?(): void
 }
 
 export function ComposerAccessPicker({
   modal,
   disabled,
   accessMode,
-  onChange
+  onChange,
+  onOpenHelp
 }: ComposerAccessPickerProps) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
@@ -87,9 +89,19 @@ export function ComposerAccessPicker({
           sideOffset={7}
           collisionPadding={10}
         >
-          <DropdownMenu.Label className="composer-access-menu-label">
-            {t('chat.access_mode')}
-          </DropdownMenu.Label>
+          <div className="composer-access-menu-header">
+            <DropdownMenu.Label className="composer-access-menu-label">
+              {t('chat.access_mode')}
+            </DropdownMenu.Label>
+            {onOpenHelp && <DropdownMenu.Item asChild onSelect={() => {
+              setOpen(false)
+              requestAnimationFrame(onOpenHelp)
+            }}>
+              <button type="button" className="ui-link-button composer-access-menu-help">
+                {t('chat.access_mode_help')}
+              </button>
+            </DropdownMenu.Item>}
+          </div>
           <DropdownMenu.Item
             className="composer-access-item ui-menu-item ui-menu-item-row"
             onSelect={() => select('strict_approval')}

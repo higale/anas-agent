@@ -232,7 +232,9 @@ describe('agent IPC recovery', () => {
     const handlers = new Map<string, (...args: unknown[]) => unknown>()
     const handle = vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => { handlers.set(channel, handler) })
     const query = vi.fn(() => ({ runId: 'run', files: [] }))
-    const database = { getRun: vi.fn((id: string) => id === 'run' ? { threadId: 'thread' } : undefined), fileChanges: { queryRoundFiles: query } }
+    const availability = vi.fn(() => [{ runId: 'run', state: 'available', relatedRunIds: ['run'] }])
+    const database = { getRun: vi.fn((id: string) => id === 'run' ? { threadId: 'thread' } : undefined),
+      fileChanges: { queryRoundFiles: query, roundAvailability: availability } }
     vi.doMock('electron', () => ({ ipcMain: { handle } }))
     vi.doMock('../ipcSecurity', () => ({ handleMainIpc: handle }))
     vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: vi.fn(() => conversationStorage(database)) } }))
@@ -253,6 +255,15 @@ describe('agent IPC recovery', () => {
       { ...input, maxChars: 40001 }, { ...input, extra: true }
     ]) await expect(Promise.resolve().then(() => read(event, invalid, requestId))).rejects.toThrow()
     expect(query).toHaveBeenCalledTimes(1)
+    const readAvailability = handlers.get('agent:changes:availability')!
+    await expect(readAvailability(event, { threadId: 'thread', runIds: ['run'] })).resolves.toEqual([
+      { runId: 'run', state: 'available', relatedRunIds: ['run'] }
+    ])
+    for (const invalid of [
+      { threadId: 'thread', runIds: [] }, { threadId: 'thread', runIds: Array(33).fill('run') },
+      { threadId: '', runIds: ['run'] }, { threadId: 'thread', runIds: [''] }, { threadId: 'thread', runIds: ['run'], extra: true }
+    ]) await expect(readAvailability(event, invalid)).rejects.toThrow()
+    expect(availability).toHaveBeenCalledExactlyOnceWith({ threadId: 'thread', runIds: ['run'] })
   })
 
   it('serializes workspace writes and waits for them before closing the database', async () => {

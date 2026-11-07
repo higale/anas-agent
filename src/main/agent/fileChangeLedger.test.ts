@@ -66,6 +66,92 @@ async function fixture(onChange?: (runId: string) => void, input: { text: string
 }
 
 describe('durable file change ledger', () => {
+  it('checks empty and pending rounds without loading bodies, summaries or diffs', async () => {
+    const value = await fixture(), ledger = value.database.resources.fileChanges
+    const input = { threadId: value.run.threadId, runIds: [value.run.id] }
+    const detail = vi.spyOn(ledger, 'queryRoundFiles').mockImplementation(() => { throw new Error('Unexpected diff read') })
+    expect(ledger.roundAvailability(input)).toEqual([{ runId: value.run.id, state: 'pending', relatedRunIds: [value.run.id] }])
+    await value.complete(value.run.id, 'completed')
+    expect(ledger.roundAvailability(input)[0].state).toBe('pending')
+    value.database.resourceCleanup.acknowledgeFileEditCleanup(value.run.id)
+    expect(ledger.roundAvailability(input)[0].state).toBe('empty')
+    expect(ledger.roundAvailability({ ...input, runIds: [value.run.id, value.run.id] })).toHaveLength(1)
+    expect(ledger.roundAvailability({ ...input, runIds: ['deleted'] })[0].state).toBe('empty')
+    const other = value.newRun()
+    expect(() => ledger.roundAvailability({ ...input, runIds: [other.id] })).toThrow('conversation')
+    expect(() => ledger.roundAvailability({ ...input, runIds: Array(33).fill(value.run.id) })).toThrow('bounds')
+    expect(detail).not.toHaveBeenCalled()
+  })
+
+  it('keeps unresolved writes visible but excludes preparation without a write', async () => {
+    const value = await fixture(), ledger = value.database.resources.fileChanges
+    const record = await value.execute([{ type: 'create', path: 'one', content: 'one' }])
+    const input = { threadId: value.run.threadId, runIds: [value.run.id] }
+    expect(ledger.roundAvailability(input)[0].state).toBe('available')
+    value.raw.prepare('DELETE FROM agent_file_change_events WHERE request_id = ?').run(value.run.id)
+    value.raw.prepare(`UPDATE agent_file_changes SET metadata_json = json_set(metadata_json,
+      '$.transaction.entries[0].after', NULL, '$.transaction.entries[0].state', 'pending') WHERE operation_id = ?`).run(record.operationId)
+    expect(ledger.queryRoundFiles({ runId: value.run.id }).files).toHaveLength(0)
+    expect(ledger.roundAvailability(input)[0].state).toBe('pending')
+    value.raw.prepare(`UPDATE agent_file_changes SET metadata_json = json_set(metadata_json,
+      '$.transaction.entries[0].state', 'intent') WHERE operation_id = ?`).run(record.operationId)
+    expect(ledger.queryRoundFiles({ runId: value.run.id }).files).toHaveLength(1)
+    expect(ledger.roundAvailability(input)[0].state).toBe('available')
+  })
+
+  it('checks only requested rounds in a 10000-round conversation', async () => {
+    const value = await fixture(), ledger = value.database.resources.fileChanges
+    await value.execute([{ type: 'create', path: 'one', content: 'one' }])
+    value.raw.prepare(`WITH RECURSIVE numbers(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM numbers WHERE n < 10000)
+      INSERT INTO agent_runs(id, thread_id, operation, status, created_at, updated_at)
+      SELECT 'history-' || n, ?, 'agent', 'completed', '2026-11-07', '2026-11-07' FROM numbers`).run(value.run.threadId)
+    const runIds = [value.run.id, ...Array.from({ length: 31 }, (_, index) => `history-${10000 - index}`)]
+    expect(ledger.roundAvailability({ threadId: value.run.threadId, runIds }).map(item => [item.runId, item.state]))
+      .toEqual(runIds.map((id, index) => [id, index ? 'empty' : 'available']))
+  })
+
+  it('does not enable a shortcut whose descendant scope exceeds the file reader limit', async () => {
+    const value = await fixture(), ledger = value.database.resources.fileChanges
+    await value.execute([{ type: 'create', path: 'one', content: 'one' }])
+    const thread = value.raw.prepare(`INSERT INTO agent_threads(id, title, project_id, created_at, updated_at)
+      SELECT ?, title, project_id, created_at, updated_at FROM agent_threads WHERE id = ?`)
+    const run = value.raw.prepare(`INSERT INTO agent_runs(id, thread_id, operation, status, created_at, updated_at)
+      VALUES (?, ?, 'agent', 'completed', '2026-11-07', '2026-11-07')`)
+    const call = value.raw.prepare(`INSERT INTO agent_subagent_calls(id, owner_thread_id, parent_thread_id, parent_run_id,
+      child_thread_id, child_run_id, agent_name, config_json, description, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'coder', '{}', 'Child', 'completed', '2026-11-07', '2026-11-07')`)
+    value.raw.transaction(() => {
+      for (let index = 0; index < 4096; index++) {
+        const id = `child-${index}`
+        thread.run(id, value.run.threadId)
+        run.run(id, id)
+        call.run(id, value.run.threadId, value.run.threadId, value.run.id, id, id)
+      }
+    })()
+    const input = { threadId: value.run.threadId, runIds: [value.run.id] }
+    expect(() => ledger.queryRoundFiles({ runId: value.run.id })).toThrow('4096')
+    expect(ledger.roundAvailability(input)[0].state).toBe('unknown')
+    value.raw.prepare('DELETE FROM agent_threads WHERE id = ?').run('child-4095')
+    expect(ledger.queryRoundFiles({ runId: value.run.id }).files).toHaveLength(1)
+    expect(ledger.roundAvailability(input)[0].state).toBe('available')
+  })
+
+  it('keeps a completed parent pending until its empty child and cleanup both finish', async () => {
+    const value = await fixture(), ledger = value.database.resources.fileChanges
+    const child = value.database.runs.createSubagentCall({ id: randomUUID(), ownerThreadId: value.run.threadId,
+      parentThreadId: value.run.threadId, parentRunId: value.run.id, childThreadId: randomUUID(), childRunId: randomUUID(),
+      config: { index: 0, name: 'coder', enabled: true, builtIn: false, description: 'Coding', systemPrompt: 'Code.', capabilities: structuredClone(defaultCapabilities) },
+      description: 'Child', childThread: {} })
+    await value.complete(value.run.id, 'completed')
+    value.database.resourceCleanup.acknowledgeFileEditCleanup(value.run.id)
+    const input = { threadId: value.run.threadId, runIds: [value.run.id] }
+    expect(ledger.roundAvailability(input)[0]).toMatchObject({ state: 'pending', relatedRunIds: expect.arrayContaining([child.childRunId]) })
+    await value.complete(child.childRunId, 'completed')
+    expect(ledger.roundAvailability(input)[0].state).toBe('pending')
+    value.database.resourceCleanup.acknowledgeFileEditCleanup(child.childRunId)
+    expect(ledger.roundAvailability(input)[0].state).toBe('empty')
+  })
+
   it('reads archived original text on demand, never replacing missing history with current files', async () => {
     const value = await fixture(), path = join(value.root, 'one')
     await writeFile(path, 'before\n')
@@ -104,6 +190,10 @@ describe('durable file change ledger', () => {
     expect(round.files.map((file) => file.path)).toEqual([join(value.root, 'nested')])
     expect(round.files[0].origins.map((origin) => origin.runId)).toEqual([nested.childRunId])
     expect(round.pendingRunIds).toEqual(expect.arrayContaining([latest.id, child.childRunId, nested.childRunId]))
+    value.database.resourceCleanup.acknowledgeFileEditCleanup(empty.id)
+    expect(value.database.resources.fileChanges.roundAvailability({ threadId: value.run.threadId, runIds: [empty.id, latest.id] }))
+      .toEqual([{ runId: empty.id, state: 'empty', relatedRunIds: [empty.id] },
+        { runId: latest.id, state: 'available', relatedRunIds: expect.arrayContaining([latest.id, child.childRunId, nested.childRunId]) }])
   })
 
   it('uses a bounded user-facing round summary after the input intent has been consumed', async () => {
@@ -345,6 +435,7 @@ describe('durable file change ledger', () => {
     const round = value.database.resources.fileChanges.queryRoundFiles({ runId: value.run.id })
     expect(round.files).toHaveLength(1)
     expect(round.files[0]).toMatchObject({ beforeExists: false, afterExists: false, cancelledOut: true })
+    expect(value.database.resources.fileChanges.roundAvailability({ threadId: value.run.threadId, runIds: [value.run.id] })[0].state).toBe('available')
   })
 
   it('reports missing snapshots and missing sequence proof instead of hiding gaps', async () => {

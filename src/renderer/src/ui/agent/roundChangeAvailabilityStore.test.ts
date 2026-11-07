@@ -1,0 +1,117 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { RoundChangeAvailability, RoundChangeAvailabilityInput } from '@shared/fileChanges'
+import { RoundChangeAvailabilityStore } from './roundChangeAvailabilityStore'
+
+function harness() {
+  vi.useFakeTimers()
+  const requests: { input: RoundChangeAvailabilityInput; resolve(result: RoundChangeAvailability[]): void; reject(error: Error): void }[] = []
+  const store = new RoundChangeAvailabilityStore('thread', input => new Promise((resolve, reject) => requests.push({ input, resolve, reject })))
+  store.start()
+  return { store, requests }
+}
+const result = (runId: string, state: RoundChangeAvailability['state'] = 'empty', relatedRunIds = [runId]): RoundChangeAvailability =>
+  ({ runId, state, relatedRunIds })
+const flush = () => vi.advanceTimersByTimeAsync(100)
+afterEach(() => vi.useRealTimers())
+
+describe('round change shortcut availability', () => {
+  it('deduplicates visible messages and reads bounded batches without concurrent queries', async () => {
+    const { store, requests } = harness()
+    for (let index = 0; index < 70; index++) {
+      store.watch(`run-${index}`, vi.fn()); store.watch(`run-${index}`, vi.fn())
+    }
+    await flush()
+    expect(requests).toHaveLength(1)
+    expect(requests[0].input.runIds).toHaveLength(32)
+    await flush(); expect(requests).toHaveLength(1)
+    for (let index = 0; index < 3; index++) {
+      requests[index].resolve(requests[index].input.runIds.map(id => result(id)))
+      await flush()
+    }
+    expect(requests.map(request => request.input.runIds.length)).toEqual([32, 32, 6])
+    expect(new Set(requests.flatMap(request => request.input.runIds)).size).toBe(70)
+    store.dispose()
+  })
+  it('reuses cached results and refreshes an invalidated offscreen run only when it remounts', async () => {
+    const { store, requests } = harness()
+    const stop = store.watch('run', vi.fn())
+    await flush(); requests[0].resolve([result('run', 'available', ['run', 'child'])]); await flush()
+    stop()
+    const again = store.watch('run', vi.fn())
+    await flush(); expect(requests).toHaveLength(1)
+    again()
+    store.receive({ type: 'file_changes', threadId: 'thread', runId: 'child' })
+    await flush(); expect(requests).toHaveLength(1)
+    store.watch('run', vi.fn())
+    await flush(); expect(requests).toHaveLength(2)
+    requests[1].resolve([result('run')]); await flush()
+    expect(store.view('run')).toBe('empty')
+    store.dispose()
+  })
+  it('ignores stale empty results and refreshes descendants without querying unrelated settled rounds', async () => {
+    const { store, requests } = harness()
+    store.watch('run', vi.fn()); store.watch('unrelated', vi.fn())
+    await flush()
+    store.receive({ type: 'file_changes', threadId: 'thread', runId: 'run' })
+    requests[0].resolve([result('run'), result('unrelated')]); await flush()
+    expect(store.view('run')).toBe('loading')
+    expect(store.view('unrelated')).toBe('empty')
+    expect(requests[1].input.runIds).toEqual(['run'])
+    requests[1].resolve([result('run', 'pending', ['run', 'child'])]); await flush()
+    store.receive({ type: 'run_settled', threadId: 'child-thread', runId: 'child', status: 'completed', operation: 'agent' })
+    await flush(); expect(requests[2].input.runIds).toEqual(['run'])
+    requests[2].resolve([result('run')]); await flush()
+    expect(store.view('run')).toBe('empty')
+    store.receive({ type: 'model_delta', threadId: 'thread', runId: 'run', modelId: 'm', delta: { type: 'text', text: 'More' } })
+    store.receive({ type: 'file_changes', threadId: 'other', runId: 'elsewhere' })
+    await flush(); expect(requests).toHaveLength(3)
+    store.dispose()
+  })
+  it('rechecks pending scopes when a newly created descendant writes before its scope refresh', async () => {
+    const { store, requests } = harness()
+    store.watch('run', vi.fn()); store.watch('done', vi.fn())
+    await flush(); requests[0].resolve([result('run', 'pending'), result('done')]); await flush()
+    store.receive({ type: 'file_changes', threadId: 'thread', runId: 'new-child' })
+    await flush(); expect(requests[1].input.runIds).toEqual(['run'])
+    store.dispose()
+  })
+  it('does not turn read failures into empty results or retry continuously', async () => {
+    const { store, requests } = harness()
+    const stop = store.watch('run', vi.fn())
+    await flush(); requests[0].reject(new Error('Unavailable')); await flush()
+    expect(store.view('run')).toBe('error')
+    await vi.advanceTimersByTimeAsync(10_000); expect(requests).toHaveLength(1)
+    stop(); store.watch('run', vi.fn()); await flush()
+    requests[1].resolve([result('wrong-run')]); await flush()
+    expect(store.view('run')).toBe('error')
+    store.synchronize(); await flush()
+    requests[2].resolve([result('run', 'available')]); await flush()
+    expect(store.view('run')).toBe('available')
+    store.dispose()
+  })
+  it('discards disconnected and disposed reads, including effect restart', async () => {
+    const { store, requests } = harness()
+    store.watch('run', vi.fn()); await flush()
+    store.connectionFailed()
+    requests[0].resolve([result('run')]); await flush()
+    expect(store.view('run')).toBe('error')
+    store.synchronize(); await flush()
+    store.dispose(); store.start(); await flush()
+    requests[1].resolve([result('run')]); await flush()
+    expect(store.view('run')).toBe('loading')
+    requests[2].resolve([result('run', 'available')]); await flush()
+    expect(store.view('run')).toBe('available')
+    store.dispose()
+  })
+  it('bounds cached offscreen history while retaining mounted subscriptions', async () => {
+    const { store, requests } = harness()
+    store.watch('visible', vi.fn())
+    for (let index = 0; index < 1000; index++) store.watch(`old-${index}`, vi.fn())()
+    await flush()
+    expect(requests[0].input.runIds).toEqual(['visible'])
+    requests[0].resolve([result('visible', 'available')]); await flush()
+    expect(store.view('old-0')).toBe('loading')
+    expect(store.view('visible')).toBe('available')
+    store.dispose()
+  })
+})

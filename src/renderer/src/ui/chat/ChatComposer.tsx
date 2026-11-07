@@ -3,10 +3,13 @@ import * as Popover from '@radix-ui/react-popover'
 import { MessageCircle, Plus, Send, Square } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { isSelectableModelConfig } from '@shared/modelConfig'
+import { userGuideId } from '@shared/helpDocuments'
 import type { AgentAccessMode, AgentContextStatus, AgentRunActivity, AgentTodo } from '@shared/agentTypes'
 import type { AgentContextBudget } from '@shared/contextWindow'
 import type { AppConfigSnapshot, Project, SelectedAttachment } from '@shared/types'
 import { NoFocusButton } from '../NoFocusButton'
+import { notice } from '../notice'
+import { isPanelClosed, panelError } from '../panels/panelError'
 import { ComposerAttachments } from './ComposerAttachments'
 import { ComposerAccessPicker } from './ComposerAccessPicker'
 import { ComposerContextMeter } from './ComposerContextMeter'
@@ -141,7 +144,20 @@ export function ChatComposer({
   onSubmit,
   onToggleSuggestionPinned
 }: ChatComposerProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  async function openAccessHelp(): Promise<void> {
+    try {
+      const documentId = userGuideId(i18n.resolvedLanguage ?? i18n.language)
+      const existing = (await window.gale.panels.list()).find(view =>
+        view.content.kind === 'document' && view.content.documentId === documentId)
+      if (existing?.location === 'window') await window.gale.panels.move(existing.viewId, 'sidebar')
+      await window.gale.panels.open({ kind: 'document', documentId,
+        anchor: documentId === 'USER_GUIDE.zh-CN.md' ? '工具与授权' : 'tools-and-approval',
+        navigationId: crypto.randomUUID() })
+    } catch (error) {
+      if (!isPanelClosed(error)) notice.error(panelError(error, t))
+    }
+  }
   const suggestionsId = useId()
   const [suggestionSelection, setSuggestionSelection] = useState<{ id: string; input: string }>()
   const mainModelSelectable = Boolean(config?.defaultModel && isSelectableModelConfig(config.defaultModel))
@@ -307,6 +323,7 @@ export function ChatComposer({
                   )
                 : (
                     <ComposerAccessPicker
+                      onOpenHelp={() => { void openAccessHelp() }}
                       disabled={locked || !toolsEnabled}
                       accessMode={accessMode}
                       onChange={onChangeAccessMode}
