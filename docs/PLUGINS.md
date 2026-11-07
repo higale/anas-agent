@@ -122,6 +122,8 @@ return {
 | [Moonshot/Kimi 国内](https://platform.kimi.com/docs/api/balance) / [国际](https://platform.kimi.ai/docs/api/balance) | `api.moonshot.cn` / `api.moonshot.ai` 的 `/v1/users/me/balance` | 可用、代金券、现金余额；国内 CNY、国际 USD。直接使用可用余额字段，现金为负时不自行重算。 |
 | [OpenRouter](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key) | `openrouter.ai/api/v1/key` | 当前密钥额度、累计及 UTC 日／周／月消费、额度重置周期、接口提供的密钥到期时间。仅表示密钥级数据；不调用要求管理密钥的 `/credits`。 |
 
+MiMo 适配使用 2026-11-03 发布的账务查询接口，识别 `api.xiaomimimo.com` 和 `token-plan-{cn,sgp,ams}.xiaomimimo.com` 的 `/v1`、`/anthropic` 路径（允许末尾斜线），不按 Key 前缀猜测计费方式。普通 API 请求 [GET /v1/platform/balance](https://mimo.mi.com/docs/zh-CN/api/asset/balance-get)：主读数为 `total_available - frozen_balance`，以整数分计算，保留负数和金额精度；详情显示总余额（含冻结）、现金、赠金、冻结及授信，币种和可用状态取接口返回。个人套餐请求相应地域的 [GET /v1/platform/token_plan](https://mimo.mi.com/docs/zh-CN/api/asset/credits-get)：显示剩余 Credits 占总额的比例、实际计费周期及自动续费等详情，周期时间按 UTC 解析；总额度为零时只显示 Credits，周期结束仅提示刷新，不推断新额度或套餐到期。余额、套餐、地域和凭据缓存相互隔离，复用 5 分钟缓存、手动刷新和失败保留读数。仅覆盖文档中的个人套餐，不承诺团队套餐查询。已用官方结构样本及 Windows 隔离桌面回归验证，未使用真实 MiMo 账户核验。
+
 设置概览中的支持厂商列表复用插件已有的本地化 `plugin.description`，宿主通用描述保留换行，不添加厂商专用设置或配置字段。内置说明同时维护中文和英文。
 
 接口核验（2026-10-15）：[硅基流动公告](https://docs.siliconflow.cn/docs/release-notes/overview)说明 `/user/info` 已于 2026-08-14 停用，因此未接入该旧接口；需要独立管理凭据或未确认官方查询协议的供应商不列为已支持。

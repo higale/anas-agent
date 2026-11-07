@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync } from 'node:fs'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { PluginWidgetContent } from '@shared/pluginWidgets'
+import { parsePluginManifest } from '@shared/plugins'
 
 const load = createRequire(import.meta.url)
 const path = resolve('data/plugins/_system/usage-meter/backend.cjs')
@@ -45,6 +46,13 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetcher)
 })
 afterEach(() => { backend.deactivate(); vi.unstubAllGlobals(); vi.useRealTimers(); rmSync(dataDirectory, { recursive: true, force: true }) })
+
+it('loads the bundled manifest and registers MiMo wallet and regional plan hosts', () => {
+  const manifest = parsePluginManifest(JSON.parse(readFileSync(resolve('data/plugins/_system/usage-meter/PLUGIN.json'), 'utf8')))
+  expect(manifest.widgets?.[0].modelHosts).toEqual(expect.arrayContaining([
+    'api.xiaomimimo.com', 'token-plan-cn.xiaomimimo.com', 'token-plan-sgp.xiaomimimo.com', 'token-plan-ams.xiaomimimo.com'
+  ]))
+})
 
 it('recognizes exact provider hosts across protocols and hides other providers without a request', async () => {
   for (const baseUrl of ['https://example.com/minimax', 'https://api.minimaxi.com.evil.test/v1', 'invalid']) {
@@ -352,6 +360,146 @@ it('persists in-widget choices across backend restarts and keeps the current mod
   const broken = load(path)
   expect(() => broken.activate({ dataDirectory })).toThrow()
   expect(readFileSync(join(dataDirectory, 'display.json'), 'utf8')).toBe('{invalid')
+})
+
+const mimo = { ...model, providerName: 'MiMo', baseUrl: 'https://api.xiaomimimo.com/v1', model: 'mimo-v2.6-pro' }
+const mimoPlan = { ...mimo, baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1' }
+const mimoBalancePayload = (changes = {}, isAvailable = true) => ({ object: 'balance', is_available: isAvailable, balance_infos: [{
+  currency: 'CNY', cash_balance: '100.50', gift_balance: '20.00', frozen_balance: '10.25',
+  credit_limit: '500.00', credit_available: '380.00', total_available: '500.50', ...changes
+}] })
+const mimoPlanPayload = (changes = {}) => ({ object: 'token_plan', plan_code: 'pro',
+  period: { start_at: '2026-09-21 23:59:59', end_at: '2027-09-21 23:59:59' },
+  quota: { total_credits: 10_000_000, used_credits: 1_500_000, remaining_credits: 8_500_000 },
+  auto_renew: false, claw_enabled: true, ...changes })
+
+it('queries the MiMo wallet across protocols and subtracts frozen funds without rounding errors', async () => {
+  fetcher.mockImplementation(async () => Response.json(mimoBalancePayload()))
+  for (const path of ['/v1', '/v1/', '/anthropic', '/anthropic/']) {
+    const result = await call({ model: { ...mimo, baseUrl: `https://api.xiaomimimo.com${path}` }, action: 'refresh' })
+    expect(fetcher).toHaveBeenLastCalledWith('https://api.xiaomimimo.com/v1/platform/balance', expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: 'Bearer test-secret' }), redirect: 'error'
+    }))
+    expect(result?.title).toBe('MiMo 余额')
+    expect(result?.dom.textContent).toContain('490.25')
+    expect(result?.dom.querySelector('progress')).toBeNull()
+    expect(result?.details).toContain('总余额（含冻结）: CNY 500.50')
+    expect(result?.details).toContain('现金余额: CNY 100.50')
+    expect(result?.details).toContain('赠金余额: CNY 20.00')
+    expect(result?.details).toContain('冻结金额: CNY 10.25')
+    expect(result?.details).toContain('授信额度: CNY 500.00')
+    expect(result?.details).toContain('可用授信额度: CNY 380.00')
+  }
+  const compact = await call({ model: mimo, action: 'show_compact', language: 'en' })
+  expect(compact?.dom.textContent).toContain('CNY 490.25')
+  expect(compact?.details).toContain('Frozen balance: CNY 10.25')
+  expect(fetcher).toHaveBeenCalledTimes(4)
+})
+
+it.each([
+  ['0.30', '0.29', '0.01', true], ['0.00', '0.01', '-0.01', false],
+  ['0.00', '0.00', '0.00', false], ['9007199254740993.20', '0.10', '9007199254740993.10', true]
+])('preserves exact MiMo monetary values: %s minus %s', async (total, frozen, available, isAvailable) => {
+  fetcher.mockResolvedValueOnce(Response.json(mimoBalancePayload({ currency: 'USD', total_available: total, frozen_balance: frozen }, isAvailable)))
+  const result = await call({ model: mimo, language: 'en' })
+  expect(result?.dom.textContent).toContain(available)
+  expect(result?.dom.textContent).toContain('USD available')
+  expect(result?.error).toBe(isAvailable ? undefined : 'Insufficient balance for API calls.')
+})
+
+it.each(['cn', 'sgp', 'ams'])('queries the MiMo %s plan host without switching region or using the wallet endpoint', async region => {
+  vi.useFakeTimers().setSystemTime(new Date('2026-11-08T00:00:00Z'))
+  fetcher.mockImplementation(async () => Response.json(mimoPlanPayload()))
+  for (const path of ['/v1', '/anthropic/']) {
+    const result = await call({ model: { ...mimoPlan, baseUrl: `https://token-plan-${region}.xiaomimimo.com${path}` }, action: 'refresh' })
+    expect(fetcher).toHaveBeenLastCalledWith(`https://token-plan-${region}.xiaomimimo.com/v1/platform/token_plan`, expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: 'Bearer test-secret' })
+    }))
+    expect(result?.title).toBe('MiMo Token Plan')
+    expect(result?.lines).toMatchObject([{ label: '套餐额度剩余', value: '85%', progress: .85,
+      description: `周期结束: ${new Date('2027-09-21T23:59:59Z').toLocaleString('zh-CN')}` }])
+    expect(result?.details).toContain('总额度: 10,000,000 Credits')
+    expect(result?.details).toContain('已用: 1,500,000 Credits')
+    expect(result?.details).toContain('剩余额度: 8,500,000 Credits')
+    expect(result?.details).toContain('自动续费: 关闭')
+    expect(result?.details).toContain('MiMo Claw: 开启')
+    expect(result?.details).not.toContain('月额度')
+    expect(result?.error).toBeUndefined()
+  }
+})
+
+it('keeps MiMo wallet, plan, region and credential caches separate and never reuses stale account data', async () => {
+  vi.useFakeTimers().setSystemTime(new Date('2026-11-08T00:00:00Z'))
+  fetcher.mockResolvedValueOnce(Response.json(mimoBalancePayload())).mockResolvedValueOnce(Response.json(mimoPlanPayload()))
+  await call({ model: mimo })
+  const plan = await call({ model: mimoPlan, action: 'show_compact', language: 'en' })
+  expect(plan?.dom.textContent).toContain('Plan 85%')
+  expect(plan?.details).toContain('Auto-renew: Off')
+  expect((await call({ model: mimo, action: 'show_detailed' }))?.dom.textContent).toContain('490.25')
+  expect(fetcher).toHaveBeenCalledTimes(2)
+  fetcher.mockResolvedValueOnce(new Response('', { status: 403 }))
+  const otherKey = await call({ model: { ...mimoPlan, apiKey: 'other-key' } })
+  expect(otherKey?.lines).toEqual([])
+  expect(otherKey?.details).not.toContain('85%')
+  expect(otherKey?.error).toContain('API Key')
+  fetcher.mockResolvedValueOnce(new Response('', { status: 429 }))
+  const otherRegion = await call({ model: { ...mimoPlan, baseUrl: 'https://token-plan-sgp.xiaomimimo.com/v1' } })
+  expect(otherRegion?.lines).toEqual([])
+  expect(otherRegion?.error).toContain('限流')
+  expect((await call({ model: mimoPlan }))?.lines[0].value).toBe('85%')
+  expect(fetcher).toHaveBeenCalledTimes(4)
+})
+
+it('shows exhausted and zero-total MiMo plans and marks ended cached periods without inventing a reset', async () => {
+  vi.useFakeTimers().setSystemTime(new Date('2027-09-21T23:59:00Z'))
+  fetcher.mockResolvedValueOnce(Response.json(mimoPlanPayload({ quota: { total_credits: 100, used_credits: 120, remaining_credits: 0 } })))
+  const result = await call({ model: mimoPlan })
+  expect(result?.lines).toMatchObject([{ value: '0%', progress: 0 }])
+  vi.setSystemTime(new Date('2027-09-22T00:00:00Z'))
+  const ended = await call({ model: mimoPlan })
+  expect(ended?.error).toContain('周期已结束')
+  expect(ended?.lines[0].value).toBe('0%')
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  fetcher.mockResolvedValueOnce(Response.json(mimoPlanPayload({ quota: { total_credits: 0, used_credits: 0, remaining_credits: 0 } })))
+  const zero = await call({ model: mimoPlan, action: 'refresh' })
+  expect(zero?.dom.querySelector('progress')).toBeNull()
+  expect(zero?.dom.textContent).toContain('0 Credits')
+  expect(zero?.dom.textContent).not.toContain('NaN')
+})
+
+it('preserves MiMo readings on malformed financial data and rejects invalid periods and quota values', async () => {
+  vi.useFakeTimers().setSystemTime(new Date('2026-11-08T00:00:00Z'))
+  fetcher.mockResolvedValueOnce(Response.json(mimoBalancePayload()))
+  const balance = await call({ model: mimo })
+  for (const bad of [mimoBalancePayload({ total_available: null }), mimoBalancePayload({ frozen_balance: '-1.00' }),
+    mimoBalancePayload({ gift_balance: '<script>secret</script>' }), { ...mimoBalancePayload(), balance_infos: [] }]) {
+    fetcher.mockResolvedValueOnce(Response.json(bad))
+    const result = await call({ model: mimo, action: 'refresh' })
+    expect(result?.dom.textContent).toContain('490.25')
+    expect(result?.updatedAt).toBe(balance?.updatedAt)
+    expect(result?.error).toContain('无法识别')
+    expect(result?.html).not.toContain('secret')
+  }
+  fetcher.mockResolvedValueOnce(Response.json(mimoPlanPayload()))
+  const plan = await call({ model: mimoPlan })
+  for (const changes of [{ quota: { total_credits: 100, used_credits: 10, remaining_credits: 100 } },
+    { quota: { total_credits: 100, used_credits: -1, remaining_credits: 101 } },
+    { quota: { total_credits: 1e20, used_credits: 0, remaining_credits: 1e20 } },
+    { period: { start_at: '2026-02-30 00:00:00', end_at: '2027-09-21 23:59:59' } },
+    { period: { start_at: '2027-09-21 23:59:59', end_at: '2026-09-21 23:59:59' } }, { auto_renew: 'false' }]) {
+    fetcher.mockResolvedValueOnce(Response.json(mimoPlanPayload(changes)))
+    const result = await call({ model: mimoPlan, action: 'refresh' })
+    expect(result?.lines).toEqual(plan?.lines)
+    expect(result?.error).toContain('无法识别')
+  }
+})
+
+it('hides unsupported MiMo hosts and paths without querying', async () => {
+  for (const baseUrl of ['https://api.xiaomimimo.com.example/v1', 'https://token-plan-us.xiaomimimo.com/v1',
+    'https://proxy.example/api.xiaomimimo.com/v1', 'https://api.xiaomimimo.com/proxy/v1', 'https://token-plan-cn.xiaomimimo.com/v10']) {
+    expect(await call({ model: { ...mimo, baseUrl } })).toBeNull()
+  }
+  expect(fetcher).not.toHaveBeenCalled()
 })
 
 const deepseek = { ...model, providerName: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-flash' }

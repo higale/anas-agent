@@ -25,6 +25,12 @@ function endpoint(baseUrl) {
     const url = new URL(baseUrl)
     if (!['http:', 'https:'].includes(url.protocol) || !manifest.widgets[0].model_hosts.includes(url.hostname)) return null
     if (bailianHosts.includes(url.hostname)) return { name: 'Bailian' }
+    if (['api.xiaomimimo.com', 'token-plan-cn.xiaomimimo.com', 'token-plan-sgp.xiaomimimo.com', 'token-plan-ams.xiaomimimo.com'].includes(url.hostname)) {
+      if (!['/v1', '/anthropic'].includes(url.pathname.replace(/\/+$/, ''))) return null
+      const plan = url.hostname !== 'api.xiaomimimo.com'
+      return { name: 'MiMo', url: `https://${url.hostname}/v1/platform/${plan ? 'token_plan' : 'balance'}`,
+        parse: plan ? parseMimoQuota : parseMimoBalance }
+    }
     if (url.hostname === 'api.deepseek.com') return { name: 'DeepSeek', url: 'https://api.deepseek.com/user/balance', parse: parseBalance }
     if (['api.moonshot.cn', 'api.moonshot.ai'].includes(url.hostname)) return { name: 'Moonshot', url: `https://${url.hostname}/v1/users/me/balance`,
       parse: (data, language) => parseMoonshot(data, language, url.hostname.endsWith('.cn') ? 'CNY' : 'USD') }
@@ -182,6 +188,69 @@ function parseBalance(payload, language) {
 function numberText(value) {
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error('response')
   return String(value)
+}
+
+function mimoMoney(value) {
+  if (typeof value !== 'string' || value.length > 128 || !/^-?\d+\.\d{2}$/.test(value)) throw new Error('response')
+  return BigInt(value.replace('.', ''))
+}
+
+function parseMimoBalance(payload, language) {
+  if (payload?.object !== 'balance' || typeof payload.is_available !== 'boolean'
+    || !Array.isArray(payload.balance_infos) || payload.balance_infos.length !== 1) throw new Error('response')
+  const row = payload.balance_infos[0], zh = language.startsWith('zh')
+  if (!row || typeof row.currency !== 'string' || !/^[A-Z]{3}$/.test(row.currency)) throw new Error('response')
+  const fields = [
+    ['total_available', zh ? '总余额（含冻结）' : 'Total balance (including frozen)'],
+    ['cash_balance', zh ? '现金余额' : 'Cash balance'],
+    ['gift_balance', zh ? '赠金余额' : 'Gift balance'],
+    ['frozen_balance', zh ? '冻结金额' : 'Frozen balance'],
+    ['credit_limit', zh ? '授信额度' : 'Credit limit'],
+    ['credit_available', zh ? '可用授信额度' : 'Available credit']
+  ]
+  const amounts = Object.fromEntries(fields.map(([key]) => [key, mimoMoney(row[key])]))
+  if (amounts.frozen_balance < 0n) throw new Error('response')
+  // MiMo total_available includes the frozen amount. Subtract in integer cents
+  // so the spendable balance stays exact, including large and negative values.
+  const available = amounts.total_available - amounts.frozen_balance
+  const absolute = available < 0n ? -available : available
+  const value = `${available < 0n ? '-' : ''}${absolute / 100n}.${String(absolute % 100n).padStart(2, '0')}`
+  return { lines: [{ label: `${row.currency} ${zh ? '可用余额' : 'available'}`, compactLabel: row.currency, value,
+    breakdown: fields.map(([key, label]) => ({ label, value: `${row.currency} ${row[key]}` })) }],
+    notice: payload.is_available ? undefined : (zh ? '余额不足，暂不可调用 API。' : 'Insufficient balance for API calls.') }
+}
+
+function mimoPeriodTime(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)) throw new Error('response')
+  const iso = value.replace(' ', 'T') + '.000Z'
+  const time = Date.parse(iso)
+  if (!Number.isFinite(time) || new Date(time).toISOString() !== iso) throw new Error('response')
+  return time
+}
+
+function parseMimoQuota(payload, language, now = Date.now()) {
+  if (payload?.object !== 'token_plan' || typeof payload.plan_code !== 'string' || !payload.plan_code
+    || typeof payload.auto_renew !== 'boolean' || typeof payload.claw_enabled !== 'boolean') throw new Error('response')
+  const quota = payload.quota, zh = language.startsWith('zh')
+  if (!quota || !['total_credits', 'used_credits', 'remaining_credits'].every(key => Number.isSafeInteger(quota[key]) && quota[key] >= 0)
+    || quota.remaining_credits !== Math.max(0, quota.total_credits - quota.used_credits)) throw new Error('response')
+  const start = mimoPeriodTime(payload.period?.start_at), end = mimoPeriodTime(payload.period?.end_at)
+  if (end <= start) throw new Error('response')
+  const progress = quota.total_credits > 0 ? quota.remaining_credits / quota.total_credits : undefined
+  const credits = value => `${new Intl.NumberFormat(language).format(value)} Credits`
+  return { lines: [{ label: zh ? '套餐额度剩余' : 'Plan quota remaining', compactLabel: zh ? '套餐' : 'Plan',
+    value: progress === undefined ? credits(quota.remaining_credits) : `${Number((progress * 100).toFixed(2))}%`, progress,
+    description: `${zh ? '周期结束' : 'Period ends'}: ${new Date(end).toLocaleString(language)}`,
+    breakdown: [
+      { label: zh ? '总额度' : 'Total quota', value: credits(quota.total_credits) },
+      { label: zh ? '已用' : 'Used', value: credits(quota.used_credits) },
+      { label: zh ? '剩余额度' : 'Remaining credits', value: credits(quota.remaining_credits) }
+    ] }], detailGroups: [{ summary: zh ? '个人 Token Plan' : 'Personal Token Plan', text: [
+      `${zh ? '套餐' : 'Plan'}: ${payload.plan_code}`,
+      `${zh ? '周期开始' : 'Period starts'}: ${new Date(start).toLocaleString(language)}`,
+      `${zh ? '自动续费' : 'Auto-renew'}: ${payload.auto_renew ? (zh ? '开启' : 'On') : (zh ? '关闭' : 'Off')}`,
+      `MiMo Claw: ${payload.claw_enabled ? (zh ? '开启' : 'On') : (zh ? '关闭' : 'Off')}`
+    ].join('\n') }], notice: end <= now ? (zh ? '当前套餐周期已结束，请刷新查询。' : 'The current plan period has ended. Refresh to check.') : undefined }
 }
 
 function parseGlmBalance(payload, language) {
@@ -355,10 +424,10 @@ module.exports = {
     if (action === 'show_compact' || action === 'show_detailed') saveDisplayMode(action === 'show_compact' ? 'compact' : 'detailed')
     if (name === 'Bailian') return renderWidget(await bailian.read(model, language, action, context.signal), language, displayMode)
     const zh = language.startsWith('zh')
-    const title = name === 'MiniMax' ? 'MiniMax Token Plan' : parse === parseGlmQuota ? `${name} Coding Plan`
+    const title = name === 'MiniMax' ? 'MiniMax Token Plan' : parse === parseMimoQuota ? 'MiMo Token Plan' : parse === parseGlmQuota ? `${name} Coding Plan`
       : name === 'OpenRouter' ? `OpenRouter ${zh ? '密钥额度' : 'Key credits'}` : `${name} ${zh ? '余额' : 'Balance'}`
     const content = { title, lines: [],
-      emptyLabel: ['DeepSeek', 'Moonshot'].includes(name) || parse === parseGlmBalance ? (zh ? '暂无余额数据' : 'Balance unavailable') : (zh ? '暂无额度' : 'Quota unavailable') }
+      emptyLabel: ['DeepSeek', 'Moonshot'].includes(name) || parse === parseGlmBalance || parse === parseMimoBalance ? (zh ? '暂无余额数据' : 'Balance unavailable') : (zh ? '暂无额度' : 'Quota unavailable') }
     if (!model.apiKey) return renderWidget({ ...content, error: messages[zh ? 'zh' : 'en'].auth }, language, displayMode)
     const cacheKey = createHash('sha256').update(JSON.stringify([model.providerId, url, model.apiKey])).digest('hex')
     let entry = cache.get(cacheKey)

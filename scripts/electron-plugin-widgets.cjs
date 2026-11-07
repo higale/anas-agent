@@ -65,6 +65,12 @@ async function verifyPluginWidgets(launchApplication) {
       if (url === 'https://api.deepseek.com/user/balance') return Response.json({ is_available: true, balance_infos: [{ currency: 'CNY', total_balance: '110.00001', granted_balance: '10.00', topped_up_balance: '100.00001' }] });
       if (url === 'https://api.moonshot.cn/v1/users/me/balance' || url === 'https://api.moonshot.ai/v1/users/me/balance') return Response.json({ code: 0, status: true, data: { available_balance: 49.58894, voucher_balance: 46.58893, cash_balance: 3.00001 } });
       if (url === 'https://openrouter.ai/api/v1/key') return Response.json({ data: { limit: 100, limit_remaining: 74.5, limit_reset: 'monthly', usage: 25.5, usage_daily: 0, usage_weekly: 3.5, usage_monthly: 5.5 } });
+      if (url === 'https://api.xiaomimimo.com/v1/platform/balance') return Response.json({ object: 'balance', is_available: true, balance_infos: [{
+        currency: 'CNY', cash_balance: '100.50', gift_balance: '20.00', frozen_balance: '10.25', credit_limit: '500.00', credit_available: '380.00', total_available: '500.50'
+      }] });
+      if (url === 'https://token-plan-cn.xiaomimimo.com/v1/platform/token_plan') return Response.json({ object: 'token_plan', plan_code: 'pro',
+        period: { start_at: '2026-11-01 00:00:00', end_at: '2030-11-01 00:00:00' },
+        quota: { total_credits: 10000000, used_credits: 1500000, remaining_credits: 8500000 }, auto_renew: false, claw_enabled: true });
       if (url === 'https://open.bigmodel.cn/api/biz/account/query-customer-account-report') {
         if (options.headers.Authorization !== 'fixture-key') throw new Error('GLM expects the raw API key');
         return Response.json({ code: 200, success: true, data: { availableBalance: 0.123456789, rechargeAmount: 20, totalSpendAmount: 18.5, frozenBalance: 0 } });
@@ -273,10 +279,9 @@ async function verifyPluginWidgets(launchApplication) {
     await app.evaluate(({ dialog }, path) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: path }) }, join(output, 'backup.zip'))
     const backup = await page.evaluate(() => globalThis.gale.app.backupData())
     assert.equal(backup.path, join(output, 'backup.zip'))
-    await expect(page.locator('.plugin-widget')).toHaveCount(0)
-    assert.equal(await page.evaluate(modelId => globalThis.gale.plugins.readWidget('usage-meter', 'quota', modelId), selected.modelId), null)
-    await page.evaluate(() => globalThis.gale.plugins.startBackend('usage-meter'))
+    // Backup restores the backends that were running before the snapshot.
     await expect(page.locator('.plugin-widget')).toBeVisible()
+    assert.notEqual(await page.evaluate(modelId => globalThis.gale.plugins.readWidget('usage-meter', 'quota', modelId), selected.modelId), null)
     await page.evaluate(() => globalThis.gale.plugins.setEnabled('usage-meter', false))
     await expect(page.locator('.plugin-widget')).toHaveCount(0)
     await page.reload()
@@ -312,6 +317,7 @@ async function verifyPluginWidgets(launchApplication) {
     for (const [name, baseUrl, summary, detail] of [
       ['Moonshot', 'https://api.moonshot.cn/v1', 'CNY 49.58894', '代金券余额'],
       ['Moonshot', 'https://api.moonshot.ai/v1', 'USD 49.58894', '现金余额'],
+      ['MiMo', 'https://api.xiaomimimo.com/v1', 'CNY 490.25', '冻结金额: CNY 10.25'],
       ['OpenRouter', 'https://openrouter.ai/api/v1', '密钥 USD 74.5', '今日消费（UTC）']
     ]) {
       await page.evaluate(async ({ providerId, name, baseUrl }) => {
@@ -328,6 +334,29 @@ async function verifyPluginWidgets(launchApplication) {
       await page.screenshot({ path: join(output, `${name.toLowerCase()}-detailed.png`) })
       await setDisplayMode('compact')
     }
+    await page.evaluate(async ({ providerId }) => {
+      await globalThis.gale.config.saveModelProvider({ id: providerId, name: 'MiMo', protocol: 'anthropic_messages',
+        baseUrl: 'https://token-plan-cn.xiaomimimo.com/anthropic', apiKey: 'fixture-key', parameters: {} })
+    }, selected)
+    await page.reload()
+    await expect(page.locator('.plugin-widget')).toContainText('套餐 85%')
+    await setDisplayMode('detailed')
+    await expect(page.locator('.plugin-widget progress')).toHaveCount(1)
+    await expect(page.locator('.plugin-widget progress')).toHaveAttribute('value', '0.85')
+    await expect(page.locator('.plugin-widget')).toContainText('周期结束:')
+    await expect(page.locator('.plugin-widget')).not.toContainText('总额度')
+    await page.locator('.plugin-widget header [tabindex="0"]').hover()
+    await expect(page.getByRole('tooltip')).toContainText('总额度: 10,000,000 Credits')
+    await expect(page.getByRole('tooltip')).toContainText('剩余额度: 8,500,000 Credits')
+    await expect(page.getByRole('tooltip')).toContainText('自动续费: 关闭')
+    await page.screenshot({ path: join(output, 'mimo-plan-details.png') })
+    await page.mouse.move(700, 200)
+    await page.evaluate(() => globalThis.gale.config.updateSettings({ language: 'en' }))
+    await expect(page.locator('.plugin-widget')).toContainText('Plan quota remaining')
+    await expect(page.locator('.plugin-widget')).toContainText('Period ends:')
+    await page.locator('.plugin-widget [data-action="show_compact"]').click()
+    await expect(page.locator('.plugin-widget')).toContainText('Plan 85%')
+    await page.screenshot({ path: join(output, 'mimo-plan-en.png') })
     for (const [name, host, language] of [['GLM', 'open.bigmodel.cn', 'zh-CN'], ['Z.ai', 'api.z.ai', 'en']]) {
       await page.evaluate(async ({ providerId, name, host, language }) => {
         await globalThis.gale.config.updateSettings({ language })
@@ -469,6 +498,7 @@ async function verifyPluginWidgets(launchApplication) {
     await expect(page.getByText(/^• OpenRouter：当前 API Key/)).toBeVisible()
     await expect(page.getByText(/^• 智谱 \/ Z.ai：Coding Plan/)).toBeVisible()
     await expect(page.getByText(/^• 百炼 \/ Qwen/)).toBeVisible()
+    await expect(page.getByText(/^• 小米 MiMo/)).toBeVisible()
     await page.screenshot({ path: join(output, 'providers-zh.png') })
     await page.evaluate(() => globalThis.gale.config.updateSettings({ language: 'en' }))
     await expect(page.getByText('Supported providers:', { exact: true })).toBeVisible()
@@ -476,6 +506,7 @@ async function verifyPluginWidgets(launchApplication) {
     await expect(page.getByText(/^• Moonshot \/ Kimi: Available/)).toBeVisible()
     await expect(page.getByText(/^• GLM \/ Z.ai: Coding Plan/)).toBeVisible()
     await expect(page.getByText(/^• Bailian \/ Qwen/)).toBeVisible()
+    await expect(page.getByText(/^• Xiaomi MiMo/)).toBeVisible()
     await page.screenshot({ path: join(output, 'providers-en.png') })
     assert.deepEqual(errors, [])
     console.log('Plugin widget Electron checks passed.')
