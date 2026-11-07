@@ -38,6 +38,7 @@ const { verifyModelRetry } = require('./electron-model-retry.cjs')
 const { verifyModelRecovery } = require('./electron-model-recovery.cjs')
 const { verifySpeechReply, verifyLiveSpeech } = require('./electron-speech-reply.cjs')
 const { verifyAttachmentPreviews } = require('./electron-attachment-previews.cjs')
+const { verifyAvatarCrop } = require('./electron-avatar-crop.cjs')
 
 const repositoryRoot = resolve(__dirname, '..')
 const packagedExecutable = process.env.ANAS_E2E_EXECUTABLE
@@ -1236,6 +1237,10 @@ async function main() {
     await verifyGlobalSettings(launchApplication)
     return
   }
+  if (process.argv.includes('--avatar-crop-only')) {
+    await verifyAvatarCrop(launchApplication)
+    return
+  }
   if (process.argv.includes('--control-layout-only')) {
     await verifyControlLayout(launchApplication)
     return
@@ -1281,6 +1286,7 @@ async function main() {
     await verifySpeechReply(launchApplication)
     await verifyCapabilities(launchApplication)
     await verifyGlobalSettings(launchApplication)
+    await verifyAvatarCrop(launchApplication)
     await verifyControlLayout(launchApplication)
     await verifyCustomTools(launchApplication)
     await verifySkillApproval(launchApplication)

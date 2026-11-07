@@ -53,25 +53,6 @@ function rotatedSize(width: number, height: number, rotation: AvatarRotation): {
     : { height, width }
 }
 
-function cropperMediaSize(image: HTMLImageElement): MediaSize {
-  const naturalWidth = image.naturalWidth || image.width
-  const naturalHeight = image.naturalHeight || image.height
-  const aspect = naturalWidth / naturalHeight
-  return aspect < 1
-    ? {
-        height: AVATAR_EDITOR_SIZE / aspect,
-        naturalHeight,
-        naturalWidth,
-        width: AVATAR_EDITOR_SIZE
-      }
-    : {
-        height: AVATAR_EDITOR_SIZE,
-        naturalHeight,
-        naturalWidth,
-        width: AVATAR_EDITOR_SIZE * aspect
-      }
-}
-
 async function exportAvatarPng(
   source: AvatarCropSource,
   crop: Area,
@@ -152,43 +133,34 @@ function AvatarCropDialogSession({ source, onCancel, onChooseSource, onSave }: A
   const { t } = useTranslation()
   const savingRef = useRef(false)
   const choosingRef = useRef(false)
+  const restoreTransformRef = useRef(source.transform)
+  const [mediaSize, setMediaSize] = useState<MediaSize>()
   const [crop, setCrop] = useState<Point>({ x: 0, y: 0 })
   const [cropArea, setCropArea] = useState<Area | null>(null)
   const [cropPixels, setCropPixels] = useState<Area | null>(null)
   const [scale, setScale] = useState(1)
   const [rotation, setRotation] = useState<AvatarRotation>(source.transform?.rotation ?? 0)
-  const [transformReady, setTransformReady] = useState(!source.transform)
   const [imageReady, setImageReady] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
   const [choosing, setChoosing] = useState(false)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    const transform = source.transform
-    if (!transform) return
-    let cancelled = false
-    loadImage(source.dataUri).then((image) => {
-      if (cancelled) return
-      const restored = getInitialCropFromCroppedAreaPercentages(
-        transform.crop,
-        cropperMediaSize(image),
-        transform.rotation,
-        { height: AVATAR_EDITOR_SIZE, width: AVATAR_EDITOR_SIZE },
-        AVATAR_SCALE_MIN,
-        AVATAR_SCALE_MAX
-      )
-      setCrop(restored.crop)
-      setScale(restored.zoom)
-      setTransformReady(true)
-    }).catch(() => {
-      if (!cancelled) setLoadFailed(true)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [source.dataUri, source.transform])
+    const transform = restoreTransformRef.current
+    if (!transform || !mediaSize?.width || !mediaSize.height) return
+    // The cropper measures again after applying cover fit. Restore against each
+    // actual measurement until the user starts editing, not an estimated size.
+    const restored = getInitialCropFromCroppedAreaPercentages(
+      transform.crop, mediaSize, transform.rotation,
+      { height: AVATAR_EDITOR_SIZE, width: AVATAR_EDITOR_SIZE },
+      AVATAR_SCALE_MIN, AVATAR_SCALE_MAX
+    )
+    setCrop(restored.crop)
+    setScale(restored.zoom)
+  }, [mediaSize])
 
   function resetEditor(): void {
+    restoreTransformRef.current = undefined
     setCrop({ x: 0, y: 0 })
     setCropArea(null)
     setCropPixels(null)
@@ -233,6 +205,7 @@ function AvatarCropDialogSession({ source, onCancel, onChooseSource, onSave }: A
   }
 
   const rotate = (change: -90 | 90): void => {
+    restoreTransformRef.current = undefined
     setRotation((value) => ((value + change + 360) % 360) as AvatarRotation)
   }
 
@@ -272,7 +245,7 @@ function AvatarCropDialogSession({ source, onCancel, onChooseSource, onSave }: A
               className="avatar-crop-preview"
               role="group"
             >
-              {transformReady && <Cropper
+              <Cropper
                 image={source.dataUri}
                 crop={crop}
                 zoom={scale}
@@ -285,6 +258,8 @@ function AvatarCropDialogSession({ source, onCancel, onChooseSource, onSave }: A
                 objectFit="cover"
                 showGrid
                 zoomSpeed={0.8}
+                setMediaSize={setMediaSize}
+                onInteractionStart={() => { restoreTransformRef.current = undefined }}
                 cropperProps={{ 'aria-label': t('settings.avatar_crop_preview') }}
                 mediaProps={{
                   onError: () => {
@@ -303,7 +278,7 @@ function AvatarCropDialogSession({ source, onCancel, onChooseSource, onSave }: A
                   setLoadFailed(false)
                 }}
                 onZoomChange={setScale}
-              />}
+              />
             </div>
 
             {loadFailed && (
@@ -321,7 +296,10 @@ function AvatarCropDialogSession({ source, onCancel, onChooseSource, onSave }: A
                 max={AVATAR_SCALE_MAX}
                 step={AVATAR_SCALE_STEP}
                 value={scale}
-                onChange={setScale}
+                onChange={(value) => {
+                  restoreTransformRef.current = undefined
+                  setScale(value)
+                }}
               />
               <div className="avatar-crop-transform-actions">
                 <button

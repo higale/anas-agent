@@ -9,7 +9,6 @@ const editorBehavior = vi.hoisted(() => ({
   crop: { x: 0, y: 0 },
   cropSize: 640,
   loadFails: false,
-  mediaSize: undefined as object | undefined,
   rotation: 0
 }))
 
@@ -23,14 +22,9 @@ vi.mock('../notice', () => ({
 
 vi.mock('react-easy-crop', async () => {
   const { useEffect, useRef } = await import('react')
+  const { getInitialCropFromCroppedAreaPercentages } = await vi.importActual<typeof import('react-easy-crop')>('react-easy-crop')
   return {
-    getInitialCropFromCroppedAreaPercentages: (_crop: object, mediaSize: object) => {
-      editorBehavior.mediaSize = mediaSize
-      return {
-        crop: { x: 42, y: -18 },
-        zoom: 2.5
-      }
-    },
+    getInitialCropFromCroppedAreaPercentages,
     default: function MockCropper(props: {
       crop: { x: number; y: number }
       image: string
@@ -101,7 +95,6 @@ afterEach(() => {
   editorBehavior.crop = { x: 0, y: 0 }
   editorBehavior.cropSize = 640
   editorBehavior.loadFails = false
-  editorBehavior.mediaSize = undefined
   editorBehavior.rotation = 0
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
@@ -162,23 +155,6 @@ describe('avatar crop dialog', () => {
 
     expect(onCancel).toHaveBeenCalledOnce()
     expect(onSave).not.toHaveBeenCalled()
-  })
-
-  it('restores persisted position, zoom, and rotation after media dimensions load', async () => {
-    const restoredSource: AvatarCropSource = {
-      ...source,
-      transform: {
-        crop: { height: 60, width: 45, x: 20, y: 10 },
-        rotation: 90
-      }
-    }
-    renderDialog({ source: restoredSource })
-
-    await waitFor(() => expect(screen.getByRole('button', { name: 'common.save' })).toBeEnabled())
-    await waitFor(() => expect(editorBehavior.crop).toEqual({ x: 42, y: -18 }))
-    expect(editorBehavior.mediaSize).toEqual({ height: 426.6666666666667, naturalHeight: 1200, naturalWidth: 900, width: 320 })
-    expect(screen.getByRole('slider', { name: 'settings.avatar_crop_zoom' })).toHaveAttribute('aria-valuenow', '2.5')
-    expect(editorBehavior.rotation).toBe(90)
   })
 
   it('uses the cropper wheel interaction and keeps the slider synchronized', async () => {
