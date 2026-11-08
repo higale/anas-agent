@@ -1,22 +1,17 @@
 import { mkdir, mkdtemp, readFile, rm, stat, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createReadStream } from 'node:fs'
-import { Readable } from 'node:stream'
-import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const electronMocks = vi.hoisted(() => ({
   createThumbnailFromPath: vi.fn(),
   getFileIcon: vi.fn(),
-  handle: vi.fn(),
-  fetch: vi.fn()
+  handle: vi.fn()
 }))
 
 vi.mock('electron', () => ({
   app: { getFileIcon: electronMocks.getFileIcon },
   nativeImage: { createThumbnailFromPath: electronMocks.createThumbnailFromPath },
-  net: { fetch: electronMocks.fetch },
   protocol: { handle: electronMocks.handle }
 }))
 
@@ -65,8 +60,6 @@ describe('bounded attachment previews', () => {
     root = await mkdtemp(join(tmpdir(), 'anas-preview-budget-'))
     electronMocks.createThumbnailFromPath.mockReset().mockResolvedValue(thumbnail())
     electronMocks.handle.mockReset()
-    electronMocks.fetch.mockReset().mockImplementation(async (url: string) =>
-      new Response(Readable.toWeb(createReadStream(fileURLToPath(url))) as ReadableStream))
     registerAttachmentPreviewProtocol()
   })
 
@@ -110,6 +103,32 @@ describe('bounded attachment previews', () => {
     }
   })
 
+  it('streams images from archive paths longer than the Windows legacy path limit', async () => {
+    const directory = join(root, 'nested-'.repeat(18), 'archive-'.repeat(18))
+    await mkdir(directory, { recursive: true })
+    const path = join(directory, 'image.png')
+    expect(path.length).toBeGreaterThan(260)
+    await writeFile(path, onePixelPng)
+    const preview = await readAttachmentPreview(path, { mode: 'original' })
+    const handler = electronMocks.handle.mock.calls[0][1] as (request: Request) => Promise<Response>
+    const response = await handler(new Request(preview!.src))
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-length')).toBe(String(onePixelPng.length))
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(onePixelPng)
+  })
+
+  it('stops streaming an original image when its request is cancelled', async () => {
+    const path = join(root, 'cancelled.png')
+    await writeFile(path, onePixelPng)
+    await truncate(path, 26 * 1024 * 1024)
+    const preview = await readAttachmentPreview(path, { mode: 'original' })
+    const controller = new AbortController()
+    const handler = electronMocks.handle.mock.calls[0][1] as (request: Request) => Promise<Response>
+    const response = await handler(new Request(preview!.src, { signal: controller.signal }))
+    controller.abort()
+    await expect(response.arrayBuffer()).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
   it('still accepts 25 MiB attachments and rejects larger images for sending', async () => {
     const path = join(root, 'send.png')
     await writeFile(path, onePixelPng)
@@ -132,7 +151,6 @@ describe('bounded attachment previews', () => {
     expect((await handler(new Request(src))).status).toBe(404)
     await writeFile(path, 'not an image')
     expect((await handler(new Request(src))).status).toBe(404)
-    expect(electronMocks.fetch).not.toHaveBeenCalled()
   })
 
   it('reads bounded BMP headers without routing unsupported formats through the stream parser', async () => {

@@ -20,6 +20,8 @@ During tool execution, one continuous shimmer moves across the entire tool heade
 
 ## Projects And Capabilities
 
+**Project skills** and **Project tools** in the project editor start collapsed and show their item counts. With multiple source folders, expanding project skills shows each source with its name, count, and folder button; for a single source, the button appears beside the main heading. The button opens that source's `.agents/skills/` directory. Hover to see the full path; unavailable directories have a disabled button.
+
 The sidebar shows Projects, Simple chats, then the separate default project. Drag a project name to reorder it within its category, or a conversation name to reorder it within its project. Pinned and unpinned items sort separately; dragging cannot move items between groups. Release to save or press Esc to cancel. After manual sorting, new items appear before unpinned items, and message updates preserve the saved order. The default project stays last.
 
 Enable **Customize capabilities** in the project editor to choose prompts, context, tools, skills, and subagents. New projects start customization with the same available capabilities used while customization is off. Turning it off uses all enabled capabilities and retains custom choices; updated defaults do not reset saved project selections. Settings manages source availability; there is no global default-capability page. Coding mode controls the development workflow without increasing access permissions.
@@ -327,7 +329,7 @@ Disabled servers remain editable; editing a running server stops it first. The t
 
 ## Attachments And Voice Input
 
-Sending an attachment saves a local copy, so moving or deleting the original does not prevent viewing it. Attachments apply to the current turn by default; pin one to keep using it in later turns of the same conversation.
+Sending an attachment saves a local copy, so moving or deleting the original does not prevent viewing it. Attachments apply to the current turn by default; pin one to keep using it in later turns of the same conversation. Before sending, hover over an attachment to show its remove and keep-in-conversation buttons; moving away hides them.
 
 Text extraction supports text files, PDFs, and docx files. Images require a model with Vision enabled; text-only models cannot receive or view image content. Unsupported files are marked as not sent to the model.
 

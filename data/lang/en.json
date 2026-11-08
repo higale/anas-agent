@@ -205,6 +205,8 @@
     "simple_chat_prompt_placeholder": "Enter the system prompt for this simple chat",
     "source_folders": "Source folders",
     "local_skills": "Project skills",
+    "open_skills_folder": "Open skills folder",
+    "failed_open_skills_folder": "Failed to open skills folder.",
     "local_tools": "Project tools",
     "add_folders": "Add folders",
     "drop_folders": "Drop folders to add",

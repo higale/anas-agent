@@ -205,6 +205,8 @@
     "simple_chat_prompt_placeholder": "输入该简易对话使用的系统提示词",
     "source_folders": "源文件夹",
     "local_skills": "项目内技能",
+    "open_skills_folder": "打开技能文件夹",
+    "failed_open_skills_folder": "打开技能文件夹失败。",
     "local_tools": "项目内工具",
     "add_folders": "添加文件夹",
     "drop_folders": "松开以添加文件夹",

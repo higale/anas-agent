@@ -271,6 +271,7 @@ const api: GaleApi = {
       ipcRenderer.invoke('files:releaseTemporaryAttachments', paths),
     readAttachmentPreview: (path: string, options?: AttachmentPreviewOptions): Promise<AttachmentPreview | null> => ipcRenderer.invoke('files:readAttachmentPreview', path, options),
     readFileIcon: (path: string, size?: FileIconSize): Promise<FileIconImage | null> => ipcRenderer.invoke('files:readFileIcon', path, size),
+    openDirectory: (path: string): Promise<string> => ipcRenderer.invoke('files:openDirectory', path),
     showItemInFolder: (path: string): Promise<string> => ipcRenderer.invoke('files:showItemInFolder', path),
     getAvatar: (): Promise<AppAvatarImage | null> => ipcRenderer.invoke('files:getAvatar'),
     getAvatarSource: (): Promise<AvatarCropSource | null> => ipcRenderer.invoke('files:getAvatarSource'),

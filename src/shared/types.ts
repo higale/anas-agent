@@ -861,6 +861,7 @@ export interface GaleApi {
     releaseTemporaryAttachments(paths: string[]): Promise<void>
     readAttachmentPreview(path: string, options?: AttachmentPreviewOptions): Promise<AttachmentPreview | null>
     readFileIcon(path: string, size?: FileIconSize): Promise<FileIconImage | null>
+    openDirectory(path: string): Promise<string>
     showItemInFolder(path: string): Promise<string>
     getAvatar(): Promise<AppAvatarImage | null>
     getAvatarSource(): Promise<AvatarCropSource | null>

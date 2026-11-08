@@ -1,9 +1,9 @@
-import { app, nativeImage, net, protocol } from 'electron'
+import { app, nativeImage, protocol } from 'electron'
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { open, readFile, rm, stat } from 'node:fs/promises'
 import { basename, extname, isAbsolute, relative, resolve, sep } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { Readable } from 'node:stream'
 import { imageDimensionsFromStream } from 'image-dimensions'
 import { maxImageSourceBytes, maxImagePixels, maxImageDimension } from '@shared/imageLimits'
 import { getAppConfigSnapshot } from './config/appConfig'
@@ -509,12 +509,12 @@ export function registerAttachmentPreviewProtocol(): void {
     }
     try {
       const image = await validateImage(path, null)
-      // Chromium streams the file directly instead of copying an unbounded base64 string through IPC.
-      const response = await net.fetch(pathToFileURL(path).href, { signal: request.signal })
-      const headers = new Headers(response.headers)
-      headers.set('Content-Type', image.mimeType)
-      headers.set('Cache-Control', 'no-store')
-      return new Response(response.body, { status: response.status, headers })
+      // Node can open long Windows archive paths that Chromium's file loader rejects.
+      const file = await open(path, 'r')
+      const stream = file.createReadStream({ signal: request.signal })
+      return new Response(Readable.toWeb(stream) as ReadableStream, {
+        headers: { 'Content-Type': image.mimeType, 'Content-Length': String(image.bytes), 'Cache-Control': 'no-store' }
+      })
     } catch {
       return new Response(null, { status: 404 })
     }

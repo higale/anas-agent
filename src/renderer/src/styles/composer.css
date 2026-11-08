@@ -828,6 +828,12 @@
   opacity: 1;
 }
 
+.attachment-tile:not(:hover) .attachment-remove,
+.attachment-tile:not(:hover) .attachment-context-toggle {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .attachment-remove:hover,
 .attachment-context-toggle:hover {
   background: rgba(20, 20, 20, 0.9);

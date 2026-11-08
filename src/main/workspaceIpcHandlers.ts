@@ -375,6 +375,13 @@ export function registerWorkspaceIpcHandlers(): void {
       return null
     }
   })
+  handleMainIpc('files:openDirectory', async (_event, directoryPath: string): Promise<string> => {
+    if (typeof directoryPath !== 'string' || !directoryPath.trim()) throw new Error('Directory path is required.')
+    if (!(await stat(directoryPath)).isDirectory()) throw new Error('Path is not a directory.')
+    const error = await shell.openPath(directoryPath)
+    if (error) throw new Error(error)
+    return directoryPath
+  })
   handleMainIpc('files:showItemInFolder', async (_event, filePath: string): Promise<string> => {
     if (typeof filePath !== 'string' || filePath.trim().length === 0) throw new Error('File path is required.')
     await stat(filePath)

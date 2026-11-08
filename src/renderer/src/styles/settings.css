@@ -751,10 +751,6 @@
   margin-inline-start: calc(-1 * (var(--ui-capability-list-padding) + 1px));
 }
 
-.ui-capability-group .ui-capability-list {
-  margin-block-start: 12px;
-}
-
 .ui-capability-group > details > summary {
   margin-inline-start: calc(var(--control-checkbox-size) + var(--ui-check-gap, 8px));
   width: fit-content;
