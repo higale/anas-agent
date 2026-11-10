@@ -391,10 +391,18 @@ describe('field-level recovery', () => {
       capabilities: { ...capabilities, workspace: false }, pinned: false
     }
     const repaired: any = repairDocument('projects.json', { version: 0, projects: [project] }).value
-    expect(repaired.projects[0]).toMatchObject({ id: project.id, name: project.name, sourceFolders: ['/keep/path'], advanced_settings: false, collapsed: false })
+    expect(repaired.projects[0]).toMatchObject({ id: project.id, name: project.name, sourceFolders: ['/keep/path'], collapsed: false })
     expect(repaired.projects[0].capabilities.workspace).toBe(false)
     delete project.id
     expect(() => repairDocument('projects.json', { version: 0, projects: [project] })).toThrow('invalid format')
+  })
+
+  it.each([[null, []], [['project:guide', false, '', 'project:extra'], ['project:guide', 'project:extra']]])('repairs malformed project exemptions while preserving identifiable choices: %j', (invalid, expected) => {
+    const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep project',
+      createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z', sourceFolders: ['/keep/path'],
+      capabilities: { ...capabilities, workspace: false }, pinned: false, script_auto_approve_skills: invalid }
+    const repaired = repairDocument('projects.json', { version: 0, projects: [project] }).value as { projects: Record<string, unknown>[] }
+    expect(repaired.projects[0]).toMatchObject({ id: project.id, capabilities: project.capabilities, script_auto_approve_skills: expected })
   })
 
   it('preserves raw files before writing and leaves unparseable files and database untouched', async () => {

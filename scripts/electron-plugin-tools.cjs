@@ -8,6 +8,24 @@ const { expect } = require('playwright/test')
 const { closeElectronTestApplication } = require('./electron-test-close.cjs')
 const { pluginPage } = require('./electron-plugin-helpers.cjs')
 
+async function readHistoryImages(page, threadId) {
+  return page.evaluate(async threadId => {
+    const api = globalThis.gale.agent
+    const thread = threadId ? { id: threadId } : (await api.threads.list())[0]
+    const snapshot = await api.threads.get(thread.id)
+    const tools = await Promise.all(snapshot.activities.map(async activity => {
+      const input = { threadId: thread.id, runId: activity.runId, requestId: crypto.randomUUID() }
+      const directory = await api.activities.directory(input)
+      const groups = await Promise.all(directory.items.filter(item => item.type === 'process').map(group =>
+        api.activities.directory({ ...input, parentId: group.key, requestId: crypto.randomUUID() })))
+      return [...directory.items, ...groups.flatMap(group => group.items)]
+        .flatMap(item => item.type === 'entry' && item.item.type === 'tool' && item.item.tool.call.name === 'plugin__example-text-tools__image' ? [item.item.tool] : [])
+    }))
+    const images = await Promise.all(tools.flat().map(tool => api.activities.detail({ ...tool.detail, field: 'output' })))
+    return { thread, images }
+  }, threadId)
+}
+
 async function verifyPluginTools(launchApplication) {
   const home = await mkdtemp(join(tmpdir(), 'anas-plugin-tools-'))
   const archiveRoot = await mkdtemp(join(tmpdir(), 'anas-plugin-backup-'))
@@ -70,17 +88,16 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
         contextCompressionThreshold: 0.8, contextCompressionEnabled: false })
       await api.config.selectDefaultModel(configured.providers.find(provider => provider.id === providerId).models[0].id)
       const base = (await api.projects.list()).find(project => project.id === 'default-workspace')
-      const project = await api.projects.create({ ...base, name: 'Plugin capability fixture', advancedSettings: true,
-        capabilities: { ...base.capabilities, toolMode: 'selected', tools: [], planning: false, environment: false, profile: false, workspace: false, memory: false,
+      const project = await api.projects.create({ ...base, name: 'Plugin capability fixture', capabilities: { ...base.capabilities, toolMode: 'selected', tools: [], planning: false, environment: false, profile: false, workspace: false, memory: false,
           skills: { mode: 'off', project: false, entries: [] }, subagents: { mode: 'off', names: [] }, mcp: { defaultMode: 'selected', servers: [] },
-          backgroundTools: false, pluginTools: [] } })
+          backgroundTools: false, pluginMode: 'off', plugins: [{ id: 'example-text-tools', mode: 'all' }], pluginTools: [] } })
       if (project.status !== 'ok') throw new Error(JSON.stringify(project))
       await api.agent.workspace.set({ mode: 'new_thread', projectId: project.value.id, modelParameterPresetId: null })
     }, server.address().port)
     await page.reload()
     await page.locator('[data-agent-composer-input]').waitFor()
     await page.getByRole('button', { name: 'Workspace menu', exact: true }).click()
-    await expect(page.getByRole('menuitem')).toHaveCount(2)
+    await expect(page.getByRole('menuitem', { name: 'Notepad', exact: true })).toHaveCount(0)
     await expect(page.getByRole('menuitem', { name: 'File changes', exact: true })).toBeVisible()
     await page.getByRole('menuitem', { name: 'Plugin settings', exact: true }).click()
     await expect(page.locator('.plugin-settings')).toBeVisible()
@@ -99,7 +116,10 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
     assert.deepEqual(await page.evaluate(async () => (await globalThis.gale.projects.list()).find(project => project.name === 'Plugin capability fixture').capabilities.pluginTools), [], 'Browsing definitions must not enable tools.')
     await page.getByRole('button', { name: 'Back to app', exact: true }).click()
     const capabilityDialog = await openCapabilityProject(page, 'Plugin capability fixture')
+    await capabilityDialog.getByRole('button', { name: 'Plugins', exact: true }).click()
+    await capabilityDialog.getByRole('radiogroup', { name: 'Plugins', exact: true }).getByText('Custom', { exact: true }).click()
     const pluginSection = capabilityDialog.getByRole('region', { name: 'Text tools', exact: true })
+    await expect(pluginSection.getByRole('radio', { name: 'All', exact: true })).toBeChecked()
     await pluginSection.getByRole('radiogroup').getByText('Custom', { exact: true }).click()
     await pluginSection.getByRole('button', { name: 'Text tools', exact: true }).click()
     const echo = page.getByRole('checkbox', { name: 'plugin__example-text-tools__echo', exact: true })
@@ -108,13 +128,36 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
     assert.equal((await page.evaluate(() => globalThis.gale.plugins.list()))[0].backendStatus, 'stopped')
     await echo.check()
     await page.getByRole('checkbox', { name: 'plugin__example-text-tools__wait', exact: true }).check()
-    await page.getByRole('checkbox', { name: 'plugin__example-text-tools__image', exact: true }).check()
+    const pluginGroupModes = capabilityDialog.getByRole('radiogroup', { name: 'Plugins', exact: true })
+    const unusedTool = pluginSection.getByRole('checkbox', { name: 'plugin__example-text-tools__image', exact: true })
+    await pluginGroupModes.getByText('All', { exact: true }).click()
+    await expect(echo).toBeChecked()
+    await expect(unusedTool).toBeChecked()
+    await expect(echo).toBeDisabled()
+    await expect(pluginSection.getByRole('radio', { name: 'Custom', exact: true })).toBeDisabled()
+    await pluginGroupModes.getByText('Off', { exact: true }).click()
+    await expect(echo).not.toBeChecked()
+    await expect(echo).toBeDisabled()
+    await pluginGroupModes.getByText('Custom', { exact: true }).click()
+    await expect(echo).toBeChecked()
+    await expect(echo).toBeEnabled()
+    await expect(unusedTool).not.toBeChecked()
+    await unusedTool.check()
+    await capabilityDialog.getByRole('button', { name: 'Plugins', exact: true }).click()
+    await expect(echo).not.toBeVisible()
+    await capabilityDialog.getByRole('button', { name: 'Plugins', exact: true }).click()
+    await expect(echo).toBeChecked()
     await echo.scrollIntoViewIfNeeded()
     const headingBounds = await pluginSection.locator('fieldset strong').first().boundingBox()
     const checkboxBounds = await echo.boundingBox()
     assert.ok(headingBounds && checkboxBounds && Math.abs(headingBounds.x - checkboxBounds.x) < 1, 'Plugin tools must align with their section heading, inside the list padding.')
     await page.screenshot({ path: join(tmpdir(), 'anas-plugin-tools-capabilities.png') })
     await capabilityDialog.getByRole('button', { name: 'Save', exact: true }).click()
+    const savedCapabilities = await page.evaluate(async () => (await globalThis.gale.projects.list()).find(project => project.name === 'Plugin capability fixture').capabilities)
+    assert.equal(savedCapabilities.pluginGroupMode, 'custom')
+    assert.equal(savedCapabilities.pluginMode, 'off', 'Individual edits must not rewrite the retained default policy.')
+    assert.deepEqual(savedCapabilities.plugins, [{ id: 'example-text-tools', mode: 'custom' }])
+    assert.deepEqual(savedCapabilities.pluginTools, ['example-text-tools:tool:echo', 'example-text-tools:tool:wait', 'example-text-tools:tool:image'])
     await page.locator('.sidebar-settings').click()
     await page.getByRole('menuitem', { name: 'Settings', exact: true }).click()
     await page.locator('[data-settings-tab="plugins"]').click()
@@ -157,10 +200,7 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
     await page.getByRole('button', { name: 'Send', exact: true }).click()
     await expect(page.getByText('PLUGIN_TOOL_FINISHED', { exact: true })).toHaveCount(2)
     assert.ok(requests.some(input => input.messages.some(message => Array.isArray(message.content) && message.content.some(block => block.type === 'image_url' && block.image_url.url.startsWith('data:image/png;base64,')))), 'A native image block must reach the model.')
-    const persisted = await page.evaluate(async () => {
-      const [thread] = await globalThis.gale.agent.threads.list()
-      return globalThis.gale.agent.threads.get(thread.id)
-    })
+    const persisted = await readHistoryImages(page)
     assert.ok(JSON.stringify(persisted).includes('iVBORw0KGgo'), 'The normal thread history must retain the image.')
     mode = 'wait'
     const before = requests.length
@@ -191,6 +231,8 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
     await page.getByRole('menuitem', { name: 'Settings', exact: true }).click()
     await page.getByRole('button', { name: 'Back to app', exact: true }).click()
     const writingDialog = await openCapabilityProject(page, 'Plugin capability fixture')
+    await writingDialog.getByRole('button', { name: 'Plugins', exact: true }).click()
+    await writingDialog.getByRole('radiogroup', { name: 'Plugins', exact: true }).getByText('Custom', { exact: true }).click()
     const writingSection = writingDialog.getByRole('region', { name: 'Writing helper', exact: true })
     await writingSection.getByRole('radiogroup').getByText('Custom', { exact: true }).click()
     await writingSection.getByRole('button', { name: 'Writing helper', exact: true }).click()
@@ -200,7 +242,7 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
     await page.getByRole('checkbox', { name: 'proofread Model', exact: true }).locator('..').click()
     await page.getByRole('checkbox', { name: 'proofread Shortcut', exact: true }).locator('..').click()
     const skillHeading = await writingSection.locator('fieldset strong').first().boundingBox()
-    const skillRow = await writingSection.locator('.ui-capability-skill').boundingBox()
+    const skillRow = await writingSection.locator('.ui-capability-resource').boundingBox()
     assert.ok(skillHeading && skillRow && skillRow.y - skillHeading.y - skillHeading.height < skillRow.height / 2, 'Skill headings must stay close to their rows.')
     await writingSection.screenshot({ path: join(tmpdir(), 'anas-plugin-grouped-capabilities.png') })
     await writingDialog.getByRole('button', { name: 'Save', exact: true }).click()
@@ -226,7 +268,6 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
     await application.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, join(home, 'examples/plugins/notepad.zip'))
     await page.evaluate(() => globalThis.gale.plugins.install())
     await page.getByRole('button', { name: 'Workspace menu', exact: true }).click()
-    await expect(page.getByRole('menuitem')).toHaveCount(3)
     await expect(page.getByRole('menuitem', { name: 'Notepad', exact: true })).toBeVisible()
     await expect(page.getByRole('menuitem', { name: 'Plugin settings', exact: true })).toBeVisible()
     await mkdir(resolve('tmp'), { recursive: true })
@@ -248,12 +289,12 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
     const backup = await page.evaluate(() => globalThis.gale.app.backupData())
     assert.equal(backup.path, archivePath)
     await page.evaluate(() => globalThis.gale.plugins.uninstall('example-text-tools', true))
-    assert.ok(JSON.stringify(await page.evaluate(id => globalThis.gale.agent.threads.get(id), persisted.thread.id)).includes('iVBORw0KGgo'), 'Uninstalling a plugin must not remove its ordinary history images.')
+    assert.ok(JSON.stringify(await readHistoryImages(page, persisted.thread.id)).includes('iVBORw0KGgo'), 'Uninstalling a plugin must not remove its ordinary history images.')
     await closeElectronTestApplication(application)
     application = await launchApplication(home)
     const restarted = await application.firstWindow()
     await restarted.locator('[data-agent-composer-input]').waitFor()
-    assert.ok(JSON.stringify(await restarted.evaluate(id => globalThis.gale.agent.threads.get(id), persisted.thread.id)).includes('iVBORw0KGgo'), 'Images must survive process restart with their plugin uninstalled.')
+    assert.ok(JSON.stringify(await readHistoryImages(restarted, persisted.thread.id)).includes('iVBORw0KGgo'), 'Images must survive process restart with their plugin uninstalled.')
     await expect.poll(async () => {
       try {
         await restarted.evaluate(id => globalThis.gale.agent.threads.delete(id), persisted.thread.id)
@@ -266,7 +307,7 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
     assert.equal((await restarted.evaluate(() => globalThis.gale.agent.threads.list())).some(thread => thread.id === persisted.thread.id), false)
     await application.evaluate(({ app }, directory) => app.setPath('documents', directory), archiveRoot)
     await restarted.evaluate(path => globalThis.gale.app.restoreData(path), archivePath)
-    assert.ok(JSON.stringify(await restarted.evaluate(id => globalThis.gale.agent.threads.get(id), persisted.thread.id)).includes('iVBORw0KGgo'), 'Restore must recover ordinary image history.')
+    assert.ok(JSON.stringify(await readHistoryImages(restarted, persisted.thread.id)).includes('iVBORw0KGgo'), 'Restore must recover ordinary image history.')
     assert.equal((await restarted.evaluate(() => globalThis.gale.plugins.invoke('example-text-tools', 'settings.get'))).values.prefix, 'Configured: ')
     assert.equal((await restarted.evaluate(() => globalThis.gale.plugins.list())).find(plugin => plugin.id === 'example-text-tools').backendStatus, 'stopped')
     const builtin = (await restarted.evaluate(() => globalThis.gale.plugins.list())).find(plugin => plugin.id === 'usage-meter')

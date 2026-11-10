@@ -23,7 +23,7 @@ describe('project skills for the composer', () => {
     await waitFor(() => expect(result.current).toBe(second))
     await act(async () => { resolveFirst({ scriptAutoApprove: false, projectId: 'first', roots: [], skills: [] }); await first })
     expect(result.current).toBe(second)
-    expect(get).toHaveBeenLastCalledWith('second', undefined)
+    expect(get).toHaveBeenLastCalledWith('second', undefined, undefined)
     rerender({ scriptAutoApprove: false, projectId: 'third' })
     expect(result.current).toBeUndefined()
   })
@@ -56,8 +56,24 @@ describe('project skills for the composer', () => {
     expect(result.current).toBeUndefined()
     rerender({ folders: ['/third'] })
     await waitFor(() => expect(result.current).toBe(current))
-    expect(get).toHaveBeenLastCalledWith('project', ['/third'])
+    expect(get).toHaveBeenLastCalledWith('project', ['/third'], undefined)
     await act(async () => { resolvePrevious(initial); await previous })
     expect(result.current).toBe(current)
+  })
+
+  it('reloads shortcuts after custom directories change without changing source folders', async () => {
+    const initial: SkillSnapshot = { scriptAutoApprove: false, roots: [], skills: [] }
+    const current: SkillSnapshot = { scriptAutoApprove: false, roots: [], skills: [] }
+    const folders = ['/workspace']
+    const get = vi.fn().mockResolvedValueOnce(initial).mockResolvedValue(current)
+    Object.defineProperty(window, 'gale', { configurable: true, value: { skills: { get } } as unknown as GaleApi })
+    const { result, rerender } = renderHook(({ directories }) => useProjectSkills('project', globalSkills, folders, directories), {
+      initialProps: { directories: ['/first'] }
+    })
+    await waitFor(() => expect(result.current).toBe(initial))
+    rerender({ directories: [] })
+    expect(result.current).toBeUndefined()
+    await waitFor(() => expect(result.current).toBe(current))
+    expect(get).toHaveBeenLastCalledWith('project', folders, [])
   })
 })

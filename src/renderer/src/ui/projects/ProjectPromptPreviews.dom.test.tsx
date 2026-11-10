@@ -45,7 +45,7 @@ const settings = {
   backupDir: ''
 } satisfies AppSettings
 
-const project: WorkspaceProjectRequest = { kind: 'workspace', name: 'Draft', sourceFolders: ['C:/draft'], prompt: 'Unsaved prompt', advancedSettings: true, codingMode: false, capabilities: defaultCapabilities, restrictSubagents: false, modelConfigId: 'model-2', modelParameterPresetId: 'preset-2' }
+const project: WorkspaceProjectRequest = { kind: 'workspace', name: 'Draft', sourceFolders: ['C:/draft'], prompt: 'Unsaved prompt', codingMode: false, capabilities: defaultCapabilities, restrictSubagents: false, modelConfigId: 'model-2', modelParameterPresetId: 'preset-2' }
 
 describe('model request preview', () => {
   beforeEach(() => {
@@ -157,7 +157,7 @@ describe('model request preview', () => {
     await user.click(screen.getByRole('menuitem', { name: 'settings.view_context_compression_prompt' }))
     expect(screen.getByText(/^Keep citations in/)).toHaveTextContent('(en): {conversation}')
     expect(screen.getByText(/^Keep citations in/)).not.toHaveTextContent('{output_language}')
-    view.rerender(<ProjectPromptPreviews {...props} project={{ ...custom, advancedSettings: false, codingMode: true }} />)
+    view.rerender(<ProjectPromptPreviews {...props} project={{ ...custom, compressionPrompt: undefined, codingMode: true }} />)
     expect(screen.getByText(/You are a conversation summarizer/)).toHaveTextContent('Coding continuation handoff')
     expect(screen.queryByText(/Keep citations/)).not.toBeInTheDocument()
     view.rerender(<ProjectPromptPreviews {...props} project={{ ...custom, compressionPrompt: 'Missing placeholder' }} />)

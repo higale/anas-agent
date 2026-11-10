@@ -31,7 +31,7 @@ import { SegmentedControl } from '../SegmentedControl'
 import { MemorySettings } from './MemorySettings'
 import { ModelPicker } from '../model/ModelPicker'
 import { PanelViewState } from '../agent/PanelViewState'
-import { SegmentedMultiSelect } from '../SegmentedMultiSelect'
+import { CheckboxButton } from '../CheckboxButton'
 import { formatDateTime } from '../formatDateTime'
 import { SkillsSettings } from './SkillsSettings'
 import { PackageActions } from './PackageActions'
@@ -291,10 +291,9 @@ export function SettingsScreen({
                   const importedId = await onImportSkills()
                   if (importedId) setSkillToReveal(importedId)
                 }} />
-              <SegmentedMultiSelect ariaLabel={t('settings.skill_scripts_auto_approve_all')}
-                disabled={!skills}
-                options={[{ value: 'scriptAutoApprove', label: t('settings.skill_scripts_auto_approve_all'), checked: skills?.scriptAutoApprove ?? false }]}
-                onChange={(_value, enabled) => void onUpdateSkillScriptApproval(undefined, enabled)} />
+              <CheckboxButton label={t('settings.skill_scripts_auto_approve_all')}
+                disabled={!skills} checked={skills?.scriptAutoApprove ?? false}
+                onChange={enabled => void onUpdateSkillScriptApproval(undefined, enabled)} />
             </div>}
           </header>
           {error && <div className="settings-error" role="alert">{error}</div>}

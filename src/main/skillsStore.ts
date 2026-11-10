@@ -34,7 +34,8 @@ import {
   skillsConfigFileName
 } from './config/dataDir'
 import { getProject } from './projectStore'
-import { parseCapabilities, resolveSkillSelection, skillSelectionEnabled, defaultCapabilities, effectiveProjectCapabilities, resolvePluginCapabilities, type SkillSelection } from '@shared/agentCapabilities'
+import { parseProjectSkillDirectories } from './projectSkillDirectories'
+import { parseCapabilities, resolveSkillSelection, skillSelectionEnabled, defaultCapabilities, resolvePluginCapabilities, type SkillSelection } from '@shared/agentCapabilities'
 import { packageResourceEnabled } from '@shared/packageResourceSelection'
 import { isSameOrInsideDirectory, samePath } from './pathContainment'
 
@@ -277,35 +278,37 @@ function projectRootId(path: string): string {
   return `project-${createHash('sha256').update(resolve(path)).digest('hex').slice(0, 16)}`
 }
 
-async function resolveSkillRoots(projectId?: string, sourceFolders?: string[]): Promise<SkillRootSummary[]> {
+async function resolveSkillRoots(folders?: string[], directories?: string[]): Promise<SkillRootSummary[]> {
   const config = await readSkillsConfig()
   const roots: SkillRootSummary[] = [
     { id: 'system', kind: 'system', name: 'System', shortcutAlias: 'system', path: getSystemSkillsDir(), removable: false, available: true },
     { id: 'user', kind: 'user', name: 'User', shortcutAlias: 'user', path: getSkillsDir(), removable: false, available: true }
   ]
-  let folders = sourceFolders
-  if (folders === undefined && projectId) {
-    const project = await getProject(projectId)
-    if (project.kind === 'workspace') folders = project.sourceFolders
-  }
-  if (folders) {
+  if (folders || directories) {
     const used = new Set([
       ...roots.map((root) => root.shortcutAlias),
       ...config.external_directories.map((directory) => directory.shortcut_alias)
     ])
-    folders.forEach((folder, index) => {
-      const base = index === 0 ? 'project' : `project-${slug(basename(folder))}`
+    const projectRoots = [
+      ...(folders ?? []).map((folder, index) => ({ id: projectRootId(folder), path: join(folder, '.agents', 'skills'),
+        name: basename(folder), base: index === 0 ? 'project' : `project-${slug(basename(folder))}`, removable: false })),
+      ...parseProjectSkillDirectories(directories).map(path => ({
+        id: `project-skill-${createHash('sha256').update(process.platform === 'win32' ? path.toLowerCase() : path).digest('hex').slice(0, 16)}`,
+        path, name: defaultExternalDirectoryName(path), base: `project-${slug(defaultExternalDirectoryName(path))}`, removable: true
+      }))
+    ]
+    projectRoots.forEach(({ id, path, name, base, removable }) => {
       let alias = base
       let suffix = 2
       while (used.has(alias)) alias = `${base}-${suffix++}`
       used.add(alias)
       roots.push({
-        id: projectRootId(folder),
+        id,
         kind: 'project',
-        name: basename(folder),
+        name,
         shortcutAlias: alias,
-        path: join(folder, '.agents', 'skills'),
-        removable: false,
+        path,
+        removable,
         available: true
       })
     })
@@ -490,11 +493,13 @@ function resolveConflicts(scans: RootScan[]): LoadedSkill[] {
   })
 }
 
+function subagentSkillRootId(id: string): string { return `subagent:${id}:skill` }
+
 export async function listSubagentSkills(ids: readonly string[]): Promise<SkillSnapshot> {
   const scans: RootScan[] = []
   for (const id of [...new Set(ids)]) {
     const agent = await findSubagentPackage(id)
-    const root: SkillRootSummary = { id: `subagent:${id}:skill`, kind: 'subagent', name: agent.name!, shortcutAlias: `agent-${id}`,
+    const root: SkillRootSummary = { id: subagentSkillRootId(id), kind: 'subagent', name: agent.name!, shortcutAlias: `agent-${id}`,
       path: join(agent.directory!, 'skills'), removable: false, available: true }
     const scan = await scanRoot(root, { version: 0, script_auto_approve: false, script_auto_approve_skills: [], external_directories: [], availability: {} })
     const selection = parseCapabilities(agent.capabilities).skills.package
@@ -507,27 +512,58 @@ export async function listSubagentSkills(ids: readonly string[]): Promise<SkillS
   return { roots: scans.map(s => s.root), skills: scans.flatMap(s => s.skills.map(s => s.summary)), scriptAutoApprove: false }
 }
 
-async function loadCatalog(projectId?: string, selection?: SkillSelection, sourceFolders?: string[], pluginTools?: readonly string[]): Promise<{ roots: SkillRootSummary[]; skills: LoadedSkill[]; scriptAutoApprove: boolean }> {
-  const [roots, config] = await Promise.all([resolveSkillRoots(projectId, sourceFolders), readSkillsConfig()])
-  const scans = await Promise.all(roots.map((root) => scanRoot(root, config)))
+export type SkillAgentScope = { kind: 'main' } | { kind: 'subagent'; id?: string }
+
+export interface SkillCatalogRequest {
+  /** The caller owns discovery scope; saved selections never add package sources. */
+  agent: SkillAgentScope
+  projectId?: string
+  sourceFolders?: string[]
+  skillDirectories?: string[]
+  scriptAutoApproveSkills?: readonly string[]
+  selection?: SkillSelection
+  pluginTools?: readonly string[]
+}
+
+async function loadCatalog({ agent, projectId, selection, sourceFolders, pluginTools, skillDirectories, scriptAutoApproveSkills }: SkillCatalogRequest): Promise<{ roots: SkillRootSummary[]; skills: LoadedSkill[]; scriptAutoApprove: boolean }> {
+  if (projectId && (sourceFolders === undefined || skillDirectories === undefined || scriptAutoApproveSkills === undefined)) {
+    const project = await getProject(projectId)
+    if (project.kind === 'workspace') {
+      sourceFolders ??= project.sourceFolders
+      skillDirectories ??= project.skillDirectories ?? []
+      scriptAutoApproveSkills ??= project.scriptAutoApproveSkills ?? []
+    }
+  }
+  const [roots, config] = await Promise.all([resolveSkillRoots(sourceFolders, skillDirectories), readSkillsConfig()])
+  // A source owns its IDs, availability and explicit shortcut alias even when
+  // another source points to the same directory. Resolve winners after selection.
+  const scans = await Promise.all(roots.map(root => scanRoot(root, config)))
+  for (const scan of scans) if (scan.root.kind === 'project') {
+    for (const skill of scan.skills) skill.summary.scriptAutoApprove = scriptAutoApproveSkills?.includes(skill.summary.id) ?? false
+  }
   scans.push(...await loadPluginSkills(config))
-  const agentIds = selection?.entries.filter(e => e.model).map(e => /^subagent:([^:]+):skill:/.exec(e.id)?.[1]).filter((id): id is string => !!id) ?? []
-  if (agentIds.length) {
-    const own = await listSubagentSkills(agentIds)
-    for (const root of own.roots) scans.unshift({ root, skills: own.skills.filter(s => s.rootId === root.id).map(summary => ({ summary })) })
+  if (agent.kind === 'subagent' && agent.id) {
+    const prefix = `${subagentSkillRootId(agent.id)}:`
+    // Resolved custom selections enumerate dependencies within the explicit owner's scope.
+    const needsOwnedSkills = !selection || selection.mode === 'default' || selection.mode === 'custom'
+      && selection.entries.some(entry => entry.model && entry.id.startsWith(prefix) && entry.id.length > prefix.length)
+    if (needsOwnedSkills) {
+      const own = await listSubagentSkills([agent.id])
+      for (const root of own.roots) scans.unshift({ root, skills: own.skills.filter(s => s.rootId === root.id).map(summary => ({ summary })) })
+    }
   }
   if (selection) {
     const resolved = resolveSkillSelection(selection, scans.flatMap(scan => scan.skills.map(skill => skill.summary)), false, false, pluginTools)
     const entries = new Map(resolved.entries.map(entry => [entry.id, entry]))
     for (const scan of scans) for (const skill of scan.skills) {
       skill.summary.modelAvailable = entries.get(skill.summary.id)?.model ?? false
-      skill.summary.userAvailable = entries.get(skill.summary.id)?.shortcut ?? false
+      skill.summary.userAvailable = agent.kind === 'main' && (entries.get(skill.summary.id)?.shortcut ?? false)
     }
   }
   return { roots: scans.map((scan) => scan.root), skills: resolveConflicts(scans), scriptAutoApprove: config.script_auto_approve }
 }
 
-export async function listSkillSnapshot(projectId?: string, sourceFolders?: string[]): Promise<SkillSnapshot> {
+export async function listSkillSnapshot(projectId?: string, sourceFolders?: string[], skillDirectories?: string[], scriptAutoApproveSkills?: readonly string[]): Promise<SkillSnapshot> {
   if (sourceFolders !== undefined) {
     const context = `project=${JSON.stringify(projectId ?? null)}, platform=${process.platform}`
     if (!Array.isArray(sourceFolders)) {
@@ -541,13 +577,16 @@ export async function listSkillSnapshot(projectId?: string, sourceFolders?: stri
     }
   }
   const folders = sourceFolders === undefined ? undefined : [...new Set(sourceFolders.map((folder) => resolve(folder)))]
-  const catalog = await loadCatalog(projectId, undefined, folders)
+  const directories = skillDirectories === undefined ? undefined : parseProjectSkillDirectories(skillDirectories)
+  const catalog = await loadCatalog({ agent: { kind: 'main' }, projectId, sourceFolders: folders, skillDirectories: directories, scriptAutoApproveSkills })
   return { ...(projectId ? { projectId } : {}), roots: catalog.roots, skills: catalog.skills.map((skill) => skill.summary), scriptAutoApprove: catalog.scriptAutoApprove }
 }
 
 export async function updateSkillScriptApproval(projectId: string | undefined, skillId: string | undefined, enabled: boolean): Promise<SkillSnapshot> {
   if (typeof enabled !== 'boolean') throw new Error('Skill script approval setting must be a boolean.')
-  if (skillId !== undefined) await findSkill(projectId, skillId)
+  if (skillId !== undefined && (await findSkill(projectId, skillId)).summary.source === 'project') {
+    throw new Error('Set project Skill script approvals in project settings.')
+  }
   return mutateSkillsConfig(async config => {
     if (skillId === undefined) config.script_auto_approve = enabled
     else config.script_auto_approve_skills = [...new Set([
@@ -558,12 +597,8 @@ export async function updateSkillScriptApproval(projectId: string | undefined, s
   })
 }
 
-export interface SkillScriptScope {
-  projectId?: string
-  sourceFolders?: string[]
+export interface SkillScriptScope extends SkillCatalogRequest {
   selection: SkillSelection
-  allowUserInvocation: boolean
-  pluginTools?: readonly string[]
 }
 
 export interface SkillScriptInvocation { name: string; sourceAlias?: string }
@@ -571,9 +606,9 @@ export interface SkillScriptInvocation { name: string; sourceAlias?: string }
 /** A current exemption, not execution permission or a persisted capability. */
 export async function findSkillScriptExemption(scriptPath: string, scope: SkillScriptScope, invocation?: SkillScriptInvocation) {
   if (!skillSelectionEnabled(scope.selection) || !isAbsolute(scriptPath)) return undefined
-  const catalog = await loadCatalog(scope.projectId, scope.selection, scope.sourceFolders, scope.pluginTools ?? [])
+  const catalog = await loadCatalog({ ...scope, pluginTools: scope.pluginTools ?? [] })
   const skills = catalog.skills.map(item => item.summary).filter(skill => !skill.loadError)
-  const explicit = scope.allowUserInvocation && invocation ? skills.find(skill => skill.userAvailable
+  const explicit = scope.agent.kind === 'main' && invocation ? skills.find(skill => skill.userAvailable
     && skill.name.toLowerCase() === invocation.name.toLowerCase()
     && (!invocation.sourceAlias || skill.shortcutAlias === invocation.sourceAlias)) : undefined
   const script = await realpath(scriptPath)
@@ -588,7 +623,7 @@ export async function findSkillScriptExemption(scriptPath: string, scope: SkillS
 }
 
 async function findSkill(projectId: string | undefined, skillId: string): Promise<LoadedSkill> {
-  const skill = (await loadCatalog(projectId)).skills.find((candidate) => candidate.summary.id === skillId)
+  const skill = (await loadCatalog({ agent: { kind: 'main' }, projectId })).skills.find((candidate) => candidate.summary.id === skillId)
   if (!skill) throw new Error(`Skill was not found: ${skillId}`)
   return skill
 }
@@ -756,6 +791,7 @@ async function reservedSkillRootPaths(projectId?: string): Promise<string[]> {
     const project = await getProject(projectId)
     if (project.kind === 'workspace') {
       paths.push(...project.sourceFolders.map((folder) => join(folder, '.agents', 'skills')))
+      paths.push(...project.skillDirectories ?? [])
     }
   }
   return Promise.all(paths.map(async (path) => realpath(path).catch(() => resolve(path))))
@@ -827,8 +863,8 @@ export async function moveExternalSkillDirectory(rootId: string, direction: -1 |
 
 export async function buildUserSkillInvocation(projectId: string | undefined, name: string, sourceAlias: string | undefined, args: string): Promise<SkillInvocationResult> {
   const project = projectId ? await getProject(projectId) : undefined
-  const capabilities = resolvePluginCapabilities(project?.kind === 'workspace' ? effectiveProjectCapabilities(project) : defaultCapabilities, await pluginRuntime().store.list())
-  const catalog = await loadCatalog(projectId, capabilities.skills)
+  const capabilities = resolvePluginCapabilities(project?.kind === 'workspace' ? project.capabilities : defaultCapabilities, await pluginRuntime().store.list())
+  const catalog = await loadCatalog({ agent: { kind: 'main' }, projectId, selection: capabilities.skills })
   const named = catalog.skills.filter((skill) => !skill.summary.loadError && skill.summary.name.toLowerCase() === name.trim().toLowerCase())
   if (!named.length) return { handled: false, promptText: '', displayText: '' }
   const command = `/${name}${sourceAlias ? `@${sourceAlias}` : ''}`
@@ -870,8 +906,8 @@ export async function buildUserSkillInvocation(projectId: string | undefined, na
 const skillsIntro = "A skill is a set of local instructions to follow that is stored in a `SKILL.md` file. Below is the list of skills that can be used. Each entry includes a name, description, and the absolute path to its `SKILL.md` file."
 const skillsUsage = "- Discovery: The list above is the skills available in this session (name + description + absolute path). Skill bodies live on disk at the listed paths.\n- Trigger rules: If the user names a skill (with `$SkillName` or plain text) OR the task clearly matches a skill's description shown above, you must use that skill for that turn. Multiple mentions mean use them all. Do not carry skills across turns unless re-mentioned.\n- Missing/blocked: If a named skill isn't in the list or the path can't be read, say so briefly and continue with the best fallback.\n- How to use a skill (progressive disclosure):\n  1) After deciding to use a skill, the main agent must open the listed absolute path and read its `SKILL.md` completely before taking task actions. If a read is truncated or paginated, continue until EOF.\n  2) When `SKILL.md` references relative paths (e.g., `scripts/foo.py`), resolve them relative to the directory containing that `SKILL.md` first, and only consider other paths if needed.\n  3) If `SKILL.md` points to extra folders such as `references/`, use its routing instructions to identify the files required for the task. The main agent must read each required instruction or reference file itself before acting on it. Do not delegate reading, summarizing, or interpreting skill instructions to a subagent. Subagents may still perform task work when the selected skill allows it.\n  4) If `scripts/` exist, prefer running or patching them instead of retyping large code blocks.\n  5) If `assets/` or templates exist, reuse them instead of recreating from scratch.\n- Coordination and sequencing:\n  - If multiple skills apply, choose the minimal set that covers the request and state the order you'll use them.\n  - Announce which skill(s) you're using and why (one short line). If you skip an obvious skill, say why.\n- Context hygiene:\n  - Progressive disclosure applies to selecting relevant files, not partially reading a selected instruction file. Do not load unrelated references, scripts, or assets.\n  - Avoid deep reference-chasing: prefer opening only files directly linked from `SKILL.md` unless you're blocked.\n  - When variants exist (frameworks, providers, domains), pick only the relevant reference file(s) and note that choice.\n- Safety and fallback: If a skill can't be applied cleanly (missing files, unclear instructions), state the issue, pick the next-best approach, and continue."
 
-export async function buildSkillsPrompt(projectId?: string, selection: SkillSelection = defaultCapabilities.skills, sourceFolders?: string[], pluginTools: readonly string[] = []): Promise<string> {
-  const catalog = await loadCatalog(projectId, selection, sourceFolders, pluginTools)
+export async function buildSkillsPrompt(request: SkillCatalogRequest): Promise<string> {
+  const catalog = await loadCatalog({ ...request, selection: request.selection ?? defaultCapabilities.skills, pluginTools: request.pluginTools ?? [] })
   const winners = catalog.skills.filter((skill) => (
         !skill.summary.loadError
         && skill.summary.modelAvailable

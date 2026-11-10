@@ -5,7 +5,7 @@ import { basename } from 'node:path'
 import type { AgentThread } from '@shared/agentTypes'
 import type { CodeReviewSnapshot } from '@shared/codeReview'
 import { DEFAULT_WORKSPACE_PROJECT_ID, type AppConfigSnapshot, type AppSettings, type Project, type WorkspaceProject, type ResolvedModelConfig } from '@shared/types'
-import { assertResolvedCapabilities, capabilityFeatures, defaultCapabilities, effectiveProjectCapabilities, effectiveProjectCapabilitySettings, intersectCapabilities, mcpToolAllowed, resolvePluginCapabilities, resolveSkillSelection, toolAllowed, type AgentCapabilities, type ResolvedAgentCapabilities, type RunConfiguration } from '@shared/agentCapabilities'
+import { assertResolvedCapabilities, capabilityFeatures, defaultCapabilities, intersectCapabilities, mcpToolAllowed, resolvePluginCapabilities, resolveSkillSelection, toolAllowed, type AgentCapabilities, type ResolvedAgentCapabilities, type RunConfiguration } from '@shared/agentCapabilities'
 import { builtinToolCatalog, enabledBuiltinFileToolNames, sortToolDefinitions } from '@shared/toolRegistry'
 import { resolveToolSelection } from '@shared/toolPackages'
 import { defaultSubagentSelection, selectedSubagents } from '@shared/subagentSelection'
@@ -22,7 +22,7 @@ import { getCachedMcpRuntime, getLoadedMcpRuntime } from '../mcpRuntimeService'
 import { resolveConfiguredLanguage } from '../languageStore'
 import { getProject } from '../projectStore'
 import { describeCommandShell, getCommandShell, prepareShellCommand, resultText, runShellCommand } from '../shellRuntime'
-import { buildSkillsPrompt, listSkillSnapshot, listSubagentSkills } from '../skillsStore'
+import { buildSkillsPrompt, listSkillSnapshot, listSubagentSkills, type SkillAgentScope } from '../skillsStore'
 import type { AgentSubagentCallRecord } from './subagentTaskStore'
 import type { ConversationResourceAccess } from './conversationResourceReader'
 import { currentToolExecution } from './toolExecutionContext'
@@ -135,14 +135,14 @@ export async function prepareAgentSystemPrompt(
   codingMode?: boolean,
   toolsEnabled = true,
   projectDraft?: Project,
-  agent: 'main' | 'subagent' = 'main'
+  agent: SkillAgentScope = { kind: 'main' }
 ): Promise<{
   workspace: WorkspaceContext
   systemPrompt: ReturnType<typeof buildAgentSystemPrompt>
   simpleChatPrompt?: string
 }> {
   const project = projectDraft ?? await getProject(thread.projectId)
-  const effective = capabilities ?? resolvePluginCapabilities(project.kind === 'workspace' ? effectiveProjectCapabilities(project) : defaultCapabilities, await pluginRuntime().store.list(), agent === 'subagent')
+  const effective = capabilities ?? resolvePluginCapabilities(project.kind === 'workspace' ? project.capabilities : defaultCapabilities, await pluginRuntime().store.list(), agent.kind === 'subagent')
   const features = capabilityFeatures(effective)
   if (project.kind === 'simple_chat') {
     const defaultWorkspace = await getProject(DEFAULT_WORKSPACE_PROJECT_ID)
@@ -163,11 +163,12 @@ export async function prepareAgentSystemPrompt(
   const workspace = workspaceContext(project)
   const [memory, skills, commandShell, pluginPrompts] = await Promise.all([
     memoryPrompt(features.memory, config.settings.memoryMode === 'foreground'),
-    features.skills ? buildSkillsPrompt(project.id, effective.skills, project.sourceFolders, effective.pluginTools) : Promise.resolve(''),
+    features.skills ? buildSkillsPrompt({ agent, projectId: project.id, selection: effective.skills, sourceFolders: project.sourceFolders,
+      pluginTools: effective.pluginTools, skillDirectories: project.skillDirectories ?? [], scriptAutoApproveSkills: project.scriptAutoApproveSkills ?? [] }) : Promise.resolve(''),
     shouldIncludeCommandShell(process.platform, config.settings, features)
       ? getCommandShell().then(describeCommandShell)
       : Promise.resolve(undefined),
-    toolsEnabled ? buildPluginPrompts(effective.pluginPrompts, effective.pluginTools, agent) : Promise.resolve('')
+    toolsEnabled ? buildPluginPrompts(effective.pluginPrompts, effective.pluginTools, agent.kind) : Promise.resolve('')
   ])
   return {
     workspace,
@@ -176,7 +177,7 @@ export async function prepareAgentSystemPrompt(
       memory,
       skills,
       pluginPrompts,
-      projectPrompt: project.advancedSettings ? project.prompt : '',
+      projectPrompt: project.prompt,
       codingMode: codingMode ?? project.codingMode,
       toolsEnabled,
       commandShell
@@ -218,12 +219,12 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
   let runConfiguration = context.configuration
   if (!runConfiguration) {
     const project = options.project ?? await getProject(thread.projectId)
-    const projectPolicy = project.kind === 'workspace' ? effectiveProjectCapabilitySettings(project) : undefined
+    const projectPolicy = project.kind === 'workspace' ? project : undefined
     const ownCapabilities = resolvePluginCapabilities(activeSubagent ? activeSubagent.capabilities : projectPolicy?.capabilities ?? defaultCapabilities, await pluginRuntime().store.list(), Boolean(activeSubagent))
     const parentLimit = activeSubagent ? context.parentConfiguration?.subagentLimit : undefined
     const skillsEnabled = project.kind === 'workspace' && capabilityFeatures(ownCapabilities).skills && (!parentLimit || capabilityFeatures(parentLimit).skills)
     const globalCatalog = skillsEnabled
-      ? await listSkillSnapshot(thread.projectId, project.sourceFolders)
+      ? await listSkillSnapshot(thread.projectId, project.sourceFolders, project.skillDirectories ?? [], project.scriptAutoApproveSkills ?? [])
       : { skills: [] }
     const globalToolCatalog = project.kind === 'workspace' ? await listToolSnapshot(project.sourceFolders) : { tools: [] }
     const packageIds = activeSubagent?.id ? [activeSubagent.id] : []
@@ -263,7 +264,7 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
       customTools: structuredClone(project.kind === 'workspace'
         ? toolCatalog.tools.filter(tool => capabilities.customTools.entries.includes(tool.id)).map(tool => tool.definition!) : []),
       ...(activeSubagent ? { subagentSelectionLimit: structuredClone(rootSelection) } : {}),
-      ...(project.kind === 'workspace' && project.advancedSettings && !activeSubagent && project.compressionPrompt
+      ...(project.kind === 'workspace' && !activeSubagent && project.compressionPrompt
         ? { compressionPrompt: project.compressionPrompt } : {}),
       codingMode: activeSubagent
         ? context.parentConfiguration?.codingMode === true
@@ -275,8 +276,9 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
   }
   const capabilities = runConfiguration.capabilities
   const features = capabilityFeatures(capabilities)
+  const skillAgent: SkillAgentScope = activeSubagent ? { kind: 'subagent', id: activeSubagent.id } : { kind: 'main' }
   const { workspace, systemPrompt: rootSystemPrompt, simpleChatPrompt } = await prepareAgentSystemPrompt(
-    thread, config, capabilities, !activeSubagent && runConfiguration.codingMode, true, options.project, activeSubagent ? 'subagent' : 'main'
+    thread, config, capabilities, !activeSubagent && runConfiguration.codingMode, true, options.project, skillAgent
   )
   const simpleChat = simpleChatPrompt !== undefined
   const toolsEnabled = !simpleChat
@@ -321,7 +323,9 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
     shell: commandShell, env: shellEnvironment.env, rgExecutable: shellEnvironment.executable,
     primaryFolder: workspace.primaryFolder, trustedFolders: workspace.trustedFolders,
     skills: { projectId: thread.projectId, sourceFolders: options.project?.kind === 'workspace' ? options.project.sourceFolders : undefined,
-      selection: capabilities.skills, allowUserInvocation: !activeSubagent, pluginTools: capabilities.pluginTools },
+      skillDirectories: options.project?.kind === 'workspace' ? options.project.skillDirectories ?? [] : undefined,
+      scriptAutoApproveSkills: options.project?.kind === 'workspace' ? options.project.scriptAutoApproveSkills ?? [] : undefined,
+      selection: capabilities.skills, agent: skillAgent, pluginTools: capabilities.pluginTools },
     accessMode: createAgentAccessModeResolver(database, thread.id, context.subagentCall), signal: context.signal
   }) : undefined
   const approvalDirectories = applicationApprovalDirectories()

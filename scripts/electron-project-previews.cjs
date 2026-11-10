@@ -5,7 +5,7 @@ async function verifyProjectPreviews(application) {
   await page.reload()
   const created = await page.evaluate(async () => {
     const defaults = (await globalThis.gale.projects.list()).find(project => project.id === 'default-workspace')
-    const result = await globalThis.gale.projects.create({ ...defaults, name: 'E2E prompt tabs', advancedSettings: true })
+    const result = await globalThis.gale.projects.create({ ...defaults, name: 'E2E prompt tabs' })
     if (result.status !== 'ok') throw new Error(JSON.stringify(result.error))
     return result.value
   })
@@ -14,7 +14,7 @@ async function verifyProjectPreviews(application) {
   await page.locator('.project-details-action').filter({ hasText: /Edit|编辑/ }).click()
   const project = page.locator('.project-dialog')
   const before = await page.evaluate(() => globalThis.gale.projects.list())
-  await project.getByRole('checkbox', { name: /^(定制能力|Customize capabilities)$/ }).check()
+
   const marker = 'PROJECT_PREVIEW_UNSAVED_INSTRUCTIONS'
   const prompt = project.getByRole('textbox', { name: /^(项目提示词|Project prompt)$/ })
   await prompt.fill(marker)
@@ -31,15 +31,6 @@ async function verifyProjectPreviews(application) {
     return element.ownerDocument.defaultView.getComputedStyle(inactive).display === 'none'
       && active.getBoundingClientRect().bottom <= folders.getBoundingClientRect().top
   })).toBe(true)
-  await project.getByRole('checkbox', { name: /^(定制能力|Customize capabilities)$/ }).uncheck()
-  await expect(project.getByRole('tab', { name: /^(压缩提示词|Compression prompt)$/ })).toHaveCount(0)
-  await expect(project.getByRole('button', { name: /^(载入默认|Load default)$/ })).toHaveCount(0)
-  await project.getByRole('button', { name: /^(更多|More)$/ }).click()
-  await page.getByRole('menuitem', { name: /^(压缩提示词|Compression prompt)$/ }).click()
-  await expect(page.locator('.settings-code-preview-dialog pre')).toContainText('You are a conversation summarizer')
-  await expect(page.locator('.settings-code-preview-dialog pre')).not.toContainText('Keep citations')
-  await page.keyboard.press('Escape')
-  await project.getByRole('checkbox', { name: /^(定制能力|Customize capabilities)$/ }).check()
   await project.getByRole('tab', { name: /^(压缩提示词|Compression prompt)$/ }).click()
   await expect(compression).toHaveValue('Keep citations: {conversation}')
   await project.getByRole('tab', { name: /^(项目提示词|Project prompt)$/ }).click()

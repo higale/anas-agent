@@ -53,7 +53,7 @@ async function verifyModelRecovery(launchApplication) {
     await mkdir(join(profile, 'db/projects/default-workspace'), { recursive: true })
     await writeFile(join(profile, 'db/projects/default-workspace/project.json'), JSON.stringify({ version: 0, project: {
       id: 'default-workspace', kind: 'workspace', name: 'Model recovery test', sourceFolders: [workspace], capabilities,
-      restrict_subagents, advanced_settings: true, coding_mode: false, prompt: '', createdAt: timestamp, updatedAt: timestamp
+      restrict_subagents, coding_mode: false, prompt: '', createdAt: timestamp, updatedAt: timestamp
     } }))
     await writeFile(join(profile, 'db/projects/state.json'), JSON.stringify({ version: 0, storage_layout: 'project-directories', projects: [] }))
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))

@@ -40,7 +40,7 @@ describe.skipIf(process.platform !== 'darwin')('macOS original-command read auth
     await symlink(join(h.project, 'child'), link)
     vi.spyOn(skillsStore, 'findSkillScriptExemption').mockImplementation(async target =>
       target === script ? { skillId: 'user:query', root: h.project, script } : undefined)
-    const analyzer = createShellCommandAuthorization({ ...h.options, skills: { selection: defaultCapabilities.skills, allowUserInvocation: true } })
+    const analyzer = createShellCommandAuthorization({ ...h.options, skills: { selection: defaultCapabilities.skills, agent: { kind: 'main' as const } } })
     const args = Object.freeze({ command: `/bin/sh '${h.project}/link/../query.sh'` })
     expect((await analyzer.inspect(args))?.skillScript?.script).toBe(script)
     await rm(link)
@@ -69,7 +69,7 @@ describe.skipIf(process.platform !== 'darwin')('macOS original-command read auth
     const script = join(h.project, 'query.sh')
     await writeFile(script, 'printf SCRIPT')
     vi.spyOn(skillsStore, 'findSkillScriptExemption').mockResolvedValue({ skillId: 'user:query', root: h.project, script })
-    const analyzer = createShellCommandAuthorization({ ...h.options, skills: { selection: defaultCapabilities.skills, allowUserInvocation: true } })
+    const analyzer = createShellCommandAuthorization({ ...h.options, skills: { selection: defaultCapabilities.skills, agent: { kind: 'main' as const } } })
     const command = `'${h.project}/link/../sh' '${script}'`
     const args = Object.freeze({ command })
     expect((await analyzer.inspect(args))?.skillScript?.executor).toBe(join(h.outside, 'sh'))
@@ -95,7 +95,7 @@ describe.skipIf(process.platform !== 'darwin')('macOS original-command read auth
     const script = join(h.outside, 'query.sh')
     await writeFile(script, 'printf "%s\\n" "$@"\n')
     const grant = vi.spyOn(skillsStore, 'findSkillScriptExemption').mockResolvedValue({ skillId: 'user:query', root: h.outside, script })
-    const analyzer = createShellCommandAuthorization({ ...h.options, skills: { selection: defaultCapabilities.skills, allowUserInvocation: true } })
+    const analyzer = createShellCommandAuthorization({ ...h.options, skills: { selection: defaultCapabilities.skills, agent: { kind: 'main' as const } } })
     for (const interpreter of ['/bin/sh', 'sh']) {
       const command = `${interpreter} '${script}' --month 2026-09 'a; b && c'`
       const args = Object.freeze({ command })

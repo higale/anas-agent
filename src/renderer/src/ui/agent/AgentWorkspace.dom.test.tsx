@@ -266,7 +266,7 @@ describe('AgentWorkspace', () => {
         messageTokens: 200, attachmentTokens: 0 }
     }
     const project = { id: 'project', name: 'Project', kind: 'workspace' as const,
-      advancedSettings: true, prompt: 'Original project instructions.', codingMode: false,
+      prompt: 'Original project instructions.', codingMode: false,
       sourceFolders: ['C:/workspace'], capabilities: structuredClone(defaultCapabilities),
       restrictSubagents: false, pinned: false, collapsed: false, createdAt: '', updatedAt: '' }
     const props = { ...workspaceProps({ ...interruptedRun([]), status: state }), selectedProjectId: project.id }

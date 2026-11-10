@@ -28,7 +28,7 @@ const continuation = { config: undefined, project: undefined, continuationRunId:
   liveStatus: contextStatus() }
 const project: Project = {
   id: 'project', name: 'Project', kind: 'workspace', sourceFolders: ['C:/workspace'],
-  advancedSettings: true, prompt: 'Project instructions.', codingMode: false,
+  prompt: 'Project instructions.', codingMode: false,
   capabilities: structuredClone(defaultCapabilities), restrictSubagents: false,
   pinned: false, collapsed: false, createdAt: '', updatedAt: ''
 }

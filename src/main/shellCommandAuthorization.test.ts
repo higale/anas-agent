@@ -38,7 +38,7 @@ describe.skipIf(process.platform !== 'win32')('Windows Shell read authorization'
     await writeFile(script, 'process.stdout.write(JSON.stringify(process.argv.slice(2)))')
     const grant = { skillId: 'user:query', root: await realpath(h.outside), script: await realpath(script) }
     const exemption = vi.spyOn(skillsStore, 'findSkillScriptExemption').mockResolvedValue(grant)
-    const scope = { selection: defaultCapabilities.skills, allowUserInvocation: true }
+    const scope = { selection: defaultCapabilities.skills, agent: { kind: 'main' as const } }
     const analyzer = createShellCommandAuthorization({ ...h, skills: scope })
     const command = `& '${nodeExecutable}' '${script}' --month 2026-09 --text 'a; b && c 中文'`
     const args = Object.freeze({ command, working_dir: h.project })
@@ -62,7 +62,7 @@ describe.skipIf(process.platform !== 'win32')('Windows Shell read authorization'
     await writeFile(script, 'process.stdout.write("ok")')
     const exemption = vi.spyOn(skillsStore, 'findSkillScriptExemption').mockResolvedValue({
       skillId: 'user:query', root: h.outside, script })
-    const analyzer = createShellCommandAuthorization({ ...h, skills: { selection: defaultCapabilities.skills, allowUserInvocation: false } })
+    const analyzer = createShellCommandAuthorization({ ...h, skills: { selection: defaultCapabilities.skills, agent: { kind: 'subagent' as const } } })
     const call = `& '${nodeExecutable}' '${script}'`
     const commands: Record<string, string> = {
       sequence: `${call}; Get-Date`, pipeline: `${call} | Select-Object -First 1`, redirect: `${call} > result.txt`, and: `${call} && Get-Date`,

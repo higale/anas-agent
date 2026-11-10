@@ -211,10 +211,7 @@ async function verifyApplication(electronApplication, verifyRestart = false) {
   await expect(codingMode).not.toBeChecked()
   await codingMode.check()
   if (process.env.ANAS_E2E_CODING_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_CODING_SCREENSHOT })
-  const advancedSettings = capabilityDialog.getByRole('checkbox', { name: /^(定制能力|Customize capabilities)$/ })
-  await expect(advancedSettings).not.toBeChecked()
-  await expect(capabilityDialog.getByRole('region', { name: /^(能力|Capabilities)$/ })).toHaveCount(0)
-  await advancedSettings.check()
+  await expect(capabilityDialog.getByRole('checkbox', { name: /^(定制能力|Customize capabilities)$/ })).toHaveCount(0)
   const projectPrompt = capabilityDialog.getByRole('textbox', { name: /^(项目提示词|Project prompt)$/ })
   await projectPrompt.fill('Follow this project instruction.')
   const promptBounds = await projectPrompt.boundingBox()
@@ -232,19 +229,14 @@ async function verifyApplication(electronApplication, verifyRestart = false) {
   if (process.env.ANAS_E2E_PROJECT_PROMPT_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_PROJECT_PROMPT_SCREENSHOT })
   const folderBounds = await capabilityDialog.locator('.project-folders').boundingBox()
   assert.ok(promptBounds.y < folderBounds.y, 'The project prompt must appear before source folders.')
-  await advancedSettings.uncheck()
-  await expect(codingMode).toBeVisible()
   await expect(codingMode).toBeChecked()
   await codingMode.uncheck()
-  await expect(projectPrompt).toHaveCount(0)
-  await expect(capabilityDialog.getByRole('region', { name: /^(能力|Capabilities)$/ })).toHaveCount(0)
-  await advancedSettings.check()
   await expect(projectPrompt).toHaveValue('Follow this project instruction.')
   const capabilityPanel = capabilityDialog.getByRole('region', { name: /^(能力|Capabilities)$/ })
   await expect(capabilityPanel).toBeVisible()
   const panelBounds = await capabilityPanel.boundingBox()
   const nameBounds = await codingMode.boundingBox()
-  assert.ok(panelBounds.x > nameBounds.x + nameBounds.width, 'Advanced capabilities must appear beside project settings.')
+  assert.ok(panelBounds.x > nameBounds.x + nameBounds.width, 'Capabilities must appear beside project settings.')
   const profileToggle = capabilityDialog.getByRole('checkbox', { name: /^(资料|Profile)$/ })
   const environmentToggle = capabilityDialog.getByRole('checkbox', { name: /^(运行环境|Runtime environment information)$/ })
   const profileBounds = await profileToggle.boundingBox()
@@ -298,7 +290,6 @@ async function verifyApplication(electronApplication, verifyRestart = false) {
   await expect(capabilityDialog).not.toBeVisible()
   const scopedProject = await page.evaluate(async (id) => (await globalThis.gale.projects.list()).find((project) => project.id === id), editableProject.id)
   assert.equal(scopedProject.restrictSubagents, true)
-  assert.equal(scopedProject.advancedSettings, true)
   assert.equal(scopedProject.prompt, 'Follow this project instruction.')
   assert.equal(scopedProject.capabilities.backgroundTools, true)
   assert.equal(scopedProject.capabilities.toolMode, 'except')
@@ -411,8 +402,10 @@ async function verifySkillSourceLayout(electronApplication) {
   const skillsSection = editor.getByRole('region', { name: /^(技能|Skills)$/ })
   await skillsSection.getByRole('button', { name: /^(技能|Skills)$/ }).click()
   const editedAgentName = await editor.getByRole('textbox').first().inputValue()
-  for (const label of [/^(系统|System)\s/, /^(用户|User)\s/]) {
-    await expect(editor.locator('strong').filter({ hasText: label })).toBeVisible()
+  for (const name of [/^(系统|System)$/, /^(用户|User)$/]) {
+    const group = skillsSection.getByRole('button', { name })
+    await expect(group).toHaveAttribute('aria-expanded', 'false')
+    await group.click()
   }
   await expect(editor.getByText('project directory', { exact: true })).toHaveCount(0)
   await expect(editor.getByText('project-search', { exact: true })).toHaveCount(0)
@@ -449,16 +442,18 @@ async function verifyCapabilityToolListLayout(electronApplication) {
   await page.locator('.project-thread-group').filter({ hasText: editableProject.name }).locator('.project-thread-more').click()
   await page.locator('.project-details-action').filter({ hasText: /Edit|编辑/ }).click()
   const dialog = page.locator('.project-dialog')
-  await dialog.getByRole('checkbox', { name: /^(定制能力|Customize capabilities)$/ }).check()
+
 
   async function verifyLists(editor, context) {
+    await editor.getByRole('button', { name: 'MCP', exact: true }).click()
+    await editor.getByRole('radiogroup', { name: 'MCP', exact: true }).getByText(/^(定制|Custom)$/, { exact: true }).click()
     for (const count of [24, 100]) {
       const group = editor.getByRole('region', { name: `Layout MCP ${count}`, exact: true })
       const toggle = group.getByRole('button', { name: `Layout MCP ${count}`, exact: true })
       const picker = group.getByRole('radiogroup')
       const useAll = picker.getByRole('radio', { name: /^(全部|All)$/ })
-      await expect(picker.getByRole('radio', { name: /^(关闭|Off)$/ })).toBeChecked()
-      await expect(toggle).toHaveCount(0)
+      await expect(useAll).toBeChecked()
+      await expect(toggle).toBeVisible()
       await picker.getByText(/^(全部|All)$/, { exact: true }).click()
       await expect(useAll).toBeChecked()
       await picker.getByText(/^(定制|Custom)$/, { exact: true }).click()
@@ -478,8 +473,7 @@ async function verifyCapabilityToolListLayout(electronApplication) {
         })
       }))
       assert.equal(layout.rows.length, count)
-      assert.ok(layout.height <= 280, `${context}: tool list must remain height bounded.`)
-      assert.ok(layout.scrollHeight > layout.height, `${context}: overflowing tools must scroll.`)
+      assert.ok(layout.scrollHeight <= layout.height + 1, `${context}: tool list must grow naturally without an inner scrollbar.`)
       assert.ok(layout.scrollWidth <= layout.width + 1, `${context}: long tool names must wrap inside the list.`)
       layout.rows.forEach((row, index) => {
         assert.ok(row.height >= row.contentHeight - 1, `${context}: tool row ${index} must not compress its contents.`)
@@ -502,7 +496,7 @@ async function verifyCapabilityToolListLayout(electronApplication) {
       await expect(list).not.toBeVisible()
       await expect(useAll).toBeVisible()
       await picker.getByText(/^(全部|All)$/, { exact: true }).click()
-      await expect(toggle).toHaveCount(0)
+      await expect(toggle).toBeVisible()
       await expect(list).not.toBeVisible()
     }
   }
@@ -830,7 +824,7 @@ async function verifyCodingMode(electronApplication) {
     await open()
     await expect(mode).not.toBeChecked()
     await mode.check()
-    await dialog.getByRole('checkbox', { name: /^(定制能力|Customize capabilities)$/ }).uncheck()
+
     if (process.env.ANAS_E2E_CODING_SCREENSHOT) {
       await page.screenshot({ path: process.env.ANAS_E2E_CODING_SCREENSHOT.replace(/\.png$/, `-${language}.png`) })
     }

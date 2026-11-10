@@ -1,6 +1,5 @@
 import { getAppSettings } from '../config/appConfig'
 import { getProject } from '../projectStore'
-import { effectiveProjectCapabilities } from '@shared/agentCapabilities'
 import { withApplicationDataMutation } from '../applicationDataSnapshot'
 import { ToolInputError } from '../../runtime/errors'
 import { validatePreferenceText } from './preferenceMemoryStore'
@@ -68,7 +67,7 @@ export async function createConversationInstance(thread: AgentThread, database: 
       const [settings, currentProject] = await Promise.all([getAppSettings(), getProject(thread.projectId)])
       signal?.throwIfAborted()
       const memory = database.memoryStore.preferences
-      if (!memory || settings.memoryMode !== 'foreground' || currentProject.kind !== 'workspace' || !effectiveProjectCapabilities(currentProject).memory) {
+      if (!memory || settings.memoryMode !== 'foreground' || currentProject.kind !== 'workspace' || !currentProject.capabilities.memory) {
         throw new ToolInputError('Foreground memory is disabled.')
       }
       const head = owner.store.readHead(thread.id)

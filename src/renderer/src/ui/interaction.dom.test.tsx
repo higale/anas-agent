@@ -2,11 +2,11 @@ import { ProjectOperationFailure } from '@shared/projectOperation'
 import { PROJECT_ICON_NAMES } from '@shared/projectAppearance'
 import { defaultCapabilities, } from '@shared/agentCapabilities'
 import axe from 'axe-core'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useRef, useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_WORKSPACE_PROJECT_ID, type AppConfigSnapshot, type Project, type SelectedAttachment } from '@shared/types'
+import { DEFAULT_WORKSPACE_PROJECT_ID, type AppConfigSnapshot, type Project, type SelectedAttachment, type SkillSnapshot } from '@shared/types'
 import type { AgentSystemContextPreviewInput, AgentThread } from '@shared/agentTypes'
 import { AgentTaskPlan } from './agent/AgentTaskPlan'
 import { ThreadTopbar } from './agent/ThreadTopbar'
@@ -222,7 +222,7 @@ describe('renderer interaction accessibility', () => {
     const project: Project = kind === 'simple_chat'
       ? preferredProject
       : {
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, advancedSettings: true, ...preferredProject, kind: 'workspace', sourceFolders: ['D:/project'] }
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, ...preferredProject, kind: 'workspace', sourceFolders: ['D:/project'] }
     render(<ProjectDialog open kind={kind} project={project} config={modelPickerConfig(true)}
       onClose={onClose} onSave={vi.fn()} />)
     const nameInput = screen.getByRole('textbox', { name: 'project.name' })
@@ -854,7 +854,7 @@ describe('renderer interaction accessibility', () => {
     const onTogglePinned = vi.fn()
     const onStartChat = vi.fn()
     const project: Project = {
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, advancedSettings: true, prompt: '',
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
       id: 'project-1',
       kind: 'workspace',
       name: 'Project',
@@ -897,7 +897,7 @@ describe('renderer interaction accessibility', () => {
     const onTogglePinned = vi.fn()
     const openSourceFolder = vi.fn(async () => '/workspace')
     const project: Project = {
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, advancedSettings: true, prompt: '',
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
       id: 'project-1',
       kind: 'workspace',
       name: 'Project',
@@ -953,7 +953,7 @@ describe('renderer interaction accessibility', () => {
     const onOpenThread = vi.fn()
     const onTogglePinned = vi.fn()
     const project: Project = {
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, advancedSettings: true, prompt: '',
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
       id: 'project-1',
       kind: 'workspace',
       name: 'Project',
@@ -1080,7 +1080,7 @@ describe('renderer interaction accessibility', () => {
   it('opens project details and thread actions from the topbar', async () => {
     const user = userEvent.setup()
     const project: Project = {
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, advancedSettings: true, prompt: '',
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
       id: 'project-1',
       kind: 'workspace',
       name: 'Project',
@@ -1129,7 +1129,7 @@ describe('renderer interaction accessibility', () => {
   it('groups the default workspace with workspace projects and italicizes its name', async () => {
     const user = userEvent.setup()
     const workspace: Project = {
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, advancedSettings: true, prompt: '',
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
       id: 'workspace-project',
       kind: 'workspace',
       name: 'Workspace project',
@@ -1150,7 +1150,7 @@ describe('renderer interaction accessibility', () => {
       updatedAt: '2026-08-13T00:00:00.000Z'
     }
     const defaultWorkspace: Project = {
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, advancedSettings: true, prompt: '',
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
       id: DEFAULT_WORKSPACE_PROJECT_ID,
       kind: 'workspace',
       name: 'Default Workspace',
@@ -1332,30 +1332,66 @@ describe('renderer interaction accessibility', () => {
     expect(onClose).toHaveBeenCalledOnce()
   })
 
-  it('starts new project customization with all custom tools and retains explicit changes across toggles', async () => {
+  it.each(['default', 'off'] as const)('preserves saved subagent Skill grants when switching from %s to custom and editing a project Skill', async mode => {
+    const user = userEvent.setup(), onSave = vi.fn().mockResolvedValue(undefined)
+    const root: SkillSnapshot['roots'][number] = { id: 'project', kind: 'project', name: 'Project', path: '/project/.agents/skills', shortcutAlias: 'project', available: true, removable: false }
+    const local: SkillSnapshot['skills'][number] = { id: 'project:guide', rootId: root.id, name: 'guide', description: 'Local guide', source: 'project', rootName: root.name,
+      dirPath: root.path + '/guide', relativePath: 'guide', shortcutAlias: root.shortcutAlias, modelAvailable: true, userAvailable: true, scriptAutoApprove: false, linked: false }
+    const ownedRoot = { ...root, id: 'subagent:reviewer:skill', kind: 'subagent' as const, name: 'Reviewer', path: '/reviewer/skills' }
+    const owned = { ...local, id: 'subagent:reviewer:skill:owned', name: 'owned', rootId: ownedRoot.id, source: 'subagent' as const, userAvailable: false }
+    const resources = { skills: { scriptAutoApprove: false, roots: [ownedRoot], skills: [owned] }, tools: [] }
+    let resolveResources!: (value: typeof resources) => void
+    const pending = new Promise<typeof resources>(resolve => { resolveResources = resolve })
+    Object.defineProperty(window, 'gale', { configurable: true, value: { ...capabilityApis,
+      skills: { get: vi.fn(async () => ({ scriptAutoApprove: false, roots: [root], skills: [local] })) },
+      config: { subagentResources: vi.fn(() => pending) } } })
+    const project: Project = { id: 'project', kind: 'workspace', name: 'Project', sourceFolders: ['/project'],
+      codingMode: false, prompt: '', capabilities: { ...structuredClone(defaultCapabilities), skills: { ...defaultCapabilities.skills, mode, entries: [
+        { id: local.id, model: true, shortcut: true }, { id: owned.id, model: true, shortcut: false }
+      ] } }, restrictSubagents: true,
+      pinned: false, collapsed: false, createdAt: '', updatedAt: '' }
+    const config = { ...modelPickerConfig(), subagents: [{ id: 'reviewer', name: 'reviewer', index: 0, enabled: true, builtIn: false,
+      description: '', systemPrompt: '', capabilities: structuredClone(defaultCapabilities) }] }
+    render(<ProjectDialog open kind="workspace" project={project} config={config} onClose={vi.fn()} onSave={onSave} />)
+    await user.click(screen.getByRole('button', { name: 'settings.capability_skills' }))
+    await user.click(screen.getByRole('button', { name: 'settings.skill_group_project' }))
+    const localModel = await screen.findByRole('checkbox', { name: 'guide capabilities.model' })
+    expect(localModel).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'project.add_skill_directories' })).toBeEnabled()
+    await user.click(within(screen.getByRole('radiogroup', { name: 'settings.capability_skills' })).getByRole('radio', { name: 'capabilities.custom' }))
+    expect(localModel).toBeDisabled()
+    await act(async () => { resolveResources(resources); await pending })
+    expect(localModel).toBeEnabled()
+    await user.click(localModel)
+    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ capabilities: expect.objectContaining({ skills: expect.objectContaining({ mode: 'custom',
+      entries: expect.arrayContaining([
+        { id: local.id, model: false, shortcut: true },
+        { id: owned.id, model: true, shortcut: false }
+      ]) }) }) }))
+  })
+
+  it('starts new projects with all custom tools and saves explicit changes', async () => {
     const user = userEvent.setup(), onSave = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(window, 'gale', { configurable: true, value: { ...capabilityApis,
       projects: { chooseSourceFolders: vi.fn(async () => ({ status: 'ok', value: ['/workspace'] })) } } })
     render(<ProjectDialog open kind="workspace" onClose={vi.fn()} onSave={onSave} />)
     await user.click(screen.getByRole('button', { name: 'project.add_folders' }))
-    const customize = screen.getByRole('checkbox', { name: 'project.advanced_settings' })
-    expect(customize).not.toBeChecked()
-    await user.click(customize)
+    expect(screen.queryByRole('checkbox', { name: 'project.advanced_settings' })).not.toBeInTheDocument()
     const tools = within(screen.getByRole('radiogroup', { name: 'custom_tools.title' }))
     expect(tools.getByRole('radio', { name: 'capabilities.all' })).toBeChecked()
     await user.click(tools.getByRole('radio', { name: 'capabilities.off' }))
-    await user.click(customize); await user.click(customize)
     expect(within(screen.getByRole('radiogroup', { name: 'custom_tools.title' })).getByRole('radio', { name: 'capabilities.off' })).toBeChecked()
     await user.click(screen.getByRole('button', { name: 'project.create' }))
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ advancedSettings: true,
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       capabilities: expect.objectContaining({ customTools: expect.objectContaining({ mode: 'off' }), pluginMode: 'default', mcp: { defaultMode: 'all', servers: [] } }) }))
   })
 
-  it('edits all default workspace settings except its name and preserves drafts when customization is toggled', async () => {
+  it('edits all default workspace settings except its name and preserves prompt drafts across tabs', async () => {
     const user = userEvent.setup()
     const onSave = vi.fn().mockResolvedValue(undefined)
     const defaultWorkspace: Project = {
- capabilities: { ...structuredClone(defaultCapabilities), memory: false }, restrictSubagents: false, codingMode: false, advancedSettings: true,
+ capabilities: { ...structuredClone(defaultCapabilities), memory: false }, restrictSubagents: false, codingMode: false,
       prompt: 'Saved project instructions', compressionPrompt: 'Saved summary: {conversation}',
       id: DEFAULT_WORKSPACE_PROJECT_ID,
       kind: 'workspace',
@@ -1383,7 +1419,6 @@ describe('renderer interaction accessibility', () => {
     expect(name).toHaveValue('Default Workspace')
     expect(screen.getByRole('button', { name: 'project.add_folders' })).toBeEnabled()
     expect(screen.getByRole('region', { name: 'settings.capabilities' })).toBeVisible()
-    expect(screen.getByRole('checkbox', { name: 'project.advanced_settings' })).toBeChecked()
     expect(screen.getByRole('checkbox', { name: 'settings.capability_profile' })).toBeChecked()
     await user.click(screen.getByRole('checkbox', { name: 'settings.capability_profile' }))
     await user.click(screen.getByRole('checkbox', { name: 'capabilities.restrict_subagents' }))
@@ -1399,10 +1434,7 @@ describe('renderer interaction accessibility', () => {
     const compression = screen.getByRole('textbox', { name: 'settings.view_context_compression_prompt' })
     expect(compression).toHaveValue('Saved summary: {conversation}')
     fireEvent.change(compression, { target: { value: 'Edited summary: {conversation}' } })
-    await user.click(screen.getByRole('checkbox', { name: 'project.advanced_settings' }))
-    expect(screen.queryByLabelText('settings.capabilities')).not.toBeInTheDocument()
-    expect(screen.queryByRole('textbox', { name: 'settings.view_context_compression_prompt' })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('checkbox', { name: 'project.advanced_settings' }))
+    await user.click(screen.getByRole('tab', { name: 'project.project_prompt' }))
     expect(screen.getByRole('textbox', { name: 'project.project_prompt' })).toHaveValue('Edited project instructions')
     expect(screen.getByRole('checkbox', { name: 'settings.capability_profile' })).not.toBeChecked()
     await user.click(screen.getByRole('button', { name: 'project.choose_icon' }))
@@ -1415,7 +1447,7 @@ describe('renderer interaction accessibility', () => {
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       name: 'Default Workspace', sourceFolders: ['/another-workspace'],
       icon: 'braces', modelConfigId: 'model-1', modelParameterPresetId: null,
-      advancedSettings: true, codingMode: true, prompt: 'Edited project instructions', compressionPrompt: 'Edited summary: {conversation}',
+      codingMode: true, prompt: 'Edited project instructions', compressionPrompt: 'Edited summary: {conversation}',
       capabilities: { ...defaultCapabilities, memory: false, profile: false }, restrictSubagents: true
     }))
     expect(screen.getByText('common.default')).toHaveClass('project-default-badge')
@@ -1426,7 +1458,7 @@ describe('renderer interaction accessibility', () => {
   it('marks the first project folder as primary and promotes another folder by reordering', async () => {
     const user = userEvent.setup()
     const project: Project = {
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, advancedSettings: true, prompt: '',
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
       id: 'project-1',
       kind: 'workspace',
       name: 'Workspace',
@@ -1456,7 +1488,7 @@ describe('renderer interaction accessibility', () => {
       .toHaveTextContent('/workspace/additional')
     await user.click(screen.getByRole('button', { name: 'common.save' }))
     expect(onSave).toHaveBeenCalledWith({
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, advancedSettings: true, prompt: '',
+      skillDirectories: [], scriptAutoApproveSkills: [], capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
       kind: 'workspace',
       name: 'Workspace',
       sourceFolders: ['/workspace/additional', '/workspace/primary']
@@ -1466,7 +1498,7 @@ describe('renderer interaction accessibility', () => {
   it.each(['workspace-project', DEFAULT_WORKSPACE_PROJECT_ID])('edits tool permissions independently of capabilities in project %s', async (id) => {
     const user = userEvent.setup()
     const project: Project = { id, kind: 'workspace', name: 'Permissions', sourceFolders: ['/workspace'],
-      codingMode: false, advancedSettings: false, prompt: '', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false,
+      codingMode: false, prompt: '', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false,
       pinned: false, collapsed: false, createdAt: '2026-10-06T00:00:00Z', updatedAt: '2026-10-06T00:00:00Z' }
     const onSave = vi.fn().mockResolvedValue(project)
     const onClose = vi.fn()
@@ -1482,7 +1514,7 @@ describe('renderer interaction accessibility', () => {
     await waitFor(() => expect(access).toHaveTextContent('chat.access_full'))
     expect(onSave).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: 'common.save' }))
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ accessMode: 'full_access', advancedSettings: false }))
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ accessMode: 'full_access', }))
 
     view.rerender(<ProjectDialog open kind="workspace" project={{ ...project, accessMode: 'full_access' }} config={modelPickerConfig(true)} onClose={onClose} onSave={onSave} />)
     await user.click(access)
@@ -1527,7 +1559,7 @@ describe('renderer interaction accessibility', () => {
     const user = userEvent.setup()
     const project: Project = {
       id: 'appearance-project', kind: 'workspace', name: 'Appearance', sourceFolders: ['D:/project'],
-      codingMode, icon, iconColor, advancedSettings: false, prompt: '',
+      codingMode, icon, iconColor, prompt: '',
       capabilities: structuredClone(defaultCapabilities), restrictSubagents: false,
       pinned: false, collapsed: false, createdAt: '2026-09-08T00:00:00Z', updatedAt: '2026-09-08T00:00:00Z'
     }
@@ -1545,7 +1577,7 @@ describe('renderer interaction accessibility', () => {
     const user = userEvent.setup()
     const project: Project = {
       id: 'appearance-project', kind: 'workspace', name: 'Appearance', sourceFolders: ['D:/project'],
-      codingMode: false, icon: 'brain', iconColor: 'blue', advancedSettings: false, prompt: '',
+      codingMode: false, icon: 'brain', iconColor: 'blue', prompt: '',
       capabilities: structuredClone(defaultCapabilities), restrictSubagents: false,
       pinned: false, collapsed: false, createdAt: '2026-09-08T00:00:00Z', updatedAt: '2026-09-08T00:00:00Z'
     }
@@ -1572,7 +1604,7 @@ describe('renderer interaction accessibility', () => {
     const user = userEvent.setup()
     const project: Project = {
       id: 'coding-project', kind: 'workspace', name: 'Coding', sourceFolders: ['D:/project'],
-      codingMode: false, advancedSettings: false, prompt: '', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false,
+      codingMode: false, prompt: '', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false,
       pinned: false, collapsed: false, createdAt: '2026-09-08T00:00:00Z', updatedAt: '2026-09-08T00:00:00Z'
     }
     const saved = { ...project, codingMode: true, icon: 'braces' as const }
@@ -1595,7 +1627,7 @@ describe('renderer interaction accessibility', () => {
     expect(mode()).toBeChecked()
     expect(onClose).toHaveBeenCalledOnce()
     await user.click(screen.getByRole('button', { name: 'common.save' }))
-    expect(onSave).toHaveBeenLastCalledWith(expect.objectContaining({ codingMode: true, advancedSettings: false, icon: 'braces' }))
+    expect(onSave).toHaveBeenLastCalledWith(expect.objectContaining({ codingMode: true, icon: 'braces' }))
     expect(onClose).toHaveBeenCalledTimes(2)
     rerender(<ProjectDialog {...props} project={saved} open={false} />)
     rerender(<ProjectDialog {...props} project={saved} open />)
@@ -1609,13 +1641,12 @@ describe('renderer interaction accessibility', () => {
   it('edits both prompt tabs as one project draft and restores default compression by clearing it', async () => {
     const user = userEvent.setup(), onSave = vi.fn(), onClose = vi.fn()
     const project: Project = { id: 'summary-project', kind: 'workspace', name: 'Summary', sourceFolders: ['D:/project'],
-      codingMode: false, advancedSettings: false, prompt: 'Retained project rules', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false,
+      codingMode: false, prompt: 'Retained project rules', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false,
       pinned: false, collapsed: false, createdAt: '2026-09-06T00:00:00Z', updatedAt: '2026-09-06T00:00:00Z' }
     const view = render(<ProjectDialog open kind="workspace" project={project} onClose={onClose} onSave={onSave} />)
     const compression = () => screen.getByRole('textbox', { name: 'settings.view_context_compression_prompt' })
-    expect(screen.queryByRole('tab', { name: 'settings.view_context_compression_prompt' })).not.toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'settings.view_context_compression_prompt' })).toBeVisible()
     expect(screen.queryByRole('button', { name: 'project.load_default_prompt' })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('checkbox', { name: 'project.advanced_settings' }))
     await user.click(screen.getByRole('tab', { name: 'project.project_prompt' }))
     await user.tab()
     expect(screen.getByRole('textbox', { name: 'project.project_prompt' })).toHaveFocus()
@@ -1633,9 +1664,7 @@ describe('renderer interaction accessibility', () => {
     await user.click(screen.getByRole('button', { name: 'project.load_default_prompt' }))
     expect((compression() as HTMLTextAreaElement).value).toContain('Coding continuation handoff')
     fireEvent.change(compression(), { target: { value: 'Keep citations: {conversation}' } })
-    await user.click(screen.getByRole('checkbox', { name: 'project.advanced_settings' }))
-    expect(screen.queryByRole('textbox', { name: 'settings.view_context_compression_prompt' })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('checkbox', { name: 'project.advanced_settings' }))
+    await user.click(screen.getByRole('tab', { name: 'project.project_prompt' }))
     expect(screen.getByRole('textbox', { name: 'project.project_prompt' })).toHaveValue('Retained project rules')
     await user.click(screen.getByRole('tab', { name: 'settings.view_context_compression_prompt' }))
     expect(compression()).toHaveValue('Keep citations: {conversation}')
@@ -1644,7 +1673,7 @@ describe('renderer interaction accessibility', () => {
     fireEvent.change(compression(), { target: { value: 'Keep citations: {conversation}' } })
     await user.click(screen.getByRole('button', { name: 'common.save' }))
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ compressionPrompt: 'Keep citations: {conversation}', prompt: project.prompt }))
-    const saved = { ...project, advancedSettings: true, compressionPrompt: 'Keep citations: {conversation}' }
+    const saved = { ...project, compressionPrompt: 'Keep citations: {conversation}' }
     view.rerender(<ProjectDialog open kind="workspace" project={saved} onClose={onClose} onSave={onSave} />)
     await user.click(screen.getByRole('tab', { name: 'settings.view_context_compression_prompt' }))
     await user.clear(compression())
@@ -1658,23 +1687,20 @@ describe('renderer interaction accessibility', () => {
     expect(saved.compressionPrompt).toBe('Keep citations: {conversation}')
   })
 
-  it('hides advanced fields without discarding their draft values', async () => {
+  it('edits capabilities and prompts directly without a master switch', async () => {
     const user = userEvent.setup()
     const onSave = vi.fn()
     const project: Project = {
       id: 'advanced-project', kind: 'workspace', name: 'Advanced', sourceFolders: ['D:/project'],
-      codingMode: false, advancedSettings: false, prompt: 'Saved rules', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false,
+      codingMode: false, prompt: 'Saved rules', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false,
       pinned: false, collapsed: false, createdAt: '2026-09-06T00:00:00Z', updatedAt: '2026-09-06T00:00:00Z'
     }
     render(<ProjectDialog open kind="workspace" project={project} onClose={vi.fn()} onSave={onSave} />)
-    const advanced = screen.getByRole('checkbox', { name: 'project.advanced_settings' })
+    expect(screen.queryByRole('checkbox', { name: 'project.advanced_settings' })).not.toBeInTheDocument()
     const coding = screen.getByRole('checkbox', { name: 'project.coding_mode' })
     expect(coding).not.toBeChecked()
     await user.click(coding)
-    expect(advanced.closest('footer')).not.toBeNull()
-    expect(screen.queryByRole('textbox', { name: 'project.project_prompt' })).toBeNull()
-    expect(screen.queryByText('settings.capabilities')).toBeNull()
-    await user.click(advanced)
+    expect(screen.getByRole('region', { name: 'settings.capabilities' })).toBeVisible()
     const prompt = screen.getByRole('textbox', { name: 'project.project_prompt' })
     expect(prompt).toHaveClass('ui-textarea')
     expect(prompt).not.toHaveClass('project-prompt-input')
@@ -1684,23 +1710,19 @@ describe('renderer interaction accessibility', () => {
     await user.type(prompt, 'New rules')
     await user.click(screen.getByText('settings.capabilities'))
     await user.click(screen.getByRole('checkbox', { name: 'settings.capability_workspaceContext' }))
-    await user.click(advanced)
-    expect(screen.queryByRole('textbox', { name: 'project.project_prompt' })).toBeNull()
     expect(coding).toBeVisible()
     expect(coding).toBeChecked()
-    await user.click(advanced)
     expect(screen.getByRole('textbox', { name: 'project.project_prompt' })).toHaveValue('New rules')
-    await user.click(advanced)
     await user.click(screen.getByRole('button', { name: 'common.save' }))
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
-      codingMode: true, advancedSettings: false, prompt: 'New rules', capabilities: expect.objectContaining({ workspace: false })
+      codingMode: true, prompt: 'New rules', capabilities: expect.objectContaining({ workspace: false })
     }))
   })
 
   it('prefers the first source folder name for a workspace project', async () => {
     const user = userEvent.setup()
     const onSave = vi.fn(async () => ({
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, advancedSettings: true, prompt: '',
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
       id: 'project-1',
       kind: 'workspace' as const,
       name: '未命名项目',
@@ -1728,13 +1750,13 @@ describe('renderer interaction accessibility', () => {
       />
     )
 
-    await waitFor(() => expect(capabilityApis.skills.get).toHaveBeenLastCalledWith(undefined, []))
+    await waitFor(() => expect(capabilityApis.skills.get).toHaveBeenLastCalledWith(undefined, [], []))
     await user.click(screen.getByRole('button', { name: 'project.add_folders' }))
-    await waitFor(() => expect(capabilityApis.skills.get).toHaveBeenLastCalledWith(undefined, ['/workspace']))
+    await waitFor(() => expect(capabilityApis.skills.get).toHaveBeenLastCalledWith(undefined, ['/workspace'], []))
     await user.click(screen.getByRole('button', { name: 'project.create' }))
 
     expect(onSave).toHaveBeenCalledWith({
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, advancedSettings: false, prompt: '',
+      skillDirectories: [], scriptAutoApproveSkills: [], capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
       kind: 'workspace',
       name: 'workspace',
       sourceFolders: ['/workspace']

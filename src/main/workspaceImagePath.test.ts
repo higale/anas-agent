@@ -10,7 +10,7 @@ const roots: string[] = []
 
 function workspaceProject(sourceFolder: string): WorkspaceProject {
   return {
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, advancedSettings: true, prompt: '',
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
     id: 'workspace-project',
     kind: 'workspace',
     name: 'Workspace',

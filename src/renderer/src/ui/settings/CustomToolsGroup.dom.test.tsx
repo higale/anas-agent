@@ -40,6 +40,14 @@ async function openGroup(button: HTMLElement): Promise<void> {
   if (toggle) await userEvent.click(toggle)
 }
 
+const capabilityToggle = (name: string | RegExp, enabled = true) => within(screen.getByRole('radiogroup', { name }))
+  .getByRole('radio', { name: enabled ? 'capabilities.on' : 'capabilities.off' })
+
+function openToolCapabilities() {
+  fireEvent.click(screen.getByRole('button', { name: 'custom_tools.title' }))
+  fireEvent.click(screen.getByRole('button', { name: 'settings.skill_group_user' }))
+}
+
 describe('custom tool settings', () => {
   async function commandFixture(present = true) {
     const source = 'user' as const
@@ -392,6 +400,72 @@ describe('custom tool settings', () => {
     expect(detail.queryByText('custom_tools.group_empty')).not.toBeInTheDocument()
   })
 
+  it.each([true, false])('keeps the parameter view and expanded files while saving availability from %s', async enabled => {
+    serverTools = [{ ...toolPackageFixture(definition), enabled }]
+    let finish!: () => void
+    const setEnabled = vi.fn(async (id: string, next: boolean) => {
+      await new Promise<void>(resolve => { finish = resolve })
+      serverTools = serverTools.map(tool => tool.id === id ? { ...tool, enabled: next } : tool)
+    })
+    const file = { name: 'TOOL.json', relativePath: 'TOOL.json', path: '/tools/TOOL.json', kind: 'text' }
+    vi.stubGlobal('gale', { tools: { ...toolApi, setEnabled, listFiles: vi.fn(async () => [file]) } })
+    render(<Harness />)
+    await openGroup(await screen.findByRole('button', { name: /^settings.skill_group_user/ }))
+    await userEvent.click(within(document.querySelector('.settings-skill-tree') as HTMLElement).getByRole('button', { name: /^submit_result/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'custom_tools.expand' }))
+    const source = screen.getByRole('radio', { name: 'settings.file_source' })
+    await userEvent.click(source)
+    const checkbox = screen.getByRole('checkbox', { name: 'settings.enabled' })
+    await userEvent.click(checkbox)
+    expect(setEnabled).toHaveBeenCalledExactlyOnceWith('stable', !enabled)
+    expect(checkbox).toBeDisabled()
+    expect(source).toBeEnabled()
+    expect(source).toBeChecked()
+    expect(screen.getByRole('button', { name: 'custom_tools.edit_information' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'TOOL.json' })).toBeVisible()
+    await act(async () => finish())
+    await waitFor(() => expect(checkbox).toBeEnabled())
+    expect(checkbox).toHaveProperty('checked', !enabled)
+    expect(source).toBeChecked()
+    expect(screen.getByRole('button', { name: 'TOOL.json' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'custom_tools.collapse' })).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it.each([false, true])('retains availability after a failed save and preserves file navigation during a retry (pending read %s)', async pendingRead => {
+    serverTools = [{ ...toolPackageFixture(definition), enabled: true }]
+    let finish!: () => void
+    const setEnabled = vi.fn().mockRejectedValueOnce(new Error('Write failed')).mockImplementation(async (id: string, enabled: boolean) => {
+      await new Promise<void>(resolve => { finish = resolve })
+      serverTools = serverTools.map(tool => tool.id === id ? { ...tool, enabled } : tool)
+    })
+    const file = { name: 'TOOL.json', relativePath: 'TOOL.json', path: '/tools/TOOL.json', kind: 'text' }
+    let finishRead!: () => void
+    vi.stubGlobal('gale', { tools: { ...toolApi, setEnabled, listFiles: vi.fn(async () => [file]),
+      readFile: vi.fn(async () => {
+        if (pendingRead) await new Promise<void>(resolve => { finishRead = resolve })
+        return { ...file, content: 'tool manifest', size: 13, editable: false }
+      }) } })
+    render(<Harness />)
+    await openGroup(await screen.findByRole('button', { name: /^settings.skill_group_user/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'submit_result' }))
+    await userEvent.click(screen.getByRole('button', { name: 'custom_tools.expand' }))
+    const checkbox = screen.getByRole('checkbox', { name: 'settings.enabled' })
+    await userEvent.click(checkbox)
+    await waitFor(() => expect(notice.error).toHaveBeenCalledWith('Write failed', { id: 'settings-tool-status' }))
+    expect(checkbox).toBeChecked()
+    expect(checkbox).toBeEnabled()
+    await userEvent.click(checkbox)
+    await userEvent.click(screen.getByRole('button', { name: 'TOOL.json' }))
+    if (!pendingRead) expect(await screen.findByText('tool manifest')).toBeVisible()
+    await act(async () => finish())
+    await waitFor(() => expect(toolApi.refresh).toHaveBeenCalled())
+    if (pendingRead) await act(async () => finishRead())
+    expect(await screen.findByText('tool manifest')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'TOOL.json', current: true })).toBeVisible()
+    await userEvent.click(within(document.querySelector('.settings-skill-tree') as HTMLElement).getByRole('button', { name: /^submit_result/ }))
+    expect(screen.getByRole('checkbox', { name: 'settings.enabled' })).not.toBeChecked()
+  })
+
   it.each(['user', 'external'] as const)('keeps page creation and import actions visible while browsing (%s)', async source => {
     const user = userEvent.setup()
     const tool = { ...toolPackageFixture(definition), source, rootId: source }
@@ -493,17 +567,18 @@ describe('custom tool settings', () => {
     const mode = within(screen.getByRole('radiogroup', { name: 'custom_tools.title' }))
     expect(mode.getByRole('radio', { name: 'capabilities.all' })).toBeChecked()
     fireEvent.click(mode.getByRole('radio', { name: 'capabilities.custom' }))
-    expect(screen.queryByRole('checkbox', { name: 'User submit_result' })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'custom_tools.title' }))
-    fireEvent.click(screen.getByRole('checkbox', { name: 'User submit_result' }))
+    expect(screen.queryByRole('radiogroup', { name: 'User submit_result' })).toBeNull()
+    openToolCapabilities()
+    fireEvent.click(capabilityToggle('User submit_result'))
     for (const name of ['capabilities.all', 'capabilities.off']) {
       fireEvent.click(mode.getByRole('radio', { name }))
-      expect(screen.queryByRole('checkbox', { name: 'User submit_result' })).toBeNull()
+      expect(capabilityToggle('User submit_result', name === 'capabilities.all')).toBeChecked()
+      expect(capabilityToggle('User submit_result')).toBeDisabled()
     }
     fireEvent.click(mode.getByRole('radio', { name: 'capabilities.custom' }))
-    expect(screen.getByRole('checkbox', { name: 'User submit_result' })).toBeChecked()
-    expect(screen.getByRole('checkbox', { name: 'User other_tool' })).not.toBeChecked()
-    if (subagent) expect(screen.getByRole('checkbox', { name: 'custom_tools.project_tools' })).toBeChecked()
+    expect(capabilityToggle('User submit_result')).toBeChecked()
+    expect(capabilityToggle('User other_tool', false)).toBeChecked()
+    if (subagent) expect(capabilityToggle('custom_tools.project_tools')).toBeChecked()
   })
   it('shows the project tools grant in the collapsed subagent summary independently of individual tools', () => {
     function Capabilities() {
@@ -515,7 +590,7 @@ describe('custom tool settings', () => {
     expect(heading).toHaveAttribute('aria-expanded', 'false')
     expect(heading).toHaveTextContent('0/0 + custom_tools.project_tools_summary')
     fireEvent.click(heading)
-    fireEvent.click(screen.getByRole('checkbox', { name: 'custom_tools.project_tools' }))
+    fireEvent.click(capabilityToggle('custom_tools.project_tools', false))
     fireEvent.click(heading)
     expect(heading).toHaveTextContent(/0\/0$/)
   })
@@ -532,9 +607,10 @@ describe('custom tool settings', () => {
     render(<Capabilities />)
     fireEvent.click(screen.getByRole('button', { name: 'custom_tools.title' }))
     for (const name of ['settings.skill_group_user', 'Shared', 'capabilities.other_tools']) expect(screen.getByText(name)).toBeVisible()
-    expect(Boolean(screen.queryByText('Project'))).toBe(!subagent)
-    expect(screen.getByRole('checkbox', { name: 'missing' })).toBeChecked()
-    fireEvent.click(screen.getByRole('checkbox', { name: 'missing' }))
+    expect(Boolean(screen.queryByRole('button', { name: 'settings.skill_group_project' }))).toBe(!subagent)
+    fireEvent.click(screen.getByRole('button', { name: 'capabilities.other_tools' }))
+    expect(capabilityToggle('missing')).toBeChecked()
+    fireEvent.click(capabilityToggle('missing', false))
     expect(screen.queryByText('capabilities.other_tools')).toBeNull()
   })
   it.each([['', 0], ['0', 0], ['7200', 7200]] as const)('saves the timeout draft %s as %s seconds', async (value, timeoutSeconds) => {
@@ -553,15 +629,15 @@ describe('custom tool settings', () => {
     const props = { value: { ...defaultCapabilities, backgroundTools: false, customTools: selectedTools(['stable']) },
       customTools: [toolPackageFixture({ ...definition, interactive: true })], onChange: vi.fn() }
     const view = render(<CapabilityEditor {...props} />)
-    fireEvent.click(screen.getByRole('button', { name: 'custom_tools.title' }))
-    expect(screen.getByRole('checkbox', { name: 'User submit_result' })).toBeChecked()
+    openToolCapabilities()
+    expect(capabilityToggle('User submit_result')).toBeChecked()
     expect(screen.getByText('custom_tools.requires_background')).toBeVisible()
     const count = screen.getByRole('button', { name: 'custom_tools.title' }).querySelector('small')
     expect(count).toHaveTextContent(/^1\/1$/)
     view.rerender(<CapabilityEditor {...props} value={{ ...props.value, backgroundTools: true }} />)
     expect(screen.queryByText('custom_tools.requires_background')).toBeNull()
     expect(count).toHaveTextContent(/^1\/1$/)
-    expect(screen.getByRole('checkbox', { name: 'User submit_result' })).toBeChecked()
+    expect(capabilityToggle('User submit_result')).toBeChecked()
   })
   it('edits disabled tools and background-dependent tools without making them effective', () => {
     function DisabledTools() {
@@ -573,12 +649,12 @@ describe('custom tool settings', () => {
       ]} />
     }
     render(<DisabledTools />)
-    fireEvent.click(screen.getByRole('button', { name: 'custom_tools.title' }))
+    openToolCapabilities()
     for (const name of ['User submit_result', 'User interactive']) {
-      const checkbox = screen.getByRole('checkbox', { name })
-      expect(checkbox).toBeEnabled()
-      fireEvent.click(checkbox)
-      expect(checkbox).toBeChecked()
+      const toggle = capabilityToggle(name)
+      expect(toggle).toBeEnabled()
+      fireEvent.click(toggle)
+      expect(toggle).toBeChecked()
     }
     expect(screen.getByRole('button', { name: 'custom_tools.title' }).querySelector('small')).toHaveTextContent(/^2\/2$/)
     expect(screen.getByText('capabilities.inactive')).toBeVisible()
@@ -590,9 +666,9 @@ describe('custom tool settings', () => {
     const props = { value: { ...defaultCapabilities, backgroundTools: false, customTools: selectedTools(['project-tool', 'stable']) },
       customTools: [projectTool, toolPackageFixture(definition)], onChange: vi.fn() }
     const view = render(<CapabilityEditor {...props} />)
-    fireEvent.click(screen.getByRole('button', { name: 'custom_tools.title' }))
+    openToolCapabilities()
     expect(screen.queryByText('custom_tools.shadowed')).toBeNull()
-    expect(screen.getByRole('checkbox', { name: 'User submit_result' })).toBeChecked()
+    expect(capabilityToggle('User submit_result')).toBeChecked()
     view.rerender(<CapabilityEditor {...props} value={{ ...props.value, backgroundTools: true }} />)
     expect(screen.getByText('custom_tools.shadowed')).toBeVisible()
   })
@@ -681,13 +757,14 @@ describe('custom tool settings', () => {
     const onChange = vi.fn()
     const props = { subagent, value: { ...defaultCapabilities, customTools: selectedTools(['stable']) }, onChange }
     const { rerender } = render(<CapabilityEditor {...props} customTools={[toolPackageFixture(definition)]} />)
-    fireEvent.click(screen.getByRole('button', { name: 'custom_tools.title' }))
-    expect(screen.getByRole('checkbox', { name: 'User submit_result' })).toBeChecked()
+    openToolCapabilities()
+    expect(capabilityToggle('User submit_result')).toBeChecked()
     rerender(<CapabilityEditor {...props} customTools={[toolPackageFixture({ ...definition, name: 'renamed' }), toolPackageFixture({ ...definition, id: 'new', name: 'new_tool' })]} />)
-    expect(screen.getByRole('checkbox', { name: 'User renamed' })).toBeChecked()
-    expect(screen.getByRole('checkbox', { name: 'User new_tool' })).not.toBeChecked()
+    expect(capabilityToggle('User renamed')).toBeChecked()
+    expect(capabilityToggle('User new_tool', false)).toBeChecked()
     rerender(<CapabilityEditor {...props} customTools={[]} />)
-    fireEvent.click(screen.getByRole('checkbox', { name: /stable/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'capabilities.other_tools' }))
+    fireEvent.click(capabilityToggle(/stable/, false))
     expect(onChange.mock.lastCall?.[0].customTools).toMatchObject(selectedTools())
   })
 })

@@ -185,7 +185,7 @@ async function verifyLifecycleAction(launchApplication, action) {
       const modelConfigId = models.providers.find((provider) => provider.id === providerId).models[0].id
       await api.config.selectDefaultModel(modelConfigId)
       const projectResult = await api.projects.create({ kind: 'workspace', name: 'PTY lifecycle', sourceFolders: [workspace],
-        advancedSettings: true, codingMode: true, prompt: '', restrictSubagents: false,
+        codingMode: true, prompt: '', restrictSubagents: false,
         capabilities: { profile: false, environment: false, workspace: true, memory: false, applicationEnvironment: false,
           backgroundTools: true, subagents: { mode: 'off', names: [] }, planning: false, toolMode: 'selected',
           tools: ['run_shell', 'read_call', 'read_call_output', 'write_call', 'wait_call', 'cancel_call'],

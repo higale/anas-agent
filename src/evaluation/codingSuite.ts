@@ -205,7 +205,7 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
       })
       const project = await createProject({
         kind: 'workspace', name: 'Fixed coding evaluation', sourceFolders: [workspace],
-        codingMode, advancedSettings: true, restrictSubagents: task.subagent?.restrict ?? false, prompt: '',
+        codingMode, restrictSubagents: task.subagent?.restrict ?? false, prompt: '',
         capabilities: capabilities(enabledTools, Boolean(task.subagent))
       })
       storage = AgentStorage.openNative(getDataDir())

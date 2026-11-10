@@ -14,7 +14,7 @@ import * as mcpRuntimeService from '../mcpRuntimeService'
 import { defineContentTool } from '../../runtime/toolDefinition'
 import { z } from 'zod/v3'
 import Database from 'better-sqlite3'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeAll, afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -117,7 +117,7 @@ describe('prepareAgentSystemPrompt workspace context', () => {
 
   it('includes a tagged workspace context when the task has a project', async () => {
     const project: Project = {
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, advancedSettings: true, prompt: '',
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
       id: 'project-1',
       name: 'Anas',
       kind: 'workspace',
@@ -264,6 +264,10 @@ describe('captureAgentSystemPrompt', () => {
     if (project.kind !== 'workspace') throw new Error('Expected a workspace fixture.')
     project.prompt = 'Use the unsaved project instructions.'
     project.sourceFolders = [testPaths.root]
+    const customSkills = join(testPaths.root, 'draft-skills')
+    await mkdir(join(customSkills, 'draft-guide'), { recursive: true })
+    await writeFile(join(customSkills, 'draft-guide', 'SKILL.md'), '---\nname: draft-guide\ndescription: Unsaved custom skill.\n---\nUse draft instructions.')
+    project.skillDirectories = [customSkills]
     project.codingMode = true
     projectStoreMocks.getProject.mockRejectedValue(new Error('Must use the draft.'))
     memoryStoreMocks.buildMemoryRulesPrompt.mockResolvedValue('')
@@ -273,6 +277,7 @@ describe('captureAgentSystemPrompt', () => {
       expect(prompt).toContain(project.prompt)
       expect(prompt).toContain(testPaths.root)
       expect(prompt).toContain('<coding_instruction>')
+      expect(prompt).toContain(join(customSkills, 'draft-guide', 'SKILL.md'))
       expect(projectStoreMocks.getProject).not.toHaveBeenCalled()
     } finally { database.close() }
   })
@@ -549,7 +554,7 @@ describe('native model request preview', () => {
       id: interactive ? 'interactive' : 'ordinary', name: interactive ? 'ask_custom' : 'read_custom',
       description: 'Custom fixture.', command: 'node fixture.cjs {{args}}', inputSchema: { type: 'object', properties: {} } }))
     vi.mocked(toolsStore.listToolSnapshot).mockResolvedValue({ roots: [], tools: snapshot.customTools })
-    projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), advancedSettings: true,
+    projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(),
       capabilities: { ...structuredClone(defaultCapabilities), backgroundTools, subagents: { mode: 'off' as const, names: [] }, planning: false,
         toolMode: 'selected', tools: [], customTools: selectedTools(['ordinary', ...(selected ? ['interactive'] : [])]),
         mcp: { defaultMode: 'selected', servers: [] } } })
@@ -574,7 +579,7 @@ describe('native model request preview', () => {
       snapshot.mcpServers = ['beta', 'alpha'].map((id, index) => ({
         id, index, name: id, enabled: true, type: 'stdio', command: 'unused', args: [], env: {}, workingDir: '', timeoutMs: 1000, url: ''
       }))
-      projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), advancedSettings: true,
+      projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(),
         capabilities: { ...structuredClone(defaultCapabilities), subagents: { mode: 'off' as const, names: [] }, planning: true,
           toolMode: 'selected', tools: ['http_request', 'run_shell', 'read_file'], customTools: selectedTools(['first', 'second']),
           mcp: { defaultMode: 'all', servers: [{ id: 'alpha', mode: 'selected', tools: ['mcp_alpha_only'] }] } } })
@@ -649,7 +654,7 @@ describe('native model request preview', () => {
     const snapshot = previewConfig()
     snapshot.providers[0].models[0].capabilities.vision = vision
     snapshot.defaultModel = resolveProviderModelConfig(snapshot.providers[0], snapshot.providers[0].models[0])
-    projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), advancedSettings: true,
+    projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(),
       capabilities: { ...structuredClone(defaultCapabilities), ...(selected ? { toolMode: 'selected', tools: ['view_multiple_images'] } : {}) } })
     const database = openDatabase()
     try {
@@ -661,16 +666,15 @@ describe('native model request preview', () => {
   })
 
   it.each([
-    { mode: 'custom' as const, names: ['researcher', 'disabled-agent'], advanced: true, expected: ['researcher'] },
-    { mode: 'custom' as const, names: [], advanced: true, expected: [] },
-    { mode: 'off' as const, names: ['general-purpose', 'researcher'], advanced: true, expected: [] as string[] },
-    { mode: 'default' as const, names: [], advanced: true, expected: ['general-purpose', 'researcher'] },
-    { mode: 'custom' as const, names: [], advanced: false, expected: ['general-purpose', 'researcher'] }
-  ])('advertises only project-selected subagents ($mode, advanced $advanced, names $names)', async ({ mode, names, advanced, expected }) => {
+    { mode: 'custom' as const, names: ['researcher', 'disabled-agent'], expected: ['researcher'] },
+    { mode: 'custom' as const, names: [], expected: [] },
+    { mode: 'off' as const, names: ['general-purpose', 'researcher'], expected: [] as string[] },
+    { mode: 'default' as const, names: [], expected: ['general-purpose', 'researcher'] }
+  ])('advertises only project-selected subagents ($mode, names $names)', async ({ mode, names, expected }) => {
     const snapshot = previewConfig()
     snapshot.subagents = [snapshot.subagents[0], { ...snapshot.subagents[0], name: 'researcher', description: 'Research only' },
       { ...snapshot.subagents[0], name: 'disabled-agent', enabled: false }]
-    projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), advancedSettings: advanced,
+    projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(),
       restrictSubagents: false, capabilities: { ...structuredClone(defaultCapabilities), subagents: { mode, names } } })
     const database = openDatabase()
     try {
@@ -683,7 +687,7 @@ describe('native model request preview', () => {
         expect(start.description.includes(`- ${name}:`)).toBe(expected.includes(name))
       }
       const supervision = expect.arrayContaining(['read_subagent', 'wait_subagent', 'cancel_subagent'])
-      if (mode === 'off' && advanced) expect(tools.map((entry: { name: string }) => entry.name)).not.toEqual(supervision)
+      if (mode === 'off') expect(tools.map((entry: { name: string }) => entry.name)).not.toEqual(supervision)
       else expect(tools.map((entry: { name: string }) => entry.name)).toEqual(supervision)
     } finally { database.close() }
   })
@@ -854,7 +858,7 @@ describe('native run configuration freezing', () => {
   it.each([false, true])('freezes coding mode %s across recreation and reopen, then refreshes the next run', async codingMode => {
     const snapshot = previewConfig()
     appConfigMocks.getAppConfigSnapshot.mockResolvedValue(snapshot)
-    const project = { ...defaultWorkspaceProject(), codingMode, advancedSettings: false, compressionPrompt: 'Keep sources: {conversation}' }
+    const project = { ...defaultWorkspaceProject(), codingMode, compressionPrompt: 'Keep sources: {conversation}' }
     projectStoreMocks.getProject.mockResolvedValue(project)
     const file = join(testPaths.root, `coding-configuration-${codingMode}.sqlite`)
     let database = openDatabase(file)
@@ -869,7 +873,7 @@ describe('native run configuration freezing', () => {
       await initial.dispose()
       const configuration = database.runs.getRunConfiguration(identity)!
       expect(configuration.codingMode).toBe(codingMode)
-      expect(configuration.compressionPrompt).toBeUndefined()
+      expect(configuration.compressionPrompt).toBe(project.compressionPrompt)
       expect(configuration.capabilities).toMatchObject({ memory: true, workspace: true, toolMode: 'all' })
       expect((await prepareAgentSystemPrompt(owner, snapshot)).systemPrompt.text.includes('<coding_instruction>')).toBe(codingMode)
       await pauseForRules(database, identity)
@@ -894,10 +898,10 @@ describe('native run configuration freezing', () => {
     } finally { database.close() }
   })
 
-  it('retains a running task compression template after customization is disabled and refreshes the next run', async () => {
+  it('retains a running task compression template after the project template is cleared and refreshes the next run', async () => {
     const snapshot = previewConfig()
     appConfigMocks.getAppConfigSnapshot.mockResolvedValue(snapshot)
-    const project = { ...defaultWorkspaceProject(), advancedSettings: true, compressionPrompt: 'Keep sources: {conversation}' }
+    const project = { ...defaultWorkspaceProject(), compressionPrompt: 'Keep sources: {conversation}' }
     projectStoreMocks.getProject.mockResolvedValue(project)
     const file = join(testPaths.root, 'compression-configuration.sqlite')
     let database = openDatabase(file)
@@ -915,7 +919,7 @@ describe('native run configuration freezing', () => {
         { requestId: run.id, prepareWorkspace: false, providerFetch }, database.execution)
       expect(database.runs.getRunConfiguration(identity)?.compressionPrompt).toBe(project.compressionPrompt)
       await initial.dispose()
-      projectStoreMocks.getProject.mockResolvedValue({ ...project, advancedSettings: false })
+      projectStoreMocks.getProject.mockResolvedValue({ ...project, compressionPrompt: undefined })
       database.close(); database = openDatabase(file)
       for (const phase of ['resumed', 'next', 'enabled'] as const) {
         if (phase !== 'resumed') {

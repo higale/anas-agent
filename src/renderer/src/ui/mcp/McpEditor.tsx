@@ -1,7 +1,7 @@
 import { useId, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AppConfigSnapshot, McpServerType, McpToolStatus } from '@shared/types'
-import { CheckboxField } from '../CheckboxField'
+import { CheckboxButton } from '../CheckboxButton'
 import { CommitNumberInput } from '../CommitNumberInput'
 import { CommitTextInput, CommitTextarea } from '../CommitTextField'
 import { SearchableOptionPicker } from '../SearchableOptionPicker'
@@ -41,8 +41,8 @@ export function McpEditor({
 
   return (
     <div className="ui-editor">
-      <div className="settings-mcp-enabled-row ui-row">
-        <CheckboxField
+      <div className="ui-toolbar">
+        <CheckboxButton
           checked={mcpDraft.enabled}
           disabled={disabled}
           label={t('settings.enabled')}

@@ -96,7 +96,9 @@
 
 .ui-disclosure-trigger {
   cursor: pointer;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
+  width: fit-content;
+  max-width: 100%;
   padding: 0;
   border: 0;
   background: transparent;
@@ -1363,11 +1365,11 @@ fieldset.ui-form-section {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   justify-content: start;
-  gap: var(--ui-check-gap, 8px);
+  gap: var(--ui-check-gap);
   min-height: var(--control-height);
-  color: var(--text-subtle);
+  color: var(--text-secondary);
   font-size: var(--font-size-ui);
-  font-weight: var(--ui-check-font-weight, 600);
+  font-weight: var(--ui-check-font-weight, 400);
   line-height: var(--font-line-height-ui);
   cursor: pointer;
 }
@@ -1376,13 +1378,62 @@ fieldset.ui-form-section {
   min-height: 0;
 }
 
-.ui-checkbox {
+.ui-checkbox,
+.ui-radio {
+  flex: 0 0 auto;
   width: var(--control-checkbox-size);
   height: var(--control-checkbox-size);
   margin: 0;
-  accent-color: var(--control-mark);
+  padding: 0;
   cursor: pointer;
   outline: none;
+}
+
+.ui-radio {
+  appearance: auto;
+  accent-color: var(--control-mark);
+}
+
+.ui-checkbox {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.ui-checkbox::before {
+  width: calc(1em + 2px);
+  height: calc(1em + 2px);
+  background: currentColor;
+  /* Match the Square, Check and Minus icons used by the shared controls. */
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1'%3E%3Crect width='18' height='18' x='3' y='3' rx='2'/%3E%3C/svg%3E") center / contain no-repeat;
+  content: '';
+}
+
+.ui-checkbox:checked,
+.ui-checkbox:indeterminate {
+  color: var(--success);
+}
+
+.ui-checkbox:checked::before {
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+}
+
+.ui-checkbox:indeterminate::before {
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M5 12h14'/%3E%3C/svg%3E");
+}
+
+.ui-checkbox:focus-visible,
+.ui-radio:focus-visible {
+  outline: 2px solid var(--accent-focus);
+  outline-offset: 2px;
+}
+
+.ui-checkbox-field:has(> .ui-checkbox:not(:disabled)):hover {
+  color: var(--text);
 }
 
 .ui-checkbox-field-label {
@@ -1391,13 +1442,31 @@ fieldset.ui-form-section {
   gap: 6px;
   min-width: 0;
   flex-wrap: wrap;
-  line-height: var(--control-checkbox-size);
-  transform: translateY(-1px);
+  line-height: var(--font-line-height-ui);
 }
 
-.ui-checkbox-field:has(.ui-checkbox:disabled),
-.ui-checkbox:disabled {
-  cursor: default;
+.ui-checkbox-field:has(> .ui-checkbox:disabled),
+.ui-check-card:has(> :is(.ui-checkbox, .ui-radio):disabled),
+.ui-checkbox:disabled,
+.ui-radio:disabled {
+  cursor: not-allowed;
+}
+
+.ui-checkbox:disabled,
+.ui-radio:disabled,
+.ui-checkbox:disabled + .ui-checkbox-field-label,
+.ui-check-card > :is(.ui-checkbox, .ui-radio):disabled + span {
+  opacity: 0.48;
+}
+
+@media (forced-colors: active) {
+  .ui-checkbox {
+    appearance: auto;
+  }
+
+  .ui-checkbox::before {
+    content: none;
+  }
 }
 
 .ui-check-card {
@@ -1406,12 +1475,12 @@ fieldset.ui-form-section {
   min-width: 0;
   overflow-wrap: anywhere;
   align-items: start;
-  column-gap: var(--ui-check-card-gap, var(--ui-check-gap, 8px));
+  column-gap: var(--ui-check-card-gap, var(--ui-check-gap));
   row-gap: var(--ui-check-card-row-gap, 3px);
   padding: var(--ui-check-card-padding, 9px);
 }
 
-.ui-check-card > .ui-checkbox {
+.ui-check-card > :is(.ui-checkbox, .ui-radio) {
   margin-top: 1px;
 }
 
@@ -2082,6 +2151,7 @@ button.ui-avatar:has(> img):focus-visible,
   box-shadow: 0 0 0 3px var(--accent-focus);
 }
 
+.ui-checkbox-button,
 .ui-segmented-control {
   display: inline-flex;
   flex: 0 0 auto;
@@ -2099,6 +2169,20 @@ button.ui-avatar:has(> img):focus-visible,
   display: flex;
   flex: 1 0 auto;
   min-width: 0;
+}
+
+.ui-checkbox-button,
+.ui-segmented-option.ui-checkbox-field {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 12px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.ui-segmented-option.ui-checkbox-field {
+  min-height: 0;
 }
 
 .ui-segmented-control[data-item-width="equal"] {
@@ -2135,24 +2219,9 @@ button.ui-avatar:has(> img):focus-visible,
   content: none;
 }
 
-.ui-segmented-control[data-selection="multiple"] > .ui-segmented-option > span {
-  gap: 6px;
-  font-weight: 400;
-}
-
 .ui-segmented-control[data-selection="multiple"] > .ui-segmented-option::before {
   background: var(--text-secondary);
   opacity: 0.3;
-}
-
-.ui-segmented-check {
-  flex: 0 0 auto;
-  width: 1em;
-  height: 1em;
-}
-
-.ui-segmented-option > input:checked + span > .ui-segmented-check {
-  color: var(--success);
 }
 
 .ui-segmented-icon {
@@ -2160,7 +2229,7 @@ button.ui-avatar:has(> img):focus-visible,
   margin-inline-end: 6px;
 }
 
-.ui-segmented-option > span {
+.ui-segmented-option > input[type="radio"] + span {
   display: inline-flex;
   flex: 1;
   align-items: center;
@@ -2173,23 +2242,31 @@ button.ui-avatar:has(> img):focus-visible,
   cursor: pointer;
 }
 
-.ui-segmented-control:not([data-selection="multiple"]) > .ui-segmented-option > input:not(:disabled):not(:checked) + span:hover,
-.ui-segmented-control[data-selection="multiple"] > .ui-segmented-option > input:not(:disabled) + span:hover {
+.ui-segmented-option > input[type="radio"]:not(:disabled):not(:checked) + span:hover,
+.ui-checkbox-button:has(> .ui-checkbox:not(:disabled)):hover,
+.ui-segmented-option.ui-checkbox-field:has(> .ui-checkbox:not(:disabled)):hover {
   background: var(--bg-muted);
   color: var(--text);
 }
 
-.ui-segmented-control:not([data-selection="multiple"]) > .ui-segmented-option > input:checked + span {
+.ui-segmented-option > input[type="radio"]:checked + span {
   background: var(--control-segment-selected-bg);
   color: var(--text-strong);
 }
 
-.ui-segmented-option > input:focus-visible + span {
+.ui-segmented-option > input[type="radio"]:focus-visible + span,
+.ui-checkbox-button:has(> .ui-checkbox:focus-visible),
+.ui-segmented-option.ui-checkbox-field:has(> .ui-checkbox:focus-visible) {
   outline: 2px solid var(--accent-focus);
   outline-offset: -2px;
 }
 
-.ui-segmented-option > input:disabled + span {
+.ui-checkbox-button > .ui-checkbox:focus-visible,
+.ui-segmented-option > .ui-checkbox:focus-visible {
+  outline: none;
+}
+
+.ui-segmented-option > input[type="radio"]:disabled + span {
   opacity: 0.48;
   cursor: not-allowed;
 }

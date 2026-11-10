@@ -52,4 +52,19 @@ describe('SegmentedMultiSelect', () => {
     await user.click(screen.getByText('User'))
     expect(onChange).toHaveBeenCalledTimes(1)
   })
+
+  it('preserves group and option names and inherits fieldset disabling', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    render(<fieldset disabled><SegmentedMultiSelect ariaLabel="Skill availability"
+      options={[{ value: 'model', label: 'Model', ariaLabel: 'Weather model access', checked: true }]}
+      onChange={onChange} /></fieldset>)
+    const group = screen.getByRole('group', { name: 'Skill availability' })
+    const checkbox = screen.getByRole('checkbox', { name: 'Weather model access' })
+    expect(group).toContainElement(checkbox)
+    expect(checkbox).toBeChecked()
+    expect(checkbox).toBeDisabled()
+    await user.click(screen.getByText('Model'))
+    expect(onChange).not.toHaveBeenCalled()
+  })
 })

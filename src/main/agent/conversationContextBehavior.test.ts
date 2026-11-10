@@ -607,7 +607,7 @@ describe('ConversationContextRuntime', () => {
         { kind: 'coding_instruction' as const, content: '<coding_instruction>Inspect, edit and verify.</coding_instruction>' },
         { kind: 'runtime_context' as const, content: '<environment>Windows</environment>' },
         {
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, advancedSettings: true, prompt: '', kind: 'workspace' as const, content: 'Workspace: C:\\project' },
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, prompt: '', kind: 'workspace' as const, content: 'Workspace: C:\\project' },
         { kind: 'memory' as const, content: '<memory>Remember this.</memory>' },
         { kind: 'skills' as const, content: '<skills>Search skill.</skills>' }
       ]

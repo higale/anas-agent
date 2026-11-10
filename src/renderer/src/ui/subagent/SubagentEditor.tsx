@@ -11,7 +11,6 @@ import type {
 import { findProviderModelConfig } from '@shared/modelConfig'
 import { ModelPicker } from '../model/ModelPicker'
 import { ModelParameterPresetPicker } from '../model/ModelParameterPresetPicker'
-import { CheckboxField } from '../CheckboxField'
 import { CommitTextInput, CommitTextarea } from '../CommitTextField'
 import { UI_TEXTAREA_ROWS_COMPACT } from '../uiConstants'
 import { CapabilityEditor } from '../CapabilityEditor'
@@ -48,7 +47,6 @@ export function SubagentEditor({
   const selectedPreset = draft.modelParameterPresetId === undefined
     ? selectedModel?.defaultParameterPresetId : draft.modelParameterPresetId
   if (draft.builtIn) return <div className="ui-form-section settings-subagent-editor">
-    <CheckboxField checked={draft.enabled} label={t('settings.enabled')} onChange={enabled => onUpdate({ enabled })} />
     <div className="ui-field-stack">
       <span className="ui-field-label">{t('settings.subagent_identifier')}</span>
       <div>{draft.name}</div>
@@ -62,14 +60,6 @@ export function SubagentEditor({
   </div>
   return (
     <div className="ui-form-section settings-subagent-editor">
-      <div className="ui-toolbar ui-toolbar-between">
-        <CheckboxField
-          checked={draft.enabled}
-          label={t('settings.enabled')}
-          onChange={(enabled) => onUpdate({ enabled })}
-        />
-      </div>
-
       <div className="ui-form-section">
         <div className="ui-field-stack">
           <div className="ui-toolbar ui-toolbar-between">

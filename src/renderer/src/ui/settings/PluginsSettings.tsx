@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { pluginDisplayText, pluginHomePolicy, pluginIconSources, type PluginSummary, type PluginViewOptions, type PluginInstallPreview } from '@shared/plugins'
 import { errorDetail } from '@shared/recovery'
 import { CheckboxField } from '../CheckboxField'
+import { CheckboxButton } from '../CheckboxButton'
 import { ConfirmDialog } from '../dialogs/ConfirmDialog'
 import { notice } from '../notice'
 import { SegmentedControl } from '../SegmentedControl'
@@ -76,7 +77,7 @@ function PluginHeading({ plugin, busy, onEnabledChange }: { plugin: PluginSummar
         <strong className="plugin-label"><PluginIcon icon={pluginIconSources(plugin.id, plugin.manifest?.icon)} onError={() => setIconFailed(true)} />{pluginDisplayText(plugin, i18n.language)}</strong>
         <small>{[plugin.id, plugin.manifest?.pluginVersion].filter(Boolean).join(' · ')}</small>
       </div>
-      <CheckboxField checked={plugin.enabled} disabled={busy || saving || Boolean(plugin.error)} label={t('settings.enabled')} onChange={enabled => void save(enabled)} />
+      <CheckboxButton checked={plugin.enabled} disabled={busy || saving || Boolean(plugin.error)} label={t('settings.enabled')} onChange={enabled => void save(enabled)} />
     </div>
     {iconFailed && <div className="ui-note ui-note-danger" role="alert">{t('plugins.icon_failed')}</div>}
   </>

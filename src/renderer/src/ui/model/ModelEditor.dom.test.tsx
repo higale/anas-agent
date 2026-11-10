@@ -688,7 +688,6 @@ describe('model token controls', () => {
     const heading = screen.getByText('settings.model_parameter_preset_parameters')
       .closest('.ui-field-heading') as HTMLElement
     const defaultToggle = within(heading).getByRole('checkbox', { name: 'common.default' })
-    expect(defaultToggle.closest('.ui-checkbox-field')).toHaveClass('ui-checkbox-field-inline')
     expect(defaultToggle).toBeChecked()
 
     await user.click(defaultToggle)

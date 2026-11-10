@@ -80,7 +80,8 @@
   --scroll-thumb-hover: #b3b3b3;
   --scroll-track: transparent;
   --control-height: max(30px, calc(var(--font-line-height-ui) + 12px));
-  --control-checkbox-size: 16px;
+  --control-checkbox-size: max(16px, calc(var(--font-size-ui) + 2px));
+  --ui-check-gap: 6px;
   --control-radius: 7px;
   --control-font-size: var(--font-size-ui);
   --control-padding-x: 10px;

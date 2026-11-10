@@ -22,6 +22,7 @@ import type { SkillSnapshot, McpToolStatus, RuntimeToolStatus } from '@shared/ty
 import { CapabilityEditor } from '../CapabilityEditor'
 import { notice } from '../notice'
 import { CheckboxField } from '../CheckboxField'
+import { CheckboxButton } from '../CheckboxButton'
 import type { AgentAccessMode } from '@shared/agentTypes'
 import { ComposerAccessPicker } from '../chat/ComposerAccessPicker'
 import { ModelPicker } from '../model/ModelPicker'
@@ -37,7 +38,6 @@ import { compressionPromptError, COMPRESSION_PROMPT_MAX_LENGTH, summaryPromptFor
 import { getLanguageOptions, resolveLanguagePreference } from '../../i18n'
 import { UI_TEXTAREA_ROWS_COMPACT } from '../uiConstants'
 import type { ToolSnapshot } from '@shared/toolPackages'
-import { ProjectResources } from './ProjectResources'
 
 export type ProjectCreationKind = ProjectKind | 'coding'
 
@@ -61,11 +61,13 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
   const [iconColor, setIconColor] = useState<ProjectIconColor>()
   const [projectTools, setProjectTools] = useState<ToolSnapshot>()
   const [sourceFolders, setSourceFolders] = useState<string[]>([])
+  const [skillDirectories, setSkillDirectories] = useState<string[]>([])
+  const [choosingSkills, setChoosingSkills] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [compressionPrompt, setCompressionPrompt] = useState('')
   const [promptTab, setPromptTab] = useState('project')
   const compressionError = compressionPromptError(compressionPrompt)
-  const [advancedSettings, setAdvancedSettings] = useState(defaultProjectSettings.advancedSettings)
+  const [scriptAutoApproveSkills, setScriptAutoApproveSkills] = useState<string[]>([])
   const [codingMode, setCodingMode] = useState(defaultProjectSettings.codingMode)
   const [capabilities, setCapabilities] = useState(() => structuredClone(defaultCapabilities))
   const [restrictSubagents, setRestrictSubagents] = useState(defaultRestrictSubagents)
@@ -96,11 +98,11 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
     }
     return simpleChat
       ? { ...preferences, kind: 'simple_chat', prompt }
-      : { ...preferences, kind: 'workspace', sourceFolders,
+      : { ...preferences, kind: 'workspace', sourceFolders, skillDirectories,
         capabilities: config ? removeEmptyMissingMcpSelections(capabilities, new Set(config.mcpServers.map((server) => server.id))) : capabilities,
-        restrictSubagents, prompt, advancedSettings, codingMode, ...(accessMode !== 'smart_approval' ? { accessMode } : {}), ...(compressionPrompt.trim() ? { compressionPrompt } : {}) }
-  }, [accessMode, advancedSettings, capabilities, codingMode, compressionPrompt, config, icon, iconColor, iconData, modelConfigId,
-    modelParameterPresetId, name, prompt, restrictSubagents, simpleChat, sourceFolders, t])
+        restrictSubagents, prompt, scriptAutoApproveSkills, codingMode, ...(accessMode !== 'smart_approval' ? { accessMode } : {}), ...(compressionPrompt.trim() ? { compressionPrompt } : {}) }
+  }, [accessMode, scriptAutoApproveSkills, capabilities, codingMode, compressionPrompt, config, icon, iconColor, iconData, modelConfigId,
+    modelParameterPresetId, name, prompt, restrictSubagents, simpleChat, sourceFolders, skillDirectories, t])
 
   useEffect(() => {
     if (!open) return
@@ -110,8 +112,9 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
     setIconData(project?.iconData)
     setIconColor(project?.iconColor)
     setSourceFolders(project?.kind === 'workspace' ? project.sourceFolders : [])
+    setSkillDirectories(project?.kind === 'workspace' ? project.skillDirectories ?? [] : [])
     setPrompt(project?.prompt ?? defaultProjectSettings.prompt)
-    setAdvancedSettings(project?.kind === 'workspace' ? project.advancedSettings : defaultProjectSettings.advancedSettings)
+    setScriptAutoApproveSkills(project?.kind === 'workspace' ? project.scriptAutoApproveSkills ?? [] : [])
     setCodingMode(initialCodingMode)
     setCapabilities(structuredClone(project?.kind === 'workspace' ? project.capabilities : defaultCapabilities))
     setRestrictSubagents(project?.kind === 'workspace' ? project.restrictSubagents : defaultRestrictSubagents)
@@ -119,7 +122,7 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
     setModelConfigId(project?.modelConfigId)
     setModelParameterPresetId(project?.modelParameterPresetId)
     setCompressionPrompt(project?.kind === 'workspace' ? project.compressionPrompt ?? '' : '')
-    setPromptTab(project?.kind === 'workspace' && project.advancedSettings ? 'project' : 'compression')
+    setPromptTab('project')
     setBusy(false)
     dragDepthRef.current = 0
     setDragActive(false)
@@ -161,11 +164,11 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
     if (!open || simpleChat) return
     let disposed = false
     setSkills(undefined)
-    void window.gale.skills.get(project?.id, sourceFolders)
+    void window.gale.skills.get(project?.id, sourceFolders, skillDirectories)
       .then((snapshot) => { if (!disposed) setSkills(snapshot) })
       .catch((reason) => { if (!disposed) notice.error(t('chat.failed_load_app'), { description: projectErrorDescription(reason, t) }) })
     return () => { disposed = true }
-  }, [open, simpleChat, project?.id, sourceFolders, t])
+  }, [open, simpleChat, project?.id, sourceFolders, skillDirectories, t])
   useEffect(() => {
     let cancelled = false
     setProjectTools(undefined)
@@ -185,6 +188,18 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
 
   function setPrimarySourceFolder(folder: string): void {
     setSourceFolders((current) => [folder, ...current.filter((item) => item !== folder)])
+  }
+
+  async function chooseSkillDirectories(): Promise<void> {
+    setChoosingSkills(true)
+    try {
+      const selected = unwrapProjectResult(await window.gale.projects.chooseSkillDirectories())
+      if (selected.length) setSkillDirectories(current => [...new Set([...current, ...selected])])
+    } catch (reason) {
+      notice.error(t('project.failed_choose_skill_directories'), { description: projectErrorDescription(reason, t) })
+    } finally {
+      setChoosingSkills(false)
+    }
   }
 
   async function chooseSourceFolders(): Promise<void> {
@@ -254,7 +269,7 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
         <Dialog.Overlay className="ui-backdrop" />
         <Dialog.Content
           asChild
-          className={`ui-dialog ui-dialog-medium ui-dialog-font-scaled ui-dialog-centered ui-dialog-fixed-footer ui-popover project-dialog${!simpleChat && advancedSettings ? ' ui-dialog-split' : ''}`}
+          className={`ui-dialog ui-dialog-medium ui-dialog-font-scaled ui-dialog-centered ui-dialog-fixed-footer ui-popover project-dialog${!simpleChat ? ' ui-dialog-split' : ''}`}
           onPointerDownOutside={(event) => event.preventDefault()}
           onOpenAutoFocus={(event) => {
             if (!defaultWorkspace) {
@@ -315,7 +330,7 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
                     />
                   </div>
 
-                  {!simpleChat && advancedSettings && <Tabs.Root value={promptTab} onValueChange={setPromptTab}
+                  {!simpleChat && <Tabs.Root value={promptTab} onValueChange={setPromptTab}
                     className="ui-field-stack ui-field-stack-fill project-prompt-tabs">
                     <div className="ui-toolbar ui-toolbar-between">
                       <Tabs.List className="ui-tab-list" aria-label={t('project.prompt_tabs')}>
@@ -342,9 +357,6 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
                       </div>
                     </Tabs.Content>
                   </Tabs.Root>}
-                  {!advancedSettings && compressionError && <div className="ui-field-hint ui-status-danger">
-                    {t('project.compression_prompt_invalid')}
-                  </div>}
 
                   <section className="ui-field-stack">
                     <div className="ui-row-between">
@@ -448,19 +460,23 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
                       />
                     </div>
                   </div>
-                  {!simpleChat && !advancedSettings && <ProjectResources skills={skills} tools={projectTools} />}
                 </div>
               </div>
-              {!simpleChat && advancedSettings && <section className="ui-dialog-pane ui-form-section" aria-label={t('settings.capabilities')}>
+              {!simpleChat && <section className="ui-dialog-pane ui-form-section" aria-label={t('settings.capabilities')}>
                 <h3 className="ui-dialog-title">{t('settings.capabilities')}</h3>
-                <CapabilityEditor customTools={projectTools?.tools} value={capabilities} skills={skills} mcpStatus={mcpStatus} mcpServers={config?.mcpServers} runtimeToolStatus={runtimeToolStatus} disabled={busy}
+                <CapabilityEditor customTools={projectTools?.tools} customToolRoots={projectTools?.roots} value={capabilities} skills={skills} mcpStatus={mcpStatus} mcpServers={config?.mcpServers} runtimeToolStatus={runtimeToolStatus} disabled={busy}
                   subagents={config?.subagents ?? []} restrictSubagents={restrictSubagents}
                   onChange={setCapabilities}
+                  projectSkills={{
+                    disabled: choosingSkills,
+                    scriptAutoApproveSkills,
+                    onChangeScriptAutoApprove: (id, enabled) => setScriptAutoApproveSkills(current => [...current.filter(item => item !== id), ...(enabled ? [id] : [])]),
+                    onAddDirectories: () => void chooseSkillDirectories(),
+                    onRemoveDirectory: path => setSkillDirectories(current => current.filter(directory => directory !== path))
+                  }}
                   onEnableAll={(capabilities) => { setCapabilities(capabilities); setRestrictSubagents(false) }}
-                  toolbarEnd={<CheckboxField className="ui-checkbox-field-inline" checked={restrictSubagents} disabled={busy} label={t('capabilities.restrict_subagents')}
-                    tooltip={t('capabilities.restrict_subagents_hint')} onChange={setRestrictSubagents} />}>
-                  <ProjectResources skills={skills} tools={projectTools} />
-                </CapabilityEditor>
+                  toolbarEnd={<CheckboxButton label={t('capabilities.restrict_subagents')} checked={restrictSubagents} disabled={busy}
+                    tooltip={t('capabilities.restrict_subagents_hint')} onChange={setRestrictSubagents} />} />
               </section>}
             </div>
 
@@ -468,8 +484,6 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
               {!simpleChat && <div className="ui-row ui-row-lg ui-dialog-footer-start">
                 <CheckboxField className="ui-checkbox-field-inline" checked={codingMode} disabled={busy}
                   label={t('project.coding_mode')} onChange={updateCodingMode} />
-                <CheckboxField className="ui-checkbox-field-inline" checked={advancedSettings}
-                  disabled={busy} label={t('project.advanced_settings')} onChange={value => { setAdvancedSettings(value); setPromptTab(value ? 'project' : 'compression') }} />
               </div>}
               <Dialog.Close asChild>
                 <button className="ui-button ui-button-compact" type="button" disabled={busy}>

@@ -116,7 +116,7 @@ describe('project deletion lifecycle', () => {
     const source = join(root, 'source')
     await mkdir(source)
     const project = await projectStore.createProject({
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, advancedSettings: true, prompt: '', kind: 'workspace', name: 'Project', sourceFolders: [source] })
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', kind: 'workspace', name: 'Project', sourceFolders: [source] })
     const storage = AgentStorage.openNative(root)
     const runtime = new NativeRuntimeCoordinator(storage, { push: vi.fn() }, { prepareWorkspace: false })
     try {
@@ -151,7 +151,7 @@ describe('project deletion lifecycle', () => {
     const source = join(root, 'source')
     await mkdir(source)
     const project = await projectStore.createProject({
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, advancedSettings: true, prompt: '', kind: 'workspace', name: 'Project', sourceFolders: [source] })
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', kind: 'workspace', name: 'Project', sourceFolders: [source] })
     const storage = AgentStorage.openNative(root)
     const runtime = new NativeRuntimeCoordinator(storage, { push: vi.fn() }, { prepareWorkspace: false })
     try {

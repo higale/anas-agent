@@ -79,7 +79,7 @@ export function thread(projectId = DEFAULT_WORKSPACE_PROJECT_ID): AgentThread {
 
 export function defaultWorkspaceProject(): Project {
   return {
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, advancedSettings: true, prompt: '',
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
     id: DEFAULT_WORKSPACE_PROJECT_ID,
     name: 'Default Workspace',
     kind: 'workspace',

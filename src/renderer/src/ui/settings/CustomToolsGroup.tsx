@@ -9,7 +9,7 @@ import type { PackageFileNode, PackageFilePreview } from '@shared/packageFiles'
 import { getCustomToolCommandFile } from '@shared/customTools'
 import { CustomToolEditor, type CustomToolEditorSection } from './CustomToolEditor'
 import { ToolParameters } from './ToolParameters'
-import { CheckboxField } from '../CheckboxField'
+import { CheckboxButton } from '../CheckboxButton'
 import { ConfirmDialog } from '../dialogs/ConfirmDialog'
 import { CommitTextInput } from '../CommitTextField'
 import { notice } from '../notice'
@@ -37,6 +37,7 @@ export function CustomToolsGroup({ actionsTarget = null, tools, onConfigChange, 
   const [removing, setRemoving] = useState<ToolRoot>()
   const [creating, setCreating] = useState<{ tool: ToolPackage; path: string }>()
   const [busy, setBusy] = useState(false)
+  const [savingEnabled, setSavingEnabled] = useState(false)
   const tree = useRef<HTMLDivElement>(null)
   const request = useRef(0)
   const catalogIdentity = useRef('')
@@ -65,7 +66,6 @@ export function CustomToolsGroup({ actionsTarget = null, tools, onConfigChange, 
 
   useEffect(() => {
     let active = true
-    const pendingRequest = request
     void window.gale.tools.get().then(value => {
       if (!active) return
       setSnapshot(value); notice.dismiss(toolNoticeId)
@@ -76,8 +76,13 @@ export function CustomToolsGroup({ actionsTarget = null, tools, onConfigChange, 
         setExpanded(current => new Set([...current].filter(key => !key.startsWith('files:'))))
       }
     }).catch(reason => { if (active) notice.error(errorDetail(reason), { id: toolNoticeId }) })
-    return () => { active = false; pendingRequest.current++; notice.dismiss(toolNoticeId) }
+    return () => { active = false }
   }, [tools])
+
+  useEffect(() => {
+    const pendingRequest = request
+    return () => { pendingRequest.current++; notice.dismiss(toolNoticeId) }
+  }, [])
 
   useEffect(() => {
     if (!showingCatalog) return
@@ -101,6 +106,16 @@ export function CustomToolsGroup({ actionsTarget = null, tools, onConfigChange, 
     try { if (await action() !== false) await refresh() }
     catch (reason) { notice.error(errorDetail(reason), { id: toolNoticeId }) }
     finally { setBusy(false) }
+  }
+  async function updateEnabled(id: string, enabled: boolean) {
+    setSavingEnabled(true); notice.dismiss(toolNoticeId)
+    try {
+      await window.gale.tools.setEnabled(id, enabled)
+      const config = await window.gale.tools.refresh()
+      setSnapshot(current => current ? { ...current, tools: config.customTools } : current)
+      onConfigChange(config)
+    } catch (reason) { notice.error(errorDetail(reason), { id: toolNoticeId }) }
+    finally { setSavingEnabled(false) }
   }
   function toggle(key: string) {
     setExpanded(current => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next })
@@ -267,8 +282,8 @@ export function CustomToolsGroup({ actionsTarget = null, tools, onConfigChange, 
         </>}
         {selected && selection?.kind === 'tool' && <>
           <div className="settings-detail-heading ui-toolbar ui-toolbar-between"><div><button className="ui-link-button" type="button" data-tooltip={t('chat.show_in_folder')} onClick={() => void showItemInFolder(selected.directory)}>{selected.name}</button></div><div className="ui-toolbar">
-            <CheckboxField label={t('settings.enabled')} checked={selected.enabled !== false} disabled={busy || Boolean(selected.error)}
-              onChange={enabled => void mutate(() => window.gale.tools.setEnabled(selected.id, enabled))} />
+            <CheckboxButton label={t('settings.enabled')} checked={selected.enabled !== false} disabled={busy || savingEnabled || Boolean(selected.error)}
+              onChange={enabled => void updateEnabled(selected.id, enabled)} />
             {(selected.source === 'user' || selected.source === 'external') && <>
               <button className="ui-icon-button" disabled={busy || !selected.definition} type="button" aria-label={t('custom_tools.edit_information')} data-tooltip={t('custom_tools.edit_information')} onClick={() => setEditing(selected)}><Pencil size={14} /></button>
             </>}

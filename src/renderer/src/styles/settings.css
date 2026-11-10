@@ -364,12 +364,6 @@
   }
 }
 
-.settings-mcp-enabled-row {
-  --ui-row-gap: 10px;
-
-  min-height: var(--control-height);
-}
-
 .settings-skill-tree {
   gap: 0;
 }
@@ -674,12 +668,34 @@
   border: 1px solid var(--border-soft);
   border-radius: var(--control-radius);
   background: var(--control-field-bg);
-  max-height: 280px;
-  overflow: auto;
 }
 
 .ui-capability-list > .ui-form-section + .ui-form-section {
   margin-block-start: 8px;
+}
+
+.ui-capability-resource-group > .ui-row > .ui-disclosure-trigger + * {
+  margin-inline-start: auto;
+}
+
+.ui-capability-resource-group ~ .ui-capability-resource-group,
+.ui-capability-resource-group-full-divider {
+  position: relative;
+  padding-block-start: var(--ui-form-section-divider-padding, 18px);
+}
+
+.ui-capability-resource-group ~ .ui-capability-resource-group::before,
+.ui-capability-resource-group-full-divider::before {
+  content: '';
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: 0;
+  border-block-start: 1px solid var(--border-muted);
+  pointer-events: none;
+}
+
+.ui-capability-list > .ui-capability-resource-group-full-divider::before {
+  inset-inline: calc(-1 * var(--ui-capability-list-padding));
 }
 
 .ui-capability-list .ui-field-hint {
@@ -752,9 +768,7 @@
 }
 
 .ui-capability-group > details > summary {
-  margin-inline-start: calc(var(--control-checkbox-size) + var(--ui-check-gap, 8px));
-  width: fit-content;
-  max-width: 100%;
+  margin-inline-start: calc(var(--control-checkbox-size) + var(--ui-check-gap));
 }
 
 .ui-capability-group summary {
@@ -768,23 +782,27 @@
   align-items: start;
 }
 
-.ui-capability-skill {
+.ui-capability-resource {
   display: flex;
   align-items: center;
   gap: 12px;
   min-width: 0;
 }
 
-.ui-capability-skill > :first-child {
+.ui-capability-resource > :first-child {
   flex: 1;
   min-width: 0;
 }
 
-.ui-capability-skill > .ui-field-stack > .ui-row {
+.ui-capability-resource > .ui-field-stack > .ui-row {
   font-weight: inherit;
 }
 
-.ui-capability-skill > label {
+.ui-capability-resource .ui-link-button {
+  font: inherit;
+}
+
+.ui-capability-resource > label {
   flex-shrink: 0;
 }
 
@@ -926,10 +944,6 @@
 .tool-parameter-editor-actions { justify-content: flex-end; }
 .tool-parameter-editor > .ui-section-title,
 .tool-parameter-editor > .ui-field-hint { margin: 0; }
-
-.ui-grid-auto > .ui-capability-section {
-  grid-column: 1 / -1;
-}
 
 .plugin-settings { position: relative; }
 .plugin-install-drop-hint {

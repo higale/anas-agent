@@ -1,7 +1,7 @@
 import { FolderOpen } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { StorageUsageValue } from '@shared/types'
-import { CheckboxField } from '../CheckboxField'
+import { CheckboxButton } from '../CheckboxButton'
 import { StorageUsageText } from '../StorageUsageText'
 import { UI_ICON_SIZE_MEDIUM } from '../uiConstants'
 import { SettingsGroup } from './SettingsGroup'
@@ -25,17 +25,16 @@ export function DeveloperHttpTraceSettings({
 
   return (
     <SettingsGroup title={t('settings.developer_diagnostics')}>
-      <div className="ui-form-row ui-form-row-fit-control">
-        <span>
+      <div className="ui-field-stack">
+        <div className="ui-form-section-heading">
           <strong>{t('settings.developer_http_trace')}</strong>
-          <small>{t('settings.developer_http_trace_hint')}</small>
-        </span>
-        <CheckboxField
-          className="ui-form-row-control-end"
-          checked={enabled}
-          label={t('settings.developer_http_trace_enabled')}
-          onChange={(nextEnabled) => void onChange(nextEnabled)}
-        />
+          <CheckboxButton
+            checked={enabled}
+            label={t('settings.enabled')}
+            onChange={(nextEnabled) => void onChange(nextEnabled)}
+          />
+        </div>
+        <small className="ui-field-hint">{t('settings.developer_http_trace_hint')}</small>
       </div>
       <div className="ui-section-header settings-action-row">
         <div>

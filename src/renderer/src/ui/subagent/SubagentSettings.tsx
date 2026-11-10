@@ -7,6 +7,7 @@ import type { SubagentRootSummary, SubagentDirectoryUpdate } from '@shared/subag
 import type { PackageFileNode, PackageFilePreview } from '@shared/packageFiles'
 import { notice } from '../notice'
 import { CommitTextInput } from '../CommitTextField'
+import { CheckboxButton } from '../CheckboxButton'
 import { ConfirmDialog } from '../dialogs/ConfirmDialog'
 import { PackageList, PackageTreeRoot, PackageTreeItem, PackageFileTree, PackageFileViewer, packageNodeKey } from '../settings/PackageTree'
 import { SettingsAvailabilityBadge } from '../settings/SettingsAvailabilityBadge'
@@ -193,6 +194,7 @@ export function SubagentSettings({ actionsTarget, config, draft, editingIndex, l
       {selection?.kind === 'agent' && selected && <>
         <div className="settings-detail-heading ui-toolbar ui-toolbar-between">
           <button type="button" className="ui-link-button" onClick={() => { if (selected.directory) void showFolder(selected.directory) }}>{selected.name}</button>
+          <CheckboxButton checked={draft.enabled} label={t('settings.enabled')} onChange={enabled => onUpdate({ enabled })} />
         </div>
         <SubagentEditor key={`${draft.id}:${revision}`} config={config} customTools={config?.customTools} draft={draft} subagents={agents}
           mcpStatus={mcpStatus} mcpServers={config?.mcpServers} runtimeToolStatus={runtimeToolStatus} skills={skills}

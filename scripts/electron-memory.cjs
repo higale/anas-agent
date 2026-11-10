@@ -66,8 +66,7 @@ async function verifyBackgroundMemory(launch) {
       const api = globalThis.gale
       await api.config.updateSettings({ language: 'en', theme: 'dark' })
       const project = (await api.projects.list()).find(item => item.id === 'default-workspace')
-      const updated = await api.projects.update(project.id, { ...project, sourceFolders: [workspace], codingMode: false, advancedSettings: true,
-        capabilities: { ...project.capabilities, memory: true, toolMode: 'selected', tools: [], planning: false,
+      const updated = await api.projects.update(project.id, { ...project, sourceFolders: [workspace], codingMode: false, capabilities: { ...project.capabilities, memory: true, toolMode: 'selected', tools: [], planning: false,
           subagents: { mode: 'off', names: [] }, backgroundTools: false, skills: { mode: 'off', project: false, entries: [] },
           mcp: { defaultMode: 'selected', servers: [] } } })
       if (updated.status !== 'ok') throw new Error(JSON.stringify(updated))

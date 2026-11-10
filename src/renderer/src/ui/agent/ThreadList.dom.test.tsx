@@ -14,7 +14,7 @@ const projects: Project[] = [
   { ...base, id: 'b', name: 'Beta', kind: 'simple_chat', prompt: '' },
   { ...base, id: 'p', name: 'Pinned', kind: 'simple_chat', prompt: '', pinned: true },
   { ...base, id: DEFAULT_WORKSPACE_PROJECT_ID, name: 'Default', kind: 'workspace', prompt: '', sourceFolders: [],
-    capabilities: defaultCapabilities, restrictSubagents: false, advancedSettings: false, codingMode: false }
+    capabilities: defaultCapabilities, restrictSubagents: false, codingMode: false }
 ]
 const threads: AgentThread[] = ['one', 'two'].map(id => ({ ...base, id, title: id, projectId: 'a', status: 'idle', accessMode: 'full_access', userTurnCount: 0 }))
 function fixture(overrides: Partial<ComponentProps<typeof ThreadList>> = {}) {

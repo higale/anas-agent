@@ -1,50 +1,65 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
-import { expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import type { SubagentSelection } from '@shared/subagentSelection'
 import { SubagentSelectionEditor } from './SubagentSelectionEditor'
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 
+afterEach(() => vi.unstubAllGlobals())
+
+const toggle = (name: string, on = true) => within(screen.getByRole('radiogroup', { name })).getByRole('radio', { name: on ? 'capabilities.on' : 'capabilities.off' })
+
 it('edits global references, clears missing entries, and retains custom choices across mode and enable changes', async () => {
   const user = userEvent.setup()
-  const changed = vi.fn()
+  const changed = vi.fn(), openDirectory = vi.fn().mockResolvedValue(undefined)
+  vi.stubGlobal('gale', { files: { openDirectory } })
   function Harness() {
     const [value, setValue] = useState<SubagentSelection>({ mode: 'custom', names: ['missing', 'disabled'] })
     return <SubagentSelectionEditor value={value} disabled={false}
-      definitions={[{ name: 'researcher', description: 'Research documents', systemPrompt: 'Research.', enabled: true }, { name: 'disabled', description: 'Custom use.', systemPrompt: 'Complete task.', enabled: false }]}
+      definitions={[{ name: 'researcher', directory: '/agents/researcher', description: 'Research documents', systemPrompt: 'Research.', enabled: true }, { name: 'disabled', description: 'Custom use.', systemPrompt: 'Complete task.', enabled: false }]}
       onChange={(next) => { setValue(next); changed(next) }} />
   }
   render(<Harness />)
   await user.click(screen.getByRole('button', { name: 'settings.capability_subagents' }))
-  expect(screen.getByRole('checkbox', { name: 'disabled' })).toBeChecked()
+  expect(toggle('disabled')).toBeChecked()
   expect(screen.getByText('capabilities.deleted')).toBeInTheDocument()
   expect(screen.getByText('capabilities.inactive')).toBeInTheDocument()
   expect(screen.getByText('2/3')).toBeInTheDocument()
-  await user.click(screen.getByRole('checkbox', { name: 'disabled' }))
+  await user.click(screen.getByRole('button', { name: 'researcher' }))
+  expect(openDirectory).toHaveBeenLastCalledWith('/agents/researcher')
+  expect(changed).not.toHaveBeenCalled()
+  await user.click(toggle('disabled', false))
   expect(screen.getByText('1/3')).toBeInTheDocument()
-  expect(screen.getByRole('checkbox', { name: 'disabled' })).toBeEnabled()
-  await user.click(screen.getByRole('checkbox', { name: 'disabled' }))
-  expect(screen.getByRole('checkbox', { name: 'disabled' })).toBeChecked()
+  expect(toggle('disabled')).toBeEnabled()
+  await user.click(toggle('disabled'))
+  expect(toggle('disabled')).toBeChecked()
   expect(screen.getByText('2/3')).toBeInTheDocument()
-  await user.click(screen.getByRole('checkbox', { name: 'missing' }))
-  expect(screen.queryByRole('checkbox', { name: 'missing' })).not.toBeInTheDocument()
+  await user.click(toggle('missing', false))
+  expect(screen.queryByRole('radiogroup', { name: 'missing' })).not.toBeInTheDocument()
   expect(screen.queryByRole('searchbox')).toBeNull()
-  await user.click(screen.getByRole('checkbox', { name: 'researcher' }))
+  await user.click(toggle('researcher'))
   expect(changed).toHaveBeenLastCalledWith({ mode: 'custom', names: ['disabled', 'researcher'] })
   const picker = within(screen.getByRole('radiogroup', { name: 'settings.capability_subagents' }))
   await user.click(picker.getByRole('radio', { name: 'capabilities.all' }))
-  expect(screen.queryByRole('checkbox', { name: 'researcher' })).not.toBeInTheDocument()
+  expect(toggle('researcher')).toBeChecked()
+  expect(toggle('researcher')).toBeDisabled()
+  expect(toggle('disabled')).toBeChecked()
+  expect(toggle('disabled')).toBeDisabled()
+  expect(screen.getByText('capabilities.inactive')).toBeVisible()
   await user.click(picker.getByRole('radio', { name: 'capabilities.custom' }))
-  const researcher = screen.getByRole('checkbox', { name: 'researcher' })
+  const researcher = toggle('researcher')
   expect(researcher).toBeChecked()
+  expect(researcher).toBeEnabled()
   expect(screen.queryByRole('checkbox', { name: 'settings.capability_subagents' })).toBeNull()
   await user.click(picker.getByRole('radio', { name: 'capabilities.off' }))
   expect(screen.queryByRole('searchbox')).toBeNull()
-  expect(screen.queryByRole('checkbox', { name: 'researcher' })).toBeNull()
+  expect(toggle('researcher', false)).toBeChecked()
+  expect(toggle('disabled', false)).toBeChecked()
+  expect(toggle('researcher')).toBeDisabled()
   expect(screen.getByText('0/2')).toBeVisible()
   expect(changed).toHaveBeenLastCalledWith({ mode: 'off', names: ['disabled', 'researcher'] })
   await user.click(picker.getByRole('radio', { name: 'capabilities.custom' }))
-  expect(screen.getByRole('checkbox', { name: 'researcher' })).toBeChecked()
+  expect(toggle('researcher')).toBeChecked()
 })

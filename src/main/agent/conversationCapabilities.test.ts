@@ -18,12 +18,12 @@ import * as toolsStore from '../toolsStore'
 import * as runtimeTools from '../llm/runtimeTools'
 
 import Database from 'better-sqlite3'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeAll, afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { defaultCapabilities } from '@shared/agentCapabilities'
+import { defaultCapabilities, serializeCapabilities } from '@shared/agentCapabilities'
 import { config, thread, defaultWorkspaceProject, previewConfig } from '../../test/agentConfigurationFixture'
 import { NativeConversationDatabase } from './nativeConversationDatabase'
 import { SqliteMemoryStore } from '../../test/legacyMemoryFixture'
@@ -148,8 +148,8 @@ describe('native capability snapshots', () => {
     } finally { tools.mockRestore(); database.close() }
   })
 
-  it('ignores stored project capability restrictions when advanced settings are off', async () => {
-    const project = { ...defaultWorkspaceProject(), advancedSettings: false, prompt: 'Hidden project instruction', restrictSubagents: true,
+  it('uses stored project restrictions and prompts directly', async () => {
+    const project = { ...defaultWorkspaceProject(), prompt: 'Hidden project instruction', restrictSubagents: true,
       capabilities: { ...structuredClone(defaultCapabilities), memory: false, workspace: false, toolMode: 'selected' as const, tools: [] } }
     projectStoreMocks.getProject.mockResolvedValue(project)
     appConfigMocks.getAppConfigSnapshot.mockResolvedValue(previewConfig())
@@ -160,18 +160,18 @@ describe('native capability snapshots', () => {
       await prepareAgentRuntimeResources(owner, database.resources, await appConfigMocks.getAppConfigSnapshot(), { onConfigurationResolved: resolved }, {
         persistent: true, prepareWorkspace: false, requestSubagentApproval: async () => { throw new Error('Unexpected approval during resource preparation') }
       })
-      expect(resolved.mock.lastCall![0].capabilities).toMatchObject({ memory: true, workspace: true, toolMode: 'all' })
-      expect(resolved.mock.lastCall![0].subagentLimit).toBeUndefined()
+      expect(resolved.mock.lastCall![0].capabilities).toMatchObject({ memory: false, workspace: false, toolMode: 'selected' })
+      expect(resolved.mock.lastCall![0].subagentLimit).toBeDefined()
       expect((await definitions.mock.results.at(-1)!.value).map((tool: { name: string }) => tool.name)).not.toContain('save_to_memory')
-      expect((await prepareAgentSystemPrompt(owner, previewConfig())).systemPrompt.text).not.toContain('Hidden project instruction')
+      expect((await prepareAgentSystemPrompt(owner, previewConfig())).systemPrompt.text).toContain('Hidden project instruction')
     } finally { database.close() }
   })
 
   it.each([false, true].flatMap(customized => [false, true].map(restricted => ({ customized, restricted }))))('uses all available capabilities or project customization and freezes each run ($customized, $restricted)', async ({ customized, restricted }) => {
     const snapshot = previewConfig()
     snapshot.subagents.push({ ...snapshot.subagents[0], name: 'reviewer', enabled: false })
-    const project = { ...defaultWorkspaceProject(), compressionPrompt: 'Parent-only summary: {conversation}', advancedSettings: customized, restrictSubagents: restricted,
-      capabilities: { ...structuredClone(defaultCapabilities), toolMode: 'selected' as const, tools: ['read_file'] } }
+    const project = { ...defaultWorkspaceProject(), compressionPrompt: 'Parent-only summary: {conversation}', restrictSubagents: restricted,
+      capabilities: { ...structuredClone(defaultCapabilities), toolMode: customized ? 'selected' as const : 'all' as const, tools: customized ? ['read_file'] : [] } }
     projectStoreMocks.getProject.mockResolvedValue(project)
     vi.mocked(toolsStore.listToolSnapshot).mockResolvedValue({ roots: [], tools: snapshot.customTools })
     appConfigMocks.getAppConfigSnapshot.mockResolvedValue(snapshot)
@@ -188,7 +188,7 @@ describe('native capability snapshots', () => {
       const parentTools = (await definitions.mock.results.at(-1)!.value).map((tool: { name: string }) => tool.name)
       expect(configuration.capabilities).toMatchObject({ profile: true, workspace: true,
         toolMode: customized ? 'selected' : 'all', tools: customized ? ['read_file'] : [] })
-      expect(Boolean(configuration.subagentLimit)).toBe(customized && restricted)
+      expect(Boolean(configuration.subagentLimit)).toBe(restricted)
       expect(configuration.capabilities.subagents.names).toEqual(['general-purpose'])
       const prompt = await prepareAgentSystemPrompt(owner, snapshot)
       expect(prompt.systemPrompt.sections.some(section => section.kind === 'workspace')).toBe(true)
@@ -203,7 +203,7 @@ describe('native capability snapshots', () => {
       }, {
         persistent: true, prepareWorkspace: false, requestSubagentApproval: async () => { throw new Error('Unexpected approval during resource preparation') }
       })
-      expect(configuration.compressionPrompt).toBe(customized ? 'Parent-only summary: {conversation}' : undefined)
+      expect(configuration.compressionPrompt).toBe('Parent-only summary: {conversation}')
       expect(resolved.mock.lastCall![0].compressionPrompt).toBeUndefined()
       const childCapabilities = resolved.mock.lastCall![0].capabilities
       expect(childCapabilities.profile).toBe(true)
@@ -221,7 +221,7 @@ describe('native capability snapshots', () => {
   })
 
   it.each([false, true])('injects project instructions independently of workspace context (%s)', async (workspace) => {
-    const project = { ...defaultWorkspaceProject(), advancedSettings: true, prompt: 'Follow the project rules.',
+    const project = { ...defaultWorkspaceProject(), prompt: 'Follow the project rules.',
       capabilities: { ...structuredClone(defaultCapabilities), workspace } }
     projectStoreMocks.getProject.mockResolvedValue(project)
     const prepared = await prepareAgentSystemPrompt(thread(), config())
@@ -300,8 +300,8 @@ describe('native capability snapshots', () => {
     tools[2].enabled = false
     appConfigMocks.getAppConfigSnapshot.mockResolvedValue(snapshot)
     vi.mocked(toolsStore.listToolSnapshot).mockResolvedValue({ roots: [], tools })
-    projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), advancedSettings: customized,
-      capabilities: { ...structuredClone(defaultCapabilities), customTools: selectedTools(['project_reader']) } })
+    projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(),
+      capabilities: { ...structuredClone(defaultCapabilities), customTools: customized ? selectedTools(['project_reader']) : defaultCapabilities.customTools } })
     const database = openDatabase()
     const thread = configuredThread(database)
     const resolved = vi.fn()
@@ -356,8 +356,8 @@ describe('native capability snapshots', () => {
       vi.spyOn(toolsStore, 'listSubagentTools').mockImplementation(async ids => ownedTools.filter(tool => ids.some(id => tool.id.startsWith(`subagent:${id}:`))))
       vi.spyOn(skillsStore, 'listSubagentSkills').mockImplementation(async ids => ({ roots: [], scriptAutoApprove: false, skills: ownedSkills.filter(skill => ids.some(id => skill.id.startsWith(`subagent:${id}:`))) }))
       vi.spyOn(skillsStore, 'listSkillSnapshot').mockResolvedValue({ roots: [], skills: [], scriptAutoApprove: false })
-      vi.spyOn(skillsStore, 'buildSkillsPrompt').mockResolvedValue('')
-      projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), advancedSettings: true, restrictSubagents: restrict,
+      vi.spyOn(skillsStore, 'buildSkillsPrompt').mockImplementation(async ({ agent }) => agent.kind === 'main' ? 'MAIN_SKILL_CATALOG' : `OWNED_SKILL_CATALOG_${agent.id}`)
+      projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), restrictSubagents: restrict,
         capabilities: { ...structuredClone(defaultCapabilities), subagents: { mode: 'default', names: [] },
           skills: { mode: 'custom', project: false, entries: grant ? ownedSkills.map(s => ({ id: s.id, model: true, shortcut: false })) : [] },
           customTools: { mode: 'custom', project: false, entries: grant ? ownedTools.map(t => t.id) : [] } } })
@@ -365,10 +365,11 @@ describe('native capability snapshots', () => {
       const owner = configuredThread(database)
       const resolved = vi.fn()
       try {
-        await prepareAgentRuntimeResources(owner, database.resources, await appConfigMocks.getAppConfigSnapshot(), { onConfigurationResolved: resolved }, {
+        const parentResources = await prepareAgentRuntimeResources(owner, database.resources, await appConfigMocks.getAppConfigSnapshot(), { onConfigurationResolved: resolved }, {
         persistent: true, prepareWorkspace: false, requestSubagentApproval: async () => { throw new Error('Unexpected approval during resource preparation') }
       })
         const parentConfiguration = resolved.mock.lastCall![0]
+        expect(parentResources.requestSystemPrompt(parentResources.initialModel).text).toContain('MAIN_SKILL_CATALOG')
         expect(parentConfiguration.customTools).toEqual([])
         expect(parentConfiguration.capabilities.skills.entries).toEqual([])
         if (restrict && grant) {
@@ -382,12 +383,13 @@ describe('native capability snapshots', () => {
           config: snapshot.subagents[0], description: 'Read own package.', childThread: { title: 'Child', projectId: owner.projectId }
         })
         expect(call.config.id).toBe('owner')
-        await prepareAgentRuntimeResources(database.getThread(call.childThreadId)!, database.resources, await appConfigMocks.getAppConfigSnapshot(), {
+        const childResources = await prepareAgentRuntimeResources(database.getThread(call.childThreadId)!, database.resources, await appConfigMocks.getAppConfigSnapshot(), {
           requestId: call.childRunId, subagentCall: call, parentConfiguration, onConfigurationResolved: resolved
         }, {
         persistent: true, prepareWorkspace: false, requestSubagentApproval: async () => { throw new Error('Unexpected approval during resource preparation') }
       })
         const configured = resolved.mock.lastCall![0]
+        expect(childResources.requestSystemPrompt(childResources.initialModel).text).toContain('OWNED_SKILL_CATALOG_owner')
         const allowed = enabled && (!restrict || grant)
         expect(configured.customTools.map((t: { id: string }) => t.id)).toEqual(allowed ? ['subagent:owner:tool:query'] : [])
         expect(configured.capabilities.skills.entries.filter((s: { model: boolean }) => s.model).map((s: { id: string }) => s.id)).toEqual(allowed ? ['subagent:owner:skill:guide'] : [])
@@ -427,8 +429,9 @@ describe('native capability snapshots', () => {
       })
       const selection = resolved.mock.lastCall![0].capabilities.skills
       expect(selection).toMatchObject({ project: false, entries: [{ id: 'current-project:search', model: !restricted, shortcut: false }] })
-      expect(catalog).toHaveBeenCalledWith(owner.projectId, ['/workspace/default'])
-      expect(prompt).toHaveBeenCalledWith(owner.projectId, selection, ['/workspace/default'], resolved.mock.lastCall![0].capabilities.pluginTools)
+      expect(catalog).toHaveBeenCalledWith(owner.projectId, ['/workspace/default'], [], [])
+      expect(prompt).toHaveBeenCalledWith({ agent: { kind: 'subagent', id: undefined }, projectId: owner.projectId, selection,
+        sourceFolders: ['/workspace/default'], pluginTools: resolved.mock.lastCall![0].capabilities.pluginTools, skillDirectories: [], scriptAutoApproveSkills: [] })
     } finally { database.close(); catalog.mockRestore(); prompt.mockRestore() }
   })
 
@@ -489,6 +492,44 @@ describe('native capability snapshots', () => {
       expect(definitions.mock.lastCall![0]).toMatchObject({ network: !restricted })
     } finally { database.close() }
   })
+  it.each([false, true])('recovers a frozen child after deleting its unused package (ordinary skill %s)', async useGlobal => {
+    const packages = await import('../subagentPackages')
+    await packages.initializeSubagentPackages()
+    const directory = join(testPaths.root, 'skills/recovery-guide')
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, 'SKILL.md'), '---\nname: recovery-guide\ndescription: Recovery guide.\n---\nUse the global recovery guide.\n')
+    const capabilities = { ...structuredClone(defaultCapabilities), memory: false, toolMode: 'selected' as const, tools: ['read_file'],
+      skills: { mode: 'custom' as const, project: false, entries: useGlobal ? [{ id: 'user:recovery-guide', shortcut: false, model: true }] : [] },
+      customTools: { mode: 'custom' as const, project: false, entries: [] } }
+    const original = { ...config().subagents[0], id: 'recovery-reviewer', name: 'recovery-reviewer', preset: undefined, builtIn: false,
+      capabilities, systemPrompt: 'Keep the frozen reviewer instructions.' }
+    await packages.writeSubagentPackages([...(await packages.readSubagentPackages(testPaths.root)), {
+      id: original.id, name: original.name, description: original.description, enabled: true,
+      system_prompt: original.systemPrompt, capabilities: serializeCapabilities(capabilities)
+    }])
+    const database = openDatabase()
+    const owner = configuredThread(database)
+    const parent = createRun(database, owner.id, 'frozen-skill-recovery-parent', 'Review')
+    const call = database.runs.createSubagentCall({
+      id: '92929292-9292-8292-8292-929292929292', ownerThreadId: owner.id, parentThreadId: owner.id, parentRunId: parent.id,
+      childThreadId: '93939393-9393-8393-8393-939393939393', childRunId: '94949494-9494-8494-9494-949494949494',
+      config: original, description: 'Review', childThread: { title: 'Frozen child', projectId: owner.projectId }
+    })
+    const configuration = { codingMode: false, customTools: [], capabilities }
+    try {
+      await packages.writeSubagentPackages((await packages.readSubagentPackages(testPaths.root)).filter(agent => agent.id !== original.id))
+      const snapshot = { ...previewConfig(), subagents: [] }
+      appConfigMocks.getAppConfigSnapshot.mockResolvedValue(snapshot)
+      const resources = await prepareAgentRuntimeResources(database.getThread(call.childThreadId)!, database.resources, snapshot,
+        { requestId: call.childRunId, subagentCall: call, configuration },
+        { persistent: true, prepareWorkspace: false, requestSubagentApproval: async () => { throw new Error('Unexpected approval') } })
+      expect(resources.runConfiguration).toEqual(configuration)
+      const prompt = resources.requestSystemPrompt(resources.initialModel).text
+      expect(prompt).toContain(original.systemPrompt)
+      expect(prompt.includes(join(directory, 'SKILL.md'))).toBe(useGlobal)
+    } finally { database.close(); await rm(directory, { recursive: true, force: true }) }
+  })
+
   it('keeps recovery independent from disabled, deleted, or edited live definitions', async () => {
     projectStoreMocks.getProject.mockResolvedValue(defaultWorkspaceProject())
     memoryStoreMocks.buildMemoryRulesPrompt.mockResolvedValue('')

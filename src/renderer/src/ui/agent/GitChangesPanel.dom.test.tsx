@@ -13,7 +13,7 @@ vi.mock('../notice', () => ({ notice: { success: vi.fn(), error: vi.fn() } }))
 vi.mock('../diff/DiffContentView', () => ({ DiffContentView: ({ request }: { request: { input: { filePath: string } } }) => <div>{request.input.filePath}</div> }))
 const get = vi.fn(), refs = vi.fn()
 const project: WorkspaceProject = { id: 'project', kind: 'workspace', name: 'Project', sourceFolders: ['/one', '/two'],
-  capabilities: defaultCapabilities, restrictSubagents: false, codingMode: false, advancedSettings: false, prompt: '', pinned: false, collapsed: false, createdAt: '', updatedAt: '' }
+  capabilities: defaultCapabilities, restrictSubagents: false, codingMode: false, prompt: '', pinned: false, collapsed: false, createdAt: '', updatedAt: '' }
 function result(input: GitChangeReadInput): GitChangeResult {
   return { scope: input.scope, sourceFolder: input.sourceFolder, repositoryRoot: input.sourceFolder,
     baseline: 'a'.repeat(40), head: 'b'.repeat(40), baselineLabel: input.baseline, version: 'c'.repeat(64), fileCount: 1,

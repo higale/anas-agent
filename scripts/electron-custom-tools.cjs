@@ -194,7 +194,7 @@ async function verifyCustomTools(launchApplication) {
     await expect(page.getByRole('checkbox', { name: 'Enabled', exact: true })).toBeChecked()
     await page.evaluate(async () => {
       const base = (await globalThis.gale.projects.list()).find(project => project.kind === 'workspace')
-      const result = await globalThis.gale.projects.create({ ...base, name: 'Custom tool selections', advancedSettings: true })
+      const result = await globalThis.gale.projects.create({ ...base, name: 'Custom tool selections' })
       if (result.status !== 'ok') throw new Error(JSON.stringify(result))
     })
     await page.getByRole('button', { name: 'Back to app', exact: true }).click()
@@ -202,9 +202,12 @@ async function verifyCustomTools(launchApplication) {
     await page.locator('[data-agent-composer-input]').waitFor()
     const capabilityDialog = await openCapabilityProject(page, 'Custom tool selections')
     const toolSection = capabilityDialog.getByRole('region', { name: 'Custom tools', exact: true })
-    await toolSection.getByRole('radiogroup').getByText('Custom', { exact: true }).click()
+    await toolSection.getByRole('radiogroup', { name: 'Custom tools', exact: true }).getByText('Custom', { exact: true }).click()
     await toolSection.getByRole('button', { name: 'Custom tools', exact: true }).click()
-    await toolSection.getByRole('checkbox', { name: 'User ask_custom', exact: true }).check()
+    await toolSection.getByRole('button', { name: 'User', exact: true }).click()
+    const toolSelection = toolSection.getByRole('radiogroup', { name: 'User ask_custom', exact: true })
+    await toolSelection.getByText('On', { exact: true }).click()
+    await expect(toolSelection.getByRole('radio', { name: 'On', exact: true })).toBeChecked()
     if (process.env.ANAS_E2E_CUSTOM_TOOL_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_CUSTOM_TOOL_SCREENSHOT + '.capabilities.png' })
     await capabilityDialog.getByRole('button', { name: 'Save', exact: true }).click()
     await page.locator('.sidebar-settings').click()
@@ -239,7 +242,7 @@ async function verifyCustomTools(launchApplication) {
       const modelConfigId = models.providers.find(provider => provider.id === providerId).models[0].id
       const base = (await api.projects.list()).find(project => project.kind === 'workspace')
       const project = await api.projects.create({ ...base, name: 'Custom terminal fixture', sourceFolders: [workspace],
-        advancedSettings: true, codingMode: false, prompt: '', restrictSubagents: false,
+        codingMode: false, prompt: '', restrictSubagents: false,
         capabilities: { ...base.capabilities, profile: false, environment: false, workspace: false, memory: false,
           applicationEnvironment: false, backgroundTools: true, subagents: { mode: 'off', names: [] }, planning: false,
           toolMode: 'selected', tools: [], customTools: { project: false, entries: toolIds },

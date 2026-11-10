@@ -178,7 +178,8 @@ const api: GaleApi = {
       const paths = files.map((file) => webUtils.getPathForFile(file)).filter((path) => path.trim().length > 0)
       return ipcRenderer.invoke('projects:fromDroppedFiles', paths)
     },
-    chooseSourceFolders: (): Promise<ProjectOperationResult<string[]>> => ipcRenderer.invoke('projects:chooseSourceFolders')
+    chooseSourceFolders: (): Promise<ProjectOperationResult<string[]>> => ipcRenderer.invoke('projects:chooseSourceFolders'),
+    chooseSkillDirectories: (): Promise<ProjectOperationResult<string[]>> => ipcRenderer.invoke('projects:chooseSkillDirectories')
   },
   config: {
     get: (): Promise<AppConfigSnapshot> => ipcRenderer.invoke('config:get'),
@@ -237,7 +238,7 @@ const api: GaleApi = {
   },
   skills: {
     updateScriptApproval: (projectId: string | undefined, skillId: string | undefined, enabled: boolean): Promise<SkillSnapshot> => ipcRenderer.invoke('skills:updateScriptApproval', projectId, skillId, enabled),
-    get: (projectId?: string, sourceFolders?: string[]): Promise<SkillSnapshot> => ipcRenderer.invoke('skills:get', projectId, sourceFolders),
+    get: (projectId?: string, sourceFolders?: string[], skillDirectories?: string[]): Promise<SkillSnapshot> => ipcRenderer.invoke('skills:get', projectId, sourceFolders, skillDirectories),
     listFiles: (projectId: string | undefined, skillId: string, relativePath?: string): Promise<SkillFileNode[]> => ipcRenderer.invoke('skills:listFiles', projectId, skillId, relativePath),
     saveFile: (projectId, skillId, path, update) => ipcRenderer.invoke('skills:saveFile', projectId, skillId, path, update),
     readFile: (projectId: string | undefined, skillId: string, relativePath: string): Promise<SkillFilePreview> => ipcRenderer.invoke('skills:readFile', projectId, skillId, relativePath),

@@ -32,11 +32,14 @@ interface ProjectBase extends ProjectModelSelection {
 export interface WorkspaceProject extends ProjectBase {
   kind: 'workspace'
   accessMode?: AgentAccessMode
-  advancedSettings: boolean
   codingMode: boolean
   compressionPrompt?: string
   prompt: string
   sourceFolders: string[]
+  /** Additional project-scoped Skill roots. Missing means no additional roots. */
+  skillDirectories?: string[]
+  /** Project-local Skill script exemptions; missing means none. */
+  scriptAutoApproveSkills?: string[]
   capabilities: AgentCapabilities
   restrictSubagents: boolean
 }
@@ -67,7 +70,6 @@ export function compareProjects(left: Project, right: Project): number {
 export interface WorkspaceProjectRequest extends ProjectModelSelection {
   kind: 'workspace'
   accessMode?: AgentAccessMode
-  advancedSettings: boolean
   codingMode: boolean
   compressionPrompt?: string
   prompt: string
@@ -76,6 +78,8 @@ export interface WorkspaceProjectRequest extends ProjectModelSelection {
   iconData?: string
   iconColor?: ProjectIconColor
   sourceFolders: string[]
+  skillDirectories?: string[]
+  scriptAutoApproveSkills?: string[]
   capabilities: AgentCapabilities
   restrictSubagents: boolean
 }
@@ -781,6 +785,7 @@ export interface GaleApi {
     openSourceFolder(projectId: string, sourceFolder: string): Promise<string>
     fromDroppedFiles(files: File[]): Promise<ProjectOperationResult<string[]>>
     chooseSourceFolders(): Promise<ProjectOperationResult<string[]>>
+    chooseSkillDirectories(): Promise<ProjectOperationResult<string[]>>
   }
   config: {
     get(): Promise<AppConfigSnapshot>
@@ -835,7 +840,7 @@ export interface GaleApi {
   }
   skills: {
     updateScriptApproval(projectId: string | undefined, skillId: string | undefined, enabled: boolean): Promise<SkillSnapshot>
-    get(projectId?: string, sourceFolders?: string[]): Promise<SkillSnapshot>
+    get(projectId?: string, sourceFolders?: string[], skillDirectories?: string[]): Promise<SkillSnapshot>
     listFiles(projectId: string | undefined, skillId: string, relativePath?: string): Promise<SkillFileNode[]>
     readFile(projectId: string | undefined, skillId: string, relativePath: string): Promise<SkillFilePreview>
     saveFile(projectId: string | undefined, skillId: string, relativePath: string, update: import('./packageFiles').PackageFileUpdate): Promise<SkillFilePreview>

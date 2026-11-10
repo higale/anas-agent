@@ -249,7 +249,7 @@ async function verifyProjectModelPicker(launchApplication) {
     // Default projects share the regular editor and persistence; only their name is read-only.
     await expect(dialog.getByRole('textbox', { name: 'Project name', exact: true })).toHaveAttribute('readonly', '')
     await expect(dialog.getByRole('button', { name: 'Add folders', exact: true })).toBeEnabled()
-    await dialog.getByRole('checkbox', { name: 'Customize capabilities', exact: true }).check()
+
     await dialog.getByRole('checkbox', { name: 'Coding mode', exact: true }).check()
     await dialog.getByRole('textbox', { name: 'Project prompt', exact: true }).fill('Default workspace custom instructions')
     await dialog.getByRole('checkbox', { name: 'Profile', exact: true }).uncheck()
@@ -259,11 +259,11 @@ async function verifyProjectModelPicker(launchApplication) {
     await dialog.getByRole('button', { name: 'Save', exact: true }).click()
     await page.reload()
     const savedDefault = await page.evaluate(async () => (await globalThis.gale.projects.list()).find(project => project.id === 'default-workspace'))
-    expect(savedDefault).toMatchObject({ advancedSettings: true, codingMode: true, prompt: 'Default workspace custom instructions',
+    expect(savedDefault).toMatchObject({ codingMode: true, prompt: 'Default workspace custom instructions',
       compressionPrompt: 'Keep decisions: {conversation}', capabilities: { profile: false } })
     await page.locator('.project-thread-group[data-default-workspace] .project-thread-more').click()
     await page.locator('.project-details-action').filter({ hasText: 'Edit' }).click()
-    await expect(dialog.getByRole('checkbox', { name: 'Customize capabilities', exact: true })).toBeChecked()
+    await expect(dialog.getByRole('region', { name: 'Capabilities', exact: true })).toBeVisible()
     await expect(dialog.getByRole('checkbox', { name: 'Coding mode', exact: true })).toBeChecked()
     await expect(dialog.getByRole('textbox', { name: 'Project prompt', exact: true })).toHaveValue('Default workspace custom instructions')
     await expect(dialog.getByRole('checkbox', { name: 'Profile', exact: true })).not.toBeChecked()

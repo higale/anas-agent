@@ -1,6 +1,6 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { CodeXml, Folder, MessageCircle, MessageCircleX, PencilLine, Pin, SlidersHorizontal, Trash2 } from 'lucide-react'
+import { CodeXml, Folder, MessageCircle, MessageCircleX, PencilLine, Pin, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { isDefaultWorkspaceProject, type Project } from '@shared/types'
 import { MenuItemPrimitive, type MenuItemKind } from '../MenuItemPrimitive'
@@ -32,8 +32,7 @@ export function ProjectDetailsContent({
   const statuses = project.kind === 'simple_chat'
     ? [{ Icon: MessageCircle, label: t('project.simple_chat'), enabled: true }]
     : [
-        { Icon: CodeXml, label: t('project.coding_mode'), enabled: project.codingMode },
-        { Icon: SlidersHorizontal, label: t('project.advanced_settings_label'), enabled: project.advancedSettings }
+        { Icon: CodeXml, label: t('project.coding_mode'), enabled: project.codingMode }
       ]
 
   function runAfterSelect(action: () => void): void {

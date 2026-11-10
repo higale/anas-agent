@@ -15,7 +15,7 @@ import capabilityDefaults from '../../data/config/capabilities.json'
 import { normalizeToolSettings } from '@shared/toolPackages'
 import toolsDefaults from '../../data/config/tools.json'
 import projectDefaultsDocument from '../../data/config/projects.json'
-import { defaultCapabilities, parseCapabilities, serializeCapabilities } from '@shared/agentCapabilities'
+import { defaultCapabilities, parseCapabilities, parseProjectScriptApprovals, serializeCapabilities } from '@shared/agentCapabilities'
 import { errorDetail, recoverableAuxiliaryFiles, resettableConfigFiles, type RecoveryFile, type RecoveryFileStatus, type RecoveryRepairResult } from '@shared/recovery'
 import { parseInputHistoryStore } from './inputHistoryStore'
 import { inspectAvatarRepair, repairAvatarData } from './recoveryAvatar'
@@ -183,6 +183,11 @@ export function repairDocument(file: string, input: unknown): { value: RecordVal
         repair.fill(project, { ...projectDefaults, sourceFolders: [], restrict_subagents: capabilityDefaults.restrict_subagents }, path)
         if (compressionPromptError(project.compression_prompt)) repair.replace(project, 'compression_prompt', '', `${path}.compression_prompt`)
         if (project.access_mode !== undefined) repair.choice(project, 'access_mode', ['strict_approval', 'smart_approval', 'full_access'], 'smart_approval', path)
+        try { parseProjectScriptApprovals(project.script_auto_approve_skills) } catch {
+          const retained = Array.isArray(project.script_auto_approve_skills)
+            ? project.script_auto_approve_skills.filter(id => typeof id === 'string' && id.trim()) : []
+          repair.replace(project, 'script_auto_approve_skills', retained, `${path}.script_auto_approve_skills`)
+        }
         repair.capabilities(project, projectCapabilityDefaults, path)
       }
     }

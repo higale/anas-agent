@@ -36,7 +36,7 @@ export function ProjectPromptPreviews({
   const [previewError, setPreviewError] = useState<'model' | 'failed'>()
   const [previewLoading, setPreviewLoading] = useState(false)
   const codingMode = project.kind === 'workspace' && project.codingMode
-  const customCompressionPrompt = project.kind === 'workspace' && project.advancedSettings ? project.compressionPrompt : undefined
+  const customCompressionPrompt = project.kind === 'workspace' ? project.compressionPrompt : undefined
   const compressionInvalid = Boolean(compressionPromptError(customCompressionPrompt))
   const outputLanguageCode = resolveLanguagePreference(settings?.language)
   const outputLanguage = getLanguageOptions().find((language) => language.code === outputLanguageCode)

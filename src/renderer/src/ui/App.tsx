@@ -12,7 +12,7 @@ import {
   type AgentThreadCleanupResult
 } from '@shared/agentTypes'
 import { applyModelParameterPreset, findProviderModelConfig, isSelectableModelConfig } from '@shared/modelConfig'
-import { defaultCapabilities, effectiveProjectCapabilities, projectSkillSnapshot, resolvePluginCapabilities } from '@shared/agentCapabilities'
+import { defaultCapabilities, projectSkillSnapshot, resolvePluginCapabilities } from '@shared/agentCapabilities'
 import { SIDEBAR_WIDTH_DEFAULT } from '@shared/uiPreferences'
 import { compareProjects, DEFAULT_WORKSPACE_PROJECT_ID, isDefaultWorkspaceProject, type AppBuildInfo, type AppConfigSnapshot, type LanguagePackSummary, type Project, type ProjectCreateRequest, type ProjectStateUpdate, type RuntimeToolStatus, type SidebarCollapsedSections, type SidebarSectionId } from '@shared/types'
 import { NoticeHost, notice } from './notice'
@@ -590,7 +590,8 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
     setResolvedTheme,
     t
   })
-  const projectSkills = useProjectSkills(activeProjectId, skills, activeProject?.kind === 'workspace' ? activeProject.sourceFolders : undefined)
+  const projectSkills = useProjectSkills(activeProjectId, skills, activeProject?.kind === 'workspace' ? activeProject.sourceFolders : undefined,
+    activeProject?.kind === 'workspace' ? activeProject.skillDirectories : undefined)
   const {
     applyComposerSuggestion,
     composerSuggestions,
@@ -604,7 +605,7 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
     inputHistory,
     setInput,
     skills: (() => {
-      const capabilities = resolvePluginCapabilities(activeProject?.kind === 'workspace' ? effectiveProjectCapabilities(activeProject) : defaultCapabilities, pluginRegistry.plugins)
+      const capabilities = resolvePluginCapabilities(activeProject?.kind === 'workspace' ? activeProject.capabilities : defaultCapabilities, pluginRegistry.plugins)
       return projectSkillSnapshot(projectSkills, capabilities.skills, capabilities.pluginTools)
     })(),
     skillShortcutsEnabled: agentCapabilitiesEnabled,

@@ -22,9 +22,7 @@ describe('DeveloperHttpTraceSettings', () => {
       />
     )
 
-    const checkbox = screen.getByRole('checkbox', { name: 'settings.developer_http_trace_enabled' })
-    expect(checkbox.closest('.ui-form-row')).toHaveClass('ui-form-row-fit-control')
-    expect(checkbox.closest('label')).toHaveClass('ui-form-row-control-end')
+    const checkbox = screen.getByRole('checkbox', { name: 'settings.enabled' })
     const usage = screen.getByText('1.50 KB')
     expect(usage).toBeVisible()
     expect(usage.parentElement).toHaveClass('ui-row')

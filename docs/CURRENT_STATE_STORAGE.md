@@ -53,7 +53,7 @@
     direction/
 ```
 
-`db/projects/<项目ID>/project.json` 保存项目定义与设置，`db/projects/state.json` 只保存按项目 ID 引用的界面状态，`db/input_history.json` 保存全局输入历史和置顶输入，`db/plugins/<id>/` 保存所有插件的独立数据、通用设置和安装状态；`anas-installation.json` 记录启用状态和标题栏图标设置。用户插件代码直接位于 `plugins/<id>/`，内置插件位于 `plugins/_system/<id>/`，均无额外的 `package/` 层级。项目重置只删除项目元数据、catalog 及对话资源，保留输入历史和插件数据。项目修复保留同目录其他文件，并在切换前核对源数据未变化。
+`db/projects/<项目ID>/project.json` 保存项目定义与设置，其中可选 `skill_directories` 保存项目自定义技能总目录的绝对路径，缺省按空列表读取，可选 `script_auto_approve_skills` 保存仅本项目生效的技能脚本免审 ID，缺省为空列表。格式仍为 v0；旧 `advanced_settings` 不再参与计算，读取时不改写文件，能力选择与提示词直接生效。目录文件原地引用，不纳入应用备份。`db/projects/state.json` 只保存按项目 ID 引用的界面状态，`db/input_history.json` 保存全局输入历史和置顶输入，`db/plugins/<id>/` 保存所有插件的独立数据、通用设置和安装状态；`anas-installation.json` 记录启用状态和标题栏图标设置。用户插件代码直接位于 `plugins/<id>/`，内置插件位于 `plugins/_system/<id>/`，均无额外的 `package/` 层级。项目重置只删除项目元数据、catalog 及对话资源，保留输入历史和插件数据。项目修复保留同目录其他文件，并在切换前核对源数据未变化。
 
 子 Agent 定义只从目录包读取。`web-researcher` 和 `project-analyst` 放在 `examples/subagents/`，不自动加载，导入后作为普通用户包使用。仅 `general-purpose` 内置于 `subagents/_system/`，启动时镜像随包内容，不改动用户包；内置定义和全部文件只读，不可删除或改名，能力全开，固定使用父 Agent 的模型，仅允许切换整个 Agent 的启用状态。`config/subagents.json` v1 保存 `order`、`external_directories`（稳定 ID、显示名及绝对路径；缺失默认空列表）和整个 Agent 的 `disabled`，不再保存内置覆盖配置。包内文件不保存宿主启停状态。自定义提示词统一从文件树的 `PROMPT.md` 编辑；内置文件只可预览，定义和文件保存入口均拒绝写入。
 

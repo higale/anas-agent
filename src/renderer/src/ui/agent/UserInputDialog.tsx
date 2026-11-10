@@ -100,7 +100,7 @@ function UserInputForm({ request, pendingCount }: { request: UserInputRequest; p
                   {question.options.map(option => <label
                     className={`ui-check-card ui-list-item${answer.selected_options.includes(option.label) ? ' ui-list-item-active' : ''}`}
                     key={option.label}>
-                    <input className="ui-checkbox" type={question.multiple ? 'checkbox' : 'radio'} name={`${request.id}-${question.id}`}
+                    <input className={question.multiple ? 'ui-checkbox' : 'ui-radio'} type={question.multiple ? 'checkbox' : 'radio'} name={`${request.id}-${question.id}`}
                       disabled={busy || expired} checked={answer.selected_options.includes(option.label)}
                       onChange={event => setAnswers(current => current.map((item, i) => i !== index ? item : {
                         ...item,

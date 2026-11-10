@@ -152,7 +152,7 @@ describe('Agent directory packages', () => {
     expect(capability.skills.entries).toHaveLength(1) // Agent namespaces are not plugin namespaces.
     const selection = resolveSkillSelection({ mode: 'custom', project: false, entries: [] }, ownSkills.skills, true, true)
     expect(selection.entries).toEqual([{ id: 'subagent:reporter:skill:local-guide', model: true, shortcut: false }])
-    expect(await skills.buildSkillsPrompt(undefined, selection, [])).toContain(join(directory, 'skills/local-guide/SKILL.md'))
+    expect(await skills.buildSkillsPrompt({ agent: { kind: 'subagent', id: 'reporter' }, selection: selection, sourceFolders: [] })).toContain(join(directory, 'skills/local-guide/SKILL.md'))
     expect(resolveToolSelection({ mode: 'custom', project: false, entries: [] }, ownTools, true).entries).toEqual(['subagent:reporter:tool:query'])
     expect(resolveToolSelection({ mode: 'off', project: false, entries: [] }, ownTools, true).entries).toEqual([])
     expect(resolveSkillSelection({ ...selection, mode: 'off' }, ownSkills.skills, true, true).entries.every(s => !s.model)).toBe(true)
@@ -163,6 +163,114 @@ describe('Agent directory packages', () => {
     expect(resolveToolSelection({ mode: 'all', project: true, entries: [] }, await tools.listSubagentTools(['reporter']), true).entries).toEqual([])
     expect(resolveSkillSelection(selection, (await skills.listSubagentSkills(['reporter'])).skills, true, true).entries.every(s => !s.model)).toBe(true)
     await expect(tools.withToolPackageDirectory(ownTools[0].definition!, async () => 'executed')).rejects.toThrow('unavailable')
+  })
+
+  it('keeps main-session shortcuts independent of saved grants after deleting a subagent', async () => {
+    const directory = await addAgent('reporter')
+    await addResources(directory)
+    const workspace = join(root, 'workspace')
+    const userSkill = join(root, 'skills/local-guide/SKILL.md')
+    const projectSkill = join(workspace, '.agents/skills/project-guide/SKILL.md')
+    await text(userSkill, '---\nname: local-guide\ndescription: User guide.\n---\nUse the user guide.\n')
+    await text(projectSkill, '---\nname: project-guide\ndescription: Project guide.\n---\nUse the project guide.\n')
+    const userScript = join(root, 'skills/local-guide/query.py')
+    await text(userScript, 'print(1)')
+    await skills.updateSkillScriptApproval(undefined, undefined, true)
+    const ownSkills = await skills.listSubagentSkills(['reporter'])
+    const catalog = await skills.listSkillSnapshot(undefined, [workspace])
+    const local = catalog.skills.find(skill => skill.source === 'project')!
+    const capabilities = structuredClone(defaultCapabilities)
+    capabilities.skills = { mode: 'custom', project: false, entries: [
+      { id: 'user:local-guide', shortcut: true, model: true },
+      { id: local.id, shortcut: true, model: false },
+      { id: ownSkills.skills[0].id, shortcut: false, model: true }
+    ] }
+    const { getProject } = await import('./projectStore')
+    vi.mocked(getProject, { partial: true }).mockResolvedValue({ id: 'project', kind: 'workspace', sourceFolders: [workspace], capabilities, restrictSubagents: true })
+    const savedSelection = structuredClone(capabilities.skills)
+    const ownSelection = resolveSkillSelection(defaultCapabilities.skills, ownSkills.skills, true, true)
+    expect(await skills.buildSkillsPrompt({ agent: { kind: 'subagent', id: 'reporter' }, selection: ownSelection, sourceFolders: [] })).toContain(join(directory, 'skills/local-guide/SKILL.md'))
+
+    for (const deleted of [false, true]) {
+      if (deleted) await packages.writeSubagentPackages((await packages.readSubagentPackages(root)).filter(agent => agent.id !== 'reporter'))
+      for (const alias of [undefined, 'user']) {
+        const invocation = await skills.buildUserSkillInvocation('project', 'local-guide', alias, 'check')
+        expect(invocation.promptText).toContain(userSkill)
+        expect(invocation.promptText).toContain('Use the user guide.')
+        expect(invocation.promptText).not.toContain(directory)
+      }
+      expect((await skills.buildUserSkillInvocation('project', 'project-guide', local.shortcutAlias, 'check')).promptText).toContain(projectSkill)
+      const main = { agent: { kind: 'main' as const }, projectId: 'project', selection: capabilities.skills }
+      const prompt = await skills.buildSkillsPrompt(main)
+      expect(prompt).toContain(userSkill)
+      expect(prompt).not.toContain(directory)
+      expect(await skills.findSkillScriptExemption(userScript, main)).toMatchObject({ skillId: 'user:local-guide' })
+      expect(capabilities.skills).toEqual(savedSelection)
+    }
+    await expect(packages.findSubagentPackage('reporter')).rejects.toThrow('unavailable')
+    capabilities.skills.mode = 'off'
+    await expect(skills.buildUserSkillInvocation('project', 'local-guide', 'user', '')).resolves.toMatchObject({ errorCode: 'user_unavailable' })
+  })
+
+  it('loads only the explicit owner for prompts and script exemptions, independently of saved grants', async () => {
+    const owner = await addAgent('reporter')
+    const other = await addAgent('other')
+    await addResources(owner)
+    await addResources(other)
+    const ownScript = join(owner, 'skills/local-guide/query.py')
+    const otherScript = join(other, 'skills/local-guide/query.py')
+    await text(ownScript, 'print(1)')
+    await text(otherScript, 'print(2)')
+    await skills.updateSkillScriptApproval(undefined, undefined, true)
+    const selection = { mode: 'custom' as const, project: false, entries: [
+      { id: 'subagent:reporter:skill:local-guide', shortcut: false, model: true },
+      { id: 'subagent:other:skill:local-guide', shortcut: false, model: true }
+    ] }
+    const main = { agent: { kind: 'main' as const }, selection, sourceFolders: [] }
+    const child = { ...main, agent: { kind: 'subagent' as const, id: 'reporter' } }
+    expect(await skills.buildSkillsPrompt({ ...child, selection: defaultCapabilities.skills })).toContain(join(owner, 'skills/local-guide/SKILL.md'))
+    expect(await skills.buildSkillsPrompt(main)).not.toContain(owner)
+    expect(await skills.findSkillScriptExemption(ownScript, main)).toBeUndefined()
+    expect(await skills.findSkillScriptExemption(otherScript, child)).toBeUndefined()
+    for (const deleted of [false, true]) {
+      if (deleted) await packages.writeSubagentPackages((await packages.readSubagentPackages(root)).filter(agent => agent.id !== 'other'))
+      const prompt = await skills.buildSkillsPrompt(child)
+      expect(prompt).toContain(join(owner, 'skills/local-guide/SKILL.md'))
+      expect(prompt).not.toContain(other)
+      expect(await skills.findSkillScriptExemption(ownScript, child)).toMatchObject({ skillId: selection.entries[0].id })
+    }
+    const denied = { ...child, selection: { ...selection, entries: selection.entries.map(entry => ({ ...entry, model: false })) } }
+    expect(await skills.buildSkillsPrompt(denied)).toBe('')
+    expect(await skills.findSkillScriptExemption(ownScript, denied, { name: 'local-guide' })).toBeUndefined()
+    await packages.writeSubagentPackages((await packages.readSubagentPackages(root)).filter(agent => agent.id !== 'reporter'))
+    await expect(skills.buildSkillsPrompt(child)).rejects.toThrow('Agent package is unavailable: reporter')
+    await expect(skills.buildSkillsPrompt({ ...child, selection: defaultCapabilities.skills })).rejects.toThrow('Agent package is unavailable: reporter')
+  })
+
+  it.each([false, true])('keeps unused deleted packages out of frozen skill dependencies (ordinary skill %s)', async useGlobal => {
+    const owner = await addAgent('reporter')
+    await addResources(owner)
+    const file = join(root, 'skills/global-guide/SKILL.md')
+    const script = join(root, 'skills/global-guide/query.py')
+    await text(file, '---\nname: global-guide\ndescription: Global instructions.\n---\nUse global instructions.\n')
+    await text(script, 'print(1)')
+    await skills.updateSkillScriptApproval(undefined, undefined, true)
+    const selection = { mode: 'custom' as const, project: false, entries: [
+      ...(useGlobal ? [{ id: 'user:global-guide', shortcut: false, model: true }] : []),
+      { id: 'subagent:reporter:skill:local-guide', shortcut: false, model: false },
+      { id: 'subagent:reporter-other:skill:local-guide', shortcut: false, model: true },
+      { id: 'subagent:skill:guide', shortcut: true, model: true }
+    ] }
+    const scope = { agent: { kind: 'subagent' as const, id: 'reporter' }, selection, sourceFolders: [] }
+    const before = await skills.buildSkillsPrompt(scope)
+    expect(before.includes(file)).toBe(useGlobal)
+    await packages.writeSubagentPackages((await packages.readSubagentPackages(root)).filter(agent => agent.id !== 'reporter'))
+    await expect(skills.buildSkillsPrompt(scope)).resolves.toBe(before)
+    expect(Boolean(await skills.findSkillScriptExemption(script, scope))).toBe(useGlobal)
+    const disabled = { ...scope, selection: { ...selection, mode: 'off' as const,
+      entries: [{ id: 'subagent:reporter:skill:local-guide', shortcut: false, model: true }] } }
+    expect(await skills.buildSkillsPrompt(disabled)).toBe('')
+    expect(await skills.findSkillScriptExemption(script, disabled)).toBeUndefined()
   })
 
   it('rejects a stale settings save after a file edit or a newly imported package', async () => {

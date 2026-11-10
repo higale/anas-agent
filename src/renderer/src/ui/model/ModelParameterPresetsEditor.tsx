@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { modelParameterPresetTemplateGroups } from '@shared/modelParameterPresetTemplates'
 import type { ModelParameterPresetTemplate } from '@shared/modelParameterPresetTemplates'
 import type { ModelParameterPresetMode } from '@shared/types'
-import { CheckboxField } from '../CheckboxField'
+import { CheckboxButton } from '../CheckboxButton'
 import { CommitTextInput, CommitTextarea } from '../CommitTextField'
 import { ConfirmDialog } from '../dialogs/AppDialogs'
 import type { ConfirmDialogRequest } from '../dialogs/AppDialogs'
@@ -294,9 +294,8 @@ export function ModelParameterPresetsEditor({
               <div className="ui-field-stack">
                 <div className="model-parameter-preset-heading ui-field-heading">
                   <span>{t('settings.model_parameter_preset_parameters')}</span>
-                  <CheckboxField
+                  <CheckboxButton
                     checked={draft.defaultParameterPresetId === selected.id}
-                    className="ui-checkbox-field-inline"
                     label={t('common.default')}
                     onChange={(checked) => onUpdate({
                       defaultParameterPresetId: checked ? selected.id : undefined
