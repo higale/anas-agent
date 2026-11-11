@@ -221,8 +221,8 @@ async function verifyModelSelection(launchApplication) {
     await expect(meter).toHaveAttribute('aria-busy', 'false')
     const interruptedLabel = await meter.getAttribute('aria-label')
     const interruptedPreview = await page.evaluate((threadId) => globalThis.gale.agent.context.status(threadId), snapshot.thread.id)
-    const resumedInstructions = 'Include the new assistant instructions after approval.\n'.repeat(600)
-    await page.evaluate((instructions) => globalThis.gale.config.updateProfile({ assistant: { instructions } }), resumedInstructions)
+    const resumedRole = 'Include the new assistant instructions after approval.\n'.repeat(600)
+    await page.evaluate((role) => globalThis.gale.config.updateProfile({ assistant: { role } }), resumedRole)
     await expect(meter).toHaveAttribute('aria-busy', 'false')
     await expect(meter).not.toHaveAttribute('aria-label', interruptedLabel)
     const resumePreview = await page.evaluate((threadId) => globalThis.gale.agent.context.status(threadId), snapshot.thread.id)
@@ -234,7 +234,7 @@ async function verifyModelSelection(launchApplication) {
     await expect(approval).toHaveCount(0)
     await expect.poll(() => requests.length, { timeout: 20_000 }).toBe(4)
     assert.ok(requests[3].input.messages.some(message => message.role === 'system'
-      && message.content.includes(resumedInstructions.trim())), 'The resumed request must use the changed profile.')
+      && message.content.includes(resumedRole.trim())), 'The resumed request must use the changed profile.')
     const resumed = await page.evaluate((threadId) => globalThis.gale.agent.threads.get(threadId), snapshot.thread.id)
     assert.equal(resumed.pendingRun.id, interrupted.pendingRun.id)
     assert.ok(resumed.contextStatus.estimatedInputTokens > interruptedPreview.estimatedInputTokens + 6000,

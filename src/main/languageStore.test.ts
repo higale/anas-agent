@@ -42,7 +42,6 @@ describe('languageStore', () => {
         profile_defaults: {
           assistant: {
             role: 'English role',
-            instructions: 'English instructions'
           }
         }
       },
@@ -50,7 +49,6 @@ describe('languageStore', () => {
         profile_defaults: {
           assistant: {
             role: '中文角色',
-            instructions: '中文指令'
           }
         }
       }
@@ -60,7 +58,6 @@ describe('languageStore', () => {
       assistant: {
         name: 'Ananas',
         role: '中文角色',
-        instructions: '中文指令',
         newAvatarPath: ''
       },
       user: {
@@ -76,7 +73,6 @@ describe('languageStore', () => {
         profile_defaults: {
           assistant: {
             role: 'English role',
-            instructions: 'English instructions'
           }
         }
       },
@@ -90,7 +86,6 @@ describe('languageStore', () => {
     expect(profile.assistant).toEqual({
       name: 'Ananas',
       role: 'Custom role',
-      instructions: 'English instructions',
       newAvatarPath: ''
     })
   })

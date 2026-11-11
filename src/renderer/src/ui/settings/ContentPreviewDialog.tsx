@@ -1,5 +1,5 @@
 import * as Dialog from '@radix-ui/react-dialog'
-import { Braces, ClipboardCopy, X } from 'lucide-react'
+import { Braces, Copy, X } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { notice } from '../notice'
@@ -29,7 +29,7 @@ export function ContentPreviewDialog({ title, description, copyText, children, o
         <div className="settings-code-preview-content">{children}</div>
         <footer className="ui-dialog-footer">
           <button className="ui-icon-button" type="button" aria-label={t('common.copy')} data-tooltip={t('common.copy')}
-            disabled={!copyText} onClick={() => void copy()}><ClipboardCopy size={UI_ICON_SIZE_SMALL} /></button>
+            disabled={!copyText} onClick={() => void copy()}><Copy size={UI_ICON_SIZE_SMALL} /></button>
           <Dialog.Close asChild>
             <button className="ui-icon-button" type="button" aria-label={t('common.close')} data-tooltip={t('common.close')}><X size={UI_ICON_SIZE_SMALL} /></button>
           </Dialog.Close>

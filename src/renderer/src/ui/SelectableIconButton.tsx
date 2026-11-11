@@ -7,7 +7,7 @@ type SelectableIconButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, '
   label: string
   pressed: boolean
   preserveFocus?: boolean
-  variant?: 'default' | 'toolbar'
+  variant?: 'default' | 'toolbar' | 'neutral'
 } & ({ Icon: LucideIcon; PressedIcon?: LucideIcon; icon?: never } | { icon: ReactNode; Icon?: never; PressedIcon?: never })
 
 export function SelectableIconButton({
@@ -33,6 +33,7 @@ export function SelectableIconButton({
       className={[
         variant === 'toolbar' ? 'ui-tool-button ui-tool-button-square' : 'ui-icon-button',
         'ui-selectable-icon-button',
+        variant === 'neutral' ? 'ui-selectable-icon-button-neutral' : '',
         pressed ? 'ui-selectable-icon-button-active' : '',
         className ?? ''
       ].filter(Boolean).join(' ')}

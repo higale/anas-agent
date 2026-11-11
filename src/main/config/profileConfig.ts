@@ -17,7 +17,6 @@ export function normalizeAppProfile(value: unknown): AppProfile {
     assistant: {
       name: assistantName,
       role: stringValue(assistant, 'role', 'profile.assistant.role'),
-      instructions: stringValue(assistant, 'instructions', 'profile.assistant.instructions'),
       newAvatarPath: stringValue(assistant, 'new_avatar_path', 'profile.assistant.new_avatar_path')
     },
     user: {
@@ -27,12 +26,12 @@ export function normalizeAppProfile(value: unknown): AppProfile {
   }
 }
 
-export function rawAppProfile(profile: AppProfile): RawAppProfile {
+export function rawAppProfile(profile: AppProfile, previous?: RawAppProfile): RawAppProfile {
   return {
     assistant: {
+      ...previous?.assistant,
       name: profile.assistant.name,
       role: profile.assistant.role,
-      instructions: profile.assistant.instructions,
       new_avatar_path: profile.assistant.newAvatarPath
     },
     user: {

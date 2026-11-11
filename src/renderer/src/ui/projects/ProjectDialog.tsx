@@ -269,7 +269,7 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
         <Dialog.Overlay className="ui-backdrop" />
         <Dialog.Content
           asChild
-          className={`ui-dialog ui-dialog-medium ui-dialog-font-scaled ui-dialog-centered ui-dialog-fixed-footer ui-popover project-dialog${!simpleChat ? ' ui-dialog-split' : ''}`}
+          className={`ui-dialog ui-dialog-medium ui-dialog-font-scaled ui-dialog-centered ui-dialog-safe-area ui-dialog-fixed-footer ui-popover project-dialog${!simpleChat ? ' ui-dialog-split' : ''}`}
           onPointerDownOutside={(event) => event.preventDefault()}
           onOpenAutoFocus={(event) => {
             if (!defaultWorkspace) {

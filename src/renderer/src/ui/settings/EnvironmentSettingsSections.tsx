@@ -1,4 +1,4 @@
-import { Fragment, type FormEvent, useEffect, useRef, useState } from 'react'
+import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AppSettings, EnvironmentContextSettings } from '@shared/types'
 import { CheckboxField } from '../CheckboxField'
@@ -22,7 +22,6 @@ interface EnvironmentSettingsSectionsProps {
 
 const defaultEnvironmentContext = Object.freeze<EnvironmentContextSettings>({
   operatingSystem: true,
-  powerShell: true,
   bundledCommands: true,
   currentDate: true,
   applicationDataDirectory: true,
@@ -56,7 +55,6 @@ export function EnvironmentSettingsSections({
   const savedCustomInformationRef = useRef(environmentContext.customInformation)
   const customInformationSelectionRef = useRef<{ value: string; start: number; end: number } | null>(null)
   const [detectingEnvironment, setDetectingEnvironment] = useState(false)
-  const windows = document.documentElement.dataset.platform === 'win32'
   environmentContextRef.current = environmentContext
 
   useEffect(() => {
@@ -126,24 +124,14 @@ export function EnvironmentSettingsSections({
         >
           <div className="settings-agent-feature-list">
             {environmentContextCheckboxKeys.map((feature) => (
-              <Fragment key={feature}>
-                <CheckboxField
-                  checked={environmentContext[feature]}
-                  className="ui-checkbox-field-inline"
-                  label={t(`settings.capability_${feature}`)}
-                  tooltip={t(`settings.capability_${feature}_hint`)}
-                  onChange={(enabled) => updateEnvironmentContext(feature, enabled)}
-                />
-                {feature === 'operatingSystem' && windows && (
-                  <CheckboxField
-                    checked={environmentContext.powerShell}
-                    className="ui-checkbox-field-inline"
-                    label={t('settings.capability_powerShell')}
-                    tooltip={t('settings.capability_powerShell_hint')}
-                    onChange={(enabled) => updateEnvironmentContext('powerShell', enabled)}
-                  />
-                )}
-              </Fragment>
+              <CheckboxField
+                key={feature}
+                checked={environmentContext[feature]}
+                className="ui-checkbox-field-inline"
+                label={t(`settings.capability_${feature}`)}
+                tooltip={t(`settings.capability_${feature}_hint`)}
+                onChange={(enabled) => updateEnvironmentContext(feature, enabled)}
+              />
             ))}
           </div>
           <div className="ui-field-stack">

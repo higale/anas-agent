@@ -15,7 +15,6 @@ function config(): AppConfigSnapshot {
         assistant: {
           name: 'Anas',
           role: 'A careful assistant.',
-          instructions: 'Be concise.',
           newAvatarPath: ''
         },
         user: {
@@ -107,7 +106,7 @@ describe('effective agent system prompt', () => {
       workspace: '<workspace_context>WORKSPACE</workspace_context>',
       memory: 'MEMORY',
       skills: 'SKILLS',
-      commandShell: 'PowerShell 7.6.4 (pwsh.exe)'
+      commandShell: 'Z shell (/bin/zsh)'
     })
     expect(prompt.sections.map((section) => section.kind)).toEqual([
       'profile',
@@ -119,12 +118,11 @@ describe('effective agent system prompt', () => {
     expect(prompt.text).toBe(prompt.sections.map((section) => section.content).join('\n\n'))
     expect(prompt.text).toContain('<name>\nAnas\n</name>')
     expect(prompt.text).toContain('<role>\nA careful assistant.\n</role>')
-    expect(prompt.text).toContain('<instructions>\nBe concise.\n</instructions>')
     expect(prompt.text).not.toContain('Gale')
     expect(prompt.text).not.toContain('Works on desktop agents.')
     expect(prompt.text).toContain('Operating system:')
     expect(prompt.text).toContain('Current date:')
-    expect(prompt.text).toContain('Command shell: PowerShell 7.6.4 (pwsh.exe)')
+    expect(prompt.text).toContain('Command shell: Z shell (/bin/zsh)')
     expect(prompt.text).toContain('Application data directory:')
     expect(prompt.text).toContain('User home directory:')
     expect(prompt.text).not.toContain('Application executable:')
@@ -153,7 +151,6 @@ describe('effective agent system prompt', () => {
     const snapshot = config()
     snapshot.settings.environmentContext.bundledCommands = false
     snapshot.settings.environmentContext.operatingSystem = false
-    snapshot.settings.environmentContext.powerShell = false
     snapshot.settings.environmentContext.applicationDataDirectory = false
     snapshot.settings.environmentContext.userHomeDirectory = false
 
@@ -175,7 +172,6 @@ describe('effective agent system prompt', () => {
     const snapshot = config()
     snapshot.settings.environmentContext = {
       operatingSystem: false,
-      powerShell: true,
       bundledCommands: false,
       currentDate: false,
       applicationDataDirectory: false,

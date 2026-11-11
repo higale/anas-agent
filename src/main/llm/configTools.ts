@@ -78,7 +78,7 @@ export function configToolDefinitions(primaryFolder: string): ToolDefinition[] {
   return [
     defineContentTool({
       name: 'update_config',
-      description: 'Update one supported application configuration value only when the user explicitly asks to change it. Never use this tool to remember something or change custom instructions. Of the profile settings, only assistant name, role and avatar are writable. Most values persist; profile.assistant.new_avatar_path submits a one-time avatar request and is cleared after the attempt. Set it to an image path to replace the avatar or to "default" to restore the default avatar. The only supported config document is settings. Use a dot-separated snake_case key from settings.json. Pass the new value itself in value; never serialize it into JSON text. Arrays and objects replace the complete value atomically.',
+      description: 'Update one supported application configuration value only when the user explicitly asks to change it. Never use this tool to remember something. Of the profile settings, only assistant name, role and avatar are writable. Most values persist; profile.assistant.new_avatar_path submits a one-time avatar request and is cleared after the attempt. Set it to an image path to replace the avatar or to "default" to restore the default avatar. The only supported config document is settings. Use a dot-separated snake_case key from settings.json. Pass the new value itself in value; never serialize it into JSON text. Arrays and objects replace the complete value atomically.',
       inputSchema: z.object({
         summary: toolSummarySchema,
         config: z.enum(['settings']).describe('Configuration document to update. Currently only settings is supported.'),

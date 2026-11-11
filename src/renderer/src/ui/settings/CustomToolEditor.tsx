@@ -63,7 +63,7 @@ export function CustomToolEditor({ tool, initialSection = 'information', onClose
     <Dialog.Root open onOpenChange={(open) => { if (!open) close() }}>
       <Dialog.Portal>
         <Dialog.Overlay className="ui-backdrop" />
-        <Dialog.Content className="ui-dialog ui-dialog-wide ui-dialog-fixed-footer ui-dialog-centered ui-dialog-resizable ui-popover custom-tool-editor"
+        <Dialog.Content className="ui-dialog ui-dialog-wide ui-dialog-fixed-footer ui-dialog-centered ui-dialog-safe-area ui-dialog-resizable ui-popover custom-tool-editor"
           onPointerDownOutside={(event) => event.preventDefault()}>
           <div className="custom-tool-editor-header ui-dialog-header-group ui-form-section">
             <header className="ui-dialog-header">

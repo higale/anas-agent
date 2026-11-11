@@ -82,10 +82,7 @@ export function shouldIncludeCommandShell(
   settings: AppSettings,
   features: ReturnType<typeof capabilityFeatures> = capabilityFeatures(defaultCapabilities)
 ): boolean {
-  if (!features.environment) return false
-  return platform === 'win32'
-    ? settings.environmentContext.powerShell
-    : features.commandExecution && settings.environmentContext.operatingSystem
+  return platform !== 'win32' && features.environment && features.commandExecution && settings.environmentContext.operatingSystem
 }
 
 function workspaceContext(project: WorkspaceProject): WorkspaceContext {

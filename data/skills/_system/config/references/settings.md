@@ -58,7 +58,6 @@ Do not guess a model ID. Change `default_model_id` only when the exact configure
 Every switch below takes a boolean. `environment_context.custom_information` takes a string.
 
 - `environment_context.operating_system`
-- `environment_context.power_shell`
 - `environment_context.bundled_commands` — include bundled command instructions (currently rg) when command execution tools are available
 - `environment_context.current_date`
 - `environment_context.application_data_directory`

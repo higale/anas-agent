@@ -162,7 +162,6 @@ describe('domain config storage', () => {
       language: 'system',
       environment_context: {
         operating_system: true,
-        power_shell: true,
         bundled_commands: true,
         current_date: true,
         application_data_directory: true,
@@ -224,7 +223,6 @@ describe('domain config storage', () => {
       language: 'system',
       environment_context: {
         operating_system: true,
-        power_shell: true,
         bundled_commands: true,
         current_date: false,
         application_data_directory: true,

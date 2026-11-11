@@ -155,13 +155,13 @@ describe('useLiveContextStatus', () => {
     const reader = vi.fn().mockResolvedValue(contextStatus(model, 300))
     installStatusReader(reader)
     const reported = contextStatus()
-    const config = { settings: { profile: { assistant: { instructions: 'Original profile.' } }, attachmentTextMaxChars: 1000 } } as AppConfigSnapshot
+    const config = { settings: { profile: { assistant: { role: 'Original profile.' } }, attachmentTextMaxChars: 1000 } } as AppConfigSnapshot
     const { result, rerender } = renderHook(({ currentConfig, currentProject }) => useLiveContextStatus('thread', model, reported, {
       config: currentConfig, project: currentProject, continuationRunId: 'run', continuationStatus: 'interrupted'
     }), { initialProps: { currentConfig: config, currentProject: { ...project, codingMode: true } } })
     await waitFor(() => expect(result.current?.estimatedInputTokens).toBe(300))
     const changedConfig = structuredClone(config)
-    if (change === 'profile') changedConfig.settings.profile.assistant.instructions = 'Expanded profile context.'
+    if (change === 'profile') changedConfig.settings.profile.assistant.role = 'Expanded profile context.'
     if (change === 'attachments') changedConfig.settings.attachmentTextMaxChars = 5000
     const changedProject = { ...project, codingMode: true, ...(change === 'prompt' ? { prompt: 'Expanded project context.' } : {}) }
     reader.mockResolvedValue(contextStatus(model, 900))

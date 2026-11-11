@@ -66,7 +66,6 @@ export function buildProfileBlock(profile: AppProfile): string {
     '<assistant_profile>',
     profileField('name', profile.assistant.name),
     profileField('role', profile.assistant.role),
-    profileField('instructions', profile.assistant.instructions),
     '</assistant_profile>',
     '</profile>'
   ].join('\n')

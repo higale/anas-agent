@@ -125,7 +125,7 @@ describe('NativeAgentRuntime system prompt preview', () => {
       }],
       settings: {
         profile: {
-          assistant: { name: 'Anas', role: 'Assistant', instructions: '', newAvatarPath: '' },
+          assistant: { name: 'Anas', role: 'Assistant', newAvatarPath: '' },
           user: { preferredName: '', personalInfo: '' }
         },
         speechReply: { enabled: false, voice: '', speed: 1 },
@@ -178,7 +178,7 @@ describe('NativeAgentRuntime system prompt preview', () => {
     const firstModel = resolveProviderModelConfig(firstProvider, firstProvider.models[0])
     const settings: AppSettings = {
       profile: {
-        assistant: { name: 'Anas', role: 'Assistant', instructions: '', newAvatarPath: '' },
+        assistant: { name: 'Anas', role: 'Assistant', newAvatarPath: '' },
         user: { preferredName: '', personalInfo: '' }
       },
       speechReply: { enabled: false, voice: '', speed: 1 },
@@ -240,7 +240,7 @@ describe('NativeAgentRuntime system prompt preview', () => {
     const selectedModel = resolveProviderModelConfig(selectedProvider, selectedProvider.models[0])
     const settings = {
       profile: {
-        assistant: { name: 'Anas', role: 'Assistant', instructions: '', newAvatarPath: '' },
+        assistant: { name: 'Anas', role: 'Assistant', newAvatarPath: '' },
         user: { preferredName: '', personalInfo: '' }
       },
       speechReply: { enabled: false, voice: '', speed: 1 },
@@ -336,7 +336,7 @@ describe('NativeAgentRuntime system prompt preview', () => {
     const defaultModel = defaultProvider && resolveProviderModelConfig(defaultProvider, defaultProvider.models[0])
     const settings = {
       profile: {
-        assistant: { name: 'Anas', role: 'Assistant', instructions: '', newAvatarPath: '' },
+        assistant: { name: 'Anas', role: 'Assistant', newAvatarPath: '' },
         user: { preferredName: '', personalInfo: '' }
       },
       speechReply: { enabled: false, voice: '', speed: 1 },

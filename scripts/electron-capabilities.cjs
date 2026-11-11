@@ -57,12 +57,14 @@ async function verifySkillDivider(group, fullWidth) {
       left: rect.left + parseFloat(line.left), width: parseFloat(line.width), thickness: parseFloat(line.borderTopWidth),
       groupLeft: rect.left, groupWidth: rect.width,
       listLeft: list.getBoundingClientRect().left + list.clientLeft, listWidth: list.clientWidth,
-      horizontalOverflow: list.scrollWidth - list.clientWidth
+      horizontalOverflow: list.scrollWidth - list.clientWidth,
+      devicePixelRatio: globalThis.devicePixelRatio
     }
   })
   const expectedLeft = fullWidth ? geometry.listLeft : geometry.groupLeft
   const expectedWidth = fullWidth ? geometry.listWidth : geometry.groupWidth
-  assert.equal(geometry.thickness, 1)
+  // Chromium snaps a 1 CSS px border to whole physical pixels.
+  assert.ok(Math.abs(geometry.thickness - 1) < 1 / geometry.devicePixelRatio && geometry.thickness > 0)
   assert.ok(Math.abs(geometry.left - expectedLeft) < 1, `Divider start: ${JSON.stringify(geometry)}`)
   assert.ok(Math.abs(geometry.width - expectedWidth) < 1, `Divider width: ${JSON.stringify(geometry)}`)
   assert.ok(geometry.horizontalOverflow <= 1, `Dividers must not cause horizontal scrolling: ${JSON.stringify(geometry)}`)
@@ -87,7 +89,7 @@ async function verifyCapabilities(launchApplication) {
     const projectId = await page.evaluate(async workspace => {
       const api = globalThis.gale
       await api.config.updateSettings({ language: 'en' })
-      await api.config.updateProfile({ assistant: { instructions: 'CAPABILITY_PROFILE_MARKER' } })
+      await api.config.updateProfile({ assistant: { role: 'CAPABILITY_PROFILE_MARKER' } })
       const added = await api.config.saveModelProvider({ name: 'Preview', protocol: 'openai_chat_completions', baseUrl: 'https://preview.invalid/v1', apiKey: '', parameters: {} })
       const provider = added.providers.find(item => item.name === 'Preview')
       const models = await api.config.saveProviderModel({ providerId: provider.id, displayName: 'Preview', model: 'preview', parameters: {}, parameterPresetMode: 'none', capabilities: { vision: true, toolUse: true }, stream: true,

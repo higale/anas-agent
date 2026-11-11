@@ -76,7 +76,6 @@ export function profileDefaultsFromResources(
     assistant: {
       name: 'Ananas',
       role: defaultValue(['profile_defaults', 'assistant', 'role']),
-      instructions: defaultValue(['profile_defaults', 'assistant', 'instructions']),
       newAvatarPath: ''
     },
     user: {

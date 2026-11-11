@@ -34,7 +34,7 @@ export function ProfileSettings({
   onProfileChange
 }: ProfileSettingsProps) {
   const { t } = useTranslation()
-  const assistant = profile?.assistant ?? { name: '', role: '', instructions: '' }
+  const assistant = profile?.assistant ?? { name: '', role: '' }
   const textareaClass = 'ui-autosize-textarea ui-code-textarea ui-textarea-wrap'
 
   return (
@@ -98,20 +98,6 @@ export function ProfileSettings({
             rows={UI_TEXTAREA_ROWS_COMPACT}
             value={assistant.role}
             onCommit={(role) => void onProfileChange({ assistant: { role } })}
-          />
-        </label>
-        <label className="ui-form-row ui-form-row-wide" htmlFor="assistant-instructions-input">
-          <span>
-            <strong>{t('settings.assistant_instructions')}</strong>
-            <small>{t('settings.assistant_instructions_hint')}</small>
-          </span>
-          <CommitTextarea
-            id="assistant-instructions-input"
-            className={textareaClass}
-            data-max-height="none"
-            rows={UI_TEXTAREA_ROWS_COMPACT}
-            value={assistant.instructions}
-            onCommit={(instructions) => void onProfileChange({ assistant: { instructions } })}
           />
         </label>
       </SettingsGroup>

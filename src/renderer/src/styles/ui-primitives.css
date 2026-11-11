@@ -728,25 +728,31 @@ details[open] > .ui-disclosure-trigger .ui-disclosure-count > .ui-disclosure-che
   overflow: auto;
 }
 
-.ui-dialog-resizable {
+.ui-dialog-safe-area {
   --ui-dialog-safe-top: 18px;
-  top: calc(50% + (var(--ui-dialog-safe-top) - 18px) / 2);
-  resize: both;
-  overflow: hidden;
-  min-width: min(420px, calc(100vw - 32px));
-  max-width: calc(100vw - 32px);
-  min-height: min(320px, calc(100vh - var(--ui-dialog-safe-top) - 18px));
-  max-height: calc(100vh - var(--ui-dialog-safe-top) - 18px);
+  --ui-dialog-safe-bottom: 18px;
+  --ui-dialog-safe-width: calc(100vw - 32px);
+  --ui-dialog-safe-height: calc(100vh - var(--ui-dialog-safe-top) - var(--ui-dialog-safe-bottom));
+  top: calc(50% + (var(--ui-dialog-safe-top) - var(--ui-dialog-safe-bottom)) / 2);
+  max-width: var(--ui-dialog-safe-width);
+  max-height: var(--ui-dialog-safe-height);
 }
 
-:root[data-platform="win32"] .ui-dialog-resizable {
-  --ui-dialog-safe-top: max(18px, calc(env(titlebar-area-y, 0px) + env(titlebar-area-height, 36px) + 8px));
+:root[data-platform="win32"] .ui-dialog-safe-area {
+  --ui-dialog-safe-top: max(18px, calc(env(titlebar-area-y, 0px) + env(titlebar-area-height, 36px) + 4px));
+}
+
+.ui-dialog-resizable {
+  resize: both;
+  overflow: hidden;
+  min-width: min(420px, var(--ui-dialog-safe-width));
+  min-height: min(320px, var(--ui-dialog-safe-height));
 }
 
 .ui-dialog-resizable[data-maximized="true"] {
   /* Native resize writes inline dimensions; keep them for restoring the window. */
-  width: calc(100vw - 32px) !important;
-  height: calc(100vh - var(--ui-dialog-safe-top) - 18px) !important;
+  width: var(--ui-dialog-safe-width) !important;
+  height: var(--ui-dialog-safe-height) !important;
   top: var(--ui-dialog-safe-top);
   transform: translateX(-50%);
   resize: none;
@@ -755,7 +761,7 @@ details[open] > .ui-disclosure-trigger .ui-disclosure-count > .ui-disclosure-che
 .ui-dialog-fixed-footer {
   grid-template-rows: minmax(0, 1fr) auto;
   gap: 0;
-  max-height: calc(100vh - 36px);
+  max-height: var(--ui-dialog-safe-height, calc(100vh - 36px));
   padding: 0;
   overflow: hidden;
 }
@@ -784,7 +790,7 @@ details[open] > .ui-disclosure-trigger .ui-disclosure-count > .ui-disclosure-che
 }
 
 .ui-dialog-split {
-  --ui-dialog-width: min(calc(1200px + var(--ui-dialog-font-growth, 0px)), calc(100% - 36px));
+  --ui-dialog-width: min(calc(1200px + var(--ui-dialog-font-growth, 0px)), var(--ui-dialog-safe-width, calc(100% - 36px)));
 }
 
 .ui-dialog-fixed-footer > .ui-dialog-panes {
@@ -1945,6 +1951,17 @@ button.ui-avatar:has(> img):focus-visible,
 .ui-selectable-icon-button.ui-selectable-icon-button-active:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 12%, var(--accent-bg));
   color: var(--accent-hover);
+}
+
+.ui-selectable-icon-button-neutral.ui-selectable-icon-button-active {
+  border-color: transparent;
+  background: var(--control-segment-selected-bg);
+  color: var(--text-strong);
+}
+
+.ui-selectable-icon-button-neutral.ui-selectable-icon-button-active:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-strong) 8%, var(--control-segment-selected-bg));
+  color: var(--text-strong);
 }
 
 .ui-icon-button-xs {

@@ -25,7 +25,6 @@ export function config(settings: Partial<AppConfigSnapshot['settings']> = {}): A
         assistant: {
           name: 'Ananas',
           role: 'AI assistant',
-          instructions: 'Be clear and useful.',
           newAvatarPath: ''
         },
         user: {

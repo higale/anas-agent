@@ -17,7 +17,7 @@ const emptyConfig = { customTools: [],
   mcpServers: [],
   settings: {
     profile: {
-      assistant: { name: 'Ananas', role: '', instructions: '', newAvatarPath: '' },
+      assistant: { name: 'Ananas', role: '', newAvatarPath: '' },
       user: { preferredName: '', personalInfo: '' }
     },
     speechReply: { enabled: false, voice: '', speed: 1 },

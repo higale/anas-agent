@@ -60,6 +60,20 @@ async function verifyGlobalSettings(launchApplication) {
         await page.locator('.project-thread-group').filter({ hasText: name }).locator('.project-thread-more').click()
         await page.locator('.project-details-action').filter({ hasText: /Edit/ }).click()
         const dialog = page.locator('.project-dialog')
+        const dialogEdges = await dialog.evaluate((element) => {
+          const bounds = element.getBoundingClientRect()
+          const titlebar = globalThis.navigator.windowControlsOverlay?.getTitlebarAreaRect()
+          return {
+            top: bounds.top,
+            bottomGap: globalThis.innerHeight - bounds.bottom,
+            titlebarBottom: globalThis.document.documentElement.dataset.platform === 'win32' ? (titlebar?.bottom || 36) : 0
+          }
+        })
+        const topInset = Math.max(18, dialogEdges.titlebarBottom + 4)
+        assert.ok(dialogEdges.top >= topInset - 1, 'Project editing must clear the window title bar.')
+        assert.ok(dialogEdges.bottomGap >= 17, 'Project editing must keep space below the footer.')
+        assert.ok(Math.abs(dialogEdges.top - topInset - (dialogEdges.bottomGap - 18)) < 2,
+          'Project editing must be centered between the title bar and the bottom inset.')
         await dialog.getByRole('button', { name: 'Add folders', exact: true }).click()
         await expect(dialog.locator('.project-folder-item')).toHaveCount(2)
         await dialog.locator('button[type="submit"]').click()
@@ -77,10 +91,11 @@ async function verifyGlobalSettings(launchApplication) {
         await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible()
       }
       await expect(page.getByRole('heading', { name: 'User profile', exact: true })).toHaveCount(0)
-      const instructions = page.locator('#assistant-instructions-input')
-      await instructions.fill('Use concise examples.')
-      await instructions.blur()
-      await expect.poll(() => page.evaluate(async () => (await globalThis.gale.config.get()).settings.profile.assistant.instructions)).toBe('Use concise examples.')
+      await expect(page.locator('#assistant-instructions-input')).toHaveCount(0)
+      const role = page.locator('#assistant-role-input')
+      await role.fill('Use concise examples.')
+      await role.blur()
+      await expect.poll(() => page.evaluate(async () => (await globalThis.gale.config.get()).settings.profile.assistant.role)).toBe('Use concise examples.')
       const assistantName = `Assistant for ${name}`
       await page.getByRole('textbox', { name: 'Name', exact: true }).fill(assistantName)
       await page.getByRole('textbox', { name: 'Name', exact: true }).blur()

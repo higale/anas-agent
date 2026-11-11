@@ -575,7 +575,6 @@ export interface AgentFeatures {
 
 export interface EnvironmentContextSettings {
   operatingSystem: boolean
-  powerShell: boolean
   bundledCommands: boolean
   currentDate: boolean
   applicationDataDirectory: boolean
@@ -628,7 +627,6 @@ export type AppSettingsUpdate = Partial<Omit<AppSettings, 'profile' | 'speechRep
 export interface AssistantProfile {
   name: string
   role: string
-  instructions: string
   newAvatarPath: string
 }
 

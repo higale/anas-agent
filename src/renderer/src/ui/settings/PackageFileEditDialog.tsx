@@ -59,13 +59,18 @@ export function PackageFileEditDialog({ preview, onSave, onClose, saveDisabled, 
   const inline = Boolean(inlineDraft) && !maximized
   const Title = inline ? 'h3' : Dialog.Title
   const Description = inline ? 'p' : Dialog.Description
+  const resizeLabel = t(maximized ? 'settings.file_restore_size' : 'settings.file_maximize')
+  const ResizeIcon = maximized ? Minimize2 : Maximize2
   const editor = <CodeFileEditor path={preview.path} content={inlineDraft?.text ?? preview.content ?? ''} onChange={inlineDraft?.onChange ?? setDraft} wordWrap={wordWrap} />
   const body = <>
     <header className="ui-toolbar ui-toolbar-between">
       <Title className="ui-dialog-title">{preview.name}</Title>
       <div className="ui-row">
-        <SelectableIconButton Icon={WrapText} iconSize={16} label={t('settings.auto_wrap')} pressed={wordWrap} onClick={() => setWordWrap(value => !value)} />
-        <SelectableIconButton Icon={Maximize2} PressedIcon={Minimize2} iconSize={16} label={t(maximized ? 'settings.file_restore_size' : 'settings.file_maximize')} pressed={maximized} onClick={() => setMaximized(value => !value)} />
+        <SelectableIconButton Icon={WrapText} iconSize={16} variant="neutral" label={t('settings.auto_wrap')} pressed={wordWrap} onClick={() => setWordWrap(value => !value)} />
+        <button type="button" className="ui-icon-button" aria-label={resizeLabel} aria-pressed={maximized}
+          data-tooltip={resizeLabel} onClick={() => setMaximized(value => !value)}>
+          <ResizeIcon size={16} />
+        </button>
       </div>
     </header>
     <Description className="ui-dialog-description">{preview.resolvedPath}</Description>
@@ -87,7 +92,7 @@ export function PackageFileEditDialog({ preview, onSave, onClose, saveDisabled, 
     }}>
       <Dialog.Portal>
         <Dialog.Overlay className="ui-backdrop" />
-        <Dialog.Content className="ui-dialog ui-dialog-wide ui-dialog-centered ui-dialog-resizable ui-popover settings-file-edit-dialog" data-maximized={maximized} onPointerDownOutside={event => event.preventDefault()}>{body}</Dialog.Content>
+        <Dialog.Content className="ui-dialog ui-dialog-wide ui-dialog-centered ui-dialog-safe-area ui-dialog-resizable ui-popover settings-file-edit-dialog" data-maximized={maximized} onPointerDownOutside={event => event.preventDefault()}>{body}</Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>}
     <ConfirmDialog request={discard ? {

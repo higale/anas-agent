@@ -37,7 +37,6 @@ function rawConfig(): RawAppConfig {
       max_model_calls_per_run: 100,
       environment_context: {
         operating_system: true,
-        power_shell: true,
         bundled_commands: true,
         current_date: true,
         application_data_directory: true,
@@ -110,7 +109,6 @@ async function loadAppConfig(raw: RawAppConfig, bundled: RawAppConfig = raw) {
     assistant: {
       name: 'Ananas',
       role: 'Localized role',
-      instructions: 'Localized instructions',
       newAvatarPath: ''
     },
     user: {
@@ -222,7 +220,6 @@ describe('profile initialization', () => {
           assistant: {
             name: 'Ananas',
             role: 'Localized role',
-            instructions: 'Localized instructions',
             new_avatar_path: ''
           },
           user: {
@@ -473,14 +470,17 @@ describe('configuration domain writes', () => {
     expect(changed).toHaveBeenCalledTimes(2)
   })
 
-  it('persists runtime environment details separately from the environment capability', async () => {
+  it('loads a saved PowerShell switch and omits it when saving runtime environment settings', async () => {
     const raw = rawConfig()
+    Object.assign(raw.settings!.environment_context!, { power_shell: false })
     const { appConfig, writeRawSettingsConfig } = await loadAppConfig(raw)
+
+    expect((await appConfig.getAppConfigSnapshot()).settings.environmentContext)
+      .toMatchObject({ operatingSystem: true, bundledCommands: true })
 
     const snapshot = await appConfig.updateSettings({
       environmentContext: {
         operatingSystem: false,
-        powerShell: false,
         bundledCommands: false,
         currentDate: true,
         applicationDataDirectory: false,
@@ -492,7 +492,6 @@ describe('configuration domain writes', () => {
 
     expect(raw.settings?.environment_context).toEqual({
       operating_system: false,
-      power_shell: false,
       bundled_commands: false,
       current_date: true,
       application_data_directory: false,
@@ -502,7 +501,6 @@ describe('configuration domain writes', () => {
     })
     expect(snapshot.settings.environmentContext).toEqual({
       operatingSystem: false,
-      powerShell: false,
       bundledCommands: false,
       currentDate: true,
       applicationDataDirectory: false,
@@ -997,7 +995,6 @@ describe('profile configuration', () => {
       assistant: {
         name: 'Ananas',
         role: '',
-        instructions: 'Be clear.',
         newAvatarPath: ''
       },
       user: {
@@ -1018,7 +1015,7 @@ describe('profile configuration', () => {
     const raw = rawConfig()
     const { appConfig, toolEffectScope, writeRawSettingsConfig } = await loadAppConfig(raw)
     let durableEffect: import('../agent/toolEffectScope').AgentToolEffectArm | undefined
-    const update = { assistant: { instructions: 'Be concise.' } }
+    const update = { assistant: { role: 'Be concise.' } }
 
     await toolEffectScope.runWithCurrentAgentToolEffect({
       arm: (effect) => { durableEffect = effect }
@@ -1027,7 +1024,7 @@ describe('profile configuration', () => {
       kind: 'profile_update',
       recoveryMode: 'idempotent',
       target: {
-        fields: ['assistant.instructions'],
+        fields: ['assistant.role'],
         beforeFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
         desiredFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/)
       }
@@ -1040,7 +1037,7 @@ describe('profile configuration', () => {
     expect(replayArm).not.toHaveBeenCalled()
     expect(writeRawSettingsConfig).toHaveBeenCalledOnce()
 
-    raw.settings!.profile!.assistant!.instructions = 'Ada'
+    raw.settings!.profile!.assistant!.role = 'Ada'
     await expect(toolEffectScope.runWithCurrentAgentToolEffect({
       arm: (effect) => {
         if (JSON.stringify(effect) !== JSON.stringify(durableEffect)) {
@@ -1049,7 +1046,7 @@ describe('profile configuration', () => {
       }
     }, () => appConfig.updateProfile(update)))
       .rejects.toThrow('durable effect target changed')
-    expect(raw.settings?.profile?.assistant?.instructions).toBe('Ada')
+    expect(raw.settings?.profile?.assistant?.role).toBe('Ada')
     expect(writeRawSettingsConfig).toHaveBeenCalledOnce()
   })
 
@@ -1077,9 +1074,9 @@ describe('profile configuration', () => {
     })
 
     await expect(appConfig.updateProfile({
-      assistant: { instructions: 'Be concise.' }
+      assistant: { role: 'Be concise.' }
     })).resolves.toMatchObject({
-      settings: { profile: { assistant: { instructions: 'Be concise.' } } }
+      settings: { profile: { assistant: { role: 'Be concise.' } } }
     })
     expect(writeRawSettingsConfig).toHaveBeenCalledOnce()
     expect(runtimeLog).toHaveBeenCalledWith(

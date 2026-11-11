@@ -120,6 +120,8 @@ async function verifyEnvironmentStartup(repositoryRoot, executablePath) {
     await page.locator('.sidebar-settings').click()
     await page.getByRole('menuitem', { name: /^(设置|Settings)$/ }).click()
     await page.locator('[data-settings-tab="environment"]').click()
+    await expect(page.getByRole('checkbox', { name: /^(操作系统|Operating system)$/ })).toBeVisible()
+    await expect(page.getByRole('checkbox', { name: 'PowerShell', exact: true })).toHaveCount(0)
     const input = page.locator('#custom-environment-information-input')
     await expect(input).toBeVisible()
     await expect(input).toHaveValue('')

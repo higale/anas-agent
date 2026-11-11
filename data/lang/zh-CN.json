@@ -53,8 +53,7 @@
   },
   "profile_defaults": {
     "assistant": {
-      "role": "一个可靠、严谨、友善的 AI 助手。",
-      "instructions": "理解用户目标，提供清晰、准确且可执行的帮助；不确定时明确说明。"
+      "role": "一个可靠、严谨、友善的 AI 助手。\n理解用户目标，提供清晰、准确且可执行的帮助；不确定时明确说明。"
     }
   },
   "common": {
@@ -450,7 +449,7 @@
     "capability_configuration": "修改配置",
     "capability_configuration_hint": "提供 update_config 工具，允许 Agent 修改应用配置。",
     "capability_profile": "资料",
-    "capability_profile_hint": "向 Agent 提供助手名称、角色和手动设置的自定义指令。",
+    "capability_profile_hint": "向 Agent 提供助手名称和角色设定。",
     "capability_environment": "运行环境",
     "capability_environment_hint": "向系统提示词注入已启用的运行环境。",
     "environment_context": "运行环境",
@@ -458,8 +457,6 @@
     "capability_operatingSystem_hint": "注入操作系统。",
     "capability_bundledCommands": "内置命令",
     "capability_bundledCommands_hint": "注入随应用提供的命令说明，当前包含 rg（ripgrep）文本与文件搜索。仅在命令执行工具可用时生效。",
-    "capability_powerShell": "PowerShell",
-    "capability_powerShell_hint": "注入可用 PowerShell 的名称、版本和可执行文件。",
     "capability_currentDate": "当前日期",
     "capability_currentDate_hint": "注入当前本地日期。",
     "capability_applicationDataDirectory": "程序数据目录",
@@ -525,8 +522,6 @@
     "assistant_name_hint": "对话中使用的角色名",
     "assistant_role": "角色设定",
     "assistant_role_hint": "描述助手是谁，包括定位、能力和性格。",
-    "assistant_instructions": "自定义指令",
-    "assistant_instructions_hint": "在此手动设置助手长期遵守的行为要求。",
     "description": "描述",
     "chat_mode": "对话",
     "planning": "计划",

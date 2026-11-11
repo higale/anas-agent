@@ -208,7 +208,6 @@ function normalizeEnvironmentContext(raw: RawAppConfig): AppSettings['environmen
   if (!context) throw new Error('Config setting settings.environment_context is missing.')
   return {
     operatingSystem: requireBoolean(context.operating_system, 'settings.environment_context.operating_system'),
-    powerShell: requireBoolean(context.power_shell, 'settings.environment_context.power_shell'),
     bundledCommands: requireBoolean(context.bundled_commands, 'settings.environment_context.bundled_commands'),
     currentDate: requireBoolean(context.current_date, 'settings.environment_context.current_date'),
     applicationDataDirectory: requireBoolean(
@@ -391,10 +390,10 @@ function writeSettingsPath(root: Record<string, unknown>, segments: readonly str
   current[segments.at(-1)!] = value
 }
 
-function rawSettingsFromSnapshot(snapshot: AppConfigSnapshot): RawAppSettings {
+function rawSettingsFromSnapshot(snapshot: AppConfigSnapshot, previousProfile?: RawAppSettings['profile']): RawAppSettings {
   const settings = snapshot.settings
   return {
-    profile: rawAppProfile(settings.profile),
+    profile: rawAppProfile(settings.profile, previousProfile),
     speech_reply: {
       enabled: settings.speechReply.enabled,
       voice: settings.speechReply.voice,
@@ -417,7 +416,6 @@ function rawSettingsFromSnapshot(snapshot: AppConfigSnapshot): RawAppSettings {
     show_memory_activity_in_titlebar: settings.showMemoryActivityInTitlebar,
     environment_context: {
       operating_system: settings.environmentContext.operatingSystem,
-      power_shell: settings.environmentContext.powerShell,
       bundled_commands: settings.environmentContext.bundledCommands,
       current_date: settings.environmentContext.currentDate,
       application_data_directory: settings.environmentContext.applicationDataDirectory,
@@ -759,7 +757,7 @@ export async function updateConfigValue(
   const segments = settingsKeySegments(key)
   const normalizedKey = segments.join('.')
   if (segments[0] === 'profile' && !['profile.assistant.name', 'profile.assistant.role', assistantNewAvatarPathKey].includes(normalizedKey)) {
-    throw new Error('Only assistant name, role and avatar can be changed with update_config. Custom instructions can only be edited in Settings.')
+    throw new Error('Only assistant name, role and avatar can be changed with update_config.')
   }
   const desiredValue = cloneConfigValue(value)
   return serializeConfigMutation(async () => {
@@ -776,7 +774,7 @@ export async function updateConfigValue(
       ...raw,
       settings: currentSettings as RawAppSettings
     })
-    const canonicalSettings = rawSettingsFromSnapshot(candidateSnapshot)
+    const canonicalSettings = rawSettingsFromSnapshot(candidateSnapshot, raw.settings.profile)
     const acceptedValue = readSettingsPath(canonicalSettings, segments)
     if (!acceptedValue.found) {
       throw new Error(`Config key settings.${normalizedKey} is not mapped by the application.`)
@@ -819,7 +817,7 @@ export async function clearNewAvatarPath(expectedPath: string): Promise<boolean>
     profile.assistant.newAvatarPath = ''
     raw.settings = {
       ...raw.settings,
-      profile: rawAppProfile(profile)
+      profile: rawAppProfile(profile, raw.settings?.profile)
     }
     await writeRawSettingsConfig(raw)
     const snapshot = await getAppConfigSnapshot()
@@ -875,7 +873,6 @@ export async function updateSettings(settings: AppSettingsUpdate): Promise<AppCo
       environment_context: settings.environmentContext
         ? {
             operating_system: settings.environmentContext.operatingSystem,
-            power_shell: settings.environmentContext.powerShell,
             bundled_commands: settings.environmentContext.bundledCommands,
             current_date: settings.environmentContext.currentDate,
             application_data_directory: settings.environmentContext.applicationDataDirectory,
@@ -913,8 +910,7 @@ export async function updateSettings(settings: AppSettingsUpdate): Promise<AppCo
 function hasProfileUpdate(update: AppProfileUpdate): boolean {
   return [
     update.assistant?.name,
-    update.assistant?.role,
-    update.assistant?.instructions
+    update.assistant?.role
   ].some((value) => value !== undefined)
 }
 
@@ -925,8 +921,7 @@ function assertProfileUpdate(update: AppProfileUpdate): void {
   }
   const fields: Array<[unknown, string]> = [
     [update.assistant?.name, 'assistant.name'],
-    [update.assistant?.role, 'assistant.role'],
-    [update.assistant?.instructions, 'assistant.instructions']
+    [update.assistant?.role, 'assistant.role']
   ]
   for (const [value, path] of fields) {
     if (value !== undefined && typeof value !== 'string') {
@@ -951,9 +946,6 @@ function profileUpdateFields(
   }
   if (update.assistant?.role !== undefined) {
     fields.push(['assistant.role', current.assistant.role, desired.assistant.role])
-  }
-  if (update.assistant?.instructions !== undefined) {
-    fields.push(['assistant.instructions', current.assistant.instructions, desired.assistant.instructions])
   }
   return fields
 }
@@ -996,7 +988,7 @@ export async function updateProfile(update: AppProfileUpdate): Promise<AppConfig
       })
       raw.settings = {
         ...raw.settings,
-        profile: rawAppProfile(desired)
+        profile: rawAppProfile(desired, raw.settings?.profile)
       }
       await writeRawSettingsConfig(raw)
     }

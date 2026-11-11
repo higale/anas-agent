@@ -66,7 +66,7 @@ The menu beside the left-hand title area opens full prompt, compression prompt, 
 
 ### Profile
 
-Supplies the assistant name, role and custom instructions from **Settings > General**. Edit custom instructions manually there. With **Update configuration** enabled, the Agent can change the assistant name, role and avatar on request. The selected memory mode handles preferences such as forms of address and response style. View and edit global preferences under **Settings > Memory**. Existing user profile values remain in configuration and are excluded from conversations and automatic memory import. Subagents receive assistant profile context according to their own capabilities and project limits.
+Supplies the assistant name and role from **Settings > General**. Older custom instructions remain in the settings file and can be copied into the role setting. With **Update configuration** enabled, the Agent can change the assistant name, role and avatar on request. The selected memory mode handles preferences such as forms of address and response style. View and edit global preferences under **Settings > Memory**. Existing user profile values remain in configuration and are excluded from conversations and automatic memory import. Subagents receive assistant profile context according to their own capabilities and project limits.
 
 ### Runtime Environment Information
 

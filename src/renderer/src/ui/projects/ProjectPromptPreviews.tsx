@@ -1,6 +1,6 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { ClipboardCopy, FileJson, FileText, Menu, Save, X } from 'lucide-react'
+import { Copy, FileJson, FileText, Menu, Save, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AgentModelRequestPreview, AgentSystemContextPreview } from '@shared/agentTypes'
@@ -210,7 +210,7 @@ export function ProjectPromptPreviews({
                 disabled={!previewText || currentPreviewLoading}
                 onClick={() => void copyPreview()}
               >
-                <ClipboardCopy size={UI_ICON_SIZE_SMALL} />
+                <Copy size={UI_ICON_SIZE_SMALL} />
                 <span>{t('common.copy')}</span>
               </button>
               <Dialog.Close asChild>

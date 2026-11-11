@@ -1,6 +1,6 @@
 ---
 name: config
-description: "Modify Anas application settings and the assistant avatar when the user asks to change appearance, conversation defaults, environment context, speech reply, assistant name, role, or avatar. Do not use for capability selection, model/provider definitions, projects, MCP servers, subagents, Skills, user preferences, or custom instructions."
+description: "Modify Anas application settings and the assistant avatar when the user asks to change appearance, conversation defaults, environment context, speech reply, assistant name, role, or avatar. Do not use for capability selection, model/provider definitions, projects, MCP servers, subagents, Skills, or user preferences."
 compatibility: "Requires Anas and its update_config tool implementing the settings schema in references/settings.md."
 ---
 
@@ -14,6 +14,6 @@ Only persist a change when the user explicitly asks for it. Modify only the requ
 
 For assistant settings:
 
-- Change the role only when the user asks to change the assistant’s identity or role. Custom instructions are edited manually in Settings.
+- Update `profile.assistant.role` only when the user explicitly asks to change the global assistant role setting. Apply task-specific directions and preferences in their own context.
 - To replace the assistant avatar, set `profile.assistant.new_avatar_path` to an absolute image path or a path relative to the active workspace. To restore the default avatar, set the same key to the exact string `"default"`. This is a one-time request: Anas applies it and clears the value before the tool returns. Do not retry a failed avatar update unless the user asks or supplies another value.
 - For requests such as “remember this” or “from now on, answer briefly”, follow the preference in this conversation and use the memory mechanism specified in the request context. Do not write preferences to settings or use general file tools.

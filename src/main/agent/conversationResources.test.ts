@@ -79,14 +79,10 @@ function createUnresolvedManagedCall(database: NativeConversationDatabase, threa
 }
 
 describe('runtime command shell context', () => {
-  it('keeps the Windows PowerShell switch independent from command execution', () => {
-    const settings = config().settings
-    const features = { ...capabilityFeatures(defaultCapabilities), commandExecution: false }
+  it.each([true, false])('omits the Windows shell from runtime context with command execution set to %s', (commandExecution) => {
+    const features = { ...capabilityFeatures(defaultCapabilities), commandExecution }
 
-    expect(shouldIncludeCommandShell('win32', settings, features)).toBe(true)
-
-    settings.environmentContext.powerShell = false
-    expect(shouldIncludeCommandShell('win32', settings, features)).toBe(false)
+    expect(shouldIncludeCommandShell('win32', config().settings, features)).toBe(false)
   })
 
   it('preserves the existing POSIX command execution gate', () => {

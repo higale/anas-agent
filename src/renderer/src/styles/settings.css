@@ -932,8 +932,8 @@
 .tool-parameter-constraints dd { margin: 0; overflow-wrap: anywhere; }
 .tool-parameter-source { width: 100%; min-height: 160px; max-height: 420px; overflow: auto; resize: none; }
 .custom-tool-editor {
-  --ui-dialog-width: min(820px, calc(100vw - 32px));
-  height: min(680px, calc(100vh - var(--ui-dialog-safe-top) - 18px));
+  --ui-dialog-width: min(820px, var(--ui-dialog-safe-width));
+  height: min(680px, var(--ui-dialog-safe-height));
   resize: none;
 }
 .custom-tool-editor-header .ui-segmented-control { justify-self: start; }

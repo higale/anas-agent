@@ -3,8 +3,7 @@
   "profile": {
     "assistant": {
       "name": "Ananas",
-      "role": "A reliable, thoughtful, and friendly AI assistant.",
-      "instructions": "Understand the user's goal and provide clear, accurate, actionable help. State uncertainty clearly.",
+      "role": "一个可靠、严谨、友善的 AI 助手。\n理解用户目标，提供清晰、准确且可执行的帮助；不确定时明确说明。",
       "new_avatar_path": ""
     },
     "user": {
@@ -34,7 +33,6 @@
   "show_memory_activity_in_titlebar": true,
   "environment_context": {
     "operating_system": true,
-    "power_shell": true,
     "bundled_commands": true,
     "current_date": true,
     "application_data_directory": true,

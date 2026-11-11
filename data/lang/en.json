@@ -53,8 +53,7 @@
   },
   "profile_defaults": {
     "assistant": {
-      "role": "A reliable, thoughtful, and friendly AI assistant.",
-      "instructions": "Understand the user's goal and provide clear, accurate, actionable help. State uncertainty clearly."
+      "role": "A reliable, thoughtful, and friendly AI assistant.\nUnderstand the user's goal and provide clear, accurate, actionable help. State uncertainty clearly."
     }
   },
   "common": {
@@ -452,7 +451,7 @@
     "capability_configuration": "Update configuration",
     "capability_configuration_hint": "Provide the update_config tool so the agent can change application settings.",
     "capability_profile": "Profile",
-    "capability_profile_hint": "Include the assistant’s name, role and manually configured instructions.",
+    "capability_profile_hint": "Include the assistant’s name and role.",
     "capability_environment": "Runtime environment information",
     "capability_environment_hint": "Include enabled runtime context details in the system prompt.",
     "environment_context": "Runtime context",
@@ -460,8 +459,6 @@
     "capability_operatingSystem_hint": "Include the operating system.",
     "capability_bundledCommands": "Bundled commands",
     "capability_bundledCommands_hint": "Include instructions for commands shipped with the app, currently rg (ripgrep) for text and file search. Applies only when command execution tools are available.",
-    "capability_powerShell": "PowerShell",
-    "capability_powerShell_hint": "Include the available PowerShell name, version, and executable.",
     "capability_currentDate": "Current date",
     "capability_currentDate_hint": "Include the current local date.",
     "capability_applicationDataDirectory": "Application data directory",
@@ -527,8 +524,6 @@
     "assistant_name_hint": "The role name used by the model in conversations.",
     "assistant_role": "Role",
     "assistant_role_hint": "Who the assistant is, including its purpose, abilities, and character.",
-    "assistant_instructions": "Instructions",
-    "assistant_instructions_hint": "Set the assistant’s long-term instructions here manually.",
     "description": "Description",
     "chat_mode": "Conversation",
     "planning": "Planning",

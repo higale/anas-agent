@@ -108,7 +108,7 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
     settings.language = 'en'
     settings.max_model_calls_per_run = 16
     settings.environment_context = {
-      operating_system: false, power_shell: false, bundled_commands: false, current_date: false,
+      operating_system: false, bundled_commands: false, current_date: false,
       application_data_directory: false, user_home_directory: false,
       custom_information_enabled: false, custom_information: ''
     }

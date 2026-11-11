@@ -70,7 +70,7 @@ export interface RawAppProfile {
   assistant?: Partial<{
     name: string
     role: string
-    instructions: string
+    instructions?: string // Retained in older settings files for manual recovery.
     new_avatar_path: string
   }>
   user?: Partial<{
@@ -103,7 +103,6 @@ export interface RawAppSettings {
   show_memory_activity_in_titlebar?: boolean
   environment_context?: Partial<{
     operating_system: boolean
-    power_shell: boolean
     bundled_commands: boolean
     current_date: boolean
     application_data_directory: boolean
