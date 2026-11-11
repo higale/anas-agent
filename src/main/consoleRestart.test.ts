@@ -129,6 +129,26 @@ describe('console restart platform selection', () => {
 })
 
 describe('Windows console restart', () => {
+  it.runIf(process.platform === 'win32')('preserves Chinese stdout, stderr and paths when restarting from a legacy code page', async () => {
+    const { directory } = await fixture()
+    const entry = join(directory, 'console.cjs')
+    await writeFile(entry, `console.log('控制台输出：中文🙂'); console.error('控制台错误：中文');
+      console.log(process.argv.at(-1)); console.log(process.cwd())`)
+    const plan = await prepareConsoleRestart({
+      platform: 'win32', executable: process.env.npm_node_execpath!, appPath: entry,
+      cwd: directory, dataDir: join(directory, '中文资料'), packaged: false, env: process.env
+    })
+    plans.push(plan)
+    const script = plan.args.at(-1)!.replaceAll("'", "''")
+    const result = await run(plan.execPath, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      '-Command', `[Console]::OutputEncoding = [System.Text.Encoding]::GetEncoding(936); & '${script}'`])
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain('控制台输出：中文🙂')
+    expect(result.stdout).toContain(join(directory, '中文资料'))
+    expect(result.stdout).toContain(directory)
+    expect(result.stderr).toContain('控制台错误：中文')
+  }, 15_000)
+
   it('uses a visible console with inherited streams and the portable launcher when present', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'anas-console-windows-'))
     temporaryDirectories.push(directory)

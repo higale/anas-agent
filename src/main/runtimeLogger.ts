@@ -82,10 +82,6 @@ function quotePowerShellLiteral(value: string): string {
   return `'${value.replace(/'/g, "''")}'`
 }
 
-function quoteBatchArgument(value: string): string {
-  return `"${value.replace(/%/g, '%%').replace(/"/g, '""')}"`
-}
-
 function quoteShellLiteral(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`
 }
@@ -238,11 +234,18 @@ export async function openRuntimeLogViewer(): Promise<string> {
     const logDir = getLogDir()
     const scriptPath = join(logDir, '_anas_tail_log.ps1')
     const launcherPath = join(logDir, '_anas_tail_log.cmd')
-    writeFileSync(scriptPath, `Get-Content -Path ${quotePowerShellLiteral(path)} -Wait\r\n`, 'utf8')
+    // A BOM lets Windows PowerShell read Chinese paths in the script as UTF-8.
+    writeFileSync(scriptPath, '\uFEFF' + [
+      '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
+      `Get-Content -LiteralPath ${quotePowerShellLiteral(path)} -Encoding UTF8 -Wait`,
+      ''
+    ].join('\r\n'), 'utf8')
     writeFileSync(launcherPath, [
       '@echo off',
+      'setlocal DisableDelayedExpansion',
+      'chcp 65001 >nul',
       'title Anas Runtime Log',
-      `powershell.exe -NoExit -NoProfile -ExecutionPolicy Bypass -File ${quoteBatchArgument(scriptPath)}`,
+      'powershell.exe -NoExit -NoProfile -ExecutionPolicy Bypass -File "%~dp0_anas_tail_log.ps1"',
       ''
     ].join('\r\n'), 'utf8')
     const error = await shell.openPath(launcherPath)
