@@ -30,7 +30,7 @@ function PanelWindow({ initial }: { initial: PanelWindowShellState }) {
     void applyLanguagePreference(state.language)
   }, [state.theme, state.fontSize, state.language])
   return <div className="panel-window-shell" data-fullscreen={state.fullScreen}>
-    <PanelWindowTitlebar view={state.view} fullScreen={state.fullScreen} />
+    <PanelWindowTitlebar view={state.view} fullScreen={state.fullScreen} fullScreenAllowed={state.fullScreenAllowed} />
     <div className="panel-window-slot" aria-busy={!!state.view.loading}>
       <PanelPageHost activeId={state.view.viewId} />
       {state.view.loading && <p className="ui-detail-panel-empty" role="status">{t('common.loading')}</p>}

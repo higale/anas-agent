@@ -53,6 +53,15 @@
 
 升级 Electron／macOS 时，先禁用此保护重跑上述原生鼠标拖拽步骤（程序调用 `setPosition` 不能代替）。只有在声明支持的系统上，初次恢复、再次设置尺寸和超屏往返均不再跳变，且普通窗口操作保持正常，才能删除本模块、注册入口、专属测试和本节。不能因单次未复现直接移除，也不要把此机制扩展为通用缩放拦截。
 
+## macOS 窗口上限与缩放状态
+
+`panelPages.ts` 对 Electron 42.9.3 的两个 macOS 行为做显式兼容，均使用公开 BrowserWindow API。依据为固定版本的 [NativeWindowMac 实现](https://github.com/electron/electron/blob/v42.9.3/shell/browser/native_window_mac.mm)：
+
+- 窗口按程序尺寸恰好达到系统缩放状态时，`unmaximize()` 可以直接返回，不发出 `unmaximize` 事件。macOS 的明确适配直接用 `setContentSize` 替换普通／缩放窗口几何，不等待此事件；真正的全屏仍等待退出动画。Windows 保留退出最大化的等待。
+- `setMaximumSize(0, 0)` 清除 Electron 内部上限时，不会重置 NSWindow 已有的最大尺寸。因此在 macOS 上先将原生上限设为 `gfx::Size` 可表达的最大整数尺寸，再传零清除逻辑上限，避免重新开启自适应后仍被旧上限限制。重新设置上限时也走同一解除过程，以便正确调整最小尺寸。
+
+回归测试模拟上述无完成事件和零值不清除原生约束的行为；本轮通过 Windows Electron 窗口切换验证；用户反馈 macOS 连接中切换自适应已恢复正常，但未记录系统架构及完整场景，不能视为全面的 macOS 验收。升级 Electron 后需在 macOS 验证程序适配至屏幕尺寸、连接中反复切换自适应、拖动边框和退出全屏；上游修复零值清除语义后，删除两步解除上限的兼容代码及对应测试假设。
+
 ## 验证
 
 `panelPages.test.ts` 覆盖交接成功、加载／恢复失败、超时、取消、连续切换及跨窗口回执校验。构建后运行 `node scripts/run-electron-e2e.cjs --panels-only`，使用隔离数据验证真实 React／iframe、草稿、交接期间切换标签后的阅读位置、DOM 菜单与提示及往返移动。RDP 原生会话和真实服务器测试位于插件仓库，宿主不引入 RDP 协议、资源类型或专用恢复路径。

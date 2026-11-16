@@ -12,7 +12,9 @@ const output = [
   { type: 'function_call', id: 'fc', call_id: 'call_f', name: 'read_file', arguments: '{"path":"a"}', status: 'completed' },
   { type: 'custom_tool_call', id: 'ct', call_id: 'call_c', name: 'apply_patch', input: 'patch\ntext', status: 'completed' },
   { type: 'computer_call', id: 'pc', call_id: 'call_p', action: { type: 'click', x: 1, y: 2, button: 'left' }, pending_safety_checks: [], status: 'completed' },
-  { type: 'web_search_call', id: 'ws', status: 'completed', action: { type: 'search', query: 'q' } }
+  { type: 'web_search_call', id: 'ws', status: 'completed', action: { type: 'search', query: 'q' } },
+  { type: 'mcp_call', id: 'mcp', server_label: 'fixture-mcp', name: 'read_file',
+    arguments: '{"path":"remote.txt"}', output: 'Remote file content', status: 'completed' }
 ]
 const response = { id: 'resp', object: 'response', model: 'fixture', status: 'completed', output } as NativeResponse
 async function* frames(items: unknown[] = [{ type: 'response.completed', response }]): AsyncGenerator<NativeResponseEvent> {

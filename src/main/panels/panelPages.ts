@@ -34,6 +34,13 @@ function deferred<T>(): Deferred<T> {
 function panelCancellation(signal?: AbortSignal): Error {
   return new Error(signal?.reason === 'PANEL_LOAD_FAILED' ? 'PANEL_LOAD_FAILED' : 'PANEL_CLOSED')
 }
+function clearWindowMaximumSize(window: BrowserWindow): void {
+  // Electron 42 macOS skips NSWindow.setMaxSize when both dimensions are zero.
+  // First release the native cap using the largest gfx::Size dimensions, then
+  // clear Electron's logical limit. See docs/PANEL_FRAMEWORK.md.
+  if (process.platform === 'darwin') window.setMaximumSize(0x7fffffff, 0x7fffffff)
+  window.setMaximumSize(0, 0)
+}
 interface Page {
   id: string
   entry: Entry
@@ -54,7 +61,7 @@ interface Entry {
   transfer?: AbortController
   closing?: Promise<void>
 }
-interface Shell { entry: Entry; window: BrowserWindow; source: RendererLocation; resources: LanguageResourcesSnapshot; atCursor: boolean; resizeRevision: number; fitting: number }
+interface Shell { entry: Entry; window: BrowserWindow; source: RendererLocation; resources: LanguageResourcesSnapshot; atCursor: boolean; resizeRevision: number; fitting: number; minimumSize: number[] }
 interface SidebarRequest { entry: Entry; owner: BrowserWindow; finish(error?: Error): void }
 interface Pending { page: Page; finish(value: PanelJson, error?: Error): void }
 
@@ -164,7 +171,7 @@ export class PanelPages {
   }
   private shellState(shell: Shell): PanelWindowShellState {
     return { view: { ...shell.entry.state, loading: !!shell.entry.state.loading || shell.entry.source?.owner !== shell.window },
-      ...this.appearance, fullScreen: shell.window.isFullScreen() }
+      ...this.appearance, fullScreen: shell.window.isFullScreen(), fullScreenAllowed: shell.window.isFullScreenable() }
   }
   fromShell(event: IpcMainInvokeEvent): PanelWindowShellState {
     this.assertHost(event)
@@ -175,7 +182,9 @@ export class PanelPages {
   setShellFullScreen(event: IpcMainInvokeEvent, fullScreen: unknown): void {
     this.fromShell(event)
     if (typeof fullScreen !== 'boolean') throw new Error('Invalid fullscreen state.')
-    this.shells.get(event.sender)!.window.setFullScreen(fullScreen)
+    const window = this.shells.get(event.sender)!.window
+    if (fullScreen && !window.isFullScreenable()) throw new Error('PANEL_ACTION_UNAVAILABLE')
+    window.setFullScreen(fullScreen)
   }
   shellLanguages(event: IpcMainInvokeEvent): LanguageResourcesSnapshot {
     this.fromShell(event)
@@ -363,9 +372,14 @@ export class PanelPages {
     }
     requireResizable()
     const window = page.owner
-    // Automatic fits preserve window state; a deliberate fit may restore it.
-    if (!size.restore && (window.isMaximized() || window.isFullScreen())) return
     const shell = this.shells.get(window.webContents)!
+    // Automatic fits preserve window state; a deliberate fit may restore it.
+    if (size.maximumSize === null) {
+      clearWindowMaximumSize(window); window.setMaximizable(true); window.setFullScreenable(true)
+      window.setMinimumSize(shell.minimumSize[0], shell.minimumSize[1])
+      this.changed()
+    }
+    if (!size.restore && !size.maximumSize && (window.isMaximized() || window.isFullScreen())) return
     shell.fitting++
     try {
       const transition = (eventName: 'leave-full-screen' | 'unmaximize', change: () => void) => new Promise<void>((resolve, reject) => {
@@ -383,17 +397,32 @@ export class PanelPages {
         try { change() } catch (error) { cleanup(); reject(error) }
       })
       if (window.isFullScreen()) { await transition('leave-full-screen', () => window.setFullScreen(false)); requireResizable() }
-      if (window.isMaximized()) { await transition('unmaximize', () => window.unmaximize()); requireResizable() }
+      // macOS zoom is geometry: unmaximize can be a no-op for programmatically
+      // zoomed bounds, with no event. setContentSize directly replaces that geometry.
+      if (process.platform !== 'darwin' && window.isMaximized()) { await transition('unmaximize', () => window.unmaximize()); requireResizable() }
       const bounds = window.getBounds()
       const placement = this.shells.get(window.webContents)?.atCursor ? undefined : size.restorePlacement
       const display = (placement && screen.getAllDisplays().find(value => value.id === placement.displayId))
         || screen.getDisplayNearestPoint({ x: bounds.x + Math.min(80, bounds.width / 2), y: bounds.y + 16 })
       const area = display.workArea
       const zoom = window.webContents.getZoomFactor()
+      if (size.maximumSize) {
+        const content = window.getContentBounds()
+        const maxWidth = Math.max(1, Math.round(size.maximumSize.width * zoom) + bounds.width - content.width)
+        const maxHeight = Math.max(1, Math.round(size.maximumSize.height * zoom) + bounds.height - content.height)
+        // Clear the previous ceiling before raising the minimum for a larger frame.
+        clearWindowMaximumSize(window)
+        window.setMinimumSize(Math.min(shell.minimumSize[0], maxWidth), Math.min(shell.minimumSize[1], maxHeight))
+        window.setMaximumSize(maxWidth, maxHeight)
+        window.setMaximizable(false)
+        window.setFullScreenable(false)
+        this.changed()
+      }
       const [minWidth, minHeight] = window.getMinimumSize()
       // Electron owns the native frame. Inferring it by subtracting rounded DIP
       // rectangles accumulates errors at fractional display scales.
-      const contentWidth = Math.round(size.width * zoom), contentHeight = Math.round(size.height * zoom)
+      const contentWidth = Math.round(Math.min(size.width, size.maximumSize?.width ?? Infinity) * zoom)
+      const contentHeight = Math.round(Math.min(size.height, size.maximumSize?.height ?? Infinity) * zoom)
       window.setContentSize(contentWidth, contentHeight)
       const { width, height } = window.getBounds()
       // Keep ordinary windows in view. Oversized windows only need their minimum
@@ -532,7 +561,7 @@ export class PanelPages {
       show: false, enableLargerThanScreen: true, backgroundColor: titleBarColors().backgroundColor, ...titleBarOptions({ compact: true }),
       webPreferences: { preload: join(__dirname, '../preload/panelWindow.js'), sandbox: true, contextIsolation: true, nodeIntegration: false } })
     const contents = window.webContents
-    const shell = { entry, window, source, resources, atCursor: !!position, resizeRevision: 0, fitting: 0 }
+    const shell = { entry, window, source, resources, atCursor: !!position, resizeRevision: 0, fitting: 0, minimumSize: window.getMinimumSize() }
     this.shells.set(contents, shell)
     const windowModeChanged = () => {
       if (!shell.fitting) shell.resizeRevision++

@@ -58,6 +58,10 @@ class Window extends EventEmitter {
   loadURL = vi.fn(async () => undefined)
   isMaximized = vi.fn(() => false)
   isFullScreen = vi.fn(() => false)
+  isFullScreenable = vi.fn(() => true)
+  setMaximumSize = vi.fn()
+  setMaximizable = vi.fn()
+  setFullScreenable = vi.fn((value: boolean) => this.isFullScreenable.mockReturnValue(value))
   setFullScreen = vi.fn((value: boolean) => { this.isFullScreen.mockReturnValue(value); this.emit(value ? 'enter-full-screen' : 'leave-full-screen') })
   unmaximize = vi.fn(() => { this.isMaximized.mockReturnValue(false); this.emit('unmaximize') })
   bounds = { x: 100, y: 50, width: 960, height: 680 }
@@ -65,6 +69,7 @@ class Window extends EventEmitter {
   getNormalBounds = vi.fn(() => this.getBounds())
   getContentBounds = vi.fn(() => ({ x: this.bounds.x + 4, y: this.bounds.y + 4, width: this.bounds.width - 8, height: this.bounds.height - 8 }))
   getMinimumSize = vi.fn(() => [400, 300])
+  setMinimumSize = vi.fn((width: number, height: number) => this.getMinimumSize.mockReturnValue([width, height]))
   setContentSize = vi.fn((width: number, height: number) => {
     const [minWidth, minHeight] = this.getMinimumSize()
     this.bounds = { ...this.bounds, width: Math.max(minWidth, width + 8), height: Math.max(minHeight, height + 8) }
@@ -205,6 +210,50 @@ describe('page handoff', () => {
     await manager.resizeWindow(event(window), page.pageId, { width: 824, height: 658 })
     expect(window.getBounds()).toEqual({ x: 100, y: 50, width: 1038, height: 831 })
   })
+  it('caps a fitted window in zoomed native coordinates and restores unconstrained window modes', async () => {
+    await open()
+    await manager.move(manager.list()[0].viewId, 'window')
+    const window = windows[1], page = manager.ownedPages(event(window))[0]
+    window.webContents.getZoomFactor.mockReturnValue(1.25)
+    window.setFullScreen(true)
+    await manager.resizeWindow(event(window), page.pageId, { width: 800, height: 600, maximumSize: { width: 1024, height: 800 } })
+    expect(window.isFullScreen()).toBe(false)
+    expect(window.setMaximumSize).toHaveBeenLastCalledWith(1288, 1008)
+    expect(window.setContentSize).toHaveBeenLastCalledWith(1000, 750)
+    expect(manager.fromShell(event(window)).fullScreenAllowed).toBe(false)
+    expect(window.setMaximizable).toHaveBeenLastCalledWith(false)
+    expect(window.setFullScreenable).toHaveBeenLastCalledWith(false)
+    expect(() => manager.setShellFullScreen(event(window), true)).toThrow('PANEL_ACTION_UNAVAILABLE')
+    await manager.resizeWindow(event(window), page.pageId, { width: 1280, height: 837 })
+    expect(window.setMaximumSize).toHaveBeenCalledTimes(2)
+    await manager.resizeWindow(event(window), page.pageId, { width: 1280, height: 837, maximumSize: null })
+    expect(window.setMaximumSize).toHaveBeenLastCalledWith(0, 0)
+    expect(manager.fromShell(event(window)).fullScreenAllowed).toBe(true)
+    expect(window.setMaximizable).toHaveBeenLastCalledWith(true)
+    expect(window.setFullScreenable).toHaveBeenLastCalledWith(true)
+    manager.setShellFullScreen(event(window), true)
+    expect(window.isFullScreen()).toBe(true)
+    for (const maximumSize of [false, { width: 0, height: 600 }, { width: 1000, height: Infinity }]) {
+      await expect(manager.resizeWindow(event(window), page.pageId, { width: 1280, height: 837, maximumSize })).rejects.toThrow('Invalid panel maximum size')
+    }
+  })
+  it('lowers the minimum for small content caps and restores it when the cap grows or is removed', async () => {
+    await open()
+    await manager.move(manager.list()[0].viewId, 'window')
+    const window = windows[1], page = manager.ownedPages(event(window))[0]
+    await manager.resizeWindow(event(window), page.pageId, { width: 800, height: 600, maximumSize: { width: 200, height: 237 } })
+    expect(window.getContentBounds()).toMatchObject({ width: 200, height: 237 })
+    expect(window.getMinimumSize()).toEqual([208, 245])
+    expect(window.setMaximumSize).toHaveBeenLastCalledWith(208, 245)
+    await manager.resizeWindow(event(window), page.pageId, { width: 700, height: 500, maximumSize: { width: 1024, height: 805 } })
+    expect(window.getMinimumSize()).toEqual([400, 300])
+    expect(window.getContentBounds()).toMatchObject({ width: 700, height: 500 })
+    await manager.resizeWindow(event(window), page.pageId, { width: 200, height: 237, maximumSize: { width: 200, height: 237 } })
+    await manager.resizeWindow(event(window), page.pageId, { width: 200, height: 237, maximumSize: null })
+    expect(window.getMinimumSize()).toEqual([400, 300])
+    expect(window.setMaximumSize).toHaveBeenLastCalledWith(0, 0)
+    expect(window.getBounds()).toMatchObject({ width: 400, height: 300 })
+  })
   it('keeps repeated content requests stable despite fractional zoom and rounded native bounds', async () => {
     await open()
     await manager.move(manager.list()[0].viewId, 'window')
@@ -312,10 +361,52 @@ describe('page handoff', () => {
     expect(window.setFullScreen).not.toHaveBeenCalled()
     await manager.resizeWindow(event(window), page.pageId, { width: 800, height: 600, restore: true })
     expect(window.setFullScreen).toHaveBeenCalledWith(false)
-    expect(window.unmaximize).toHaveBeenCalledOnce()
+    if (process.platform === 'darwin') expect(window.unmaximize).not.toHaveBeenCalled()
+    else expect(window.unmaximize).toHaveBeenCalledOnce()
     expect(window.getBounds()).toEqual({ x: 100, y: 50, width: 808, height: 608 })
     expect(window.listenerCount('leave-full-screen')).toBe(listeners)
     expect(window.listenerCount('unmaximize')).toBe(maximizeListeners)
+  })
+  it('applies a cap on macOS when geometry is zoomed but unmaximize emits no completion', async () => {
+    await open()
+    await manager.move(manager.list()[0].viewId, 'window')
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'darwin' })
+    vi.useFakeTimers()
+    try {
+      const window = windows[1], page = manager.ownedPages(event(window))[0]
+      window.isMaximized.mockReturnValue(true)
+      window.unmaximize.mockImplementation(() => {})
+      const resizing = manager.resizeWindow(event(window), page.pageId, { width: 700, height: 500, maximumSize: { width: 1024, height: 805 } })
+        .then(() => null, error => error.message)
+      await vi.advanceTimersByTimeAsync(10001)
+      expect(await resizing).toBe(null)
+      expect(window.getContentBounds()).toMatchObject({ width: 700, height: 500 })
+      expect(window.setMaximumSize).toHaveBeenLastCalledWith(1032, 813)
+      expect(window.isFullScreenable()).toBe(false)
+    } finally { Object.defineProperty(process, 'platform', platform) }
+  })
+  it('releases the macOS native cap even when a zero maximum only clears Electron metadata', async () => {
+    await open()
+    await manager.move(manager.list()[0].viewId, 'window')
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'darwin' })
+    try {
+      const window = windows[1], page = manager.ownedPages(event(window))[0]
+      let nativeMaximum = [Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER]
+      window.setMaximumSize.mockImplementation((width: number, height: number) => { if (width || height) nativeMaximum = [width, height] })
+      const cap = { width: 200, height: 237 }
+      await manager.resizeWindow(event(window), page.pageId, { ...cap, maximumSize: cap })
+      expect(nativeMaximum).toEqual([208, 245])
+      await manager.resizeWindow(event(window), page.pageId, { width: 1600, height: 900, maximumSize: null })
+      expect(nativeMaximum[0]).toBeGreaterThan(1608)
+      expect(nativeMaximum[1]).toBeGreaterThan(908)
+      expect(window.setMaximumSize).toHaveBeenLastCalledWith(0, 0)
+      expect(window.getMinimumSize()).toEqual([400, 300])
+      expect(window.isFullScreenable()).toBe(true)
+      await manager.resizeWindow(event(window), page.pageId, { ...cap, maximumSize: cap })
+      expect(nativeMaximum).toEqual([208, 245])
+    } finally { Object.defineProperty(process, 'platform', platform) }
   })
   it('stops a pending restore when the window closes and releases its listeners', async () => {
     await open()

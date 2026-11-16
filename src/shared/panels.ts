@@ -40,6 +40,7 @@ export interface PanelWindowState {
 }
 export interface PanelWindowShellState extends PanelWindowState {
   fullScreen: boolean
+  fullScreenAllowed: boolean
 }
 export interface PanelWindowApi {
   pages: PanelPageApi

@@ -1,7 +1,7 @@
-## Anas v5.2.9
+## Anas v5.2.10
 
-- 修复 Windows 日志窗口的中文乱码，支持中文及含特殊字符的日志路径，历史日志和实时追加内容统一按 UTF-8 显示。
-- Windows 开发启动脚本启用 UTF-8 代码页，避免开发控制台中的中文乱码。
+- 修复简单聊天未发送模型配置中服务端工具的问题，支持 Responses 服务端工具及 MCP 与 Agent 本地工具共存。
+- 插件独立窗口支持内容尺寸上限，允许手动缩小；上限随应用缩放和标题栏更新，兼容小画面，并修复 macOS 切换自适应时的缩放等待与上限解除。
 
-- Fix garbled Chinese text in the Windows runtime log viewer. Read both existing and newly appended logs as UTF-8, including log paths with Chinese or special characters.
-- Enable the UTF-8 code page in the Windows development launcher to display Chinese console output correctly.
+- Fix simple chat omitting provider-executed tools configured on the model. Responses server tools and MCP can coexist with local Agent tools.
+- Add content-size limits for separate plugin windows while allowing manual shrinking. Limits follow application zoom and titlebar changes, support small desktops, and handle macOS zoom transitions and removal of size limits when adaptation changes.

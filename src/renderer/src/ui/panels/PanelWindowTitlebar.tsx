@@ -11,7 +11,7 @@ import { PanelToolbar } from './PanelToolbar'
 
 const edgeInset = 12
 
-export function PanelWindowTitlebar({ view, fullScreen }: { view: PanelState; fullScreen: boolean }) {
+export function PanelWindowTitlebar({ view, fullScreen, fullScreenAllowed = true }: { view: PanelState; fullScreen: boolean; fullScreenAllowed?: boolean }) {
   const { t } = useTranslation()
   const toolbar = useRef<HTMLDivElement>(null)
   const drag = useRef<{ pointerId: number; offsetX: number; handle: HTMLButtonElement } | null>(null)
@@ -87,7 +87,7 @@ export function PanelWindowTitlebar({ view, fullScreen }: { view: PanelState; fu
       disabled={moving || !!view.pendingLocation} onClick={() => void move()}>
       <SquareArrowInDownLeft size={16} aria-hidden="true" />
     </NoFocusButton>}
-    {(fullScreen || document.documentElement.dataset.platform === 'win32') && <NoFocusButton type="button" className="ui-tool-button ui-tool-button-small"
+    {(fullScreen || fullScreenAllowed && document.documentElement.dataset.platform === 'win32') && <NoFocusButton type="button" className="ui-tool-button ui-tool-button-small"
       aria-label={fullScreenLabel} data-tooltip={fullScreenLabel}
       onClick={() => { void window.panelWindow.setFullScreen(!fullScreen).catch(reason => notice.error(panelError(reason, t))) }}>
       <FullScreenIcon size={16} aria-hidden="true" />

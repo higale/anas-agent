@@ -477,7 +477,9 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
   function selectModelTools<T extends { name: string }>(model: ResolvedModelConfig, tools: readonly T[]): Array<T | Record<string, unknown>> {
     try {
       const serverTools = configuredServerTools(model)
-      if (!toolsEnabled || !model.capabilities.toolUse) return []
+      if (!model.capabilities.toolUse) return []
+      // Simple chat disables host tools; configured tools execute at the provider.
+      if (!toolsEnabled) return serverTools
       return [...tools.filter(tool => tool.name !== 'update_memory' || offersMemoryWrite(model)).filter(tool => model.capabilities.vision || !['view_image', 'view_multiple_images'].includes(tool.name))
         .map(tool => accessMode() === 'smart_approval' && supportsApprovalParameter(tool)
           ? { ...tool, metadata: { ...('metadata' in tool ? tool.metadata as Record<string, unknown> : {}), smartApproval: true } } : tool), ...serverTools]

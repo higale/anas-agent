@@ -25,6 +25,13 @@ function mount() {
   return { ...result, toolbar, handle, down, move }
 }
 describe('fullscreen panel toolbar', () => {
+  it('hides the fullscreen entry while the plugin window has a size limit', () => {
+    document.documentElement.dataset.platform = 'win32'
+    const { rerender } = render(<PanelWindowTitlebar view={view} fullScreen={false} fullScreenAllowed={false} />)
+    expect(screen.queryByRole('button', { name: 'panels.enter_fullscreen' })).toBeNull()
+    rerender(<PanelWindowTitlebar view={view} fullScreen={false} fullScreenAllowed />)
+    expect(screen.getByRole('button', { name: 'panels.enter_fullscreen' })).toBeVisible()
+  })
   it.each(['plugin', 'document'] as const)('offers a Windows fullscreen entry for %s windows and switches to exit after confirmation', async kind => {
     document.documentElement.dataset.platform = 'win32'
     const content: PanelState['content'] = kind === 'plugin' ? view.content : { kind: 'document', documentId: 'USER_GUIDE.en.md' }

@@ -49,6 +49,9 @@ vi.mock('../toolsStore', async importOriginal => ({ ...await importOriginal<type
 beforeAll(async () => { testPaths.root = await mkdtemp(join(tmpdir(), 'anas-native-agent-resources-')) })
 afterAll(async () => { await rm(testPaths.root, { recursive: true, force: true }) })
 const memories: Database.Database[] = []
+const serverMcpTool = { type: 'mcp', server_protocol: 'sse', server_label: 'fixture-mcp',
+  server_description: 'Provider-executed MCP fixture.', server_url: 'https://fixture.invalid/sse',
+  headers: { Authorization: 'Bearer fixture-token' } }
 afterEach(() => { vi.restoreAllMocks(); for (const db of memories.splice(0)) db.close() })
 function openDatabase(file = ':memory:') {
   const global = new Database(':memory:'); memories.push(global)
@@ -443,6 +446,50 @@ function observer(): RunObserver {
     model: vi.fn(), tool: vi.fn(), approval: vi.fn(), committed: vi.fn(async () => {}) }
 }
 
+it.each([
+  { toolUse: true, configured: true, stream: false },
+  { toolUse: true, configured: true, stream: true },
+  { toolUse: false, configured: true, stream: false },
+  { toolUse: true, configured: false, stream: false }
+])('preserves only configured server tools in simple chat preview and execution ($toolUse, $configured, $stream)', async ({ toolUse, configured, stream }) => {
+  const project: Project = { id: 'server-tools-chat', name: 'Simple chat', kind: 'simple_chat', pinned: false,
+    collapsed: false, prompt: 'Answer the question.', createdAt: '', updatedAt: '' }
+  projectStoreMocks.getProject.mockImplementation(async (id: string) => id === project.id ? project : defaultWorkspaceProject())
+  const snapshot = previewConfig(toolUse)
+  const serverTools = [{ type: 'code_interpreter' }, { type: 'web_search' }, { type: 'web_extractor' }, serverMcpTool]
+  snapshot.providers[0].protocol = 'openai_responses'
+  snapshot.providers[0].models[0].stream = stream
+  snapshot.providers[0].models[0].parameters = { tools: configured ? serverTools : [], enable_thinking: true }
+  snapshot.defaultModel = resolveProviderModelConfig(snapshot.providers[0], snapshot.providers[0].models[0])
+  appConfigMocks.getAppConfigSnapshot.mockResolvedValue(snapshot)
+  const network = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unexpected network request'))
+  const database = openDatabase()
+  try {
+    const owner = configuredThread(database, { projectId: project.id })
+    const managedCalls = new ManagedCallService(database.managed, database.results)
+    const preview = JSON.parse(await captureAgentModelRequest(owner, database.resources, snapshot, managedCalls))
+    const run = createRun(database, owner.id, 'simple-server-tools', '123的21次方是多少？')
+    let sent: CapturedProviderRequest | undefined
+    const instance = await createConversationInstance(owner, database.resources, snapshot, {
+      requestId: run.id, prepareWorkspace: false, managedCalls,
+      providerFetch: createProviderRequestCaptureFetch(value => { sent = value })
+    }, database.execution)
+    try {
+      const result = await instance.execution.execute('input', { threadId: owner.id, runId: run.id,
+        signal: new AbortController().signal }, observer())
+      expect(result.result.status).toBe('rejected')
+      expect(sent, result.result.status === 'rejected' ? String(result.result.reason) : '').toBeDefined()
+      for (const body of [preview.request.body, sent!.body] as Record<string, unknown>[]) {
+        expect(body.tools).toEqual(toolUse && configured ? serverTools : undefined)
+        expect(body.enable_thinking).toBe(true)
+        expect(body.stream).toBe(stream)
+        expect(body).not.toHaveProperty('extra_body')
+      }
+      expect(network).not.toHaveBeenCalled()
+    } finally { await instance.dispose() }
+  } finally { database.close() }
+})
+
 describe('native main and delegated model budgets', () => {
   it.each([false, true])('limits the main run but allows a delegated task to continue (child %s)', async child => {
     const snapshot = previewConfig()
@@ -604,7 +651,7 @@ describe('native model request preview', () => {
   it.each([false, true])('sends tools in catalog order for an executing agent (child %s)', async child => {
     const snapshot = previewConfig()
     snapshot.providers[0].protocol = 'openai_responses'
-    snapshot.providers[0].parameters = { tools: [{ type: 'web_search' }] }
+    snapshot.providers[0].parameters = { tools: [{ type: 'web_search' }, serverMcpTool] }
     snapshot.defaultModel = resolveProviderModelConfig(snapshot.providers[0], snapshot.providers[0].models[0])
     appConfigMocks.getAppConfigSnapshot.mockResolvedValue(snapshot)
     const database = openDatabase()
@@ -637,7 +684,7 @@ describe('native model request preview', () => {
         expect(names).toEqual(orderedToolCatalog.map(entry => entry.id).filter(id => names.includes(id)))
         expect(names[0]).toBe('write_todos')
         expect(names).toContain('read_subagent')
-        expect(definitions.at(-1)).toEqual({ type: 'web_search' })
+        expect(definitions.slice(-2)).toEqual([{ type: 'web_search' }, serverMcpTool])
       } finally { await instance.dispose() }
     } finally { database.close() }
   })

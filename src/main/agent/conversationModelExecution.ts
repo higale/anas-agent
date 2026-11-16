@@ -78,7 +78,7 @@ export function createConversationModelPreparation(options: ConversationModelExe
     let messages = options.attachments ? await options.attachments.project(source.messages, model.capabilities.vision, included) : source.messages
     let systemMessage: ConversationMessage = { kind: 'system', content: options.systemPrompt(model) }
     const memoryGeneration = options.memoryWriteGeneration?.(model)
-    const tools = options.simpleChat ? [] : options.tools(model)
+    const tools = options.tools(model)
     const supervised = options.supervision ? await projectConversationSupervision(systemMessage, tools, options.supervision) : undefined
     if (supervised) systemMessage = supervised.systemMessage
     let documentHashes: { global: string; project: string } | undefined

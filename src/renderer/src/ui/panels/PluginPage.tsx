@@ -1,5 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { requirePanelSize, type PanelPageApi, type PanelPageContext, type PanelJson } from '@shared/panelLifecycle'
+import i18next from 'i18next'
+import { requirePanelSize, type PanelPageApi, type PanelPageContext, type PanelJson, type PanelSize } from '@shared/panelLifecycle'
+import { notice } from '../notice'
+import { panelError } from './panelError'
 
 function withViewport(context: PanelPageContext, frame: HTMLIFrameElement | null): PanelPageContext {
   // The owning document is authoritative: an out-of-process iframe can briefly
@@ -13,9 +16,50 @@ export function PluginPage({ context, api }: { context: PanelPageContext; api: P
   const frame = useRef<HTMLIFrameElement>(null)
   const [port, setPort] = useState<MessagePort>()
   const current = useRef(context); current.current = context
+  const refreshConstraints = useRef<() => void>(() => {})
   useEffect(() => {
     if (!port) return
     let alive = true
+    let maximum: PanelSize['maximumSize'], layoutKey = '', sizing = 0, revision = 0
+    const measure = () => {
+      const bounds = frame.current?.getBoundingClientRect()
+      if (!bounds || bounds.width <= 0 || bounds.height <= 0) return
+      const titlebar = frame.current?.closest('.panel-window-shell')?.querySelector('.panel-window-titlebar')
+      const viewport = document.documentElement.getBoundingClientRect()
+      const width = viewport.width - bounds.width
+      const height = Math.max(viewport.height - bounds.height, titlebar?.getBoundingClientRect().height ?? 0)
+      return { bounds, width, height, key: JSON.stringify([window.devicePixelRatio, width, height]) }
+    }
+    const resize = async (size: PanelSize) => {
+      const layout = measure(), request = size.maximumSize !== undefined ? ++revision : revision
+      if (!layout) throw new Error('PANEL_TARGET_UNAVAILABLE')
+      sizing++
+      try {
+        await api.resizeWindow(context.pageId, {
+          ...size,
+          ...(size.maximumSize ? { maximumSize: { width: size.maximumSize.width + layout.width, height: size.maximumSize.height + layout.height } } : {}),
+          width: size.width + layout.width, height: size.height + layout.height
+        })
+        if (request === revision) {
+          if (size.maximumSize !== undefined) maximum = size.maximumSize
+          layoutKey = layout.key
+        }
+      } finally { sizing-- }
+    }
+    const refreshMaximum = () => {
+      const page = current.current
+      if (!alive || sizing || !maximum || page.location !== 'window' || page.phase !== 'active' || page.view.pendingLocation) return
+      const layout = measure()
+      if (!layout || layout.key === layoutKey) return
+      layoutKey = layout.key
+      // Preserve the current viewport when zoom/chrome changes; only shrink it
+      // if the new ceiling requires it. A user border resize must never refit.
+      void resize({ width: Math.min(layout.bounds.width, maximum.width), height: Math.min(layout.bounds.height, maximum.height), maximumSize: maximum })
+        .then(refreshMaximum).catch(reason => {
+          if (alive && current.current.phase === 'active' && !current.current.view.pendingLocation) notice.error(panelError(reason, i18next.t))
+        })
+    }
+    refreshConstraints.current = refreshMaximum
     const reply = (id: unknown, result: unknown, error?: string) => {
       if (alive) port.postMessage({ type: 'reply', id, result, error })
     }
@@ -32,18 +76,9 @@ export function PluginPage({ context, api }: { context: PanelPageContext; api: P
           case 'toolbar': return api.setToolbar(context.pageId, message.params)
           case 'resizeWindow': {
             const size = requirePanelSize(message.params)
-            const bounds = frame.current?.getBoundingClientRect()
-            if (!bounds || bounds.width <= 0 || bounds.height <= 0) throw new Error('PANEL_TARGET_UNAVAILABLE')
-            // The plugin requests its own viewport; shell chrome belongs to the host.
-            // A restored window needs its regular titlebar, even when it currently floats over fullscreen content.
-            const titlebar = frame.current?.closest('.panel-window-shell')?.querySelector('.panel-window-titlebar')
-            const viewport = document.documentElement.getBoundingClientRect()
-            const chromeHeight = Math.max(viewport.height - bounds.height, titlebar?.getBoundingClientRect().height ?? 0)
-            return api.resizeWindow(context.pageId, {
-              ...size,
-              width: size.width + (viewport.width - bounds.width),
-              height: size.height + chromeHeight
-            })
+            await resize(size)
+            refreshMaximum()
+            return
           }
           case 'complete': return api.complete(context.pageId, message.params.requestId, message.params.result ?? null, message.params.failed === true)
           case 'invoke':
@@ -57,12 +92,18 @@ export function PluginPage({ context, api }: { context: PanelPageContext; api: P
     port.start()
     const stopCommand = api.onCommand(command => { if (command.pageId === context.pageId) port.postMessage({ type: 'command', command }) })
     const stopCancel = api.onCancel(requestId => port.postMessage({ type: 'cancel', requestId }))
-    const publishViewport = () => { if (alive) port.postMessage({ type: 'context', context: withViewport(current.current, frame.current) }) }
+    const publishViewport = () => {
+      if (alive) port.postMessage({ type: 'context', context: withViewport(current.current, frame.current) })
+      refreshMaximum()
+    }
     const observer = new ResizeObserver(publishViewport)
     if (frame.current) observer.observe(frame.current)
-    return () => { alive = false; observer.disconnect(); stopCommand(); stopCancel(); port.close() }
+    return () => { alive = false; refreshConstraints.current = () => {}; observer.disconnect(); stopCommand(); stopCancel(); port.close() }
   }, [api, context.pageId, context.panelId, port])
-  useEffect(() => { port?.postMessage({ type: 'context', context: withViewport(context, frame.current) }) }, [context, port])
+  useEffect(() => {
+    port?.postMessage({ type: 'context', context: withViewport(context, frame.current) })
+    refreshConstraints.current()
+  }, [context, port])
   useLayoutEffect(() => {
     const url = new URL(context.pluginUrl!)
     const origin = url.protocol + '//' + url.host
