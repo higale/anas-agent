@@ -1,7 +1,9 @@
-## Anas v5.2.10
+## Anas v5.2.11
 
-- 修复简单聊天未发送模型配置中服务端工具的问题，支持 Responses 服务端工具及 MCP 与 Agent 本地工具共存。
-- 插件独立窗口支持内容尺寸上限，允许手动缩小；上限随应用缩放和标题栏更新，兼容小画面，并修复 macOS 切换自适应时的缩放等待与上限解除。
+- 修复 Windows 独立窗口全屏时标题栏状态更新滞后，避免远程桌面自适应使用错误高度。
+- 插件可独立控制系统最大化；窗口工具栏始终提供全屏或适配到尺寸上限的入口，并使用不同图标。
+- 修复 Windows 非整数显示缩放下窗口上限多算边框，适配后仍能继续拖大少量像素的问题。
 
-- Fix simple chat omitting provider-executed tools configured on the model. Responses server tools and MCP can coexist with local Agent tools.
-- Add content-size limits for separate plugin windows while allowing manual shrinking. Limits follow application zoom and titlebar changes, support small desktops, and handle macOS zoom transitions and removal of size limits when adaptation changes.
+- Fix delayed titlebar state updates when separate windows enter fullscreen on Windows, so remote desktop adaptation uses the correct height.
+- Let plugins control system maximization independently. The window toolbar always offers fullscreen or fitting to the size limit, with distinct icons.
+- Fix extra resize space caused by counting rounded window borders again under fractional Windows display scaling.

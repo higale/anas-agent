@@ -9,7 +9,7 @@ const view: PanelState = { viewId: 'desktop', name: 'Desktop', content: { kind: 
 beforeEach(() => {
   document.documentElement.dataset.platform = 'darwin'
   Object.defineProperty(window, 'panelWindow', { configurable: true, value: {
-    moveToSidebar: vi.fn(async () => {}), setFullScreen: vi.fn(async () => {}), invokeToolbarAction: vi.fn(async () => {})
+    moveToSidebar: vi.fn(async () => {}), setFullScreen: vi.fn(async () => {}), fitToMaximumSize: vi.fn(async () => {}), invokeToolbarAction: vi.fn(async () => {})
   } })
 })
 afterEach(() => { delete document.documentElement.dataset.platform })
@@ -25,11 +25,17 @@ function mount() {
   return { ...result, toolbar, handle, down, move }
 }
 describe('fullscreen panel toolbar', () => {
-  it('hides the fullscreen entry while the plugin window has a size limit', () => {
-    document.documentElement.dataset.platform = 'win32'
+  it.each(['win32', 'darwin'])('keeps a size action and uses a distinct fit icon while capped on %s', async platform => {
+    document.documentElement.dataset.platform = platform
     const { rerender } = render(<PanelWindowTitlebar view={view} fullScreen={false} fullScreenAllowed={false} />)
     expect(screen.queryByRole('button', { name: 'panels.enter_fullscreen' })).toBeNull()
+    const fit = screen.getByRole('button', { name: 'panels.fit_window' })
+    expect(fit.querySelector('.lucide-scan')).not.toBeNull()
+    await act(async () => { fireEvent.click(fit) })
+    expect(window.panelWindow.fitToMaximumSize).toHaveBeenCalledOnce()
+    expect(window.panelWindow.setFullScreen).not.toHaveBeenCalled()
     rerender(<PanelWindowTitlebar view={view} fullScreen={false} fullScreenAllowed />)
+    expect(screen.queryByRole('button', { name: 'panels.fit_window' })).toBeNull()
     expect(screen.getByRole('button', { name: 'panels.enter_fullscreen' })).toBeVisible()
   })
   it.each(['plugin', 'document'] as const)('offers a Windows fullscreen entry for %s windows and switches to exit after confirmation', async kind => {
@@ -47,9 +53,9 @@ describe('fullscreen panel toolbar', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'panels.exit_fullscreen' })) })
     expect(window.panelWindow.setFullScreen).toHaveBeenLastCalledWith(false)
   })
-  it('keeps the native macOS entry and offers the shared exit when fullscreen', () => {
+  it('offers the toolbar entry alongside the native macOS control and switches to exit when fullscreen', () => {
     const { rerender } = render(<PanelWindowTitlebar view={view} fullScreen={false} />)
-    expect(screen.queryByRole('button', { name: 'panels.enter_fullscreen' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'panels.enter_fullscreen' })).toBeVisible()
     rerender(<PanelWindowTitlebar view={view} fullScreen />)
     expect(screen.getByRole('button', { name: 'panels.exit_fullscreen' })).toBeVisible()
   })

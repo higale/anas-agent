@@ -41,6 +41,14 @@ function clearWindowMaximumSize(window: BrowserWindow): void {
   if (process.platform === 'darwin') window.setMaximumSize(0x7fffffff, 0x7fffffff)
   window.setMaximumSize(0, 0)
 }
+function windowContentInsets(window: BrowserWindow): { width: number; height: number } {
+  // Windows hidden-titlebar panels use content-sized logical bounds. Electron
+  // already accounts for the invisible resize frame in native size constraints.
+  // Subtracting independently rounded DIP rectangles adds false chrome at 125%.
+  if (process.platform === 'win32') return { width: 0, height: 0 }
+  const bounds = window.getBounds(), content = window.getContentBounds()
+  return { width: bounds.width - content.width, height: bounds.height - content.height }
+}
 interface Page {
   id: string
   entry: Entry
@@ -61,7 +69,7 @@ interface Entry {
   transfer?: AbortController
   closing?: Promise<void>
 }
-interface Shell { entry: Entry; window: BrowserWindow; source: RendererLocation; resources: LanguageResourcesSnapshot; atCursor: boolean; resizeRevision: number; fitting: number; minimumSize: number[] }
+interface Shell { entry: Entry; window: BrowserWindow; source: RendererLocation; resources: LanguageResourcesSnapshot; atCursor: boolean; resizeRevision: number; fitting: number; minimumSize: number[]; maximizable: boolean }
 interface SidebarRequest { entry: Entry; owner: BrowserWindow; finish(error?: Error): void }
 interface Pending { page: Page; finish(value: PanelJson, error?: Error): void }
 
@@ -185,6 +193,20 @@ export class PanelPages {
     const window = this.shells.get(event.sender)!.window
     if (fullScreen && !window.isFullScreenable()) throw new Error('PANEL_ACTION_UNAVAILABLE')
     window.setFullScreen(fullScreen)
+  }
+  async fitShellToMaximumSize(event: IpcMainInvokeEvent): Promise<void> {
+    this.fromShell(event)
+    const shell = this.shells.get(event.sender)!, window = shell.window, page = shell.entry.source
+    const [width, height] = window.getMaximumSize()
+    if (!page || page.owner !== window || width <= 0 || height <= 0) throw new Error('PANEL_ACTION_UNAVAILABLE')
+    const insets = windowContentInsets(window), zoom = window.webContents.getZoomFactor()
+    await this.resizeWindow(event, page.id, { width: (width - insets.width) / zoom,
+      height: (height - insets.height) / zoom, restore: true })
+    // This is an explicit user size choice, so plugins must refresh normal-size
+    // memory even though the native resize itself was programmatic.
+    if (window.isDestroyed() || shell.entry.source !== page) throw new Error('PANEL_CLOSED')
+    shell.resizeRevision++
+    this.changed()
   }
   shellLanguages(event: IpcMainInvokeEvent): LanguageResourcesSnapshot {
     this.fromShell(event)
@@ -373,13 +395,17 @@ export class PanelPages {
     requireResizable()
     const window = page.owner
     const shell = this.shells.get(window.webContents)!
+    if (size.maximizable !== undefined) {
+      shell.maximizable = size.maximizable
+      window.setMaximizable(shell.maximizable && window.isFullScreenable())
+    }
     // Automatic fits preserve window state; a deliberate fit may restore it.
     if (size.maximumSize === null) {
-      clearWindowMaximumSize(window); window.setMaximizable(true); window.setFullScreenable(true)
+      clearWindowMaximumSize(window); window.setMaximizable(shell.maximizable); window.setFullScreenable(true)
       window.setMinimumSize(shell.minimumSize[0], shell.minimumSize[1])
       this.changed()
     }
-    if (!size.restore && !size.maximumSize && (window.isMaximized() || window.isFullScreen())) return
+    if (!size.restore && !size.maximumSize && (window.isFullScreen() || window.isMaximized() && size.maximizable !== false)) return
     shell.fitting++
     try {
       const transition = (eventName: 'leave-full-screen' | 'unmaximize', change: () => void) => new Promise<void>((resolve, reject) => {
@@ -407,9 +433,9 @@ export class PanelPages {
       const area = display.workArea
       const zoom = window.webContents.getZoomFactor()
       if (size.maximumSize) {
-        const content = window.getContentBounds()
-        const maxWidth = Math.max(1, Math.round(size.maximumSize.width * zoom) + bounds.width - content.width)
-        const maxHeight = Math.max(1, Math.round(size.maximumSize.height * zoom) + bounds.height - content.height)
+        const insets = windowContentInsets(window)
+        const maxWidth = Math.max(1, Math.round(size.maximumSize.width * zoom) + insets.width)
+        const maxHeight = Math.max(1, Math.round(size.maximumSize.height * zoom) + insets.height)
         // Clear the previous ceiling before raising the minimum for a larger frame.
         clearWindowMaximumSize(window)
         window.setMinimumSize(Math.min(shell.minimumSize[0], maxWidth), Math.min(shell.minimumSize[1], maxHeight))
@@ -561,11 +587,13 @@ export class PanelPages {
       show: false, enableLargerThanScreen: true, backgroundColor: titleBarColors().backgroundColor, ...titleBarOptions({ compact: true }),
       webPreferences: { preload: join(__dirname, '../preload/panelWindow.js'), sandbox: true, contextIsolation: true, nodeIntegration: false } })
     const contents = window.webContents
-    const shell = { entry, window, source, resources, atCursor: !!position, resizeRevision: 0, fitting: 0, minimumSize: window.getMinimumSize() }
+    const shell = { entry, window, source, resources, atCursor: !!position, resizeRevision: 0, fitting: 0, minimumSize: window.getMinimumSize(), maximizable: true }
     this.shells.set(contents, shell)
     const windowModeChanged = () => {
       if (!shell.fitting) shell.resizeRevision++
-      if (!window.isDestroyed()) this.changed()
+      // On Windows the fullscreen event precedes the native flag update.
+      // Publish after that transition so titlebar layout and page mode agree.
+      setImmediate(() => { if (!window.isDestroyed()) this.changed() })
     }
     // Unlike `resize`, `resized` reports completion of a native user resize
     // (Windows/macOS), not each programmatic size or DPI/layout notification.

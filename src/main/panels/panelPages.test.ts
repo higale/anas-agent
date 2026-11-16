@@ -59,7 +59,8 @@ class Window extends EventEmitter {
   isMaximized = vi.fn(() => false)
   isFullScreen = vi.fn(() => false)
   isFullScreenable = vi.fn(() => true)
-  setMaximumSize = vi.fn()
+  getMaximumSize = vi.fn(() => [0, 0])
+  setMaximumSize = vi.fn((width: number, height: number) => { this.getMaximumSize.mockReturnValue([width, height]) })
   setMaximizable = vi.fn()
   setFullScreenable = vi.fn((value: boolean) => this.isFullScreenable.mockReturnValue(value))
   setFullScreen = vi.fn((value: boolean) => { this.isFullScreen.mockReturnValue(value); this.emit(value ? 'enter-full-screen' : 'leave-full-screen') })
@@ -83,7 +84,10 @@ let ready: (owner: Window, pageId: string) => void
 let respond: (command: PanelPageCommand) => Promise<PanelJson>
 const open = () => manager.open({ ownerId: 'plugin:example', name: () => 'Example', icon: undefined,
   content: { kind: 'plugin', pluginId: 'example', instanceId: 'main' }, location: 'sidebar', locations: ['sidebar', 'window'] })
+const nativePlatform = Object.getOwnPropertyDescriptor(process, 'platform')!
 beforeEach(() => {
+  // The default window fixture has an 8-DIP frame; platform cases override it.
+  Object.defineProperty(process, 'platform', { configurable: true, value: 'linux' })
   windows = []; seen = new Set(); commands = []
   main = new Window(); main.main = true; windows.push(main)
   mock.windows.mockImplementation(() => windows.filter(window => !window.destroyed))
@@ -95,7 +99,7 @@ beforeEach(() => {
   ready = (owner, id) => manager.pageReady(event(owner), id)
   respond = async command => command.kind === 'prepare' ? { draft: 'latest edit', scroll: 347 } : null
 })
-afterEach(() => { manager.closeAll(); vi.useRealTimers() })
+afterEach(() => { manager.closeAll(); vi.useRealTimers(); Object.defineProperty(process, 'platform', nativePlatform) })
 
 describe('page handoff', () => {
   it.each(['ready', 'activate'])('reports an initial page load failure during %s and permits a clean retry', async phase => {
@@ -148,16 +152,34 @@ describe('page handoff', () => {
     expect(manager.fromShell(event(window)).fullScreen).toBe(false)
     manager.setShellFullScreen(event(window), true)
     expect(window.setFullScreen).toHaveBeenCalledWith(true)
+    await new Promise<void>(resolve => setImmediate(resolve))
     expect(send).toHaveBeenCalledWith('panel-window:changed', expect.objectContaining({ fullScreen: true }))
     expect(manager.fromShell(event(window)).fullScreen).toBe(true)
     manager.setShellFullScreen(event(window), false)
     expect(window.setFullScreen).toHaveBeenCalledWith(false)
+    await new Promise<void>(resolve => setImmediate(resolve))
     expect(send).toHaveBeenCalledWith('panel-window:changed', expect.objectContaining({ fullScreen: false }))
     expect(manager.ownedPages(event(window))).toEqual([{ ...page, windowResizeRevision: 2 }])
     expect(commands).toEqual(previousCommands)
     window.destroy()
     expect(window.listenerCount('enter-full-screen')).toBe(0)
     expect(window.listenerCount('leave-full-screen')).toBe(0)
+  })
+  it.each([true, false])('publishes settled native fullscreen state when the event precedes its flag (%s)', async fullScreen => {
+    await open()
+    await manager.move(manager.list()[0].viewId, 'window')
+    const window = windows[1]
+    window.isFullScreen.mockReturnValue(!fullScreen)
+    const send = vi.spyOn(window.webContents, 'send')
+    // Windows emits the event inside the native transition, before updating
+    // isFullScreen(). No later toolbar/activity event should be needed to fix it.
+    window.emit(fullScreen ? 'enter-full-screen' : 'leave-full-screen')
+    window.isFullScreen.mockReturnValue(fullScreen)
+    await new Promise<void>(resolve => setImmediate(resolve))
+    const states = send.mock.calls.filter(([channel]) => channel === 'panel-window:changed').map(([, state]) => state)
+    expect(states).not.toHaveLength(0)
+    for (const state of states) expect(state).toMatchObject({ fullScreen })
+    expect(send).toHaveBeenCalledWith('panel-page:changed')
   })
   it('reports the current page window mode and notifies maximize/fullscreen changes', async () => {
     await open()
@@ -169,6 +191,7 @@ describe('page handoff', () => {
     expect(mode()).toBe('normal')
     window.isMaximized.mockReturnValue(true); window.emit('maximize')
     expect(mode()).toBe('maximized')
+    await new Promise<void>(resolve => setImmediate(resolve))
     expect(send).toHaveBeenCalledWith('panel-page:changed')
     window.setFullScreen(true); expect(mode()).toBe('fullscreen')
     window.setFullScreen(false); expect(mode()).toBe('maximized')
@@ -237,6 +260,38 @@ describe('page handoff', () => {
       await expect(manager.resizeWindow(event(window), page.pageId, { width: 1280, height: 837, maximumSize })).rejects.toThrow('Invalid panel maximum size')
     }
   })
+  it('preserves the maximization preference while caps are toggled without disabling fullscreen', async () => {
+    await open()
+    await manager.move(manager.list()[0].viewId, 'window')
+    const window = windows[1], page = manager.ownedPages(event(window))[0]
+    await manager.resizeWindow(event(window), page.pageId, { width: 800, height: 600, maximizable: false, maximumSize: null })
+    expect(window.setMaximizable).toHaveBeenLastCalledWith(false)
+    manager.setShellFullScreen(event(window), true)
+    expect(window.isFullScreen()).toBe(true)
+    await manager.resizeWindow(event(window), page.pageId, { width: 800, height: 600, maximumSize: { width: 1024, height: 800 } })
+    await manager.resizeWindow(event(window), page.pageId, { width: 800, height: 600, maximumSize: null })
+    expect(window.setMaximizable).toHaveBeenLastCalledWith(false)
+    expect(window.isFullScreenable()).toBe(true)
+    await manager.resizeWindow(event(window), page.pageId, { width: 800, height: 600, maximizable: true })
+    expect(window.setMaximizable).toHaveBeenLastCalledWith(true)
+    await expect(manager.resizeWindow(event(window), page.pageId, { width: 800, height: 600, maximizable: 'false' })).rejects.toThrow('Invalid panel size')
+  })
+  it('fits a user-shrunk window to its actual native ceiling and reports an explicit size choice', async () => {
+    await open()
+    await expect(manager.fitShellToMaximumSize(event(main))).rejects.toThrow('Unregistered panel window')
+    await manager.move(manager.list()[0].viewId, 'window')
+    const window = windows[1], page = manager.ownedPages(event(window))[0]
+    await expect(manager.fitShellToMaximumSize(event(window))).rejects.toThrow('PANEL_ACTION_UNAVAILABLE')
+    window.webContents.getZoomFactor.mockReturnValue(1.25)
+    await manager.resizeWindow(event(window), page.pageId, { width: 600, height: 400, maximumSize: { width: 1024, height: 800 } })
+    const before = manager.pageContext(event(window), page.pageId).windowResizeRevision!
+    await manager.fitShellToMaximumSize(event(window))
+    expect(window.setContentSize).toHaveBeenLastCalledWith(1280, 1000)
+    expect(window.getBounds()).toMatchObject({ width: 1288, height: 1008 })
+    expect(manager.pageContext(event(window), page.pageId).windowResizeRevision).toBe(before + 1)
+    expect(window.isFullScreen()).toBe(false)
+    expect(window.isFullScreenable()).toBe(false)
+  })
   it('lowers the minimum for small content caps and restores it when the cap grows or is removed', async () => {
     await open()
     await manager.move(manager.list()[0].viewId, 'window')
@@ -265,6 +320,25 @@ describe('page handoff', () => {
       expect(window.getBounds()).toEqual({ x: 100, y: 41, width: 1768, height: 1039 })
       expect(window.setContentSize).toHaveBeenLastCalledWith(1760, 1031)
     }
+  })
+  it('does not add Windows DIP rounding to the cap or subtract it when fitting', async () => {
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    await open()
+    await manager.move(manager.list()[0].viewId, 'window')
+    const window = windows[1], page = manager.ownedPages(event(window))[0]
+    window.webContents.getZoomFactor.mockReturnValue(1.25)
+    // At fractional display scales the two rounded rectangles disagree even
+    // though the hidden title bar has no native chrome outside the content.
+    window.getContentBounds.mockImplementation(() => ({ ...window.bounds, width: window.bounds.width - 2, height: window.bounds.height - 1 }))
+    await manager.resizeWindow(event(window), page.pageId, { width: 600, height: 400, maximumSize: { width: 1024, height: 800 } })
+    expect(window.getMaximumSize()).toEqual([1280, 1000])
+    await manager.fitShellToMaximumSize(event(window))
+    expect(window.setContentSize).toHaveBeenLastCalledWith(1280, 1000)
+    // User resizing can produce a different rounding error on the same screen.
+    window.getContentBounds.mockImplementation(() => ({ ...window.bounds, width: window.bounds.width - 1, height: window.bounds.height - 2 }))
+    await manager.fitShellToMaximumSize(event(window))
+    expect(window.setContentSize).toHaveBeenLastCalledWith(1280, 1000)
+    expect(window.getMaximumSize()).toEqual([1280, 1000])
   })
   it('preserves oversized content dimensions while keeping the title bar reachable', async () => {
     await open()

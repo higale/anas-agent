@@ -145,6 +145,24 @@ async function verifyUnifiedPanels() {
         const header = await target.locator('.panel-window-titlebar').boundingBox()
         const body = await target.locator('.panel-window-slot').boundingBox()
         assert.ok(header.height >= 36 && body.y >= header.y + header.height)
+        if (process.platform === 'win32' && content.kind === 'document' && round === 0) {
+          // A static panel must settle without a later toolbar/activity update.
+          for (let toggle = 0; toggle < 2; toggle++) {
+            await target.getByRole('button', { name: 'Enter full screen', exact: true }).click()
+            await expect(target.locator('.panel-window-shell')).toHaveAttribute('data-fullscreen', 'true')
+            await expect.poll(() => target.locator('.panel-window-slot').evaluate(node => {
+              const bounds = node.getBoundingClientRect()
+              return bounds.y === 0 && Math.abs(bounds.height - globalThis.innerHeight) < 1
+            })).toBe(true)
+            await target.getByRole('button', { name: 'Exit full screen', exact: true }).click()
+            await expect(target.locator('.panel-window-shell')).toHaveAttribute('data-fullscreen', 'false')
+            await expect.poll(() => target.locator('.panel-window-slot').evaluate(node => {
+              const bounds = node.getBoundingClientRect()
+              const titlebar = globalThis.document.querySelector('.panel-window-titlebar').getBoundingClientRect()
+              return bounds.y >= titlebar.bottom && Math.abs(bounds.bottom - globalThis.innerHeight) < 1
+            })).toBe(true)
+          }
+        }
         if (content.kind === 'document') await expect.poll(() => target.locator('.ui-document-panel').evaluate(node => node.scrollTop)).toBeGreaterThan(280)
         await target.evaluate(() => { void globalThis.panelWindow.moveToSidebar() })
         await panelPage(application, content.kind)
@@ -237,6 +255,37 @@ async function verifyUnifiedPanels() {
       const restored = currentFrame(target)
       await expect(restored.locator('#draft')).toHaveValue('unsaved edit')
       assert.notEqual(await restored.evaluate(() => globalThis.identity), identity)
+      if (process.platform === 'win32' && round === 0) {
+        await restored.evaluate(() => globalThis.anas.resizeWindow({ width: 600, height: 400, maximizable: false, maximumSize: { width: 900, height: 600 } }))
+        await expect(target.getByRole('button', { name: 'Enter full screen', exact: true })).toHaveCount(0)
+        const before = await restored.evaluate(() => globalThis.anas.getContext().then(value => value.windowResizeRevision))
+        await target.getByRole('button', { name: 'Fit window to content', exact: true }).click()
+        await expect.poll(() => restored.evaluate(() => globalThis.anas.getContext().then(value => value.viewport))).toEqual({ width: 900, height: 600 })
+        assert.ok(await restored.evaluate(() => globalThis.anas.getContext().then(value => value.windowResizeRevision)) > before)
+        // Verify the actual Win32 drag ceiling, including invisible resize
+        // borders. Electron's rounded DIP bounds can hide surplus space.
+        const slack = await application.evaluate(({ BrowserWindow }) => {
+          const window = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('panel-window'))
+          const koffi = globalThis.__panelFixture.nativeRequire('koffi'), user32 = koffi.load('user32.dll')
+          const getRect = user32.func('bool __stdcall GetWindowRect(uintptr_t hwnd, _Out_ int32_t *rect)')
+          const send = user32.func('intptr_t __stdcall SendMessageW(uintptr_t hwnd, uint32_t msg, uintptr_t wp, void *lp)')
+          const hwnd = window.getNativeWindowHandle().readBigUInt64LE(), rect = [0, 0, 0, 0], limits = Buffer.alloc(40)
+          if (!getRect(hwnd, rect)) throw new Error('Cannot read panel window rectangle')
+          send(hwnd, 0x24, 0, limits) // WM_GETMINMAXINFO
+          return [limits.readInt32LE(32) - rect[2] + rect[0], limits.readInt32LE(36) - rect[3] + rect[1]]
+        })
+        assert.deepEqual(slack, [0, 0], 'Fitted size must reach the native drag ceiling')
+        await restored.evaluate(() => globalThis.anas.resizeWindow({ width: 900, height: 600, maximumSize: null }))
+        assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()
+          .find(window => window.webContents.getURL().includes('panel-window')).isMaximizable()), false)
+        await target.locator('.panel-window-titlebar > strong').dblclick()
+        assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()
+          .find(window => window.webContents.getURL().includes('panel-window')).isMaximized()), false)
+        await target.getByRole('button', { name: 'Enter full screen', exact: true }).click()
+        await expect(target.locator('.panel-window-shell')).toHaveAttribute('data-fullscreen', 'true')
+        await target.getByRole('button', { name: 'Exit full screen', exact: true }).click()
+        await expect(target.locator('.panel-window-shell')).toHaveAttribute('data-fullscreen', 'false')
+      }
       await target.evaluate(() => { void globalThis.panelWindow.moveToSidebar() })
       await panelPage(application, 'plugin')
       await expect(currentFrame(main).locator('#draft')).toHaveValue('unsaved edit')

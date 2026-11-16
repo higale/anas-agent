@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react'
-import { GripVertical, Maximize2, Minimize2 } from 'lucide-react'
+import { GripVertical, Maximize2, Minimize2, Scan } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { PanelState } from '@shared/panels'
 import { NoFocusButton } from '../NoFocusButton'
@@ -19,8 +19,18 @@ export function PanelWindowTitlebar({ view, fullScreen, fullScreenAllowed = true
   const [position, setPosition] = useState(0.5)
   const [dragging, setDragging] = useState(false)
   const [moving, setMoving] = useState(false)
-  const FullScreenIcon = fullScreen ? Minimize2 : Maximize2
-  const fullScreenLabel = t(fullScreen ? 'panels.exit_fullscreen' : 'panels.enter_fullscreen')
+  const [sizing, setSizing] = useState(false)
+  const fitToMaximum = !fullScreen && !fullScreenAllowed
+  const SizeIcon = fullScreen ? Minimize2 : fitToMaximum ? Scan : Maximize2
+  const sizeLabel = t(fullScreen ? 'panels.exit_fullscreen' : fitToMaximum ? 'panels.fit_window' : 'panels.enter_fullscreen')
+  const resize = async () => {
+    setSizing(true)
+    try {
+      if (fitToMaximum) await window.panelWindow.fitToMaximumSize()
+      else await window.panelWindow.setFullScreen(!fullScreen)
+    } catch (reason) { notice.error(panelError(reason, t)) }
+    finally { setSizing(false) }
+  }
   const finishDrag = useCallback(() => {
     const current = drag.current
     drag.current = null
@@ -87,10 +97,10 @@ export function PanelWindowTitlebar({ view, fullScreen, fullScreenAllowed = true
       disabled={moving || !!view.pendingLocation} onClick={() => void move()}>
       <SquareArrowInDownLeft size={16} aria-hidden="true" />
     </NoFocusButton>}
-    {(fullScreen || fullScreenAllowed && document.documentElement.dataset.platform === 'win32') && <NoFocusButton type="button" className="ui-tool-button ui-tool-button-small"
-      aria-label={fullScreenLabel} data-tooltip={fullScreenLabel}
-      onClick={() => { void window.panelWindow.setFullScreen(!fullScreen).catch(reason => notice.error(panelError(reason, t))) }}>
-      <FullScreenIcon size={16} aria-hidden="true" />
-    </NoFocusButton>}
+    <NoFocusButton type="button" className="ui-tool-button ui-tool-button-small"
+      aria-label={sizeLabel} data-tooltip={sizeLabel} disabled={sizing || !!view.loading || !!view.pendingLocation}
+      onClick={() => { void resize() }}>
+      <SizeIcon size={16} aria-hidden="true" />
+    </NoFocusButton>
   </div>
 }

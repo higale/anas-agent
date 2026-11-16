@@ -7,6 +7,7 @@
     "move_toolbar": "Move toolbar left or right",
     "enter_fullscreen": "Enter full screen",
     "exit_fullscreen": "Exit full screen",
+    "fit_window": "Fit window to content",
     "view_target_unavailable": "The target location is not ready. The original page has been kept.",
     "view_closed": "This panel has closed.",
     "operation_failed": "Panel operation failed.",

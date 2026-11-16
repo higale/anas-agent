@@ -6,13 +6,14 @@ export type PanelPagePhase = 'preparing' | 'active' | 'suspended'
 export type PanelWindowMode = 'normal' | 'maximized' | 'fullscreen'
 /** DIP offsets from the display work-area origin, independent of application zoom. */
 export interface PanelWindowPlacement { displayId: number; x: number; y: number }
-export interface PanelSize { width: number; height: number; restore?: boolean; maximumSize?: { width: number; height: number } | null; restorePlacement?: PanelWindowPlacement }
+export interface PanelSize { width: number; height: number; restore?: boolean; maximizable?: boolean; maximumSize?: { width: number; height: number } | null; restorePlacement?: PanelWindowPlacement }
 export function requirePanelSize(input: unknown): PanelSize {
   const size = input as Partial<PanelSize> | null
   if (!size || typeof size.width !== 'number' || typeof size.height !== 'number'
     || !Number.isFinite(size.width) || !Number.isFinite(size.height)
     || size.width <= 0 || size.height <= 0 || size.width > 32768 || size.height > 32768
-    || (size.restore !== undefined && typeof size.restore !== 'boolean')) throw new Error('Invalid panel size.')
+    || (size.restore !== undefined && typeof size.restore !== 'boolean')
+    || (size.maximizable !== undefined && typeof size.maximizable !== 'boolean')) throw new Error('Invalid panel size.')
   const maximum = size.maximumSize
   if (maximum !== undefined && maximum !== null && (!maximum || typeof maximum !== 'object'
     || ![maximum.width, maximum.height].every(value => typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= 32768))) throw new Error('Invalid panel maximum size.')
@@ -20,6 +21,7 @@ export function requirePanelSize(input: unknown): PanelSize {
   if (placement !== undefined && (!placement || !Number.isSafeInteger(placement.displayId)
     || ![placement.x, placement.y].every(value => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 1_000_000))) throw new Error('Invalid panel placement.')
   return { width: size.width, height: size.height, ...(size.restore !== undefined ? { restore: size.restore } : {}),
+    ...(size.maximizable !== undefined ? { maximizable: size.maximizable } : {}),
     ...(maximum !== undefined ? { maximumSize: maximum === null ? null : { width: maximum.width, height: maximum.height } } : {}),
     ...(placement ? { restorePlacement: { displayId: placement.displayId, x: placement.x, y: placement.y } } : {}) }
 }

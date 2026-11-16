@@ -49,6 +49,7 @@ export interface PanelWindowApi {
   getLanguageResources(): Promise<LanguageResourcesSnapshot>
   moveToSidebar(): Promise<void>
   setFullScreen(fullScreen: boolean): Promise<void>
+  fitToMaximumSize(): Promise<void>
   invokeToolbarAction(id: string): Promise<void>
   open(panel: BuiltinPanel): Promise<void>
   updatePreferences(preferences: Partial<PanelPreferences>): Promise<PanelPreferencesSnapshot>
