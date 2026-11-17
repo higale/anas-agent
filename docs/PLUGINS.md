@@ -163,6 +163,8 @@ const result = await anas.backend.call('example', { value: 1 });
 
 `resizeWindow` 的可选 `maximizable` 控制系统最大化，默认 `true`，省略时保留当前选择；尺寸上限存在时始终禁用最大化，解除上限后仍遵循该选择。它不禁用全屏。Windows 禁用后隐藏系统最大化按钮，最小化和关闭不变；插件可只在 Windows 传 `false`，保留 macOS 绿色按钮的原生全屏行为。宿主工具栏始终提供尺寸入口：无上限时进入／退出全屏，有上限时显示不同的适配图标，恢复到当前允许的最大尺寸；适配作为用户尺寸操作通知插件，不更改上限或后台资源。
 
+`anas.onPointerLeave(listener)` 订阅所属原生窗口的鼠标离开通知，返回取消订阅函数。此通知补足 macOS 中隔离 iframe 可能遗漏的 DOM `pointerleave`，仅发给该窗口当前可见且活动生命周期的插件页面；不表示页面失焦、不改变输入归属、不自动松开按键。插件仍处理画布／控件自己的 DOM 进入与离开，收到原生通知时清除局部悬停状态。通知走宿主私有 MessagePort，不开放原生事件或输入模拟权限。
+
 独立窗口的 `getContext().windowMode` 为 `normal`、`maximized` 或 `fullscreen`；侧栏不提供该字段。`getContext().windowPlacement` 提供普通窗口的显示器及位置。`getContext().viewport` 是宿主父文档分配给插件的页面内容区域 `{ width, height }`（CSS 像素，保留小数，不含宿主标题栏，隐藏时可为 0），不取 iframe 内部可能尚未完成 DPI 更新的尺寸。`windowResizeRevision` 是独立窗口内递增的用户尺寸操作编号：用户完成拖动边框或切换最大化／全屏状态时递增；移动、DPI／布局通知以及 `resizeWindow` 引发的调整不递增。`onViewChanged` 同样携带 `windowMode/windowPlacement/windowResizeRevision/viewport`，任一变化时通知。需要自适应内容的插件应以用户尺寸操作为触发，不能把每次视口测量变化都当作用户调整窗口；原生窗口的整数取整也不应反向修改插件指定的内容尺寸。宿主只报告事实、不持久化插件窗口状态；插件自行管理尺寸、位置记录、恢复和清理。需要从子页面测量内部布局时，应先确认 `innerWidth/innerHeight` 与宿主视口一致，再派发依赖该布局的操作。
 
 `getInfo()` 返回 API 版本、应用版本、插件 ID、当前语言、明暗主题、字号及 `view: { instanceId, location }`。语言是宿主按可用语言包解析后的代码，包含 `system` 的解析结果。设置更新不会重建页面，插件可在聚焦时或以有界频率重新读取，以保留活动连接和输入状态。

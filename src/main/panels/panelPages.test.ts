@@ -602,6 +602,29 @@ describe('page handoff', () => {
   })
 })
 
+it('routes repeated native pointer exits only to visible plugin pages in the owning window and removes the listener on close', async () => {
+  await open()
+  const id = manager.list()[0].viewId
+  const send = vi.spyOn(main.webContents, 'send')
+  const exit = () => main.webContents.emit('before-mouse-event', {}, { type: 'mouseLeave' })
+  exit()
+  expect(send).not.toHaveBeenCalledWith('panel-page:pointer-leave', expect.anything())
+  manager.setActivity(event(main), id, id)
+  const pageId = manager.ownedPages(event(main))[0].pageId
+  send.mockClear()
+  main.webContents.emit('before-mouse-event', {}, { type: 'mouseMove' })
+  exit(); exit()
+  expect(send.mock.calls).toEqual([['panel-page:pointer-leave', pageId], ['panel-page:pointer-leave', pageId]])
+  await manager.move(id, 'window')
+  send.mockClear(); exit()
+  expect(send).not.toHaveBeenCalled()
+  const target = windows[1], targetSend = vi.spyOn(target.webContents, 'send')
+  target.webContents.emit('before-mouse-event', {}, { type: 'mouseLeave' })
+  expect(targetSend).toHaveBeenCalledWith('panel-page:pointer-leave', manager.ownedPages(event(target))[0].pageId)
+  await manager.close(id)
+  expect(target.webContents.listenerCount('before-mouse-event')).toBe(0)
+})
+
 it('combines native focus with sidebar selection and interaction without conflating lifecycle phase', async () => {
   await open()
   const id = manager.list()[0].viewId

@@ -1,7 +1,7 @@
 // Served from the plugin's package origin; the only transport is its host-owned MessagePort.
 export const pluginSdk = `(() => {
   let port, context, lifecycle, action, sequence = 0;
-  const pending = new Map(), controllers = new Map(), listeners = new Set();
+  const pending = new Map(), controllers = new Map(), listeners = new Set(), pointerLeaveListeners = new Set();
   let connect, commands = Promise.resolve();
   const connected = new Promise(resolve => { connect = resolve; });
   const request = async (method, params, timeout = 60000) => {
@@ -33,6 +33,8 @@ export const pluginSdk = `(() => {
         || previous.viewport?.width !== context.viewport?.width || previous.viewport?.height !== context.viewport?.height
         || previous.view.activity?.visible !== context.view.activity?.visible || previous.view.activity?.active !== context.view.activity?.active)
         for (const listener of listeners) listener({ instanceId: context.view.content.instanceId, location: context.location, activity: context.view.activity, windowMode: context.windowMode, windowResizeRevision: context.windowResizeRevision, windowPlacement: context.windowPlacement, viewport: context.viewport });
+    } else if (message.type === 'pointer-leave') {
+      for (const listener of pointerLeaveListeners) listener();
     } else if (message.type === 'cancel') {
       controllers.get(message.requestId)?.abort();
     } else if (message.type === 'command') {
@@ -85,6 +87,7 @@ export const pluginSdk = `(() => {
     moveView: target => invoke('host.moveView', typeof target === 'string' ? { location: target } : target),
     closeView: options => invoke('host.closeView', options),
     onViewChanged: listener => { listeners.add(listener); return () => listeners.delete(listener); },
+    onPointerLeave: listener => { pointerLeaveListeners.add(listener); return () => pointerLeaveListeners.delete(listener); },
     setToolbar: toolbar => request('toolbar', toolbar),
     resizeWindow: size => request('resizeWindow', size),
     onToolbarAction: listener => { if (action) throw new Error('Toolbar handler already registered.'); action = listener;

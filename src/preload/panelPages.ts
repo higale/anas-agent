@@ -21,6 +21,11 @@ export const panelPagesApi: PanelPageApi = {
     ipcRenderer.on('panel-page:command', handler)
     return () => ipcRenderer.removeListener('panel-page:command', handler)
   },
+  onPointerLeave: listener => {
+    const handler = (_event: Electron.IpcRendererEvent, pageId: string) => listener(pageId)
+    ipcRenderer.on('panel-page:pointer-leave', handler)
+    return () => ipcRenderer.removeListener('panel-page:pointer-leave', handler)
+  },
   onCancel: listener => {
     const handler = (_event: Electron.IpcRendererEvent, id: string) => listener(id)
     ipcRenderer.on('panel-page:cancel', handler)

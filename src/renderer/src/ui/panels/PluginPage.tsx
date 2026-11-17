@@ -92,13 +92,16 @@ export function PluginPage({ context, api }: { context: PanelPageContext; api: P
     port.start()
     const stopCommand = api.onCommand(command => { if (command.pageId === context.pageId) port.postMessage({ type: 'command', command }) })
     const stopCancel = api.onCancel(requestId => port.postMessage({ type: 'cancel', requestId }))
+    const stopPointerLeave = api.onPointerLeave(pageId => {
+      if (pageId === context.pageId) port.postMessage({ type: 'pointer-leave' })
+    })
     const publishViewport = () => {
       if (alive) port.postMessage({ type: 'context', context: withViewport(current.current, frame.current) })
       refreshMaximum()
     }
     const observer = new ResizeObserver(publishViewport)
     if (frame.current) observer.observe(frame.current)
-    return () => { alive = false; refreshConstraints.current = () => {}; observer.disconnect(); stopCommand(); stopCancel(); port.close() }
+    return () => { alive = false; refreshConstraints.current = () => {}; observer.disconnect(); stopCommand(); stopCancel(); stopPointerLeave(); port.close() }
   }, [api, context.pageId, context.panelId, port])
   useEffect(() => {
     port?.postMessage({ type: 'context', context: withViewport(context, frame.current) })

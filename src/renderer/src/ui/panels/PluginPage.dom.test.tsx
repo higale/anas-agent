@@ -11,7 +11,7 @@ it('refreshes the content cap after zoom or titlebar changes without refitting a
   let resized = () => {}
   vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resized = callback } observe() {} disconnect() {} })
   vi.stubGlobal('devicePixelRatio', 1)
-  const api = { resizeWindow: vi.fn(async () => {}), onCommand: () => () => {}, onCancel: () => () => {} } as unknown as PanelPageApi
+  const api = { resizeWindow: vi.fn(async () => {}), onCommand: () => () => {}, onCancel: () => () => {}, onPointerLeave: () => () => {} } as unknown as PanelPageApi
   const context = { pageId: 'page', panelId: 'panel', location: 'window', phase: 'active', view: { name: 'Desktop' }, pluginUrl: 'https://plugin.test/index.html' } as PanelPageContext
   const { container, unmount } = render(<div className="panel-window-shell"><div className="panel-window-titlebar" /><PluginPage context={context} api={api} /></div>)
   const frame = container.querySelector('iframe')!
@@ -62,7 +62,7 @@ it('refreshes the content cap after zoom or titlebar changes without refitting a
 it.each([false, true])('fits a restored plugin viewport with titlebar space (floating: %s)', async floating => {
   const port = { onmessage: null as ((event: { data: unknown }) => void) | null, postMessage: vi.fn(), start() {}, close() {} }
   vi.stubGlobal('MessageChannel', class { port1 = port; port2 = {} })
-  const api = { resizeWindow: vi.fn(async () => {}), onCommand: () => () => {}, onCancel: () => () => {} } as unknown as PanelPageApi
+  const api = { resizeWindow: vi.fn(async () => {}), onCommand: () => () => {}, onCancel: () => () => {}, onPointerLeave: () => () => {} } as unknown as PanelPageApi
   const context = { pageId: 'page', panelId: 'panel', view: { name: 'Desktop' }, pluginUrl: 'https://plugin.test/index.html' } as PanelPageContext
   const { container } = render(<div className="panel-window-shell"><div className="panel-window-titlebar" /><PluginPage context={context} api={api} /></div>)
   const frame = container.querySelector('iframe')!
@@ -88,7 +88,7 @@ it('reports the parent-assigned viewport on initialization, request and resize, 
   const disconnected = vi.fn()
   vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resized = callback } observe() {} disconnect = disconnected })
   const context = { pageId: 'page', panelId: 'panel', view: { name: 'Desktop' }, pluginUrl: 'https://plugin.test/index.html' } as PanelPageContext
-  const api = { context: vi.fn(async () => context), onCommand: () => () => {}, onCancel: () => () => {} } as unknown as PanelPageApi
+  const api = { context: vi.fn(async () => context), onCommand: () => () => {}, onCancel: () => () => {}, onPointerLeave: () => () => {} } as unknown as PanelPageApi
   const { container, unmount } = render(<PluginPage context={context} api={api} />)
   const frame = container.querySelector('iframe')!
   let width = 1920
@@ -103,4 +103,25 @@ it('reports the parent-assigned viewport on initialization, request and resize, 
   act(resized)
   expect(port.postMessage).toHaveBeenLastCalledWith({ type: 'context', context: { ...context, viewport: { width: 1280, height: 1080.25 } } })
   unmount(); expect(disconnected).toHaveBeenCalledOnce()
+})
+
+it('forwards native pointer exit only to its own page and unsubscribes on unmount', () => {
+  const port = { onmessage: null, postMessage: vi.fn(), start() {}, close() {} }
+  vi.stubGlobal('MessageChannel', class { port1 = port; port2 = {} })
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+  let notify!: (pageId: string) => void
+  const stop = vi.fn()
+  const api = { onCommand: () => () => {}, onCancel: () => () => {}, onPointerLeave: (listener: typeof notify) => { notify = listener; return stop } } as unknown as PanelPageApi
+  const context = { pageId: 'page', panelId: 'panel', view: { name: 'Desktop' }, pluginUrl: 'https://plugin.test/index.html' } as PanelPageContext
+  const { container, unmount } = render(<PluginPage context={context} api={api} />)
+  const frame = container.querySelector('iframe')!
+  vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation(() => {})
+  act(() => window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, origin: 'https://plugin.test', data: { type: 'anas:ready' } })))
+  port.postMessage.mockClear()
+  act(() => notify('other-page'))
+  expect(port.postMessage).not.toHaveBeenCalled()
+  act(() => notify('page'))
+  expect(port.postMessage).toHaveBeenCalledExactlyOnceWith({ type: 'pointer-leave' })
+  unmount()
+  expect(stop).toHaveBeenCalledOnce()
 })

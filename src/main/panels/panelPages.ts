@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { app, BrowserWindow, screen, type IpcMainInvokeEvent, type Point, type WebContents } from 'electron'
+import { app, BrowserWindow, screen, type IpcMainInvokeEvent, type Point, type WebContents, type Event, type MouseInputEvent } from 'electron'
 import { panelIdentity, type PanelContent, type PanelLocation, type PanelMoveOptions, type PanelState, type PanelWindowState, type PanelWindowShellState, type PanelPreferences, type PanelPreferencesSnapshot } from '@shared/panels'
 import { requirePanelJson, requirePanelSize, type PanelJson, type PanelPageContext, type PanelPageCommand, type PanelPagePhase } from '@shared/panelLifecycle'
 import { findPanelToolbarAction, requirePanelToolbar, type PanelToolbar } from '@shared/panelToolbar'
@@ -660,6 +660,17 @@ export class PanelPages {
     }
     owner.once('closed', releasePages)
     const contents = owner.webContents
+    // macOS can deliver a native exit without routing DOM pointerleave into
+    // isolated child frames. Use the native boundary, not the parent's stale hover state.
+    const pointerLeave = (_event: Event, mouse: MouseInputEvent) => {
+      if (mouse.type !== 'mouseLeave' || owner.isDestroyed()) return
+      for (const page of this.pages.values()) {
+        if (page.owner === owner && page.phase === 'active' && page.entry.state.content.kind === 'plugin'
+          && this.view(page.entry).activity?.visible) contents.send('panel-page:pointer-leave', page.id)
+      }
+    }
+    contents.on('before-mouse-event', pointerLeave)
+    owner.once('closed', () => contents.removeListener('before-mouse-event', pointerLeave))
     contents.on('render-process-gone', releasePages)
     contents.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => {
       if (mainFrame && !inPlace) releasePages()

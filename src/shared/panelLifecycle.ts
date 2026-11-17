@@ -66,6 +66,7 @@ export interface PanelPageApi {
   onChanged(listener: () => void): () => void
   onCommand(listener: (command: PanelPageCommand) => void): () => void
   onCancel(listener: (requestId: string) => void): () => void
+  onPointerLeave(listener: (pageId: string) => void): () => void
 }
 
 /** Handoff state is a bounded snapshot, never a live object or business resource. */

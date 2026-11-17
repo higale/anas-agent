@@ -1,6 +1,6 @@
 import { Fragment, useLayoutEffect, useRef, useState } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { Check, ChevronDown, ChevronRight, MoreHorizontal } from 'lucide-react'
+import { Check, ChevronRight, MoreHorizontal } from 'lucide-react'
 import type { PanelToolbarAction } from '@shared/panelToolbar'
 import { useTranslation } from 'react-i18next'
 import type { PanelState } from '@shared/panels'
@@ -60,9 +60,9 @@ export function PanelToolbar({ view, onAction }: { view: PanelState; onAction(id
       <span ref={measure} className="panel-toolbar-measure ui-tool-button-small" aria-hidden="true" />
       {toolbar.actions.slice(0, layout.count).map(action => {
         if (action.items) return <DropdownMenuRoot key={action.id}>
-          <DropdownMenuTrigger asChild><NoFocusButton type="button" className="ui-tool-button ui-tool-button-small panel-toolbar-menu-trigger"
+          <DropdownMenuTrigger asChild><NoFocusButton type="button" className="ui-tool-button ui-tool-button-small"
             aria-label={action.label} data-tooltip={action.label} disabled={disabled(action)}>
-            {icon(action.icon)}<ChevronDown size={9} className="panel-toolbar-menu-chevron" aria-hidden="true" />
+            {icon(action.icon)}
           </NoFocusButton></DropdownMenuTrigger>
           <DropdownMenu.Portal><DropdownMenuContent className="ui-menu ui-menu-list" align="end">{menuItems(action)}</DropdownMenuContent></DropdownMenu.Portal>
         </DropdownMenuRoot>

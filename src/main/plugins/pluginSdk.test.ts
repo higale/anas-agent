@@ -37,6 +37,18 @@ describe('plugin lifecycle scheduling', () => {
   })
 })
 
+it('delivers native pointer exits through the private port and supports unsubscribe', () => {
+  const f = fixture(), listener = vi.fn()
+  const stop = (f.window.anas as unknown as { onPointerLeave(listener: () => void): () => void }).onPointerLeave(listener)
+  f.port.onmessage({ data: { type: 'pointer-leave' } })
+  f.port.onmessage({ data: { type: 'pointer-leave' } })
+  expect(listener).toHaveBeenCalledTimes(2)
+  expect(f.calls).toEqual([])
+  stop()
+  f.port.onmessage({ data: { type: 'pointer-leave' } })
+  expect(listener).toHaveBeenCalledTimes(2)
+})
+
 it('toolbar actions can await their own close while lifecycle disposal runs', async () => {
   vi.useFakeTimers()
   const listeners = new Map<string, (value: unknown) => unknown>()

@@ -80,8 +80,6 @@
 .panel-toolbar-actions { display: flex; position: relative; flex-shrink: 1; min-width: 24px; gap: 4px; -webkit-app-region: no-drag; }
 .panel-toolbar-actions > button { flex-shrink: 0; }
 .panel-toolbar-measure { position: absolute; visibility: hidden; pointer-events: none; }
-.panel-toolbar-menu-trigger { position: relative; }
-.panel-toolbar-menu-chevron { position: absolute; right: 0; bottom: 0; }
 .panel-toolbar-menu-description { max-width: 260px; padding: 6px 8px; color: var(--text-muted); font-size: 0.85em; white-space: normal; }
 .panel-window-slot { min-height: 0; min-width: 0; }
 
