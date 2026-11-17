@@ -73,7 +73,7 @@ export const pluginSdk = `(() => {
   });
   window.parent.postMessage({ type: 'anas:ready' }, '*');
   window.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && !event.defaultPrevented && !event.isComposing && !event.repeat
+    if (event.key === 'Escape' && !event.defaultPrevented && !event.isComposing && event.keyCode !== 229 && !event.repeat
       && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) void request('escape').catch(() => {});
   });
   for (const name of ['pointerdown', 'focusin', 'focus']) window.addEventListener(name, () => { void request('interact').catch(() => {}) }, true);

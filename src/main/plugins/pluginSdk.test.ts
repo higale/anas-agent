@@ -14,8 +14,19 @@ function fixture() {
   runInNewContext(pluginSdk, { window, document, AbortController, setTimeout, clearTimeout })
   listeners.get('message')!({ source: window.parent, data: { type: 'anas:connect' }, ports: [port] })
   const command = (kind: string, requestId: string) => port.onmessage({ data: { type: 'command', command: { kind, requestId, payload: null } } })
-  return { window, document, port, calls, command }
+  return { window, document, port, calls, command, key: (event: Record<string, unknown>) => listeners.get('keydown')!(event) }
 }
+
+it('keeps IME Escape events local even when the composition flag is already cleared', async () => {
+  const f = fixture()
+  f.key({ key: 'Escape', isComposing: true })
+  f.key({ key: 'Escape', isComposing: false, keyCode: 229 })
+  await Promise.resolve()
+  expect(f.calls.filter(call => call.method === 'escape')).toHaveLength(0)
+  f.key({ key: 'Escape', isComposing: false, keyCode: 27 })
+  await Promise.resolve()
+  expect(f.calls.filter(call => call.method === 'escape')).toHaveLength(1)
+})
 describe('plugin lifecycle scheduling', () => {
   it('waits for cancelled preparation to finish before resuming and drops stale replies', async () => {
     const f = fixture(), order: string[] = []

@@ -15,7 +15,7 @@ describe('panel Escape routing', () => {
       key()
       input.addEventListener('keydown', event => event.stopPropagation(), { once: true })
       key()
-      key({ isComposing: true }); key({ repeat: true }); key({ ctrlKey: true }); key({ key: 'Enter' })
+      key({ isComposing: true }); key({ keyCode: 229, isComposing: false }); key({ repeat: true }); key({ ctrlKey: true }); key({ key: 'Enter' })
       expect(escape).not.toHaveBeenCalled()
       key()
       expect(escape).toHaveBeenCalledOnce()
