@@ -111,7 +111,7 @@ function workspaceProps(
     onLoadEarlierMessages: vi.fn(),
     onLoadEarlierError: vi.fn(),
     onOpenModelSettings: vi.fn(),
-    onRemoveAttachment: vi.fn(),
+    onRemoveAttachment: vi.fn(), onConvertAttachmentToPath: vi.fn(),
     onRemoveQueuedMessage: vi.fn(),
     onRetryQueuedMessage: vi.fn(),
     onToggleAttachmentContextPolicy: vi.fn(),

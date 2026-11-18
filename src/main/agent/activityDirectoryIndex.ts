@@ -12,6 +12,7 @@ import { displayTransaction } from './activityDisplayProjection'
 export interface ActivityMessageHeader {
   kind: ConversationMessage['kind']
   hasText: boolean
+  hasImageLimitWarnings?: boolean
   hasReasoning: boolean
   reasoningSummary?: string
   calls: { call: AgentToolCall; freeform?: boolean }[]
@@ -42,6 +43,7 @@ export function activityMessageHeader(threadId: string, runId: string, id: strin
     ? result.subagent_id : undefined
   return {
     kind: value.kind,
+    ...(message.imageLimitWarnings?.length ? { hasImageLimitWarnings: true } : {}),
     hasText: message.content.some(block => block.type === 'text' && /\S/.test(block.text)),
     hasReasoning: message.content.some(block => block.type === 'reasoning' && Boolean(block.text)),
     ...(summary ? { reasoningSummary: [...summary.slice(0, 240)].join('') } : {}),

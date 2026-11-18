@@ -6,7 +6,7 @@ import type { AgentActivityDetailReference, AgentActivityDetail } from '../../sh
 import { decodeExecutionValue } from '../../runtime/executionValue'
 
 export interface ActivityPayloadReader {
-  model(runId: string, modelId: string, messageId: string | undefined, subagentId?: string): Pick<AgentModelActivity, 'text' | 'reasoning' | 'reasoningSummary' | 'toolCallIds' | 'recovery'>
+  model(runId: string, modelId: string, messageId: string | undefined, subagentId?: string): Pick<AgentModelActivity, 'text' | 'reasoning' | 'reasoningSummary' | 'toolCallIds' | 'recovery' | 'imageLimitWarnings'>
   tool(runId: string, callId: string, name: string, subagentId?: string, summaryOnly?: boolean): { call: AgentToolCall; output?: unknown }
 }
 
@@ -208,7 +208,7 @@ export class RunActivityReader {
     if (run.threadId !== input.threadId) throw new Error('Activity run belongs to another conversation.')
     if (input.kind === 'model') {
       const model = this.getModelActivity(input.runId, input.id)
-      if (model && model.subagentId === input.subagentId) return { text: model.text, reasoning: model.reasoning }
+      if (model && model.subagentId === input.subagentId) return { text: model.text, reasoning: model.reasoning, ...(model.imageLimitWarnings?.length ? { imageLimitWarnings: model.imageLimitWarnings } : {}) }
     } else if (input.kind === 'tool') {
       const tool = this.getToolActivity(input.runId, input.id, input.subagentId)
       if (tool) return { args: tool.call.args, output: tool.output }

@@ -563,6 +563,8 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
   const {
     attachTextFiles,
     composerDragActive,
+    convertAttachmentToPath,
+    attachmentConversionBusy,
     handleComposerDragEnter,
     handleComposerDragLeave,
     handleComposerDragOver,
@@ -573,6 +575,9 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
   } = useComposerAttachments({
     attachments,
     draftKey: composerDraftKey,
+    projectId: activeProjectId,
+    inputRef: composerInputRef,
+    setInput,
     setAttachments,
     t,
     visionEnabled
@@ -993,6 +998,7 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
   }
 
   async function sendCurrentMessage(): Promise<void> {
+    if (attachmentConversionBusy) return
     await submissionLockRef.current.run(async () => {
       setSubmissionBusy(true)
       try {
@@ -1007,14 +1013,15 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
   async function sendCurrentMessageUnlocked(): Promise<void> {
     const submittedDraftKey = composerDraftKey
     const threadId = agent.activeThreadId
-    const originalText = input.trim()
+    // Whitespace may be part of a native filename; trim only to reject an empty prompt.
+    const originalText = input.trim() ? input : ''
     const queueing = Boolean(
       threadId
       && agent.activeRun?.operation === 'agent'
       && agent.activeRun.status === 'running'
     )
     if (threadLocked && !queueing) return
-    if (originalText.startsWith('/') && executeExactSlashCommand()) return
+    if (originalText.trimStart().startsWith('/') && executeExactSlashCommand()) return
     if (!selectedModel || !isSelectableModelConfig(selectedModel)) {
       agent.setThreadError(threadId, t('chat.select_model_before_send'))
       return
@@ -1335,7 +1342,7 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
         queuedMessages={agent.activeQueuedMessages}
         simpleChatEnabled={simpleChatEnabled}
         run={agent.activeRun}
-        submissionBusy={submissionBusy}
+        submissionBusy={submissionBusy || attachmentConversionBusy}
         speech={speech.state}
         selectedProjectId={activeProjectId}
         selectedProjectThreadCount={activeProjectThreadCount}
@@ -1375,6 +1382,7 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
         onLoadEarlierMessages={({ threadId, signal }) => agent.loadEarlierMessages(threadId, signal)}
         onLoadEarlierError={agent.setThreadError}
         onOpenModelSettings={openModelSettings}
+        onConvertAttachmentToPath={convertAttachmentToPath}
         onRemoveAttachment={removeAttachment}
         onRemoveQueuedMessage={agent.removeQueuedMessage}
         onRetryQueuedMessage={agent.retryQueuedMessage}

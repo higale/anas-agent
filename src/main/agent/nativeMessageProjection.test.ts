@@ -605,3 +605,20 @@ it.each([false, true])('rebuilds colliding v1 links without rewriting native his
     expect(h.product.readSnapshot(h.identity.threadId)).toEqual(snapshot)
   } finally { h.dispose() }
 })
+
+
+it('keeps image omission notices in authoritative responses and loads them after restart', async () => {
+  const h = fixture()
+  const warnings = ['Tool capture, image 1 was not sent: count 2 exceeds limit 1. Original result preserved.']
+  try {
+    await h.owner.enter('input', h.identity)
+    h.reader().observations.recordModel('run', { id: 'images', messageId: 'image-response', status: 'completed',
+      text: 'Continue', reasoning: '', toolCallIds: [], imageLimitWarnings: warnings })
+    h.owner.store.acceptModel(h.scope(), { id: 'image-response', value: { kind: 'assistant', content: 'Continue',
+      context: { imageLimitWarnings: warnings } } }, [], { modelCalls: 1, todos: [] })
+    h.reopen()
+    const activity = h.reader().activities.getModelActivity('run', 'images')
+    expect(activity?.imageLimitWarnings).toEqual(warnings)
+    expect(h.reader().activities.getDisplayDetail({ threadId: h.identity.threadId, runId: 'run', kind: 'model', id: 'images' }).imageLimitWarnings).toEqual(warnings)
+  } finally { h.dispose() }
+})

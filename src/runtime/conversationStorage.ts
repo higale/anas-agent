@@ -17,6 +17,7 @@ const sourceKeys: Record<keyof NonNullable<ConversationMessage['source']>, strin
   functionItemIds: 'function_item_ids', customItemIds: 'custom_item_ids'
 }
 const contextKeys: Record<keyof NonNullable<ConversationMessage['context']>, string> = {
+  imageLimitWarnings: 'image_limit_warnings',
   runId: 'run_id', createdAt: 'created_at', displayText: 'display_text', directionAfterCallIds: 'direction_after_call_ids',
   skill: 'skill', reviewScope: 'review_scope', reviewReport: 'review_report', summaryId: 'summary_id', summary: 'summary',
   modelContextKey: 'model_context_key', requestKey: 'request_key', projectRulesReceipt: 'project_rules_receipt', memoryWriteSource: 'memory_write_source',
@@ -74,6 +75,7 @@ function validate(value: unknown): asserts value is ConversationMessage {
   }
   if (message.context !== undefined) {
     const context = record(message.context)
+    if (context.imageLimitWarnings !== undefined && (!Array.isArray(context.imageLimitWarnings) || context.imageLimitWarnings.some(value => typeof value !== 'string'))) invalid('invalid image limit warnings')
     if (context.memoryWriteSource !== undefined) {
       const source = record(context.memoryWriteSource)
       if (typeof source.generation !== 'string' || typeof source.recordId !== 'string') invalid('invalid memory write source')

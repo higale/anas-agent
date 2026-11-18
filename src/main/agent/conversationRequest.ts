@@ -1,3 +1,4 @@
+import { projectModelToolImageLimits } from './conversationImageLimits'
 import type { ResolvedModelConfig } from '@shared/types'
 import type { CodeReviewSnapshot } from '@shared/codeReview'
 import { modelContextKey } from '@shared/modelConfig'
@@ -9,7 +10,7 @@ import { projectRulesText, ruleScopeIds, type ProjectRulesSnapshot } from '../..
 import { conversationContentBlocks } from '../../providers/conversationInput'
 import { createConversationModel, type ConversationModelOptions } from './conversationModel'
 import type { ObserveConversationProgress } from '../../providers/conversationStream'
-import { assertConversationFits, assertConversationSupported, conversationRequestKey, countConversationTokens, projectConversationSkills } from './conversationContext'
+import { assertConversationFits, assertConversationSupported, conversationRequestKey, countConversationTokens, projectConversationSkills, projectConversationToolImages } from './conversationContext'
 import { codeReviewPrompt } from './codeReview'
 import { withResponseTools } from './modelToolDeclarations'
 import { modelOutputWasTruncated, modelRecoveryFeedback } from '../../runtime/modelOutputRecovery'
@@ -36,7 +37,8 @@ export async function prepareConversationModelCall(model: ResolvedModelConfig, c
     now?: () => string
   }) {
   options.signal.throwIfAborted()
-  let messages = [...context.messages]
+  let messages = projectModelToolImageLimits(projectConversationToolImages(context.messages), model.imageLimits)
+  const imageLimitWarnings = messages.filter(message => message.kind === 'tool').flatMap(message => message.context?.imageLimitWarnings ?? [])
   const tools = withResponseTools(context.tools, context.review ? [codeReviewToolDeclaration(context.review.id)] : [])
   if (context.review) {
     const prompt = codeReviewPrompt(context.review)
@@ -104,6 +106,7 @@ export async function prepareConversationModelCall(model: ResolvedModelConfig, c
       throw new Error('The model ended the review without the required structured report. No completed review is available.')
     }
     return { ...result, message: { ...result.message, context: { ...result.message.context,
+      ...(imageLimitWarnings.length ? { imageLimitWarnings } : {}),
       ...(rulesReceipt ? { projectRulesReceipt: rulesReceipt } : {}),
       modelContextKey: modelContextKey(model), requestKey, runId: options.runId, createdAt: (options.now ?? (() => new Date().toISOString()))() } } }
   } }

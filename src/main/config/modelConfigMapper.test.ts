@@ -282,3 +282,27 @@ describe('model provider configuration mapper', () => {
     )).toThrow('cannot be changed')
   })
 })
+
+
+describe('optional model image rules', () => {
+  it('reads missing groups without migration and round-trips explicit zero and byte basis', () => {
+    const old = rawProvider()
+    delete old.models![0].image_limits
+    expect(normalizeModelProvider(old, 0).models[0].imageLimits).toEqual({})
+    const limits = { minShortSide: 11, maxLongSide: 6000, maxPixels: 25_000_000, maxAspectRatio: 200, maxBytes: 0, maxCount: 0, byteBasis: 'base64' as const }
+    const raw = rawProviderModelFromSave(modelSave({ imageLimits: limits }), 'model', 'openai_chat_completions')
+    expect(raw.image_limits).toEqual({ min_short_side: 11, max_long_side: 6000, max_pixels: 25_000_000, max_aspect_ratio: 200, max_bytes: 0, max_count: 0, byte_basis: 'base64' })
+    const provider = normalizeModelProvider(rawProvider({ models: [raw] }), 0)
+    expect(resolveModelConfig(provider, provider.models[0]).imageLimits).toEqual(limits)
+  })
+  it.each([{ maxBytes: -1 }, { maxCount: 1.5 }, { minShortSide: 0 }, { maxPixels: Infinity }, { maxAspectRatio: 0.5 }, { minShortSide: 20, maxLongSide: 10 }])('rejects invalid rules %j', imageLimits => {
+    expect(() => rawProviderModelFromSave(modelSave({ imageLimits }), 'model', 'openai_chat_completions')).toThrow()
+  })
+  it('rejects invalid persisted groups and fields rather than silently disabling limits', () => {
+    for (const value of [null, [], { max_bytes: '5000' }, { byte_basis: 'kilobytes' }]) {
+      const raw = rawProvider()
+      raw.models![0].image_limits = value as never
+      expect(() => normalizeModelProvider(raw, 0)).toThrow()
+    }
+  })
+})

@@ -879,7 +879,7 @@ export async function buildUserSkillInvocation(projectId: string | undefined, na
   if (!skill) return { handled: true, promptText: '', displayText: command, errorCode: 'user_unavailable', errorName: name }
   const missingTools = skill.summary.requiredTools?.filter(id => !capabilities.pluginTools.includes(id))
   if (missingTools?.length) return { handled: true, promptText: '', displayText: command, errorCode: 'tools_unavailable', errorName: name, missingTools }
-  const trimmedArgs = args.trim()
+  const trimmedArgs = args.trimStart()
   const displayText = `${command}${trimmedArgs ? ` ${trimmedArgs}` : ''}`
   const skillPath = join(skill.summary.dirPath, 'SKILL.md')
   const contents = await readBoundedTextFile(skillPath)

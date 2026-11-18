@@ -209,6 +209,7 @@ describe('IPC sender security', () => {
       'files:readAttachments',
       'files:readDroppedAttachments',
       'files:releaseTemporaryAttachments',
+      'files:retainTemporaryAttachment',
       'speech:listVoices',
       'app:backupData',
       'app:getLanguageResources',

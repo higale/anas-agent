@@ -368,10 +368,11 @@ describe('skillsStore', () => {
     const fixture = await loadSkillsStore()
     const contents = '---\nname: arguments\ndescription: Arguments\ncompatibility: Python 3\nmetadata:\n  author: Example\n---\n\n    Keep indentation.\n$ARGUMENTS $0 $1 $ARGUMENTS[0] $HOME <example>\n\n'.replaceAll('\n', newline)
     await writeText(join(fixture.skillsDir, 'arguments', 'SKILL.md'), contents)
-    const request = '用户需求  保留空格\n$ARGUMENTS $0 <example>'
+    const request = '用户需求  保留空格\n$ARGUMENTS $0 <example>\n/Users/tester/Desktop/报告 '
     const invocation = await fixture.store.buildUserSkillInvocation(undefined, 'arguments', undefined, request)
     expect(invocation.promptText.endsWith(`\n${contents}\n</skill>`)).toBe(true)
     expect(invocation.promptText.startsWith(`/arguments ${request}\n\n`)).toBe(true)
+    expect(invocation.displayText).toBe(`/arguments ${request}`)
     const withoutRequest = await fixture.store.buildUserSkillInvocation(undefined, 'arguments', undefined, '')
     expect(withoutRequest.displayText).toBe('/arguments')
     expect(withoutRequest.promptText.endsWith(`\n${contents}\n</skill>`)).toBe(true)

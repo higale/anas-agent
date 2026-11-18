@@ -105,9 +105,10 @@ describe('native model preparation in the durable conversation loop', () => {
     expect(state.messages[1].value.source?.metadata.id).toBe('repeated-provider-id')
   })
 
-  it('keeps simple-chat tool history out of the request without deleting the original conversation', async () => {
+  it.each([true, false])('keeps simple-chat tool history out of the request without deleting the original conversation (tool use: %s)', async toolUse => {
     const h = fixture(); h.options.simpleChat = true
-    h.options.tools = () => [{ name: 'read_file', description: 'Read', parameters: { type: 'object', properties: {} } }]
+    h.options.resolveModel = async () => ({ ...model, capabilities: { ...model.capabilities, toolUse } })
+    // Runtime resources select tools before model preparation; simple chat has no host tools.
     const original: ConversationMessage[] = [{ id: 'user', kind: 'user', content: 'task' },
       { id: 'call', kind: 'assistant', content: 'Visible answer', calls: [{ id: 'provider-call', name: 'read_file', args: { path: 'file' } }] },
       { id: 'result', kind: 'tool', resultFor: 'provider-call', content: 'Internal tool result' },

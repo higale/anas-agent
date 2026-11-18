@@ -144,8 +144,8 @@ const activeUserRequestPattern = new RegExp(
 function finalizedSummaryText(text: string, preparation?: CompressionPreparation): string {
   const summary = text.replace(activeUserRequestPattern, '\n').trim()
   if (!summary) throw new ModelSelectionError('Context compression returned an empty summary. The run was stopped without replacing its history. Try again or select another model.')
-  const activeUserRequest = preparation?.activeUserRequest?.trim()
-  if (!activeUserRequest) return summary
+  const activeUserRequest = preparation?.activeUserRequest
+  if (!activeUserRequest?.trim()) return summary
   return [
     summary,
     activeUserRequestStart,

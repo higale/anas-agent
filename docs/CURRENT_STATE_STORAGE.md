@@ -46,6 +46,7 @@
         conversations/<主对话ID>/
           conversation.sqlite
           attachments/<threadId>/<attachmentId>/content.<ext>
+          attachments/_paths/<文件ID>/<文件名>  # 编辑附件转为路径后保留的文件，随主对话删除
           file_edits/<runId>/<operationId>/...
           tool_results/<内容哈希>.txt
   tmp/conversations/<主对话ID>/

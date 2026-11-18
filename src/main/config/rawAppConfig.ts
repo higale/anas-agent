@@ -30,6 +30,15 @@ export interface RawProviderModelConfig {
   }>
   parameter_preset_mode?: string
   default_parameter_preset_id?: string
+  image_limits?: {
+    min_short_side?: number
+    max_long_side?: number
+    max_pixels?: number
+    max_aspect_ratio?: number
+    max_bytes?: number
+    byte_basis?: string
+    max_count?: number
+  }
   capabilities?: {
     vision?: boolean
     tool_use?: boolean

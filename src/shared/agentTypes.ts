@@ -170,6 +170,8 @@ export interface AgentToolCallProgress {
 }
 
 export interface AgentModelActivity {
+  imageLimitWarnings?: string[]
+  hasImageLimitWarnings?: boolean
   detail?: AgentActivityDetailReference
   hasText?: boolean
   hasReasoning?: boolean
@@ -313,6 +315,7 @@ export interface AgentContextStatus {
 }
 
 export interface AgentMessage {
+  imageLimitWarnings?: string[]
   /** Display identity shared with the corresponding streamed reply. */
   activityModelId?: string
   codeReview?: CodeReviewPresentation
@@ -426,6 +429,7 @@ export interface AgentActivityDetailReference extends AgentRunReferenceInput {
 }
 
 export interface AgentActivityDetail {
+  imageLimitWarnings?: string[]
   message?: AgentMessage
   text?: string
   reasoning?: string

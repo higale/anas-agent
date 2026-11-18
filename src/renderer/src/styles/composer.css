@@ -767,6 +767,7 @@
 }
 
 .attachment-remove,
+.attachment-path,
 .attachment-context-toggle,
 .attachment-context-indicator {
   position: absolute;
@@ -790,6 +791,12 @@
   right: 3px;
 }
 
+.attachment-path {
+  top: auto;
+  bottom: 3px;
+  right: 3px;
+}
+
 .attachment-context-toggle,
 .attachment-context-indicator {
   left: 3px;
@@ -810,6 +817,7 @@
 }
 
 .attachment-remove svg,
+.attachment-path svg,
 .attachment-context-toggle svg,
 .attachment-context-indicator svg {
   display: block;
@@ -824,17 +832,23 @@
 }
 
 .attachment-tile:hover .attachment-remove,
-.attachment-tile:hover .attachment-context-toggle {
+.attachment-tile:hover .attachment-path,
+.attachment-tile:hover .attachment-context-toggle,
+.attachment-tile:focus-within .attachment-remove,
+.attachment-tile:focus-within .attachment-path,
+.attachment-tile:focus-within .attachment-context-toggle {
   opacity: 1;
 }
 
-.attachment-tile:not(:hover) .attachment-remove,
-.attachment-tile:not(:hover) .attachment-context-toggle {
+.attachment-tile:not(:hover):not(:focus-within) .attachment-remove,
+.attachment-tile:not(:hover):not(:focus-within) .attachment-path,
+.attachment-tile:not(:hover):not(:focus-within) .attachment-context-toggle {
   opacity: 0;
   pointer-events: none;
 }
 
 .attachment-remove:hover,
+.attachment-path:hover,
 .attachment-context-toggle:hover {
   background: rgba(20, 20, 20, 0.9);
   color: #fff;

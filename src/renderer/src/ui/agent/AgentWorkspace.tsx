@@ -96,6 +96,7 @@ interface AgentWorkspaceProps {
   onLoadEarlierMessages(request: { threadId: string; signal: AbortSignal }): void | Promise<void>
   onLoadEarlierError(threadId: string, error: string): void
   onOpenModelSettings(): void | Promise<void>
+  onConvertAttachmentToPath(path: string): Promise<void>
   onRemoveAttachment(path: string): void
   onRemoveQueuedMessage(message: QueuedAgentMessage): void | Promise<unknown>
   onRetryQueuedMessage(message: QueuedAgentMessage): void | Promise<unknown>
@@ -325,6 +326,7 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
         onCreateProject={props.onCreateProject}
         onOpenModelSettings={props.onOpenModelSettings}
         onOpenSubagent={openSubagent}
+        onConvertAttachmentToPath={props.onConvertAttachmentToPath}
         onRemoveAttachment={props.onRemoveAttachment}
         onRemoveQueuedMessage={props.onRemoveQueuedMessage}
         onRetryQueuedMessage={props.onRetryQueuedMessage}

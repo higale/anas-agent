@@ -4,6 +4,7 @@ import { AttachmentGrid } from './AttachmentGrid'
 interface ComposerAttachmentsProps {
   attachments: SelectedAttachment[]
   disabled?: boolean
+  onConvertAttachmentToPath: (path: string) => Promise<void>
   onRemoveAttachment: (path: string) => void
   onToggleAttachmentContextPolicy: (path: string) => void
 }
@@ -11,6 +12,7 @@ interface ComposerAttachmentsProps {
 export function ComposerAttachments({
   attachments,
   disabled,
+  onConvertAttachmentToPath,
   onRemoveAttachment,
   onToggleAttachmentContextPolicy
 }: ComposerAttachmentsProps) {
@@ -21,6 +23,7 @@ export function ComposerAttachments({
       attachments={attachments}
       mode="composer"
       removalDisabled={disabled}
+      onConvertAttachmentToPath={onConvertAttachmentToPath}
       onRemoveAttachment={onRemoveAttachment}
       onToggleContextPolicy={onToggleAttachmentContextPolicy}
     />

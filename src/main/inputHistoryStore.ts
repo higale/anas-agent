@@ -17,7 +17,7 @@ function now(): string {
 }
 
 function cleanText(text: string): string {
-  return text.trim()
+  return text.trim() ? text : ''
 }
 
 async function writeJsonAtomic(path: string, data: unknown): Promise<void> {

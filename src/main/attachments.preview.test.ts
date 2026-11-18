@@ -19,7 +19,7 @@ vi.mock('./config/appConfig', () => ({ getAppConfigSnapshot: async () => ({
   settings: { attachmentTextMaxChars: 100_000, attachmentTextOverflow: 'truncate' }
 }) }))
 
-import { readAttachmentPreview, readSelectedAttachments, registerAttachmentPreviewProtocol, releaseTemporaryAttachments } from './attachments'
+import { readAttachmentPreview, readSelectedAttachments, registerAttachmentPreviewProtocol, releaseTemporaryAttachments, retainTemporaryAttachment } from './attachments'
 import * as dataDir from './config/dataDir'
 import { archiveAgentAttachments } from './agent/agentAttachmentStore'
 
@@ -79,6 +79,41 @@ describe('bounded attachment previews', () => {
     const handler = electronMocks.handle.mock.calls[0][1] as (request: Request) => Promise<Response>
     const response = await handler(new Request(original!.src))
     expect(Buffer.from(await response.arrayBuffer()).equals(onePixelPng)).toBe(true)
+  })
+
+  it('keeps mixed selections in order, identifies path-only files and folders, and preserves native names', async () => {
+    const text = join(root, '文字 # 100% .custom')
+    const binary = join(root, '归档.zip')
+    const directory = join(root, '未命名文件夹')
+    const trailingSpace = join(root, 'notes ')
+    const broken = join(root, 'broken.png')
+    const missing = join(root, 'missing.txt')
+    await writeFile(text, 'plain text')
+    await writeFile(binary, Buffer.from([0, 255, 0]))
+    await mkdir(directory)
+    await writeFile(trailingSpace, 'keep name')
+    await writeFile(broken, 'damaged image')
+    const paths = [text, binary, directory, trailingSpace, broken, missing]
+    const files = await readSelectedAttachments([...paths, text])
+    expect(files.map(file => file.path)).toEqual(paths)
+    expect(files.map(file => file.kind)).toEqual(['text', 'binary', 'binary', 'text', 'image', 'binary'])
+    expect(files.slice(0, 4).every(file => !file.skippedReason)).toBe(true)
+    expect(files[4].skippedReason).toBeTruthy()
+    expect(files[5].skippedReason).toBeTruthy()
+  })
+
+  it('reads SVG source as text but keeps binary files with an SVG extension path-only', async () => {
+    const svg = join(root, 'diagram.svg')
+    const binary = join(root, 'binary.svg')
+    const source = '<svg xmlns="http://www.w3.org/2000/svg"><text>中文</text></svg>'
+    await writeFile(svg, source)
+    await writeFile(binary, Buffer.from([0, 255, 0]))
+
+    const files = await readSelectedAttachments([svg, binary])
+    expect(files[0]).toMatchObject({ path: svg, kind: 'text', mimeType: 'text/plain', text: source })
+    expect(files[1]).toMatchObject({ path: binary, kind: 'binary', mimeType: 'image/svg+xml' })
+    expect(files.every(file => !file.skippedReason && !file.dataUri)).toBe(true)
+    expect(files[1].text).toBeUndefined()
   })
 
   it.each([10, 25, 26])('previews the complete %i MiB source and archived image without a byte limit', async (mebibytes) => {
@@ -217,13 +252,14 @@ describe('bounded attachment previews', () => {
   })
 })
 
-it('releases only the selected conversation edit draft, preserving other drafts and persistent attachments', async () => {
+it('releases only the selected edited attachment, preserving its siblings, other drafts and persistent files', async () => {
   const root = await mkdtemp(join(tmpdir(), 'anas-release-draft-'))
   const temporary = join(root, 'tmp')
   const paths = [join(temporary, 'conversations', 'one', 'message_edit', 'draft', '0', 'file.txt'),
     join(temporary, 'conversations', 'two', 'message_edit', 'draft', '0', 'file.txt'),
     join(temporary, 'conversations', 'one', 'direction', 'draft', 'file.txt'),
-    join(root, 'db', 'conversations', 'one', 'attachments', 'file.txt')]
+    join(root, 'db', 'conversations', 'one', 'attachments', 'file.txt'),
+    join(temporary, 'conversations', 'one', 'message_edit', 'draft', '1', 'sibling.txt')]
   const mockedRoot = vi.spyOn(dataDir, 'getTempDir').mockReturnValue(temporary)
   try {
     for (const path of paths) { await mkdir(join(path, '..'), { recursive: true }); await writeFile(path, 'keep') }
@@ -231,4 +267,28 @@ it('releases only the selected conversation edit draft, preserving other drafts 
     await expect(stat(paths[0])).rejects.toMatchObject({ code: 'ENOENT' })
     for (const path of paths.slice(1)) expect(await readFile(path, 'utf8')).toBe('keep')
   } finally { mockedRoot.mockRestore(); await rm(root, { recursive: true, force: true }) }
+})
+
+it('retains an edited attachment outside temporary cleanup, without recreating a deleted conversation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'anas-retain-attachment-'))
+  const temporary = join(root, 'tmp')
+  const path = join(temporary, 'conversations', 'thread', 'message_edit', 'draft', '0000', '中文 # %.txt')
+  const attachmentRoot = dataDir.getAgentAttachmentsDir('thread', root, 'project')
+  const mocks = [vi.spyOn(dataDir, 'getDataDir').mockReturnValue(root), vi.spyOn(dataDir, 'getTempDir').mockReturnValue(temporary)]
+  try {
+    await mkdir(join(path, '..'), { recursive: true })
+    await writeFile(path, 'retained content')
+    await expect(retainTemporaryAttachment(path, 'project')).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(path, 'utf8')).toBe('retained content')
+    await mkdir(attachmentRoot, { recursive: true })
+    const kept = await retainTemporaryAttachment(path, 'project')
+    expect(kept.startsWith(join(attachmentRoot, '_paths'))).toBe(true)
+    await releaseTemporaryAttachments([path])
+    await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(kept, 'utf8')).toBe('retained content')
+    await expect(retainTemporaryAttachment(kept, 'project')).rejects.toThrow('Invalid temporary attachment')
+  } finally {
+    for (const mock of mocks) mock.mockRestore()
+    await rm(root, { recursive: true, force: true })
+  }
 })

@@ -1312,3 +1312,20 @@ it('shows only the current recovery status and clears it when the run completes'
   view.rerender(<AgentMessageList {...props} activities={[{ ...run, status: 'completed' }]} />)
   expect(screen.queryByRole('status')).not.toBeInTheDocument()
 })
+
+
+it('shows image omission reasons even when model round labels are hidden', async () => {
+  const run = { ...activity('completed'), tools: [], models: [{ id: 'image-model', sequence: 2, status: 'completed' as const,
+    messageId: 'answer', text: 'Continue', reasoning: '', toolCallIds: [], imageLimitWarnings: ['Image omitted: 2 images exceed limit 1. Tool succeeded.'] }] }
+  const view = render(<ActivityPreferences value={{ runningProcessDisplay: 'expanded', showModelRounds: false }}>
+    <MessageList title="Thread" messages={[...messages, { id: 'answer', runId: 'run-1', role: 'assistant', content: [{ type: 'text', text: 'Continue' }] }]}
+      activities={[run]} panelRef={{ current: null }} followOutputRef={{ current: true }} speech={{ status: 'idle' }} onSpeak={vi.fn()} />
+  </ActivityPreferences>)
+  fireEvent.click(view.container.querySelector('.agent-activity-range-toggle')!)
+  await waitFor(() => expect(view.container.querySelector('.agent-activity-process')).not.toBeNull())
+  const process = view.container.querySelector<HTMLDetailsElement>('.agent-activity-process')
+  expand(process!)
+  const label = await screen.findByText('agent.image_limits_omitted')
+  expand(label.closest('details')!)
+  expect(await screen.findByText(/2 images exceed limit 1/)).toBeInTheDocument()
+})

@@ -1,3 +1,5 @@
+import { projectModelToolImageLimits } from './conversationImageLimits'
+import type { ModelImageLimits } from '@shared/modelImageLimits'
 import type { ConversationMessage } from '../../runtime/conversationMessage'
 import type { ModelProtocol, ResolvedModelConfig } from '@shared/types'
 import { modelContextKey } from '@shared/modelConfig'
@@ -81,8 +83,9 @@ export function conversationRequestKey(options: ConversationContextRequest): str
 export function conversationContextTokens(options: ConversationContextRequest & {
   modelContextKey?: string
   parameters?: Record<string, unknown>
+  imageLimits?: ModelImageLimits
 }): number {
-  const messages = projectConversationSkills(projectConversationToolImages(options.messages))
+  const messages = projectConversationSkills(projectModelToolImageLimits(projectConversationToolImages(options.messages), options.imageLimits))
   let snapshot = conversationUsageSnapshot(messages, options.modelContextKey)
   if (snapshot && messages[snapshot.messageIndex].context?.requestKey !== conversationRequestKey({
     ...options, messages: messages.slice(0, snapshot.messageIndex)
@@ -102,6 +105,6 @@ export function assertConversationSupported(model: ResolvedModelConfig, messages
 
 export function assertConversationFits(model: ResolvedModelConfig, messages: readonly ConversationMessage[], tools: readonly unknown[]): void {
   const capacity = model.maxContextTokens - model.maxOutputTokens
-  const tokens = conversationContextTokens({ messages, tools, modelContextKey: modelContextKey(model), protocol: model.protocol, parameters: model.parameters })
+  const tokens = conversationContextTokens({ messages, tools, modelContextKey: modelContextKey(model), protocol: model.protocol, parameters: model.parameters, imageLimits: model.imageLimits })
   if (tokens > capacity) throw new ModelContextOverflowError(`Model "${model.displayName || model.model}" has an input capacity of ${capacity} tokens, but the prepared conversation needs approximately ${tokens}. The run was stopped because the required context does not fit. Choose a larger context window or adjust compression and send again.`)
 }

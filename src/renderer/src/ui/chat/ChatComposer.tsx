@@ -73,6 +73,7 @@ interface ChatComposerProps {
   onCreateProject: (kind: ProjectCreationKind) => void
   onOpenModelSettings: () => void | Promise<void>
   onOpenSubagent: (runId: string, subagentId: string) => void
+  onConvertAttachmentToPath: (path: string) => Promise<void>
   onRemoveAttachment: (path: string) => void
   onRemoveQueuedMessage: (message: QueuedAgentMessage) => void | Promise<unknown>
   onRetryQueuedMessage: (message: QueuedAgentMessage) => void | Promise<unknown>
@@ -131,6 +132,7 @@ export function ChatComposer({
   onCreateProject,
   onOpenModelSettings,
   onOpenSubagent,
+  onConvertAttachmentToPath,
   onRemoveAttachment,
   onRemoveQueuedMessage,
   onRetryQueuedMessage,
@@ -252,6 +254,7 @@ export function ChatComposer({
             <ComposerAttachments
               attachments={attachments}
               disabled={messageDraftLocked}
+              onConvertAttachmentToPath={onConvertAttachmentToPath}
               onRemoveAttachment={onRemoveAttachment}
               onToggleAttachmentContextPolicy={onToggleAttachmentContextPolicy}
             />

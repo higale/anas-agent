@@ -270,6 +270,8 @@ const api: GaleApi = {
     readAttachments: (paths: string[]): Promise<SelectedAttachment[]> => ipcRenderer.invoke('files:readAttachments', paths),
     releaseTemporaryAttachments: (paths: string[]): Promise<void> =>
       ipcRenderer.invoke('files:releaseTemporaryAttachments', paths),
+    retainTemporaryAttachment: (path: string, projectId: string): Promise<string> =>
+      ipcRenderer.invoke('files:retainTemporaryAttachment', path, projectId),
     readAttachmentPreview: (path: string, options?: AttachmentPreviewOptions): Promise<AttachmentPreview | null> => ipcRenderer.invoke('files:readAttachmentPreview', path, options),
     readFileIcon: (path: string, size?: FileIconSize): Promise<FileIconImage | null> => ipcRenderer.invoke('files:readFileIcon', path, size),
     openDirectory: (path: string): Promise<string> => ipcRenderer.invoke('files:openDirectory', path),

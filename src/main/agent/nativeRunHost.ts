@@ -82,10 +82,10 @@ export class NativeRunHost {
 
   async steerRun(input: AgentRunDirectionInput): Promise<boolean> {
     this.assertOpen()
-    const id = input.queuedInputId.trim(), text = input.text.trim(), displayText = input.displayText?.trim()
+    const id = input.queuedInputId.trim(), text = input.text, displayText = input.displayText
     if (!id) throw new Error('A queued input ID is required.')
-    if (!text) throw new Error('Direction text is required.')
-    if (input.displayText !== undefined && !displayText) throw new Error('Direction display text must not be empty.')
+    if (!text.trim()) throw new Error('Direction text is required.')
+    if (displayText !== undefined && !displayText.trim()) throw new Error('Direction display text must not be empty.')
     const attachments = validatedAttachmentInputs(input.attachments, 'Direction')
     this.requireRun(input)
     const active = this.active.get(input.threadId)
@@ -95,7 +95,7 @@ export class NativeRunHost {
       const supplied = attachments.map(item => ({ ...item, textTruncated: item.textTruncated ?? false }))
       const saved = queued.attachments.map(item => ({ path: item.path, name: item.name, mimeType: item.mimeType, size: item.size,
         kind: item.kind, contextPolicy: item.contextPolicy, textTruncated: item.truncated ?? false }))
-      if (text !== queued.text.trim() || (displayText ?? text) !== queued.displayText.trim() || !isDeepStrictEqual(supplied, saved)) {
+      if (text !== queued.text || (displayText ?? text) !== queued.displayText || !isDeepStrictEqual(supplied, saved)) {
         throw new Error('Direction input changed from its saved queued message. Reload the queue before applying it.')
       }
     }

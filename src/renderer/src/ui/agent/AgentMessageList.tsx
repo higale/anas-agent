@@ -788,6 +788,12 @@ function ModelActivityDetails({ item, run }: { item: ModelItem; run: AgentRunAct
           <LoaderCircle className="agent-spin" size={13} />
         )}
       </header>}
+      {(item.model.hasImageLimitWarnings || item.model.imageLimitWarnings?.length) && <ActivityDisclosure
+        stateKey={`image-limits:${item.model.id}`} icon={<Activity size={13} />} label={t('agent.image_limits_omitted')}>
+        {() => item.model.detail
+          ? <ActivityDetail reference={item.model.detail} field="imageLimitWarnings">{value => <ActivityTraceBody value={value} copyable />}</ActivityDetail>
+          : <ActivityTraceBody value={item.model.imageLimitWarnings} copyable />}
+      </ActivityDisclosure>}
       {(item.model.reasoning || item.model.hasReasoning) && (
         <ActivityDisclosure
           stateKey={`reasoning:${item.model.id}`}
@@ -899,7 +905,8 @@ function activityRows({ source, scopes, disclosures, runningProcessDisplay, show
     // Live model status belongs to the group title. Hidden rounds must not
     // leave a member row containing only a spinner or duplicated retry text.
     if (!showModelRounds && node.type === 'entry' && node.item.type === 'model'
-      && !node.item.model.hasReasoning && !node.item.model.reasoning) return
+      && !node.item.model.hasReasoning && !node.item.model.reasoning
+      && !node.item.model.hasImageLimitWarnings && !node.item.model.imageLimitWarnings?.length) return
     const single = group?.start.key === group?.end.key && group?.first.type === 'tool'
     rows.push({ key, activityKey: node.key, parentKey: parent, estimatedHeight: node.type === 'reply' ? 120 : 40,
       className: group && !single ? 'agent-timeline-member' : undefined,
@@ -914,7 +921,8 @@ function activityRows({ source, scopes, disclosures, runningProcessDisplay, show
     if (node.type !== 'process') { add(node, parentKey); continue }
     // The outline already describes content and live status. Omit empty groups
     // before selecting member scopes, without reading their members or bodies.
-    if (!showModelRounds && !node.hasThought && !node.hasTools && !activeProcessItem(node, run)) continue
+    if (!showModelRounds && !node.hasThought && !node.hasTools && !activeProcessItem(node, run)
+      && !(node.first.type === 'model' && (node.first.model.hasImageLimitWarnings || node.first.model.imageLimitWarnings?.length))) continue
     const key = activityRowKey(scope, node.key), single = node.start.key === node.end.key && node.first.type === 'tool'
     const running = activeGroups.has(node.key)
     const open = disclosures.open(scope, node.key, running && (runningProcessDisplay === 'expanded' || Boolean(node.attention)))

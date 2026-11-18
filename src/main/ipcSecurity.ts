@@ -56,6 +56,7 @@ const applicationDataIpcChannels = new Set([
   'files:readAttachments',
   'files:readDroppedAttachments',
   'files:releaseTemporaryAttachments',
+  'files:retainTemporaryAttachment',
   'files:saveAvatarCrop',
   'speech:listVoices'
 ])

@@ -3,7 +3,7 @@ function isValidSkillShortcutName(value: string): boolean {
 }
 
 export function parseSlashSkillInput(value: string): { name: string; sourceAlias?: string; args: string } | undefined {
-  const trimmed = value.trim()
+  const trimmed = value.trimStart()
   if (!trimmed.startsWith('/') || trimmed.length <= 1) return undefined
   const body = trimmed.slice(1)
   const space = body.search(/\s/)
@@ -17,6 +17,6 @@ export function parseSlashSkillInput(value: string): { name: string; sourceAlias
   return {
     name,
     ...(sourceAlias ? { sourceAlias } : {}),
-    args: space < 0 ? '' : body.slice(space + 1).trim()
+    args: space < 0 ? '' : body.slice(space + 1).trimStart()
   }
 }

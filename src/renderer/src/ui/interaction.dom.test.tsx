@@ -819,10 +819,11 @@ describe('renderer interaction accessibility', () => {
     await waitFor(() => expect(trigger).toHaveFocus())
   })
 
-  it('keeps attachment remove and pin actions isolated from the open action', async () => {
+  it('keeps attachment remove, pin and path actions isolated from the open action', async () => {
     const user = userEvent.setup()
     const onRemoveAttachment = vi.fn()
     const onToggleContextPolicy = vi.fn()
+    const onConvertAttachmentToPath = vi.fn().mockResolvedValue(undefined)
     const attachment: SelectedAttachment = {
       contextPolicy: 'one_turn',
       dataUri: 'data:image/png;base64,iVBORw0KGgo=',
@@ -838,11 +839,14 @@ describe('renderer interaction accessibility', () => {
         mode="composer"
         onRemoveAttachment={onRemoveAttachment}
         onToggleContextPolicy={onToggleContextPolicy}
+        onConvertAttachmentToPath={onConvertAttachmentToPath}
       />
     )
 
     await user.click(screen.getByRole('button', { name: 'chat.remove_attachment' }))
     await user.click(screen.getByRole('button', { name: 'chat.attachment_keep_in_conversation' }))
+    await user.click(screen.getByRole('button', { name: 'chat.attachment_to_path' }))
+    expect(onConvertAttachmentToPath).toHaveBeenCalledWith(attachment.path)
     expect(onRemoveAttachment).toHaveBeenCalledWith(attachment.path)
     expect(onToggleContextPolicy).toHaveBeenCalledWith(attachment.path)
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()

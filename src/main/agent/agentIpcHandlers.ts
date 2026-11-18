@@ -689,7 +689,7 @@ export function registerAgentIpcHandlers(): void {
   handleAgentIpc('agent:activities:detail', (_event, input: unknown) => {
     const parsed = z.object({ ...activityScope, kind: z.enum(['model', 'tool', 'summary', 'memory', 'skill', 'subagent', 'message']),
       id: z.string().min(1), subagentId: z.string().min(1).optional(),
-      field: z.enum(['text', 'reasoning', 'args', 'output', 'result', 'error', 'message']).optional() }).strict().parse(input)
+      field: z.enum(['text', 'reasoning', 'args', 'output', 'result', 'error', 'message', 'imageLimitWarnings']).optional() }).strict().parse(input)
     const database = currentRuntime().databaseForThread(parsed.threadId)
     if (parsed.kind === 'message') return database.messages.displayMessageDetail(parsed.threadId, parsed.runId, parsed.id)
     if (parsed.kind === 'skill') {

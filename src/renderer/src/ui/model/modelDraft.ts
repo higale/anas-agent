@@ -1,3 +1,4 @@
+import { requireModelImageLimits, type ModelImageLimits } from '@shared/modelImageLimits'
 import type { TFunction } from 'i18next'
 import {
   defaultModelConfig,
@@ -42,6 +43,7 @@ export interface ModelDraft {
   parameterPresets: ModelParameterPresetDraft[]
   parameterPresetMode: ModelParameterPresetMode
   defaultParameterPresetId?: string
+  imageLimits?: ModelImageLimits
   capabilities: ModelCapabilities
   stream: boolean
   maxContextTokens: string
@@ -74,6 +76,7 @@ export function emptyModelDraft(): ModelDraft {
       : '',
     parameterPresets: [],
     parameterPresetMode: defaultModelConfig.parameterPresetMode,
+    imageLimits: {},
     capabilities: { ...defaultModelConfig.capabilities },
     stream: defaultModelConfig.stream,
     maxContextTokens: String(defaultModelConfig.maxContextTokens),
@@ -113,6 +116,7 @@ export function modelConfigToDraft(
     })),
     parameterPresetMode: model.parameterPresetMode,
     defaultParameterPresetId: model.defaultParameterPresetId,
+    imageLimits: { ...model.imageLimits },
     capabilities: { ...model.capabilities },
     stream: model.stream,
     maxContextTokens: String(model.maxContextTokens),
@@ -232,6 +236,8 @@ export function validateModelProviderDraft(draft: ModelDraft, t: TFunction): str
 
 export function buildProviderModelPayload(draft: ModelDraft): ProviderModelConfigSave | undefined {
   if (!draft.providerId) return undefined
+  let imageLimits: ModelImageLimits
+  try { imageLimits = requireModelImageLimits(draft.imageLimits) } catch { return undefined }
   const maxContextTokens = parseModelMaxContextTokens(draft.maxContextTokens)
   const maxOutputTokens = parseModelMaxOutputTokens(draft.maxOutputTokens)
   const parsedParameters = parseModelParametersJson(draft.parametersJson)
@@ -261,6 +267,7 @@ export function buildProviderModelPayload(draft: ModelDraft): ProviderModelConfi
     parameterPresets,
     parameterPresetMode: draft.parameterPresetMode,
     defaultParameterPresetId: draft.defaultParameterPresetId,
+    imageLimits,
     capabilities: draft.capabilities,
     stream: draft.stream,
     maxContextTokens,
@@ -271,6 +278,7 @@ export function buildProviderModelPayload(draft: ModelDraft): ProviderModelConfi
 }
 
 export function validateProviderModelDraft(draft: ModelDraft, t: TFunction): string | undefined {
+  try { requireModelImageLimits(draft.imageLimits) } catch { return t('settings.image_limits_invalid') }
   const parameters = parseModelParametersJson(draft.parametersJson)
   if (!parameters) return t('settings.model_parameters_invalid_json')
   const reserved = parameters ? modelReservedParameterKeys(parameters) : []

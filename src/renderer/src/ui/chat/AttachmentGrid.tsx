@@ -1,6 +1,6 @@
 import { contentServices } from '../panels/contentServices'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, File, FileCode, FileText, Image as ImageIcon, Pin, X } from 'lucide-react'
+import { AlertTriangle, File, FileCode, FileText, Image as ImageIcon, Link2, Pin, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { AttachmentPreview, FileIconImage, SelectedAttachment } from '@shared/types'
 import { NoFocusButton } from '../NoFocusButton'
@@ -16,6 +16,7 @@ interface AttachmentGridProps {
   mode: 'composer' | 'message'
   removalDisabled?: boolean
   onRemoveAttachment?: (path: string) => void
+  onConvertAttachmentToPath?: (path: string) => Promise<void>
   onToggleContextPolicy?: (path: string) => void
 }
 
@@ -52,6 +53,7 @@ export function AttachmentGrid({
   mode,
   removalDisabled = false,
   onRemoveAttachment,
+  onConvertAttachmentToPath,
   onToggleContextPolicy
 }: AttachmentGridProps) {
   const { t } = useTranslation()
@@ -284,6 +286,18 @@ export function AttachmentGrid({
                   onClick={() => onToggleContextPolicy(file.path)}
                 >
                   <Pin size={11} />
+                </NoFocusButton>
+              )}
+              {mode === 'composer' && onConvertAttachmentToPath && (
+                <NoFocusButton
+                  className="attachment-path"
+                  type="button"
+                  aria-label={t('chat.attachment_to_path')}
+                  data-tooltip={t('chat.attachment_to_path')}
+                  disabled={removalDisabled}
+                  onClick={() => void onConvertAttachmentToPath(file.path)}
+                >
+                  <Link2 size={13} />
                 </NoFocusButton>
               )}
               {mode === 'message' && file.contextPolicy === 'conversation' && (

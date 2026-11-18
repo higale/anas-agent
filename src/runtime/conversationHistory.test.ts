@@ -49,8 +49,14 @@ describe('native conversation history policies', () => {
   it('retains an oversized newest call and all its results together with the active request', () => {
     const messages = [user('  Keep all constraints  '), { role: 'assistant' } as HistoryEntry, call(), result()]
     expect(compressionRetention(messages, messages, 40, count([1, 50, 2, 200])))
-      .toEqual({ cutoffIndex: 2, retainedTokens: 202, activeUserRequest: 'Keep all constraints' })
+      .toEqual({ cutoffIndex: 2, retainedTokens: 202, activeUserRequest: '  Keep all constraints  ' })
     expect(messages).toHaveLength(4)
+  })
+
+  it.each([undefined, '', ' \t\r\n '])('does not carry a blank active request into compression (%j)', text => {
+    const messages: HistoryEntry[] = [{ role: 'user', userText: text }, { role: 'assistant' }, call(), result()]
+    expect(compressionRetention(messages, messages, 40, count([1, 50, 2, 200])))
+      .toEqual({ cutoffIndex: 2, retainedTokens: 202, activeUserRequest: undefined })
   })
 
   it('keeps a pending image transaction even when new user input would otherwise cut it off', () => {

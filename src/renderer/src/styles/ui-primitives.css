@@ -2221,7 +2221,8 @@ button.ui-avatar:has(> img):focus-visible,
   border-end-end-radius: 999px;
 }
 
-.ui-segmented-option + .ui-segmented-option::before {
+.ui-segmented-option + .ui-segmented-option::before,
+.ui-segmented-accessory + .ui-segmented-option::before {
   position: absolute;
   inset-block: 7px;
   inset-inline-start: 0;
@@ -2704,4 +2705,10 @@ html.ui-tab-dragging, html.ui-tab-dragging * { cursor: grabbing !important; user
   .ui-diff-browser { display: grid; grid-template-columns: minmax(0, 1fr) clamp(16em, 28%, 24em); grid-template-rows: minmax(300px, 1fr); flex: 1 0 300px; }
   .ui-diff-browser > .ui-diff-file-list { grid-column: 2; grid-row: 1; max-height: none; }
   .ui-diff-content { grid-column: 1; grid-row: 1; }
+}
+
+.ui-segmented-accessory {
+  display: inline-flex;
+  align-items: center;
+  padding-inline-end: 6px;
 }

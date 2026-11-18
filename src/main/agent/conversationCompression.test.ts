@@ -502,18 +502,28 @@ describe('native automatic compression', () => {
     expect(config.compressionTracking.onCompressionCompleted).toHaveBeenCalledOnce()
   })
 
-  it('carries the active user request into the summary when only the newest tool transaction fits', async () => {
-    const active: ConversationMessage = { id: 'active', kind: 'user', content: 'Finish the active investigation without changing its scope.' }
+  it.each([
+    '/Users/tester/Desktop/报告 ',
+    'C:\\Users\\tester\\报告 # %.txt',
+    '\\\\server\\共享目录\\报告.txt'
+  ])('keeps the active path when only the newest tool transaction fits: %s', async path => {
+    const active: ConversationMessage = { id: 'active', kind: 'user', content: `  Finish analyzing this file:\n${path}` }
     const older = toolTransaction('old-call', 'older active result '.repeat(300)), newest = toolTransaction('new-call', 'newest active result '.repeat(40))
     const threshold = (countConversationTokens(newest, [], { protocol: model.protocol }) + 1) * 4
     const selected = { ...model, maxContextTokens: 11000, contextCompressionThreshold: threshold / 10000 }, config = options(), prepared = vi.fn()
     const history: ConversationMessage[] = [{ kind: 'user', content: 'Earlier question ' + 'x'.repeat(1000) }, { kind: 'assistant', content: 'Earlier answer ' + 'y'.repeat(1000) }, active, ...older, ...newest]
-    config.resolveModel = async () => selected; config.onRequest = prepared; config.providerFetch = async () => response('Condensed active work')
+    const requests: Array<{ messages: Array<{ role: string; content: string | Array<{ type: string; text?: string }> }> }> = []
+    config.resolveModel = async () => selected; config.onRequest = prepared
+    config.providerFetch = async (_url, init) => { requests.push(JSON.parse(String(init?.body))); return response('Condensed active work') }
     const result = await invokeConversationWithCompression(selected, context(history), config)
     const text = ['Condensed active work', '<active_user_request>', active.content, '</active_user_request>'].join('\n\n')
     expect(config.compressionTracking.onCompressionCompleted).toHaveBeenCalledWith('summary', text, expect.objectContaining({ cutoffIndex: history.indexOf(newest[0]), firstPreservedMessageId: newest[0].id }))
     expect(result.summary?.summaryText).toBe(text)
     expect(prepared.mock.lastCall![1].messages).toEqual([expect.objectContaining({ content: expect.stringContaining(String(active.content)) }), ...newest])
+    expect(requests).toHaveLength(2)
+    const sentUserTexts = requests[1].messages.filter(message => message.role === 'user').map(message =>
+      typeof message.content === 'string' ? message.content : message.content.map(block => block.type === 'text' ? block.text : '').join(''))
+    expect(sentUserTexts).toEqual(expect.arrayContaining([expect.stringContaining(text)]))
   })
 
   it('fails without dropping an oversized latest user message or publishing a summary', async () => {

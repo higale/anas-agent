@@ -20,7 +20,7 @@ export function activityReference(threadId: string, runId: string, kind: AgentAc
 }
 
 export function displayModel(threadId: string, runId: string, model: AgentModelActivity): AgentModelActivity {
-  return { ...model, text: '', reasoning: '', hasText: hasVisibleModelText(model),
+  return { ...model, imageLimitWarnings: undefined, hasImageLimitWarnings: model.hasImageLimitWarnings || Boolean(model.imageLimitWarnings?.length), text: '', reasoning: '', hasText: hasVisibleModelText(model),
     hasReasoning: model.hasReasoning || Boolean(model.reasoning), reasoningSummary: caption(model.reasoningSummary),
     detail: activityReference(threadId, runId, 'model', model.id, model.subagentId) }
 }

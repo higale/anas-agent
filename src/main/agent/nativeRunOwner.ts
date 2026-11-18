@@ -40,8 +40,8 @@ export const nativeRunOwnerSchema = `
 `
 function direction(row: QueuedRow, runId: string, afterCallIds: string[]): ExecutionMessageInput {
   const id = `${runId}:direction:${row.id}`
-  return { id, value: { id, kind: 'user', content: userMessageContent(row.text.trim()),
-    context: { runId, createdAt: row.created_at, displayText: row.display_text.trim(), directionAfterCallIds: afterCallIds } } }
+  return { id, value: { id, kind: 'user', content: userMessageContent(row.text),
+    context: { runId, createdAt: row.created_at, displayText: row.display_text, directionAfterCallIds: afterCallIds } } }
 }
 function contextDecision(response: unknown): 'approve' | 'reject' {
   const decisions = (response as { decisions?: { type?: unknown; message?: unknown }[] } | undefined)?.decisions

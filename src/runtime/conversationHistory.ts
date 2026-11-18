@@ -323,8 +323,9 @@ export function compressionRetention(
     : rawMessages[latestRawUserIndex]
   const preserved = effectiveMessages.slice(cutoffIndex)
   const activeUserRequest = latestRawUser
+    && latestRawUser.userText?.trim()
     && !preservedContainsMessage(preserved, latestRawUser)
-    ? latestRawUser.userText?.trim() || undefined
+    ? latestRawUser.userText
     : undefined
 
   return {

@@ -27,7 +27,7 @@ function composerProps(): ComponentProps<typeof ChatComposer> {
     onChangeSpeechReplyEnabled: vi.fn(), onCompressContext: vi.fn(),
     onDragEnter: vi.fn(), onDragLeave: vi.fn(), onDragOver: vi.fn(), onDrop: vi.fn(),
     onKeyDown: vi.fn(), onCreateProject: vi.fn(),
-    onOpenModelSettings: vi.fn(), onOpenSubagent: vi.fn(), onRemoveAttachment: vi.fn(),
+    onOpenModelSettings: vi.fn(), onOpenSubagent: vi.fn(), onRemoveAttachment: vi.fn(), onConvertAttachmentToPath: vi.fn(),
     onRemoveQueuedMessage: vi.fn(), onRetryQueuedMessage: vi.fn(),
     onToggleAttachmentContextPolicy: vi.fn(), onRemoveSuggestion: vi.fn(),
     onSelectProject: vi.fn(), onSelectMainModel: vi.fn(),

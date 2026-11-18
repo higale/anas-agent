@@ -7,6 +7,8 @@ export const reservedModelParameterKeys = [
   'modelListUrl',
   'model_list_url',
   'capabilities',
+  'imageLimits',
+  'image_limits',
   'contextCompressionEnabled',
   'contextCompressionThreshold',
   'context_compression_enabled',

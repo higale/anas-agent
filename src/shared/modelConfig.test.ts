@@ -52,6 +52,7 @@ describe('selectable model configuration', () => {
     expect(defaultModelConfig).toEqual({
       parameters: {},
       parameterPresetMode: 'protocol_default',
+      imageLimits: {},
       capabilities: { vision: true, toolUse: true },
       stream: true,
       maxContextTokens: 256_000,

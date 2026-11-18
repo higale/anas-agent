@@ -25,4 +25,14 @@ describe('parseSlashSkillInput', () => {
     expect(parseSlashSkillInput('/weather@ value')).toBeUndefined()
     expect(parseSlashSkillInput('/weather@bad.alias value')).toBeUndefined()
   })
+
+  it.each(['/Users/tester/Desktop/报告 ', 'C:\\Users\\tester\\报告 # %.txt', '\\\\server\\共享目录\\报告.txt'])(
+    'preserves native path arguments after a shortcut: %s', path => {
+      expect(parseSlashSkillInput(`  /analyze\n${path}`)).toEqual({ name: 'analyze', args: path })
+    }
+  )
+
+  it('still accepts a shortcut with only whitespace after its name', () => {
+    expect(parseSlashSkillInput('  /analyze \n  ')).toEqual({ name: 'analyze', args: '' })
+  })
 })

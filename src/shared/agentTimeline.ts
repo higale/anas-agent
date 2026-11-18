@@ -193,8 +193,8 @@ export function projectRunActivityItems(
       && message.role === 'assistant'
       && message.runId === run.runId
     )
-    if (messageVisible && !model.reasoning && !model.hasReasoning) return
-    if (!model.reasoning && !model.hasReasoning && !hasVisibleModelText(model) && model.toolCallIds.length === 0 && model.status !== 'running') {
+    if (messageVisible && !model.reasoning && !model.hasReasoning && !model.hasImageLimitWarnings && !model.imageLimitWarnings?.length) return
+    if (!model.hasImageLimitWarnings && !model.imageLimitWarnings?.length && !model.reasoning && !model.hasReasoning && !hasVisibleModelText(model) && model.toolCallIds.length === 0 && model.status !== 'running') {
       return
     }
     items.push({

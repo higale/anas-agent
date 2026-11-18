@@ -11,10 +11,9 @@ export function useInputHistoryState({ setError, t }: UseInputHistoryStateOption
   const [inputHistory, setInputHistory] = useState<InputHistorySnapshot>({ maxHistory: 100, items: [] })
 
   async function saveInputHistoryText(text: string): Promise<void> {
-    const value = text.trim()
-    if (!value) return
+    if (!text.trim()) return
     try {
-      setInputHistory(await window.gale.inputHistory.add(value))
+      setInputHistory(await window.gale.inputHistory.add(text))
     } catch {
       // Chat sending should not fail because input history could not be written.
     }

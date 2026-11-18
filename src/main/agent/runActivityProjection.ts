@@ -132,6 +132,7 @@ export class RunActivityProjection {
       })
       const model = this.observations.recordModel(runId, {
         id, messageId: event.message.id, status: 'completed', subagentId,
+        ...(event.message.imageLimitWarnings?.length ? { imageLimitWarnings: event.message.imageLimitWarnings } : {}),
         text: traceText(event.message.content, 'text') || event.streamedText,
         reasoning: traceText(event.message.content, 'reasoning') || event.streamedReasoning,
         reasoningSummary: traceReasoningSummary(event.message.content), toolCallIds: event.calls.map(call => call.id)

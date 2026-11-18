@@ -1,13 +1,13 @@
 import { app, nativeImage, protocol } from 'electron'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { open, readFile, rm, stat } from 'node:fs/promises'
-import { basename, extname, isAbsolute, relative, resolve, sep } from 'node:path'
+import { copyFile, mkdir, open, readFile, rm, rmdir, stat } from 'node:fs/promises'
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { Readable } from 'node:stream'
 import { imageDimensionsFromStream } from 'image-dimensions'
 import { maxImageSourceBytes, maxImagePixels, maxImageDimension } from '@shared/imageLimits'
 import { getAppConfigSnapshot } from './config/appConfig'
-import { getTempDir } from './config/dataDir'
+import { getAgentAttachmentsDir, getDataDir, getTempDir } from './config/dataDir'
 import { extractLocalAttachmentText, supportsLocalTextExtraction } from './attachmentTextExtractor'
 import { runtimeLog } from './runtimeLogger'
 import { findAvatarSourceImage, isAvatarImageExtension, readAvatarImage as readCurrentAvatarImage, readAvatarTransform, resetAvatarAssetsToDefault, setAvatarCrop, setAvatarSourceCrop } from './avatarAssets'
@@ -30,7 +30,6 @@ const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
 const fileIconSizes = new Set<FileIconSize>(['small', 'normal', 'large'])
 
 export const attachmentExtensions = ['txt', 'md', 'markdown', 'json', 'jsonl', 'csv', 'tsv', 'log', 'xml', 'yaml', 'yml', 'toml', 'ini', 'js', 'ts', 'tsx', 'jsx', 'py', 'ps1', 'css', 'html', 'pdf', 'docx', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp']
-const attachmentExtensionSet = new Set(attachmentExtensions)
 
 interface TextAttachmentLimit {
   maxChars: number
@@ -233,15 +232,10 @@ export function attachmentMimeType(filePath: string): string {
 }
 
 function attachmentKind(mimeType: string): SelectedAttachmentKind {
-  if (mimeType.startsWith('image/')) return 'image'
+  if (mimeType.startsWith('image/')) return [...imageMimeTypes.values()].includes(mimeType) ? 'image' : 'binary'
   if (supportsLocalTextExtraction(mimeType)) return 'text'
   if (mimeType.startsWith('text/') || ['application/json', 'application/jsonl', 'application/toml', 'application/xml', 'application/yaml'].includes(mimeType)) return 'text'
   return 'binary'
-}
-
-function hasKnownAttachmentExtension(filePath: string): boolean {
-  const ext = extname(filePath).toLowerCase().replace(/^\./, '')
-  return attachmentExtensionSet.has(ext)
 }
 
 function bufferLooksLikeText(buffer: Buffer): boolean {
@@ -280,9 +274,10 @@ async function fileLooksLikeText(filePath: string): Promise<boolean> {
   }
 }
 
-async function detectAttachmentMimeType(filePath: string, detectedMimeType?: string): Promise<string> {
-  const mimeType = detectedMimeType ?? attachmentMimeType(filePath)
-  if (mimeType !== 'application/octet-stream') return mimeType
+async function detectAttachmentMimeType(filePath: string): Promise<string> {
+  const mimeType = attachmentMimeType(filePath)
+  // SVG source is a text attachment, not a supported raster image.
+  if (mimeType !== 'application/octet-stream' && mimeType !== 'image/svg+xml') return mimeType
   return await fileLooksLikeText(filePath) ? 'text/plain' : mimeType
 }
 
@@ -311,7 +306,7 @@ function limitAttachmentText(text: string, limit: TextAttachmentLimit): Pick<Sel
   }
 }
 
-async function readSelectedAttachment(filePath: string, detectedMimeType: string | undefined, textLimit: TextAttachmentLimit): Promise<SelectedAttachment> {
+async function readSelectedAttachment(filePath: string, textLimit: TextAttachmentLimit): Promise<SelectedAttachment> {
   const info = await stat(filePath)
   if (!info.isFile()) {
     return {
@@ -321,10 +316,10 @@ async function readSelectedAttachment(filePath: string, detectedMimeType: string
       kind: 'binary',
       mimeType: 'application/octet-stream',
       contextPolicy: 'one_turn',
-      skippedReason: 'Only files can be attached.'
+      ...(!info.isDirectory() ? { skippedReason: 'Only files and directories can be selected.' } : {})
     }
   }
-  const mimeType = await detectAttachmentMimeType(filePath, detectedMimeType)
+  const mimeType = await detectAttachmentMimeType(filePath)
   const kind = attachmentKind(mimeType)
   if (kind === 'image') {
     let validated: ValidatedImage
@@ -364,7 +359,7 @@ async function readSelectedAttachment(filePath: string, detectedMimeType: string
     }
   }
   if (kind !== 'text') {
-    runtimeLog('debug', 'attachment', 'Attachment selected for upload-only use.', {
+    runtimeLog('debug', 'attachment', 'Attachment selected for path-only use.', {
       file: filePath,
       mimeType
     })
@@ -435,62 +430,63 @@ async function readSelectedAttachment(filePath: string, detectedMimeType: string
 }
 
 export async function readSelectedAttachments(filePaths: string[]): Promise<SelectedAttachment[]> {
-  const uniquePaths = Array.from(new Set(filePaths.map((filePath) => filePath.trim()).filter(Boolean)))
+  const uniquePaths = Array.from(new Set(filePaths.filter((filePath) => filePath.length > 0)))
   const textLimit = await getTextAttachmentLimit()
-  return Promise.all(uniquePaths.map((filePath) => readSelectedAttachment(filePath, undefined, textLimit)))
+  return Promise.all(uniquePaths.map(async (filePath): Promise<SelectedAttachment> => {
+    try {
+      return await readSelectedAttachment(filePath, textLimit)
+    } catch (reason) {
+      return { path: filePath, name: basename(filePath), size: 0, kind: 'binary',
+        mimeType: 'application/octet-stream', contextPolicy: 'one_turn',
+        skippedReason: reason instanceof Error ? reason.message : 'Failed to read attachment.' }
+    }
+  }))
 }
 
-export async function readDroppedAttachments(filePaths: string[]): Promise<SelectedAttachment[]> {
-  const uniquePaths = Array.from(new Set(filePaths.map((filePath) => filePath.trim()).filter(Boolean)))
-  const supportedFiles: Array<{ filePath: string; detectedMimeType?: string }> = []
-  for (const filePath of uniquePaths) {
-    try {
-      const info = await stat(filePath)
-      if (!info.isFile()) {
-        runtimeLog('debug', 'attachment', 'Dropped attachment rejected.', {
-          file: filePath,
-          isFile: false,
-          extension: extname(filePath).toLowerCase()
-        })
-        continue
-      }
-      if (hasKnownAttachmentExtension(filePath)) {
-        supportedFiles.push({ filePath })
-        continue
-      }
-      if (await fileLooksLikeText(filePath)) {
-        supportedFiles.push({ filePath, detectedMimeType: 'text/plain' })
-        continue
-      }
-      runtimeLog('debug', 'attachment', 'Dropped attachment rejected.', {
-        file: filePath,
-        isFile: true,
-        extension: extname(filePath).toLowerCase()
-      })
-    } catch (reason) {
-      runtimeLog('warn', 'attachment', 'Dropped attachment rejected because file metadata could not be read.', {
-        file: filePath,
-        error: reason instanceof Error ? reason.message : String(reason)
-      })
-    }
+function temporaryAttachmentLocation(filePath: string): { ownerId: string; directory: string; draftDirectory: string } | undefined {
+  const temporaryRoot = resolve(getTempDir(), 'conversations')
+  const rel = relative(temporaryRoot, resolve(filePath))
+  if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return undefined
+  const [ownerId, kind, draftId, index, ...fileName] = rel.split(sep)
+  if (kind !== 'message_edit' || !ownerId || !draftId || !/^\d+$/.test(index ?? '') || fileName.length !== 1) return undefined
+  const draftDirectory = join(temporaryRoot, ownerId, kind, draftId)
+  return { ownerId, draftDirectory, directory: join(draftDirectory, index) }
+}
+
+/** Keep an edited attachment as a conversation-owned file, without carrying its content. */
+export async function retainTemporaryAttachment(filePath: string, projectId: string): Promise<string> {
+  const location = temporaryAttachmentLocation(filePath)
+  if (!location || !(await stat(filePath)).isFile()) throw new Error('Invalid temporary attachment.')
+  const root = join(getAgentAttachmentsDir(location.ownerId, getDataDir(), projectId), '_paths')
+  // Do not recreate a conversation that was deleted while its draft was open.
+  await mkdir(root).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'EEXIST') throw error })
+  const directory = join(root, randomUUID())
+  await mkdir(directory)
+  try {
+    const path = join(directory, basename(filePath))
+    await copyFile(filePath, path)
+    return path
+  } catch (error) {
+    await rm(directory, { recursive: true, force: true })
+    throw error
   }
-  const textLimit = await getTextAttachmentLimit()
-  return Promise.all(supportedFiles.map((file) => readSelectedAttachment(file.filePath, file.detectedMimeType, textLimit)))
 }
 
 export async function releaseTemporaryAttachments(filePaths: string[]): Promise<void> {
-  const temporaryRoot = resolve(getTempDir(), 'conversations')
   const directories = new Set<string>()
+  const drafts = new Set<string>()
   for (const filePath of filePaths) {
-    const rel = relative(temporaryRoot, resolve(filePath))
-    if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) continue
-    const [ownerId, kind, draftId, index, ...fileName] = rel.split(sep)
-    if (kind !== 'message_edit' || !ownerId || !draftId || !index || !fileName.length) continue
-    directories.add(resolve(temporaryRoot, ownerId, kind, draftId))
+    const location = temporaryAttachmentLocation(filePath)
+    if (!location) continue
+    directories.add(location.directory)
+    drafts.add(location.draftDirectory)
   }
   await Promise.all([...directories].map((directory) =>
     rm(directory, { recursive: true, force: true })
   ))
+  await Promise.all([...drafts].map(directory => rmdir(directory).catch((error: NodeJS.ErrnoException) => {
+    if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code ?? '')) throw error
+  })))
 }
 
 const attachmentPreviewScheme = 'anas-image'

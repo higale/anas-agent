@@ -1,3 +1,4 @@
+import { projectModelToolImageLimits } from './conversationImageLimits'
 import type { ResolvedModelConfig } from '@shared/types'
 import { contextCompressionTriggerTokens } from '@shared/contextWindow'
 import { modelContextKey } from '@shared/modelConfig'
@@ -57,10 +58,10 @@ export async function invokeConversationWithCompression(model: ResolvedModelConf
   }
   if (!(options.enabled ?? model.contextCompressionEnabled) || !effective.length) return { ...await invoke(messages), summary: undefined as Summary | undefined }
   const selection = selectConversationRetention(effective, raw, threshold,
-    messages => countConversationTokens(messages, [], { protocol: model.protocol }))
+    messages => countConversationTokens(projectModelToolImageLimits(messages, model.imageLimits), [], { protocol: model.protocol }))
   const feedback = modelRecoveryFeedback(context.modelRecovery)
   const currentTokens = conversationContextTokens({ messages: [...messages, ...feedback], tools, systemMessage: context.systemMessage,
-    modelContextKey: modelContextKey(model), protocol: model.protocol, parameters: model.parameters })
+    modelContextKey: modelContextKey(model), protocol: model.protocol, parameters: model.parameters, imageLimits: model.imageLimits })
   if (currentTokens < threshold) {
     try { return { ...await invoke(messages), summary: undefined as Summary | undefined } } catch (error) {
       if (!isModelContextOverflow(error) || selection.cutoffIndex <= 0) throw error
@@ -94,7 +95,7 @@ export async function invokeConversationWithCompression(model: ResolvedModelConf
       if (!isModelContextOverflow(error)) throw error
       const facts = conversationHistoryFacts(finalMessages).map((fact, index) => ({ ...fact, content: finalMessages[index].content }))
       const replacements = await compactLatestToolResults(facts, inputCapacityTokens, indices =>
-        countConversationTokens([context.systemMessage, ...finalMessages.map((message, index) => indices.includes(index) ? { ...message, content: '' } : message), ...feedback],
+        countConversationTokens([context.systemMessage, ...projectModelToolImageLimits(finalMessages.map((message, index) => indices.includes(index) ? { ...message, content: '' } : message), model.imageLimits), ...feedback],
           tools, { protocol: model.protocol, parameters: model.parameters }), options.saveToolResult)
       if (!replacements.length) throw new PreservedContextOverflowError()
       finalMessages = [...finalMessages]
@@ -107,8 +108,8 @@ export async function invokeConversationWithCompression(model: ResolvedModelConf
     const summary: Summary = { id: tracked.id, summaryText: generated.text, modelContent: String(summaryMessage.content), cutoffIndex,
       activatedAfterMessageIndex: Math.max(0, cutoffIndex - 1), coveredThroughMessageId: raw[cutoffIndex - 1]?.id,
       firstPreservedMessageId: raw[cutoffIndex]?.id,
-      inputTokensBefore: countConversationTokens([context.systemMessage, ...effective], tools, { protocol: model.protocol, parameters: model.parameters }),
-      inputTokensAfter: countConversationTokens([context.systemMessage, ...finalMessages], tools, { protocol: model.protocol, parameters: model.parameters }) }
+      inputTokensBefore: countConversationTokens([context.systemMessage, ...projectModelToolImageLimits(projectConversationToolHistory(effective), model.imageLimits)], tools, { protocol: model.protocol, parameters: model.parameters }),
+      inputTokensAfter: countConversationTokens([context.systemMessage, ...projectModelToolImageLimits(finalMessages, model.imageLimits)], tools, { protocol: model.protocol, parameters: model.parameters }) }
     stageCompressionSummary(preparation.generated, () => {
       const { id: _id, summaryText: _text, ...completion } = summary
       return completion

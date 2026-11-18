@@ -1,3 +1,4 @@
+import { hasModelImageLimits, requireModelImageLimits } from './modelImageLimits'
 import rawModelsConfig from '../../data/config/models.json'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
@@ -179,6 +180,7 @@ function bundledDefaults(): ModelDefaults {
       defaults.parameter_preset_mode,
       'model_defaults.parameter_preset_mode'
     ),
+    imageLimits: {},
     capabilities: {
       vision: requireDefaultBoolean(capabilityRecord.vision, 'model_defaults.capabilities.vision'),
       toolUse: requireDefaultBoolean(capabilityRecord.tool_use, 'model_defaults.capabilities.tool_use')
@@ -212,6 +214,7 @@ export function modelContextKey(model: ResolvedModelConfig): string {
     baseUrl: model.baseUrl,
     model: model.model,
     capabilities: model.capabilities,
+    ...(hasModelImageLimits(model.imageLimits) ? { imageLimits: requireModelImageLimits(model.imageLimits) } : {}),
     parameters: model.parameters
   }))))
 }

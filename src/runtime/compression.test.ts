@@ -102,6 +102,24 @@ describe('native compression preparation', () => {
     expect(discarded).toHaveBeenCalledExactlyOnceWith('s')
   })
 
+  it('keeps the original request whitespace when replacing a model-generated active request', async () => {
+    const activeUserRequest = '  检查文件\n/Users/tester/Desktop/报告 \t\n'
+    await prepareCompression({ activeUserRequest }, async preparation => {
+      const response = await trackCompressionSummary('history', undefined, async () => ({
+        text: 'Summary\n\n<active_user_request>\nRewritten request\n</active_user_request>'
+      }), { preparation })
+      expect(response.text).toBe(`Summary\n\n<active_user_request>\n\n${activeUserRequest}\n\n</active_user_request>`)
+      expect(preparation.generated).toMatchObject([{ state: 'pending', text: response.text }])
+    })
+  })
+
+  it.each([undefined, '', ' \t\r\n '])('omits a blank active request from the final summary (%j)', async activeUserRequest => {
+    await prepareCompression({ activeUserRequest }, async preparation => {
+      const response = await trackCompressionSummary('history', undefined, async () => ({ text: ' Summary ' }), { preparation })
+      expect(response.text).toBe('Summary')
+    })
+  })
+
   it('does not silently inherit another request budget or task text', async () => {
     const completed = vi.fn()
     await prepareCompression({ activeUserRequest: 'Unrelated task', inputCapacityTokens: 0 }, async preparation => {

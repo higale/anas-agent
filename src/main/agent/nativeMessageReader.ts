@@ -120,11 +120,13 @@ export class NativeMessageReader {
     if (!message) {
       const pending = this.observations.pendingModel(source.runId, modelId) ?? this.observations.pendingModel(runId, modelId)
       return { text: pending?.text ?? '', reasoning: pending?.reasoning ?? '', toolCallIds: pending?.toolCallIds ?? [],
+        ...(pending?.imageLimitWarnings?.length ? { imageLimitWarnings: pending.imageLimitWarnings } : {}),
         ...(pending?.recovery ? { recovery: pending.recovery } : {}),
         ...(pending?.reasoningSummary ? { reasoningSummary: pending.reasoningSummary } : {}) }
     }
     const summary = traceReasoningSummary(message.content)
     return {
+      ...(message.imageLimitWarnings?.length ? { imageLimitWarnings: message.imageLimitWarnings } : {}),
       text: message?.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('') ?? '',
       reasoning: message?.content.flatMap(block => block.type === 'reasoning' ? [block.text] : []).join('') ?? '',
       ...(summary ? { reasoningSummary: summary } : {}),

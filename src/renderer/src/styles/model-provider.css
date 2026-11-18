@@ -254,3 +254,27 @@
   place-items: center;
   min-height: 58px;
 }
+
+.model-image-limits-trigger {
+  position: relative;
+}
+
+.model-image-limits-dot {
+  position: absolute;
+  inset-block-start: 2px;
+  inset-inline-end: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+@media (max-width: 640px) {
+  .model-details-dialog > .ui-dialog-header {
+    grid-template-columns: var(--ui-dialog-icon-size) minmax(0, 1fr);
+  }
+  .model-details-dialog > .ui-dialog-header > .ui-segmented-control {
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
+}

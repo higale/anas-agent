@@ -1,3 +1,4 @@
+import { requireModelImageLimits, type ModelImageLimits } from '@shared/modelImageLimits'
 import type {
   ModelCapabilities,
   ModelProviderConfig,
@@ -20,6 +21,25 @@ import {
 } from '@shared/modelConfig'
 import { normalizeIconData } from '@shared/iconImage'
 import type { RawModelProviderConfig, RawProviderModelConfig } from './rawAppConfig'
+
+const imageLimitKeys = {
+  minShortSide: 'min_short_side', maxLongSide: 'max_long_side', maxPixels: 'max_pixels',
+  maxAspectRatio: 'max_aspect_ratio', maxBytes: 'max_bytes', byteBasis: 'byte_basis', maxCount: 'max_count'
+} as const
+
+function imageLimitsFromRaw(raw: RawProviderModelConfig['image_limits'], path: string): ModelImageLimits {
+  if (raw === undefined) return {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`${path} must be an object.`)
+  return requireModelImageLimits(Object.fromEntries(Object.entries(imageLimitKeys).map(([key, rawKey]) => [key, raw[rawKey]])), path)
+}
+
+function imageLimitsToRaw(value: ModelImageLimits | undefined): RawProviderModelConfig['image_limits'] {
+  const limits = requireModelImageLimits(value, 'model.imageLimits')
+  return Object.fromEntries(Object.entries(imageLimitKeys).flatMap(([key, rawKey]) => {
+    const value = limits[key as keyof ModelImageLimits]
+    return value === undefined ? [] : [[rawKey, value]]
+  }))
+}
 
 const minMaxContextTokens = 2000
 const minMaxOutputTokens = 0
@@ -212,6 +232,7 @@ export function rawProviderModelFromSave(
       availableParameterPresets,
       'model.defaultParameterPresetId'
     ),
+    image_limits: imageLimitsToRaw(model.imageLimits),
     capabilities: { vision: capabilities.vision, tool_use: capabilities.toolUse },
     stream: requireBoolean(model.stream, 'model.stream'),
     max_context_tokens: maxContextTokens,
@@ -260,6 +281,7 @@ export function normalizeProviderModel(
       availableParameterPresets,
       `${path}.default_parameter_preset_id`
     ),
+    imageLimits: imageLimitsFromRaw(raw.image_limits, `${path}.image_limits`),
     capabilities: normalizeCapabilities(raw.capabilities, `${path}.capabilities`),
     stream: requireBoolean(raw.stream, `${path}.stream`),
     maxContextTokens,

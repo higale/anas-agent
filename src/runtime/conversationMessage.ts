@@ -30,6 +30,7 @@ export interface ConversationMessage {
     customItemIds?: Record<string, unknown>
   }
   context?: {
+    imageLimitWarnings?: string[]
     runId?: unknown
     createdAt?: unknown
     displayText?: unknown

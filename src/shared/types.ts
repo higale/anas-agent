@@ -127,6 +127,7 @@ export type ModelParameterPresetMode = 'protocol_default' | 'custom' | 'none'
 export interface ModelDefaults {
   parameters: Record<string, unknown>
   parameterPresetMode: ModelParameterPresetMode
+  imageLimits?: import('./modelImageLimits').ModelImageLimits
   capabilities: ModelCapabilities
   stream: boolean
   maxContextTokens: number
@@ -147,6 +148,7 @@ export interface ProviderModelConfig {
   parameterPresets?: ModelParameterPreset[]
   parameterPresetMode: ModelParameterPresetMode
   defaultParameterPresetId?: string
+  imageLimits?: import('./modelImageLimits').ModelImageLimits
   capabilities: ModelCapabilities
   stream: boolean
   maxContextTokens: number
@@ -168,6 +170,7 @@ export interface ProviderModelConfigSave {
   parameterPresets?: ModelParameterPreset[]
   parameterPresetMode: ModelParameterPresetMode
   defaultParameterPresetId?: string
+  imageLimits?: import('./modelImageLimits').ModelImageLimits
   capabilities: ModelCapabilities
   stream: boolean
   maxContextTokens: number
@@ -862,6 +865,7 @@ export interface GaleApi {
     fromDroppedFiles(files: File[]): Promise<SelectedAttachment[]>
     readAttachments(paths: string[]): Promise<SelectedAttachment[]>
     releaseTemporaryAttachments(paths: string[]): Promise<void>
+    retainTemporaryAttachment(path: string, projectId: string): Promise<string>
     readAttachmentPreview(path: string, options?: AttachmentPreviewOptions): Promise<AttachmentPreview | null>
     readFileIcon(path: string, size?: FileIconSize): Promise<FileIconImage | null>
     openDirectory(path: string): Promise<string>

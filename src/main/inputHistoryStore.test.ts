@@ -42,7 +42,7 @@ describe('input history store', () => {
     const stored = JSON.parse(await readFile(storePaths.inputHistoryFile, 'utf8'))
 
     expect(snapshot.items).toHaveLength(1)
-    expect(snapshot.items[0]).toMatchObject({ text: 'first prompt', pinned: false })
+    expect(snapshot.items[0]).toMatchObject({ text: '  first prompt  ', pinned: false })
     expect(stored).toEqual({
       version: 0,
       maxHistory: 100,
@@ -65,13 +65,13 @@ describe('input history store', () => {
         { text: ' newer ', pinned: false, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-03T00:00:00.000Z' },
         { text: 'pinned', pinned: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
         { text: 'older', pinned: false, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z' },
-        { text: 'newer', pinned: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-04T00:00:00.000Z' },
+        { text: ' newer ', pinned: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-04T00:00:00.000Z' },
         { text: 'pruned', pinned: false, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
         { text: '   ', pinned: false, createdAt: '', updatedAt: '' }
       ]
     })
 
-    expect(normalized.items.map((item) => item.text)).toEqual(['pinned', 'newer', 'older'])
+    expect(normalized.items.map((item) => item.text)).toEqual(['pinned', ' newer ', 'older'])
 
     const defaulted = normalizeInputHistoryStore({
       maxHistory: 0,
@@ -80,6 +80,20 @@ describe('input history store', () => {
     expect(defaulted.maxHistory).toBe(100)
     expect(defaulted.items[0]?.createdAt).toBe(defaulted.items[0]?.updatedAt)
   })
+
+  it.each(['/Users/tester/Desktop/报告 ', 'C:\\Users\\tester\\报告 # %.txt', '\\\\server\\共享目录\\报告.txt'])(
+    'preserves native paths through history reload, pinning and deletion: %s', async path => {
+      const { addInputHistory, getInputHistory, removeInputHistory, setInputHistoryPinned } = await import('./inputHistoryStore')
+      await addInputHistory(path)
+      await addInputHistory(`${path}\n`)
+      await addInputHistory(path)
+      expect((await getInputHistory()).items.map(item => item.text).sort()).toEqual([path, `${path}\n`].sort())
+      await setInputHistoryPinned(path, true)
+      expect((await getInputHistory()).items.find(item => item.text === path)?.pinned).toBe(true)
+      await removeInputHistory(`${path}\n`)
+      expect((await getInputHistory()).items.map(item => item.text)).toEqual([path])
+    }
+  )
 
   it('updates, pins, removes, and clears only unpinned entries', async () => {
     const {

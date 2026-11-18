@@ -19,7 +19,7 @@ import { getSkillExamplesDir, getSubagentExamplesDir, getToolExamplesDir } from 
 import { addInputHistory, getInputHistory, removeInputHistory, setInputHistoryPinned } from './inputHistoryStore'
 import { closeCachedMcpServerIndex, getCachedMcpStatus, loadMcpRuntimeForCurrentConfig, pingAndReloadFailedMcpServers, reloadMcpRuntimeForServer } from './mcpRuntimeService'
 import { fetchAvailableModels, getCachedAvailableModels } from './modelListService'
-import { attachmentExtensions, clearAvatarImage, onAvatarChanged, readAttachmentPreview, readAvatarCropSource, readAvatarCropSourceResult, readAvatarImage, readCurrentAvatarCropSource, readDroppedAttachments, readFileIcon, readSelectedAttachments, releaseTemporaryAttachments, saveAvatarCrop } from './attachments'
+import { attachmentExtensions, clearAvatarImage, onAvatarChanged, readAttachmentPreview, readAvatarCropSource, readAvatarCropSourceResult, readAvatarImage, readCurrentAvatarCropSource, readFileIcon, readSelectedAttachments, releaseTemporaryAttachments, retainTemporaryAttachment, saveAvatarCrop } from './attachments'
 import { avatarImageExtensions } from './avatarAssets'
 import { configureRuntimeLogger } from './runtimeLogger'
 import { applyNativeTheme, configureApplicationMenu } from './appShell'
@@ -348,7 +348,7 @@ export function registerWorkspaceIpcHandlers(): void {
   })
   handleMainIpc('files:readDroppedAttachments', async (_event, filePaths: string[]): Promise<SelectedAttachment[]> => {
     if (!Array.isArray(filePaths)) return []
-    return readDroppedAttachments(filePaths.filter((filePath): filePath is string => typeof filePath === 'string'))
+    return readSelectedAttachments(filePaths.filter((filePath): filePath is string => typeof filePath === 'string'))
   })
   handleMainIpc('files:readAttachments', async (_event, filePaths: string[]): Promise<SelectedAttachment[]> => {
     if (!Array.isArray(filePaths)) return []
@@ -359,6 +359,12 @@ export function registerWorkspaceIpcHandlers(): void {
     await releaseTemporaryAttachments(
       filePaths.filter((filePath): filePath is string => typeof filePath === 'string')
     )
+  })
+  handleMainIpc('files:retainTemporaryAttachment', async (_event, filePath: string, projectId: string): Promise<string> => {
+    if (typeof filePath !== 'string' || !isAbsolute(filePath) || typeof projectId !== 'string') {
+      throw new Error('Invalid attachment path request.')
+    }
+    return retainTemporaryAttachment(filePath, projectId)
   })
   handleMainIpc('files:readAttachmentPreview', async (_event, filePath: string, options?: AttachmentPreviewOptions): Promise<AttachmentPreview | null> => {
     if (typeof filePath !== 'string' || filePath.trim().length === 0) return null

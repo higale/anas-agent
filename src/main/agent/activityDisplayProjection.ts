@@ -8,7 +8,7 @@ import type { ActivityMessageHeader } from './activityDirectoryIndex'
 
 interface Run { id: string; thread_id: string; status: string; updated_at: string }
 interface LightModel {
-  hasText: boolean; hasReasoning: boolean; reasoningSummary?: string; toolCallIds: string[]
+  hasImageLimitWarnings?: boolean; hasText: boolean; hasReasoning: boolean; reasoningSummary?: string; toolCallIds: string[]
   recovery?: AgentModelActivity['recovery']; progress?: AgentToolCallProgress[]
 }
 interface AtomRecord { scope: DisplayScope; atom: ActivityAtom }
@@ -74,9 +74,9 @@ export class ActivityDisplayProjection {
       SELECT model.run_id,'model:' || model.model_id FROM owners JOIN agent_model_activities model
       ON model.run_id=owners.run_id WHERE model.model_id=?`).run(runId, modelId)
   }
-  observeModel(runId: string, model: Pick<AgentModelActivity, 'id' | 'text' | 'reasoning' | 'reasoningSummary' | 'toolCallIds' | 'recovery'>) {
+  observeModel(runId: string, model: Pick<AgentModelActivity, 'id' | 'text' | 'reasoning' | 'reasoningSummary' | 'toolCallIds' | 'recovery' | 'imageLimitWarnings'>) {
     const key = this.identity(runId, model.id), old = this.models.get(key)
-    const next: LightModel = { hasText: /\S/.test(model.text), hasReasoning: Boolean(model.reasoning),
+    const next: LightModel = { hasImageLimitWarnings: Boolean(model.imageLimitWarnings?.length), hasText: /\S/.test(model.text), hasReasoning: Boolean(model.reasoning),
       reasoningSummary: model.reasoningSummary?.slice(0, 240), toolCallIds: model.toolCallIds, recovery: model.recovery, progress: old?.progress }
     if (JSON.stringify(old) === JSON.stringify(next)) return
     model.toolCallIds.forEach((id, index) => this.set(this.calls, this.identity(runId, id), { modelId: model.id, index }))
@@ -132,11 +132,12 @@ export class ActivityDisplayProjection {
     const model: AgentModelActivity = { id, messageId: header ? row.message_id! : undefined, sequence: row.sequence, round: row.round,
       subagentId: scope.agentId || undefined, status: header ? 'completed' : 'running', text: '', reasoning: '', toolCallIds: [],
       hasText: header?.hasText ?? observed?.hasText ?? false, hasReasoning: header?.hasReasoning ?? observed?.hasReasoning ?? false,
+      hasImageLimitWarnings: header?.hasImageLimitWarnings ?? observed?.hasImageLimitWarnings,
       reasoningSummary: header?.reasoningSummary ?? observed?.reasoningSummary, recovery: observed?.recovery,
       startedAt: row.started_at ?? undefined, completedAt: header ? row.completed_at ?? undefined : undefined,
       detail: activityReference(run.thread_id, run.id, 'model', id, scope.agentId || undefined) }
     const result: AtomRecord[] = []
-    if (model.hasReasoning || ids.length || model.status === 'running') result.push(this.entry(scope, { type: 'model', key, model, round: row.round, showText: false }, row.sequence))
+    if (model.hasImageLimitWarnings || model.hasReasoning || ids.length || model.status === 'running') result.push(this.entry(scope, { type: 'model', key, model, round: row.round, showText: false }, row.sequence))
     if (model.hasText) result.push({ scope, atom: { type: 'reply', model, position: { sequence: row.sequence, part: 2, key: `text:${key}` } } })
     if (!header && active) for (const [index, progress] of (observed?.progress ?? []).entries()) {
       const callId = ids[index] ?? progress.callId ?? `${id}:draft:${progress.index}`

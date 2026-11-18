@@ -271,6 +271,8 @@ The settings list and model picker use the same two-line layout: the model name 
 
 Changes to the model name, capabilities, context limits, extra parameters, and reasoning options remain drafts until you choose **Save**. Choosing **Cancel** or closing the editor discards those changes.
 
+The small settings button beside Vision opens Tool image limits: minimum short side, maximum long side, pixel count, aspect ratio, bytes per image and images per request. Empty fields add no limits. Byte inputs use comma grouping and decimal K/M abbreviations; choose original-file or Base64-payload size. Count overflow omits the entire batch of embedded tool images; other rules omit only noncompliant images and explain why to the model. Original tool results remain intact, with omission details available in the activity view. Remote URLs, file IDs and user attachments are outside these new limits. Confirm the child dialog, then Save in the model editor to apply the changes.
+
 Set Vision and Tool use to match the model's actual capabilities. Turning Tool use off prevents calls to built-in tools, MCP tools, and subagents. Profile, runtime information, project information, skill listings, and automatic memory recall still follow capability settings; saved choices are unchanged.
 
 ## Tools And Approval
@@ -333,9 +335,9 @@ Disabled servers remain editable; editing a running server stops it first. The t
 
 ## Attachments And Voice Input
 
-Sending an attachment saves a local copy, so moving or deleting the original does not prevent viewing it. Attachments apply to the current turn by default; pin one to keep using it in later turns of the same conversation. Before sending, hover over an attachment to show its remove and keep-in-conversation buttons; moving away hides them.
+Sending an attachment saves a local copy, so moving or deleting the original does not prevent viewing it. Attachments apply to the current turn by default; pin one to keep using it in later turns of the same conversation. Before sending, hover over an attachment to show its remove, keep-in-conversation, and Convert to path buttons. Converting removes the pending attachment and appends its native absolute path to the input without replacing existing text, one path per line. Temporary attachments restored for message editing are first retained in the conversation directory; these retained files are deleted with the conversation.
 
-Text extraction supports text files, PDFs, and docx files. Images require a model with Vision enabled; text-only models cannot receive or view image content. Unsupported files are marked as not sent to the model.
+Text extraction supports text files, PDFs, and docx files; SVG files are attached as source text. Images require a model with Vision enabled; text-only models cannot receive or view image content. Selecting or dropping unsupported files, or dropping folders, appends their paths to the input without expanding folders or attaching file content. Windows drive letters, backslashes and network paths, and macOS paths are preserved; Unicode and spaces are not URL-encoded. Read failures, damaged files and size-limit failures still show errors and can be converted manually.
 
 The microphone button invokes Windows voice typing or macOS Dictation. The system controls starting, stopping, and recognition language. On macOS, enable Dictation in System Settings > Keyboard > Dictation first. Confirm that system dictation has started, then review the recognized text before sending. Anas does not record or save audio.
 

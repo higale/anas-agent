@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict')
 const { createServer } = require('node:http')
-const { mkdir, mkdtemp, rm, writeFile } = require('node:fs/promises')
+const { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } = require('node:fs/promises')
 const { tmpdir } = require('node:os')
 const { basename, dirname, join } = require('node:path')
 const { expect } = require('playwright/test')
@@ -23,6 +23,19 @@ function bitmap(width, height) {
   return bytes
 }
 
+async function dropNativeFile(page, path) {
+  // A real input File retains the OS path through Electron's getPathForFile.
+  await page.evaluate(() => { const picker = globalThis.document.createElement('input'); picker.type = 'file'; picker.id = 'native-drop-test'; globalThis.document.body.append(picker) })
+  await page.locator('#native-drop-test').setInputFiles(path)
+  await page.evaluate(() => {
+    const picker = globalThis.document.querySelector('#native-drop-test')
+    const transfer = new globalThis.DataTransfer()
+    transfer.items.add(picker.files[0])
+    globalThis.document.querySelector('[data-agent-composer-input]').closest('form').dispatchEvent(new globalThis.DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }))
+    picker.remove()
+  })
+}
+
 async function verifyAttachmentPreviews(launchApplication) {
   const root = await mkdtemp(join(tmpdir(), 'anas-image-preview-e2e-'))
   if (dirname(root) !== tmpdir() || !basename(root).startsWith('anas-image-preview-e2e-')) throw new Error('Unexpected test directory.')
@@ -30,6 +43,11 @@ async function verifyAttachmentPreviews(launchApplication) {
   const large = join(root, '超大 # %.bmp')
   const generatedName = 'generated 猫.bmp'
   const generated = join(root, generatedName)
+  // Ordinary Windows filenames cannot end in a space; macOS exercises that case on disk.
+  const nativePath = join(root, process.platform === 'win32' ? '报告 # 100%.txt' : '报告 # 100% ')
+  const pathPrompt = `  请分析这个文件\n${nativePath}`
+  const svg = join(root, 'diagram.svg')
+  const svgSource = '<svg xmlns="http://www.w3.org/2000/svg"><text>附件文本</text></svg>'
   const profile = join(root, 'profile')
   let application
   let requests = 0
@@ -41,15 +59,27 @@ async function verifyAttachmentPreviews(launchApplication) {
       const input = JSON.parse(body)
       const images = input.messages.flatMap(message => Array.isArray(message.content)
         ? message.content.filter(block => block.type === 'image_url') : [])
-      assert.equal(images.length, 1)
-      assert.ok(Buffer.from(images[0].image_url.url.split(',')[1], 'base64').length > 10 * 1024 * 1024)
+      let content
+      if (requests === 0) {
+        assert.equal(images.length, 1)
+        assert.ok(Buffer.from(images[0].image_url.url.split(',')[1], 'base64').length > 10 * 1024 * 1024)
+        content = `Photo received.\n\n![Generated cat](${encodeURIComponent(generatedName)})`
+          + `\n\n![Absolute cat](<${generated}>)`
+          + `\n\n![Absolute photo](<${photo.replaceAll('%', '%25').replaceAll('#', '%23')}>)`
+      } else {
+        assert.equal(images.length, 0)
+        const user = input.messages.findLast(message => message.role === 'user')
+        assert.deepEqual(user.content, [
+          { type: 'text', text: pathPrompt },
+          { type: 'text', text: `<file name="diagram.svg">\n${svgSource}\n</file>` }
+        ])
+        content = 'Native path and SVG source received.'
+      }
       requests += 1
       response.writeHead(200, { 'content-type': 'application/json' })
       response.end(JSON.stringify({ id: 'photo-response', object: 'chat.completion', created: 1, model: input.model,
         choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant',
-          content: `Photo received.\n\n![Generated cat](${encodeURIComponent(generatedName)})`
-            + `\n\n![Absolute cat](<${generated}>)`
-            + `\n\n![Absolute photo](<${photo.replaceAll('%', '%25').replaceAll('#', '%23')}>)` } }],
+          content } }],
         usage: { prompt_tokens: 2000, completion_tokens: 5, total_tokens: 2005 } }))
     })().catch(error => { errors.push(String(error)); response.writeHead(400); response.end(String(error)) })
   })
@@ -57,6 +87,8 @@ async function verifyAttachmentPreviews(launchApplication) {
     await writeFile(photo, bitmap(2048, 1707))
     await writeFile(large, bitmap(3072, 3000))
     await writeFile(generated, bitmap(800, 600))
+    await writeFile(nativePath, 'Convert this file without sending its contents.')
+    await writeFile(svg, svgSource)
     await mkdir(join(profile, 'config'), { recursive: true })
     await writeFile(join(profile, 'config', 'settings.json'), JSON.stringify({ ...settingsDefaults, language: 'en' }))
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -91,6 +123,33 @@ async function verifyAttachmentPreviews(launchApplication) {
     await application.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, photo)
     await page.getByRole('button', { name: /attach file/i }).click()
     const tile = page.locator('.attachment-grid-composer .attachment-tile')
+    const input = page.locator('[data-agent-composer-input]')
+    await input.fill('保留已有内容')
+    await tile.hover()
+    await expect(tile.getByRole('button', { name: 'Convert to path' })).toBeVisible()
+    await mkdir(join(__dirname, '../tmp'), { recursive: true })
+    await page.screenshot({ path: join(__dirname, '../tmp/attachment-path-button.png') })
+    await tile.getByRole('button', { name: 'Convert to path' }).click()
+    await expect(tile).toHaveCount(0)
+    await expect(input).toHaveValue(`保留已有内容\n${photo}`)
+    await expect(input).toBeFocused()
+    assert.equal(await input.evaluate(element => element.selectionStart), `保留已有内容\n${photo}`.length)
+
+    const archive = join(root, '归档 # 100%.zip')
+    const folder = join(root, '未命名文件夹')
+    await writeFile(archive, Buffer.from([0, 255, 0]))
+    await mkdir(folder)
+    await application.evaluate(({ dialog }, paths) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: paths }) }, [photo, archive, folder])
+    await input.fill('继续分析\n')
+    await page.getByRole('button', { name: /attach file/i }).click()
+    await expect(tile).toHaveCount(1)
+    await expect(input).toHaveValue(`继续分析\n${archive}\n${folder}`)
+
+    await input.fill('拖放文件')
+    await dropNativeFile(page, archive)
+    await expect(input).toHaveValue(`拖放文件\n${archive}`)
+    await input.fill('')
+    await application.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, photo)
     const remove = tile.locator('.attachment-remove')
     const contextToggle = tile.locator('.attachment-context-toggle')
     await page.locator('[data-agent-composer-input]').hover()
@@ -124,7 +183,8 @@ async function verifyAttachmentPreviews(launchApplication) {
     await expect(slide).toHaveAttribute('src', /^anas-image:/)
     await expect.poll(() => slide.evaluate(image => image.naturalWidth)).toBe(800)
     await page.locator('.attachment-lightbox-folder-button').click()
-    await expect.poll(() => application.evaluate(() => globalThis.__anasRevealedImages)).toEqual([photo, generated])
+    await expect.poll(async () => Promise.all((await application.evaluate(() => globalThis.__anasRevealedImages)).map(path => realpath(path))))
+      .toEqual(await Promise.all([photo, generated].map(path => realpath(path))))
     await expect(page.getByText('Failed to open attachment.', { exact: true })).toHaveCount(0)
     await page.keyboard.press('Escape')
 
@@ -136,7 +196,7 @@ async function verifyAttachmentPreviews(launchApplication) {
       await expect(slide).toHaveAttribute('src', /^anas-image:/)
       await expect.poll(() => slide.evaluate(image => image.naturalWidth)).toBe(width)
       await page.locator('.attachment-lightbox-folder-button').click()
-      await expect.poll(() => application.evaluate(() => globalThis.__anasRevealedImages.at(-1))).toBe(path)
+      await expect.poll(async () => realpath(await application.evaluate(() => globalThis.__anasRevealedImages.at(-1)))).toBe(await realpath(path))
       await page.keyboard.press('Escape')
     }
     await page.screenshot({ path: join(tmpdir(), 'anas-markdown-local-images.png') })
@@ -154,7 +214,50 @@ async function verifyAttachmentPreviews(launchApplication) {
     assert.match(largeResult.rejected, /exceeds 25 MB/)
     assert.equal(requests, 1)
     assert.deepEqual(errors, [])
-    console.log('Attachment previews Electron E2E passed: original resolution; large image limits; reveal buttons for attachments, project-relative and absolute Markdown images with Unicode, spaces, # and %.')
+    // Prepare the edit draft through its existing action, independent of the virtual history viewport.
+    await page.getByRole('button', { name: 'Edit', exact: true }).evaluate(button => button.click())
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Edit', exact: true }).click()
+    await expect(tile).toHaveCount(1)
+    await tile.hover()
+    await tile.getByRole('button', { name: 'Convert to path' }).click()
+    await expect(tile).toHaveCount(0)
+    const retained = (await input.inputValue()).split('\n').at(-1)
+    assert.ok(retained.includes(join('attachments', '_paths')))
+    assert.equal(basename(retained), basename(photo))
+    assert.deepEqual(await readFile(retained), await readFile(photo))
+    await page.evaluate(async projectId => {
+      const thread = (await globalThis.gale.agent.threads.list()).find(thread => thread.projectId === projectId)
+      await globalThis.gale.agent.threads.delete(thread.id)
+    }, projectUpdate.value.id)
+    await assert.rejects(stat(retained), { code: 'ENOENT' })
+
+    await page.reload()
+    await expect(input).toBeVisible()
+    await page.locator('.project-thread-group').filter({ hasText: projectUpdate.value.name }).locator('.project-thread-new-chat').click()
+    await input.fill('')
+    // Both the file dialog and a real drop must keep SVG source as an attachment.
+    await application.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, svg)
+    await page.getByRole('button', { name: /attach file/i }).click()
+    await expect(tile).toHaveCount(1)
+    await expect(input).toHaveValue('')
+    await tile.hover()
+    await tile.locator('.attachment-remove').click()
+    await application.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, nativePath)
+    await page.getByRole('button', { name: /attach file/i }).click()
+    await input.fill('  请分析这个文件')
+    await tile.hover()
+    await tile.getByRole('button', { name: 'Convert to path' }).click()
+    await expect(tile).toHaveCount(0)
+    await expect(input).toHaveValue(pathPrompt)
+    await dropNativeFile(page, svg)
+    await expect(tile).toHaveCount(1)
+    await expect(input).toHaveValue(pathPrompt)
+    await page.getByRole('button', { name: 'Send', exact: true }).click()
+    await expect(page.getByText('Native path and SVG source received.', { exact: true })).toBeVisible()
+    await expect.poll(() => page.evaluate(async () => (await globalThis.gale.inputHistory.get()).items.map(item => item.text))).toContain(pathPrompt)
+    assert.equal(requests, 2)
+    assert.deepEqual(errors, [])
+    console.log('Attachment Electron E2E passed: exact native path submission and history, SVG source imports, mixed selections, real file drops, retained edit files and conversation cleanup; image previews and reveal actions.')
   } finally {
     await closeElectronTestApplication(application)
     server.closeAllConnections()

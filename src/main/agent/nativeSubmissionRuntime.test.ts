@@ -192,13 +192,17 @@ it.each([false, true])('applies queued directions only with the committed batch 
   const sql = new Database(join(h.root, 'conversation.sqlite'))
   try {
     const input = h.input(); h.database.runs.createThread({}, input.threadId); input.newThread = undefined
-    const queued = await h.host.enqueueQueuedInput({ id: randomUUID(), threadId: input.threadId, text: '  Expanded direction  ', displayText: '  Display direction  ', attachments: input.attachments })
+    const text = '  Analyze this file:\n/Users/tester/Desktop/报告 '
+    const displayText = '  /analyze\n/Users/tester/Desktop/报告 '
+    const queued = await h.host.enqueueQueuedInput({ id: randomUUID(), threadId: input.threadId, text, displayText, attachments: input.attachments })
     const withdrawn = await h.host.enqueueQueuedInput({ id: randomUUID(), threadId: input.threadId, text: 'Withdraw me' })
     const steer = { threadId: input.threadId, runId: input.runId, queuedInputId: queued.id, text: queued.text, displayText: queued.displayText,
       attachments: queued.attachments.map(item => ({ path: item.path, name: item.name, size: item.size, kind: item.kind,
         mimeType: item.mimeType, contextPolicy: item.contextPolicy, textTruncated: item.truncated })) }
     const submission = await h.host.submitRunWithAttachments({ ...input, attachments: [] }, h.create); await entered.promise
     await expect(h.host.steerRun({ ...steer, text: 'Changed after enqueue' })).rejects.toThrow('changed from its saved queued message')
+    await expect(h.host.steerRun({ ...steer, text: text.trimEnd() })).rejects.toThrow('changed from its saved queued message')
+    await expect(h.host.steerRun({ ...steer, displayText: displayText.trimEnd() })).rejects.toThrow('changed from its saved queued message')
     expect(await h.host.steerRun(steer)).toBe(true)
     rmSync(input.attachments![0].path)
     expect(await h.host.steerRun(steer)).toBe(true)
@@ -216,11 +220,11 @@ it.each([false, true])('applies queued directions only with the committed batch 
       expect(h.database.resources.listAttachmentsForMessages(input.threadId, [`${input.runId}:direction:${queued.id}`])).toEqual([])
       sql.exec('DROP TRIGGER reject_queue_commit')
     } else {
-      expect(directions).toMatchObject([{ queuedInputId: queued.id, message: { directionAfterToolCallIds: ['read'], content: [{ type: 'text', text: 'Display direction' }],
+      expect(directions).toMatchObject([{ queuedInputId: queued.id, message: { directionAfterToolCallIds: ['read'], content: [{ type: 'text', text: displayText }],
         attachments: [{ path: queued.attachments[0].path }] } }])
       expect(directions).toHaveLength(1)
       expect(h.host.listQueuedInputs().map(item => item.id)).toEqual([withdrawn.id])
-      expect(h.database.runs.store.readHistory(input.threadId)!.messages.find(message => message.id === `${input.runId}:direction:${queued.id}`)?.value.content).toBe('Expanded direction')
+      expect(h.database.runs.store.readHistory(input.threadId)!.messages.find(message => message.id === `${input.runId}:direction:${queued.id}`)?.value.content).toBe(text)
       expect(h.host.readSnapshot(input.threadId).activities[0].models).toHaveLength(2)
       const before = h.events.length
       await h.reopen()
