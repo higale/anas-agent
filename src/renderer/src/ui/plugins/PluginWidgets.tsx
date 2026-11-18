@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { LoaderCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { pluginDisplayText, type PluginSummary } from '@shared/plugins'
@@ -11,41 +11,88 @@ function PluginWidget({ plugin, definition, model, active }: {
   plugin: PluginSummary; definition: PluginWidgetDefinition; model?: ResolvedModelConfig; active: boolean
 }) {
   const { t, i18n } = useTranslation()
-  const context = useMemo(() => ({ modelId: model?.id, baseUrl: model?.baseUrl, apiKey: model?.apiKey, model: model?.model, providerName: model?.providerName, language: i18n.language }), [model?.id, model?.baseUrl, model?.apiKey, model?.model, model?.providerName, i18n.language])
-  // Undefined means no reply yet; null is an explicit request to hide the widget.
-  const [state, setState] = useState<{ context: object; content: (PluginWidgetContent & { fragment: DocumentFragment }) | null | undefined; busy: boolean; error?: string }>({ context, content: undefined, busy: true })
+  const language = i18n.language
+  const renderAction = definition.presentation?.render
+  const legacyActive = renderAction ? undefined : active
+  const legacyLanguage = renderAction ? undefined : language
+  const legacyProviderName = renderAction ? undefined : model?.providerName
+  // Registry/settings updates can recreate equivalent manifest arrays.
+  const actionList = definition.actions.join(',')
+  const displayList = definition.presentation?.actions.join(',') ?? ''
+  const displayActions = useMemo(() => displayList ? displayList.split(',') : [], [displayList])
+  const context = useMemo(() => ({ modelId: model?.id, providerId: model?.providerId, baseUrl: model?.baseUrl, apiKey: model?.apiKey,
+    model: model?.model, legacyProviderName, legacyLanguage }), [model?.id, model?.providerId, model?.baseUrl, model?.apiKey, model?.model, legacyProviderName, legacyLanguage])
+  type Content = (PluginWidgetContent & { fragment: DocumentFragment }) | null
+  const [state, setState] = useState<{ context: object; content?: Content; busy: boolean; error?: string }>({ context, busy: true })
+  const latest = useRef({ active, language, t })
+  useLayoutEffect(() => { latest.current = { active, language, t } })
   const request = useRef<(action?: string) => void>(() => {})
+  const onShow = useRef<() => void>(() => {})
   useEffect(() => {
-    let disposed = false, pending = false
+    let disposed = false, pending = false, started = false, hasReply = false
+    let requestedLanguage = latest.current.language, displayRevision = 0, settledDisplay = 0
+    let displayWork: Promise<void> = Promise.resolve()
+    const actions = actionList ? actionList.split(',') : []
+    const visible = () => latest.current.active && document.visibilityState !== 'hidden'
+    const report = (message: string) => {
+      if (!disposed) setState(old => ({ context, content: old.context === context ? old.content : undefined, busy: pending, error: message }))
+    }
+    const failed = (reason: unknown) => {
+      const name = missingModelApiKeyEnvironmentVariable(reason)
+      report(name ? latest.current.t('settings.api_key_variable_missing', { name }) : latest.current.t('plugins.widget_failed'))
+    }
+    const show = (snapshot: PluginWidgetContent | null) => {
+      if (disposed) return
+      try {
+        const content = snapshot ? { ...snapshot, fragment: parseWidgetHtml(snapshot.html, plugin.id, actions) } : null
+        hasReply = true
+        const busy = pending
+        setState(old => ({ context, content: old.context === context && old.content && content && old.content.html === content.html && old.content.title === content.title ? old.content : content, busy }))
+      } catch { report(latest.current.t('plugins.widget_invalid_html')) }
+    }
+    const read = (action?: string) => window.gale.plugins.readWidget(plugin.id, definition.id, model?.id, action)
+    const redraw = (action: string) => {
+      const revision = ++displayRevision
+      // Keep preference writes in click order, independently of a slow provider call.
+      displayWork = displayWork.then(async () => {
+        if (disposed) return
+        const snapshot = await read(action)
+        if (revision === displayRevision) show(snapshot)
+      }).catch(failed).finally(() => { settledDisplay = revision })
+    }
     const load = async (action?: string) => {
-      if (disposed || pending || !active || document.visibilityState === 'hidden') return
+      if (disposed || !visible() || pending) return
       pending = true
+      started = true
+      const revision = displayRevision, locale = latest.current.language
       setState(old => ({ context, content: old.context === context ? old.content : undefined, busy: true }))
       try {
-        const snapshot = await window.gale.plugins.readWidget(plugin.id, definition.id, model?.id, action)
+        const snapshot = await read(action)
         if (disposed) return
-        let content: (PluginWidgetContent & { fragment: DocumentFragment }) | null
-        try { content = snapshot ? { ...snapshot, fragment: parseWidgetHtml(snapshot.html, plugin.id, definition.actions) } : null }
-        catch {
-          setState(old => ({ context, content: old.context === context ? old.content : undefined, busy: false, error: t('plugins.widget_invalid_html') }))
-          return
-        }
-        setState(old => ({ context, content: old.context === context && old.content && content && old.content.html === content.html && old.content.title === content.title ? old.content : content, busy: false }))
-      } catch (reason) {
-        // Backend/network diagnostics must not accidentally expose connection credentials.
-        const name = missingModelApiKeyEnvironmentVariable(reason)
-        if (!disposed) setState(old => ({ context, content: old.context === context ? old.content : undefined, busy: false,
-          error: name ? t('settings.api_key_variable_missing', { name }) : t('plugins.widget_failed') }))
-      } finally { pending = false }
+        pending = false
+        if (renderAction && (revision !== displayRevision || settledDisplay !== displayRevision || locale !== latest.current.language)) redraw(renderAction)
+        else show(snapshot)
+      } catch (reason) { pending = false; failed(reason) }
     }
-    request.current = action => { void load(action) }
-    void load()
+    request.current = action => {
+      if (action && displayActions.includes(action)) redraw(action)
+      else void load(action)
+    }
+    const shown = () => {
+      if (!visible()) return
+      if (!started) void load()
+      else if (renderAction && requestedLanguage !== latest.current.language && (hasReply || !pending)) redraw(renderAction)
+      requestedLanguage = latest.current.language
+    }
+    onShow.current = shown
+    shown()
     const timer = window.setInterval(() => { void load() }, 60_000)
-    const visible = () => { void load() }
-    document.addEventListener('visibilitychange', visible)
-    window.addEventListener('focus', visible)
-    return () => { disposed = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible) }
-  }, [plugin.id, plugin.backendStatus, definition.id, definition.actions, model?.id, context, active, t])
+    const visibleAgain = renderAction ? shown : () => { void load() }
+    document.addEventListener('visibilitychange', visibleAgain)
+    window.addEventListener('focus', visibleAgain)
+    return () => { disposed = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', visibleAgain); window.removeEventListener('focus', visibleAgain) }
+  }, [plugin.id, plugin.backendStatus, definition.id, actionList, displayActions, renderAction, model?.id, context, legacyActive])
+  useEffect(() => { onShow.current() }, [active, language])
   if (!active) return null
   const current = state.context === context
   const content = current ? state.content : undefined
@@ -57,7 +104,7 @@ function PluginWidget({ plugin, definition, model, active }: {
       <LoaderCircle className="agent-spin" size={14} aria-hidden="true" />
       <span className="ui-truncate">{pluginDisplayText(plugin, i18n.language)} · {t('common.loading')}…</span>
     </div>}
-    {content && <PluginWidgetHtml fragment={content.fragment} busy={busy} onAction={action => request.current(action)}
+    {content && <PluginWidgetHtml displayActions={displayActions} fragment={content.fragment} busy={busy} onAction={action => request.current(action)}
       onLink={url => { void window.gale.app.openExternalUrl(url).catch(() => setState(old => ({ ...old, error: t('plugins.widget_failed') }))) }} />}
     {error && <small className="plugin-widget-error" role="status">{error}</small>}
     {!content && error && <button type="button" className="ui-button" disabled={busy}

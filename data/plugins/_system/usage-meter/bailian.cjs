@@ -86,7 +86,9 @@ function accountLabel(user) { return user.name === user.uid ? user.uid : `${user
 
 function createBailian() {
   const cancellations = new Set(), cache = new Map()
-  let login, loginError, stopped = false
+  let login, loginError, session, stopped = false
+  let sessionVersion = 0
+  function clearSession() { sessionVersion++; session = undefined; cache.clear() }
   function run(args, signal, { json = true, timeout = 12_000 } = {}) {
     return new Promise((resolve, reject) => {
       if (stopped || signal?.aborted) { reject(fault('timeout')); return }
@@ -237,67 +239,85 @@ function createBailian() {
     }
     return { title, lines, notes, detailGroups, notice, ...(data.plan && !lines.length ? { emptyLabel: t.noQuota } : {}), updatedAt: data.updatedAt }
   }
+  const modelKey = model => createHash('sha256').update(JSON.stringify([model.baseUrl, model.apiKey, model.model])).digest('hex')
+  function present(model, language, entry = cache.get(modelKey(model))) {
+    const t = words(language), plan = new URL(model.baseUrl).hostname.startsWith('token-plan.')
+    const base = { title: `${t.title} · ${plan ? 'Token Plan' : t.ordinary}`, lines: [] }
+    if (login) return { ...base, emptyLabel: t.waiting, notice: t.loginHint, actions: [{ id: 'cancel_login', label: t.cancelButton }] }
+    const error = loginError ?? entry?.error
+    if (error) {
+      const code = Object.hasOwn(copy.en, error.message) ? error.message : 'network'
+      const auth = ['login', 'mismatch', 'key_missing', 'login_failed'].includes(code)
+      return { ...base, emptyLabel: t[code], error: t[code], notes: entry?.user ? [`${t.account}: ${accountLabel(entry.user)}`] : [],
+        ...(auth ? { actions: [{ id: 'login', label: code === 'mismatch' || code === 'key_missing' ? t.switchButton : t.loginButton }] } : {}),
+        ...(code === 'missing' ? { installLink: true } : {}) }
+    }
+    return entry?.data ? render(entry.data, language, entry.user, model) : { ...base, emptyLabel: language.startsWith('zh') ? '暂无用量数据' : 'Usage unavailable' }
+  }
   async function read(model, language, action, signal) {
-    const t = words(language), plan = new URL(model.baseUrl).hostname.startsWith('token-plan.'), controller = new AbortController()
+    const key = modelKey(model), plan = new URL(model.baseUrl).hostname.startsWith('token-plan.'), controller = new AbortController()
     const abort = () => controller.abort()
     signal.addEventListener('abort', abort, { once: true })
     const timer = setTimeout(abort, 25_000)
-    let user
-    const base = { title: `${t.title} · ${plan ? 'Token Plan' : t.ordinary}`, lines: [] }
-    const waiting = () => ({ ...base, emptyLabel: t.waiting, notice: t.loginHint, actions: [{ id: 'cancel_login', label: t.cancelButton }] })
+    const version = sessionVersion
     try {
       if (signal.aborted || stopped) throw fault('timeout')
       if (action === 'cancel_login') { login?.controller.abort(); login = undefined; loginError = undefined }
-      if (login) return waiting()
+      if (login) return present(model, language)
       if (loginError && action !== 'login') { const error = loginError; loginError = undefined; throw error }
       const status = await run(['auth', 'status'], controller.signal)
-      // Another window can start login while this request reads CLI status.
-      if (login) return waiting()
+      if (login || version !== sessionVersion) return present(model, language)
       if (typeof status.config !== 'string') throw fault('response')
       const profile = status.config
       if (action === 'login') {
-        cache.clear()
+        clearSession()
         loginError = undefined
         const current = { controller: new AbortController() }
         login = current
         current.done = run(['auth', 'login', '--console', '--console-site', 'domestic', '--config', profile], current.controller.signal, { json: false, timeout: 180_000 })
           .catch(() => { if (login === current) loginError = fault('login_failed') })
-          .finally(() => { if (login === current) { login = undefined; cache.clear() } })
-        return waiting()
+          .finally(() => { if (login === current) { login = undefined; clearSession() } })
+        return present(model, language)
       }
       if (!status.console) throw fault('login')
       if (!model.apiKey) throw fault('model_key')
       if (plan !== model.apiKey.startsWith('sk-sp-')) throw fault('key_type')
-      user = await identity(profile, controller.signal, true)
-      const scope = createHash('sha256').update(JSON.stringify([model.baseUrl, model.apiKey, model.model, profile, status.console.masked, user.uid, user.parentUid])).digest('hex')
-      let entry = cache.get(scope)
-      if (!entry || action === 'refresh' || Date.now() >= entry.nextAt) {
-        if (!entry?.pending) {
-          if (cache.size >= 32) cache.clear()
-          entry = { nextAt: 0 }
-          cache.set(scope, entry)
-          const current = entry
-          current.pending = query(model, plan, profile, controller.signal).then(async data => {
-            const after = await identity(profile, controller.signal)
-            if (after.uid !== user.uid || after.parentUid !== user.parentUid) throw fault('mismatch')
-            // Validate before caching, so malformed data cannot replace a valid reading.
-            render(data, language, user, model)
-            current.data = { ...data, updatedAt: Date.now() }
-            current.nextAt = Date.now() + 300_000
-          }).catch(error => { current.error = error; current.nextAt = Date.now() + 60_000 }).finally(() => { current.pending = undefined })
-        }
+      const user = await identity(profile, controller.signal, true)
+      if (version !== sessionVersion) return present(model, language)
+      const scope = JSON.stringify([profile, status.console.masked, user.uid, user.parentUid])
+      if (session !== undefined && session !== scope) clearSession()
+      session = scope
+      let entry = cache.get(key)
+      if (!entry) {
+        if (cache.size >= 32) cache.delete(cache.keys().next().value)
+        entry = { nextAt: 0 }
+        cache.set(key, entry)
+      }
+      entry.user = user
+      if (!entry.pending && (action === 'refresh' || Date.now() >= entry.nextAt)) {
+        entry.pending = query(model, plan, profile, controller.signal).then(async data => {
+          const after = await identity(profile, controller.signal)
+          if (after.uid !== user.uid || after.parentUid !== user.parentUid) {
+            if (cache.get(key) === entry) { clearSession(); cache.set(key, entry) }
+            throw fault('mismatch')
+          }
+          render(data, language, user, model)
+          entry.data = { ...data, updatedAt: Date.now() }
+          entry.error = undefined
+          entry.nextAt = Date.now() + 300_000
+        }).catch(error => { entry.data = undefined; entry.error = error; entry.nextAt = Date.now() + 60_000 })
+          .finally(() => { entry.pending = undefined })
       }
       await entry.pending
-      if (entry.error) throw entry.error
-      return render(entry.data, language, user, model)
+      return present(model, language)
     } catch (error) {
-      const code = Object.hasOwn(copy.en, error.message) ? error.message : 'network'
-      const auth = ['login', 'mismatch', 'key_missing', 'login_failed'].includes(code)
-      return { ...base, emptyLabel: t[code], error: t[code], notes: user ? [`${t.account}: ${accountLabel(user)}`] : [],
-        ...(auth ? { actions: [{ id: 'login', label: code === 'mismatch' || code === 'key_missing' ? t.switchButton : t.loginButton }] } : {}),
-        ...(code === 'missing' ? { installLink: true } : {}) }
+      // A failed identity check invalidates readings from the previous session.
+      if (version !== sessionVersion) return present(model, language)
+      if (!['model_key', 'key_type'].includes(error.message)) clearSession()
+      cache.set(key, { error, nextAt: 0 })
+      return present(model, language)
     } finally { clearTimeout(timer); signal.removeEventListener('abort', abort) }
   }
-  return { read, stop() { stopped = true; login?.controller.abort(); for (const cancel of cancellations) cancel(); cache.clear() } }
+  return { read, present, stop() { stopped = true; login?.controller.abort(); for (const cancel of cancellations) cancel(); clearSession() } }
 }
 module.exports = { hosts, createBailian, maskedMatch }

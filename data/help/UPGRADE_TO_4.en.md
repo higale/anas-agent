@@ -4,7 +4,7 @@
 
 **When upgrading from a version before 4.0 to any 4.x release, previous conversations and all long-term memory, including project memory, become unavailable. There is no migration or import of pre-4.0 backups.** This storage-layout change was introduced in 4.0.0 and also applies when skipping directly to a later 4.x release. Data already using the new 4.x layout is not discarded again because of this change.
 
-This guide covers only the 4.0.0 data-directory changes. Other compatibility changes in later releases, such as plugin installation paths, are described in their own release notes.
+This guide covers the 4.0.0 data-directory changes when upgrading to 4.x. For the current 5.x series, use the [5.x upgrade guide](UPGRADE_TO_5.en.md); do not follow this guide to copy old database contents. Other compatibility changes in later 4.x releases, such as plugin installation paths, are described in their own release notes.
 
 ## Affected data
 

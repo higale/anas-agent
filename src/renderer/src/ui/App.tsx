@@ -1157,22 +1157,22 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
         assistantRole={assistantRole}
         sidebarVisible={sidebarVisible}
         sidebarWidth={sidebarWidth}
-        footer={settingsOpen ? (
-          <SettingsSidebarFooter onBack={() => closeSettings(ensureModelDraftCanLeave)} />
-        ) : (
-          <>
-          <PluginWidgets plugins={pluginRegistry.plugins} model={selectedModel} active={sidebarVisible && initialAppReady} />
-          <ThreadSidebarFooter
-            appMenuOpen={appMenuOpen}
-            buildInfo={appBuildInfo}
-            onOpenHelp={openHelpFromMenu}
-            onOpenSettings={openSettingsFromMenu}
-            onQuit={quitFromMenu}
-            onShowAbout={showAboutFromMenu}
-            onAppMenuOpenChange={setAppMenuOpen}
-          />
-          </>
-        )}
+        footer={<>
+          <PluginWidgets plugins={pluginRegistry.plugins} model={selectedModel} active={!settingsOpen && sidebarVisible && initialAppReady} />
+          {settingsOpen ? (
+            <SettingsSidebarFooter onBack={() => closeSettings(ensureModelDraftCanLeave)} />
+          ) : (
+            <ThreadSidebarFooter
+              appMenuOpen={appMenuOpen}
+              buildInfo={appBuildInfo}
+              onOpenHelp={openHelpFromMenu}
+              onOpenSettings={openSettingsFromMenu}
+              onQuit={quitFromMenu}
+              onShowAbout={showAboutFromMenu}
+              onAppMenuOpenChange={setAppMenuOpen}
+            />
+          )}
+        </>}
         onAvatarClick={settingsOpen
           ? () => switchSettingsTab('general', ensureModelDraftCanLeave)
           : openGeneralSettings}

@@ -3,6 +3,7 @@ export interface PluginWidgetDefinition {
   location: 'sidebar.footer'
   handler: string
   actions: string[]
+  presentation?: { render: string; actions: string[] }
   modelHosts?: string[]
 }
 
@@ -21,10 +22,15 @@ export function parsePluginWidgets(value: unknown, hasBackend: boolean): PluginW
     const actions = raw.actions ?? []
     if (!Array.isArray(actions) || actions.length > 8 || actions.some(id => typeof id !== 'string' || !identifier.test(id))
       || new Set(actions).size !== actions.length) throw new Error('Invalid widget actions.')
+    const presentation = raw.presentation
+    if (presentation !== undefined && (!presentation || !actions.includes(presentation.render)
+      || !Array.isArray(presentation.actions) || presentation.actions.some((id: unknown) => !actions.includes(id))
+      || new Set(presentation.actions).size !== presentation.actions.length)) throw new Error('Invalid widget presentation actions.')
     const hosts = raw.model_hosts
     if (hosts !== undefined && (!Array.isArray(hosts) || !hosts.length || hosts.length > 32
       || hosts.some(host => typeof host !== 'string' || host.length > 253 || !/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/.test(host)))) throw new Error('Invalid widget model hosts.')
-    return { id: raw.id, location: raw.location, handler: raw.handler, actions, ...(hosts ? { modelHosts: hosts } : {}) } as PluginWidgetDefinition
+    return { id: raw.id, location: raw.location, handler: raw.handler, actions, ...(presentation ? { presentation: { render: presentation.render, actions: presentation.actions } } : {}),
+      ...(hosts ? { modelHosts: hosts } : {}) } as PluginWidgetDefinition
   })
   if (new Set(result.map(item => item.id)).size !== result.length) throw new Error('Duplicate widget ID.')
   return result

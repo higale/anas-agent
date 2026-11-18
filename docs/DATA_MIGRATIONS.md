@@ -30,9 +30,10 @@
 | 项目、项目删除日志、输入历史、恢复事务日志 | 顶层 `version: 0` |
 | 文件修改 definition.json、record.json、头像裁剪参数 | 顶层 `version: 0` |
 | 缓存、HTTP 跟踪元数据、保全清单 | 顶层 `version: 0` |
-| 备份清单 | `version: 0`、`storage_layout: "project-directories"`；内部 catalog 必须为 v2、会话库为 v3 |
+| 备份清单 | `version: 0`、`storage_layout: "project-directories"`；内部 catalog 必须为 v2、会话库为 v3，独立记忆库存在时须为 v1 |
 | catalog SQLite | `PRAGMA user_version = 2` |
 | 会话 SQLite | `PRAGMA user_version = 3` |
+| 独立记忆 SQLite（`db/memory.sqlite`） | `PRAGMA user_version = 1`、`memory_meta.version = 1` |
 
 会话数据从 v3 建立后续兼容原点；其他应用格式保留各自已支持的版本。`.env`、标准 `SKILL.md`、供应商协议及原始资源文件不增加应用版本字段。应用发布版本与数据版本分别管理。
 

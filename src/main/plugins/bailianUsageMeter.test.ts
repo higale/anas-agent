@@ -108,6 +108,29 @@ it.each(['zh-CN', 'en'])('shares complete subscription hover details between exp
   expect(compact.details).toBe(details)
   expect(commands.filter(args => args.includes('zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/subscription'))).toHaveLength(1)
 })
+it.each([
+  {},
+  { baseUrl: 'https://dashscope.aliyuncs.com/v1', apiKey: 'sk-ordinary-secret-ending' }
+])('redraws the last reading or error without running any CLI commands (%j)', async changes => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  const initial = await text(undefined, changes)
+  vi.setSystemTime(Date.now() + 600_000)
+  const count = commands.length
+  expect(count).toBeGreaterThan(0)
+  expect((await text('show_compact', changes)).details).toBe(initial.details)
+  expect((await text('show_detailed', changes)).details).toBe(initial.details)
+  expect((await text('redisplay', changes, 'en')).details).toContain('Readable account')
+  expect((await text('redisplay', { ...changes, apiKey: 'different-key' })).details).not.toContain('Readable account')
+  expect(commands).toHaveLength(count)
+
+  noConsole = true
+  expect((await text('refresh', changes)).text).toContain('未登录')
+  const afterFailure = commands.length
+  const failed = await text('show_compact', changes, 'en')
+  expect(failed.dom.querySelector('[data-action="login"]')).not.toBeNull()
+  expect(failed.details).not.toContain('Readable account')
+  expect(commands).toHaveLength(afterFailure)
+})
 it('keeps account and partial subscription details without inventing missing values', async () => {
   respond = args => args.some(x => x.endsWith('/subscription')) ? wrap({ specCode: 'lite' }) : defaultResponse(args)
   const summary = await text()

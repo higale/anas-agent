@@ -41,6 +41,38 @@ it('renders plugin HTML in a shadow root and bridges nested action clicks withou
   expect(widget().getByRole('button', { name: 'Refresh now' })).toBeEnabled()
 })
 
+it('keeps layout interactive during refresh and reuses data across sidebar, focus and size changes', async () => {
+  const definition = { ...plugins[0].manifest!.widgets![0], actions: ['refresh', 'redisplay', 'expand', 'collapse'],
+    presentation: { render: 'redisplay', actions: ['expand', 'collapse'] } }
+  const registry = () => [{ ...plugins[0], manifest: { ...plugins[0].manifest!, widgets: [{ ...definition, actions: [...definition.actions] }] } }]
+  let detailed = false, value = '68%', complete!: () => void
+  const snapshot = () => ({ title: 'Quota', html: `<p>${detailed ? 'Detailed' : 'Compact'} ${value}</p>
+    <button data-action="refresh">Refresh</button><button data-action="${detailed ? 'collapse' : 'expand'}">Toggle</button>` })
+  mocks.read.mockImplementation(async (_id, _widget, _model, action) => {
+    if (action === 'refresh') await new Promise<void>(resolve => { complete = () => { value = '44%'; resolve() } })
+    if (action === 'expand' || action === 'collapse') detailed = action === 'expand'
+    return snapshot()
+  })
+  const { rerender } = render(<PluginWidgets plugins={registry()} model={model} active />)
+  await waitFor(() => expect(widget().getByText('Compact 68%')).toBeVisible())
+  rerender(<PluginWidgets plugins={registry()} model={{ ...model }} active={false} />)
+  rerender(<PluginWidgets plugins={registry()} model={{ ...model }} active />)
+  fireEvent(window, new Event('resize'))
+  fireEvent.focus(window)
+  fireEvent(document, new Event('visibilitychange'))
+  expect(mocks.read).toHaveBeenCalledTimes(1)
+  fireEvent.click(widget().getByText('Refresh'))
+  expect(widget().getByText('Refresh')).toBeDisabled()
+  expect(widget().getByText('Toggle')).toBeEnabled()
+  fireEvent.click(widget().getByText('Toggle'))
+  await waitFor(() => expect(widget().getByText('Detailed 68%')).toBeVisible())
+  expect(widget().getByText('Refresh')).toBeDisabled()
+  await act(async () => complete())
+  await waitFor(() => expect(widget().getByText('Detailed 44%')).toBeVisible())
+  expect(widget().getByText('Refresh')).toBeEnabled()
+  expect(mocks.read.mock.calls.map(call => call[3])).toEqual([undefined, 'refresh', 'expand', 'redisplay'])
+})
+
 it('identifies missing credential variables without displaying other backend diagnostics', async () => {
   mocks.read.mockRejectedValueOnce(new Error("Error invoking remote method 'plugins:readWidget': Error: API key environment variable MY_TOKEN is missing or empty."))
   render(<PluginWidgets plugins={plugins} model={{ ...model, apiKey: '${MY_TOKEN}' }} active />)

@@ -421,8 +421,14 @@ module.exports = {
     const provider = model && endpoint(model.baseUrl)
     if (!provider) return null
     const { url, name, parse } = provider
-    if (action === 'show_compact' || action === 'show_detailed') saveDisplayMode(action === 'show_compact' ? 'compact' : 'detailed')
-    if (name === 'Bailian') return renderWidget(await bailian.read(model, language, action, context.signal), language, displayMode)
+    const presentation = manifest.widgets[0].presentation
+    const toggle = presentation.actions.includes(action)
+    const displayOnly = toggle || action === presentation.render
+    if (toggle) saveDisplayMode(action === 'show_compact' ? 'compact' : 'detailed')
+    if (name === 'Bailian') {
+      const snapshot = displayOnly ? bailian.present(model, language) : await bailian.read(model, language, action, context.signal)
+      return renderWidget(snapshot, language, displayMode)
+    }
     const zh = language.startsWith('zh')
     const title = name === 'MiniMax' ? 'MiniMax Token Plan' : parse === parseMimoQuota ? 'MiMo Token Plan' : parse === parseGlmQuota ? `${name} Coding Plan`
       : name === 'OpenRouter' ? `OpenRouter ${zh ? '密钥额度' : 'Key credits'}` : `${name} ${zh ? '余额' : 'Balance'}`
@@ -432,6 +438,7 @@ module.exports = {
     const cacheKey = createHash('sha256').update(JSON.stringify([model.providerId, url, model.apiKey])).digest('hex')
     let entry = cache.get(cacheKey)
     if (!entry) {
+      if (displayOnly) return renderWidget(content, language, displayMode)
       if (cache.size >= 32) {
         const disposable = [...cache].find(([, item]) => !item.pending)
         if (disposable) cache.delete(disposable[0])
@@ -440,7 +447,7 @@ module.exports = {
       entry = { nextAt: 0, failures: 0 }
       cache.set(cacheKey, entry)
     }
-    if (!entry.pending && (action === 'refresh' || Date.now() >= entry.nextAt)) {
+    if (!displayOnly && !entry.pending && (action === 'refresh' || Date.now() >= entry.nextAt)) {
       const controller = new AbortController()
       entry.controller = controller
       const timeout = setTimeout(() => controller.abort(), 15_000)
@@ -456,7 +463,7 @@ module.exports = {
         entry.nextAt = Date.now() + Math.min(300_000, 60_000 * 2 ** Math.min(entry.failures++, 3))
       }).finally(() => { clearTimeout(timeout); entry.pending = undefined; entry.controller = undefined })
     }
-    await entry.pending
+    if (!displayOnly) await entry.pending
     context.signal.throwIfAborted()
     if (stopped) throw new Error('Usage Meter stopped.')
     let error = entry.error

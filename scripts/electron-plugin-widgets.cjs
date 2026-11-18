@@ -28,11 +28,13 @@ async function verifyPluginWidgets(launchApplication) {
   const mode = join(home, 'query-mode'), calls = join(home, 'query-calls'), layout = join(home, 'layout.html')
   const pending = join(home, 'query-pending')
   const bailianMode = join(home, 'bailian-mode'), loginDone = join(home, 'login-done')
+  const cliCalls = join(home, 'bailian-cli-calls'), holdUsage = join(home, 'hold-bailian-usage')
   const fixtureBin = join(home, 'bin')
   await mkdir(join(fixtureBin, 'node_modules', 'bailian-cli', 'dist'), { recursive: true })
   const cli = `#!/usr/bin/env node
     const fs = require('node:fs');
     const args = process.argv.slice(2);
+    fs.appendFileSync(${JSON.stringify(cliCalls)}, args[0] + '\\n');
     const mode = fs.existsSync(${JSON.stringify(bailianMode)}) ? fs.readFileSync(${JSON.stringify(bailianMode)}, 'utf8') : 'ok';
     const wrap = data => ({successResponse: true, data: {success: true, DataV2: {ret: ['SUCCESS::ok'], data: {success: true, data}}}});
     const out = data => process.stdout.write(JSON.stringify(data));
@@ -46,7 +48,13 @@ async function verifyPluginWidgets(launchApplication) {
       if (api.endsWith('.loginInfo')) out(wrap({loginStatus: 'ALIYUN_LOGINED', aliyun: {uid: 'fixture-account', parentUid: 'fixture-account', nickName: 'Fixture account'}}));
       else if (api.endsWith('.getGConfig')) out(wrap({user: {outerKey: 'fixture-account', showName: 'Fixture account'}}));
       else if (api.endsWith('/getKeyByUid')) out(wrap({key_id: 'fixture-key-id', mask_apikey: mode === 'mismatch' ? 'sk-sp-9876543210****wrong-ending-xx' : 'sk-sp-123456789-****987654321abcdef'}));
-      else if (api.endsWith('/usage')) out(wrap({per1MonthPercentage: .64951, per1MonthResetTime: Date.now() + 86400000}));
+      else if (api.endsWith('/usage')) {
+        const quota = () => out(wrap({per1MonthPercentage: .64951, per1MonthResetTime: Date.now() + 86400000}));
+        if (fs.existsSync(${JSON.stringify(holdUsage)})) {
+          fs.appendFileSync(${JSON.stringify(cliCalls)}, 'waiting-for-usage\\n');
+          const timer = setInterval(() => { if (!fs.existsSync(${JSON.stringify(holdUsage)})) { clearInterval(timer); quota(); } }, 25);
+        } else quota();
+      }
       else if (api.endsWith('/subscription')) out(wrap({specCode: 'lite', status: 'VALID', autoRenewFlag: false, endTime: Date.now() + 30 * 86400000}));
       else if (api.endsWith('.listApiKeys4Agent')) out(wrap({total: 1, items: [{id: 42, key: 'sk-ord****ending', deleted: 0}]}));
       else if (api.endsWith('.getApiKey')) out(wrap({id: 42, key: 'sk-ordinary-secret-ending', workspace_id: 'ws', workspace_name: 'Fixture workspace', blocked: 0}));
@@ -421,6 +429,8 @@ async function verifyPluginWidgets(launchApplication) {
     await expect(page.locator('.plugin-widget')).toContainText('月 35.05%')
     await expect(page.locator('.plugin-widget [tabindex="0"]')).toHaveAttribute('data-tooltip', /自动续费: 关闭/)
     const compactDetails = await page.locator('.plugin-widget [tabindex="0"]').getAttribute('data-tooltip')
+    const commandsBeforeLayout = await readFile(cliCalls, 'utf8')
+    await page.evaluate(() => globalThis.gale.config.updateSettings({ sidebarWidth: 280 }))
     await setDisplayMode('detailed')
     await expect(page.locator('.plugin-widget')).not.toContainText('套餐: lite')
     await expect(page.locator('.plugin-widget')).not.toContainText('Fixture account')
@@ -455,6 +465,19 @@ async function verifyPluginWidgets(launchApplication) {
     await page.screenshot({ path: join(output, 'bailian-plan-details-en-light.png') })
     await page.mouse.move(700, 200)
     await page.evaluate(() => globalThis.gale.config.updateSettings({ language: 'zh-CN', theme: 'dark', fontSize: 18 }))
+    await expect(page.locator('.plugin-widget header [tabindex="0"]')).toHaveAttribute('data-tooltip', /自动续费: 关闭/)
+    assert.equal(await readFile(cliCalls, 'utf8'), commandsBeforeLayout, 'Changing layout and language must not start the Bailian CLI')
+    await writeFile(holdUsage, 'wait')
+    const refreshPlan = page.locator('.plugin-widget [data-action="refresh"]')
+    await refreshPlan.click()
+    await expect.poll(() => readFile(cliCalls, 'utf8')).toContain('waiting-for-usage')
+    await setDisplayMode('compact')
+    await expect(page.locator('.plugin-widget')).toContainText('月 35.05%')
+    await setDisplayMode('detailed')
+    await expect(page.locator('.plugin-widget progress')).toHaveCount(1)
+    await expect(refreshPlan).toBeDisabled()
+    await rm(holdUsage)
+    await expect(refreshPlan).toBeEnabled()
     await writeFile(bailianMode, 'mismatch')
     await page.locator('.plugin-widget [data-action="refresh"]').click()
     await expect(page.locator('.plugin-widget')).toContainText('不匹配')

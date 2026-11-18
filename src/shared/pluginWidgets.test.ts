@@ -13,6 +13,14 @@ it('validates declarations and limits model matching to exact URL hostnames', ()
   expect(() => parsePluginManifest({ ...manifest, widgets: [...manifest.widgets, ...manifest.widgets] })).toThrow('Duplicate')
   expect(() => parsePluginManifest({ ...manifest, widgets: [{ ...manifest.widgets[0], id: undefined }] })).toThrow()
 })
+it('accepts presentation operations only from the declared widget actions', () => {
+  const widget = { ...manifest.widgets[0], actions: ['redisplay', 'expand'] }
+  const parse = (render: string, actions: string[]) => parsePluginManifest({ ...manifest,
+    widgets: [{ ...widget, presentation: { render, actions } }] }).widgets![0].presentation
+  expect(parse('redisplay', ['expand'])).toEqual({ render: 'redisplay', actions: ['expand'] })
+  expect(() => parse('unknown', ['expand'])).toThrow()
+  expect(() => parse('redisplay', ['unknown'])).toThrow()
+})
 it('accepts bounded HTML snapshots and rejects missing or oversized content', () => {
   const content = { title: 'Quota', html: '<table><tr><td>Remaining</td><td>68%</td></tr></table>' }
   expect(requirePluginWidgetContent({ ...content, apiKey: 'discard' })).toEqual(content)

@@ -128,7 +128,8 @@ it('shows unlimited quota without fabricating consumption and rejects a non-enti
   expect(compact?.dom.textContent).toContain('1w Unlimited')
   fetcher.mockResolvedValueOnce(Response.json(payload({ current_interval_status: 3, current_weekly_status: 3,
     current_interval_total_count: 0, current_weekly_total_count: 0 })))
-  const notEntitled = await call({ model: { ...model, apiKey: 'no-plan' }, action: 'show_detailed' })
+  await call({ action: 'show_detailed' })
+  const notEntitled = await call({ model: { ...model, apiKey: 'no-plan' } })
   expect(notEntitled?.lines).toEqual([])
   expect(notEntitled?.error).toContain('通用额度')
 })
@@ -331,6 +332,7 @@ it('defaults to a compact summary with reset details on hover and switches layou
 })
 
 it('keeps compact cached quota with an accessible failure indicator', async () => {
+  await call()
   await call({ action: 'show_compact' })
   fetcher.mockResolvedValueOnce(new Response('', { status: 429 }))
   const failed = await call({ action: 'refresh' })
@@ -432,6 +434,7 @@ it('keeps MiMo wallet, plan, region and credential caches separate and never reu
   vi.useFakeTimers().setSystemTime(new Date('2026-11-08T00:00:00Z'))
   fetcher.mockResolvedValueOnce(Response.json(mimoBalancePayload())).mockResolvedValueOnce(Response.json(mimoPlanPayload()))
   await call({ model: mimo })
+  await call({ model: mimoPlan })
   const plan = await call({ model: mimoPlan, action: 'show_compact', language: 'en' })
   expect(plan?.dom.textContent).toContain('Plan 85%')
   expect(plan?.details).toContain('Auto-renew: Off')
@@ -535,6 +538,7 @@ it('recognizes DeepSeek URLs and displays exact balances and breakdowns without 
 
 it('keeps currencies separate and reports zero or negative unavailable balances', async () => {
   fetcher.mockResolvedValueOnce(Response.json(balancePayload({ balance_infos: [balance, { ...balance, currency: 'USD', total_balance: '0.000001' }] })))
+  await call({ model: deepseek })
   const multi = await call({ model: deepseek, action: 'show_compact', language: 'en' })
   expect(multi?.dom.textContent).toContain('CNY 110.00001 · USD 0.000001')
   expect(multi?.dom.querySelector('[tabindex="0"]')?.getAttribute('title')).toContain('Granted balance')
@@ -821,4 +825,23 @@ it('retains GLM readings on malformed quota values without inventing periods or 
   const recovered = await call({ model: glm, action: 'refresh' })
   expect(recovered?.lines).toEqual([{ label: '5 小时额度剩余', value: '100%', progress: 1 }])
   expect(recovered?.error).toBeUndefined()
+})
+
+it('redraws cold, expired and in-flight readings without waiting for or starting a provider query', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  const cold = await call({ action: 'show_compact' })
+  expect(cold?.dom.textContent).toContain('暂无额度')
+  expect(fetcher).not.toHaveBeenCalled()
+  await call()
+  vi.setSystemTime(Date.now() + 600_000)
+  expect((await call({ action: 'show_detailed' }))?.lines[0].value).toBe('80%')
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  let finish!: (response: Response) => void
+  fetcher.mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve }))
+  const checking = call()
+  expect((await call({ action: 'show_compact' }))?.dom.textContent).toContain('80%')
+  expect((await call({ action: 'redisplay', language: 'en' }))?.dom.textContent).toContain('80%')
+  expect(fetcher).toHaveBeenCalledTimes(2)
+  finish(Response.json(payload({ current_interval_remaining_percent: 40 })))
+  expect((await checking)?.dom.textContent).toContain('40%')
 })

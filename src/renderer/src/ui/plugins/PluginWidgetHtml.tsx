@@ -58,8 +58,8 @@ export function parseWidgetHtml(html: string, pluginId: string, actions: string[
   return template.content
 }
 
-export function PluginWidgetHtml({ fragment, busy, onAction, onLink }: {
-  fragment: DocumentFragment; busy: boolean; onAction(action: string): void; onLink(url: string): void
+export function PluginWidgetHtml({ fragment, busy, displayActions, onAction, onLink }: {
+  fragment: DocumentFragment; busy: boolean; displayActions: string[]; onAction(action: string): void; onLink(url: string): void
 }) {
   const host = useRef<HTMLDivElement>(null)
   const [details, setDetails] = useState<Array<{ container: HTMLElement; button: HTMLButtonElement }>>([])
@@ -100,7 +100,7 @@ export function PluginWidgetHtml({ fragment, busy, onAction, onLink }: {
     fitText()
     controls.current = new Map([...root.querySelectorAll<HTMLButtonElement>('button[data-action]')].map(button => [button, button.disabled]))
     for (const [button, disabled] of controls.current) {
-      button.disabled = disabled || callbacks.current.busy
+      button.disabled = disabled || (callbacks.current.busy && !displayActions.includes(button.dataset.action!))
       if (button.dataset.action === focusedAction && !button.disabled) button.focus()
     }
     const click = (event: Event) => {
@@ -110,7 +110,7 @@ export function PluginWidgetHtml({ fragment, busy, onAction, onLink }: {
       const link = target?.closest<HTMLAnchorElement>('a[href]')
       if (button) {
         event.preventDefault()
-        if (!callbacks.current.busy && !button.disabled) callbacks.current.onAction(button.dataset.action!)
+        if (!button.disabled) callbacks.current.onAction(button.dataset.action!)
       } else if (link) {
         event.preventDefault()
         callbacks.current.onLink(link.href)
@@ -125,10 +125,10 @@ export function PluginWidgetHtml({ fragment, busy, onAction, onLink }: {
       root.removeEventListener('click', click)
       root.removeEventListener('auxclick', click)
     }
-  }, [fragment])
+  }, [fragment, displayActions])
   useLayoutEffect(() => {
-    for (const [button, disabled] of controls.current) button.disabled = busy || disabled
-  }, [busy])
+    for (const [button, disabled] of controls.current) button.disabled = disabled || (busy && !displayActions.includes(button.dataset.action!))
+  }, [busy, displayActions])
   return <><div ref={host} className="plugin-widget-html" aria-busy={busy} />
     {details.map(({ container, button }) => createPortal(<DetailsPopover label={button.textContent!}
       text={button.dataset.details!} className={button.className} disabled={button.disabled}
