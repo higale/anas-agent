@@ -64,6 +64,30 @@ describe('native context status and manual compression', () => {
     expect(mocks.generate.mock.calls[0][0]).toContain(code)
   })
 
+  it.each([{ maxCount: 1 }, { maxBytes: 0 }, { minShortSide: 11 }])(
+    'keeps attachment estimates and completes manual compression under stricter image rules %j', async imageLimits => {
+      const bytes = Buffer.alloc(33)
+      Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex').copy(bytes)
+      bytes.writeUInt32BE(1, 16); bytes.writeUInt32BE(1, 20)
+      const image = { type: 'image', mimeType: 'image/png', data: bytes.toString('base64') }
+      const state = source(), original = structuredClone(state)
+      const projectMessages = async (messages: ConversationMessage[]) => messages.map(message => message.id === 'user'
+        ? { ...message, content: [{ type: 'text', text: String(message.content) }, image, image] } : message)
+      const runtime = createConversationContextRuntime({ ...options(), resolveModel: async () => ({ ...model, imageLimits }), projectMessages })
+      const unrestricted = createConversationContextRuntime({ ...options(), projectMessages })
+      const before = await runtime.projectedStatus(state)
+      expect(before.manualCompressionAvailable).toBe(true)
+      expect(before.estimatedInputTokens).toBe((await unrestricted.projectedStatus(state)).estimatedInputTokens)
+      expect(before.breakdown.attachmentTokens).toBeGreaterThan(0)
+      const result = await runtime.compress(state, new AbortController().signal)
+      expect(result).toMatchObject({ summaryText: 'Summary', cutoffIndex: 2, inputTokensBefore: before.estimatedInputTokens })
+      expect(result.inputTokensAfter).toBeLessThan(result.inputTokensBefore)
+      expect(mocks.generate).toHaveBeenCalledOnce()
+      expect(mocks.generate.mock.calls[0][0]).toContain('Keep the whole request')
+      expect(mocks.generate.mock.calls[0][0]).not.toContain(image.data)
+      expect(state).toEqual(original)
+    })
+
   it('maps repeated manual compression to raw history and preserves pending image transactions', async () => {
     const state = source()
     state.messages.push({ id: 'next', kind: 'user', content: 'Inspect this' },

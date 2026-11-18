@@ -23,6 +23,7 @@ export function selectedAttachmentInput(attachment: SelectedAttachment): AgentAt
   return {
     path: attachment.path,
     name: attachment.name,
+    ...(attachment.sourcePath === undefined ? {} : { sourcePath: attachment.sourcePath }),
     mimeType: attachment.mimeType,
     size: attachment.size,
     kind: attachment.kind,

@@ -55,6 +55,34 @@ function toolTransaction(id: string, content: string): [ConversationMessage, Con
 }
 
 describe('native automatic compression', () => {
+  it.each([false, true])('summarizes over-limit old attachments but still validates retained images (%s)', async retainImage => {
+    const selected = { ...model, imageLimits: { maxCount: 0 } }, config = options(), history = messages()
+    const image = { type: 'image', mimeType: 'image/png', data: 'SU1BR0U=' }
+    history[0].content = [{ type: 'text', text: String(history[0].content) }, image]
+    if (retainImage) history[2].content = [{ type: 'text', text: String(history[2].content) }, image]
+    const original = structuredClone(history), requests: unknown[] = []
+    config.resolveModel = async () => selected
+    config.providerFetch = async (_url, init) => {
+      requests.push(JSON.parse(String(init?.body)))
+      return response(requests.length === 1 ? 'Summary' : 'Continue')
+    }
+    const pending = invokeConversationWithCompression(selected, context(history), config)
+    if (retainImage) {
+      await expect(pending).rejects.toThrow('Remove attachments')
+      expect(requests).toHaveLength(1)
+      expect(config.compressionTracking.onCompressionCompleted).not.toHaveBeenCalled()
+    } else {
+      const result = await pending
+      expect(result.text).toBe('Continue')
+      expect(result.summary).toMatchObject({ cutoffIndex: 2, summaryText: 'Summary' })
+      expect(result.summary!.inputTokensBefore).toBeGreaterThan(result.summary!.inputTokensAfter)
+      expect(config.compressionTracking.onCompressionCompleted).toHaveBeenCalledOnce()
+      expect(requests).toHaveLength(2)
+    }
+    expect(JSON.stringify(requests)).not.toContain(image.data)
+    expect(history).toEqual(original)
+  })
+
   it('returns a provisional summary and commits it atomically with the complete response', async () => {
     const database = new Database(':memory:')
     try {

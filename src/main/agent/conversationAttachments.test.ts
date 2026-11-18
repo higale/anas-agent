@@ -3,9 +3,46 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ConversationMessage } from '../../runtime/conversationMessage'
 import type { AgentAttachmentArtifact } from '@shared/agentTypes'
-import { afterEach, describe, expect, it } from 'vitest'
-import { createConversationAttachmentProjector } from './conversationAttachments'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createConversationAttachmentProjector, validateSubmittedImageAttachments } from './conversationAttachments'
 import { stripConversationAttachments } from './conversationAttachments'
+
+vi.mock('../config/appConfig', () => ({ getAppConfigSnapshot: async () => ({ settings: { attachmentTextMaxChars: 1000, attachmentTextOverflow: 'truncate' } }) }))
+
+const pixel = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j3ioAAAAASUVORK5CYII='
+const imageBlock = { type: 'image' as const, data: pixel, mimeType: 'image/png' }
+
+describe('attachment submission preflight', () => {
+  it('counts only retained conversation attachments alongside the new input, preserving originals', async () => {
+    const root = await temporaryDirectory(), path = join(root, 'pixel.png')
+    await writeFile(path, Buffer.from(pixel, 'base64'))
+    const messages: ConversationMessage[] = [{ id: 'run-1:input', kind: 'user', content: 'Earlier image' }]
+    const original = structuredClone(messages)
+    const input = { text: 'New image', content: [imageBlock] }
+    const model = { capabilities: { vision: true, toolUse: true }, imageLimits: { maxCount: 1 } }
+    const image = artifact(path, { kind: 'image', mimeType: 'image/png' })
+    await expect(validateSubmittedImageAttachments(input, model, messages, [image])).resolves.toBeUndefined()
+    await expect(validateSubmittedImageAttachments(input, model, messages, [{ ...image, contextPolicy: 'conversation' }])).rejects.toThrow('contains 2 embedded images')
+    await expect(validateSubmittedImageAttachments(input, model, [], [{ ...image, contextPolicy: 'conversation' }])).resolves.toBeUndefined()
+    expect(messages).toEqual(original)
+    expect(input.content).toEqual([imageBlock])
+  })
+
+  it('rereads source files and rejects changed files or rules without modifying the input', async () => {
+    const root = await temporaryDirectory(), path = join(root, 'pixel.png')
+    await writeFile(path, Buffer.from(pixel, 'base64'))
+    const input = { text: 'Keep this draft', attachments: [{ path, name: 'pixel.png', kind: 'image' as const,
+      mimeType: 'image/png', size: 1, contextPolicy: 'one_turn' as const }] }
+    const model = { capabilities: { vision: true, toolUse: true }, imageLimits: { minShortSide: 1 } }
+    await expect(validateSubmittedImageAttachments(input, model)).resolves.toBeUndefined()
+    await expect(validateSubmittedImageAttachments(input, { ...model, imageLimits: { minShortSide: 2 } })).rejects.toThrow('pixel.png: Dimensions 1×1')
+    await expect(validateSubmittedImageAttachments(input, { ...model, imageLimits: { maxBytes: 1 } })).rejects.toThrow('Original size')
+    await writeFile(path, 'no longer an image')
+    await expect(validateSubmittedImageAttachments(input, model)).rejects.toThrow('pixel.png')
+    expect(input.text).toBe('Keep this draft')
+    expect(input.attachments).toHaveLength(1)
+  })
+})
 
 const temporaryDirectories: string[] = []
 
@@ -58,6 +95,47 @@ function projector(
 }
 
 describe('conversation attachment projection', () => {
+  it.each([true, false])('retains the original path when historical image data is omitted (vision=%s)', async vision => {
+    const sourcePath = 'C:\\images\\diagram.png'
+    const image = artifact('/archive/need/not/exist.png', { name: 'diagram.png', sourcePath, kind: 'image', mimeType: 'image/png' })
+    const messages: ConversationMessage[] = [{ id: image.messageId, kind: 'user', content: 'Inspect this' }]
+    const target = projector([], 'later-run', vision)
+    target.addArtifacts([image])
+    const [projected] = await target.project(messages)
+    expect(projected.content).toContainEqual({ type: 'text', text: `[Attachment: diagram.png]\nOriginal path: ${sourcePath}` })
+    expect(JSON.stringify(projected.content)).not.toContain(image.path)
+    expect(JSON.stringify(projected.content)).toContain('image data omitted')
+    expect((projected.content as { type: string }[]).every(block => block.type === 'text')).toBe(true)
+    expect(stripConversationAttachments([projected])).toEqual([{ ...messages[0], content: [{ type: 'text', text: 'Inspect this' }], context: {} }])
+    expect(messages[0].content).toBe('Inspect this')
+  })
+
+  it.each(['image', 'text'] as const)('provides the original %s path while reading the archived content', async kind => {
+    const root = await temporaryDirectory(), archivedPath = join(root, 'content'), originalPath = join(root, '原始目录', '附件 # 100%')
+    await writeFile(archivedPath, kind === 'image' ? Buffer.from(pixel, 'base64') : 'Archived text')
+    const saved = artifact(archivedPath, { name: '附件 # 100%', sourcePath: originalPath, kind, mimeType: kind === 'image' ? 'image/png' : 'text/plain' })
+    const [projected] = await projector([saved], 'run-1').project([{ id: saved.messageId, kind: 'user', content: 'Inspect' }])
+    expect(projected.content).toContainEqual({ type: 'text', text: kind === 'image'
+      ? `[Attachment: 附件 # 100%]\nOriginal path: ${originalPath}` : `Original path: ${originalPath}\n<file name="附件 # 100%">\nArchived text\n</file>` })
+    expect(JSON.stringify(projected.content)).not.toContain(JSON.stringify(archivedPath).slice(1, -1))
+    if (kind === 'image') expect(projected.content).toContainEqual({ type: 'image_url', image_url: { url: `data:image/png;base64,${pixel}`, detail: 'auto' } })
+    expect(saved.sourcePath).toBe(originalPath)
+    expect(saved.path).toBe(archivedPath)
+  })
+
+  it('keeps only the filename for an old image without an original path', async () => {
+    const root = await temporaryDirectory(), path = join(root, 'archived.png')
+    await writeFile(path, Buffer.from(pixel, 'base64'))
+    const image = artifact(path, { name: 'old.png', kind: 'image', mimeType: 'image/png' })
+    const messages: ConversationMessage[] = [{ id: image.messageId, kind: 'user', content: 'Old image' }]
+    const [projected] = await projector([image], 'later-run').project(messages)
+    expect(projected.content).toContainEqual({ type: 'text', text: '[Attachment: old.png]' })
+    expect(JSON.stringify(projected.content)).not.toContain(JSON.stringify(path).slice(1, -1))
+    expect(JSON.stringify(projected.content)).not.toContain('Original path:')
+    const [retained] = await projector([{ ...image, contextPolicy: 'conversation' }], 'later-run').project(messages)
+    expect(retained.content).toContainEqual({ type: 'image_url', image_url: { url: `data:image/png;base64,${pixel}`, detail: 'auto' } })
+  })
+
   it('projects one-turn content throughout its source run without mutating stored messages', async () => {
     const root = await temporaryDirectory()
     const path = join(root, 'notes.txt')
@@ -191,6 +269,7 @@ it.each([true, false])('reports missing attachment content to the model (availab
   const [projected] = await target.project([source])
   expect(JSON.stringify(projected.content)).toContain('Application attachment notice')
   expect(JSON.stringify(projected.content)).toContain('content was not provided')
+  expect(JSON.stringify(projected.content)).not.toContain(JSON.stringify(path).slice(1, -1))
   expect(source.content).toBe('Read the attachment.')
   expect(stripConversationAttachments([projected])[0].content).toEqual([{ type: 'text', text: source.content }])
   await writeFile(path, 'late change')

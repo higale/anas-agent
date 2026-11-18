@@ -65,6 +65,10 @@ import {
 import { findResolvedModelConfig, getAppConfigSnapshot, onAppConfigChanged } from '../config/appConfig'
 import { runtimeLog } from '../runtimeLogger'
 import { getProject, recoverProjectDeletion, reorderSidebar } from '../projectStore'
+import { hasModelImageLimits } from '@shared/modelImageLimits'
+import { validateSubmittedImageAttachments } from './conversationAttachments'
+import { simpleConversationHistory } from './conversationHistoryProjection'
+import type { ConversationMessage } from '../../runtime/conversationMessage'
 import type { SidebarReorderRequest } from '@shared/sidebarOrder'
 import type {
   ProjectDeleteResult
@@ -789,6 +793,16 @@ export function registerAgentIpcHandlers(): void {
         executionInput.codeReview = await captureCodeReview(currentDatabase(input.review.kind === 'recorded' ? input.review.threadId : input.threadId), input.review, thread?.projectId ?? executionInput.newThread!.projectId)
         executionInput.text = codeReviewPrompt(executionInput.codeReview)
         delete executionInput.displayText
+      }
+      if (hasModelImageLimits(selectedModel.imageLimits)) {
+        const database = input.threadId ? currentRuntime().databaseForThread(input.threadId) : undefined
+        const history = database?.runs.store.readHistory(executionInput.threadId)
+        let messages: ConversationMessage[] = (history?.messages.slice(history.context.summary?.cutoffIndex ?? 0) ?? [])
+          .map(record => ({ ...record.value, id: record.id }))
+        const project = await getProject(thread?.projectId ?? executionInput.newThread!.projectId)
+        if (project.kind === 'simple_chat') messages = simpleConversationHistory(messages)
+        await validateSubmittedImageAttachments(executionInput, selectedModel, messages,
+          database?.resources.listAttachmentsForThread(executionInput.threadId))
       }
       subscribeAgentEvents(event.sender)
       const result = await currentRuntime().submitRunWithAttachments(executionInput, confirmSpeech)

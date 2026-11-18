@@ -27,7 +27,9 @@ import { initializePluginsStore, stopPluginChangeNotifications } from './plugins
 import { initializeBundledExamples } from './bundledExamples'
 import { getInputHistory } from './inputHistoryStore'
 import { validateExecutionStorageDirectory } from './executionStorageValidation'
-import { recoverInterruptedDataRestore } from './backupService'
+import { recoverInterruptedDataRestore, defaultBackupDirectory } from './backupService'
+import { join } from 'node:path'
+import { upgradeSavedConversationStorage } from './migrations'
 import { reportStartupFailure } from './startupFailure'
 import { registerSpeechReplyIpc } from './speech/speechReplyIpc'
 import { registerSpeechInputIpc } from './speech/speechInputIpc'
@@ -90,6 +92,8 @@ function startApplication(): void {
     await initializeBundledExamples()
     await initializePluginsStore()
     await recoverPendingProjectDeletion()
+    const upgradeBackup = await upgradeSavedConversationStorage(getDataDir(), join(defaultBackupDirectory(), 'before-upgrade'))
+    if (upgradeBackup) runtimeLog('info', 'backup', 'Conversation databases upgraded; originals preserved.', { path: upgradeBackup })
     await initializeAgentRuntime()
     await initializeAppProfile()
     try {

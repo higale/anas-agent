@@ -1,4 +1,4 @@
-import { projectModelToolImageLimits } from './conversationImageLimits'
+import { projectModelImageLimits } from './conversationImageLimits'
 import type { ResolvedModelConfig } from '@shared/types'
 import type { CodeReviewSnapshot } from '@shared/codeReview'
 import { modelContextKey } from '@shared/modelConfig'
@@ -37,8 +37,9 @@ export async function prepareConversationModelCall(model: ResolvedModelConfig, c
     now?: () => string
   }) {
   options.signal.throwIfAborted()
-  let messages = projectModelToolImageLimits(projectConversationToolImages(context.messages), model.imageLimits)
-  const imageLimitWarnings = messages.filter(message => message.kind === 'tool').flatMap(message => message.context?.imageLimitWarnings ?? [])
+  let messages = projectModelImageLimits(projectConversationToolImages(context.messages), model.imageLimits)
+  const imageLimitWarnings = messages.filter(message => message.kind === 'tool' || message.kind === 'user')
+    .flatMap(message => message.context?.imageLimitWarnings ?? [])
   const tools = withResponseTools(context.tools, context.review ? [codeReviewToolDeclaration(context.review.id)] : [])
   if (context.review) {
     const prompt = codeReviewPrompt(context.review)

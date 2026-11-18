@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TFunction } from 'i18next'
 import type { SelectedAttachment } from '@shared/types'
+import type { ModelImageLimits } from '@shared/modelImageLimits'
 import { useComposerDrafts } from './composerDrafts'
 import { useComposerAttachments } from './useComposerAttachments'
 
@@ -16,10 +17,10 @@ function file(path: string, kind: SelectedAttachment['kind'] = 'text', extra: Pa
   return { path, name: path, kind, mimeType: kind === 'image' ? 'image/png' : 'text/plain', size: 1, contextPolicy: 'one_turn', ...extra }
 }
 
-function Harness({ draftKey = 'a', visionEnabled = true }: { draftKey?: string; visionEnabled?: boolean }) {
+function Harness({ draftKey = 'a', visionEnabled = true, imageLimits }: { draftKey?: string; visionEnabled?: boolean; imageLimits?: ModelImageLimits }) {
   const draft = useComposerDrafts(draftKey)
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const controller = useComposerAttachments({ ...draft, draftKey, projectId: 'project', inputRef, t, visionEnabled })
+  const controller = useComposerAttachments({ ...draft, draftKey, projectId: 'project', inputRef, t, visionEnabled, imageLimits })
   return <form aria-label="composer" onDrop={event => { void controller.handleComposerDrop(event) }}>
     <textarea aria-label="input" ref={inputRef} value={draft.input} onChange={event => draft.setInput(event.target.value)} />
     <button type="button" onClick={() => void controller.attachTextFiles()}>add</button>
@@ -39,6 +40,33 @@ afterEach(() => {
 })
 
 describe('composer attachment paths', () => {
+  it.each(['pick', 'drop'])('rejects a noncompliant image at %s and preserves text and valid attachments', async method => {
+    const dataUri = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j3ioAAAAASUVORK5CYII='
+    const selected = [file('/pixel.png', 'image', { dataUri, temporary: true }), file('/notes.txt')]
+    files.openText.mockResolvedValue(selected)
+    files.fromDroppedFiles.mockResolvedValue(selected)
+    render(<Harness imageLimits={{ minShortSide: 2 }} />)
+    fireEvent.change(screen.getByLabelText('input'), { target: { value: 'Keep my text' } })
+    if (method === 'pick') fireEvent.click(screen.getByText('add'))
+    else fireEvent.drop(screen.getByRole('form'), { dataTransfer: { types: ['Files'], files: [new File(['x'], 'pixel.png')] } })
+    expect(await screen.findByText('convert /notes.txt')).toBeInTheDocument()
+    expect(screen.queryByText('convert /pixel.png')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('input')).toHaveValue('Keep my text')
+    expect(notices.warning).toHaveBeenCalledWith(expect.stringContaining('/pixel.png: Dimensions 1×1'))
+    expect(files.releaseTemporaryAttachments).toHaveBeenCalledWith(['/pixel.png'])
+  })
+
+  it('uses the latest model limits when a pending file selection returns', async () => {
+    let resolve!: (files: SelectedAttachment[]) => void
+    files.openText.mockReturnValue(new Promise<SelectedAttachment[]>(done => { resolve = done }))
+    const view = render(<Harness />)
+    fireEvent.click(screen.getByText('add'))
+    view.rerender(<Harness imageLimits={{ maxBytes: 0 }} />)
+    await act(async () => { resolve([file('/pixel.png', 'image', { dataUri: 'data:image/png;base64,AAAA' })]) })
+    expect(screen.queryByText('convert /pixel.png')).not.toBeInTheDocument()
+    expect(notices.warning).toHaveBeenCalledWith(expect.stringContaining('exceeds the limit of 0'))
+  })
+
   it.each([
     '/Users/tester/Desktop/未命名文件夹/报告 # 100%.txt',
     'C:\\Users\\tester\\Desktop\\未命名文件夹\\报告 # 100%.txt',

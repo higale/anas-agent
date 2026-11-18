@@ -137,12 +137,22 @@ describe('native prepared conversation request', () => {
 
 
 describe('image limits in prepared protocol requests', () => {
+  it.each([{ maxCount: 0 }, { maxBytes: 0 }])('estimates blocked attachments without allowing transport %j', async imageLimits => {
+    const selected = { ...model, imageLimits }, source = context(), current = options()
+    source.messages = [{ kind: 'user', content: [{ type: 'image', mimeType: 'image/png', data: 'SU1BR0U=' }] }]
+    expect(conversationContextTokens({ ...source, protocol: model.protocol, imageLimits })).toBe(
+      conversationContextTokens({ ...source, protocol: model.protocol }))
+    await expect(prepareConversationModelCall(selected, source, { ...current, resolveModel: async () => selected }))
+      .rejects.toBeInstanceOf(ModelSelectionError)
+    expect(current.providerFetch).not.toHaveBeenCalled()
+  })
+
   it.each((['openai_chat_completions', 'openai_responses', 'anthropic_messages'] as const).flatMap(protocol => [false, true].map(stream => ({ protocol, stream }))))(
     'projects actual $protocol stream=$stream requests consistently with budgets and identity', async ({ protocol, stream }) => {
-      const selected = { ...model, protocol, stream, imageLimits: { maxCount: 0 } }
+      const selected = { ...model, protocol, stream, imageLimits: { maxCount: 1 } }
       const image = { type: 'image', mimeType: 'image/png', data: 'SU1BR0U=' }
       const source = context()
-      source.messages = [{ kind: 'user', content: 'Capture' },
+      source.messages = [{ kind: 'user', content: [{ type: 'text', text: 'Capture' }, image] },
         { kind: 'assistant', content: '', calls: [{ id: 'call', name: 'capture', args: {} }] },
         { kind: 'tool', name: 'capture', resultFor: 'call', resultStatus: 'success', content: [{ type: 'text', text: 'Tool succeeded' }, image] }]
       const before = structuredClone(source)
@@ -152,7 +162,7 @@ describe('image limits in prepared protocol requests', () => {
       await expect(prepared.invoke()).rejects.toThrow()
       expect(body).toBeDefined()
       expect(JSON.stringify(body)).not.toContain(image.data)
-      expect(JSON.stringify(body)).toContain('entire batch of 1')
+      expect(JSON.stringify(body)).toContain('entire batch of 2')
       expect(JSON.stringify(body)).toContain('Tool succeeded')
       expect(source).toEqual(before)
       expect(prepared.requestKey).toBe(conversationRequestKey({ ...prepared, protocol }))
@@ -161,14 +171,25 @@ describe('image limits in prepared protocol requests', () => {
     })
 
   it('persists omission reasons as response context for UI without overwriting tool results', async () => {
-    const selected = { ...model, imageLimits: { maxCount: 0 } }
+    const selected = { ...model, imageLimits: { maxCount: 1 } }
     const source = context()
-    source.messages = [{ kind: 'assistant', content: '', calls: [{ id: 'call', name: 'capture', args: {} }] },
+    source.messages = [{ kind: 'user', content: [{ type: 'image', data: 'SU1BR0U=', mimeType: 'image/png' }] },
+      { kind: 'assistant', content: '', calls: [{ id: 'call', name: 'capture', args: {} }] },
       { kind: 'tool', resultFor: 'call', content: [{ type: 'image', data: 'SU1BR0U=', mimeType: 'image/png' }] }]
     const prepared = await prepareConversationModelCall(selected, source, { ...options(), resolveModel: async () => selected })
     const result = await prepared.invoke()
     const restored = decodeConversationMessage(encodeConversationMessage(result.message))
-    expect(presentConversationMessage(restored, 'response').imageLimitWarnings).toEqual([expect.stringContaining('entire batch of 1')])
-    expect(source.messages[1].content).toEqual([{ type: 'image', data: 'SU1BR0U=', mimeType: 'image/png' }])
+    expect(presentConversationMessage(restored, 'response').imageLimitWarnings).toEqual([
+      expect.stringContaining('Attachment'), expect.stringContaining('Tool')])
+    expect(source.messages[0].content).toEqual(source.messages[2].content)
+  })
+
+  it('does not repeat omission warnings from an earlier assistant response', async () => {
+    const selected = { ...model, imageLimits: { maxCount: 0 } }
+    const source = context()
+    source.messages = [{ kind: 'assistant', content: 'Earlier answer', context: { imageLimitWarnings: ['Earlier omitted image'] } },
+      { kind: 'user', content: 'Continue' }]
+    const prepared = await prepareConversationModelCall(selected, source, { ...options(), resolveModel: async () => selected })
+    expect((await prepared.invoke()).message.context?.imageLimitWarnings).toBeUndefined()
   })
 })

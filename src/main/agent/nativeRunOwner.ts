@@ -438,8 +438,8 @@ export class NativeRunOwner {
           || !Buffer.from(encodeConversationMessage(direction(row, commit.runId, after).value)).equals(Buffer.from(encodeConversationMessage(record.value)))) {
           throw new Error('The committed direction no longer matches its queued input.')
         }
-        this.database.prepare(`INSERT INTO agent_attachments(id,thread_id,message_id,run_id,name,mime_type,size,kind,storage_path,text_truncated,context_policy,created_at)
-          SELECT id,?,?,?,name,mime_type,size,kind,storage_path,text_truncated,context_policy,created_at
+        this.database.prepare(`INSERT INTO agent_attachments(id,thread_id,message_id,run_id,name,mime_type,size,kind,storage_path,text_truncated,context_policy,created_at,source_path)
+          SELECT id,?,?,?,name,mime_type,size,kind,storage_path,text_truncated,context_policy,created_at,source_path
           FROM agent_queued_attachments WHERE queued_input_id=?`).run(commit.threadId, record.id, commit.runId, id)
         this.database.prepare('DELETE FROM agent_queued_inputs WHERE id=? AND thread_id=?').run(id, commit.threadId)
       }

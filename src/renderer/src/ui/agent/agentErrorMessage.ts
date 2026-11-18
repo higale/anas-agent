@@ -10,7 +10,8 @@ interface AgentErrorTranslator {
 const runModelCallLimitPattern = /^Model call limits exceeded: run level call limit reached with (\d+) model calls$/i
 
 export function agentActionError(summary: string, error: unknown): string {
-  const detail = error instanceof Error ? error.message.trim() : typeof error === 'string' ? error.trim() : ''
+  const raw = error instanceof Error ? error.message.trim() : typeof error === 'string' ? error.trim() : ''
+  const detail = raw.replace(/^Error invoking remote method '[^']+':\s*(?:[\w.]*Error:\s*)?/, '')
   return detail && detail !== summary ? `${summary}\n${detail}` : summary
 }
 

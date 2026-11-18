@@ -29,6 +29,7 @@ describe('ComposerQueuedMessages', () => {
     messages[0].attachments = [{
       path: 'C:\\notes.txt',
       name: 'notes.txt',
+      sourcePath: 'C:\\original\\notes.txt',
       size: 12,
       kind: 'text',
       mimeType: 'text/plain',
@@ -47,6 +48,7 @@ describe('ComposerQueuedMessages', () => {
     expect(container.querySelector('.composer-queue-list')).toHaveAttribute('role', 'list')
     expect(screen.getAllByRole('listitem')).toHaveLength(3)
     expect(screen.getByText('notes.txt')).toBeInTheDocument()
+    expect(screen.getByText('notes.txt')).toHaveAttribute('data-tooltip', 'C:\\original\\notes.txt')
     fireEvent.click(screen.getAllByText('chat.queued_direction')[1])
     expect(onSteer).toHaveBeenCalledWith(messages[1], 'run-1')
     fireEvent.click(screen.getAllByLabelText('chat.remove_queued_message')[2])

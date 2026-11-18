@@ -277,11 +277,47 @@ describe('data backup restore', () => {
     storage.createThread({ title: 'Keep current data' }); storage.close()
     const current = await readFile(join(dataRoot, 'db/catalog.sqlite'))
     const config = await readFile(join(dataRoot, 'config/models.json'))
-    await expect(service.restoreDataBackupZip(backup.path)).rejects.toThrow('expected 2')
+    await expect(service.restoreDataBackupZip(backup.path)).rejects.toThrow('Unsupported')
     expect(await readFile(join(dataRoot, 'db/catalog.sqlite'))).toEqual(current)
     expect(await readFile(join(dataRoot, 'config/models.json'))).toEqual(config)
     expect(await readFile(backup.path)).toEqual(archive)
   }, 15_000)
+
+  it.each([true, false])('upgrades a v3 backup and restores queued records without requiring attachment files (available=%s)', async available => {
+    const root = await temporaryDirectory(), dataRoot = join(root, 'data')
+    const { snapshotAgentStorage } = await vi.importActual<typeof import('./agent/agentDatabaseBackup')>('./agent/agentDatabaseBackup')
+    const { validateRestoredDataDirectory } = await vi.importActual<typeof import('./dataRestoreValidation')>('./dataRestoreValidation')
+    const service = await loadBackupService(dataRoot, validateRestoredDataDirectory, undefined, snapshotAgentStorage)
+    await cp(join(process.cwd(), 'data/config'), join(dataRoot, 'config'), { recursive: true })
+    await cp(join(process.cwd(), 'data/subagents'), join(dataRoot, 'subagents'), { recursive: true })
+    const { AgentStorage } = await import('./agent/agentStorage')
+    const { archiveAgentAttachments } = await import('./agent/agentAttachmentStore')
+    const { getAgentConversationDatabaseFile, getAgentAttachmentsDir } = await import('./config/dataDir')
+    const storage = AgentStorage.openNative(dataRoot), thread = storage.createThread({ title: 'From v3 backup' })
+    const file = getAgentConversationDatabaseFile(thread.id, dataRoot), source = join(root, 'notes.txt')
+    await writeText(source, 'Old attachment content')
+    const archived = await archiveAgentAttachments([{ path: source, name: 'notes.txt', kind: 'text', mimeType: 'text/plain',
+      size: 22, contextPolicy: 'conversation' }], { threadId: thread.id, runId: 'queued', messageId: 'queued' }, getAgentAttachmentsDir(thread.id, dataRoot))
+    storage.conversationForThread(thread.id).queue.createQueuedInput({ id: 'queued', threadId: thread.id, text: 'Keep queue' }, archived)
+    storage.close()
+    const { default: Database } = await import('better-sqlite3')
+    const old = new Database(file)
+    old.exec('ALTER TABLE agent_attachments DROP COLUMN source_path; ALTER TABLE agent_queued_attachments DROP COLUMN source_path; PRAGMA user_version=3')
+    old.close()
+    if (!available) await rm(archived[0].artifact.path)
+    const backup = await service.createDataBackupZip(join(root, 'v3.zip')), bytes = await readFile(backup.path)
+    await service.restoreDataBackupZip(backup.path)
+    expect(await readFile(backup.path)).toEqual(bytes)
+    const restored = AgentStorage.openNative(dataRoot)
+    try {
+      expect(restored.listThreads()[0].title).toBe('From v3 backup')
+      const queued = restored.conversationForThread(thread.id).queue.listQueuedInputs()[0]
+      expect(queued.attachments[0].name).toBe('notes.txt')
+      expect(queued.attachments[0].sourcePath).toBeUndefined()
+      if (available) expect(await readFile(queued.attachments[0].path, 'utf8')).toBe('Old attachment content')
+      else expect(queued.attachments[0].skippedReason).toBe('Queued attachment is no longer available.')
+    } finally { restored.close() }
+  })
 
   it('backs up only registered conversations and preserves unregistered creation leftovers on disk', async () => {
     const root = await temporaryDirectory(), dataRoot = join(root, 'data')

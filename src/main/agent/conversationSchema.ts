@@ -161,7 +161,8 @@ export const conversationResourceSchema = `
         text_truncated INTEGER NOT NULL DEFAULT 0 CHECK (text_truncated IN (0, 1)),
         context_policy TEXT NOT NULL DEFAULT 'one_turn'
           CHECK (context_policy IN ('one_turn', 'conversation')),
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        source_path TEXT
       );
 
       CREATE INDEX IF NOT EXISTS agent_attachments_thread_message_idx
@@ -194,7 +195,8 @@ export const conversationResourceSchema = `
         text_truncated INTEGER NOT NULL DEFAULT 0 CHECK (text_truncated IN (0, 1)),
         context_policy TEXT NOT NULL DEFAULT 'one_turn'
           CHECK (context_policy IN ('one_turn', 'conversation')),
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        source_path TEXT
       );
 
       CREATE INDEX IF NOT EXISTS agent_queued_attachments_input_idx

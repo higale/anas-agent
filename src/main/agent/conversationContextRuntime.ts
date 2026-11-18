@@ -1,4 +1,4 @@
-import { projectModelToolImageLimits } from './conversationImageLimits'
+import { projectModelImageLimits } from './conversationImageLimits'
 import { modelRecoveryFeedback } from '../../runtime/modelOutputRecovery'
 import { modelParameterInputTokens } from '../../runtime/modelInputBudget'
 import type { ManualContextCompression } from '../../runtime/compression'
@@ -110,7 +110,7 @@ export function createConversationContextRuntime(options: {
     ),
     request?: ConversationContextRequest
   ): AgentContextStatus {
-    messages = projectModelToolImageLimits(projectConversationToolImages(messages), model.imageLimits)
+    messages = projectModelImageLimits(projectConversationToolImages(messages), model.imageLimits, 'estimate')
     const tools = request?.tools ?? options.tools(model)
     const systemPrompt = systemPromptValue(options.systemPrompt(model))
     const baseSystemMessage: ConversationMessage = { kind: 'system', content: systemPrompt.text }

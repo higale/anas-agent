@@ -104,6 +104,7 @@ export type AgentAttachmentContextPolicy = 'one_turn' | 'conversation'
 export interface AgentAttachmentInput {
   path: string
   name: string
+  sourcePath?: string
   mimeType: string
   size: number
   kind: 'image' | 'text' | 'binary'
@@ -117,6 +118,7 @@ export interface AgentAttachmentArtifact {
   messageId: string
   runId: string
   name: string
+  sourcePath?: string
   mimeType: string
   size: number
   kind: AgentAttachmentInput['kind']

@@ -7,7 +7,7 @@ import type { ResolvedModelConfig } from '@shared/types'
 import type { ConversationMessage } from '../../runtime/conversationMessage'
 import type { RunObserver } from '../../runtime/runExecution'
 import { isToolImageBlock } from '../../runtime/conversationHistory'
-import { conversationRequestKey, conversationContextTokens, countConversationTokens, projectConversationToolImages } from './conversationContext'
+import { conversationRequestKey, conversationContextTokens, countConversationTokens, projectConversationToolImages, projectConversationInput } from './conversationContext'
 import { conversationPendingImageStart } from './conversationHistoryProjection'
 import { NativeExecutionStore, nativeExecutionSchema } from './nativeExecutionStore'
 import { createConversationModelPreparation } from './conversationModelExecution'
@@ -30,6 +30,17 @@ function call(id = 'capture') {
 }
 
 describe('tool image request lifetime', () => {
+  it.each(['openai_chat_completions', 'openai_responses', 'anthropic_messages'] as const)('retains tool image path text after omitting image data for %s', protocol => {
+    const path = '/original/screenshots/diagram.png', tool = result()
+    tool.content.unshift({ type: 'text', text: `Original path: ${path}` })
+    const projected = projectConversationToolImages([call(), tool, { kind: 'assistant', content: 'Observed' }])
+    const request = JSON.stringify(projectConversationInput(projected, protocol))
+    expect(request).toContain(path)
+    expect(request).not.toContain('SCREENSHOT_BASE64')
+    expect(request).not.toContain('SECOND_IMAGE')
+    expect(hasToolImages(tool)).toBe(true)
+  })
+
   it('preserves every pending image and removes only observed tool images without mutating history', () => {
     const old = result('old'), fresh = result('fresh')
     const attachment = { kind: 'user' as const, content: [image] }

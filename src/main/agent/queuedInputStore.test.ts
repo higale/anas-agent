@@ -36,7 +36,7 @@ describe('durable queued inputs', () => {
       initializeNativeConversationStorage(database)
       const owner = new NativeRunOwner(database), thread = owner.createThread(), other = owner.createThread()
       await writeFile(source, 'Native queued attachment')
-      const archived = await archiveAgentAttachments([{ path: source, name: 'notes.txt', mimeType: 'text/plain', size: 24, kind: 'text', contextPolicy: 'one_turn' }],
+      const archived = await archiveAgentAttachments([{ path: source, name: 'notes.txt', sourcePath: source, mimeType: 'text/plain', size: 24, kind: 'text', contextPolicy: 'one_turn' }],
         { threadId: thread.id, runId: 'queued', messageId: 'queued' }, attachmentRoot)
       let queue = new QueuedInputStore(database, attachmentRoot)
       expect(() => queue.createQueuedInput({ id: 'wrong-owner', threadId: other.id, text: 'Wrong' }, archived)).toThrow('does not belong')
@@ -51,7 +51,7 @@ describe('durable queued inputs', () => {
       database.close(); database = new Database(file); initializeNativeConversationStorage(database)
       queue = new QueuedInputStore(database, attachmentRoot)
       expect(queue.getQueuedInput(thread.id, 'queued')).toMatchObject({ status: 'failed', error: 'Provider unavailable', displayText: '/review',
-        attachments: [expect.objectContaining({ path: archived[0].artifact.path, contextPolicy: 'one_turn' })] })
+        attachments: [expect.objectContaining({ path: archived[0].artifact.path, name: 'notes.txt', sourcePath: source, contextPolicy: 'one_turn' })] })
       await expect(readFile(archived[0].artifact.path, 'utf8')).resolves.toBe('Native queued attachment')
       await rm(archived[0].artifact.path)
       const retried = queue.retryQueuedInput(thread.id, 'queued')

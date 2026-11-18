@@ -222,6 +222,7 @@ export function AttachmentGrid({
     <>
       <div className={`attachment-grid attachment-grid-${mode}`}>
         {attachments.map((file, index) => {
+          const displayName = file.name
           const preview = filePreview(file, previews)
           const fileIconDataUri = fileIcons[file.path]?.dataUri
           const status = attachmentDisplaySuffix(file, t)
@@ -237,11 +238,12 @@ export function AttachmentGrid({
               <NoFocusButton
                 className="attachment-open"
                 type="button"
-                aria-label={`${openLabel}: ${file.name}`}
+                aria-label={`${openLabel}: ${displayName}`}
+                data-tooltip={file.sourcePath ?? file.name}
                 onClick={() => void openAttachment(file)}
               >
                 {preview ? (
-                  <img src={preview} alt={file.name} decoding="async" loading="lazy" draggable={false} />
+                  <img src={preview} alt={displayName} decoding="async" loading="lazy" draggable={false} />
                 ) : (
                   <>
                     <span className="attachment-file-icon">
@@ -250,7 +252,7 @@ export function AttachmentGrid({
                         : fileIconFallback(file)}
                     </span>
                     <span className="attachment-file-text">
-                      <strong className="ui-truncate">{file.name}</strong>
+                      <strong className="ui-truncate">{displayName}</strong>
                       <small>
                         {file.skippedReason && <AlertTriangle size={12} />}
                         <span className="ui-truncate">{status}</span>

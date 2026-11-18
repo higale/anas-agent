@@ -14,7 +14,7 @@
 
 - 普通聊天、简单聊天、审核、压缩、子任务、历史编辑和恢复共用原生协调器、`NativeRunHost` 与一份执行状态。LangChain、LangGraph、Deep Agents 及旧执行器、图存储、middleware 和适配依赖已移除。支持 OpenAI Chat Completions、Responses 和 Anthropic 协议。
 - 默认数据目录为 `~/.anas`，开发与打包一致，保留 `--data-dir`。不自动发现、导入或清理 `.galeAnas`、`.anas-next`。测试使用隔离目录。
-- 当前 catalog 为 **v2**，会话库为 **v3**，独立记忆库为 **v1**。项目定义为 v0，子 Agent 管理配置为 v1；完整版本表与历史不兼容边界见[数据兼容规则](DATA_MIGRATIONS.md)。从旧框架升级只复制兼容配置与扩展资源，不复制旧 `db/`；步骤见 [5.x 升级说明](../data/help/UPGRADE_TO_5.zh-CN.md)及[英文版](../data/help/UPGRADE_TO_5.en.md)。
+- 当前 catalog 为 **v2**，会话库为 **v4**，独立记忆库为 **v1**。项目定义为 v0，子 Agent 管理配置为 v1；完整版本表与历史不兼容边界见[数据兼容规则](DATA_MIGRATIONS.md)。从旧框架升级只复制兼容配置与扩展资源，不复制旧 `db/`；步骤见 [5.x 升级说明](../data/help/UPGRADE_TO_5.zh-CN.md)及[英文版](../data/help/UPGRADE_TO_5.en.md)。
 - 项目定义保存于 `db/projects/<项目ID>/project.json`，跨项目界面状态保存于 `db/projects/state.json`，对话资源位于各项目的 `conversations/` 中，创建后归属固定。旧 `db/projects.json`／`db/conversations/` 不读取、不迁移、不自动清理，也不恢复其备份。
 - 启动在副本上检查 catalog 版本、必需字段和权限约束；打开会话时核对其格式与身份。无关目录条目不阻塞启动，缺失的可选界面状态使用默认值。当前格式自身的备份、修复和事务恢复继续保留。
 - 手动修复先保全原件，逐项抢救项目与会话，再重建索引；无法恢复的内容隔离保留并报告，补齐必要结构，以程序可进入为目标。切换前实际打开存储验证，不转换旧布局或重放外部操作。

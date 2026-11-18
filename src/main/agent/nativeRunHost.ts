@@ -94,6 +94,7 @@ export class NativeRunHost {
     if (queued) {
       const supplied = attachments.map(item => ({ ...item, textTruncated: item.textTruncated ?? false }))
       const saved = queued.attachments.map(item => ({ path: item.path, name: item.name, mimeType: item.mimeType, size: item.size,
+        ...(item.sourcePath === undefined ? {} : { sourcePath: item.sourcePath }),
         kind: item.kind, contextPolicy: item.contextPolicy, textTruncated: item.truncated ?? false }))
       if (text !== queued.text || (displayText ?? text) !== queued.displayText || !isDeepStrictEqual(supplied, saved)) {
         throw new Error('Direction input changed from its saved queued message. Reload the queue before applying it.')

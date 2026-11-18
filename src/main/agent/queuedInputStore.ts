@@ -20,6 +20,7 @@ type QueuedAttachmentRow = {
   id: string
   queued_input_id: string
   name: string
+  source_path: string | null
   mime_type: string
   size: number
   kind: SelectedAttachment['kind']
@@ -55,6 +56,7 @@ export class QueuedInputStore {
           id,
           queued_input_id,
           name,
+          source_path,
           mime_type,
           size,
           kind,
@@ -62,7 +64,7 @@ export class QueuedInputStore {
           text_truncated,
           context_policy,
           created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       for (const archived of attachments) {
         const artifact = archived.artifact
@@ -77,6 +79,7 @@ export class QueuedInputStore {
           artifact.id,
           input.id,
           artifact.name,
+          artifact.sourcePath ?? null,
           artifact.mimeType,
           artifact.size,
           artifact.kind,
@@ -102,6 +105,7 @@ export class QueuedInputStore {
         id,
         queued_input_id,
         name,
+        source_path,
         mime_type,
         size,
         kind,
@@ -136,6 +140,7 @@ export class QueuedInputStore {
         id,
         queued_input_id,
         name,
+        source_path,
         mime_type,
         size,
         kind,
@@ -232,6 +237,7 @@ export class QueuedInputStore {
     return {
       path: managed ? path : '',
       name: row.name,
+      ...(row.source_path === null ? {} : { sourcePath: row.source_path }),
       mimeType: row.mime_type,
       size: row.size,
       kind: row.kind,

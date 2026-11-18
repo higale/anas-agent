@@ -21,6 +21,7 @@ import {
   shouldSkipBackupRelativePath
 } from './backupArchive'
 import { validateRestoredDataDirectory } from './dataRestoreValidation'
+import { upgradeStagedConversationStorage } from './migrations'
 import { runtimeLog } from './runtimeLogger'
 import { withApplicationDataSnapshot } from './applicationDataSnapshot'
 import { createPreservationDirectory } from './recoveryData'
@@ -260,6 +261,7 @@ async function restoreDataBackupZipExclusive(
       throw new Error('Unsupported backup storage layout.')
     }
     await rm(join(restoreDir, backupManifestFileName))
+    await upgradeStagedConversationStorage(restoreDir)
     await validateRestoredDataDirectory(restoreDir)
     await writeRestoreJournal(join(tempRoot, 'transaction.json'), journal)
 

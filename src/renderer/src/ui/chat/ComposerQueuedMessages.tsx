@@ -64,7 +64,7 @@ export function ComposerQueuedMessages({
               {message.attachments.length > 0 && (
                 <span
                   className="composer-queue-item-attachments ui-truncate"
-                  data-tooltip={message.attachments.map((attachment) => attachment.name).join('\n')}
+                  data-tooltip={message.attachments.map((attachment) => attachment.sourcePath ?? attachment.name).join('\n')}
                 >
                   <Paperclip size={12} aria-hidden="true" />
                   {message.attachments.map((attachment) => attachment.name).join(' · ')}

@@ -58,6 +58,7 @@ async function archiveOne(
       messageId: context.messageId,
       runId: context.runId,
       name: input.name,
+      ...(input.sourcePath === undefined ? {} : { sourcePath: input.sourcePath }),
       mimeType: input.mimeType,
       size: sourceInfo.size,
       kind: input.kind,
@@ -153,6 +154,9 @@ export function validatedAttachmentInputs(
       throw new Error(`${label} attachment ${index + 1} requires a MIME type.`)
     }
     const size = attachment.size
+    if (attachment.sourcePath !== undefined && (typeof attachment.sourcePath !== 'string' || !attachment.sourcePath.trim())) {
+      throw new Error(`${label} attachment ${index + 1} has an invalid source path.`)
+    }
     if (typeof size !== 'number' || !Number.isSafeInteger(size) || size < 0) {
       throw new Error(`${label} attachment ${index + 1} has an invalid size.`)
     }
@@ -173,6 +177,7 @@ export function validatedAttachmentInputs(
     return {
       path: attachment.path,
       name: attachment.name,
+      ...(attachment.sourcePath === undefined ? {} : { sourcePath: attachment.sourcePath }),
       mimeType: attachment.mimeType,
       size,
       kind,

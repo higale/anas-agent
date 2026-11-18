@@ -94,7 +94,7 @@ it('repairs databases with absent optional UI state and recreates it while retai
   expect(JSON.parse(await readFile(join(data, 'db/projects/state.json'), 'utf8')).version).toBe(0)
   for (const [index, file] of databases.entries()) {
     const db = new Database(file, { readonly: true })
-    try { expect(db.pragma('user_version', { simple: true })).toBe(index === 0 ? 2 : 3) } finally { db.close() }
+    try { expect(db.pragma('user_version', { simple: true })).toBe(index === 0 ? 2 : 4) } finally { db.close() }
   }
 })
 
@@ -102,7 +102,8 @@ async function archivedChangeFixture(version: number | undefined, databaseVersio
   const value = await fixture(0, deletedInverse ? 'deleted-inverse' : restore ? 'reversed' : 'forward')
   for (const [index, file] of value.databases.entries()) {
     const raw = new Database(file)
-    raw.pragma(`user_version = ${index === 0 ? 2 : 3}`)
+    raw.pragma(`user_version = ${index === 0 ? 2 : 4}`)
+    if (index !== 0) raw.exec('ALTER TABLE agent_attachments ADD COLUMN source_path TEXT; ALTER TABLE agent_queued_attachments ADD COLUMN source_path TEXT')
     raw.close()
   }
   const { run, inverseRunId, target: archivedTarget } = value.metadata
@@ -439,7 +440,7 @@ describe('project version metadata recovery', () => {
     const storage = AgentStorage.openNative(data)
     try { expect(storage.listThreads()).toHaveLength(1) } finally { storage.close() }
     const db = new Database(databases[1], { readonly: true })
-    try { expect(db.pragma('user_version', { simple: true })).toBe(3) } finally { db.close() }
+    try { expect(db.pragma('user_version', { simple: true })).toBe(4) } finally { db.close() }
   })
 
   it('validates a copied WAL without checkpointing or changing the original database', async () => {
@@ -453,7 +454,7 @@ describe('project version metadata recovery', () => {
       const plan = await inspectRecoveryRepair(data)
       const status = plan.files.find(file => file.name === 'projects.json')!
       expect(status.error).toBeUndefined()
-      expect(status.repairableFields.some(field => field.endsWith('user_version (9 → 3)'))).toBe(true)
+      expect(status.repairableFields.some(field => field.endsWith('user_version (9 → 4)'))).toBe(true)
       expect(await readFile(databases[1])).toEqual(before)
       expect(await readFile(`${databases[1]}-wal`)).toEqual(wal)
     } finally { db.close() }
@@ -471,7 +472,9 @@ describe('project version metadata recovery', () => {
     const inspected = await inspectRecoveryRepair(data)
     const status = inspected.files.find(file => file.name === 'projects.json')!
     expect(status.error).toBeUndefined()
-    expect(status.repairableFields).toHaveLength(version === 0 ? 3 : 4)
+    expect(status.repairableFields).toHaveLength(version === 0 ? 5 : 6)
+    expect(status.repairableFields.join('\n')).toContain('agent_attachments.source_path')
+    expect(status.repairableFields.join('\n')).toContain('agent_queued_attachments.source_path')
     for (const [index, path] of databases.entries()) expect(await readFile(path)).toEqual(before[index])
     const result = await repairRecoveryData(data, 'projects.json', () => preserveRecoveryData(data, root))
     expect(result.unresolved).toEqual([])
@@ -481,7 +484,7 @@ describe('project version metadata recovery', () => {
     expect(JSON.parse(await readProjectFixture(join(result.preservationPath!, 'data')))).toEqual(projects)
     for (const [index, path] of databases.entries()) {
       const db = new Database(path, { readonly: true })
-      try { expect(db.pragma('user_version', { simple: true })).toBe(index === 0 ? 2 : 3) } finally { db.close() }
+      try { expect(db.pragma('user_version', { simple: true })).toBe(index === 0 ? 2 : 4) } finally { db.close() }
       const saved = join(result.preservationPath!, 'data', path.slice(data.length + 1))
       expect(await readFile(saved)).toEqual(before[index])
     }

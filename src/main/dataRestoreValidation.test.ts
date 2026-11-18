@@ -1,4 +1,5 @@
 import { writeProjectFixture } from '../test/projectDirectories'
+import Database from 'better-sqlite3'
 import type { AgentThreadCreate } from '../shared/agentTypes'
 import { defaultCapabilities, serializeCapabilities } from '@shared/agentCapabilities'
 import { cp, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
@@ -208,7 +209,7 @@ describe('restored native data validation', () => {
     await expect(validateRestoredDataDirectory(root)).rejects.toThrow('Unexpected conversation storage entry: unlisted')
   })
 
-  it('rejects valid conversation databases exchanged between catalog entries', async () => {
+  it('does not inspect record ownership when restoring supported conversation formats', async () => {
     const root = await fixture()
     const [first, second] = await seedStorage(root, 'paired')
     const firstFile = getAgentConversationDatabaseFile(first.id, root)
@@ -218,16 +219,27 @@ describe('restored native data validation', () => {
     await rename(secondFile, firstFile)
     await rename(temporary, secondFile)
 
-    await expect(validateRestoredDataDirectory(root)).rejects.toThrow('Conversation database does not belong to')
+    await expect(validateRestoredDataDirectory(root)).resolves.toBeUndefined()
   })
 
-  it('rejects a thread whose project is absent from the restored project store', async () => {
+  it('does not validate a saved thread project reference during restore', async () => {
     const root = await fixture()
     await seedStorage(root, 'missing-project')
 
-    await expect(validateRestoredDataDirectory(root)).rejects.toThrow(
-      'references missing project missing-project'
-    )
+    await expect(validateRestoredDataDirectory(root)).resolves.toBeUndefined()
+  })
+
+  it('does not parse memory job records or validate saved catalog values during restore', async () => {
+    const root = await fixture()
+    await seedStorage(root, 'default')
+    const memory = new Database(join(root, 'db/memory.sqlite'))
+    memory.exec("INSERT INTO memory_jobs VALUES ('unparsed',0,'pending','{}')"); memory.close()
+    const catalog = new Database(getAgentCatalogFile(root))
+    catalog.exec("PRAGMA ignore_check_constraints=ON; UPDATE agent_conversations SET access_mode='invalid'"); catalog.close()
+    const files = [join(root, 'db/memory.sqlite'), getAgentCatalogFile(root)]
+    const before = await Promise.all(files.map(file => readFile(file)))
+    await expect(validateRestoredDataDirectory(root)).resolves.toBeUndefined()
+    expect(await Promise.all(files.map(file => readFile(file)))).toEqual(before)
   })
 
   it('rejects invalid project and Skill data', async () => {

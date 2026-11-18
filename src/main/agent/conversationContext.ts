@@ -1,4 +1,4 @@
-import { projectModelToolImageLimits } from './conversationImageLimits'
+import { projectModelImageLimits } from './conversationImageLimits'
 import type { ModelImageLimits } from '@shared/modelImageLimits'
 import type { ConversationMessage } from '../../runtime/conversationMessage'
 import type { ModelProtocol, ResolvedModelConfig } from '@shared/types'
@@ -85,7 +85,7 @@ export function conversationContextTokens(options: ConversationContextRequest & 
   parameters?: Record<string, unknown>
   imageLimits?: ModelImageLimits
 }): number {
-  const messages = projectConversationSkills(projectModelToolImageLimits(projectConversationToolImages(options.messages), options.imageLimits))
+  const messages = projectConversationSkills(projectModelImageLimits(projectConversationToolImages(options.messages), options.imageLimits, 'estimate'))
   let snapshot = conversationUsageSnapshot(messages, options.modelContextKey)
   if (snapshot && messages[snapshot.messageIndex].context?.requestKey !== conversationRequestKey({
     ...options, messages: messages.slice(0, snapshot.messageIndex)

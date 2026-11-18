@@ -165,6 +165,7 @@ function ContentBlocks({ message }: { message: AgentMessage }) {
     (attachment) => ({
       path: attachment.path,
       name: attachment.name,
+      sourcePath: attachment.sourcePath,
       size: attachment.size,
       kind: attachment.kind,
       mimeType: attachment.mimeType,

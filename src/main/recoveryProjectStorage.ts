@@ -199,6 +199,14 @@ async function stageProjectRepair(root: string, staged: string, before: string, 
         database.pragma(`user_version = ${targetVersion}`)
         if (relative !== 'db/catalog.sqlite') {
           repairedFields = await repairArchivedFileChangeVersions(database, join(root, dirname(relative)))
+          // Repair missing current-format fields independently of historical upgrade modules.
+          for (const table of ['agent_attachments', 'agent_queued_attachments']) {
+            const columns = database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+            if (columns.length && !columns.some(column => column.name === 'source_path')) {
+              database.exec(`ALTER TABLE ${table} ADD COLUMN source_path TEXT`)
+              repairedFields.push(`${table}.source_path`)
+            }
+          }
           if (rebuildActivityDirectory(database)) repairedFields.push('display directory')
         }
         const checkpoint = database.pragma('wal_checkpoint(TRUNCATE)') as Array<{ busy: number }>

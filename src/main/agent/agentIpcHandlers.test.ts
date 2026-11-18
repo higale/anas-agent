@@ -67,6 +67,39 @@ describe('agent IPC recovery', () => {
     }
   )
 
+  it('rejects image count overflow before creating a run and excludes summarized history', async () => {
+    const handlers = new Map<string, (...args: unknown[]) => unknown>()
+    const handle = vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => { handlers.set(channel, handler) })
+    const thread = { id: 'thread', projectId: 'project', modelConfigId: 'model' }
+    const image = { type: 'image', data: 'AAAA', mimeType: 'image/png' }
+    const history = { context: { summary: { cutoffIndex: 1 } }, messages: [0, 1].map(index => ({
+      id: `old-${index}`, value: { kind: 'user', content: [image] }
+    })) }
+    const database = { getThread: () => thread, runs: { store: { readHistory: () => history } },
+      listAttachmentsForThread: () => [] }
+    const run = { id: 'run', threadId: thread.id }
+    const submitRunWithAttachments = vi.fn(async () => ({ thread, run }))
+    vi.doMock('../ipcSecurity', () => ({ handleMainIpc: handle }))
+    vi.doMock('./agentStorage', () => ({ AgentStorage: { openNative: () => conversationStorage(database) } }))
+    vi.doMock('./nativeRuntimeCoordinator', () => ({ NativeRuntimeCoordinator: vi.fn(function (storage) {
+      return runtimeForStorage(storage, { getRunSubmission: vi.fn(), submitRunWithAttachments })
+    }) }))
+    vi.doMock('../projectStore', () => ({ getProject: async () => ({ kind: 'workspace' }), recoverProjectDeletion: vi.fn() }))
+    vi.doMock('../config/appConfig', () => ({ onAppConfigChanged: vi.fn(), getAppConfigSnapshot: async () => ({}),
+      findResolvedModelConfig: () => ({ id: 'model', capabilities: { vision: true }, imageLimits: { maxCount: 1 } }) }))
+    vi.doMock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
+    const module = await import('./agentIpcHandlers')
+    module.registerAgentIpcHandlers()
+    const sender = { isDestroyed: () => false, send: vi.fn(), once: vi.fn() }
+    const input = { requestId: '718b5ec8-dbb4-4bd2-8dd0-d9073f14185d', threadId: thread.id, text: 'Keep draft', content: [image] }
+    await expect(handlers.get('agent:runs:submit')!({ sender }, input)).rejects.toThrow('contains 2 embedded images')
+    expect(submitRunWithAttachments).not.toHaveBeenCalled()
+    history.context.summary.cutoffIndex = 2
+    await expect(handlers.get('agent:runs:submit')!({ sender }, input)).resolves.toEqual({ thread, run })
+    expect(submitRunWithAttachments).toHaveBeenCalledOnce()
+    expect(input.text).toBe('Keep draft')
+  })
+
   it('allows model changes during a run and rejects deleted selections when submitting again', async () => {
     const handlers = new Map<string, (...args: unknown[]) => unknown>()
     const handle = vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => { handlers.set(channel, handler) })

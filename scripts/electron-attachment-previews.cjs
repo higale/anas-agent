@@ -57,22 +57,35 @@ async function verifyAttachmentPreviews(launchApplication) {
       let body = ''
       for await (const chunk of request) body += chunk
       const input = JSON.parse(body)
+      const text = input.messages.flatMap(message => Array.isArray(message.content)
+        ? message.content.filter(block => block.type === 'text').map(block => block.text) : []).join('\n')
+      assert.ok(!text.includes('Archived path:'))
+      assert.ok(!text.includes(join(profile, 'db', 'projects')))
       const images = input.messages.flatMap(message => Array.isArray(message.content)
         ? message.content.filter(block => block.type === 'image_url') : [])
       let content
       if (requests === 0) {
         assert.equal(images.length, 1)
+        const labelText = `[Attachment: ${basename(photo)}]\nOriginal path: ${photo}`
+        const label = input.messages.flatMap(message => Array.isArray(message.content) ? message.content : [])
+          .find(block => block.type === 'text' && block.text === labelText)
+        assert.ok(label)
         assert.ok(Buffer.from(images[0].image_url.url.split(',')[1], 'base64').length > 10 * 1024 * 1024)
         content = `Photo received.\n\n![Generated cat](${encodeURIComponent(generatedName)})`
           + `\n\n![Absolute cat](<${generated}>)`
           + `\n\n![Absolute photo](<${photo.replaceAll('%', '%25').replaceAll('#', '%23')}>)`
+      } else if (requests === 1) {
+        assert.equal(images.length, 0)
+        assert.ok(input.messages.some(message => Array.isArray(message.content) && message.content.some(block =>
+          block.type === 'text' && block.text === `[Attachment: ${basename(photo)}]\nOriginal path: ${photo}`)))
+        await assert.rejects(stat(photo), { code: 'ENOENT' })
+        content = 'Historical image paths retained.'
       } else {
         assert.equal(images.length, 0)
         const user = input.messages.findLast(message => message.role === 'user')
-        assert.deepEqual(user.content, [
-          { type: 'text', text: pathPrompt },
-          { type: 'text', text: `<file name="diagram.svg">\n${svgSource}\n</file>` }
-        ])
+        assert.equal(user.content.length, 2)
+        assert.deepEqual(user.content[0], { type: 'text', text: pathPrompt })
+        assert.deepEqual(user.content[1], { type: 'text', text: `Original path: ${svg}\n<file name="diagram.svg">\n${svgSource}\n</file>` })
         content = 'Native path and SVG source received.'
       }
       requests += 1
@@ -201,6 +214,15 @@ async function verifyAttachmentPreviews(launchApplication) {
     }
     await page.screenshot({ path: join(tmpdir(), 'anas-markdown-local-images.png') })
 
+    // Historical image bytes and archive paths stay out of model context,
+    // while the original path remains even if its file has disappeared.
+    const photoBytes = await readFile(photo)
+    await rm(photo)
+    await input.fill('Keep the image paths for later reference.')
+    await page.getByRole('button', { name: 'Send', exact: true }).click()
+    await expect(page.getByText('Historical image paths retained.', { exact: true })).toBeVisible()
+    await writeFile(photo, photoBytes)
+
     const largeResult = await page.evaluate(async path => {
       const preview = await globalThis.gale.files.readAttachmentPreview(path, { mode: 'original' })
       const image = new globalThis.Image()
@@ -212,12 +234,13 @@ async function verifyAttachmentPreviews(launchApplication) {
     assert.equal(largeResult.width, 3072)
     assert.equal(largeResult.height, 3000)
     assert.match(largeResult.rejected, /exceeds 25 MB/)
-    assert.equal(requests, 1)
+    assert.equal(requests, 2)
     assert.deepEqual(errors, [])
     // Prepare the edit draft through its existing action, independent of the virtual history viewport.
-    await page.getByRole('button', { name: 'Edit', exact: true }).evaluate(button => button.click())
+    await page.getByRole('button', { name: 'Edit', exact: true }).first().evaluate(button => button.click())
     await page.getByRole('alertdialog').getByRole('button', { name: 'Edit', exact: true }).click()
     await expect(tile).toHaveCount(1)
+    await expect(tile.locator('.attachment-open')).toHaveAttribute('data-tooltip', photo)
     await tile.hover()
     await tile.getByRole('button', { name: 'Convert to path' }).click()
     await expect(tile).toHaveCount(0)
@@ -255,9 +278,9 @@ async function verifyAttachmentPreviews(launchApplication) {
     await page.getByRole('button', { name: 'Send', exact: true }).click()
     await expect(page.getByText('Native path and SVG source received.', { exact: true })).toBeVisible()
     await expect.poll(() => page.evaluate(async () => (await globalThis.gale.inputHistory.get()).items.map(item => item.text))).toContain(pathPrompt)
-    assert.equal(requests, 2)
+    assert.equal(requests, 3)
     assert.deepEqual(errors, [])
-    console.log('Attachment Electron E2E passed: exact native path submission and history, SVG source imports, mixed selections, real file drops, retained edit files and conversation cleanup; image previews and reveal actions.')
+    console.log('Attachment Electron E2E passed: model context retains only original paths when historical image data is omitted; native path submission, SVG, drops, history editing, cleanup and previews.')
   } finally {
     await closeElectronTestApplication(application)
     server.closeAllConnections()

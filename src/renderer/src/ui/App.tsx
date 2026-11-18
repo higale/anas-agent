@@ -12,6 +12,7 @@ import {
   type AgentThreadCleanupResult
 } from '@shared/agentTypes'
 import { applyModelParameterPreset, findProviderModelConfig, isSelectableModelConfig } from '@shared/modelConfig'
+import { attachmentImageFailure, attachmentImageCount, modelImageCountFailure } from '@shared/modelImageValidation'
 import { defaultCapabilities, projectSkillSnapshot, resolvePluginCapabilities } from '@shared/agentCapabilities'
 import { SIDEBAR_WIDTH_DEFAULT } from '@shared/uiPreferences'
 import { compareProjects, DEFAULT_WORKSPACE_PROJECT_ID, isDefaultWorkspaceProject, type AppBuildInfo, type AppConfigSnapshot, type LanguagePackSummary, type Project, type ProjectCreateRequest, type ProjectStateUpdate, type RuntimeToolStatus, type SidebarCollapsedSections, type SidebarSectionId } from '@shared/types'
@@ -580,7 +581,8 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
     setInput,
     setAttachments,
     t,
-    visionEnabled
+    visionEnabled,
+    imageLimits: selectedModel?.imageLimits
   })
   const { initialLoad, retryInitialResource } = useAppLifecycle({
     config,
@@ -1038,6 +1040,14 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
       agent.setThreadError(threadId, t('chat.vision_unsupported_attachment'))
       return
     }
+    const invalidImage = attachments.flatMap(file => {
+      const reason = attachmentImageFailure(file, selectedModel.imageLimits)
+      return reason ? [`${file.name}: ${reason}`] : []
+    })[0] ?? modelImageCountFailure(attachmentImageCount(attachments), selectedModel.imageLimits)
+    if (invalidImage) {
+      agent.setThreadError(threadId, invalidImage)
+      return
+    }
     followOutputRef.current = true
     agent.setThreadError(threadId, undefined)
     try {
@@ -1106,8 +1116,8 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
       if (historyText) await saveInputHistoryText(historyText)
       if (!queueing) discardComposerDraftsAndRelease([submittedDraftKey])
       resetComposerSuggestions()
-    } catch {
-      agent.setThreadError(threadId, t('chat.failed_send'))
+    } catch (error) {
+      agent.setThreadError(threadId, agentActionError(t('chat.failed_send'), error))
     }
   }
 

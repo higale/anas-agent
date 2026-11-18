@@ -1,14 +1,13 @@
-import { PreferenceMemoryStore } from './agent/preferenceMemoryStore'
 import Database from 'better-sqlite3'
 import { validateRestoredTools } from './toolsStore'
 import { access, lstat, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import { NativeConversationDatabase } from './agent/nativeConversationDatabase'
-import { AgentStorage } from './agent/agentStorage'
+import { validateNativeConversationSchema } from './agent/nativeDatabaseSchema'
+import { validateCatalogSchema } from './agent/catalogSchema'
 import { avatarTransformPath, readAvatarTransform } from './avatarAssets'
 import { normalizeAppConfigSnapshot } from './config/appConfig'
 import {
-  configDirName, getAgentAttachmentsDir, getAgentCatalogFile, getAgentConversationDatabaseFile,
+  configDirName, getAgentCatalogFile, getAgentConversationDatabaseFile,
   getAgentConversationsDir, getProjectsDir, getInputHistoryFile, getProjectStoreFile, skillsConfigFileName
 } from './config/dataDir'
 import { readRawConfigFromDirectory } from './config/rawAppConfig'
@@ -49,13 +48,24 @@ export async function validateRestoredDataDirectory(root: string): Promise<void>
   if (await exists(avatarTransformPath(root))) await readAvatarTransform(root)
   await validateRestoredSkillsDirectory(join(root, 'skills'), true)
   await validateRestoredTools(root)
-  PreferenceMemoryStore.validateDirectory(root)
+  const memory = join(root, 'db', 'memory.sqlite')
+  if (await exists(memory)) {
+    if (!(await lstat(memory)).isFile()) throw new Error('Memory database is not a regular file.')
+    const database = new Database(memory, { readonly: true, fileMustExist: true })
+    try {
+      const version = database.pragma('user_version', { simple: true })
+      if (version !== 1 && !(version === 0 && !database.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' LIMIT 1").get())) {
+        throw new Error('Unsupported preference memory database version.')
+      }
+    } finally { database.close() }
+  }
   const catalog = getAgentCatalogFile(root)
-  const conversationIds = AgentStorage.validateCatalogBackup(catalog, projectIds)
   const locations = new Map<string, string>()
   if (await exists(catalog)) {
+    if (!(await lstat(catalog)).isFile()) throw new Error('Agent catalog is not a regular file.')
     const database = new Database(catalog, { readonly: true, fileMustExist: true })
     try {
+      validateCatalogSchema(database, false)
       for (const row of database.prepare('SELECT id, project_id FROM agent_conversations').all() as Array<{ id: string; project_id: string }>) locations.set(row.id, row.project_id)
     } finally { database.close() }
   }
@@ -68,10 +78,12 @@ export async function validateRestoredDataDirectory(root: string): Promise<void>
       if (!entry.isDirectory() || locations.get(entry.name) !== projectId) throw new Error(`Unexpected conversation storage entry: ${entry.name}`)
     }
   }
-  for (const id of conversationIds) {
-    const projectId = locations.get(id)!
+  // Restore checks supported database formats, not the contents or external
+  // resources of individual saved records. Runtime reads handle availability.
+  for (const [id, projectId] of locations) {
     const file = getAgentConversationDatabaseFile(id, root, projectId)
     if (!(await lstat(file)).isFile()) throw new Error(`Conversation database is not a regular file: ${id}`)
-    NativeConversationDatabase.validateBackup(file, getAgentAttachmentsDir(id, root, projectId), new Set([projectId]), id)
+    const database = new Database(file, { readonly: true, fileMustExist: true })
+    try { validateNativeConversationSchema(database) } finally { database.close() }
   }
 }

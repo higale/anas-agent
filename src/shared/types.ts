@@ -345,6 +345,7 @@ export type SelectedAttachmentKind = 'text' | 'image' | 'binary'
 export interface SelectedAttachment {
   path: string
   name: string
+  sourcePath?: string
   size: number
   kind: SelectedAttachmentKind
   mimeType: string

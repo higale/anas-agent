@@ -1,9 +1,9 @@
-## Anas v5.2.15
+## Anas v5.2.16
 
-- 新增模型级工具图片限制：在“视觉”旁的独立弹窗设置尺寸、比例、字节大小和请求图片数量，默认不限制。数量超限整批省略，其他规则逐图处理，保留原始工具结果并提供省略原因；远端 URL／file ID 不处理。配置和数据库版本不变，已有配置缺少新字段时正常读取。
-- 附件支持转为输入框中的原生绝对路径；统一选择和拖放行为，不支持的文件与文件夹直接追加路径，SVG 恢复为文本源码附件。保留会话草稿和历史消息编辑时的临时附件。
-- 修复发送、输入历史、Skill 快捷命令及上下文压缩中路径和原始请求的空白丢失，保留 Windows、UNC 和 macOS 路径格式。
+- 用户图片附件纳入模型图片限制：添加时检查尺寸、比例和大小，提交前合并检查本次请求图片数量；失败时保留草稿和附件，允许调整后重试。修复图片限制对历史上下文统计和压缩的干扰。
+- 附件独立保存原始路径，模型仅接收原始路径，不再附带内部归档路径。历史图片省略数据后仍保留文件名与原始路径，历史编辑和排队消息保留来源信息。
+- 会话数据库升级为 v4，启动与恢复备份时自动升级受支持的 v3；旧附件原始路径为空，启动升级前保全原数据库，失败可重试。恢复备份不逐条检查记录内容或附件文件的存在性和大小；catalog、记忆和配置版本不变，不支持降级读取 v4。
 
-- Add per-model tool image limits in a separate dialog beside Vision, with no limits enabled by default. Configure dimensions, aspect ratio, byte size and request image count. Count overflow omits the entire batch; other limits apply per image. Original tool results remain intact and omission reasons are available. Remote URLs and file IDs are left unchanged. Configuration and database versions are unchanged; existing configurations without the new fields remain supported.
-- Convert attachments to native absolute paths in the composer. Unify file picker and drag-and-drop behavior, append unsupported files and folders as paths, and restore SVG source-text attachments. Preserve conversation drafts and temporary attachments when editing history.
-- Preserve whitespace in paths and original requests across sending, input history, Skill shortcuts and context compression, including Windows, UNC and macOS paths.
+- Apply model image limits to user attachments: check dimensions, aspect ratio and size when adding images, then check the combined image count before submission. Keep drafts and attachments after validation failures so they can be adjusted and retried. Fix image-limit checks interfering with history context estimates and compression.
+- Store each attachment's original path separately. Models receive only the original path, without internal archive paths. Keep filenames and original paths when omitting historical image data, including after history edits and in queued messages.
+- Upgrade conversation databases to v4 automatically from supported v3 databases at startup and during backup restore. Existing attachments have no original path; startup upgrades preserve original databases and can be retried after failure. Backup restore no longer checks individual record contents or attachment existence and sizes. Catalog, memory and configuration versions are unchanged; older versions cannot read v4 databases.

@@ -5,7 +5,7 @@ import type { ContextSummaryRow } from './runActivityReader'
 export type AttachmentRow = {
   id: string; thread_id: string; message_id: string; run_id: string; name: string; mime_type: string;
   size: number; kind: AgentAttachmentArtifact['kind']; storage_path: string; text_truncated: number;
-  context_policy: AgentAttachmentArtifact['contextPolicy']; created_at: string
+  context_policy: AgentAttachmentArtifact['contextPolicy']; created_at: string; source_path: string | null
 }
 
 /** Product resources discarded by a history revision. Execution heads and
@@ -61,8 +61,8 @@ export class HistoryRevisionResources {
   restoreAttachments(plan: ReturnType<HistoryRevisionResources['prepare']>, runId: string): void {
     if (!this.database.inTransaction) throw new Error('History attachment transfer requires the owning revision transaction.')
     if (!this.database.prepare('SELECT 1 FROM agent_runs WHERE id=? AND thread_id=?').get(runId, plan.threadId)) throw new Error('Replacement run belongs to another conversation.')
-    const insert = this.database.prepare(`INSERT INTO agent_attachments(id,thread_id,message_id,run_id,name,mime_type,size,kind,storage_path,text_truncated,context_policy,created_at)
-      VALUES (@id,@thread_id,@message_id,@run_id,@name,@mime_type,@size,@kind,@storage_path,@text_truncated,@context_policy,@created_at)`)
+    const insert = this.database.prepare(`INSERT INTO agent_attachments(id,thread_id,message_id,run_id,name,mime_type,size,kind,storage_path,text_truncated,context_policy,created_at,source_path)
+      VALUES (@id,@thread_id,@message_id,@run_id,@name,@mime_type,@size,@kind,@storage_path,@text_truncated,@context_policy,@created_at,@source_path)`)
     for (const row of plan.preserved) insert.run({ ...row, run_id: runId })
   }
 }

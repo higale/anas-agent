@@ -6,7 +6,7 @@ import { validateNativeManagedResult } from './nativeManagedResults'
 import { activityMessageHeader } from './activityDirectoryIndex'
 import { validateActivityGroupIndex } from './activityGroupIndex'
 
-export const nativeConversationSchemaVersion = 3
+export const nativeConversationSchemaVersion = 4
 
 /** Opening/recovery checks the current owners and pending commands. Historical
  * bodies are checked by readMessageRecord when consumed; offline validation

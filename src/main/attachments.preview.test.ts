@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, readFile, rm, stat, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const electronMocks = vi.hoisted(() => ({
@@ -96,6 +96,8 @@ describe('bounded attachment previews', () => {
     const paths = [text, binary, directory, trailingSpace, broken, missing]
     const files = await readSelectedAttachments([...paths, text])
     expect(files.map(file => file.path)).toEqual(paths)
+    expect(files.map(file => file.name)).toEqual(paths.map(path => basename(path)))
+    expect(files.map(file => file.sourcePath)).toEqual(paths)
     expect(files.map(file => file.kind)).toEqual(['text', 'binary', 'binary', 'text', 'image', 'binary'])
     expect(files.slice(0, 4).every(file => !file.skippedReason)).toBe(true)
     expect(files[4].skippedReason).toBeTruthy()

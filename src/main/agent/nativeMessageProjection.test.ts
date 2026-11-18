@@ -600,7 +600,7 @@ it.each([false, true])('rebuilds colliding v1 links without rewriting native his
     const snapshot = h.product.readSnapshot(h.identity.threadId)
     expect(snapshot.activities[0].tools.map(tool => [tool.call.id, tool.output])).toEqual([['first', 'first'], ['second', 'second']])
     expect(h.owner.store.readHistory(h.identity.threadId)).toEqual(original)
-    expect(h.database.pragma('user_version', { simple: true })).toBe(3)
+    expect(h.database.pragma('user_version', { simple: true })).toBe(4)
     h.reopen(); expect(h.product.recover()).toEqual([])
     expect(h.product.readSnapshot(h.identity.threadId)).toEqual(snapshot)
   } finally { h.dispose() }

@@ -98,6 +98,7 @@ export class RunSubmissionStore {
         message_id,
         run_id,
         name,
+        source_path,
         mime_type,
         size,
         kind,
@@ -111,6 +112,7 @@ export class RunSubmissionStore {
         @messageId,
         @runId,
         @name,
+        @sourcePath,
         @mimeType,
         @size,
         @kind,
@@ -131,6 +133,7 @@ export class RunSubmissionStore {
       }
       insertAttachment.run({
         ...artifact,
+        sourcePath: artifact.sourcePath ?? null,
         storagePath: archived.storagePath,
         textTruncated: artifact.textTruncated ? 1 : 0
       })

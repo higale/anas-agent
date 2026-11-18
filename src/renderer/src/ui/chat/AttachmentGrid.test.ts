@@ -18,6 +18,14 @@ const attachment: SelectedAttachment = {
 }
 
 describe('AttachmentGrid accessibility', () => {
+  it.each(['C:\\资料\\notes.txt', '/Users/example/资料/notes.txt', 'notes.txt'])(
+    'shows a compact filename and retains the source label in its tooltip (%s)', name => {
+      const html = renderToStaticMarkup(createElement(AttachmentGrid, { attachments: [{ ...attachment, sourcePath: name === 'notes.txt' ? undefined : name }], mode: 'message' }))
+      expect(html).toContain('data-tooltip="' + name + '"')
+      expect(html).toContain('>notes.txt</strong>')
+      expect(html).toContain('aria-label="chat.show_attachment_in_folder: notes.txt"')
+    })
+
   it('keeps open, remove, and context actions as sibling native buttons', () => {
     const html = renderToStaticMarkup(createElement(AttachmentGrid, {
       attachments: [attachment],

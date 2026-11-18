@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import Database from 'better-sqlite3'
 import { NativeConversationDatabase } from './nativeConversationDatabase'
 import { NativeAgentRuntime } from './nativeAgentRuntime'
@@ -79,7 +79,7 @@ describe('agent attachment store', () => {
 
     const matchingArchived = await archiveAgentAttachments([{
       path: sourcePath,
-      name: 'source.txt',
+      name: basename(sourcePath), sourcePath: sourcePath,
       mimeType: 'text/plain',
       size: 18,
       kind: 'text',
@@ -101,7 +101,7 @@ describe('agent attachment store', () => {
       threadId: matchingThread.id,
       runId: matchingRunId,
       messageId: matchingMessageId,
-      name: 'source.txt',
+      name: basename(sourcePath), sourcePath: sourcePath,
       mimeType: 'text/plain',
       kind: 'text',
       available: true,
@@ -375,7 +375,7 @@ describe('agent attachment store', () => {
     const archived = await archiveAgentAttachments([
       {
         path: sourcePath,
-        name: 'editable.txt',
+        name: basename(sourcePath), sourcePath: sourcePath,
         mimeType: 'text/plain',
         size: 19,
         kind: 'text',
@@ -384,7 +384,7 @@ describe('agent attachment store', () => {
       },
       {
         path: imageSourcePath,
-        name: 'editable.png',
+        name: basename(imageSourcePath), sourcePath: imageSourcePath,
         mimeType: 'image/png',
         size: 14,
         kind: 'image',
@@ -402,13 +402,13 @@ describe('agent attachment store', () => {
     expect(result.snapshot.messages).toEqual([])
     expect(result.attachments).toEqual([
       expect.objectContaining({
-        name: 'editable.txt',
+        name: basename(sourcePath), sourcePath: sourcePath,
         contextPolicy: 'conversation',
         truncated: true,
         temporary: true
       }),
       expect.objectContaining({
-        name: 'editable.png',
+        name: basename(imageSourcePath), sourcePath: imageSourcePath,
         contextPolicy: 'one_turn',
         temporary: true,
         dataUri: `data:image/png;base64,${Buffer.from('editable image').toString('base64')}`
@@ -416,6 +416,11 @@ describe('agent attachment store', () => {
     ])
     expect(await readFile(result.attachments[0].path, 'utf8')).toBe('editable attachment')
     expect(await readFile(result.attachments[1].path, 'utf8')).toBe('editable image')
+    const resubmitted = await archiveAgentAttachments(result.attachments, {
+      threadId: thread.id, runId: 'edited-run', messageId: 'edited-run:input'
+    }, attachmentRoot)
+    expect(resubmitted.map(item => item.artifact.sourcePath)).toEqual([sourcePath, imageSourcePath])
+    expect(resubmitted.every(item => item.artifact.path !== item.artifact.name)).toBe(true)
     await Promise.all(archived.map(({ artifact }) =>
       expect(stat(artifact.path)).rejects.toMatchObject({ code: 'ENOENT' })
     ))

@@ -1,3 +1,4 @@
+import { bmpImageDimensions } from '@shared/imageDimensions'
 import { app, nativeImage, protocol } from 'electron'
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
@@ -95,28 +96,13 @@ function isSupportedStreamImage(header: Uint8Array): boolean {
     (signature.subarray(0, 4).toString('ascii') === 'RIFF' && signature.subarray(8, 12).toString('ascii') === 'WEBP')
 }
 
-function bmpDimensions(header: Uint8Array): ImageDimensions | undefined {
-  const bytes = Buffer.from(header)
-  if (bytes.length < 26 || bytes.subarray(0, 2).toString('ascii') !== 'BM') return undefined
-  const dibHeaderSize = bytes.readUInt32LE(14)
-  if (dibHeaderSize === 12) {
-    return { height: bytes.readUInt16LE(20), type: 'bmp', width: bytes.readUInt16LE(18) }
-  }
-  if (dibHeaderSize < 40) return undefined
-  return {
-    height: Math.abs(bytes.readInt32LE(22)),
-    type: 'bmp',
-    width: bytes.readInt32LE(18)
-  }
-}
-
 async function readImageDimensions(filePath: string): Promise<ImageDimensions | undefined> {
   const handle = await open(filePath, 'r')
   const header = Buffer.alloc(26)
   try {
     const { bytesRead } = await handle.read(header, 0, header.length, 0)
     const boundedHeader = header.subarray(0, bytesRead)
-    const bmp = bmpDimensions(boundedHeader)
+    const bmp = bmpImageDimensions(boundedHeader)
     if (bmp) return bmp
     if (!isSupportedStreamImage(boundedHeader)) return undefined
   } finally {
@@ -312,6 +298,7 @@ async function readSelectedAttachment(filePath: string, textLimit: TextAttachmen
     return {
       path: filePath,
       name: basename(filePath),
+      sourcePath: resolve(filePath),
       size: info.size,
       kind: 'binary',
       mimeType: 'application/octet-stream',
@@ -329,6 +316,7 @@ async function readSelectedAttachment(filePath: string, textLimit: TextAttachmen
       return {
         path: filePath,
         name: basename(filePath),
+        sourcePath: resolve(filePath),
         size: info.size,
         kind,
         mimeType,
@@ -341,6 +329,7 @@ async function readSelectedAttachment(filePath: string, textLimit: TextAttachmen
       return {
         path: filePath,
         name: basename(filePath),
+        sourcePath: resolve(filePath),
         size: buffer.length,
         kind,
         mimeType: validated.mimeType,
@@ -351,6 +340,7 @@ async function readSelectedAttachment(filePath: string, textLimit: TextAttachmen
     return {
       path: filePath,
       name: basename(filePath),
+      sourcePath: resolve(filePath),
       size: buffer.length,
       kind,
       mimeType: validated.mimeType,
@@ -366,6 +356,7 @@ async function readSelectedAttachment(filePath: string, textLimit: TextAttachmen
     return {
       path: filePath,
       name: basename(filePath),
+      sourcePath: resolve(filePath),
       size: info.size,
       kind,
       mimeType,
@@ -378,6 +369,7 @@ async function readSelectedAttachment(filePath: string, textLimit: TextAttachmen
       return {
         path: filePath,
         name: basename(filePath),
+        sourcePath: resolve(filePath),
         size: info.size,
         kind,
         mimeType,
@@ -391,6 +383,7 @@ async function readSelectedAttachment(filePath: string, textLimit: TextAttachmen
       return {
         path: filePath,
         name: basename(filePath),
+        sourcePath: resolve(filePath),
         size: info.size,
         kind,
         mimeType,
@@ -407,6 +400,7 @@ async function readSelectedAttachment(filePath: string, textLimit: TextAttachmen
       return {
         path: filePath,
         name: basename(filePath),
+        sourcePath: resolve(filePath),
         size: info.size,
         kind,
         mimeType,
@@ -421,6 +415,7 @@ async function readSelectedAttachment(filePath: string, textLimit: TextAttachmen
   return {
     path: filePath,
     name: basename(filePath),
+    sourcePath: resolve(filePath),
     size: info.size,
     kind,
     mimeType,
@@ -436,7 +431,7 @@ export async function readSelectedAttachments(filePaths: string[]): Promise<Sele
     try {
       return await readSelectedAttachment(filePath, textLimit)
     } catch (reason) {
-      return { path: filePath, name: basename(filePath), size: 0, kind: 'binary',
+      return { path: filePath, name: basename(filePath), sourcePath: resolve(filePath), size: 0, kind: 'binary',
         mimeType: 'application/octet-stream', contextPolicy: 'one_turn',
         skippedReason: reason instanceof Error ? reason.message : 'Failed to read attachment.' }
     }

@@ -20,7 +20,7 @@ export const catalogConversationIndexes = `CREATE INDEX agent_conversations_orde
 CREATE INDEX agent_conversations_project_idx ON agent_conversations (project_id);`
 
 /** Check the actual constraint on an isolated in-memory table, never by writing user data. */
-export function validateCatalogAccessMode(database: Database.Database): void {
+export function validateCatalogAccessMode(database: Database.Database, validateRecords = true): void {
   const row = database.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'agent_conversations'").get() as { sql: string } | undefined
   const probe = new Database(':memory:')
   try {
@@ -33,8 +33,10 @@ export function validateCatalogAccessMode(database: Database.Database): void {
     let rejected = false
     try { insert.run('invalid', 'invalid') } catch { rejected = true }
     if (!rejected) throw new Error('Missing access mode constraint.')
-    const invalid = database.prepare("SELECT 1 FROM agent_conversations WHERE access_mode IS NULL OR access_mode NOT IN ('strict_approval', 'smart_approval', 'full_access') LIMIT 1").get()
-    if (invalid) throw new Error('Invalid saved access mode.')
+    if (validateRecords) {
+      const invalid = database.prepare("SELECT 1 FROM agent_conversations WHERE access_mode IS NULL OR access_mode NOT IN ('strict_approval', 'smart_approval', 'full_access') LIMIT 1").get()
+      if (invalid) throw new Error('Invalid saved access mode.')
+    }
   } catch (cause) {
     throw new Error('Invalid agent catalog access mode structure or values; repair the saved data before opening it.', { cause })
   } finally { probe.close() }
@@ -48,7 +50,7 @@ const requiredCatalogColumns: Record<string, string[]> = {
   agent_workspace_state: ['id', 'active_thread_id', 'draft_project_id', 'draft_model_config_id', 'draft_model_parameter_preset_id'],
 }
 
-export function validateCatalogSchema(database: Database.Database): void {
+export function validateCatalogSchema(database: Database.Database, validateRecords = true): void {
   const version = database.pragma('user_version', { simple: true }) as number
   if (version !== catalogVersion) throw new Error(`Unsupported agent catalog schema ${version}; expected ${catalogVersion}.`)
   for (const [table, required] of Object.entries(requiredCatalogColumns)) {
@@ -58,5 +60,5 @@ export function validateCatalogSchema(database: Database.Database): void {
       if (!columns.has(column)) throw new Error(`Agent catalog is missing column ${table}.${column}.`)
     }
   }
-  validateCatalogAccessMode(database)
+  validateCatalogAccessMode(database, validateRecords)
 }

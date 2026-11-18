@@ -38,6 +38,7 @@ export async function prepareMessageEditDraft(artifacts: AgentAttachmentArtifact
     const attachments = await Promise.all(artifacts.map(async (artifact, index) => ({
       path: paths[index],
       name: artifact.name,
+      ...(artifact.sourcePath === undefined ? {} : { sourcePath: artifact.sourcePath }),
       size: artifact.size,
       kind: artifact.kind,
       mimeType: artifact.mimeType,

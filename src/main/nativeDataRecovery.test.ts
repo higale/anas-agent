@@ -102,17 +102,18 @@ it('backs up committed native WAL with history, queued attachments, memory and u
   expect(await Promise.all(files.map(file => readFile(file)))).toEqual(before)
 })
 
-it('rejects missing native bodies, foreign ownership and missing attachments without repairing or rewriting them', async () => {
+it('restores supported formats without checking missing bodies or attachments, leaving record validation to runtime and repair', async () => {
   const f = await fixture(); f.storage.close()
   const attachments = getAgentAttachmentsDir(f.thread.id, f.root)
   const projects = new Set([DEFAULT_WORKSPACE_PROJECT_ID])
   expect(() => NativeConversationDatabase.validateBackup(f.file, attachments, projects, 'other')).toThrow('does not belong')
   await rm(join(attachments, 'queued.txt'))
-  await expect(validateRestoredDataDirectory(f.root)).rejects.toThrow('Queued attachment is missing')
-  await writeFile(join(attachments, 'queued.txt'), 'queued')
+  await expect(validateRestoredDataDirectory(f.root)).resolves.toBeUndefined()
+  await writeFile(join(attachments, 'queued.txt'), 'changed length')
+  await expect(validateRestoredDataDirectory(f.root)).resolves.toBeUndefined()
   mutate(f.file, 'PRAGMA foreign_keys=OFF; DELETE FROM execution_message_bodies')
   const before = await readFile(f.file)
-  await expect(validateRestoredDataDirectory(f.root)).rejects.toThrow()
+  await expect(validateRestoredDataDirectory(f.root)).resolves.toBeUndefined()
   expect(await readFile(f.file)).toEqual(before)
 })
 
@@ -150,7 +151,9 @@ it('rebuilds damaged display metadata only through preserved explicit repair', a
   mutate(f.file, 'DELETE FROM agent_display_headers')
   mutate(f.pendingFile, 'UPDATE agent_run_input_intents SET display_json=NULL')
   const before = await readFile(f.file)
-  await expect(validateRestoredDataDirectory(f.root)).rejects.toThrow(/display (header|projection)/)
+  await expect(validateRestoredDataDirectory(f.root)).resolves.toBeUndefined()
+  expect(() => NativeConversationDatabase.validateBackup(f.file, getAgentAttachmentsDir(f.thread.id, f.root),
+    new Set([DEFAULT_WORKSPACE_PROJECT_ID]), f.thread.id)).toThrow(/display (header|projection)/)
   const inspection = await inspectProjectStorageRepair(f.root, f.projects, f.projects)
   expect(inspection.issues).toEqual([])
   expect(inspection.fields.filter(field => field.includes('display directory'))).toHaveLength(2)
@@ -174,6 +177,6 @@ it('preserves an unrepairable native conversation and salvages independent versi
   expect(await readFile(f.file)).toEqual(damaged)
   expect(await readFile(join(result.preservationPath, 'data/db/projects/default-workspace/conversations', f.thread.id, 'conversation.sqlite'))).toEqual(damaged)
   const raw = new Database(f.pendingFile, { readonly: true })
-  try { expect(raw.pragma('user_version', { simple: true })).toBe(3) } finally { raw.close() }
+  try { expect(raw.pragma('user_version', { simple: true })).toBe(4) } finally { raw.close() }
   NativeConversationDatabase.validateBackup(f.pendingFile, getAgentAttachmentsDir(f.pending.id, f.root), new Set([DEFAULT_WORKSPACE_PROJECT_ID]), f.pending.id)
 })

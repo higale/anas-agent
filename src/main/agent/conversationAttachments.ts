@@ -1,9 +1,16 @@
 import { readFile } from 'node:fs/promises'
 import type { ConversationMessage } from '../../runtime/conversationMessage'
 import type {
-  AgentAttachmentArtifact
+  AgentAttachmentArtifact,
+  AgentRunInput
 } from '@shared/agentTypes'
-import type { AttachmentTextOverflowMode } from '@shared/types'
+import type { AttachmentTextOverflowMode, ResolvedModelConfig } from '@shared/types'
+import { hasModelImageLimits } from '@shared/modelImageLimits'
+import { attachmentImageFailure } from '@shared/modelImageValidation'
+import { readSelectedAttachments } from '../attachments'
+import { projectModelImageLimits } from './conversationImageLimits'
+import { projectConversationToolImages } from './conversationContext'
+import { userMessageContent } from '../../runtime/messagePresentation'
 import { extractLocalAttachmentText, supportsLocalTextExtraction } from '../attachmentTextExtractor'
 import { runtimeLog } from '../runtimeLogger'
 import { ModelSelectionError } from '../../runtime/errors'
@@ -21,6 +28,32 @@ export interface ConversationAttachmentProjector {
   artifacts: AgentAttachmentArtifact[]
   addArtifacts(artifacts: AgentAttachmentArtifact[]): void
   project(messages: ConversationMessage[], visionEnabled: boolean, includedMessageIds?: ReadonlySet<string>): Promise<ConversationMessage[]>
+}
+
+/** Read-only submission preflight. A failure leaves the draft and durable history untouched. */
+export async function validateSubmittedImageAttachments(input: Pick<AgentRunInput, 'text' | 'content' | 'attachments'>,
+  model: Pick<ResolvedModelConfig, 'imageLimits' | 'capabilities'>,
+  messages: ConversationMessage[] = [], artifacts: AgentAttachmentArtifact[] = []): Promise<void> {
+  if (!hasModelImageLimits(model.imageLimits)) return
+  const projector = createConversationAttachmentProjector({ artifacts: artifacts.filter(item => item.kind === 'image'),
+    textMaxChars: 0, textOverflow: 'truncate' })
+  const history = await projector.project(projectConversationToolImages(messages), model.capabilities.vision)
+  const imageInputs = (input.attachments ?? []).filter(item => item.kind === 'image')
+  const paths = imageInputs.map(item => item.path)
+  const files = paths.length ? await readSelectedAttachments(paths) : []
+  const filesByPath = new Map(files.map(file => [file.path, file]))
+  const content = userMessageContent(input.text, input.content)
+  const blocks = typeof content === 'string' ? [{ type: 'text', text: content }] : [...content]
+  for (const attachment of imageInputs) {
+    const file = filesByPath.get(attachment.path)!
+    if (file.skippedReason || file.kind !== 'image' || !file.dataUri) {
+      throw new ModelSelectionError(`Attachment ${attachment.name}: ${file.skippedReason ?? 'The selected image is no longer a supported image.'}`)
+    }
+    const failure = attachmentImageFailure(file, model.imageLimits)
+    if (failure) throw new ModelSelectionError(`Attachment ${attachment.name}: ${failure}`)
+    blocks.push(fileLabel({ name: attachment.name, sourcePath: attachment.sourcePath }), { type: 'image_url', image_url: { url: file.dataUri } })
+  }
+  projectModelImageLimits([...history, { kind: 'user', content: blocks }], model.imageLimits, 'submission')
 }
 
 function selectedForContext(
@@ -41,15 +74,19 @@ function textMimeType(mimeType: string): boolean {
     ].includes(mimeType)
 }
 
-function fileLabel(artifact: AgentAttachmentArtifact): ModelContentBlock {
+function attachmentSource(artifact: Pick<AgentAttachmentArtifact, 'sourcePath'>): string {
+  return artifact.sourcePath ? `\nOriginal path: ${artifact.sourcePath}` : ''
+}
+
+function fileLabel(artifact: Pick<AgentAttachmentArtifact, 'name' | 'sourcePath'>): ModelContentBlock {
   return {
     type: 'text',
-    text: `[Attachment: ${artifact.name}]`
+    text: `[Attachment: ${artifact.name}]${attachmentSource(artifact)}`
   }
 }
 
 function unavailableAttachment(artifact: AgentAttachmentArtifact, detail: string): ModelContentBlock[] {
-  return [{ type: 'text', text: `[Application attachment notice: ${JSON.stringify(artifact.name)}]\n${detail}\nThe attachment content was not provided. Do not claim to have read it. Continue with available information, or explain what is missing if it is needed for the task.` }]
+  return [{ type: 'text', text: `[Application attachment notice: ${JSON.stringify(artifact.name)}]${attachmentSource(artifact)}\n${detail}\nThe attachment content was not provided. Do not claim to have read it. Continue with available information, or explain what is missing if it is needed for the task.` }]
 }
 
 async function textContent(
@@ -62,9 +99,10 @@ async function textContent(
     : (await readFile(artifact.path)).toString('utf8')
   if (text.length > maxChars && overflow === 'error') return unavailableAttachment(artifact, 'Extracted text exceeds the configured attachment limit.')
   const content = text.length > maxChars ? text.slice(0, maxChars) : text
+  const source = attachmentSource(artifact)
   return [{
     type: 'text',
-    text: `<file name=${JSON.stringify(artifact.name)}>\n${content}\n</file>`
+    text: `${source ? source.slice(1) + '\n' : ''}<file name=${JSON.stringify(artifact.name)}>\n${content}\n</file>`
   }]
 }
 
@@ -101,7 +139,7 @@ async function modelContent(
       file: artifact.path,
       error: reason instanceof Error ? reason.message : String(reason)
     })
-    return unavailableAttachment(artifact, `Reading the archived file or extracting its text failed: ${reason instanceof Error ? reason.message.slice(0, 1000) : String(reason).slice(0, 1000)}`)
+    return unavailableAttachment(artifact, 'Reading the archived file or extracting its text failed.')
   }
 }
 
@@ -125,7 +163,7 @@ export function createConversationAttachmentProjector(
   options: AttachmentProjectionOptions
 ): ConversationAttachmentProjector {
   const artifacts = options.artifacts.filter((artifact) =>
-    selectedForContext(artifact, options.currentRunId)
+    artifact.kind === 'image' || selectedForContext(artifact, options.currentRunId)
   )
   const artifactIds = new Set(artifacts.map((artifact) => artifact.id))
   const contentCache = new Map<string, Promise<ModelContentBlock[]>>()
@@ -134,7 +172,7 @@ export function createConversationAttachmentProjector(
     for (const artifact of items) {
       if (
         artifactIds.has(artifact.id)
-        || !selectedForContext(artifact, options.currentRunId)
+        || artifact.kind !== 'image' && !selectedForContext(artifact, options.currentRunId)
       ) continue
       artifactIds.add(artifact.id)
       artifacts.push(artifact)
@@ -165,10 +203,12 @@ export function createConversationAttachmentProjector(
     const messageIds = new Set(messages.flatMap((message) => message.id ? [message.id] : []))
     for (const artifact of artifacts) {
       if (!messageIds.has(artifact.messageId) || includedMessageIds && !includedMessageIds.has(artifact.messageId)) continue
-      if (artifact.available && artifact.kind === 'image' && !visionEnabled) {
+      const includeContent = selectedForContext(artifact, options.currentRunId)
+      if (includeContent && artifact.available && artifact.kind === 'image' && !visionEnabled) {
         throw new ModelSelectionError(`The selected model does not support the required image attachment "${artifact.name}". The run was stopped. Choose a model with vision enabled and send again.`)
       }
-      const content = await contentFor(artifact)
+      const content = includeContent ? await contentFor(artifact) : [fileLabel(artifact),
+        { type: 'text', text: '[Image attachment provided in an earlier turn; image data omitted from this request.]' }]
       if (content.length === 0) continue
       contentByMessage.set(
         artifact.messageId,

@@ -3,6 +3,11 @@ import { agentActionError, localizeAgentError } from './agentErrorMessage'
 import { backgroundTasksPendingError, backgroundCleanupStarted, backgroundCleanupCompleted } from '@shared/backgroundCleanup'
 
 describe('agent error messages', () => {
+  it('shows the image rejection reason without IPC method names or error class prefixes', () => {
+    expect(agentActionError('发送失败。', new Error("Error invoking remote method 'agent:runs:submit': ModelSelectionError: This request contains 2 embedded images, exceeding the limit of 1.")))
+      .toBe('发送失败。\nThis request contains 2 embedded images, exceeding the limit of 1.')
+  })
+
   it('keeps the underlying failure beside the localized action summary', () => {
     expect(agentActionError('重新生成回复失败。', new Error('Background work is still executing.')))
       .toBe('重新生成回复失败。\nBackground work is still executing.')

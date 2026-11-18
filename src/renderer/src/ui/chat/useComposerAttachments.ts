@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Dispatch, DragEvent, RefObject, SetStateAction } from 'react'
 import type { TFunction } from 'i18next'
 import type { SelectedAttachment } from '@shared/types'
+import type { ModelImageLimits } from '@shared/modelImageLimits'
+import { attachmentImageFailure } from '@shared/modelImageValidation'
 import { dataTransferHasFiles } from '../dragDrop'
 import { notice } from '../notice'
 
@@ -14,6 +16,7 @@ interface UseComposerAttachmentsOptions {
   setAttachments: Dispatch<SetStateAction<SelectedAttachment[]>>
   t: TFunction
   visionEnabled: boolean
+  imageLimits?: ModelImageLimits
 }
 
 function appendUniqueAttachments(current: SelectedAttachment[], files: SelectedAttachment[]): SelectedAttachment[] {
@@ -43,13 +46,16 @@ export function useComposerAttachments({
   setInput,
   setAttachments,
   t,
-  visionEnabled
+  visionEnabled,
+  imageLimits
 }: UseComposerAttachmentsOptions) {
   const [composerDragActive, setComposerDragActive] = useState(false)
   const composerDragDepthRef = useRef(0)
   const activeDraftRef = useRef<string | undefined>(draftKey)
   const conversionsRef = useRef(new Set<string>())
   const [convertingKeys, setConvertingKeys] = useState(new Set<string>())
+  const modelRef = useRef({ visionEnabled, imageLimits })
+  modelRef.current = { visionEnabled, imageLimits }
 
   useEffect(() => {
     activeDraftRef.current = draftKey
@@ -70,14 +76,21 @@ export function useComposerAttachments({
   }, [draftKey, inputRef, setInput])
 
   const acceptFiles = useCallback((files: SelectedAttachment[]): void => {
+    const model = activeDraftRef.current === draftKey ? modelRef.current : { visionEnabled, imageLimits }
     const pathOnly = files.filter(file => file.kind === 'binary' && !file.skippedReason)
-    const rejected = files.filter(file => file.kind === 'image' && !visionEnabled)
+    const unsupported = files.filter(file => file.kind === 'image' && !model.visionEnabled)
+    const invalid = files.flatMap(file => {
+      const reason = unsupported.includes(file) ? undefined : attachmentImageFailure(file, model.imageLimits)
+      return reason ? [{ file, reason }] : []
+    })
+    const rejected = [...unsupported, ...invalid.map(item => item.file)]
     const accepted = files.filter(file => !pathOnly.includes(file) && !rejected.includes(file))
     releaseTemporaryAttachments(rejected)
-    if (rejected.length > 0) notice.warning(t('chat.vision_unsupported_attach'))
+    if (unsupported.length > 0) notice.warning(t('chat.vision_unsupported_attach'))
+    if (invalid.length > 0) notice.warning(invalid.map(({ file, reason }) => `${file.name}: ${reason}`).join('\n'))
     setAttachments(current => appendUniqueAttachments(current, accepted))
     appendPaths(pathOnly.map(file => file.path))
-  }, [appendPaths, setAttachments, t, visionEnabled])
+  }, [appendPaths, draftKey, imageLimits, setAttachments, t, visionEnabled])
 
   const clearAttachments = useCallback((): void => {
     releaseTemporaryAttachments(attachments)
