@@ -491,6 +491,51 @@ describe('MCP runtime lifecycle', () => {
     expect(harness.initialize).toHaveBeenCalledTimes(1)
   })
 
+  it('returns ready tools while another server is connecting and includes it after startup', async () => {
+    let release!: (tools: unknown[]) => void
+    const pending = new Promise<unknown[]>(resolve => { release = resolve })
+    const harness = await loadHarness()
+    await harness.service.getCachedMcpRuntime()
+    harness.initialize.mockImplementationOnce(() => pending)
+    harness.setConfig({ enabled: true, servers: [server, { ...server, id: 'beta', index: 1, name: 'Beta' }] })
+    try {
+      const reading = harness.service.getCachedMcpRuntime()
+      let returned = false
+      void reading.then(() => { returned = true })
+      await vi.waitFor(() => expect(returned).toBe(true), { timeout: 500 })
+      const result = await reading
+      expect(result.loaded.map(item => item.id)).toEqual(['alpha'])
+      expect(result.tools.map(tool => tool.name)).toEqual(['mcp_alpha_ping'])
+      expect(harness.service.getCachedMcpStatus()?.servers.find(item => item.id === 'beta')?.state).toBe('starting')
+      release([])
+      await vi.waitFor(() => expect(harness.service.getCachedMcpStatus()?.servers.find(item => item.id === 'beta')?.state).toBe('ready'))
+      expect((await harness.service.getCachedMcpRuntime()).loaded.map(item => item.id)).toEqual(['alpha', 'beta'])
+    } finally { release([]) }
+  })
+
+  it('does not wait for automatic reconnection when a chat reads the tool catalog', async () => {
+    let release!: (tools: unknown[]) => void
+    const pending = new Promise<unknown[]>(resolve => { release = resolve })
+    const harness = await loadHarness()
+    await harness.service.getCachedMcpRuntime()
+    harness.initialize.mockImplementationOnce(() => pending)
+    const hooks = harness.createClient.mock.calls[0][1] as { onConnectionClosed(): void }
+    try {
+      hooks.onConnectionClosed()
+      await harness.service.pingAndReloadFailedMcpServers()
+      await vi.waitFor(() => expect(harness.initialize).toHaveBeenCalledTimes(2))
+      expect(harness.service.getCachedMcpStatus()?.servers[0].state).toBe('recovering')
+      const reading = harness.service.getCachedMcpRuntime()
+      let returned = false
+      void reading.then(() => { returned = true })
+      await vi.waitFor(() => expect(returned).toBe(true), { timeout: 500 })
+      expect((await reading).tools).toEqual([])
+      release([mcpTool])
+      await vi.waitFor(() => expect(harness.service.getCachedMcpStatus()?.servers[0].state).toBe('ready'))
+      expect((await harness.service.getCachedMcpRuntime()).tools).toHaveLength(1)
+    } finally { release([]) }
+  })
+
   it('lets a disable operation supersede an in-flight connection start', async () => {
     let resolveInitialization: ((value: unknown[]) => void) | undefined
     const initialization = new Promise<unknown[]>((resolve) => {

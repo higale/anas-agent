@@ -134,6 +134,7 @@ function installAgentApi(restoredWorkspace: AgentWorkspaceState) {
   const listThreads = vi.fn(async () => [thread])
   const recover = vi.fn(async () => false)
   const resume = vi.fn(async () => undefined)
+  const submit = vi.fn<GaleApi['agent']['runs']['submit']>()
   const loadEarlierActivities = vi.fn<() => Promise<AgentRunActivity>>()
   const loadSubagentDetails = vi.fn<() => Promise<AgentSubagentActivity>>()
   const eventSubscriptions = new Set<{
@@ -164,7 +165,7 @@ function installAgentApi(restoredWorkspace: AgentWorkspaceState) {
           markFailed: vi.fn(),
           retry: vi.fn()
         },
-        runs: { recover, resume },
+        runs: { recover, resume, submit },
         activities: { loadEarlier: loadEarlierActivities, subagent: loadSubagentDetails },
         onEvent: vi.fn((
           listener: (event: AgentRuntimeEvent) => void,
@@ -182,6 +183,7 @@ function installAgentApi(restoredWorkspace: AgentWorkspaceState) {
     listThreads,
     recover,
     resume,
+    submit,
     loadEarlierActivities,
     loadSubagentDetails,
     setAccessMode,
@@ -196,6 +198,39 @@ function installAgentApi(restoredWorkspace: AgentWorkspaceState) {
 }
 
 describe('useAgentWorkspace startup restoration', () => {
+  it('shows an acknowledged message in an existing conversation before any run event', async () => {
+    const api = installAgentApi({ mode: 'thread', threadId: thread.id })
+    const { result } = renderHook(() => useAgentWorkspace({ onAppError: vi.fn() }))
+    await waitFor(() => expect(result.current.activeThreadId).toBe(thread.id))
+    const pending = runningSnapshot('')
+    pending.activities = []
+    pending.messages = [{ id: 'run-1:input', runId: 'run-1', role: 'user', content: [{ type: 'text', text: '你好' }] }]
+    pending.messageWindow = { startIndex: 0, shown: 1, total: 1, remaining: 0 }
+    api.submit.mockImplementation(async () => {
+      api.getThread.mockResolvedValue(pending)
+      return { thread: pending.thread, run: pending.pendingRun!, userMessage: pending.messages[0] }
+    })
+    await act(async () => { await result.current.send('你好', []) })
+    expect(result.current.activeSnapshot?.messages).toEqual(pending.messages)
+    expect(result.current.activeSnapshot?.pendingRun?.id).toBe('run-1')
+    act(() => api.emit({ type: 'run_started', run: pending.pendingRun!, newUserTurn: true, userMessage: pending.messages[0] }))
+    expect(result.current.activeSnapshot?.messages).toHaveLength(1)
+  })
+
+  it('does not report an accepted send as failed when refreshing its display fails', async () => {
+    const api = installAgentApi({ mode: 'thread', threadId: thread.id })
+    const { result } = renderHook(() => useAgentWorkspace({ onAppError: vi.fn() }))
+    await waitFor(() => expect(result.current.activeSnapshot).toBeDefined())
+    const pending = runningSnapshot('')
+    api.submit.mockImplementation(async () => {
+      api.getThread.mockRejectedValue(new Error('Display read failed'))
+      return { thread: pending.thread, run: pending.pendingRun! }
+    })
+    await act(async () => { await expect(result.current.send('你好', [])).resolves.toBe(thread.id) })
+    expect(api.submit).toHaveBeenCalledTimes(1)
+    expect(result.current.activeError).toBe('chat.failed_load_app')
+  })
+
   it('keeps restored context separate from reports emitted after the current run starts', async () => {
     const interrupted = interruptedSnapshot('context-approval')
     const stored = { runId: 'run-1', estimatedInputTokens: 100 } as AgentContextStatus

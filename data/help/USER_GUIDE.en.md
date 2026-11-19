@@ -327,6 +327,8 @@ Commands run in the tool directory, where relative paths resolve, for example `s
 
 Add and edit servers in Settings > MCP using stdio, HTTP, or SSE. The server must be enabled and connected, the model must have Tool use enabled, and the project must allow the relevant tools.
 
+Sending a message does not wait for MCP startup or background reconnection. Each turn uses the tools connected when preparation finishes. Servers still connecting become available to later turns after connecting successfully; check their status and errors in MCP settings.
+
 Use **New MCP server** at the top right to create a configuration. The top-left toolbar moves the selected server up or down or deletes it. The refresh icon checks running servers and restarts failed or unreachable ones.
 
 For stdio servers, leaving Working directory blank uses the current user's home directory. Enter an absolute path to run the server in another directory.

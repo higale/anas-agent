@@ -243,8 +243,13 @@ export class NativeMessageReader {
   window(threadId: string, startIndex?: number, limit = 100) {
     return this.database.transaction(() => {
       if (!this.database.prepare('SELECT 1 FROM agent_threads WHERE id=?').get(threadId)) throw new Error('Conversation does not exist.')
-      const totalCount = (this.database.prepare('SELECT COUNT(*) AS count FROM agent_message_index WHERE thread_id=? AND visible=1')
+      const committedCount = (this.database.prepare('SELECT COUNT(*) AS count FROM agent_message_index WHERE thread_id=? AND visible=1')
         .get(threadId) as { count: number }).count
+      // Submission is durable before runtime preparation finishes. Project that
+      // saved input too; the first execution commit consumes the intent atomically.
+      const latestRun = this.activities.getLatestRunForThread(threadId)
+      const submitted = latestRun ? this.submittedUserMessage(latestRun.id) : undefined
+      const totalCount = committedCount + (submitted ? 1 : 0)
       const size = Math.max(0, Math.floor(limit))
       const offset = startIndex === undefined ? Math.max(0, totalCount - size) : Math.min(totalCount, Math.max(0, Math.floor(startIndex)))
       // Preserve the product's explicit-start behavior: the requested suffix
@@ -255,7 +260,7 @@ export class NativeMessageReader {
           ON history.thread_id=entry.thread_id AND history.position=entry.position
         LEFT JOIN agent_runs run ON run.id=entry.run_id
         WHERE entry.thread_id=? AND entry.visible=1 ORDER BY entry.position LIMIT ? OFFSET ?`)
-        .all(threadId, startIndex === undefined ? size : totalCount - offset, offset) as Array<{
+        .all(threadId, startIndex === undefined ? Math.max(0, size - (submitted ? 1 : 0)) : Math.max(0, committedCount - offset), offset) as Array<{
           record_id: string; message_id: string; run_id: string | null;
           history_record_id: string | null; history_message_id: string | null; owner_thread_id: string | null
         }>
@@ -271,6 +276,7 @@ export class NativeMessageReader {
         }
         return this.present(threadId, record)
       })
+      if (submitted && offset < totalCount && (startIndex !== undefined || size > 0)) messages.push(submitted)
       const status = this.database.prepare('SELECT status_json FROM agent_context_status WHERE thread_id=?').get(threadId) as { status_json: string } | undefined
       return { messages, startIndex: offset, totalCount,
         ...(status ? { contextStatus: JSON.parse(status.status_json) as AgentContextStatus } : {}) }

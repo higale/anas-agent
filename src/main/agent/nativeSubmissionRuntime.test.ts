@@ -136,6 +136,30 @@ it.each([
   } finally { assembly.resolve(); await h.close() }
 })
 
+it('shows a saved message and its attachments while an existing conversation is still preparing', async () => {
+  const h = fixture(), first = h.input(), assembly = deferred()
+  try {
+    const prior = await h.host.submitRunWithAttachments(first, h.create)
+    await prior.handle!.drained
+    const input = { ...h.input(), threadId: first.threadId, newThread: undefined }
+    const saved = await h.host.submitRunWithAttachments(input, async () => { await assembly.promise; return h.create() })
+    const pending = h.host.readSnapshot(input.threadId)
+    expect(h.requests).toBe(1)
+    expect(h.events.some(event => event.type === 'run_started' && event.run.id === input.runId)).toBe(false)
+    expect(pending.messages.map(message => message.id)).toEqual([`${first.runId}:input`, `${first.runId}:answer`, `${input.runId}:input`])
+    expect(pending.messages.at(-1)).toEqual(saved.userMessage)
+    expect(pending.messageWindow).toEqual({ startIndex: 0, shown: 3, total: 3, remaining: 0 })
+    expect(h.database.messages.window(input.threadId, undefined, 2).messages.map(message => message.id))
+      .toEqual([`${first.runId}:answer`, `${input.runId}:input`])
+    expect(h.database.messages.window(input.threadId, 2).messages.map(message => message.id)).toEqual([`${input.runId}:input`])
+    expect(h.database.messages.window(input.threadId, 99).messages).toEqual([])
+    expect(h.database.messages.window(input.threadId, undefined, 0).messages).toEqual([])
+    assembly.resolve(); await saved.handle!.drained
+    expect(h.host.readSnapshot(input.threadId).messages.map(message => message.id))
+      .toEqual([`${first.runId}:input`, `${first.runId}:answer`, `${input.runId}:input`, `${input.runId}:answer`])
+  } finally { assembly.resolve(); await h.close() }
+})
+
 it('retains committed input after assembly failure and recovers it once after reopen without adding a user turn event', async () => {
   const h = fixture(), input = h.input()
   try {
@@ -146,6 +170,7 @@ it('retains committed input after assembly failure and recovers it once after re
     await h.reopen()
     const repeated = await h.host.submitRunWithAttachments(input, h.create)
     expect(repeated.run.id).toBe(input.runId); expect(repeated.handle).toBeUndefined(); expect(h.requests).toBe(0)
+    expect(h.host.readSnapshot(input.threadId).messages).toEqual([repeated.userMessage])
     expect(h.host.getRunSubmission(input.submissionId)?.userMessage?.attachments?.[0].path).toBe(archived)
     const recovered = h.host.recoverRun(input.threadId, h.create)!
     expect((await recovered.completed).status).toBe('completed'); await recovered.drained

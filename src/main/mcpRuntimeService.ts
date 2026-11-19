@@ -684,7 +684,9 @@ class McpRuntimeManager {
       forceReload ? 'manual_reload' : 'startup',
       false
     ))
-    await this.waitForRuntimes(application.waitFor)
+    // Chat preparation uses the tools that are ready now. Startup and automatic
+    // recovery run independently; only an explicit reload waits for them.
+    if (forceReload) await this.waitForRuntimes(application.waitFor)
     return this.enqueueMutation(async () => this.aggregate())
   }
 

@@ -1,9 +1,7 @@
-## Anas v5.2.16
+## Anas v5.2.17
 
-- 用户图片附件纳入模型图片限制：添加时检查尺寸、比例和大小，提交前合并检查本次请求图片数量；失败时保留草稿和附件，允许调整后重试。修复图片限制对历史上下文统计和压缩的干扰。
-- 附件独立保存原始路径，模型仅接收原始路径，不再附带内部归档路径。历史图片省略数据后仍保留文件名与原始路径，历史编辑和排队消息保留来源信息。
-- 会话数据库升级为 v4，启动与恢复备份时自动升级受支持的 v3；旧附件原始路径为空，启动升级前保全原数据库，失败可重试。恢复备份不逐条检查记录内容或附件文件的存在性和大小；catalog、记忆和配置版本不变，不支持降级读取 v4。
+- 修复已有对话发送消息后迟迟不上屏的问题：已保存的消息和附件在运行准备期间即可显示，开始执行后不会重复；刷新显示失败不再把已成功提交的消息误报为发送失败。
+- MCP 启动和后台重连不再阻塞聊天，每轮使用当前已连接的工具；连接成功后供后续轮次使用，手动重载仍等待连接结果。补充中英文使用说明。
 
-- Apply model image limits to user attachments: check dimensions, aspect ratio and size when adding images, then check the combined image count before submission. Keep drafts and attachments after validation failures so they can be adjusted and retried. Fix image-limit checks interfering with history context estimates and compression.
-- Store each attachment's original path separately. Models receive only the original path, without internal archive paths. Keep filenames and original paths when omitting historical image data, including after history edits and in queued messages.
-- Upgrade conversation databases to v4 automatically from supported v3 databases at startup and during backup restore. Existing attachments have no original path; startup upgrades preserve original databases and can be retried after failure. Backup restore no longer checks individual record contents or attachment existence and sizes. Catalog, memory and configuration versions are unchanged; older versions cannot read v4 databases.
+- Show saved messages and attachments in existing conversations while execution is still preparing, without duplicating them when execution starts. A display refresh failure no longer reports an accepted submission as a failed send.
+- Keep MCP startup and background reconnection from blocking chat. Each turn uses currently connected tools; newly connected servers become available to later turns, while manual reloads still wait for connection results. Update the Chinese and English guides.

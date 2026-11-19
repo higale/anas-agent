@@ -661,9 +661,17 @@ export function useAgentWorkspace({ onAppError }: UseAgentWorkspaceOptions) {
       } else {
         await loadThreadSnapshot(submission.thread.id, true)
       }
+    } else {
+      // The saved input is visible before runtime preparation emits run_started.
+      try {
+        await loadThreadSnapshot(submission.thread.id, true)
+      } catch {
+        // A display read failure must not turn an accepted send into a retry.
+        setThreadError(submission.thread.id, translationRef.current('chat.failed_load_app'))
+      }
     }
     return submission.thread.id
-  }, [activeThreadId, draftProjectId, loadThreadSnapshot, saveWorkspaceState, threads])
+  }, [activeThreadId, draftProjectId, loadThreadSnapshot, saveWorkspaceState, setThreadError, threads])
 
   const cancel = useCallback(async (threadId: string): Promise<void> => {
     const run = runs[threadId]
