@@ -1,6 +1,7 @@
 import { SettingsSelectionActions } from './SettingsListActions'
 import { errorDetail } from '@shared/recovery'
-import { ListTree, Pencil, Wrench } from 'lucide-react'
+import { ListTree, Pencil } from 'lucide-react'
+import { ToolsIcon } from '../ToolsIcon'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AppConfigSnapshot } from '@shared/types'
@@ -209,7 +210,7 @@ export function CustomToolsGroup({ actionsTarget = null, tools, onConfigChange, 
   }
   function renderTool(tool: ToolPackage, showSource = false) {
     const isExpanded = expanded.has(`files:${packageNodeKey(tool.id)}`)
-    return <PackageTreeItem key={tool.id} name={tool.name} icon={<Wrench size={14} aria-hidden="true" />} depth={1} selected={selection?.kind === 'tool' && selection.id === tool.id && !catalogView}
+    return <PackageTreeItem key={tool.id} name={tool.name} icon={<ToolsIcon size={14} aria-hidden="true" />} depth={1} selected={selection?.kind === 'tool' && selection.id === tool.id && !catalogView}
       expanded={isExpanded} badge={showSource ? rootLabel(roots.find(root => root.id === tool.rootId)!) : undefined}
       status={<SettingsAvailabilityBadge disabled={tool.enabled === false} error={Boolean(tool.error)} />}
       expandLabel={t(isExpanded ? 'custom_tools.collapse' : 'custom_tools.expand', { name: tool.name })}

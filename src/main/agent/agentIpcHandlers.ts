@@ -67,6 +67,9 @@ import { runtimeLog } from '../runtimeLogger'
 import { getProject, recoverProjectDeletion, reorderSidebar } from '../projectStore'
 import { hasModelImageLimits } from '@shared/modelImageLimits'
 import { validateSubmittedImageAttachments } from './conversationAttachments'
+import { ModelImageSelectionError } from './modelImageSelectionError'
+import { ModelSelectionError } from '../../runtime/errors'
+import { getConfiguredTranslator } from '../languageStore'
 import { simpleConversationHistory } from './conversationHistoryProjection'
 import type { ConversationMessage } from '../../runtime/conversationMessage'
 import type { SidebarReorderRequest } from '@shared/sidebarOrder'
@@ -801,8 +804,15 @@ export function registerAgentIpcHandlers(): void {
           .map(record => ({ ...record.value, id: record.id }))
         const project = await getProject(thread?.projectId ?? executionInput.newThread!.projectId)
         if (project.kind === 'simple_chat') messages = simpleConversationHistory(messages)
-        await validateSubmittedImageAttachments(executionInput, selectedModel, messages,
-          database?.resources.listAttachmentsForThread(executionInput.threadId))
+        try {
+          await validateSubmittedImageAttachments(executionInput, selectedModel, messages,
+            database?.resources.listAttachmentsForThread(executionInput.threadId))
+        } catch (error) {
+          if (!(error instanceof ModelImageSelectionError)) throw error
+          const latestConfig = await getAppConfigSnapshot()
+          const t = await getConfiguredTranslator(latestConfig.settings.language)
+          throw new ModelSelectionError(error.localizedMessage(t), { cause: error })
+        }
       }
       subscribeAgentEvents(event.sender)
       const result = await currentRuntime().submitRunWithAttachments(executionInput, confirmSpeech)

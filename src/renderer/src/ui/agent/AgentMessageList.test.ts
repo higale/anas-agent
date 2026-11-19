@@ -167,8 +167,8 @@ describe('AgentMessageList', () => {
       /agent-activity-tool(?: [^"]*)?"[^>]*><summary[^>]*>([\s\S]*?)<\/summary>/
     )?.[1] ?? ''
     expect(skillInputSummary).toContain('lucide-file-text')
-    expect(skillInputSummary).not.toContain('lucide-wrench')
-    expect(toolSummary).toContain('lucide-wrench')
+    expect(skillInputSummary).not.toContain('lucide-tools')
+    expect(toolSummary).toContain('lucide-tools')
   })
 
   it('keeps the live conversation unchanged when preferences are injected', () => {

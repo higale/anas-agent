@@ -1,5 +1,5 @@
-import { modelImageDataFailure, modelImageCountFailure, type EmbeddedModelImage } from '@shared/modelImageValidation'
-import { ModelSelectionError } from '../../runtime/errors'
+import { modelImageDataFailure, modelImageCountFailure, modelImageFailureText, type EmbeddedModelImage } from '@shared/modelImageValidation'
+import { ModelImageSelectionError } from './modelImageSelectionError'
 import { hasModelImageLimits, type ModelImageLimits } from '@shared/modelImageLimits'
 import type { ConversationMessage } from '../../runtime/conversationMessage'
 import { inputContentBlocks } from '../../runtime/inputContent'
@@ -39,9 +39,11 @@ export function projectModelImageLimits(messages: readonly ConversationMessage[]
       if (image) { images.set(block, image); count++; if (message.kind === 'tool') toolCount++ }
     }
   }
-  const countFailure = modelImageCountFailure(count, rules)
   const rejectsAttachments = !toolCount || mode === 'submission' && count > toolCount
-  if (countFailure && rejectsAttachments && mode !== 'estimate') throw new ModelSelectionError(`${countFailure} Remove attachments or change the model image limits and send again.`)
+  const countFailure = modelImageCountFailure(count, rules, failure => {
+    if (rejectsAttachments && mode !== 'estimate') throw new ModelImageSelectionError(failure)
+    return modelImageFailureText(failure)
+  })
   const batchFailure = countFailure && !rejectsAttachments ? `${countFailure} The entire batch of ${count} embedded images was omitted.` : undefined
   return messages.map(message => {
     if (!['tool', 'user'].includes(message.kind) || !Array.isArray(message.content)) return message
@@ -52,8 +54,10 @@ export function projectModelImageLimits(messages: readonly ConversationMessage[]
       const image = images.get(block)
       if (!image) return block
       if (message.kind === 'user' && mode === 'estimate' && !batchFailure) return block
-      const failure = batchFailure ? undefined : modelImageDataFailure(image, rules)
-      if (message.kind === 'user' && failure) throw new ModelSelectionError(`Attachment image ${ordinal} in message ${message.id ?? 'current'}: ${failure} Change the attachment or model and send again.`)
+      const failure = batchFailure ? undefined : modelImageDataFailure(image, rules, reason => {
+        if (message.kind === 'user') throw new ModelImageSelectionError(reason, { ordinal, messageId: message.id })
+        return modelImageFailureText(reason)
+      })
       const reason = batchFailure ?? failure
       if (!reason) return block
       const origin = message.kind === 'user' ? `Attachment (message ${message.id ?? 'current'})` : `Tool ${message.name ?? 'unknown'} (result ${message.resultFor ?? message.id ?? 'unknown'})`

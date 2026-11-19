@@ -1,6 +1,7 @@
 import { errorDetail } from '@shared/recovery'
 import * as Dialog from '@radix-ui/react-dialog'
-import { Check, CircleHelp, Wrench, X } from 'lucide-react'
+import { Check, CircleHelp, X } from 'lucide-react'
+import { ToolsIcon } from '../ToolsIcon'
 import { useId, useState, type CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import { customToolDefaults, type CustomToolDefinition, type CustomToolSave } from '@shared/customTools'
@@ -67,7 +68,7 @@ export function CustomToolEditor({ tool, initialSection = 'information', onClose
           onPointerDownOutside={(event) => event.preventDefault()}>
           <div className="custom-tool-editor-header ui-dialog-header-group ui-form-section">
             <header className="ui-dialog-header">
-              <div className="ui-dialog-icon"><Wrench size={18} /></div>
+              <div className="ui-dialog-icon"><ToolsIcon size={18} /></div>
               <div>
                 <Dialog.Title className="ui-dialog-title">{t(tool ? 'custom_tools.edit' : 'custom_tools.add')}</Dialog.Title>
                 <Dialog.Description className="ui-dialog-description">{t('custom_tools.editor_hint')}</Dialog.Description>

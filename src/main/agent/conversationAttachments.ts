@@ -14,6 +14,7 @@ import { userMessageContent } from '../../runtime/messagePresentation'
 import { extractLocalAttachmentText, supportsLocalTextExtraction } from '../attachmentTextExtractor'
 import { runtimeLog } from '../runtimeLogger'
 import { ModelSelectionError } from '../../runtime/errors'
+import { ModelImageSelectionError } from './modelImageSelectionError'
 
 type ModelContentBlock = Record<string, unknown>
 
@@ -49,8 +50,9 @@ export async function validateSubmittedImageAttachments(input: Pick<AgentRunInpu
     if (file.skippedReason || file.kind !== 'image' || !file.dataUri) {
       throw new ModelSelectionError(`Attachment ${attachment.name}: ${file.skippedReason ?? 'The selected image is no longer a supported image.'}`)
     }
-    const failure = attachmentImageFailure(file, model.imageLimits)
-    if (failure) throw new ModelSelectionError(`Attachment ${attachment.name}: ${failure}`)
+    attachmentImageFailure(file, model.imageLimits, failure => {
+      throw new ModelImageSelectionError(failure, { name: attachment.name })
+    })
     blocks.push(fileLabel({ name: attachment.name, sourcePath: attachment.sourcePath }), { type: 'image_url', image_url: { url: file.dataUri } })
   }
   projectModelImageLimits([...history, { kind: 'user', content: blocks }], model.imageLimits, 'submission')

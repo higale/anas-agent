@@ -85,6 +85,8 @@ async function verifyModelSelection(launchApplication) {
           parameterPresets: [{ id: 'balanced', name: 'Balanced', parameters: { temperature: 0.4 } },
             { id: 'deep', name: 'Deep', parameters: { temperature: 0.7 } }],
           capabilities: { vision: true, toolUse: true }, stream: false,
+          imageLimits: index === 0 ? { minShortSide: 10, maxLongSide: 4096, maxPixels: 12_000_000,
+            maxAspectRatio: 4, maxBytes: 1_500_000, byteBasis: 'base64', maxCount: 3 } : {},
           maxContextTokens: index === 0 ? 50000 : 100000, maxOutputTokens: index === 0 ? 10000 : 5000,
           contextCompressionThreshold: index === 0 ? 0.8 : 0.6, contextCompressionEnabled: true })
       }
@@ -94,10 +96,37 @@ async function verifyModelSelection(launchApplication) {
     const modelPicker = page.getByRole('button', { name: 'Select model', exact: true })
     const presetPicker = page.getByRole('button', { name: 'Reasoning options', exact: true })
     await modelPicker.click()
+    const limitedModel = page.getByRole('menuitemradio', { name: 'Model A', exact: true })
+    const unrestrictedModel = page.getByRole('menuitemradio', { name: 'Model B', exact: true })
+    const limitedEye = limitedModel.getByLabel('Vision: On · Image limits configured', { exact: true })
+    await expect(limitedEye).toBeVisible()
+    await expect(unrestrictedModel.getByLabel('Vision: On', { exact: true })).toBeVisible()
+    await expect(unrestrictedModel.locator('.lucide-eye circle')).toHaveCSS('fill', 'none')
+    await limitedEye.hover()
+    await expect(page.getByRole('tooltip')).toContainText('Minimum short side (px): 10')
+    await expect(page.getByRole('tooltip')).toContainText('Maximum image size (bytes): 1,500,000 (Base64 encoded)')
+    await expect(page.getByRole('tooltip')).toContainText('Images per request: 3')
+    await expect(page.getByRole('tooltip')).not.toContainText('Protocol:')
+    const pupil = await limitedEye.locator('circle').evaluate(element => ({
+      fill: globalThis.getComputedStyle(element).fill, stroke: globalThis.getComputedStyle(element).stroke,
+      outline: globalThis.getComputedStyle(element.parentElement).color
+    }))
+    assert.notEqual(pupil.fill, 'none')
+    assert.equal(pupil.fill, pupil.stroke)
+    assert.notEqual(pupil.fill, pupil.outline)
+    await mkdir(join(__dirname, '../tmp'), { recursive: true })
+    await page.screenshot({ path: join(__dirname, '../tmp/model-image-limits-eye.png') })
+    await limitedModel.getByLabel('Tool use: On', { exact: true }).hover()
+    await expect(page.getByRole('tooltip')).toHaveText('Tool use: On')
+    await limitedModel.locator('.model-item-name').hover()
+    await expect(page.getByRole('tooltip')).toContainText('Maximum long side (px): 4,096')
+    await unrestrictedModel.locator('.model-item-name').hover()
+    await expect(page.getByRole('tooltip')).toContainText('Image input limits: not configured')
     await page.getByRole('menuitemradio', { name: /^Model A(?: |$)/ }).click()
     await expect(modelPicker).toHaveText('Model A')
     await modelPicker.hover()
     await expect(page.getByRole('tooltip')).toContainText('80% (32,000)')
+    await expect(page.getByRole('tooltip')).toContainText('Maximum image size (bytes): 1,500,000 (Base64 encoded)')
     await page.locator('[data-agent-composer-input]').fill('Verify the model selected for the next request.')
     await page.getByRole('button', { name: 'Send', exact: true }).click()
     await expect.poll(() => requests.length, { timeout: 20_000 }).toBe(1)

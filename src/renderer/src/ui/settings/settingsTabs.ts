@@ -1,6 +1,7 @@
-import { Bot, Code2, Earth, GitFork, Plug, Puzzle, Settings, SlidersHorizontal, Wand2, Wrench } from 'lucide-react'
+import { Bot, Code2, Earth, GitFork, Plug, Puzzle, Settings, SlidersHorizontal, Wand2 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { MemoryIcon } from '../MemoryIcon'
+import { ToolsIcon } from '../ToolsIcon'
 
 export type SettingsTab = 'general' | 'chatMode' | 'environment' | 'subagents' | 'memory' | 'dev' | 'model' | 'mcp' | 'tools' | 'skills' | 'plugins'
 
@@ -17,7 +18,7 @@ export const settingsTabs: Array<{
   { id: 'subagents', labelKey: 'settings.tabs.subagents', descriptionKey: 'settings.tab_descriptions.subagents', Icon: GitFork },
   { id: 'skills', labelKey: 'settings.tabs.skills', descriptionKey: 'settings.tab_descriptions.skills', Icon: Wand2 },
   { id: 'mcp', labelKey: 'settings.tabs.mcp', descriptionKey: 'settings.tab_descriptions.mcp', Icon: Plug },
-  { id: 'tools', labelKey: 'settings.tools_page', descriptionKey: 'settings.tab_descriptions.tools', Icon: Wrench },
+  { id: 'tools', labelKey: 'settings.tools_page', descriptionKey: 'settings.tab_descriptions.tools', Icon: ToolsIcon },
   { id: 'plugins', labelKey: 'plugins.title', descriptionKey: 'plugins.description', Icon: Puzzle },
   { id: 'memory', labelKey: 'settings.tabs.memory', descriptionKey: 'settings.tab_descriptions.memory', Icon: MemoryIcon },
   { id: 'dev', labelKey: 'settings.tabs.dev', descriptionKey: 'settings.tab_descriptions.dev', Icon: Code2 }

@@ -4,6 +4,7 @@ import type { TFunction } from 'i18next'
 import type { SelectedAttachment } from '@shared/types'
 import type { ModelImageLimits } from '@shared/modelImageLimits'
 import { attachmentImageFailure } from '@shared/modelImageValidation'
+import { modelImageFailureMessage } from '@shared/modelImageFailureMessage'
 import { dataTransferHasFiles } from '../dragDrop'
 import { notice } from '../notice'
 
@@ -56,6 +57,8 @@ export function useComposerAttachments({
   const [convertingKeys, setConvertingKeys] = useState(new Set<string>())
   const modelRef = useRef({ visionEnabled, imageLimits })
   modelRef.current = { visionEnabled, imageLimits }
+  const translatorRef = useRef(t)
+  translatorRef.current = t
 
   useEffect(() => {
     activeDraftRef.current = draftKey
@@ -80,17 +83,18 @@ export function useComposerAttachments({
     const pathOnly = files.filter(file => file.kind === 'binary' && !file.skippedReason)
     const unsupported = files.filter(file => file.kind === 'image' && !model.visionEnabled)
     const invalid = files.flatMap(file => {
-      const reason = unsupported.includes(file) ? undefined : attachmentImageFailure(file, model.imageLimits)
+      const reason = unsupported.includes(file) ? undefined
+        : attachmentImageFailure(file, model.imageLimits, failure => modelImageFailureMessage(failure, translatorRef.current))
       return reason ? [{ file, reason }] : []
     })
     const rejected = [...unsupported, ...invalid.map(item => item.file)]
     const accepted = files.filter(file => !pathOnly.includes(file) && !rejected.includes(file))
     releaseTemporaryAttachments(rejected)
-    if (unsupported.length > 0) notice.warning(t('chat.vision_unsupported_attach'))
+    if (unsupported.length > 0) notice.warning(translatorRef.current('chat.vision_unsupported_attach'))
     if (invalid.length > 0) notice.warning(invalid.map(({ file, reason }) => `${file.name}: ${reason}`).join('\n'))
     setAttachments(current => appendUniqueAttachments(current, accepted))
     appendPaths(pathOnly.map(file => file.path))
-  }, [appendPaths, draftKey, imageLimits, setAttachments, t, visionEnabled])
+  }, [appendPaths, draftKey, imageLimits, setAttachments, visionEnabled])
 
   const clearAttachments = useCallback((): void => {
     releaseTemporaryAttachments(attachments)
@@ -112,9 +116,9 @@ export function useComposerAttachments({
       if (files.length === 0) return
       acceptFiles(files)
     } catch {
-      notice.error(t('chat.failed_attach_file'))
+      notice.error(translatorRef.current('chat.failed_attach_file'))
     }
-  }, [acceptFiles, t])
+  }, [acceptFiles])
 
   const handleComposerDragEnter = useCallback((event: DragEvent<HTMLFormElement>): void => {
     if (!dataTransferHasFiles(event.dataTransfer)) return
@@ -147,14 +151,14 @@ export function useComposerAttachments({
     try {
       const files = await window.gale.files.fromDroppedFiles(droppedFiles)
       if (files.length === 0) {
-        notice.warning(t('chat.unsupported_dropped_file'))
+        notice.warning(translatorRef.current('chat.unsupported_dropped_file'))
         return
       }
       acceptFiles(files)
     } catch {
-      notice.error(t('chat.failed_attach_file'))
+      notice.error(translatorRef.current('chat.failed_attach_file'))
     }
-  }, [acceptFiles, t])
+  }, [acceptFiles])
 
   const convertAttachmentToPath = useCallback(async (path: string): Promise<void> => {
     const file = attachments.find(file => file.path === path)
@@ -163,19 +167,19 @@ export function useComposerAttachments({
     conversionsRef.current.add(key)
     setConvertingKeys(new Set(conversionsRef.current))
     try {
-      const retainedPath = file.temporary
+      const convertedPath = file.sourcePath ?? (file.temporary
         ? await window.gale.files.retainTemporaryAttachment(file.path, projectId)
-        : file.path
-      appendPaths([retainedPath])
+        : file.path)
+      appendPaths([convertedPath])
       setAttachments(current => current.filter(item => item.path !== path))
       releaseTemporaryAttachments([file])
     } catch {
-      notice.error(t('chat.failed_convert_attachment_to_path'))
+      notice.error(translatorRef.current('chat.failed_convert_attachment_to_path'))
     } finally {
       conversionsRef.current.delete(key)
       setConvertingKeys(new Set(conversionsRef.current))
     }
-  }, [appendPaths, attachments, draftKey, projectId, setAttachments, t])
+  }, [appendPaths, attachments, draftKey, projectId, setAttachments])
 
   const removeAttachment = useCallback((path: string): void => {
     const removed = attachments.find((file) => file.path === path)

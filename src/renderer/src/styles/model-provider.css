@@ -186,6 +186,11 @@
   white-space: nowrap;
 }
 
+.model-vision-limited > circle {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+
 .model-list-url-inline-trigger {
   display: inline-grid;
   place-items: center;

@@ -190,7 +190,11 @@ export function GlobalTooltip() {
     function handleFocusIn(event: TooltipInput): void {
       if (retargetedShadowEvent(event)) return
       const target = tooltipTargetFromEventTarget(event.target)
-      if (target) showTooltip(target)
+      if (!target) return
+      // Menu items focus themselves on pointer entry. Keep the hovered icon's
+      // more specific tooltip instead of replacing it with the row's summary.
+      const pending = pendingTargetRef.current
+      showTooltip(pending && target.contains(pending) ? pending : target)
     }
 
     function handleFocusOut(event: TooltipInput): void {

@@ -40,6 +40,7 @@ async function verifyAttachmentPreviews(launchApplication) {
   const root = await mkdtemp(join(tmpdir(), 'anas-image-preview-e2e-'))
   if (dirname(root) !== tmpdir() || !basename(root).startsWith('anas-image-preview-e2e-')) throw new Error('Unexpected test directory.')
   const photo = join(root, '照片 #1 %.bmp')
+  const tiny = join(root, '小图.bmp')
   const large = join(root, '超大 # %.bmp')
   const generatedName = 'generated 猫.bmp'
   const generated = join(root, generatedName)
@@ -80,13 +81,17 @@ async function verifyAttachmentPreviews(launchApplication) {
           block.type === 'text' && block.text === `[Attachment: ${basename(photo)}]\nOriginal path: ${photo}`)))
         await assert.rejects(stat(photo), { code: 'ENOENT' })
         content = 'Historical image paths retained.'
-      } else {
+      } else if (requests === 2) {
         assert.equal(images.length, 0)
         const user = input.messages.findLast(message => message.role === 'user')
         assert.equal(user.content.length, 2)
         assert.deepEqual(user.content[0], { type: 'text', text: pathPrompt })
         assert.deepEqual(user.content[1], { type: 'text', text: `Original path: ${svg}\n<file name="diagram.svg">\n${svgSource}\n</file>` })
         content = 'Native path and SVG source received.'
+      } else {
+        assert.equal(requests, 3)
+        assert.equal(images.length, 1)
+        content = 'Retained tiny image received.'
       }
       requests += 1
       response.writeHead(200, { 'content-type': 'application/json' })
@@ -98,6 +103,7 @@ async function verifyAttachmentPreviews(launchApplication) {
   })
   try {
     await writeFile(photo, bitmap(2048, 1707))
+    await writeFile(tiny, bitmap(8, 6))
     await writeFile(large, bitmap(3072, 3000))
     await writeFile(generated, bitmap(800, 600))
     await writeFile(nativePath, 'Convert this file without sending its contents.')
@@ -128,19 +134,66 @@ async function verifyAttachmentPreviews(launchApplication) {
         baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: '', parameters: {}, modelListUrl: '' })
       const providerId = config.providers.find(provider => provider.name === 'Preview test').id
       await api.saveProviderModel({ providerId, displayName: 'Photo model', model: 'photo', parameters: {},
+        imageLimits: { minShortSide: 10 },
+        parameterPresetMode: 'none', capabilities: { vision: true, toolUse: false }, stream: false,
+        maxContextTokens: 100000, maxOutputTokens: 1000, contextCompressionThreshold: 0.8, contextCompressionEnabled: true })
+      await api.saveProviderModel({ providerId, displayName: 'Zero images', model: 'zero-images', parameters: {},
+        imageLimits: { maxCount: 0 },
         parameterPresetMode: 'none', capabilities: { vision: true, toolUse: false }, stream: false,
         maxContextTokens: 100000, maxOutputTokens: 1000, contextCompressionThreshold: 0.8, contextCompressionEnabled: true })
     }, server.address().port)
     await page.getByRole('button', { name: 'Select model', exact: true }).click()
     await page.getByRole('menuitemradio', { name: /^Photo model(?: |$)/ }).click()
-    await application.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, photo)
-    await page.getByRole('button', { name: /attach file/i }).click()
     const tile = page.locator('.attachment-grid-composer .attachment-tile')
     const input = page.locator('[data-agent-composer-input]')
+    await mkdir(join(__dirname, '../tmp'), { recursive: true })
+    for (const language of ['zh-CN', 'en']) {
+      const chinese = language === 'zh-CN'
+      await page.evaluate(language => globalThis.gale.config.updateSettings({ language }), language)
+      await expect(page.locator('html')).toHaveAttribute('lang', language)
+      const selectModel = async name => {
+        await page.getByRole('button', { name: chinese ? '选择模型' : 'Select model', exact: true }).click()
+        await page.getByRole('menuitemradio', { name: new RegExp(`^${name}(?: |$)`) }).click()
+      }
+      const attach = page.getByRole('button', { name: chinese ? '添加附件' : 'Attach file', exact: true })
+      const send = page.getByRole('button', { name: chinese ? '发送' : 'Send', exact: true })
+      const dimensions = chinese ? '图片尺寸为 8×6 像素：短边 6 像素，小于 10 像素的下限。'
+        : 'Dimensions 8×6 px: short side 6 px is below the minimum of 10 px.'
+      await input.fill('保留已有内容')
+      await application.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, tiny)
+      if (chinese) await dropNativeFile(page, tiny)
+      else await attach.click()
+      const warning = page.locator('[data-sonner-toast]').filter({ hasText: `小图.bmp: ${dimensions}` })
+      await expect(warning).toBeVisible()
+      await expect(tile).toHaveCount(0)
+      await expect(input).toHaveValue('保留已有内容')
+      if (chinese) await page.screenshot({ path: join(__dirname, '../tmp/image-validation-zh-CN.png') })
+      await warning.locator('.notice-close').click()
+      await expect(warning).not.toBeVisible()
+
+      // Images accepted under one model must be checked again before sending to another.
+      await selectModel('Zero images')
+      await attach.click()
+      await expect(tile).toHaveCount(1)
+      await selectModel('Photo model')
+      await send.click()
+      await expect(page.getByText(`小图.bmp: ${dimensions}`, { exact: true })).toBeVisible()
+      await selectModel('Zero images')
+      await send.click()
+      await expect(page.getByText(chinese ? '本次请求包含 1 张内嵌图片，超过 0 张的上限。'
+        : 'This request contains 1 embedded images, exceeding the limit of 0.', { exact: true })).toBeVisible()
+      await expect(input).toHaveValue('保留已有内容')
+      await expect(tile).toHaveCount(1)
+      assert.equal(requests, 0)
+      await tile.hover()
+      await tile.locator('.attachment-remove').click()
+      await selectModel('Photo model')
+    }
+    await application.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, photo)
+    await page.getByRole('button', { name: /attach file/i }).click()
     await input.fill('保留已有内容')
     await tile.hover()
     await expect(tile.getByRole('button', { name: 'Convert to path' })).toBeVisible()
-    await mkdir(join(__dirname, '../tmp'), { recursive: true })
     await page.screenshot({ path: join(__dirname, '../tmp/attachment-path-button.png') })
     await tile.getByRole('button', { name: 'Convert to path' }).click()
     await expect(tile).toHaveCount(0)
@@ -244,15 +297,14 @@ async function verifyAttachmentPreviews(launchApplication) {
     await tile.hover()
     await tile.getByRole('button', { name: 'Convert to path' }).click()
     await expect(tile).toHaveCount(0)
-    const retained = (await input.inputValue()).split('\n').at(-1)
-    assert.ok(retained.includes(join('attachments', '_paths')))
-    assert.equal(basename(retained), basename(photo))
-    assert.deepEqual(await readFile(retained), await readFile(photo))
-    await page.evaluate(async projectId => {
+    await expect(input).toHaveValue(`Inspect the photo.\n${photo}`)
+    const deletedThreadId = await page.evaluate(async projectId => {
       const thread = (await globalThis.gale.agent.threads.list()).find(thread => thread.projectId === projectId)
       await globalThis.gale.agent.threads.delete(thread.id)
+      return thread.id
     }, projectUpdate.value.id)
-    await assert.rejects(stat(retained), { code: 'ENOENT' })
+    assert.deepEqual(await readFile(photo), photoBytes, 'Converting and deleting the conversation must preserve the original file.')
+    await assert.rejects(stat(join(profile, 'db/projects', projectUpdate.value.id, 'conversations', deletedThreadId)), { code: 'ENOENT' })
 
     await page.reload()
     await expect(input).toBeVisible()
@@ -280,7 +332,48 @@ async function verifyAttachmentPreviews(launchApplication) {
     await expect.poll(() => page.evaluate(async () => (await globalThis.gale.inputHistory.get()).items.map(item => item.text))).toContain(pathPrompt)
     assert.equal(requests, 3)
     assert.deepEqual(errors, [])
-    console.log('Attachment Electron E2E passed: model context retains only original paths when historical image data is omitted; native path submission, SVG, drops, history editing, cleanup and previews.')
+
+    // Retained historical images are validated by the main process, without new composer attachments.
+    await page.evaluate(async () => {
+      const config = await globalThis.gale.config.get()
+      const providerId = config.providers.find(provider => provider.name === 'Preview test').id
+      await globalThis.gale.config.saveProviderModel({ providerId, displayName: 'Unrestricted images', model: 'unrestricted', parameters: {},
+        parameterPresetMode: 'none', capabilities: { vision: true, toolUse: false }, stream: false,
+        maxContextTokens: 100000, maxOutputTokens: 1000, contextCompressionThreshold: 0.8, contextCompressionEnabled: true })
+    })
+    await page.locator('.project-thread-group').filter({ hasText: projectUpdate.value.name }).locator('.project-thread-new-chat').click()
+    await page.getByRole('button', { name: 'Select model', exact: true }).click()
+    await page.getByRole('menuitemradio', { name: /^Unrestricted images(?: |$)/ }).click()
+    await application.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, tiny)
+    await page.getByRole('button', { name: 'Attach file', exact: true }).click()
+    await expect(tile).toHaveCount(1)
+    await tile.hover()
+    await tile.locator('.attachment-context-toggle').click()
+    await input.fill('Retain this tiny image.')
+    await page.getByRole('button', { name: 'Send', exact: true }).click()
+    await expect(page.getByText('Retained tiny image received.', { exact: true })).toBeVisible()
+    await expect(tile).toHaveCount(0)
+    for (const language of ['zh-CN', 'en']) {
+      const chinese = language === 'zh-CN'
+      await page.evaluate(language => globalThis.gale.config.updateSettings({ language }), language)
+      await expect(page.locator('html')).toHaveAttribute('lang', language)
+      await input.fill('Keep this draft after historical image rejection.')
+      for (const model of ['Photo model', 'Zero images']) {
+        await page.getByRole('button', { name: chinese ? '选择模型' : 'Select model', exact: true }).click()
+        await page.getByRole('menuitemradio', { name: new RegExp(`^${model}(?: |$)`) }).click()
+        await page.getByRole('button', { name: chinese ? '发送' : 'Send', exact: true }).click()
+        const error = page.locator('.thread-title.error')
+        await expect(error).toContainText(model === 'Photo model'
+          ? chinese ? '图片尺寸为 8×6 像素：短边 6 像素，小于 10 像素的下限。' : 'Dimensions 8×6 px: short side 6 px is below the minimum of 10 px.'
+          : chinese ? '本次请求包含 1 张内嵌图片，超过 0 张的上限。' : 'This request contains 1 embedded images, exceeding the limit of 0.')
+        await expect(error).not.toContainText('Error invoking remote method')
+        if (chinese) await expect(error).not.toContainText(/Dimensions|Remove attachments|Change the attachment/)
+        await expect(input).toHaveValue('Keep this draft after historical image rejection.')
+        assert.equal(requests, 4)
+      }
+    }
+    assert.deepEqual(errors, [])
+    console.log('Attachment Electron E2E passed: localized composer and main-process historical image validation, preserved rejected drafts, native paths, SVG, drops, history editing, cleanup and previews.')
   } finally {
     await closeElectronTestApplication(application)
     server.closeAllConnections()

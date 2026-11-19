@@ -19,9 +19,9 @@ import {
   RotateCcw,
   ShieldAlert,
   Terminal,
-  Trash2,
-  Wrench
+  Trash2
 } from 'lucide-react'
+import { ToolsIcon } from '../ToolsIcon'
 import { memo, type ReactNode, type RefObject, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { NoFocusButton } from '../NoFocusButton'
@@ -570,7 +570,7 @@ function specialToolPresentation(call: AgentToolCall): ToolPresentation | undefi
 
 function toolPresentation(call: AgentToolCall): ToolPresentation {
   return specialToolPresentation(call) ?? {
-    icon: <Wrench size={13} />,
+    icon: <ToolsIcon size={13} />,
     title: call.name,
     codeTitle: true,
     showArgumentSummary: true

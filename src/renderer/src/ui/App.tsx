@@ -27,6 +27,7 @@ import {
   useComposerDrafts
 } from './chat/composerDrafts'
 import { attachmentPromptText } from './chat/attachmentUtils'
+import { modelImageFailureMessage } from '@shared/modelImageFailureMessage'
 import { useComposerKeyDown } from './chat/useComposerKeyDown'
 import { SynchronousSubmissionLock } from './chat/synchronousSubmissionLock'
 import { useComposerSuggestions } from './chat/useComposerSuggestions'
@@ -1041,9 +1042,9 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
       return
     }
     const invalidImage = attachments.flatMap(file => {
-      const reason = attachmentImageFailure(file, selectedModel.imageLimits)
+      const reason = attachmentImageFailure(file, selectedModel.imageLimits, failure => modelImageFailureMessage(failure, t))
       return reason ? [`${file.name}: ${reason}`] : []
-    })[0] ?? modelImageCountFailure(attachmentImageCount(attachments), selectedModel.imageLimits)
+    })[0] ?? modelImageCountFailure(attachmentImageCount(attachments), selectedModel.imageLimits, failure => modelImageFailureMessage(failure, t))
     if (invalidImage) {
       agent.setThreadError(threadId, invalidImage)
       return

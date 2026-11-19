@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentRuntimeEvent } from '../../shared/agentTypes'
+import type { ModelImageLimits } from '@shared/modelImageLimits'
+import { createInstance } from 'i18next'
+import en from '../../../data/lang/en.json'
+import zhCN from '../../../data/lang/zh-CN.json'
 
 vi.mock('../config/dataDir', () => ({ getDataDir: () => '/isolated-agent-ipc-data' }))
+vi.mock('../languageStore', () => ({ getConfiguredTranslator: async (language: string) => createInstance().init({
+  lng: language, fallbackLng: 'en', interpolation: { escapeValue: false },
+  resources: { en: { translation: en }, 'zh-CN': { translation: zhCN } }
+}) }))
 
 function runtimeForStorage<T extends object>(storage: { conversationForThread: (threadId: string) => object }, runtime: T) {
   return Object.assign(runtime, {
@@ -67,11 +75,15 @@ describe('agent IPC recovery', () => {
     }
   )
 
-  it('rejects image count overflow before creating a run and excludes summarized history', async () => {
+  it.each(['en', 'zh-CN'])('localizes image count and historical image failures in %s before creating a run', async language => {
     const handlers = new Map<string, (...args: unknown[]) => unknown>()
     const handle = vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => { handlers.set(channel, handler) })
     const thread = { id: 'thread', projectId: 'project', modelConfigId: 'model' }
-    const image = { type: 'image', data: 'AAAA', mimeType: 'image/png' }
+    const bytes = Buffer.alloc(33)
+    Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex').copy(bytes)
+    bytes.writeUInt32BE(8, 16); bytes.writeUInt32BE(6, 20)
+    const image = { type: 'image', data: bytes.toString('base64'), mimeType: 'image/png' }
+    let imageLimits: ModelImageLimits = { maxCount: 1 }
     const history = { context: { summary: { cutoffIndex: 1 } }, messages: [0, 1].map(index => ({
       id: `old-${index}`, value: { kind: 'user', content: [image] }
     })) }
@@ -85,17 +97,25 @@ describe('agent IPC recovery', () => {
       return runtimeForStorage(storage, { getRunSubmission: vi.fn(), submitRunWithAttachments })
     }) }))
     vi.doMock('../projectStore', () => ({ getProject: async () => ({ kind: 'workspace' }), recoverProjectDeletion: vi.fn() }))
-    vi.doMock('../config/appConfig', () => ({ onAppConfigChanged: vi.fn(), getAppConfigSnapshot: async () => ({}),
-      findResolvedModelConfig: () => ({ id: 'model', capabilities: { vision: true }, imageLimits: { maxCount: 1 } }) }))
+    vi.doMock('../config/appConfig', () => ({ onAppConfigChanged: vi.fn(), getAppConfigSnapshot: async () => ({ settings: { language } }),
+      findResolvedModelConfig: () => ({ id: 'model', capabilities: { vision: true }, imageLimits }) }))
     vi.doMock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
     const module = await import('./agentIpcHandlers')
     module.registerAgentIpcHandlers()
     const sender = { isDestroyed: () => false, send: vi.fn(), once: vi.fn() }
     const input = { requestId: '718b5ec8-dbb4-4bd2-8dd0-d9073f14185d', threadId: thread.id, text: 'Keep draft', content: [image] }
-    await expect(handlers.get('agent:runs:submit')!({ sender }, input)).rejects.toThrow('contains 2 embedded images')
+    await expect(handlers.get('agent:runs:submit')!({ sender }, input)).rejects.toThrow(language === 'en'
+      ? 'This request contains 2 embedded images, exceeding the limit of 1. Remove attachments or change the model image limits and send again.'
+      : '本次请求包含 2 张内嵌图片，超过 1 张的上限。 请移除附件或调整模型图片限制后重新发送。')
     expect(submitRunWithAttachments).not.toHaveBeenCalled()
     history.context.summary.cutoffIndex = 2
     await expect(handlers.get('agent:runs:submit')!({ sender }, input)).resolves.toEqual({ thread, run })
+    expect(submitRunWithAttachments).toHaveBeenCalledOnce()
+    history.context.summary.cutoffIndex = 1
+    imageLimits = { minShortSide: 10 }
+    await expect(handlers.get('agent:runs:submit')!({ sender }, { ...input, content: [] })).rejects.toThrow(language === 'en'
+      ? 'Attachment image 1 in message old-1: Dimensions 8×6 px: short side 6 px is below the minimum of 10 px. Change the attachment or model and send again.'
+      : '消息 old-1 的第 1 张附件图片：图片尺寸为 8×6 像素：短边 6 像素，小于 10 像素的下限。 请更换附件或模型后重新发送。')
     expect(submitRunWithAttachments).toHaveBeenCalledOnce()
     expect(input.text).toBe('Keep draft')
   })

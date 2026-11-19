@@ -1,5 +1,6 @@
-import { hasModelImageLimits, modelImageLimitFields, compactImageBytes } from '@shared/modelImageLimits'
+import { hasModelImageLimits } from '@shared/modelImageLimits'
 import { ModelImageLimitsDialog } from './ModelImageLimitsDialog'
+import { modelImageLimitsSummary } from './modelImageLimitsSummary'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Save, Settings2, SlidersHorizontal, X } from 'lucide-react'
 import { useId, useRef, useState } from 'react'
@@ -86,10 +87,6 @@ export function ModelDetailsDialog({
       setSaving(false)
     }
   }
-  const imageLimitsSummary = modelImageLimitFields.flatMap(key => {
-    const value = modelDraft.imageLimits?.[key]
-    return value === undefined ? [] : [`${t(`settings.image_limit_${key}`)}: ${key === 'maxBytes' ? compactImageBytes(value) : value.toLocaleString('en-US')}`]
-  }).join('；')
   const tokenFieldId = useId()
   const maxContextTokens = Number(modelDraft.maxContextTokens)
   const maxOutputTokens = Number(modelDraft.maxOutputTokens)
@@ -130,7 +127,7 @@ export function ModelDetailsDialog({
                 { value: 'stream', label: t('settings.stream_output'), checked: modelDraft.stream },
                 { value: 'vision', label: t('settings.model_capability_vision'), checked: modelDraft.capabilities.vision,
                   accessory: <button type="button" className="ui-icon-button ui-icon-button-xs model-image-limits-trigger" disabled={saving}
-                    aria-label={t('settings.image_limits')} data-tooltip={imageLimitsSummary || t('settings.image_limits_unconfigured')}
+                    aria-label={t('settings.image_limits')} data-tooltip={modelImageLimitsSummary(modelDraft.imageLimits, t)}
                     onClick={() => setImageLimitsOpen(true)}>
                     <Settings2 size={14} />
                     {hasModelImageLimits(modelDraft.imageLimits) && <span className="model-image-limits-dot" />}

@@ -10,6 +10,7 @@ import { NoFocusButton } from '../NoFocusButton'
 import { ModelListItemContent } from './ModelListItemContent'
 import { ProviderIcon } from './ProviderIcon'
 import { providerProtocolLabel } from './providerProtocol'
+import { modelImageLimitsSummary } from './modelImageLimitsSummary'
 
 interface ModelPickerProps {
   providers: ModelProviderConfig[] | undefined
@@ -98,7 +99,8 @@ export function ModelPicker({
         : t('chat.model_summary_compression_off'),
       t('chat.model_summary_capabilities', {
         stream: state(model.stream), vision: state(model.capabilities.vision), tools: state(model.capabilities.toolUse)
-      })
+      }),
+      ...(model.capabilities.vision ? [modelImageLimitsSummary(model.imageLimits, t)] : [])
     ].join('\n')
   }
 
@@ -272,6 +274,7 @@ export function ModelPicker({
                     className={`composer-model-item ui-list-item ui-menu-item ui-menu-item-row${model.id === selectedModel?.id ? ' ui-list-item-active active' : ''}`}
                     aria-label={model.displayName.trim() || model.model.trim()}
                     aria-description={modelSummary(model, 'item')}
+                    data-tooltip={contextMenu ? undefined : modelSummary(model, 'item')}
                     data-app-context-menu={onSetDefault ? true : undefined}
                     onContextMenu={onSetDefault ? (event) => openContextMenu(event, model.id) : undefined}
                     onSelect={() => select(model.id)}

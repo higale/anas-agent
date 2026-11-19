@@ -1,6 +1,7 @@
 import { PopoverContent } from '../PopoverContent'
 import * as Popover from '@radix-ui/react-popover'
-import { Ban, Bot, CircleCheck, CircleX, LoaderCircle, ShieldAlert, Wrench } from 'lucide-react'
+import { Ban, Bot, CircleCheck, CircleX, LoaderCircle, ShieldAlert } from 'lucide-react'
+import { ToolsIcon } from '../ToolsIcon'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AgentRunActivity, AgentSubagentActivityStatus } from '@shared/agentTypes'
 import {
@@ -271,7 +272,7 @@ export function AgentSubagentActivityTrigger({
               {recoveryError
                 ? <CircleX size={13} />
                 : running && details.currentToolName
-                ? <Wrench size={13} />
+                ? <ToolsIcon size={13} />
                 : running
                   ? <LoaderCircle className="agent-spin" size={13} />
                   : <AgentSubagentStatusIcon status={subagent.status} size={13} />}

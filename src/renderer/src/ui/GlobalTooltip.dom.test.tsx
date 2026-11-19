@@ -95,3 +95,26 @@ it('shows shadow content on hover and focus, follows internal transitions, and d
     host.remove()
   }
 })
+
+it('keeps a hovered icon tooltip when its menu row automatically receives focus', () => {
+  vi.useFakeTimers()
+  render(<><GlobalTooltip /><div role="menuitem" tabIndex={0} data-tooltip="Model summary" aria-label="Model">
+    <span data-tooltip="Image limits" aria-label="Vision" />
+    <span data-tooltip="Tool use" aria-label="Tools" />
+  </div></>)
+  const row = screen.getByLabelText('Model')
+  const vision = screen.getByLabelText('Vision')
+  const tools = screen.getByLabelText('Tools')
+  fireEvent.pointerOver(vision)
+  fireEvent.focusIn(row)
+  fireEvent.scroll(row)
+  expect(screen.getByRole('tooltip')).toHaveTextContent('Image limits')
+  fireEvent.pointerOut(vision, { relatedTarget: tools })
+  fireEvent.pointerOver(tools, { relatedTarget: vision })
+  act(() => { vi.advanceTimersByTime(450) })
+  expect(screen.getByRole('tooltip')).toHaveTextContent('Tool use')
+  fireEvent.pointerOut(tools, { relatedTarget: document.body })
+  fireEvent.focusOut(row)
+  fireEvent.focusIn(row)
+  expect(screen.getByRole('tooltip')).toHaveTextContent('Model summary')
+})
