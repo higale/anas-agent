@@ -127,7 +127,9 @@ export async function runPackagedSmoke(): Promise<void> {
       const runPython = async (executable: string, args: string[]) => {
         let succeeded = false, output = ''
         await runPreparedProcess({ command: 'packaged Python dependency smoke', workingDir: documents, timeoutSec: 30,
-          invocation: { executable, args, windowsHide: true }, env: dependencyEnv,
+          // -I ignores PYTHONUTF8/PYTHONIOENCODING; keep captured Unicode paths
+          // readable even when the Windows host uses a legacy ANSI code page.
+          invocation: { executable, args: ['-X', 'utf8', ...args], windowsHide: true }, env: dependencyEnv,
           logScope: 'packaged-smoke', successMessage: 'Python dependency smoke passed.', failureMessage: 'Python dependency smoke failed.',
           abortBeforeStartError: 'Python cancelled.', abortError: 'Python cancelled.', timeoutError: 'Python smoke timed out.'
         }, undefined, { onResult: value => { succeeded = value.ok; output = value.stdout + value.stderr } })
@@ -145,7 +147,8 @@ export async function runPackagedSmoke(): Promise<void> {
       const venv = join(documents, 'venv 中文')
       await runPython(python.executable, ['-I', '-B', '-m', 'venv', venv])
       const venvPython = join(venv, process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python3')
-      await runPython(venvPython, ['-I', '-B', '-m', 'pip', '--version'])
+      const pipVersion = await runPython(venvPython, ['-I', '-B', '-m', 'pip', '--version'])
+      if (!pipVersion.includes('venv 中文')) throw new Error(`Python venv pip output lost its Unicode path: ${pipVersion}`)
       await runPython(venvPython, ['-I', '-B', '-c', 'import sys; assert sys.prefix != sys.base_prefix'])
     }
     const authorization = createShellCommandAuthorization({ shell, env: searchEnvironment.env, rgExecutable: searchEnvironment.executable,
