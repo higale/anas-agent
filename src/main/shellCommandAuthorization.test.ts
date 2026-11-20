@@ -1,12 +1,13 @@
 import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { promisify } from 'node:util'
 import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentAccessMode } from '@shared/agentTypes'
 import { bundledSearchEnvironment, withExecutableDirectory } from './bundledRipgrep'
-import { getCommandShell, prepareShellCommand, resolveShellInvocation } from './shellRuntime'
+import { getCommandShell, prepareShellCommand, resolveShellInvocation, runShellCommand } from './shellRuntime'
 import { createShellCommandAuthorization } from './shellCommandAuthorization'
 import { parsePowerShellCommands } from './powershellCommandAnalysis'
 import * as skillsStore from './skillsStore'
@@ -29,6 +30,26 @@ async function fixture(accessMode: AgentAccessMode = 'strict_approval') {
   return { ...options, project, outside, search, authorization: createShellCommandAuthorization(options) }
 }
 afterEach(async () => { await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true }))) })
+
+const bundledPython = resolve('build/python-runtime', `${process.platform}-${process.arch}`, 'python', process.platform === 'win32' ? 'python.exe' : 'bin/python3')
+it.skipIf(!['win32', 'darwin'].includes(process.platform) || !existsSync(bundledPython))('binds Skill authorization to the explicit bundled interpreter used by Shell execution', async () => {
+  const h = await fixture()
+  const script = join(h.project, 'query.py')
+  await writeFile(script, 'import sys\nprint(sys.executable)\n')
+  vi.spyOn(skillsStore, 'findSkillScriptExemption').mockResolvedValue({ skillId: 'user:query', root: await realpath(h.project), script: await realpath(script) })
+  const env = { ...h.env, PYTHONHOME: undefined, PYTHONPATH: undefined,
+    PYTHONNOUSERSITE: '1', PYTHONDONTWRITEBYTECODE: '1', ...(process.platform === 'darwin' ? { ZDOTDIR: h.project } : {}) }
+  if (process.platform === 'darwin') await writeFile(join(h.project, '.zprofile'), 'export PATH="/usr/bin:/bin"\n')
+  const authorization = createShellCommandAuthorization({ ...h, env,
+    skills: { selection: defaultCapabilities.skills, agent: { kind: 'main' } } })
+  const quote = (value: string) => `'${value.replaceAll("'", process.platform === 'win32' ? "''" : "'\\''")}'`
+  const command = `${process.platform === 'win32' ? '& ' : ''}${quote(bundledPython)} query.py`
+  const args = { command, working_dir: h.project }
+  const plan = await authorization.inspect(args, { name: 'query', sourceAlias: 'user' })
+  expect(plan?.skillScript?.executor).toBe(await realpath(bundledPython))
+  const output = await runShellCommand({ command, workingDir: h.project, env, pathPrepend: h.search.directory, timeoutSec: 10, keepProcesses: false }, h.shell)
+  expect(await realpath(output.trim())).toBe(await realpath(bundledPython))
+}, 20000)
 
 describe.skipIf(process.platform !== 'win32')('Windows Shell read authorization', () => {
   it('recognizes one Skill invocation outside the project, executes the original command, and observes revocation', async () => {

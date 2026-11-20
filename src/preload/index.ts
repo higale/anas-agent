@@ -305,6 +305,8 @@ const api: GaleApi = {
       ipcRenderer.invoke('speech:logWarning', kind, diagnostics)
   },
   app: {
+    getPythonRuntimeStatus: () => ipcRenderer.invoke('app:getPythonRuntimeStatus'),
+    resetBundledPython: () => ipcRenderer.invoke('app:resetBundledPython'),
     getBuildInfo: (): Promise<AppBuildInfo> => ipcRenderer.invoke('app:getBuildInfo'),
     toggleDevTools: (): Promise<void> => ipcRenderer.invoke('app:toggleDevTools'),
     restartInConsole: (): Promise<void> => ipcRenderer.invoke('app:restartInConsole'),

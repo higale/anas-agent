@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { resettableConfigFiles, type ResettableConfigFile } from '@shared/recovery'
 import { isSameOrInsideDirectory, samePath } from './pathContainment'
 
-const excludedRoots = new Set(['electron', 'tmp', 'cache', 'dev'])
+const excludedRoots = new Set(['electron', 'tmp', 'cache', 'dev', 'runtimes'])
 const maxEntries = 100_000
 const maxBytes = 16 * 1024 ** 3
 

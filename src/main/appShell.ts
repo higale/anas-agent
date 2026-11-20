@@ -270,7 +270,7 @@ export function registerNativeContextMenu(window: BrowserWindow): void {
   })
 }
 
-export function createMainWindow(options: { recovery?: boolean } = {}): void {
+export function createMainWindow(options: { recovery?: boolean } = {}): BrowserWindow {
   const rendererFile = join(__dirname, '../renderer/index.html')
   const rendererLocation = resolveRendererLocation({
     isPackaged: app.isPackaged,
@@ -323,4 +323,5 @@ export function createMainWindow(options: { recovery?: boolean } = {}): void {
   } else {
     void win.loadFile(rendererFile, options.recovery ? { hash: 'recovery' } : undefined)
   }
+  return win
 }

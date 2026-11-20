@@ -5,6 +5,7 @@
   "description": "Research current or external information, verify claims, compare sources, and return findings with source links.",
   "capabilities": {
     "application_environment": true,
+    "bundled_python": true,
     "background_tools": true,
     "subagents": {
       "mode": "off",

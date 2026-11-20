@@ -15,6 +15,7 @@ import { processEnvironment } from '../config/apiKeys'
 import { resolvePluginTools, buildPluginPrompts, pluginRuntime } from '../plugins/pluginRuntime'
 import { listToolSnapshot, listSubagentTools } from '../toolsStore'
 import { bundledSearchEnvironment } from '../bundledRipgrep'
+import { getBundledPythonInfo } from '../bundledPython'
 import { createShellCommandAuthorization } from '../shellCommandAuthorization'
 import { fileToolDefinitions } from '../llm/fileTools'
 import { runtimeToolDefinitions } from '../llm/runtimeTools'
@@ -177,6 +178,7 @@ export async function prepareAgentSystemPrompt(
       projectPrompt: project.prompt,
       codingMode: codingMode ?? project.codingMode,
       toolsEnabled,
+      bundledPython: effective.bundledPython && toolsEnabled ? getBundledPythonInfo() : undefined,
       commandShell
     }, features)
   }
@@ -313,8 +315,9 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
   const commandShell = toolsEnabled && features.commandExecution
     ? await getCommandShell()
     : undefined
+  const baseEnvironment = toolsEnabled ? processEnvironment(capabilities.applicationEnvironment) : process.env
   const shellEnvironment = commandShell && !options.contextPreview
-    ? await bundledSearchEnvironment(processEnvironment(capabilities.applicationEnvironment))
+    ? await bundledSearchEnvironment(baseEnvironment)
     : undefined
   const shellCommandAuthorization = commandShell && shellEnvironment ? createShellCommandAuthorization({
     shell: commandShell, env: shellEnvironment.env, rgExecutable: shellEnvironment.executable,
@@ -438,7 +441,8 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
       })
     : []
   const customTools = toolsEnabled ? customToolDefinitions(runConfiguration.customTools, {
-    env: processEnvironment(capabilities.applicationEnvironment),
+    env: baseEnvironment,
+    bundledPython: capabilities.bundledPython,
     backgroundTools: capabilities.backgroundTools,
     signal: context.signal, preview: !options.persistent
   }) : []

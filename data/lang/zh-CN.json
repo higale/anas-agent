@@ -143,7 +143,11 @@
     "resource_config": "配置",
     "resource_input_history": "输入历史",
     "resource_build_info": "构建信息",
-    "resource_icon": "应用图标"
+    "resource_icon": "应用图标",
+    "python_preparing": "正在准备内置 Python，可继续使用程序…",
+    "python_ready": "内置 Python 已就绪",
+    "python_failed": "内置 Python 准备失败，可继续聊天和使用系统 Python",
+    "python_status_failed": "无法读取内置 Python 准备状态，请查看日志"
   },
   "project": {
     "projects": "项目",
@@ -487,6 +491,8 @@
     "environment_detection_failed": "系统环境检测失败。",
     "environment_detection_content_changed": "检测期间环境信息已修改，未插入检测结果。请重新定位光标并检测。",
     "capability_applicationEnvironment": ".env",
+    "capability_bundledPython": "内置 Python",
+    "capability_bundledPython_hint": "在初始上下文提供内置 Python 的备用路径，由模型决定是否调用；.py 自定义工具在系统 Python 不可用时自动保底。不修改 PATH，与运行环境和 .env 独立，不影响启动准备和重置。",
     "capability_applicationEnvironment_hint": "控制数据目录 .env 是否生效；关闭后其中的所有变量都会失效。",
     "capability_subagents": "子 Agent",
     "capability_subagents_hint": "提供已配置的异步子 Agent 及启动、读取、等待和取消工具。",
@@ -1056,7 +1062,14 @@
     "memory_conflict": "记忆已更新。请将以下最新正文与编辑器中的草稿核对后再保存。",
     "memory_reviewed": "已核对最新正文",
     "memory_finish_edit": "项目记忆有未保存的修改。请先保存或取消编辑，再关闭面板。",
-    "memory_document_empty": "尚无已整理的偏好。"
+    "memory_document_empty": "尚无已整理的偏好。",
+    "bundled_python": "内置 Python",
+    "bundled_python_hint": "包含 pip 和 venv。是否使用由项目或子 Agent 的“内置 Python”能力控制；环境损坏或文件缺失时可重置。",
+    "python_reset": "重置内置 Python",
+    "python_resetting": "正在重置内置 Python…",
+    "python_reset_success": "内置 Python 已重置",
+    "python_reset_failed": "重置内置 Python 失败",
+    "python_reset_confirm": "将用随包版本替换当前内置 Python，清除在其中安装的依赖和所做的修改。系统 Python、其他版本目录及外部虚拟环境不受影响。请先停止使用内置 Python 的脚本。"
   },
   "speech_input": {
     "open_win32": "系统语音输入（Win+H）",

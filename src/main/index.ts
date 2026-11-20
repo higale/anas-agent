@@ -20,6 +20,7 @@ import { initializeAvatarAssets } from './avatarAssets'
 import { consumePendingAvatarUpdate } from './avatarConfigService'
 import { initializeUserShellEnvironment } from './shellEnvironment'
 import { initializeCustomEnvironmentInformation } from './environmentContextService'
+import { initializeBundledPython } from './bundledPython'
 import { installRuntimeNetworkPolicy } from './runtimeNetworkPolicy'
 import { initializeSkillsStore } from './skillsStore'
 import { initializeToolsStore } from './toolsStore'
@@ -134,7 +135,8 @@ function startApplication(): void {
     }
     await applyProfileIcon()
     await cleanupTempFiles()
-    createMainWindow()
+    const mainWindow = createMainWindow()
+    mainWindow.webContents.once('did-finish-load', () => { void initializeBundledPython() })
     windowReady = true
     void initializeCustomEnvironmentInformation()
     void loadMcpRuntimeForCurrentConfig(false)

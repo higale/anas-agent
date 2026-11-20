@@ -1,18 +1,18 @@
 {
     "name": "anas",
-    "version": "5.2.18",
+    "version": "5.2.19",
     "productName": "Anas",
     "description": "Anas, short for Ananas: a local desktop agent with project-scoped context, tools, and skills customization.",
     "main": "out/main/index.js",
     "scripts": {
         "ensure:electron": "node scripts/ensure-electron.cjs",
         "postinstall": "patch-package --error-on-fail && npm run ensure:electron && node scripts/prepare-native-dependencies.cjs",
-        "dev": "npm run build:examples && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ electron-vite dev",
+        "dev": "npm run prepare:python && npm run build:examples && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ electron-vite dev",
         "build:examples": "node scripts/prepare-examples.cjs",
         "clean:build": "node scripts/clean-build-output.cjs build",
         "clean:pack": "node scripts/clean-build-output.cjs pack",
         "clean:portable": "node scripts/clean-build-output.cjs portable",
-        "build": "npm run clean:build && npm run build:examples && npm run typecheck && electron-vite build && npm run verify:main-bundle",
+        "build": "npm run prepare:python && npm run clean:build && npm run build:examples && npm run typecheck && electron-vite build && npm run verify:main-bundle",
         "preview": "cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ electron-vite preview",
         "pack": "npm run build && npm run clean:pack && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --dir && npm run verify:packaged:normal",
         "dist": "npm run pack",
@@ -36,7 +36,8 @@
         "verify:packaged:normal": "node scripts/verify-packaged-app.cjs verify release-build",
         "verify:packaged:portable": "node scripts/verify-packaged-app.cjs verify release-portable/win-unpacked",
         "eval:coding": "cross-env ELECTRON_RUN_AS_NODE=1 electron ./node_modules/vitest/vitest.mjs run --config vitest.evaluation.config.ts",
-        "eval:coding:live": "cross-env ELECTRON_RUN_AS_NODE=1 electron ./node_modules/vitest/vitest.mjs run --config vitest.evaluation.live.config.ts"
+        "eval:coding:live": "cross-env ELECTRON_RUN_AS_NODE=1 electron ./node_modules/vitest/vitest.mjs run --config vitest.evaluation.live.config.ts",
+        "prepare:python": "node scripts/prepare-python-runtime.cjs"
     },
     "repository": {
         "type": "git",

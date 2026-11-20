@@ -42,6 +42,8 @@ git fetch origin
 | macOS Intel | `macos-15-intel`，x64 | `Anas-<version>-macos-x64.dmg` |
 | Windows x64 | `windows-2022` | `Anas-<version>-windows-x64.zip` |
 
+Python 使用 `build/python-runtime.json` 锁定三个平台的版本、下载地址、大小和 SHA-256。`npm run prepare:python`、开发／构建及打包钩子在构建机准备发行件，缓存位于 `tmp/python-downloads/`，生成资源位于 Git 忽略的 `build/python-runtime/`。每个包仅携带本平台架构的 `runtime/python/`，不在用户启动应用时下载。程序启动、窗口加载后，后台将运行时复制到数据目录的 `runtimes/python/<Python版本>/`，保留 pip 和 venv。耗时较长时显示过程通知，失败只提示错误，不阻断窗口或聊天；对话不触发或等待释放。相同 Python 版本不覆盖已有环境，不同 Python 版本并存，旧目录不自动清理。`runtimes/` 不进入备份或修复保全副本，备份恢复保留本机目录。更新运行时需同步校验值、上游许可证及相关验证；不得使用浮动 latest 地址。包内自检使用隔离的应用数据目录，自定义工具采用无系统 Python 的 PATH，Shell 保留系统环境并显式调用内置解释器；验证解释器的实际可执行性、Shell 绝对路径调用、`.py` 自定义工具自动保底、中文及脚本目录导入，以及离线 pip 安装与 venv 创建。自检的依赖安装清除继承的 `PIP_*` 变量，以 Python 的 `os.devnull` 禁用 pip 配置文件，并关闭缓存；打包验证注入安装目标、前缀、用户安装及配置文件的干扰，确认测试包仅写入隔离运行时。系统优先、开关及商店占位链接另由相关行为测试覆盖。macOS 仍须通过现有完整签名检查。
+
 每个作业使用 Node.js 24，在本机架构安装锁定依赖、运行 lint、类型检查与构建，再校验打包资源和实际启动。macOS 检查 ad-hoc 签名，不执行证书签名或公证；Windows ZIP 内有完整 `Anas/` 目录，不是安装器或单文件便携 EXE。Release 同时提供 `SHA256SUMS.txt`。
 
 推送的标签必须精确匹配 `package.json` 的 `vMAJOR.MINOR.PATCH`，普通分支推送不会触发打包。工作流进入默认分支后，可在 Actions > Build release packages > Run workflow 手动运行；`release_tag` 留空时仅验证，构建产物保留 14 天。修复发布故障后，可选择修复后的分支并填写原版本标签，重新执行全部三平台检查和发布；标签须与 package 版本一致且已存在，不移动标签，Release 说明记录实际构建提交。上传中断留下的草稿在全部构建成功后补齐并发布；已公开的 Release 拒绝覆盖。

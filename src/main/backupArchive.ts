@@ -20,7 +20,7 @@ export const backupManifest = { version: 0, storage_layout: 'project-directories
 
 // Obsolete layout remains on disk, but is neither exported nor restored.
 const skippedRootDirs = new Set([
-  'dev', 'electron', 'log', 'tmp', 'cache', 'sqlite', 'attachments', 'file_edits', 'conversations', 'assets',
+  'dev', 'electron', 'log', 'tmp', 'cache', 'runtimes', 'sqlite', 'attachments', 'file_edits', 'conversations', 'assets',
   'skills_examples', 'tools_examples', 'plugins_examples', 'skills_system', 'tools_system', 'plugins_system', 'plugins_data'
 ])
 

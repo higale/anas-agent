@@ -107,6 +107,7 @@ describe('backup archive extraction', () => {
   it('excludes developer HTTP traces from backup creation and restore', () => {
     expect(shouldSkipBackupRelativePath('dev/model-http/request/response-body.sse')).toBe(true)
     expect(shouldSkipBackupRelativePath('log/current.log')).toBe(true)
+    expect(shouldSkipBackupRelativePath('runtimes/python/version/Lib/site-packages/custom.py')).toBe(true)
     expect(shouldSkipBackupRelativePath('config/settings.json')).toBe(false)
   })
 
@@ -119,6 +120,7 @@ describe('backup archive extraction', () => {
       { name: 'notes/state.txt', data: Buffer.from('payload') },
       { name: 'log/ignored.log', data: Buffer.from('not restored') },
       { name: 'dev/model-http/ignored.json', data: Buffer.from('not restored') },
+      { name: 'runtimes/python/foreign/python', data: Buffer.from('not restored') },
       { name: 'db/projects.json', data: Buffer.from('not restored') },
       { name: 'db/conversations/old/conversation.sqlite', data: Buffer.from('not restored') },
       { name: 'empty/' }

@@ -34,7 +34,7 @@ describe('raw recovery data', () => {
       'log/current.log': 'error log'
     }
     for (const [name, value] of Object.entries(files)) await put(join(data, name), value)
-    for (const name of ['electron', 'tmp', 'cache', 'dev']) await put(join(data, name, 'ignored'), 'transient')
+    for (const name of ['electron', 'tmp', 'cache', 'dev', 'runtimes']) await put(join(data, name, 'ignored'), 'excluded')
     const output = await preserveRecoveryData(data, join(root, 'Anas', 'recovery'))
     expect(dirname(output)).toBe(join(root, 'Anas', 'recovery'))
     for (const [name, value] of Object.entries(files)) {

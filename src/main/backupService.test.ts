@@ -178,7 +178,7 @@ describe('data backup restore', () => {
       'plugins_data/old/state.json', 'conversations/old/conversation.sqlite', 'conversations/old/tool_results/result.txt',
       'assets/avatar-source.png', 'assets/avatar-transform.json',
       '.avatar-assets-stage-old/previous-assets/avatar-source.png',
-      'cache/tool-results/old.txt', 'projects.json', 'input_history.json', 'projects.json.delete-journal', 'projects.json.delete-stage']
+      'cache/tool-results/old.txt', 'runtimes/python/local/site-packages/user.py', 'projects.json', 'input_history.json', 'projects.json.delete-journal', 'projects.json.delete-stage']
     for (const name of residues) await writeText(join(dataRoot, name), 'old data')
     for (const name of configFileNames) await writeText(join(dataRoot, 'config', name), name === 'tools.json'
       ? '{"version":0,"order":[],"external_directories":[]}' : '{}')
@@ -192,6 +192,10 @@ describe('data backup restore', () => {
     await expect(service.restoreDataBackupZip(legacyArchive, { deactivate, activate })).rejects.toThrow('Unsupported backup storage layout')
     expect(deactivate).not.toHaveBeenCalled()
     const backup = await service.createDataBackupZip(join(root, 'current.zip'))
+    const { extractZipArchive } = await import('./zipArchive')
+    const { backupArchiveLimits } = await import('./backupArchive')
+    const rawArchive = await extractZipArchive(backup.path, join(root, 'inspect-raw'), backupArchiveLimits)
+    expect([...rawArchive.entryNames].some(name => name.startsWith('runtimes/'))).toBe(false)
     const { extractBackupArchive } = await import('./backupArchive')
     const extracted = await extractBackupArchive(backup.path, join(root, 'inspect'))
     for (const name of residues) expect(extracted.entryNames.has(name)).toBe(false)

@@ -52,6 +52,31 @@ function config(): AppConfigSnapshot {
 }
 
 describe('effective agent system prompt', () => {
+  it.each([true, false])('keeps bundled Python separate from system versions, independent of environment switches (%s)', environment => {
+    const snapshot = config()
+    snapshot.settings.environmentContext.bundledCommands = environment
+    snapshot.settings.environmentContext.customInformation = 'Available common commands:\n- python: 3.11.0'
+    const bundledPython = { executable: '/test/中文 Python/python3', version: '3.13.18', state: 'installed' as const }
+    const prompt = buildAgentSystemPrompt(snapshot, { workspace: '', memory: '', skills: '', bundledPython },
+      { ...capabilityFeatures(defaultCapabilities), environment })
+    expect(prompt.text).toContain('Python 3.13.18 (fallback; installed)')
+    expect(prompt.text).toContain(bundledPython.executable)
+    expect(prompt.text).toContain('Prefer a working system Python')
+    expect(prompt.text.match(/Bundled commands:/g)).toHaveLength(1)
+    expect(prompt.text.includes('- rg:')).toBe(environment)
+    expect(prompt.text.includes('- python: 3.11.0')).toBe(environment)
+    expect(snapshot.settings.environmentContext.customInformation).toBe('Available common commands:\n- python: 3.11.0')
+    const hidden = buildAgentSystemPrompt(snapshot, { workspace: '', memory: '', skills: '', bundledPython, toolsEnabled: false })
+    expect(hidden.text).not.toContain('Python 3.13.18')
+  })
+
+  it.each(['preparing', 'unavailable'] as const)('reports a %s bundled runtime without claiming it is installed', state => {
+    const prompt = buildAgentSystemPrompt(config(), { workspace: '', memory: '', skills: '',
+      bundledPython: { executable: '/test/python', version: '3.13.18', state } })
+    expect(prompt.text).toContain(`fallback; ${state}`)
+    expect(prompt.text).not.toContain('fallback; installed')
+  })
+
   it.each([
     { bundledCommands: true, environment: true, commandExecution: true, toolsEnabled: true, included: true },
     { bundledCommands: false, environment: true, commandExecution: true, toolsEnabled: true, included: false },
@@ -66,6 +91,7 @@ describe('effective agent system prompt', () => {
       workspace: '', memory: '', skills: '', toolsEnabled: options.toolsEnabled
     }, { ...capabilityFeatures(defaultCapabilities), environment: options.environment, commandExecution: options.commandExecution })
     expect(prompt.text.includes('Bundled commands:')).toBe(options.included)
+    expect(prompt.text).not.toContain('Python')
     if (options.included) {
       const environment = prompt.sections.find((section) => section.kind === 'runtime_context')!.content
       expect(environment).toMatch(/^- rg:/m)

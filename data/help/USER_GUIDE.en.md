@@ -84,6 +84,10 @@ Controls whether commands and custom tools additionally receive variables from t
 
 It has no separate tool. Turning it off preserves inherited system environment variables and the `.env` file. It does not change model connections or shared MCP server configuration.
 
+### Bundled Python
+
+Enabled by default, this adds the fallback Python version, absolute path and preparation status to the initial **Bundled commands** context section for the model to choose in Shell. `.py` custom tools use system Python first and fall back to the bundled runtime only when no system interpreter is usable. PATH stays unchanged. This is independent of **Runtime environment information** and **.env**. Subagents use their own capability under the project’s **Limit subagent capabilities** policy. Startup preparation and reset are unaffected; see [Runtime environment and variables](#runtime-environment-and-variables) for maintenance.
+
 ### Background Tools
 
 Allows long-running built-in, custom, and MCP tool calls to continue in the background so the Agent can inspect, wait for, or cancel them. The following tools depend on one another and are enabled or disabled as a group, not selected individually. Turning this off makes new calls wait for completion; it does not cancel existing calls.
@@ -108,7 +112,7 @@ Provides `write_todos` to create and update the current task's plan and completi
 
 Runs programs, scripts, searches, tests, and builds through the system command interpreter. The tool uses its actual program name, such as `zsh` on macOS or `pwsh` or `powershell` on Windows. A supported command interpreter must be available.
 
-Bundled rg supports file and text searches without a separate installation. Script runtimes such as Python or Node.js must still be installed as needed. Follow-up terminal input requires **Background tools**; application `.env` variables are controlled separately by **.env**. Commands follow the conversation's access mode.
+Bundled rg supports file and text searches without a separate installation. Windows and macOS packages include fallback Python with pip and venv. By default, the model receives its absolute path and chooses whether to invoke it; ordinary `python`/`python3` commands keep using the system environment. Other runtimes, such as Node.js, must be installed as needed. Follow-up terminal input requires **Background tools**; application `.env` variables are controlled separately by **.env**. Commands follow the conversation’s access mode.
 
 To run an application or service independently, the Agent can set `keep_processes: true` and execute the service command directly, without a launcher such as `Start-Process`. Once startup ownership is handed off, the tool returns a PID and stdout/stderr log paths in the system temporary directory; readiness needs a separate check. The process continues after later messages, conversation cancellation, and exiting Anas, and must be stopped explicitly. This mode cannot use an interactive terminal or a positive execution timeout. Cancellation before handoff still reclaims the process. Copy the logs elsewhere if you need to retain them long term.
 
@@ -297,7 +301,13 @@ Subagents can work in the background. Select a subagent status entry to view its
 
 ## Runtime Environment And Variables
 
-Bundled commands in Runtime Environment is enabled by default and gives the Agent instructions for bundled rg. Detect System Environment updates information about system commands; bundled rg needs no detection. The result is inserted at the last cursor position in Custom Environment Information, replacing any selected text.
+Bundled commands in Runtime Environment is enabled by default and supplies rg instructions. The project’s **Bundled Python** capability is on by default and supplies the fallback interpreter’s version, absolute path, preparation status and invocation syntax in the same **Bundled commands** section of initial context. It is independent of **Runtime environment information**, the global **Bundled commands** switch and **.env**. The model chooses whether to invoke it; Python is not added to PATH and Shell commands are not rewritten. Custom Environment Information continues to describe the system environment, with system and bundled Python identified separately; saved user text is unchanged. Capability changes apply from the next chat request. Subagents follow **Limit subagent capabilities**. Existing configurations without this field default to enabled without rewriting files.
+
+A `.py` custom-tool entry first probes system Python 3 by executing code. Only when no system interpreter is usable and bundled Python is enabled does it probe and use the bundled executable by absolute path. Uninstalled Microsoft Store aliases are not accepted merely because a file exists. Probes have timeouts and never request automatic installation. Ordinary and interactive `.py` tools share this selection. Script errors and missing dependencies do not trigger retries with another interpreter. Explicit `python ...`, `py -3 ...` and virtual-environment commands keep their configured meaning without fallback. Windows interactive tools with an explicit interpreter should use its absolute path.
+
+At application startup, after the window loads, the complete runtime with pip and venv is copied in the background into `runtimes/python/<Python-version>/` under the data directory. Slow preparation shows a notice; failure does not block the window or chat. Conversations and tools never trigger or wait for this copy. Context does not claim the runtime is ready while preparation is pending; subsequent `.py` calls can use it after preparation finishes. Use its `-m pip` or `-m venv` yourself. Anas does not automatically manage virtual environments or guarantee third-party packages. Disabling the capability does not affect preparation or reset.
+
+For damaged or missing files, use **Settings → Environment → Bundled Python → Reset bundled Python**. Confirmation restores the current version and removes its installed packages and modifications, leaving system Python, other versions and external virtual environments unaffected. Stop scripts using bundled Python first. Deleting its entire current version directory causes preparation at the next launch. Existing environments are preserved; Python updates use separate directories without migrating dependencies or removing older versions. `runtimes/` is excluded from backups, preserved during restore and retained by unknown-file cleanup. **Detect System Environment** inserts system command information at the last cursor position in Custom Environment Information, replacing selected text.
 
 Custom Environment Information is enabled by default. If selected and empty at startup, it is filled by background detection without blocking startup. Existing content is preserved; deselecting it during detection discards the result.
 

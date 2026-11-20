@@ -232,6 +232,8 @@ describe('IPC sender security', () => {
       'app:selectDataRestoreBackup',
       'app:quit',
       'app:getBuildInfo',
+      'app:getPythonRuntimeStatus', // In-memory status; must remain readable during preparation.
+      'app:resetBundledPython', // The service tracks its own application-data operation.
       'app:toggleDevTools',
       'app:getIcon',
       'app:openExternalUrl',
@@ -277,8 +279,10 @@ describe('IPC sender security', () => {
       'app:detectSystemEnvironment',
       'app:getBuildInfo',
       'app:getIcon',
+      'app:getPythonRuntimeStatus',
       'app:openExternalUrl',
       'app:quit',
+      'app:resetBundledPython',
       'app:restoreData',
       'app:selectDataRestoreBackup',
       'app:toggleDevTools',

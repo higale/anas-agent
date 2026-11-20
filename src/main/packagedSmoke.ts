@@ -82,6 +82,72 @@ export async function runPackagedSmoke(): Promise<void> {
     const searchEnvironment = await bundledSearchEnvironment({ ...process.env,
       ...(process.platform === 'darwin' ? { ZDOTDIR: root } : {}) })
     const shell = await getCommandShell()
+    if (process.platform === 'win32' || process.platform === 'darwin') {
+      const { ensureBundledPython } = await import('./bundledPython')
+      const { probePython3, discoverPython3 } = await import('./runtimeDiscovery')
+      const bundled = await ensureBundledPython()
+      if (!bundled) throw new Error('Packaged Python runtime is missing.')
+      // Isolate discovery and .py fallback from system Python; Shell keeps its normal environment.
+      const pythonEnv: NodeJS.ProcessEnv = { ...searchEnvironment.env, PATH: '', PYTHONHOME: undefined, PYTHONPATH: undefined,
+        PYTHONNOUSERSITE: '1', PYTHONDONTWRITEBYTECODE: '1', PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' }
+      for (const key of Object.keys(pythonEnv)) if (key.toLowerCase() === 'path' && key !== 'PATH') delete pythonEnv[key]
+      if (await discoverPython3({ env: pythonEnv, cwd: documents })) throw new Error('Python smoke must not discover a system interpreter.')
+      const python = await probePython3(bundled.executable, [], { env: pythonEnv, cwd: documents })
+      if (python?.executable !== bundled.executable || python.version !== bundled.version) {
+        throw new Error(`Packaged Python probe failed: ${JSON.stringify(python)}`)
+      }
+      const script = join(documents, 'python smoke 中文.py')
+      await writeFile(join(documents, 'local_helper.py'), 'value = "中文🙂"\n')
+      await writeFile(script, 'import json, ssl, sqlite3, hashlib, ctypes, urllib.request, subprocess, local_helper\nprint(json.dumps({"value": local_helper.value}, ensure_ascii=False))\n')
+      const quote = (text: string) => `'${text.replaceAll("'", process.platform === 'win32' ? "''" : "'\\''")}'`
+      const pythonCommand = `${process.platform === 'win32' ? '& ' : ''}${quote(bundled.executable)} ${quote(script)}`
+      const preparedPython = await prepareShellCommand({ command: pythonCommand, workingDir: documents }, documents)
+      if ('ok' in preparedPython) throw new Error(preparedPython.error)
+      preparedPython.env = { ...pythonEnv, PATH: searchEnvironment.env.PATH }
+      let pythonSucceeded = false
+      const pythonOutput = await runShellCommand(preparedPython, shell, undefined, {
+        onResult: result => { pythonSucceeded = result.ok }
+      })
+      if (!pythonSucceeded || !pythonOutput.includes('中文🙂')) throw new Error(`Packaged Python Shell failed: ${pythonOutput}`)
+      const { customToolDefinitions } = await import('./agent/customToolRuntime')
+      const { parseCustomTools } = await import('../shared/customTools')
+      const [definition] = parseCustomTools([{ version: 0, id: 'python-smoke', name: 'python_smoke', description: 'Smoke',
+        command: '"python smoke 中文.py" {{args}}', input_schema: { type: 'object', properties: {} }, timeout_seconds: 10, interactive: false }])
+      const [tool] = customToolDefinitions([{ ...definition, directory: documents }], { env: pythonEnv, backgroundTools: false, bundledPython: true })
+      const result = await tool.execute({}, { callId: 'python-smoke' })
+      if (!JSON.stringify(result).includes('中文🙂')) throw new Error(`Packaged Python custom tool failed: ${JSON.stringify(result)}`)
+      // runPreparedProcess inherits the host environment. Explicitly unset all
+      // pip variables so target/prefix/config/cache settings cannot escape this
+      // fixture. pip compares PIP_CONFIG_FILE to Python's exact os.devnull value.
+      const dependencyEnv: NodeJS.ProcessEnv = {
+        ...Object.fromEntries(Object.keys(process.env).filter(key => /^PIP_/i.test(key)).map(key => [key, undefined])),
+        PIP_CONFIG_FILE: process.platform === 'win32' ? 'nul' : '/dev/null',
+        PIP_NO_INDEX: '1', PIP_DISABLE_PIP_VERSION_CHECK: '1', PIP_NO_CACHE_DIR: '1'
+      }
+      const runPython = async (executable: string, args: string[]) => {
+        let succeeded = false, output = ''
+        await runPreparedProcess({ command: 'packaged Python dependency smoke', workingDir: documents, timeoutSec: 30,
+          invocation: { executable, args, windowsHide: true }, env: dependencyEnv,
+          logScope: 'packaged-smoke', successMessage: 'Python dependency smoke passed.', failureMessage: 'Python dependency smoke failed.',
+          abortBeforeStartError: 'Python cancelled.', abortError: 'Python cancelled.', timeoutError: 'Python smoke timed out.'
+        }, undefined, { onResult: value => { succeeded = value.ok; output = value.stdout + value.stderr } })
+        if (!succeeded) throw new Error(`Python dependency smoke failed: ${output}`)
+        return output
+      }
+      // Build a tiny local wheel: pip must install offline into the released runtime,
+      // and a subsequent prepare must preserve it. No PyPI or user environment access.
+      const wheel = join(documents, 'anas_smoke-1.0-py3-none-any.whl')
+      await runPython(python.executable, ['-I', '-B', '-c',
+        'import sys,zipfile\nwith zipfile.ZipFile(sys.argv[1],"w") as z:\n z.writestr("anas_smoke.py", "value = 42\\n")\n z.writestr("anas_smoke-1.0.dist-info/METADATA", "Metadata-Version: 2.1\\nName: anas-smoke\\nVersion: 1.0\\n")\n z.writestr("anas_smoke-1.0.dist-info/WHEEL", "Wheel-Version: 1.0\\nGenerator: anas-smoke\\nRoot-Is-Purelib: true\\nTag: py3-none-any\\n")\n z.writestr("anas_smoke-1.0.dist-info/RECORD", "")', wheel])
+      await runPython(python.executable, ['-I', '-B', '-m', 'pip', 'install', '--no-index', '--no-deps', wheel])
+      await ensureBundledPython()
+      await runPython(python.executable, ['-I', '-B', '-c', 'import anas_smoke; assert anas_smoke.value == 42'])
+      const venv = join(documents, 'venv 中文')
+      await runPython(python.executable, ['-I', '-B', '-m', 'venv', venv])
+      const venvPython = join(venv, process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python3')
+      await runPython(venvPython, ['-I', '-B', '-m', 'pip', '--version'])
+      await runPython(venvPython, ['-I', '-B', '-c', 'import sys; assert sys.prefix != sys.base_prefix'])
+    }
     const authorization = createShellCommandAuthorization({ shell, env: searchEnvironment.env, rgExecutable: searchEnvironment.executable,
       primaryFolder: documents, trustedFolders: [documents], accessMode: () => 'strict_approval' })
     const searchArgs = Object.freeze({ command: "rg -n -g '*.txt' packaged-search-marker .", working_dir: documents })

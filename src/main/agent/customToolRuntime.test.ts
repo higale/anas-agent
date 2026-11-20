@@ -14,6 +14,7 @@ import { customToolDefinitions } from './customToolRuntime'
 import { validateCapabilityInput } from '../../runtime/toolInput'
 import { classifyAgentToolEffect } from './toolEffectClassification'
 import * as runtimeDiscovery from '../runtimeDiscovery'
+import * as bundledPython from '../bundledPython'
 
 vi.mock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
 const directories: string[] = []
@@ -39,6 +40,46 @@ async function invokeText(tool: ToolDefinition, input: unknown) {
 }
 
 describe('custom command tools', () => {
+  it.each([true, false])('uses a bundled interpreter only after system discovery fails and fallback is enabled (%s)', async enabled => {
+    const { directory, definition } = await fixture('')
+    await writeFile(join(directory, 'run.py'), 'console.log("fallback-ran")')
+    vi.spyOn(runtimeDiscovery, 'discoverPython3').mockResolvedValue(undefined)
+    const fallback = vi.spyOn(bundledPython, 'discoverBundledPython').mockResolvedValue({ executable: process.execPath, version: '3.13.18', command: process.execPath })
+    const [tool] = customToolDefinitions([{ ...definition, command: 'run.py {{args}}' }], {
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, backgroundTools: false, bundledPython: enabled
+    })
+    const output = await invokeText(tool, { title: 'test' })
+    if (enabled) expect(output.trim()).toBe('fallback-ran')
+    else expect(JSON.parse(output)).toMatchObject({ ok: false, error: expect.stringContaining('No usable Python 3') })
+    expect(fallback).toHaveBeenCalledTimes(enabled ? 1 : 0)
+  })
+
+  it('does not retry a failed system script with bundled Python', async () => {
+    const { directory, definition } = await fixture('')
+    await writeFile(join(directory, 'run.py'), 'require("fs").appendFileSync("count.txt","once\\n"); console.error("missing dependency"); process.exit(1)')
+    vi.spyOn(runtimeDiscovery, 'discoverPython3').mockResolvedValue({ executable: process.execPath, version: '3.12.0', command: 'python' })
+    const fallback = vi.spyOn(bundledPython, 'discoverBundledPython')
+    const [tool] = customToolDefinitions([{ ...definition, command: 'run.py {{args}}' }], {
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, backgroundTools: false, bundledPython: true
+    })
+    expect(JSON.parse(await invokeText(tool, { title: 'test' }))).toMatchObject({ ok: false, exit_code: 1 })
+    expect(await readFile(join(directory, 'count.txt'), 'utf8')).toBe('once\n')
+    expect(fallback).not.toHaveBeenCalled()
+  })
+
+  it('does not enter bundled fallback after system discovery is cancelled', async () => {
+    const { directory, definition } = await fixture('')
+    await writeFile(join(directory, 'run.py'), 'console.log("must not run")')
+    const controller = new AbortController()
+    vi.spyOn(runtimeDiscovery, 'discoverPython3').mockImplementation(async () => { controller.abort(); controller.signal.throwIfAborted(); return undefined })
+    const fallback = vi.spyOn(bundledPython, 'discoverBundledPython')
+    const [tool] = customToolDefinitions([{ ...definition, command: 'run.py {{args}}' }], {
+      env: process.env, backgroundTools: false, bundledPython: true, signal: controller.signal
+    })
+    await expect(invokeText(tool, { title: 'test' })).rejects.toMatchObject({ name: 'AbortError' })
+    expect(fallback).not.toHaveBeenCalled()
+  })
+
   it('runs the copied Baidu search example and reports missing credentials and invalid queries without a request', async ({ skip }) => {
     if (!await runtimeDiscovery.discoverPython3()) return skip()
     const { directory } = await fixture('')

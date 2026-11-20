@@ -33,6 +33,7 @@ import { detectSystemEnvironment } from './systemEnvironmentDetection'
 import { getDataStorageUsage, getDeveloperHttpTraceUsage } from './dataStorageUsage'
 import { restartInConsole } from './consoleRestart'
 import { createAppBuildInfo } from './buildInfo'
+import { getPythonRuntimeStatus, resetBundledPython } from './bundledPython'
 
 declare const __ANAS_BUILD_ENVIRONMENT__: AppBuildInfo['environment']
 declare const __ANAS_BUILD_TIME__: string
@@ -104,6 +105,9 @@ async function clearElectronCache(): Promise<void> {
 }
 
 export function registerAppIpcHandlers(): void {
+  handleMainIpc('app:getPythonRuntimeStatus', () => getPythonRuntimeStatus())
+  // The runtime service owns the data lifecycle boundary, as it does at startup.
+  handleMainIpc('app:resetBundledPython', () => resetBundledPython())
   handleMainIpc('app:getBuildInfo', (): AppBuildInfo => {
     return createAppBuildInfo(app.getVersion(), app.isPackaged, {
       environment: __ANAS_BUILD_ENVIRONMENT__, builtAt: __ANAS_BUILD_TIME__,

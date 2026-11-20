@@ -10,6 +10,7 @@ release-quality-build
 release-quality-portable
 /runtime-data/
 /tmp/
+/build/python-runtime/
 .env
 .env.*
 !.env.example

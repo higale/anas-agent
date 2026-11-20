@@ -58,7 +58,7 @@ Do not guess a model ID. Change `default_model_id` only when the exact configure
 Every switch below takes a boolean. `environment_context.custom_information` takes a string.
 
 - `environment_context.operating_system`
-- `environment_context.bundled_commands` — include bundled command instructions (currently rg) when command execution tools are available
+- `environment_context.bundled_commands` — include bundled ripgrep (`rg`) instructions when command execution tools are available. The project's or subagent's Bundled Python capability independently adds its fallback path and preparation status to the same initial-context section, and enables automatic fallback for `.py` custom tools. Python is not added to PATH.
 - `environment_context.current_date`
 - `environment_context.application_data_directory`
 - `environment_context.user_home_directory`

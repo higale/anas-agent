@@ -340,6 +340,11 @@ export interface RuntimeToolStatus {
   toolNames: string[]
 }
 
+export interface PythonRuntimeStatus {
+  state: 'idle' | 'preparing' | 'ready' | 'unavailable' | 'error'
+  error?: string
+}
+
 export type SelectedAttachmentKind = 'text' | 'image' | 'binary'
 
 export interface SelectedAttachment {
@@ -892,6 +897,8 @@ export interface GaleApi {
     logWarning(kind: SpeechRendererWarningKind, diagnostics: SpeechRendererDiagnostics): Promise<void>
   }
   app: {
+    getPythonRuntimeStatus(): Promise<PythonRuntimeStatus>
+    resetBundledPython(): Promise<void>
     getBuildInfo(): Promise<AppBuildInfo>
     toggleDevTools(): Promise<void>
     restartInConsole(): Promise<void>

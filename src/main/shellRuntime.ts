@@ -1679,8 +1679,9 @@ export async function runShellCommand(
 ): Promise<string> {
   // Login shells may replace PATH; inject the bundled executable directory
   // after startup files, without changing the user's/global environment.
+  const quotePath = (path: string) => `'${path.replaceAll("'", "'\\''")}'`
   const source = shell.family === 'posix' && command.pathPrepend
-    ? `export PATH='${command.pathPrepend.replaceAll("'", "'\\''")}':"$PATH"\n${command.command}`
+    ? `export PATH=${quotePath(command.pathPrepend)}:"$PATH"\n${command.command}`
     : command.command
   const invocation = await resolveShellInvocation(source, shell, signal)
   if (command.pty && shell.family === 'powershell') invocation.args = invocation.args.filter((arg) => arg !== '-NonInteractive')

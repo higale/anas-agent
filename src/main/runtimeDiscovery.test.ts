@@ -2,7 +2,7 @@ import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { discoverPython3, runRuntimeProbe } from './runtimeDiscovery'
+import { discoverPython3, probePython3, runRuntimeProbe } from './runtimeDiscovery'
 import { runWithCurrentAgentToolEffect } from './agent/toolEffectScope'
 import { withToolExecution } from './agent/toolExecutionContext'
 import type { ManagedCallControl } from './agent/managedCallService'
@@ -40,9 +40,48 @@ describe('Python runtime discovery', () => {
     expect(await discoverPython3({ platform, runProbe })).toEqual({ executable: '/opt/python/bin/python', version: '3.12.9', command: 'python' })
   })
 
+  it.skipIf(process.platform !== 'win32').each([false, true])('disables launcher installation only inside the real probe process (mixed case=%s)', async mixedCase => {
+    const cwd = await directory()
+    const script = join(cwd, 'launcher.cjs')
+    // A launcher fixture reports installation attempts instead of contacting a
+    // store. Exercise the actual child environment, including inherited flags.
+    await writeFile(script, `
+      const env = Object.fromEntries(Object.entries(process.env).map(([key, value]) => [key.toUpperCase(), value]));
+      if (env.PYLAUNCHER_ALLOW_INSTALL !== undefined || env.PYLAUNCHER_ALWAYS_INSTALL !== undefined
+          || env.PYTHON_MANAGER_AUTOMATIC_INSTALL !== 'false') {
+        console.error('Unexpected automatic installation'); process.exit(1);
+      }
+      if (env.PY_PYTHON3 !== '3.13') process.exit(2);
+      console.log('3.13.18'); console.log(process.execPath);
+    `)
+    const inherited = { PYLAUNCHER_ALLOW_INSTALL: 'false', PYLAUNCHER_ALWAYS_INSTALL: '1', PYTHON_MANAGER_AUTOMATIC_INSTALL: 'true' }
+    for (const [key, value] of Object.entries(inherited)) vi.stubEnv(key, value)
+    try {
+      const env: NodeJS.ProcessEnv = { ...process.env, PY_PYTHON3: '3.13', ELECTRON_RUN_AS_NODE: '1' }
+      if (mixedCase) {
+        for (const [key, value] of Object.entries(inherited)) { delete env[key]; env[key.toLowerCase()] = value }
+      }
+      const before = { ...env }
+      const python = await probePython3(process.env.npm_node_execpath ?? process.execPath, [script], { env, cwd })
+      expect(python).toMatchObject({ version: '3.13.18', executable: expect.stringMatching(/node\.exe$|electron\.exe$/i) })
+      expect(env).toEqual(before)
+      for (const [key, value] of Object.entries(inherited)) expect(process.env[key]).toBe(value)
+    } finally { vi.unstubAllEnvs() }
+  })
+
   it('preserves spaces and Unicode in the interpreter path', async () => {
     const executable = '/opt/中文 Python/python3 '
     expect((await discoverPython3({ platform: 'darwin', runProbe: async () => `3.13.3\n${executable}\n` }))?.executable).toBe(executable)
+  })
+
+  it('rejects Store installation hints and still accepts an installed Store interpreter', async () => {
+    const installed = 'C:\\Users\\Test\\AppData\\Local\\Microsoft\\WindowsApps\\Python3\\python.exe'
+    const runProbe = vi.fn(async (executable: string) => executable === 'python.exe'
+      ? 'Python was not found; run without arguments to install from the Microsoft Store.'
+      : executable === 'python3.exe' ? `3.13.18\n${installed}` : undefined)
+    expect(await discoverPython3({ platform: 'win32', runProbe })).toMatchObject({ executable: installed, command: 'python3' })
+    expect(runProbe.mock.calls.map(([command]) => command)).toEqual(['python.exe', 'py.exe', 'python3.exe'])
+    expect(await probePython3(installed, [], { platform: 'win32', runProbe: async () => 'Install Python 3.13 from the Microsoft Store' })).toBeUndefined()
   })
 
   it.each(['Python 3.13.3', '2.7.18\n/usr/bin/python', '3.13.3\npython', '3.13.3\n/usr/bin/python\nnoise', '3.13.3\n/usr/bin/py\0thon'])('rejects an unusable interpreter identity: %j', async output => {

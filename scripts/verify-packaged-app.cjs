@@ -116,6 +116,15 @@ function packageManifest(unpackedDirectory) {
     if (!existsSync(path)) throw new Error(`Packaged application file is missing: ${path}`)
   }
   const rawEntries = listPackage(paths.asar)
+  const pythonRoot = join(paths.resources, 'runtime', 'python')
+  const pythonExecutable = join(pythonRoot, process.platform === 'win32' ? 'python.exe' : 'bin/python3')
+  if (['win32', 'darwin'].includes(process.platform)) {
+    const pythonVersion = require('../build/python-runtime.json').version.split('.').slice(0, 2).join('.')
+    const pythonLicense = process.platform === 'win32' ? 'LICENSE.txt' : `lib/python${pythonVersion}/LICENSE.txt`
+    for (const file of [pythonExecutable, join(pythonRoot, pythonLicense), join(pythonRoot, 'anas-runtime.json')]) {
+      if (!existsSync(file)) throw new Error(`Packaged Python resource is missing: ${file}`)
+    }
+  }
   const rawEntryByNormalized = new Map(rawEntries.map((entry) => [entry.replaceAll('\\', '/'), entry]))
   const entries = [...rawEntryByNormalized.keys()].sort()
   const set = new Set(entries)
@@ -198,6 +207,14 @@ function smoke(manifest) {
   const home = mkdtempSync(join(tmpdir(), 'anas-packaged-home-'))
   try {
     mkdirSync(join(home, 'Documents'))
+    const appData = join(home, 'AppData', 'Roaming'), localAppData = join(home, 'AppData', 'Local')
+    mkdirSync(appData, { recursive: true })
+    mkdirSync(localAppData, { recursive: true })
+    // A user's pip configuration must neither redirect the smoke installation
+    // nor break it. Keep every trap inside the disposable profile.
+    const pipTarget = join(home, 'outside-python-runtime')
+    const pipConfig = join(home, 'pip.ini')
+    writeFileSync(pipConfig, `[install]\ntarget = ${pipTarget}\n`)
     const result = spawnSync(manifest.paths.executable, [
       '--anas-packaged-smoke',
       `--user-data-dir=${join(home, 'electron')}`
@@ -207,6 +224,13 @@ function smoke(manifest) {
         ...process.env,
         ANAS_PACKAGED_SMOKE: '1',
         ELECTRON_RENDERER_URL: 'https://renderer-environment-must-be-ignored.invalid/',
+        PIP_TARGET: pipTarget,
+        PIP_PREFIX: join(pipTarget, 'prefix'),
+        PIP_USER: '1',
+        PIP_CONFIG_FILE: pipConfig,
+        PIP_CACHE_DIR: join(pipTarget, 'cache'),
+        APPDATA: appData,
+        LOCALAPPDATA: localAppData,
         HOME: home,
         USERPROFILE: home
       },
@@ -215,6 +239,7 @@ function smoke(manifest) {
       windowsHide: true
     })
     if (result.error) throw result.error
+    if (existsSync(pipTarget)) throw new Error('Packaged Python smoke wrote outside its isolated runtime.')
     if (result.status !== 0 || !result.stdout.includes('ANAS_PACKAGED_SMOKE_OK')) {
       throw new Error([
         `Packaged Agent smoke failed for ${basename(manifest.paths.root)} (exit ${result.status}).`,

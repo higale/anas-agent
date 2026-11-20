@@ -19,6 +19,7 @@ async function verifyEnvironmentStartup(repositoryRoot, executablePath) {
     await writeFile(join(traceDirectory, 'fixture.txt'), '1234567')
     await symlink(join(repositoryRoot, 'data'), join(root, 'data'), 'junction')
     await symlink(join(repositoryRoot, 'out'), join(root, 'out'), 'junction')
+    await symlink(join(repositoryRoot, 'build'), join(root, 'build'), 'junction')
     await writeFile(join(root, 'package.json'), JSON.stringify({
       name: 'anas-startup-test', version: '1.0.0', main: 'main.cjs'
     }))
@@ -43,6 +44,22 @@ async function verifyEnvironmentStartup(repositoryRoot, executablePath) {
     await writeFile(join(root, 'main.cjs'), `
       require('electron').app.setPath('documents', ${JSON.stringify(documents)})
       const { ipcMain } = require('electron')
+      const files = require('node:fs/promises')
+      const originalCopy = files.cp
+      let controlledCopy = true
+      let releasePython
+      const pythonPending = new Promise((resolve) => { releasePython = resolve })
+      globalThis.__anasPythonPreparation = { pending: false, release: releasePython }
+      files.cp = async function (source, ...args) {
+        if (controlledCopy && String(source).includes('python-runtime')) {
+          controlledCopy = false
+          globalThis.__anasPythonPreparation.pending = true
+          const fail = await pythonPending
+          globalThis.__anasPythonPreparation.pending = false
+          if (fail) throw new Error('Simulated Python preparation failure')
+        }
+        return originalCopy.call(this, source, ...args)
+      }
       let releaseTrace
       const tracePending = new Promise((resolve) => { releaseTrace = resolve })
       globalThis.__anasDevStorageProbe = { calls: {}, release: releaseTrace }
@@ -100,6 +117,20 @@ async function verifyEnvironmentStartup(repositoryRoot, executablePath) {
     })
     const page = await application.firstWindow({ timeout: 10_000 })
     await expect(page.locator('[data-agent-composer-input]')).toBeVisible({ timeout: 10_000 })
+    if (['win32', 'darwin'].includes(process.platform)) {
+      await expect.poll(() => application.evaluate(() => globalThis.__anasPythonPreparation.pending)).toBe(true)
+      assert.equal((await page.evaluate(() => globalThis.gale.app.getPythonRuntimeStatus())).state, 'preparing')
+      await expect(page.getByText(/正在准备内置 Python|Preparing bundled Python/)).toBeVisible()
+      const composer = page.locator('[data-agent-composer-input]')
+      await composer.fill('Keep chatting while Python is preparing')
+      await application.evaluate(() => globalThis.__anasPythonPreparation.release(true))
+      await expect(page.getByText(/内置 Python 准备失败|Bundled Python preparation failed/)).toBeVisible()
+      assert.equal((await page.evaluate(() => globalThis.gale.app.getPythonRuntimeStatus())).state, 'error')
+      await expect(composer).toBeEditable()
+      await expect(composer).toHaveValue('Keep chatting while Python is preparing')
+      await composer.fill('')
+      console.log('Python startup E2E passed: slow preparation shows a notice after window load; copy failure leaves the composer interactive and preserves its draft.')
+    }
     const profile = join(root, 'profile')
     assert.ok((await readdir(join(profile, 'examples/skills'))).length > 0)
     assert.equal(JSON.parse(await readFile(join(profile, 'plugins/_system/usage-meter/PLUGIN.json'), 'utf8')).id, 'usage-meter')
@@ -120,6 +151,25 @@ async function verifyEnvironmentStartup(repositoryRoot, executablePath) {
     await page.locator('.sidebar-settings').click()
     await page.getByRole('menuitem', { name: /^(设置|Settings)$/ }).click()
     await page.locator('[data-settings-tab="environment"]').click()
+    await expect(page.getByRole('checkbox', { name: /^(启用内置 Python|Enable bundled Python|内置 Python|Bundled Python)$/ })).toHaveCount(0)
+    if (['win32', 'darwin'].includes(process.platform)) {
+      await page.getByRole('button', { name: /^(重置内置 Python|Reset bundled Python)$/ }).click()
+      const confirmation = page.getByRole('alertdialog')
+      await expect(confirmation).toContainText(/清除在其中安装的依赖|removing packages installed into it/)
+      await confirmation.getByRole('button', { name: /^(重置内置 Python|Reset bundled Python)$/ }).click()
+      await expect(page.getByText(/^(内置 Python 已重置|Bundled Python has been reset)$/)).toBeVisible({ timeout: 30_000 })
+      await expect(page.getByText('Simulated Python preparation failure', { exact: true })).toHaveCount(0)
+      assert.equal((await page.evaluate(() => globalThis.gale.app.getPythonRuntimeStatus())).state, 'ready')
+      const version = require('../build/python-runtime.json').version
+      const entry = process.platform === 'win32' ? 'python.exe' : 'bin/python3'
+      const executable = join(profile, 'runtimes', 'python', version, entry)
+      const { execFile } = require('node:child_process')
+      const result = await require('node:util').promisify(execFile)(executable,
+        ['-E', '-s', '-B', '-X', 'utf8', '-c', 'import pip, venv, sys; print(sys.version.split()[0])'])
+      assert.equal(result.stdout.trim(), version)
+      await page.screenshot({ path: join(repositoryRoot, 'tmp/python-environment-settings.png') })
+      console.log('Python reset E2E passed: confirmed settings action restores a runnable runtime with pip and venv after startup failure.')
+    }
     await expect(page.getByRole('checkbox', { name: /^(操作系统|Operating system)$/ })).toBeVisible()
     await expect(page.getByRole('checkbox', { name: 'PowerShell', exact: true })).toHaveCount(0)
     const input = page.locator('#custom-environment-information-input')
@@ -166,6 +216,7 @@ async function verifyEnvironmentStartup(repositoryRoot, executablePath) {
     await closeElectronTestApplication(application, () => application.evaluate(() => {
       globalThis.__anasEnvironmentProbe?.release()
       globalThis.__anasDevStorageProbe?.release()
+      globalThis.__anasPythonPreparation?.release(true)
     }))
     await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
   }

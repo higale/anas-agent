@@ -25,6 +25,21 @@ async function openMcp() {
   await userEvent.click(within(screen.getByRole('radiogroup', { name: 'settings.capability_mcp' })).getByRole('radio', { name: 'capabilities.custom' }))
 }
 describe('shared capability editor', () => {
+  it.each([false, true])('controls bundled Python independently and includes it in enable/disable all (subagent %s)', async subagent => {
+    const changed = vi.fn()
+    render(<Harness subagent={subagent} onChange={changed} />)
+    const python = screen.getByRole('checkbox', { name: 'settings.capability_bundledPython' })
+    expect(python).toBeChecked()
+    await userEvent.click(python)
+    expect(changed.mock.lastCall![0]).toMatchObject({ bundledPython: false, applicationEnvironment: true, environment: true })
+    expect(python).not.toBeChecked()
+    await userEvent.click(screen.getByRole('button', { name: 'settings.capabilities_enable_all' }))
+    expect(python).toBeChecked()
+    await userEvent.click(screen.getByRole('button', { name: 'settings.capabilities_disable_all' }))
+    expect(python).not.toBeChecked()
+    expect(changed.mock.lastCall![0].bundledPython).toBe(false)
+  })
+
   it.each(['default', 'custom', 'off'] as const)('manages project skills once at the end in %s mode without changing permissions on expansion or approval', async mode => {
     const openDirectory = vi.fn().mockResolvedValue(undefined)
     vi.stubGlobal('gale', { files: { openDirectory } })

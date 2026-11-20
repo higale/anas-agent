@@ -26,7 +26,7 @@ it('previews and removes obsolete and unknown data while retaining complete mana
     'cache/tool-results/old.txt', 'cache/anything.txt', 'skills/custom/extra.bin', 'tools/custom/data.bin',
     'plugins/.remove-recoverable/transaction.json', 'plugins/.replace-recoverable/previous/data.bin',
     'examples/future/document.md', 'lang/custom.json', 'help/custom.md', 'electron/Local State',
-    'tmp/generated.bin', 'log/current.log', 'dev/model-http/request.json',
+    'tmp/generated.bin', 'log/current.log', 'dev/model-http/request.json', 'runtimes/python/custom/Lib/site-packages/installed.py',
     'config/.settings.json.1.2.tmp', 'db/projects/state.json.write.tmp',
     'config/.avatar-assets-stage-interrupted/previous-assets/source.png', '.examples.mirror.previous/readme.md']
   for (const path of retained) await file(join(data, path))

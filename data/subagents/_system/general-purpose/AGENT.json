@@ -6,6 +6,7 @@
   "description": "A general-purpose agent for complex independent tasks that need broad reasoning, tools, or project work.",
   "capabilities": {
     "application_environment": true,
+    "bundled_python": true,
     "background_tools": true,
     "subagents": {
       "mode": "default",

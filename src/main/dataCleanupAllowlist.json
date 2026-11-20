@@ -68,6 +68,11 @@
     },
     {
       "type": "tree",
+      "paths": ["runtimes"],
+      "reason": "释放的运行时及用户安装的依赖完整保留；不因应用升级或未知文件清理覆盖、删除。"
+    },
+    {
+      "type": "tree",
       "paths": [
         "electron",
         "tmp",

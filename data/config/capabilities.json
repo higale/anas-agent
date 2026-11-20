@@ -1,6 +1,7 @@
 {
   "version": 0,
   "application_environment": true,
+  "bundled_python": true,
   "background_tools": true,
   "subagents": {
     "mode": "default",

@@ -5,6 +5,7 @@ describe('literal interpreter file invocation', () => {
   it.each([
     ['python', ['scripts/query.py', '--month', '2026-09']],
     ['python3.13', ['-u', '-B', 'scripts/query.py', '--text', 'a; b && c']],
+    ['python3', ['-E', '-s', '-B', '-X', 'utf8', 'scripts/query.py']],
     ['py.exe', ['-3.13', 'scripts/query.py']],
     ['node', ['--', 'scripts/query.py', '--eval', 'a script argument']],
     ['ruby', ['scripts/query.py']], ['perl', ['scripts/query.py']], ['lua', ['scripts/query.py']],
@@ -18,6 +19,7 @@ describe('literal interpreter file invocation', () => {
   it.each([
     ['python', ['-c', 'print(1)', 'script.py']], ['python', ['-m', 'module', 'script.py']],
     ['python', ['-i', 'script.py']], ['python', ['-']], ['python', []],
+    ['python', ['-X', 'presite=other', 'script.py']], ['python', ['-X', 'script.py']],
     ['node', ['-e', 'code', 'script.js']], ['node', ['--require', 'other.js', 'script.js']],
     ['node', ['--import=other.js', 'script.js']], ['bun', ['run', 'script.ts']],
     ['bash', ['-c', 'commands', 'script.sh']], ['pwsh', ['-Command', 'script.ps1']],

@@ -79,6 +79,7 @@ async function detectTool(
   options: DetectSystemEnvironmentOptions
 ): Promise<DetectedSystemEnvironmentTool | undefined> {
   if ('python' in probe) {
+    // This editable snapshot describes system Python; the bundled fallback is described separately.
     const runtime = await discoverPython3(options)
     return runtime && { command: runtime.command, version: runtime.version }
   }

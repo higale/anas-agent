@@ -7,7 +7,11 @@ export function scriptOperand(executable: string, args: readonly string[]): stri
   let index = 0
   if (/^python(?:[23](?:\.\d+)*)?$/.test(name) || name === 'py') {
     if (name === 'py' && /^-[23](?:\.\d+)*$/.test(args[index] ?? '')) index++
-    while (['-u', '-B', '-E', '-s', '-S', '-I', '-O', '-OO', '-b', '-bb'].includes(args[index])) index++
+    while (index < args.length) {
+      if (['-u', '-B', '-E', '-s', '-S', '-I', '-O', '-OO', '-b', '-bb'].includes(args[index])) index++
+      else if (args[index] === '-X' && args[index + 1] === 'utf8') index += 2
+      else break
+    }
   } else if (['node', 'nodejs', 'ruby', 'perl', 'lua'].includes(name)) {
     // No preloads, loaders, module names, eval strings or interactive modes.
   } else if (['bash', 'sh', 'zsh'].includes(name)) {

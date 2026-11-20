@@ -7,6 +7,7 @@ import { notice } from '../notice'
 import { UI_TEXTAREA_ROWS_COMPACT } from '../uiConstants'
 import { EnvSettings } from './EnvSettings'
 import { SettingsGroup } from './SettingsGroup'
+import { BundledPythonSettings } from './BundledPythonSettings'
 import type { SettingsTab } from './settingsTabs'
 
 interface EnvironmentSettingsSectionsProps {
@@ -169,6 +170,9 @@ export function EnvironmentSettingsSections({
             />
           </div>
         </SettingsGroup>
+      </section>
+      <section className={sectionClass('environment')}>
+        <BundledPythonSettings />
       </section>
       <section className={sectionClass('environment')}>
         <EnvSettings

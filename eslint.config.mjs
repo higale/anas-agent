@@ -11,6 +11,7 @@ export default tseslint.config(
       'node_modules/**',
       'out/**',
       'tmp/**',
+      'build/python-runtime/**',
       'release-build/**',
       'release-macos/**',
       'release-portable/**'

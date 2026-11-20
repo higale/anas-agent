@@ -76,6 +76,30 @@ interface PythonDiscoveryOptions extends RuntimeProbeOptions {
 // probe dependency. A successful probe proves this interpreter can run code.
 const pythonIdentityCode = 'import sys; print(".".join(str(n) for n in sys.version_info[:3])); print(sys.executable)'
 const pythonCache = new Map<string, { runtime: PythonRuntime; expiresAt: number }>()
+/** Validate execution, not just existence: Windows Store aliases may have no installed interpreter. */
+export async function probePython3(executable: string, args: string[] = [], options: Omit<PythonDiscoveryOptions, 'cache'> = {}): Promise<PythonRuntime | undefined> {
+  const platform = options.platform ?? process.platform
+  const env: NodeJS.ProcessEnv = { ...(options.env ?? process.env), PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' }
+  if (platform === 'win32') {
+    // Legacy py.exe enables installation when either flag has ANY value, even
+    // "false". Remove them only from the probe, including Windows casing aliases.
+    for (const key of Object.keys(env)) {
+      if (/^(?:PYLAUNCHER_(?:ALLOW|ALWAYS)_INSTALL|PYTHON_MANAGER_AUTOMATIC_INSTALL)$/i.test(key)) delete env[key]
+    }
+    env.PYTHON_MANAGER_AUTOMATIC_INSTALL = 'false'
+  }
+  options.signal?.throwIfAborted()
+  const output = await (options.runProbe ?? runRuntimeProbe)(executable, [...args, '-c', pythonIdentityCode], {
+    env, cwd: options.cwd ?? process.cwd(), signal: options.signal
+  })
+  options.signal?.throwIfAborted()
+  const lines = output?.split(/\r?\n/)
+  if (lines?.at(-1) === '') lines.pop()
+  if (!lines || lines.length !== 2) return undefined
+  const [version, path] = lines
+  if (!/^3\.\d+\.\d+$/.test(version) || path.includes('\0') || !(platform === 'win32' ? win32 : posix).isAbsolute(path)) return undefined
+  return { executable: path, version, command: executable }
+}
 
 export async function discoverPython3(options: PythonDiscoveryOptions = {}): Promise<PythonRuntime | undefined> {
   const platform = options.platform ?? process.platform
@@ -97,27 +121,18 @@ export async function discoverPython3(options: PythonDiscoveryOptions = {}): Pro
     }
     pythonCache.delete(key)
   }
-  // Discovery must not ask the Windows Python install manager to install a runtime.
-  if (platform === 'win32') env.PYTHON_MANAGER_AUTOMATIC_INSTALL = 'false'
   const candidates = platform === 'win32'
     ? [{ executable: 'python.exe', args: [], command: 'python' },
       { executable: 'py.exe', args: ['-3'], command: 'py -3' },
       { executable: 'python3.exe', args: [], command: 'python3' }]
     : [{ executable: 'python3', args: [], command: 'python3' },
       { executable: 'python', args: [], command: 'python' }]
-  const runProbe = options.runProbe ?? runRuntimeProbe
   for (const candidate of candidates) {
-    signal?.throwIfAborted()
-    const output = await runProbe(candidate.executable, [...candidate.args, '-c', pythonIdentityCode], { env, cwd, signal })
-    signal?.throwIfAborted()
-    const lines = output?.split(/\r?\n/)
-    if (lines?.at(-1) === '') lines.pop()
-    if (!lines || lines.length !== 2) continue
-    const [version, executable] = lines
-    if (!/^3\.\d+\.\d+$/.test(version) || executable.includes('\0') || !(platform === 'win32' ? win32 : posix).isAbsolute(executable)) continue
+    const runtime = await probePython3(candidate.executable, candidate.args, { ...options, env, cwd })
+    if (!runtime) continue
     // Launch the selected interpreter itself, retaining py -3's version choice
     // without running the launcher again or resolving a bare command a second time.
-    const runtime = { executable, version, command: candidate.command }
+    runtime.command = candidate.command
     if (key) {
       if (pythonCache.size >= maxCachedEnvironments) pythonCache.delete(pythonCache.keys().next().value!)
       pythonCache.set(key, { runtime, expiresAt: Date.now() + cacheLifetimeMs })

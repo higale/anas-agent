@@ -7,10 +7,12 @@ import { runPreparedProcess, type ShellRunResult } from '../shellRuntime'
 import { withToolPackageDirectory } from '../toolsStore'
 import { currentToolExecution } from './toolExecutionContext'
 import { discoverPython3 } from '../runtimeDiscovery'
+import { discoverBundledPython } from '../bundledPython'
 
 export function customToolDefinitions(definitions: readonly CustomToolDefinition[], options: {
   env: NodeJS.ProcessEnv
   backgroundTools: boolean
+  bundledPython?: boolean
   signal?: AbortSignal
   preview?: boolean
 }): ToolDefinition[] {
@@ -47,7 +49,10 @@ export function customToolDefinitions(definitions: readonly CustomToolDefinition
             return failure(`Cannot access Python script ${script}: ${error instanceof Error ? error.message : String(error)}`)
           }
           const python = await discoverPython3({ env, cwd: directory, signal, cache: true })
-          if (!python) return failure('No usable Python 3 interpreter was found. Install Python 3 and add it to PATH, or specify its executable explicitly in the tool command.')
+            ?? (options.bundledPython ? await discoverBundledPython({ env, cwd: directory, signal }) : undefined)
+          if (!python) return failure(options.bundledPython
+            ? 'No usable Python 3 interpreter was found in the system environment or bundled runtime. Check bundled Python preparation or specify a working interpreter explicitly.'
+            : 'No usable Python 3 interpreter was found in the system environment. Enable bundled Python or specify a working interpreter explicitly.')
           invocation = { ...invocation, executable: python.executable, args: [script, ...invocation.args] }
         }
         signal?.throwIfAborted()
