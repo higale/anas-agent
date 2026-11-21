@@ -47,8 +47,18 @@ export function spawnWindowsShell(native: typeof koffi, Events: typeof EventEmit
     const stdout = createPipe(), stderr = createPipe(), stdin = createPipe()
     for (const value of [stdout.read, stderr.read, stdin.write]) if (!inherit(value, 1, 0)) fail('SetHandleInformation')
     const info: any = {}
-    const environment = Object.entries(options.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
-      .sort(([a], [b]) => a.toUpperCase().localeCompare(b.toUpperCase())).map(([key, value]) => `${key}=${value}`).join('\0') + '\0\0'
+    // Match child_process: Windows names are case-insensitive and the first
+    // lexicographically sorted spelling wins. A second Path can otherwise hide
+    // the explicit PATH containing bundled executables in the native block.
+    const seen = new Set<string>()
+    const keys = Object.keys(options.env).sort().filter(key => {
+      const canonical = key.toUpperCase()
+      if (seen.has(canonical)) return false
+      seen.add(canonical)
+      return typeof options.env[key] === 'string'
+    })
+    const environment = keys.sort((a, b) => a.toUpperCase() < b.toUpperCase() ? -1 : a.toUpperCase() > b.toUpperCase() ? 1 : 0)
+      .map(key => `${key}=${options.env[key]}`).join('\0') + '\0\0'
     if (!create(null, Buffer.from(command + '\0', 'utf16le'), null, null, 1, 0x410,
       Buffer.from(environment, 'utf16le'), options.cwd,
       { size: native.sizeof(startup), flags: 0x101, show: 0, stdin: stdin.read, stdout: stdout.write, stderr: stderr.write }, info)) fail('CreateProcessW')

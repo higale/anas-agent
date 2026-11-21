@@ -21,6 +21,14 @@ async function cleanup(pid: number | undefined) {
   if (info) terminateObservedProcess({ ...info, role: 'child' })
 }
 describe('model Shell process ownership', () => {
+  it.runIf(process.platform === 'win32').each(['fixture-search-path', ''])('passes the canonical Windows PATH even with an inherited Path alias (%j)', async path => {
+    const script = "process.stdout.write('PATH=' + process.env.PATH + ';CASE=' + process.env.ANAS_CASE)"
+    const result = await runPreparedProcess({ ...prepared(script), invocation: { ...invocation(script), env: {
+      ELECTRON_RUN_AS_NODE: '1', Path: 'stale-search-path', PATH: path, anas_case: 'stale', ANAS_CASE: 'canonical'
+    } } })
+    expect(result).toBe(`PATH=${path};CASE=canonical`)
+  })
+
   it('rechecks completed call children for read and wait without changing recorded outcomes', async () => {
     const h = nativeCapabilityFixture()
     let pid: number | undefined, callId = ''
@@ -170,24 +178,27 @@ describe('model Shell process ownership', () => {
 it('supports input and preserves detached children when a model PTY Shell ends', async () => {
   const executable = process.platform === 'win32' ? process.env.npm_node_execpath! : process.execPath
   let pid: number | undefined, terminal: import('./ptyShellSupervisor').ShellTerminalControl | undefined
+  let outcome: ShellRunResult | undefined, output = ''
   const controller = new AbortController()
-  const script = source(true).replace('c.unref(); setInterval(() => {}, 1000)',
+  const script = source(true).replace('console.log(c.pid)', "console.log('CHILD_PID=' + c.pid)").replace('c.unref(); setInterval(() => {}, 1000)',
     "c.unref(); process.stdin.setEncoding('utf8'); console.log('READY'); process.stdin.once('data',()=>{console.log('RECEIVED'); process.exit(0)})")
   const completion = runPreparedProcess({ ...prepared(script, 8), pty: { columns: 90, rows: 25 },
     invocation: { ...invocation(script), executable } }, controller.signal, {
     onTerminal: value => { terminal = value },
+    onResult: value => { outcome = value },
     onProcesses: value => { pid ??= value.processes.find(info => info.role === 'child' && info.name.toLowerCase().includes('node'))?.pid },
     onOutput: (_stream, text) => {
-      const match = text.match(/(?:^|[\r\n])(\d+)[\r\n]/)
+      output += text
+      const match = output.match(/CHILD_PID=(\d+)/)
       if (match) pid = Number(match[1])
       if (text.includes('READY')) setTimeout(() => { void terminal?.apply({ type: 'text', text: 'continue\r' }) }, 100)
     }
   })
   try {
-    const result = JSON.parse(await completion) as ShellRunResult
-    expect(result.error).toBeUndefined()
-    expect(result.stdout).toContain('RECEIVED')
-    expect(result.ok).toBe(true)
+    expect(await completion).toContain('RECEIVED')
+    expect(outcome).toMatchObject({ ok: true, exitCode: 0 })
+    expect(outcome?.error).toBeUndefined()
+    expect(outcome?.stdout).toContain('RECEIVED')
     expect(pid).toBeGreaterThan(1)
     expect(inspectProcess(pid!)?.pid).toBe(pid)
   } finally { controller.abort(); await completion; await cleanup(pid) }
