@@ -96,7 +96,7 @@ describe.skipIf(!['win32', 'darwin'].includes(process.platform) || !existsSync(j
     const quote = (text: string) => `'${text.replaceAll("'", process.platform === 'win32' ? "''" : "'\\''")}'`
     const command = `${process.platform === 'win32' ? '& ' : ''}${quote(info.executable)} -c ${quote('print("EXPLICIT_OK")')}`
     let result: ShellRunResult | undefined
-    await runShellCommand({ command, env: h.env, workingDir: h.root, timeoutSec: 10, keepProcesses: false,
+    await runShellCommand({ command, env: h.env, workingDir: h.root, timeoutSec: 10,
       ...(interactive ? { pty: { columns: 100, rows: 24 } } : {}) }, shell, undefined, { onResult: value => { result = value } })
     expect(result?.ok).toBe(true)
     expect(result?.stdout).toContain('EXPLICIT_OK')

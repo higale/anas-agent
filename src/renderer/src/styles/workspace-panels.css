@@ -175,3 +175,10 @@
 .memory-activity-spinning { animation: memory-activity-spin 1.2s linear infinite; }
 @keyframes memory-activity-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .memory-activity-spinning { animation: none; } }
+
+.process-list-panel { height: 100%; overflow: auto; padding: 12px; }
+.process-list-call { margin-block: 16px; overflow-wrap: anywhere; }
+.process-list-call pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.process-list-items { list-style: none; padding: 0; margin-block: 8px; }
+.process-list-items > li { padding-block: 6px; }
+.process-list-items .ui-row { min-height: var(--control-height); }

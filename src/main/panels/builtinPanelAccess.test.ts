@@ -48,3 +48,12 @@ describe('built-in panel context boundaries', () => {
     expect(builtinPanelCanInvoke(subagent, 'agent:panels:review', [])).toBe(false)
   })
 })
+
+it('binds process reads and termination to the panel conversation', () => {
+  const panel = { kind: 'processes', projectId: 'project', threadId: 'thread' } as const
+  for (const channel of ['agent:processes:list', 'agent:processes:terminate']) {
+    expect(builtinPanelCanInvoke(panel, channel, [{ threadId: 'thread' }])).toBe(true)
+    expect(builtinPanelCanInvoke(panel, channel, [{ threadId: 'other' }])).toBe(false)
+    expect(builtinPanelCanInvoke({ kind: 'files', projectId: 'project', threadId: 'thread' }, channel, [{ threadId: 'thread' }])).toBe(false)
+  }
+})

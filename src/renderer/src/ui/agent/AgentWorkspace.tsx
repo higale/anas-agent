@@ -226,6 +226,7 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
           <WorkspaceMenu plugins={props.plugins ?? []} onOpenMemoryActivity={openMemoryActivity}
             onOpenPlugin={props.onOpenPlugin} onOpenPluginSettings={props.onOpenPluginSettings}
             project={selectedProject ? { name: selectedProject.name,
+              onOpenProcesses: props.activeThreadId ? () => props.panels.open({ kind: 'processes', projectId: selectedProject.id, threadId: props.activeThreadId! }) : undefined,
               onOpenMemory: selectedProject.kind === 'workspace' ? () => props.panels.open({ kind: 'projectMemory', projectId: selectedProject.id }) : undefined,
               onOpenFiles: () => props.panels.open({
               kind: 'files', projectId: selectedProject.id, threadId: props.activeThreadId,

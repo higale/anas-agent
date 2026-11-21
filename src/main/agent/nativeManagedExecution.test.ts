@@ -31,6 +31,26 @@ function invoke(tool: ToolDefinition<ConversationMessage>, id: string, args: Rec
 afterEach(() => vi.useRealTimers())
 
 describe('native managed execution lifecycle', () => {
+  it('retains a completed inline Shell process record after the conversation commits its tool result', async () => {
+    const h = harness()
+    const definition = defineContentTool({ name: 'pwsh', description: 'Shell', metadata: commandShellMetadata(), inputSchema: z.object({}),
+      execute: async () => {
+        const control = currentToolExecution()!
+        control.markRunning()
+        control.setOutcome({ process_snapshot: { complete: false, checkedAt: new Date().toISOString(),
+          processes: [{ pid: 1234, birth: '123', name: 'music', role: 'child', status: 'running', parentPid: 123, startedAt: '' }] } })
+        return JSON.stringify({ call_id: control.callId, stdout: 'started' })
+      } })
+    try {
+      const history = await h.executeCalls([definition], [[{ id: 'start-music', name: 'pwsh', args: {} }]])
+      const result = history.messages.find(message => message.value.kind === 'tool')!
+      const { call_id } = JSON.parse(String(result.value.content))
+      expect(h.database.managed.getManagedCall(call_id, h.threadId)).toMatchObject({ kind: 'shell', status: 'completed',
+        outcome: { process_snapshot: { processes: [{ pid: 1234, status: 'running' }] } } })
+      expect(h.database.managed.listProcessCalls(h.threadId).map(call => call.id)).toContain(call_id)
+    } finally { await h.close() }
+  })
+
   it('returns a background handle while retaining resources until the actual executor settles', async () => {
     vi.useFakeTimers()
     const h = harness(), finish = deferred<string>()
@@ -190,7 +210,9 @@ describe('native managed execution lifecycle', () => {
       await expect.poll(() => pids.length, { timeout: 5000 }).toBe(2)
       controller.abort(new Error('User stopped the run.'))
       const result = await pending
-      expect(JSON.parse(String(result.content))).toMatchObject({ ok: false, aborted: true, timedOut: false })
+      const returned = JSON.parse(String(result.content))
+      expect(returned).toMatchObject({ ok: false, aborted: true })
+      expect(returned).not.toHaveProperty('timedOut')
       await expect.poll(() => pids.every((pid) => { try { process.kill(pid, 0); return false } catch { return true } }), { timeout: 5000 }).toBe(true)
       expect(h.service.unresolvedForThread(h.threadId)).toHaveLength(0)
     } finally {

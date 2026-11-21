@@ -77,7 +77,7 @@ export async function cleanupUnresolvedBackgroundTasks(options: {
       lines.push(backgroundCallsCancelling)
       report()
     }
-    await managedCalls.cancelThreads(activeThreads, backgroundCleanupStarted)
+    await managedCalls.cancelThreads(activeThreads, backgroundCleanupStarted, true)
   }
   // Stop parent/child executors and shell/MCP calls together so neither waits
   // for work that the other cancellation branch has not signalled yet.

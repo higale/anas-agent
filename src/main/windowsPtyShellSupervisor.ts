@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { DetachedWindowsShellSupervisor } from './windowsDetachedShellSupervisor'
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { createRequire } from 'node:module'
@@ -8,13 +9,16 @@ import type { ShellTerminalControl } from './ptyShellSupervisor'
 const nativeDependency = createRequire(import.meta.url)
 
 // This supervisor stays OUTSIDE the console. The parent puts it in its
-// kill-on-close Job before sending dispatch. CreateProcess in node-pty then
-// inherits that Job atomically; the managed Job does not permit breakaway.
+// Job before sending dispatch. Model Shells use an observation-only Job;
+// dedicated tools retain their kill-on-close containment.
 const program = String.raw`
 const pty = require(process.env.ANAS_PTY_MODULE)
-let terminal, request, startup, timeout
+let terminal, request, startup, timeout, rootHandle, rootPoll, rootNative, pipeSocket
+let aborted = false, timedOut = false
+const rootOnly = process.env.ANAS_SHELL_ROOT_ONLY === '1'
 let started = false, dispatched = false, ended = false, pressure = 0
 const send = (message, callback) => {
+  if (pipeSocket) return pipeSocket.write(JSON.stringify({ ...message, token: process.env.ANAS_SHELL_SUPERVISOR_TOKEN }) + '\n', callback)
   if (!process.connected) return false
   return process.send(message, callback)
 }
@@ -22,6 +26,24 @@ const reportStarted = () => {
   if (!started && terminal && terminal.pid > 0) {
     started = true
     clearInterval(startup)
+    if (rootOnly) {
+      const native = require(process.env.ANAS_SHELL_NATIVE_MODULE), kernel = native.load('kernel32.dll')
+      rootNative = {
+        open: kernel.func('void * __stdcall OpenProcess(uint32_t, int, uint32_t)'),
+        wait: kernel.func('uint32_t __stdcall WaitForSingleObject(void *, uint32_t)'),
+        code: kernel.func('int __stdcall GetExitCodeProcess(void *, _Out_ uint32_t *)'),
+        stop: kernel.func('int __stdcall TerminateProcess(void *, uint32_t)'),
+        close: kernel.func('int __stdcall CloseHandle(void *)')
+      }
+      rootHandle = rootNative.open(0x101001, 0, terminal.pid)
+      if (rootHandle) rootPoll = setInterval(() => {
+        if (rootNative.wait(rootHandle, 0) !== 0) return
+        const code = [0]
+        clearInterval(rootPoll)
+        if (rootNative.code(rootHandle, code)) setTimeout(() => finish(code[0]), 150)
+        else finish(undefined, 'Could not read the Shell exit code.')
+      }, 20)
+    }
     send({ type: 'started', pid: terminal.pid })
   }
 }
@@ -29,13 +51,13 @@ const finish = (exitCode, error) => {
   if (ended) return
   reportStarted()
   ended = true
-  clearInterval(startup); clearTimeout(timeout)
-  send({ type: 'result', exitCode, timedOut: false, aborted: false, beforeStart: !started, error })
-  // Remain alive until the parent terminates the Job, including any remaining
-  // descendants. ConPTY exit alone is not proof that the Job is empty.
+  clearInterval(startup); clearTimeout(timeout); clearInterval(rootPoll)
+  send({ type: 'result', exitCode, timedOut, aborted, beforeStart: !started, error }, () => { if (rootOnly) process.exit(0) })
+  // Dedicated tools remain until their parent reclaims the containment Job.
 }
-process.on('disconnect', () => process.exit(1))
-process.on('message', (message) => {
+const disconnected = () => { if (rootHandle) rootNative.stop(rootHandle, 1); process.exit(1) }
+process.on('disconnect', disconnected)
+const receive = (message) => {
   if (message.type === 'start' && !request && !ended) {
     request = message
     send({ type: 'dispatching' })
@@ -65,7 +87,12 @@ process.on('message', (message) => {
       }, request.timeoutMs)
     } catch (error) { finish(undefined, error.message) }
   } else if (message.type === 'cancel' || message.type === 'termination_ack') {
-    send({ type: 'force_required', reason: message.type === 'cancel' ? 'cancel' : 'timeout' })
+    if (rootOnly) {
+      aborted ||= message.type === 'cancel'; timedOut ||= message.type === 'termination_ack'
+      if (rootHandle) rootNative.stop(rootHandle, 1)
+      else if (!dispatched) finish(undefined)
+      else send({ type: 'force_required', reason: aborted ? 'cancel' : 'timeout' })
+    } else send({ type: 'force_required', reason: message.type === 'cancel' ? 'cancel' : 'timeout' })
   } else if (message.type === 'terminal_input') {
     try {
       if (!started || ended) throw new Error('The terminal instance is no longer available.')
@@ -74,13 +101,32 @@ process.on('message', (message) => {
       send({ type: 'terminal_ack', id: message.id })
     } catch (error) { send({ type: 'terminal_ack', id: message.id, error: error.message }) }
   }
-})
-send({ type: 'ready', pid: process.pid })
+}
+if (process.env.ANAS_SHELL_SUPERVISOR_PIPE) {
+  pipeSocket = require('node:net').createConnection(process.env.ANAS_SHELL_SUPERVISOR_PIPE)
+  let input = ''
+  pipeSocket.setEncoding('utf8')
+  pipeSocket.on('data', chunk => {
+    input += chunk
+    if (input.length > 1000000) return disconnected()
+    for (;;) {
+      const boundary = input.indexOf('\n')
+      if (boundary < 0) break
+      const line = input.slice(0, boundary); input = input.slice(boundary + 1)
+      try { receive(JSON.parse(line)) } catch { disconnected() }
+    }
+  })
+  pipeSocket.once('connect', () => send({ type: 'ready', pid: process.pid }))
+  pipeSocket.once('close', disconnected); pipeSocket.once('error', disconnected)
+} else {
+  process.on('message', receive)
+  send({ type: 'ready', pid: process.pid })
+}
 `
 
 export class WindowsPtyShellSupervisor extends EventEmitter implements ShellTerminalControl {
   readonly id = randomUUID()
-  private readonly child: ChildProcess
+  private readonly child: ChildProcess | DetachedWindowsShellSupervisor
   private dimensions: TerminalSize
   private ready = false
   private ended = false
@@ -88,10 +134,12 @@ export class WindowsPtyShellSupervisor extends EventEmitter implements ShellTerm
   private inputWrites = 0
   private readonly pending = new Map<string, { resolve(): void; reject(error: Error): void; timer: NodeJS.Timeout }>()
 
-  constructor(size: TerminalSize) {
+  constructor(size: TerminalSize, rootOnly = false) {
     super()
     this.dimensions = { ...size }
-    this.child = spawn(process.execPath, ['-e', program], {
+    this.child = rootOnly ? new DetachedWindowsShellSupervisor(program, { ANAS_SHELL_ROOT_ONLY: '1',
+      ANAS_SHELL_NATIVE_MODULE: nativeDependency.resolve('koffi'), ANAS_PTY_MODULE: nativeDependency.resolve('node-pty'), ANAS_PTY_SIZE: JSON.stringify(size) })
+      : spawn(process.execPath, ['-e', program], {
       windowsHide: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', ANAS_PTY_MODULE: nativeDependency.resolve('node-pty'), ANAS_PTY_SIZE: JSON.stringify(size) }
     })
@@ -113,9 +161,10 @@ export class WindowsPtyShellSupervisor extends EventEmitter implements ShellTerm
       if (message.type === 'result') this.end()
       this.emit('message', message)
     })
-    this.child.once('error', (error) => { this.end(); this.emit('error', error) })
-    this.child.once('exit', (code, signal) => { this.end(); this.emit('exit', code, signal) })
-    this.child.once('disconnect', () => this.end())
+    ;(this.child as EventEmitter).once('error', (error: Error) => { this.end(); this.emit('error', error) })
+    ;(this.child as EventEmitter).once('exit', (code: number | null, signal: NodeJS.Signals | null) => { this.end(); this.emit('exit', code, signal) })
+    if (this.child instanceof DetachedWindowsShellSupervisor) this.child.once('exit', () => this.end())
+    else this.child.once('disconnect', () => this.end())
   }
 
   get pid(): number | undefined { return this.child.pid }
@@ -125,7 +174,7 @@ export class WindowsPtyShellSupervisor extends EventEmitter implements ShellTerm
   get size(): TerminalSize { return { ...this.dimensions } }
   send(message: any, callback?: (error: Error | null) => void): boolean { return this.child.send(message, callback) }
   disconnect(): void { this.child.disconnect() }
-  kill(signal?: NodeJS.Signals | number): boolean { return this.child.kill(signal) }
+  kill(signal?: NodeJS.Signals | number): boolean { return this.child instanceof DetachedWindowsShellSupervisor ? this.child.kill() : this.child.kill(signal) }
 
   async apply(input: TerminalAction): Promise<void> {
     const action = terminalActionSchema.parse(input)

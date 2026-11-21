@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { defineContentTool, type ToolDefinition } from '../../runtime/toolDefinition'
 import { runtimeToolDefinitions } from './runtimeTools'
-import { toolJsonSchema } from '../../runtime/toolSchema'
+import { modelToolJsonSchema, toolJsonSchema } from '../../runtime/toolSchema'
 import { invokeCapability } from '../../runtime/toolInvocation'
 import { z } from 'zod/v3'
 import { supportsManagedTool } from '../agent/managedToolRuntime'
@@ -51,7 +51,7 @@ describe('subagent runtime tool scopes', () => {
     const id = '22222222-2222-4222-8222-222222222222'
     await invokeContent(write, { call_id: id, terminal_id: id, action: { type: 'text', text: '你好\r' } })
     expect(managedCalls.writeTerminal).toHaveBeenCalledWith(id, 'thread', id, { type: 'text', text: '你好\r' })
-    await expect(invokeContent(shell, { command: 'Read-Host', pty: { columns: 100, rows: 30 }, keep_processes: true })).rejects.toThrow('cannot keep')
+    await expect(invokeContent(shell, { command: 'Read-Host', pty: { columns: 100, rows: 30 }, keep_processes: true })).rejects.toThrow()
     const shellOnlySelection = await runtimeToolDefinitions({ ...options, toolNames: ['run_shell'] })
     expect(toolNames(shellOnlySelection)).toEqual(expect.arrayContaining(['read_call', 'read_call_output', 'write_call', 'wait_call', 'cancel_call']))
     for (const scoped of [{ ...options, shell: false }, { ...options, backgroundTools: false }, { ...options, toolNames: ['write_call'] }]) {
@@ -315,6 +315,22 @@ describe('subagent runtime tool scopes', () => {
   })
 
 
+  it.each([pwsh, { executable: '/bin/zsh', name: 'zsh', family: 'posix' as const }])(
+    '$name launches without a process lifetime option and rejects the removed option', async commandShell => {
+      const shellRunner = vi.fn(async () => 'ok')
+      const tools = await runtimeToolDefinitions({ enabled: true, primaryFolder: process.cwd(),
+        network: false, shell: true, mcp: false, commandShell, shellRunner })
+      const shell = tools.find(tool => tool.name === 'pwsh' || tool.name === 'zsh')!
+      const schema = modelToolJsonSchema(shell.inputSchema) as InputSchema
+      expect(schema.properties).not.toHaveProperty('keep_processes')
+      await expect(invokeContent(shell, { command: 'echo ready', timeout: 1 })).resolves.toBe('ok')
+      expect(shellRunner).toHaveBeenLastCalledWith(expect.objectContaining({ command: 'echo ready', timeoutSec: 1 }))
+      for (const keep_processes of [true, false]) {
+        await expect(invokeContent(shell, { command: 'echo ready', keep_processes })).rejects.toThrow()
+      }
+      expect(shellRunner).toHaveBeenCalledOnce()
+    })
+
   it('keeps the generic shell tool independent of Skills', async () => {
     const shellRunner = vi.fn().mockResolvedValue('ok')
     const tools = await runtimeToolDefinitions({
@@ -330,7 +346,7 @@ describe('subagent runtime tool scopes', () => {
 
     const shellTool = tools.find((item) => item.name === 'pwsh')
     expect(shellTool?.description).toContain('PowerShell 7.6.4 command with pwsh')
-    expect(shellTool?.description).toContain('set keep_processes to true')
+    expect(shellTool?.description).toContain('Only that Shell')
     expect(shellTool?.description).not.toContain('skill')
     expect((shellTool as { metadata?: unknown } | undefined)?.metadata).toMatchObject({
       anasCapabilityId: 'run_shell',
@@ -338,36 +354,28 @@ describe('subagent runtime tool scopes', () => {
     })
     const shellSchema = toolJsonSchema(shellTool!.inputSchema) as InputSchema
     expect(shellSchema.properties.command.description).toContain('PowerShell 7+ syntax')
-    expect(shellSchema.properties.keep_processes.description).toContain('MUST be true')
-    expect(shellSchema.properties.keep_processes.description).toContain('Defaults to false')
+    expect(shellSchema.properties).not.toHaveProperty('keep_processes')
     expect(shellSchema.properties.summary.description).toContain("user's language")
     await expect(invokeContent(shellTool!, {
       command: 'curl wttr.in/Shanghai',
-      summary: 'Query Shanghai weather via wttr.in'
+      summary: 'Query Shanghai weather via wttr.in',
     })).resolves.toBe('ok')
     expect(shellRunner).toHaveBeenCalledWith({
       command: 'curl wttr.in/Shanghai',
       summary: 'Query Shanghai weather via wttr.in',
       timeoutSec: undefined,
       workingDir: undefined,
-      keepProcesses: false
     })
     await expect(invokeContent(shellTool!, {
       command: 'Start-Process calc',
       summary: 'Open Calculator',
-      keep_processes: true
     })).resolves.toBe('ok')
     expect(shellRunner).toHaveBeenLastCalledWith({
       command: 'Start-Process calc',
       summary: 'Open Calculator',
       timeoutSec: undefined,
       workingDir: undefined,
-      keepProcesses: true
     })
-    const independentCalls = shellRunner.mock.calls.length
-    await expect(invokeContent(shellTool!, { command: 'npm run dev', keep_processes: true, timeout: 30 }))
-      .rejects.toThrow('Independent processes cannot have a managed execution timeout')
-    expect(shellRunner.mock.calls).toHaveLength(independentCalls)
     await expect(invokeContent(shellTool!, { command: 'pwd' })).resolves.toBe('ok')
     const original = '\n  # original comment\n rg -n needle .  \n'
     await expect(invokeContent(shellTool!, { command: original })).resolves.toBe('ok')

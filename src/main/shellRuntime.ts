@@ -1,5 +1,9 @@
 import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { createRequire } from 'node:module'
+import { spawnWindowsShell } from './windowsShellProcess'
+import { inspectProcess, refreshProcesses, terminateObservedProcess } from './processObservation'
+import { processSnapshotSummary, type ProcessIdentity, type ProcessSnapshot } from '@shared/processes'
 import { stat } from 'node:fs/promises'
 import { basename } from 'node:path'
 import { promisify } from 'node:util'
@@ -14,6 +18,7 @@ import { terminalSizeSchema, type TerminalSize } from '@shared/terminal'
 import { PtyShellSupervisor, type ShellTerminalControl } from './ptyShellSupervisor'
 import { createPosixPtySession } from './posixPtySession'
 
+const shellDependency = createRequire(import.meta.url)
 const defaultShellTimeoutSec = 0
 const maxShellOutputChars = 120_000
 const forceKillDelayMs = 2_000
@@ -26,7 +31,6 @@ export interface PreparedShellCommand {
   command: string
   workingDir: string
   timeoutSec: number
-  keepProcesses: boolean
   pty?: TerminalSize
 }
 
@@ -54,8 +58,7 @@ interface CommandShellResolutionOptions {
 
 export interface ShellRunResult {
   ok: boolean
-  /** Confirms independent launch, not command completion or service readiness. */
-  detached?: { pid: number; stdoutPath: string; stderrPath: string }
+  process_snapshot?: ProcessSnapshot
   command: string
   workingDir: string
   timeoutSec: number
@@ -77,7 +80,8 @@ export interface PreparedProcess {
   workingDir: string
   timeoutSec: number
   maxStdoutChars?: number
-  keepProcesses?: boolean
+  /** Internal tools retain their own containment; model Shell owns only its root. */
+  rootOnly?: boolean
   pty?: TerminalSize
   invocation: ProcessInvocation
   env?: NodeJS.ProcessEnv
@@ -94,6 +98,7 @@ export interface PreparedProcess {
 }
 
 export interface ShellRunCallbacks {
+  onProcesses?(snapshot: ProcessSnapshot): void
   onTerminal?(terminal: ShellTerminalControl): void
   onDispatched?(): void
   onOutcomeUncertain?(reason: string): void
@@ -104,10 +109,9 @@ export interface ShellRunCallbacks {
 type ShellSupervisorMessage =
   | { type: 'ready'; pid: number }
   | { type: 'dispatching' }
-  | { type: 'started'; pid: number; outputFiles?: { stdoutPath: string; stderrPath: string } }
+  | { type: 'started'; pid: number }
   | { type: 'termination_started'; reason: 'timeout' }
   | { type: 'force_required'; reason: 'cancel' | 'timeout' }
-  | { type: 'release_ready' }
   | { type: 'output'; stream: 'stdout' | 'stderr'; text: string }
   | {
       type: 'result'
@@ -145,8 +149,7 @@ export const shellSupervisorProgram = String.raw`
 'use strict'
 const { spawn } = require('node:child_process')
 const net = require('node:net')
-const fs = require('node:fs')
-const path = require('node:path')
+const spawnWindows = process.platform === 'win32' ? (${spawnWindowsShell.toString()}) : undefined
 const forceKillDelayMs = ${forceKillDelayMs}
 const coordinationTimeoutMs = ${supervisorStartupTimeoutMs}
 let child
@@ -167,9 +170,7 @@ let timeoutTimer
 let forceKillTimer
 let terminationAckTimer
 let outputBackpressure = 0
-let releaseAccepted = false
-let independent = false
-let outputFiles
+let rootOnly = false
 let pipeSocket
 const pipePath = process.env.ANAS_SHELL_SUPERVISOR_PIPE
 const pipeToken = process.env.ANAS_SHELL_SUPERVISOR_TOKEN
@@ -246,6 +247,10 @@ function send(message, callback) {
 }
 
 function terminateTree(force) {
+  if (rootOnly) {
+    if (child && child.exitCode === null && child.signalCode === null) child.kill(force ? 'SIGKILL' : 'SIGTERM')
+    return
+  }
   if (process.platform !== 'win32') {
     if (ptySession && ptySessionLeader) ptySession.terminate(ptySessionLeader, force)
     try {
@@ -290,11 +295,6 @@ function scheduleForcedTermination() {
 
 function requestTermination(reason) {
   if (settled) return
-  if (releaseAccepted) {
-    releaseAccepted = false
-    if (forceKillTimer) clearTimeout(forceKillTimer)
-    forceKillTimer = undefined
-  }
   if (!terminationReason || reason === 'cancel') terminationReason = reason
   if (!terminationRequested) {
     terminationRequested = true
@@ -322,14 +322,8 @@ function beginTimeoutTermination() {
 
 function closeSupervisor() {
   closing = true
-  if (releaseAccepted) {
-    settled = true
-    if (forceKillTimer) clearTimeout(forceKillTimer)
-    // libuv places non-detached Windows children in its own kill-on-close
-    // Job. Keep this independent guardian alive until the command exits;
-    // DETACHED_PROCESS cannot be used for PowerShell's console host. The
-    // application IPC and managed call end now, with no later cancellation.
-    if (child && process.platform !== 'win32') child.unref()
+  if (rootOnly && child) {
+    child.stdout?.destroy(); child.stderr?.destroy(); child.unref()
   }
   process.exitCode = 0
   disconnectTransport()
@@ -348,7 +342,7 @@ function finish(details) {
     beforeStart: !spawned,
     ...details
   }
-  if (!spawned) {
+  if (!spawned || rootOnly) {
     if (!parentDisconnected) send(message, closeSupervisor)
     else closeSupervisor()
     return
@@ -399,15 +393,12 @@ function forward(stream, value) {
 function cancelForParentDisconnect() {
   if (closing) return
   parentDisconnected = true
-  if (releaseAccepted) {
-    closeSupervisor()
-    return
-  }
   aborted = true
   timeoutAwaitingAck = false
   if (terminationAckTimer) clearTimeout(terminationAckTimer)
   if (settled) {
     terminateTree(true)
+    if (rootOnly) closeSupervisor()
     return
   }
   if (!child) {
@@ -421,40 +412,25 @@ function cancelForParentDisconnect() {
 function startCommand(message) {
   if (settled || child) return
   dispatchAccepted = true
-  independent = message.independent === true
-  const outputHandles = []
+  rootOnly = message.rootOnly === true
   try {
-    if (independent) {
-      const directory = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'anas-shell-'))
-      outputFiles = { stdoutPath: path.join(directory, 'stdout.log'), stderrPath: path.join(directory, 'stderr.log') }
-      outputHandles.push(fs.openSync(outputFiles.stdoutPath, 'ax', 0o600))
-      outputHandles.push(fs.openSync(outputFiles.stderrPath, 'ax', 0o600))
-    }
-    child = spawn(message.executable, message.args, {
-      cwd: message.cwd,
-      windowsHide: message.windowsHide === true,
-      shell: false,
-      detached: false,
-      env: message.environment,
-      stdio: independent ? ['ignore', ...outputHandles]
-        : terminalMode ? ['inherit', 'inherit', 'inherit'] : ['ignore', 'pipe', 'pipe']
-    })
-  } catch (error) {
-    finish({ error: error instanceof Error ? error.message : String(error) })
-    return
-  } finally {
-    for (const handle of outputHandles) fs.closeSync(handle)
-  }
-  if (!terminalMode && !independent) {
-    child.stdout.setEncoding('utf8')
-    child.stderr.setEncoding('utf8')
+    child = rootOnly && process.platform === 'win32' && !terminalMode
+      ? spawnWindows(require(process.env.ANAS_SHELL_NATIVE_MODULE), require('node:events').EventEmitter, require('node:stream').PassThrough,
+          message.executable, message.args, { cwd: message.cwd, env: message.environment })
+      : spawn(message.executable, message.args, {
+          cwd: message.cwd, windowsHide: message.windowsHide === true, shell: false, detached: false,
+          env: message.environment, stdio: terminalMode ? ['inherit', 'inherit', 'inherit'] : ['ignore', 'pipe', 'pipe']
+        })
+  } catch (error) { finish({ error: error instanceof Error ? error.message : String(error) }); return }
+  if (!terminalMode) {
+    child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8')
     child.stdout.on('data', (chunk) => forward('stdout', chunk))
     child.stderr.on('data', (chunk) => forward('stderr', chunk))
   }
   child.once('spawn', () => {
     if (!spawned) {
       spawned = true
-      send({ type: 'started', pid: child.pid, ...(outputFiles ? { outputFiles } : {}) })
+      send({ type: 'started', pid: child.pid })
     }
     const timeoutMs = Math.max(0, Math.floor(Number(message.timeoutMs) || 0))
     if (timeoutMs > 0) timeoutTimer = setTimeout(beginTimeoutTermination, timeoutMs)
@@ -462,32 +438,20 @@ function startCommand(message) {
   child.once('error', (error) => {
     childError = error instanceof Error ? error.message : String(error)
   })
+  let drainTimer
+  child.once('exit', (exitCode, signal) => {
+    if (!rootOnly) return
+    // Shell exit is authoritative. Inherited pipes must not extend its lifetime.
+    drainTimer = setTimeout(() => finish({ exitCode, signal, ...(childError ? { error: childError } : {}) }), 150)
+  })
   child.once('close', (exitCode, signal) => {
-    // Independent launch is acknowledged at spawn. An early command exit is
-    // not permission to reclaim descendants before ownership is handed off.
-    if (independent && spawned && !terminationRequested && !parentDisconnected) return
+    clearTimeout(drainTimer)
     finish({ exitCode, signal, ...(childError ? { error: childError } : {}) })
   })
 }
 
 function handleParentMessage(message) {
   if (!message || typeof message !== 'object') return
-  if (message.type === 'prepare_release') {
-    if (!independent || !spawned || settled || terminationRequested || releaseAccepted) return
-    releaseAccepted = true
-    if (forceKillTimer) {
-      clearTimeout(forceKillTimer)
-      forceKillTimer = undefined
-    }
-    send({ type: 'release_ready' })
-    forceKillTimer = setTimeout(closeSupervisor, coordinationTimeoutMs)
-    return
-  }
-  if (message.type === 'release_complete') {
-    if (!releaseAccepted) return
-    closeSupervisor()
-    return
-  }
   if (message.type === 'cancel') {
     aborted = true
     timeoutAwaitingAck = false
@@ -563,7 +527,7 @@ function appendLimited(current: string, chunk: string, limit: number): { text: s
 }
 
 export async function prepareShellCommand(
-  input: { command: string; timeoutSec?: number; workingDir?: string; keepProcesses?: boolean; pty?: TerminalSize },
+  input: { command: string; timeoutSec?: number; workingDir?: string; pty?: TerminalSize },
   defaultWorkingDir: string
 ): Promise<PreparedShellCommand | ShellRunResult> {
   const command = input.command
@@ -612,22 +576,38 @@ export async function prepareShellCommand(
     command,
     workingDir: requestedWorkingDir,
     timeoutSec,
-    keepProcesses: input.keepProcesses === true,
     ...(input.pty ? { pty: terminalSizeSchema.parse(input.pty) } : {})
   }
 }
 
-export function resultText(result: ShellRunResult): string {
+export function resultText(result: ShellRunResult, callId?: string): string {
   const truncated = Boolean(result.truncated?.stdout || result.truncated?.stderr)
+  const processes = processSnapshotSummary(result.process_snapshot)
   const needsStatusEnvelope = !result.ok
-    || Boolean(result.detached)
+    || Boolean(processes.remaining_processes || processes.process_observation_error)
     || result.stdout.length === 0
     || result.stderr.length > 0
     || truncated
     || Boolean(result.timedOut)
     || Boolean(result.aborted)
     || Boolean(result.error)
-  return needsStatusEnvelope ? JSON.stringify(result) : result.stdout
+  if (!needsStatusEnvelope) return result.stdout
+  return JSON.stringify({
+    ok: result.ok,
+    ...(result.exitCode == null || result.ok && result.exitCode === 0 ? {} : { exitCode: result.exitCode }),
+    ...(result.stdout ? { stdout: result.stdout } : {}),
+    ...(result.stderr ? { stderr: result.stderr } : {}),
+    ...(result.signal ? { signal: result.signal } : {}),
+    ...(result.timedOut ? { timedOut: true } : {}),
+    ...(result.aborted ? { aborted: true } : {}),
+    ...(result.error ? { error: result.error } : {}),
+    ...(truncated ? { truncated: {
+      ...(result.truncated?.stdout ? { stdout: true } : {}),
+      ...(result.truncated?.stderr ? { stderr: true } : {})
+    } } : {}),
+    ...processes,
+    ...(truncated && callId ? { call_id: callId } : {})
+  })
 }
 
 async function probeShellVersion(executable: string, args: string[]): Promise<string | undefined> {
@@ -698,17 +678,18 @@ export function describeCommandShell(shell: CommandShellInfo): string {
 export function describeCommandShellTool(shell: CommandShellInfo): string {
   const toolName = commandShellToolName(shell.executable)
   const version = shell.version ? ` ${shell.version}` : ''
+  const output = 'Returns raw stdout on clean success; otherwise compact JSON with output, status, and known remaining direct child processes as needed.'
   switch (toolName) {
     case 'pwsh':
-      return `Run a PowerShell${version} command with pwsh when no dedicated tool fits. Returns stdout on clean success, otherwise JSON status.`
+      return `Run a PowerShell${version} command with pwsh when no dedicated tool fits. ${output}`
     case 'powershell':
-      return `Run a Windows PowerShell${version} command with powershell.exe when no dedicated tool fits. Returns stdout on clean success, otherwise JSON status.`
+      return `Run a Windows PowerShell${version} command with powershell.exe when no dedicated tool fits. ${output}`
     case 'bash':
-      return `Run a Bash command with ${shell.executable} when no dedicated tool fits. Returns stdout on clean success, otherwise JSON status.`
+      return `Run a Bash command with ${shell.executable} when no dedicated tool fits. ${output}`
     case 'zsh':
-      return `Run a Z shell command with ${shell.executable} when no dedicated tool fits. Returns stdout on clean success, otherwise JSON status.`
+      return `Run a Z shell command with ${shell.executable} when no dedicated tool fits. ${output}`
     default:
-      return `Run a command with ${describeCommandShell(shell)} when no dedicated tool fits. Returns stdout on clean success, otherwise JSON status.`
+      return `Run a command with ${describeCommandShell(shell)} when no dedicated tool fits. ${output}`
   }
 }
 
@@ -893,8 +874,6 @@ export function runPreparedProcess(
 ): Promise<string> {
   const maxStdoutChars = prepared.maxStdoutChars ?? maxShellOutputChars
   if (!Number.isSafeInteger(maxStdoutChars) || maxStdoutChars <= 0) throw new Error('stdout limit must be a positive safe integer.')
-  if (prepared.pty && prepared.keepProcesses) throw new Error('PTY sessions cannot keep processes after the command ends. Use non-interactive execution for detached services.')
-  if (prepared.keepProcesses && prepared.timeoutSec > 0) throw new Error('Independent processes cannot have a managed execution timeout. Omit timeout or set it to 0 when keep_processes is true.')
   if (prepared.pty) terminalSizeSchema.parse(prepared.pty)
   if (signal?.aborted) {
     return Promise.resolve(resultText({
@@ -919,7 +898,6 @@ export function runPreparedProcess(
       executable: prepared.invocation.executable,
       arguments: prepared.invocation.args,
       environmentFingerprint: processEnvironmentFingerprint(environment),
-      keepProcesses: prepared.keepProcesses === true,
       ...(prepared.pty ? { pty: prepared.pty } : {}),
       ...(prepared.effectSource ? { source: prepared.effectSource } : {})
     }
@@ -949,7 +927,19 @@ export function runPreparedProcess(
     let dispatched = false
     let started = false
     let resultReceived = false
-    let releasePendingResult: ShellRunResult | undefined
+    let rootPid: number | undefined
+    let rootIdentity: ProcessIdentity | undefined
+    let supervisorIdentity: ProcessIdentity | undefined
+    let observed: ProcessSnapshot = { processes: [], complete: false, checkedAt: new Date().toISOString() }
+    let observationTimer: NodeJS.Timeout | undefined
+    const observe = () => {
+      if (!prepared.rootOnly) return
+      let pids: number[] = []
+      try { pids = windowsJob?.processIds().filter(pid => pid !== supervisor.pid) ?? [] } catch { /* Snapshot remains explicitly incomplete. */ }
+      observed = refreshProcesses(observed.processes, rootPid, pids)
+      rootIdentity ??= observed.processes.find(info => info.role === 'shell')
+      callbacks.onProcesses?.(observed)
+    }
     let terminationRequested = false
     let expectedTermination: 'cancel' | 'timeout' | undefined
     let forcedContainmentConfirmed = false
@@ -962,6 +952,12 @@ export function runPreparedProcess(
 
     const finish = (result: ShellRunResult): void => {
       if (settled) return
+      if (observationTimer) clearInterval(observationTimer)
+      if (prepared.rootOnly) {
+        try { observe() } catch (error) { markOutcomeUncertain(String(error)) }
+        result = { ...result, ok: result.ok && !outcomeUncertainReason,
+          ...(outcomeUncertainReason ? { error: outcomeUncertainReason } : {}), process_snapshot: observed }
+      }
       settled = true
       if (handshakeTimer.current) clearTimeout(handshakeTimer.current)
       signal?.removeEventListener('abort', abortCommand)
@@ -970,7 +966,6 @@ export function runPreparedProcess(
         command: result.command,
         workingDir: result.workingDir,
         timeoutSec: result.timeoutSec,
-        keepProcesses: prepared.keepProcesses === true,
         executable: prepared.invocation.executable,
         args: prepared.invocation.args,
         exitCode: result.exitCode,
@@ -988,7 +983,10 @@ export function runPreparedProcess(
           stderr: stderrTruncated
         }
       }
-      callbacks.onResult?.(completed)
+      try { callbacks.onResult?.(completed) } catch (error) {
+        markOutcomeUncertain(`Could not record the Shell outcome: ${String(error)}`)
+        completed.ok = false; completed.error = outcomeUncertainReason
+      }
       resolveCommand(resultText(completed))
     }
 
@@ -997,7 +995,7 @@ export function runPreparedProcess(
       if (!job) return false
       let terminated = false
       let closed = false
-      if (terminateMembers) {
+      if (terminateMembers && !prepared.rootOnly) {
         try {
           job.terminate()
           terminated = true
@@ -1024,26 +1022,19 @@ export function runPreparedProcess(
       return terminated || closed
     }
 
-    const releaseWindowsJob = (): boolean => {
-      const job = windowsJob
-      if (!job) return process.platform !== 'win32'
-      try {
-        job.release()
-        windowsJob = undefined
-        windowsJobAttached = false
-        return true
-      } catch (error) {
-        runtimeLog('error', prepared.logScope, 'Could not release the Windows command Job Object.', {
-          ...prepared.logStart,
-          command: prepared.command,
-          error: error instanceof Error ? error.message : String(error)
-        })
-        return false
-      }
-    }
-
     const forceSupervisorTermination = (): boolean => {
       if (forcedContainmentConfirmed) return true
+      if (prepared.rootOnly) {
+        try {
+          try { observe() } catch (error) { markOutcomeUncertain(String(error)) }
+          if (rootIdentity) terminateObservedProcess(rootIdentity)
+          if (supervisorIdentity) terminateObservedProcess(supervisorIdentity)
+          else if (!dispatched) supervisor.kill('SIGKILL')
+          disposeWindowsJob(false)
+          forcedContainmentConfirmed = !dispatched || Boolean(rootIdentity)
+          return forcedContainmentConfirmed
+        } catch { return false }
+      }
       const contained = process.platform === 'win32' && windowsJobAttached
         ? disposeWindowsJob(true)
         : terminateProcessTree(supervisor, true)
@@ -1089,11 +1080,11 @@ export function runPreparedProcess(
         try {
           supervisor.send({ type: 'cancel' })
         } catch {
-          if (process.platform === 'win32') forceSupervisorTermination()
+          if (prepared.rootOnly || process.platform === 'win32') forceSupervisorTermination()
           else terminateProcessTree(supervisor, false)
         }
       } else {
-        if (process.platform === 'win32') forceSupervisorTermination()
+        if (prepared.rootOnly || process.platform === 'win32') forceSupervisorTermination()
         else terminateProcessTree(supervisor, false)
         try {
           supervisor.disconnect()
@@ -1152,7 +1143,7 @@ export function runPreparedProcess(
 
     if (process.platform === 'win32') {
       try {
-        windowsJob = createWindowsKillOnCloseJob()
+        windowsJob = createWindowsKillOnCloseJob(!prepared.rootOnly)
       } catch (reason) {
         finish({
           ok: false,
@@ -1169,9 +1160,9 @@ export function runPreparedProcess(
 
     try {
       supervisor = prepared.pty ? process.platform === 'win32'
-        ? new WindowsPtyShellSupervisor(prepared.pty) : new PtyShellSupervisor(shellSupervisorProgram, prepared.pty)
-        : process.platform === 'win32' && prepared.keepProcesses === true
-        ? new DetachedWindowsShellSupervisor(shellSupervisorProgram)
+        ? new WindowsPtyShellSupervisor(prepared.pty, prepared.rootOnly) : new PtyShellSupervisor(shellSupervisorProgram, prepared.pty, prepared.rootOnly)
+        : process.platform === 'win32' && prepared.rootOnly
+        ? new DetachedWindowsShellSupervisor(shellSupervisorProgram, { ANAS_SHELL_NATIVE_MODULE: shellDependency.resolve('koffi') })
         : spawn(process.execPath, ['-e', shellSupervisorProgram], {
             windowsHide: true,
             shell: false,
@@ -1239,6 +1230,9 @@ export function runPreparedProcess(
             return
           }
         }
+        if (prepared.rootOnly) {
+          try { const info = inspectProcess(message.pid); if (info) supervisorIdentity = { ...info, role: 'shell' } } catch { /* Parent disconnect still cancels through the supervisor's owned handle. */ }
+        }
         ready = true
         if (signal?.aborted || aborted) {
           aborted = true
@@ -1254,7 +1248,7 @@ export function runPreparedProcess(
             cwd: prepared.workingDir,
             windowsHide: prepared.invocation.windowsHide,
             environment,
-            independent: prepared.keepProcesses === true,
+            rootOnly: prepared.rootOnly === true,
             timeoutMs: prepared.timeoutSec * 1000
           }, (error) => {
             if (!error || settled) return
@@ -1396,42 +1390,6 @@ export function runPreparedProcess(
         }
         return
       }
-      if (message.type === 'release_ready') {
-        if (!releasePendingResult || settled) return
-        if (aborted || terminationRequested) {
-          requestSupervisorTermination('cancel')
-          return
-        }
-        if (handshakeTimer.current) {
-          clearTimeout(handshakeTimer.current)
-          handshakeTimer.current = undefined
-        }
-        if (!releaseWindowsJob()) {
-          const contained = forceSupervisorTermination()
-          clearForceKillTimer()
-          if (!contained) {
-            markOutcomeUncertain(
-              'The command ended, but its Windows containment boundary could neither be released nor terminated; the final outcome is unknown.'
-            )
-          }
-          finish({
-            ...releasePendingResult,
-            ok: false,
-            detached: undefined,
-            error: outcomeUncertainReason
-              ?? 'The command started, but independent process ownership could not be handed off.'
-          })
-          return
-        }
-        try {
-          supervisor.send({ type: 'release_complete' })
-        } catch {
-          // The supervisor accepted release ownership already. Its disconnect
-          // handler now exits without terminating the requested processes.
-        }
-        finish(releasePendingResult)
-        return
-      }
       if (message.type === 'started') {
         if (started || settled) return
         if (!Number.isSafeInteger(message.pid) || message.pid <= 0) return
@@ -1440,34 +1398,13 @@ export function runPreparedProcess(
           handshakeTimer.current = undefined
         }
         started = true
-        if (prepared.keepProcesses) {
-          if (aborted || terminationRequested) {
-            requestSupervisorTermination('cancel')
-            return
-          }
-          if (!message.outputFiles || typeof message.outputFiles.stdoutPath !== 'string'
-            || typeof message.outputFiles.stderrPath !== 'string') {
-            requestSupervisorTermination()
-            markOutcomeUncertain('The independent command started without confirmed output files.')
-            return
-          }
-          releasePendingResult = {
-            ok: true, command: prepared.command, workingDir: prepared.workingDir,
-            timeoutSec: prepared.timeoutSec, stdout, stderr,
-            detached: { pid: message.pid, ...message.outputFiles }
-          }
-          armHandshakeDeadline('Command supervisor did not hand off the independent process.')
-          try {
-            supervisor.send({ type: 'prepare_release' }, (error) => {
-              if (!error || settled) return
-              requestSupervisorTermination()
-              markOutcomeUncertain('The independent command ownership handoff failed.')
-            })
-          } catch {
-            requestSupervisorTermination()
-            markOutcomeUncertain('The independent command ownership handoff failed.')
-          }
-          return
+        rootPid = message.pid
+        if (prepared.rootOnly) {
+          try { observe() } catch (error) { requestSupervisorTermination(); markOutcomeUncertain(String(error)) }
+          observationTimer = setInterval(() => {
+            try { observe() } catch (error) { requestSupervisorTermination(); markOutcomeUncertain(String(error)) }
+          }, 500)
+          observationTimer.unref()
         }
         if (supervisor instanceof PtyShellSupervisor || supervisor instanceof WindowsPtyShellSupervisor) {
           try { callbacks.onTerminal?.(supervisor) } catch (error) {
@@ -1559,7 +1496,13 @@ export function runPreparedProcess(
         )
       }
       resultReceived = true
-      const contained = forceSupervisorTermination()
+      let contained: boolean
+      if (prepared.rootOnly) {
+        try { observe() } catch (error) { markOutcomeUncertain(String(error)) }
+        disposeWindowsJob(false)
+        try { supervisor.disconnect() } catch { /* Already closed. */ }
+        contained = true
+      } else contained = forceSupervisorTermination()
       clearForceKillTimer()
       if (!contained) {
         markOutcomeUncertain(
@@ -1597,6 +1540,7 @@ export function runPreparedProcess(
     supervisor.once('exit', (exitCode, supervisorSignal) => {
       clearForceKillTimer()
       const terminateRemainingCommand = (): boolean => {
+        if (prepared.rootOnly) return forceSupervisorTermination()
         if (process.platform === 'win32') {
           return forcedContainmentConfirmed
             || (windowsJobAttached && disposeWindowsJob(true))
@@ -1689,7 +1633,7 @@ export async function runShellCommand(
     command: command.command,
     workingDir: command.workingDir,
     timeoutSec: command.timeoutSec,
-    keepProcesses: command.keepProcesses,
+    rootOnly: true,
     pty: command.pty,
     env: command.env,
     invocation,

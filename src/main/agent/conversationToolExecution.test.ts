@@ -120,6 +120,7 @@ describe('native capability dispatch and durable effects', () => {
     { args: JSON.parse('{"command":"Get-Date","timeout":1e400}'), field: '/timeout' },
     { args: { command: 'Get-Date', extra: { values: [Infinity] } }, field: '/extra/values/0' },
     { args: { command: ' \n\t' }, field: 'command' },
+    { args: { command: 'Get-Date', keep_processes: false }, field: 'keep_processes' },
     { args: { command: 'Read-Host', pty: { columns: 100, rows: 30 }, keep_processes: true }, field: 'keep_processes' }
   ])('returns invalid Shell $field before inspection, approval or effects, then accepts correction', async ({ args, field }) => {
     const h = await fixture(), execute = vi.fn(async () => { await verifyCurrentShellAuthorization(); return 'Executed' })
@@ -154,6 +155,35 @@ describe('native capability dispatch and durable effects', () => {
     expect(resumedEffects).toHaveBeenCalledOnce(); expect(execute).toHaveBeenCalledOnce()
   })
 
+
+  it.each(['pending', 'completed'] as const)('reopens a %s legacy Shell call with a removed option without rewriting history or replaying effects', async status => {
+    const h = await fixture(), shellRunner = vi.fn(async () => 'Executed')
+    const tools = (await runtimeToolDefinitions({ enabled: true, primaryFolder: h.root, network: false,
+      shell: true, mcp: false, commandShell: { executable: 'pwsh.exe', name: 'PowerShell', family: 'powershell' }, shellRunner
+    })).filter(tool => tool.name === 'pwsh')
+    const legacy = { ...tools[0], inputSchema: z.object({ command: z.string(), keep_processes: z.boolean().optional() }) }
+    h.options.definitions = [legacy]
+    await h.begin([call('legacy', 'pwsh', { command: 'Get-Date', keep_processes: true })])
+    if (status === 'completed') {
+      const state = h.store.load('thread')!
+      const result = await h.executor(h.store, [native(legacy)])(state.calls[0], state, h.request, observer())
+      expect(result.kind).toBe('result')
+      expect(shellRunner).toHaveBeenCalledOnce()
+      // The effect result is durable even if the outer call has not committed it yet.
+      expect(h.store.loadEffect({ ...h.request, callId: 'legacy' })?.result?.value.content).toBe('Executed')
+    }
+    shellRunner.mockClear()
+    h.options.definitions = tools
+    const store = reopen(h)
+    const messages = await dispatchSavedCalls(h, store, tools)
+    expect(messages.filter(message => message.kind === 'tool')).toMatchObject([
+      { resultFor: 'provider:legacy', resultStatus: status === 'pending' ? 'error' : 'success',
+        content: status === 'pending' ? expect.stringContaining('keep_processes') : 'Executed' }
+    ])
+    expect(store.readHistory('thread')!.messages.find(message => message.id === 'model')?.value.calls?.[0].args)
+      .toEqual({ command: 'Get-Date', keep_processes: true })
+    expect(shellRunner).not.toHaveBeenCalled()
+  })
 
   it.each(['revoke', 'skillId', 'root', 'script', 'executor'] as const)('rechecks changed Skill exemption %s at delayed dispatch after reopening', async change => {
     const h = await shellFixture(['python scripts/query.py --month 2026-09'])

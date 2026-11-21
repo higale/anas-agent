@@ -14,6 +14,7 @@ const { _electron: electron } = require('playwright')
 const { expect } = require('playwright/test')
 const { verifyReadonlyDiff } = require('./electron-diff-view.cjs')
 const { verifyPtyLifecycle } = require('./electron-pty-lifecycle.cjs')
+const { verifyProcessList } = require('./electron-process-list.cjs')
 const { verifyEnvironmentStartup } = require('./electron-environment-startup.cjs')
 const { verifyGitPanelStates } = require('./electron-git-panel.cjs')
 const { verifyRoundChanges, verifyRoundChangesInApplication } = require('./electron-round-changes.cjs')
@@ -1269,6 +1270,10 @@ async function main() {
     await verifyEnvironmentStartup(repositoryRoot, electronExecutable)
     return
   }
+  if (process.argv.includes('--processes-only')) {
+    await verifyProcessList(launchApplication)
+    return
+  }
   if (process.argv.includes('--pty-only')) {
     await verifyPtyLifecycle(launchApplication)
     return
@@ -1347,6 +1352,7 @@ async function main() {
     await rm(testHome, { recursive: true, force: true })
   }
   await verifyPtyLifecycle(launchApplication)
+  await verifyProcessList(launchApplication)
   await verifyToolArguments(launchApplication)
   await verifyActivityWindow(launchApplication)
 }

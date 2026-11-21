@@ -524,6 +524,7 @@ export interface AgentEventSubscription {
 }
 
 export interface AgentApi {
+  processes: import('./processes').ProcessListApi
   userInput: import('./userInput').UserInputApi
   changes: {
     availability(input: import('./fileChanges').RoundChangeAvailabilityInput): Promise<import('./fileChanges').RoundChangeAvailability[]>

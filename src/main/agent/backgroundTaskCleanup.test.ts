@@ -13,7 +13,7 @@ it.each(['none', 'initial', 'all'] as const)('cancels executors even when cleanu
   vi.useFakeTimers()
   const h = nativeCapabilityFixture(), { database, thread, run, service } = h
   let aborted = false
-  const starting = service.start({ kind: 'shell', threadId: thread.id, runId: run.id, summary: 'Stop this call',
+  const starting = service.start({ kind: 'custom', threadId: thread.id, runId: run.id, summary: 'Stop this call',
     execute: async (control) => {
       control.markRunning()
       await new Promise<void>((resolve) => control.signal.addEventListener('abort', () => { aborted = true; resolve() }, { once: true }))

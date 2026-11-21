@@ -49,7 +49,7 @@ describe.skipIf(process.platform !== 'darwin')('macOS original-command read auth
       const command = `/bin/sh '${operand}'`
       expect(await analyzer.requiresApproval({ command })).toBe(true)
       let output = ''
-      await runShellCommand({ command, workingDir: h.project, env: h.search.env, timeoutSec: 5, keepProcesses: false }, shell, undefined,
+      await runShellCommand({ command, workingDir: h.project, env: h.search.env, timeoutSec: 5 }, shell, undefined,
         { onResult: result => { expect(result.ok).toBe(true); output = result.stdout } })
       expect(output).toBe('OUTSIDE')
     }
@@ -74,7 +74,7 @@ describe.skipIf(process.platform !== 'darwin')('macOS original-command read auth
     const args = Object.freeze({ command })
     expect((await analyzer.inspect(args))?.skillScript?.executor).toBe(join(h.outside, 'sh'))
     let output = ''
-    await runShellCommand({ command, workingDir: h.project, env: h.search.env, timeoutSec: 5, keepProcesses: false }, shell, undefined,
+    await runShellCommand({ command, workingDir: h.project, env: h.search.env, timeoutSec: 5 }, shell, undefined,
       { onResult: result => { expect(result.ok).toBe(true); output = result.stdout } })
     expect(output).toBe('OUTSIDE:SCRIPT')
     expect(args.command).toBe(command)
@@ -101,7 +101,7 @@ describe.skipIf(process.platform !== 'darwin')('macOS original-command read auth
       const args = Object.freeze({ command })
       expect((await analyzer.inspect(args))?.skillScript).toMatchObject({ skillId: 'user:query', script })
       let output = ''
-      await runShellCommand({ command, workingDir: h.project, env: h.search.env, timeoutSec: 5, keepProcesses: false }, shell, undefined,
+      await runShellCommand({ command, workingDir: h.project, env: h.search.env, timeoutSec: 5 }, shell, undefined,
         { onResult: result => { expect(result.ok).toBe(true); output = result.stdout } })
       expect(output).toBe('--month\n2026-09\na; b && c\n')
       for (const extra of ['; true', ' | head -n 1', ' > output', ' $(true)']) {
@@ -124,7 +124,7 @@ describe.skipIf(process.platform !== 'darwin')('macOS original-command read auth
     expect(args).toEqual({ command })
     let stdout = '', ok = false
     await runShellCommand({ command: args.command, workingDir: h.project, env: h.search.env,
-      pathPrepend: h.search.directory, timeoutSec: 5, keepProcesses: false }, shell, undefined, {
+      pathPrepend: h.search.directory, timeoutSec: 5 }, shell, undefined, {
       onResult: (result) => { stdout = result.stdout; ok = result.ok }
     })
     expect(ok).toBe(true)
@@ -179,7 +179,7 @@ describe.skipIf(process.platform !== 'darwin')('macOS original-command read auth
 
   it('retains manual approval for PTY, retained processes and Bash, and honors cancellation', async () => {
     const h = await fixture()
-    for (const extra of [{ pty: { columns: 80, rows: 24 } }, { keep_processes: true }]) {
+    for (const extra of [{ pty: { columns: 80, rows: 24 } }]) {
       expect(await h.authorization.requiresApproval({ command: "cat '文档 notes.txt'", ...extra })).toBe(true)
     }
     expect(await createShellCommandAuthorization({ ...h.options, shell: { ...shell, executable: '/bin/bash' } })

@@ -43,7 +43,7 @@ export class PtyShellSupervisor extends EventEmitter implements ShellTerminalCon
   exitCode: number | null = null
   signalCode: NodeJS.Signals | null = null
 
-  constructor(program: string, size: TerminalSize) {
+  constructor(program: string, size: TerminalSize, private readonly rootOnly = false) {
     super()
     this.dimensions = { ...size }
     this.server = createServer((socket) => this.accept(socket))
@@ -115,7 +115,7 @@ export class PtyShellSupervisor extends EventEmitter implements ShellTerminalCon
     if (!this.terminal) return false
     if (this.exited) return this.containmentConfirmed
     try {
-      const contained = Boolean(this.sessionLeader && this.session.terminate(this.sessionLeader, signal === 'SIGKILL' || signal === 9))
+      const contained = this.rootOnly || Boolean(this.sessionLeader && this.session.terminate(this.sessionLeader, signal === 'SIGKILL' || signal === 9))
       const ended = Boolean(this.sessionLeader && this.session.signalMember(this.sessionLeader, signal === 'SIGKILL' || signal === 9 ? 'SIGKILL' : 'SIGTERM'))
       if (!contained || !ended) return false
       if (signal === 'SIGKILL' || signal === 9) this.containmentConfirmed = true

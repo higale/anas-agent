@@ -25,14 +25,18 @@ function callLabel(call: ManagedCall): string {
   return `- ${call.id} (${call.kind}, ${call.status})${summary ? `: ${JSON.stringify(summary)}` : ''}`
 }
 
+export function continuingShell(call: { kind: string; status: string }): boolean {
+  return call.kind === 'shell' && call.status === 'running'
+}
+
 export function managedCallSupervision(calls: readonly ManagedCall[], toolNames: readonly string[]): string {
   if (!calls.length) return ''
   if (!toolNames.some(name => supervisionToolNames.has(name))) throw new Error('Background call supervision tools are unavailable for this model request.')
   return [
     '<background_call_supervision>',
-    'Background calls in this conversation still require a terminal status to be observed:',
+    'Background calls in this conversation:',
     ...calls.map(callLabel),
-    'Do not finish the run yet. Use wait_call or read_call until every call reaches a terminal status. Use read_call_output only when the call details are needed; reading output is not required for supervision. If a call is no longer needed, call cancel_call and then observe its terminal status.',
+    'Running Shell calls may continue across turns when needed. Queued Shell calls must start or be cancelled before finishing the turn. Do not wait indefinitely for a server or watcher, or stop it solely to finish your reply. Explicitly cancel_call a Shell when it is no longer needed. Other calls require a terminal status to be observed through read_call or wait_call before finishing. Read output when needed.',
     '</background_call_supervision>'
   ].join('\n')
 }

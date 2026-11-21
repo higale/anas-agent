@@ -23,6 +23,23 @@ async function* frames(items: unknown[] = [{ type: 'response.completed', respons
 
 
 describe('native Responses persistence', () => {
+  it.each(['complete', 'stream'] as const)('keeps a tool result next to its call when a provider adds an empty trailing message (%s)', async mode => {
+    const call = { type: 'function_call', id: 'fc_shell', call_id: 'pwsh_0_fixture', name: 'pwsh',
+      arguments: '{"command":"fixture"}', status: 'completed' }
+    const empty = { type: 'message', id: 'msg_empty', role: 'assistant', status: 'completed',
+      content: [{ type: 'output_text', text: '', annotations: [] }] }
+    const original = { ...response, output: [output[0], output[1], call, empty] } as NativeResponse
+    const result = mode === 'complete' ? openAiResponsesConversationResponse(original)
+      : await streamResponsesConversation(frames([{ type: 'response.completed', response: original }]), () => {})
+    const restored = decodeConversationMessage(encodeConversationMessage(result.message))
+    const replay = conversationResponsesInput([restored,
+      { kind: 'tool', resultFor: call.call_id, content: '{"processes":[{"pid":1234,"name":"music"}]}' }
+    ], { model: 'fixture', zeroRetention: false })
+    expect(replay).toEqual([output[0], output[1], call,
+      { type: 'function_call_output', call_id: call.call_id, output: '{"processes":[{"pid":1234,"name":"music"}]}' }])
+    expect(restored.source?.metadata.output).toEqual(original.output)
+  })
+
   it.each([false, true])('uses the SDK complete and streaming path without losing tool identity (stream=%s)', async streaming => {
     const provider = new OpenAiResponses({ apiKey: 'fixture', baseURL: 'https://fixture.invalid/v1', fetch: async () => streaming
       ? new Response('event: response.completed\ndata: ' + JSON.stringify({ type: 'response.completed', response, sequence_number: 0 }) + '\n\n',

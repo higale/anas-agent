@@ -10,6 +10,7 @@ export type PanelLocation = 'sidebar' | 'window'
 export type BuiltinPanel =
   | { kind: 'memory' }
   | { kind: 'projectMemory'; projectId: string }
+  | { kind: 'processes'; projectId: string; threadId: string }
   | { kind: 'document'; documentId: HelpDocumentId; anchor?: string; navigationId?: string }
   | { kind: 'files'; projectId: string; threadId?: string; runId?: string; navigationId?: string; draft?: Pick<AgentThreadCreate, 'modelConfigId' | 'modelParameterPresetId' | 'accessMode'> }
   | { kind: 'subagent'; projectId: string; threadId: string; runId: string; subagentId: string; name: string }
@@ -82,14 +83,14 @@ export interface ContentServices {
   preferences: import('./preferenceMemory').PreferenceMemoryApi
   app: Pick<GaleApi['app'], 'readHelp' | 'openExternalUrl'>
   files: Pick<GaleApi['files'], 'showItemInFolder' | 'readFileIcon' | 'readAttachmentPreview'>
-  agent: Pick<AgentApi, 'changes' | 'activities' | 'onEvent'> & { threads: Pick<AgentApi['threads'], 'get'> }
+  agent: Pick<AgentApi, 'changes' | 'activities' | 'processes' | 'onEvent'> & { threads: Pick<AgentApi['threads'], 'get'> }
 }
 export interface PanelContentState extends PanelWindowState {
   project?: Project
   preferences: PanelPreferencesSnapshot
 }
 export function panelScope(content: PanelContent): string | undefined {
-  return content.kind === 'subagent'
+  return content.kind === 'subagent' || content.kind === 'processes'
     ? workspacePanelScope(content.threadId, content.projectId) : undefined
 }
 export function workspacePanelScope(threadId: string | undefined, projectId: string): string {
@@ -97,6 +98,7 @@ export function workspacePanelScope(threadId: string | undefined, projectId: str
 }
 export function panelIdentity(content: PanelContent): string {
   switch (content.kind) {
+    case 'processes': return JSON.stringify([content.kind, content.projectId, content.threadId])
     case 'projectMemory': return JSON.stringify([content.kind, content.projectId])
     case 'memory': return JSON.stringify(['memory'])
     case 'plugin': return JSON.stringify([content.kind, content.pluginId, content.instanceId])

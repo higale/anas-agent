@@ -183,7 +183,7 @@ export function createShellCommandAuthorization(options: ShellCommandAuthorizati
   async function inspect(args: Readonly<Record<string, unknown>>, invocation?: SkillScriptInvocation): Promise<ShellCommandPlan | undefined> {
     options.signal?.throwIfAborted()
     if (!args || typeof args !== 'object' || Array.isArray(args)) return undefined
-    if (typeof args.command !== 'string' || args.keep_processes === true || args.pty !== undefined) return undefined
+    if (typeof args.command !== 'string' || args.pty !== undefined) return undefined
     const command = args.command
     const workingDir = typeof args.working_dir === 'string' ? args.working_dir : options.primaryFolder
     let timer: NodeJS.Timeout | undefined

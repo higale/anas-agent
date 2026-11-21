@@ -24,6 +24,10 @@ export const contentServices: ContentServices = {
     readFileIcon: (path, size) => ipcRenderer.invoke('files:readFileIcon', path, size)
   },
   agent: {
+    processes: {
+      list: input => ipcRenderer.invoke('agent:processes:list', input),
+      terminate: input => ipcRenderer.invoke('agent:processes:terminate', input)
+    },
     changes: {
       availability: input => ipcRenderer.invoke('agent:changes:availability', input),
       gitContents: (input, requestId) => ipcRenderer.invoke('agent:changes:gitContents', input, requestId),

@@ -25,7 +25,6 @@ export type ShellRunner = (input: {
   summary?: string
   timeoutSec?: number
   workingDir?: string
-  keepProcesses?: boolean
   pty?: TerminalSize
 }) => Promise<string>
 
@@ -196,21 +195,15 @@ export async function runtimeToolDefinitions(options: RuntimeToolOptions): Promi
       name: toolName,
       description: `${describeCommandShellTool(commandShell)} Use the current shell's syntax for pipes and redirection. ${terminalEnabled
         ? 'For commands that require interactive input, explicitly request pty at launch; use write_call for subsequent input. A non-PTY process cannot be converted into an interactive terminal later.'
-        : 'Interactive terminal input is unavailable. Use non-interactive command options or supply required input within the command. You cannot send follow-up input or attach a PTY after launch. Non-interactive mode does not guarantee completion; a command may still wait indefinitely until the user stops it.'} OMIT timeout for normal commands; expected long duration is not a reason to set one. Only provide timeout when the user explicitly requests a finite deadline or a known external deadline must be enforced. Commands and descendants are managed and cleaned up by default; set keep_processes to true to launch the command independently, including a foreground server command. The executor detaches it automatically; no Start-Process, nohup, or background operator is required. Independent launch returns detached.pid, detached.stdoutPath, and detached.stderrPath instead of waiting for completion. Read those log files and check readiness separately. After handoff, conversation cancellation, turn cleanup, and application exit do not stop the process; stop it explicitly when needed.`,
+        : 'Interactive terminal input is unavailable. Use non-interactive command options or supply required input within the command. You cannot send follow-up input or attach a PTY after launch. Non-interactive mode does not guarantee completion; a command may still wait indefinitely until the user stops it.'} OMIT timeout for normal commands; expected long duration is not a reason to set one. Only provide timeout when the user explicitly requests a finite deadline or a known external deadline must be enforced. The call completes when the Shell itself exits. Only that Shell is automatically stopped by cancellation, timeout, or application exit; its child processes are not automatically terminated. Completed results include known remaining direct child processes, excluding descendants started by those applications; tracking is best-effort. A yielded Shell can continue across turns. Use read_call/wait_call for status and cancel_call to stop a live Shell explicitly when finished. Stopping a completed call does not stop its children; stop those explicitly through a new command when needed. PTY closure can affect programs attached to the terminal.`,
       metadata: commandShellMetadata(),
       inputSchema: z.object({
-        ...(terminalEnabled ? { pty: terminalSizeSchema.optional().describe('Explicitly allocate a PTY for a CLI that needs terminal input. stdout/stderr are merged UTF-8 terminal text, including control sequences. Use read_call to obtain terminal_id, then write_call; cannot combine with keep_processes. Omit for ordinary commands.') } : {}),
+        ...(terminalEnabled ? { pty: terminalSizeSchema.optional().describe('Explicitly allocate a PTY for a CLI that needs terminal input. stdout/stderr are merged UTF-8 terminal text, including control sequences. Use read_call to obtain terminal_id, then write_call. Omit for ordinary commands.') } : {}),
         command: z.string().refine(value => value.trim().length > 0, 'command must contain non-whitespace text.').describe(describeCommandShellArgument(commandShell)),
         summary: toolSummarySchema,
         timeout: z.number().int().min(0).max(maxCommandTimeoutSeconds).optional().describe('Exceptional hard execution deadline in seconds. OMIT for normal commands; omission means no time limit. NEVER infer or add a timeout merely because a command may take a long time. Supply a positive value only for an explicitly requested or externally required finite deadline. Use 0 only to explicitly request no limit.'),
         working_dir: z.string().optional().describe('Execution directory, absolute or relative to the primary/default folder. Defaults to that folder.'),
-        keep_processes: z.boolean().optional().describe('Launch the entire command as an independent process and return after ownership handoff. Defaults to false (managed execution). MUST be true for an application or service that should outlive this call or conversation. Successful launch does not confirm service readiness or command completion. Output goes to the returned files in the system temporary directory, outside read_call_output. Cancellation before handoff cleans up; after handoff the process is user-managed. Cannot combine with pty or a positive timeout.')
-      }).superRefine((input, context) => {
-        if (input.keep_processes && (input.timeout ?? 0) > 0) context.addIssue({ code: z.ZodIssueCode.custom,
-          path: ['timeout'], message: 'Independent processes cannot have a managed execution timeout. Omit timeout or set it to 0 when keep_processes is true.' })
-        if (input.pty && input.keep_processes) context.addIssue({ code: z.ZodIssueCode.custom,
-          path: ['keep_processes'], message: 'PTY execution cannot keep processes after completion. Omit keep_processes or set it to false.' })
-      }),
+      }).strict(),
       execute: async (input) => {
         if (!options.shellRunner) return JSON.stringify({ ok: false, error: `${toolName} is not connected to an executor.` })
         return options.shellRunner({
@@ -218,7 +211,6 @@ export async function runtimeToolDefinitions(options: RuntimeToolOptions): Promi
           summary: typeof input.summary === 'string' ? input.summary : undefined,
           timeoutSec: typeof input.timeout === 'number' ? input.timeout : undefined,
           workingDir: typeof input.working_dir === 'string' ? input.working_dir : undefined,
-          keepProcesses: input.keep_processes === true,
           ...(input.pty ? { pty: terminalSizeSchema.parse(input.pty) } : {})
         })
       }
@@ -228,7 +220,7 @@ export async function runtimeToolDefinitions(options: RuntimeToolOptions): Promi
   if (terminalEnabled || (options.backgroundTools && options.interactiveCustomTools)) {
     tools.push(defineContentTool({
       name: 'write_call',
-      description: 'Send input or resize an exact live PTY owned by this conversation. Obtain terminal_id from read_call, never guess or reuse a replaced terminal. Text is literal (add enter explicitly); keys/EOF can execute pending commands and require the current Shell approval policy. EOF sends Ctrl+D on POSIX or Ctrl+Z then Enter on Windows, not a guaranteed half-close in raw-mode CLIs. Ctrl+C interrupts the foreground command; use cancel_call to stop the whole session. Input acceptance does not mean completion. Output remains in read_call_output. Input is bounded to 16000 characters per call and cumulatively 1 MiB/4096 writes per session; use files for bulk data.',
+      description: 'Send input or resize an exact live PTY owned by this conversation. Obtain terminal_id from read_call, never guess or reuse a replaced terminal. Text is literal (add enter explicitly); keys/EOF can execute pending commands and require the current Shell approval policy. EOF sends Ctrl+D on POSIX or Ctrl+Z then Enter on Windows, not a guaranteed half-close in raw-mode CLIs. Ctrl+C interrupts the foreground command; use cancel_call to stop the Shell; attached programs may also react to terminal closure. Input acceptance does not mean completion. Output remains in read_call_output. Input is bounded to 16000 characters per call and cumulatively 1 MiB/4096 writes per session; use files for bulk data.',
       inputSchema: z.object({ summary: toolSummarySchema, call_id: z.string().uuid(), terminal_id: z.string().uuid(), action: terminalActionSchema }),
       execute: async (input) => {
         options.signal?.throwIfAborted()

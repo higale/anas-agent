@@ -20,7 +20,8 @@ const builtinSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('files'), projectId: id, threadId: id.optional(), runId: id.optional(), navigationId: id.optional(), draft: z.object({ modelConfigId: id.optional(), modelParameterPresetId: id.nullable().optional(), accessMode: z.enum(['strict_approval', 'smart_approval', 'full_access']).optional() }).strict().optional() }).strict(),
   z.object({ kind: z.literal('subagent'), projectId: id, threadId: id, runId: id, subagentId: id, name: z.string().min(1).max(512) }).strict(),
   z.object({ kind: z.literal('memory') }).strict(),
-  z.object({ kind: z.literal('projectMemory'), projectId: id }).strict()
+  z.object({ kind: z.literal('projectMemory'), projectId: id }).strict(),
+  z.object({ kind: z.literal('processes'), projectId: id, threadId: id }).strict()
 ])
 // Serialize context preparation, not page loading or placement acknowledgements.
 let filesPreparation: Promise<unknown> = Promise.resolve()
@@ -32,6 +33,7 @@ function prepareFiles<T>(action: () => Promise<T>): Promise<T> {
 function presentation(content: BuiltinPanel, project?: Project): Pick<PanelDefinition, 'name' | 'project'> {
   return { project, name: (language, currentProject) => content.kind === 'document' ? helpDocuments[content.documentId]
     : content.kind === 'memory' ? panelLabel(language, 'memory_activity')
+    : content.kind === 'processes' ? panelLabel(language, 'process_list')
     : content.kind === 'subagent' ? content.name : `${panelLabel(language, content.kind === 'projectMemory' ? 'project_memory' : 'file_changes')} · ${currentProject!.name}` }
 }
 export function updatePanelProject(project: Project): void { panelPages.updateProject(project) }

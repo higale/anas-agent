@@ -27,7 +27,7 @@ export class DetachedWindowsShellSupervisor extends EventEmitter {
   exitCode: number | null = null
   signalCode: NodeJS.Signals | null = null
 
-  constructor(program: string) {
+  constructor(program: string, private readonly environment: NodeJS.ProcessEnv = {}) {
     super()
     this.server = createServer((socket) => this.accept(socket))
     this.server.once('error', (error) => this.fail(error))
@@ -69,7 +69,7 @@ export class DetachedWindowsShellSupervisor extends EventEmitter {
     const pid = this.supervisorPid ?? this.launcherPid
     if (!pid) return false
     try {
-      spawn('taskkill.exe', ['/pid', String(pid), '/t', '/f'], {
+      spawn('taskkill.exe', ['/pid', String(pid), '/f'], {
         windowsHide: true,
         stdio: 'ignore'
       }).unref()
@@ -157,6 +157,7 @@ export class DetachedWindowsShellSupervisor extends EventEmitter {
       windowsHide: true,
       env: {
         ...process.env,
+        ...this.environment,
         ELECTRON_RUN_AS_NODE: '1',
         ANAS_SHELL_SUPERVISOR_PIPE: this.pipePath,
         ANAS_SHELL_SUPERVISOR_TOKEN: this.token,

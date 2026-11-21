@@ -3,9 +3,10 @@ import * as ContextMenu from '@radix-ui/react-context-menu'
 import { ContextMenuShell } from '../ContextMenuShell'
 import { installPanelEscapeHandler } from '../panels/panelKeyboard'
 import { PanelPageHost } from '../panels/PanelPageHost'
+import { BuiltinPanelIcon } from '../panels/BuiltinPanelIcon'
 import { PluginIcon } from '../plugins/PluginIcon'
 import * as Tabs from '@radix-ui/react-tabs'
-import { BookOpen, FileDiff, Maximize2, Minimize2, PanelLeftOpen, PanelRightClose, SquareArrowOutUpRight, X } from 'lucide-react'
+import { Maximize2, Minimize2, PanelLeftOpen, PanelRightClose, SquareArrowOutUpRight, X } from 'lucide-react'
 import { useEffect, useRef, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AgentRunActivity } from '@shared/agentTypes'
@@ -135,7 +136,7 @@ export function WorkspacePanels({ controller, scope, activities, narrow, width, 
                   ? <span role="img" aria-label={subagent ? subagentStatusLabel(subagent.status) : t('agent.panel_unavailable')}>
                       <AgentSubagentStatusIcon status={subagent?.status ?? 'failed'} size={14} />
                     </span>
-                  : panel.kind === 'document' ? <BookOpen size={14} /> : panel.kind === 'plugin' ? <PluginIcon icon={tab.icon} size={14} /> : <FileDiff size={14} />}
+                  : panel.kind === 'plugin' ? <PluginIcon icon={tab.icon} size={14} /> : <BuiltinPanelIcon kind={panel.kind} size={14} />}
                 <span className="ui-tab-title ui-truncate">{label}</span>
               </Tabs.Trigger>
               <span className="ui-tab-close-overlay">

@@ -19,6 +19,7 @@ import * as runtimeTools from '../llm/runtimeTools'
 import * as bundledPython from '../bundledPython'
 import * as shellRuntime from '../shellRuntime'
 import * as toolAuthorization from './toolAuthorizationRuntime'
+import { withToolExecution } from './toolExecutionContext'
 import * as customToolRuntime from './customToolRuntime'
 
 import Database from 'better-sqlite3'
@@ -77,6 +78,30 @@ describe('native capability snapshots', () => {
     memoryStoreMocks.buildMemoryRulesPrompt.mockReset().mockResolvedValue('')
     appConfigMocks.getAppConfigSnapshot.mockReset().mockResolvedValue(previewConfig())
     vi.mocked(toolsStore.listToolSnapshot).mockReset().mockResolvedValue({ roots: [], tools: [] })
+  })
+  it.each(['{"ok":false,"data":1}', '[1,2]', '42', 'null'])('preserves JSON stdout through a managed Shell call: %s', async stdout => {
+    projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), sourceFolders: [testPaths.root] })
+    vi.spyOn(toolAuthorization, 'verifyCurrentShellAuthorization').mockResolvedValue()
+    const outcome: shellRuntime.ShellRunResult = { ok: true, command: 'print json', workingDir: testPaths.root,
+      timeoutSec: 0, exitCode: 0, stdout, stderr: '', process_snapshot: { processes: [], checkedAt: 'now', complete: false } }
+    vi.spyOn(shellRuntime, 'runShellCommand').mockImplementation(async (_prepared, _shell, _signal, callbacks) => {
+      callbacks?.onDispatched?.()
+      callbacks?.onResult?.(outcome)
+      return shellRuntime.resultText(outcome)
+    })
+    const database = openDatabase()
+    const service = new ManagedCallService(database.managed, database.results)
+    try {
+      const thread = configuredThread(database)
+      const run = createRun(database, thread.id, 'json-output', 'Print JSON')
+      await prepareAgentRuntimeResources(thread, database.resources, previewConfig(), {}, {
+        persistent: true, prepareWorkspace: false, requestSubagentApproval: async () => { throw new Error('Unexpected approval') }
+      })
+      const runner = definitions.mock.lastCall![0].shellRunner!
+      const result = await service.start({ kind: 'shell', threadId: thread.id, runId: run.id, summary: 'Print JSON',
+        execute: control => withToolExecution(control, false, () => runner({ command: 'print json', workingDir: testPaths.root })) })
+      expect(result).toBe(stdout)
+    } finally { await service.shutdown(); database.close() }
   })
   it.each([true, false])('controls initial Python information and custom-tool fallback without changing PATH (%s)', async enabled => {
     const snapshot = previewConfig()

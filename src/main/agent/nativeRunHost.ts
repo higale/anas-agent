@@ -390,7 +390,7 @@ export class NativeRunHost {
         // A cancellation deadline reports uncertainty, never releases a live task.
         await Promise.allSettled(active.cancellations)
         if (terminal(this.requireRun(owner))) {
-          await this.managed.waitForRunIdle(owner.runId)
+          await this.managed.waitForRunIdle(owner.runId, true)
           await this.resourceCleanup.drainPendingFileEditCleanup()
           try { await directoryTreePages.closeIdleCursors(owner.runId) } catch (error) { active.diagnostics.push(error) }
           this.database.activityProjection.releaseRun(owner.runId)
@@ -466,8 +466,8 @@ export class NativeRunHost {
     active.controller.abort(new Error('Agent run cancelled.'))
     // Signal descendants and managed work now, before the foreground drain.
     const descendants = () => this.database.background.listDescendantSubagentCalls(owner.threadId, [owner.runId])
-    this.trackCancellation(active, this.cancelChildren(descendants))
-    this.trackCancellation(active, this.managed.cancelRun(owner.runId, 'Agent run cancelled.'))
+    this.trackCancellation(active, this.cancelChildren(descendants, true))
+    this.trackCancellation(active, this.managed.cancelRun(owner.runId, 'Agent run cancelled.', true))
     return true
   }
 
@@ -477,7 +477,7 @@ export class NativeRunHost {
     return observed
   }
 
-  private async cancelChildren(list: () => AgentSubagentCallRecord[]): Promise<void> {
+  private async cancelChildren(list: () => AgentSubagentCallRecord[], preserveShells = false): Promise<void> {
     const seen = new Set<string>()
     while (true) {
       const calls = list().filter(call => !seen.has(call.id))
@@ -490,8 +490,8 @@ export class NativeRunHost {
         // Capture it after cancellation so history cannot delete its rows early.
         const child = this.active.get(owner.threadId)
         if (child) await child.drained
-        await this.managed.cancelRun(owner.runId, 'Parent run stopped.')
-        await this.managed.waitForRunIdle(owner.runId)
+        await this.managed.cancelRun(owner.runId, 'Parent run stopped.', preserveShells)
+        await this.managed.waitForRunIdle(owner.runId, preserveShells)
         this.database.runs.reconcileSubagent(call.id, call.ownerThreadId)
       }))
       const failures = outcomes.filter(result => result.status === 'rejected').map(result => result.reason)
@@ -581,7 +581,7 @@ export class NativeRunHost {
         if (hasUnresolvedBackgroundTasks(database.background, threadId)) {
           await cleanupUnresolvedBackgroundTasks({ database: database.background, managedCalls: this.managed, threadId, runId,
             cancelSubagents: list => {
-              const cancellation = this.cancelChildren(list)
+              const cancellation = this.cancelChildren(list, true)
               this.trackCancellation(active, cancellation)
               return cancellation
             },
@@ -602,8 +602,8 @@ export class NativeRunHost {
             } })
         }
       } catch (error) { active.diagnostics.push(error) }
-      this.trackCancellation(active, this.cancelChildren(() => database.background.listDescendantSubagentCalls(threadId, [runId])))
-      if (this.managed.hasActiveForRun(runId)) this.trackCancellation(active, this.managed.cancelRun(runId, 'Agent run ended.'))
+      this.trackCancellation(active, this.cancelChildren(() => database.background.listDescendantSubagentCalls(threadId, [runId]), true))
+      if (this.managed.hasActiveForRun(runId)) this.trackCancellation(active, this.managed.cancelRun(runId, 'Agent run ended.', true))
       run = this.requireRun(active)
       if (active.backgroundCleanup) run = { ...run, backgroundCleanup: active.backgroundCleanup }
       if (run.status === 'completed') {

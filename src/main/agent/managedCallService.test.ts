@@ -12,6 +12,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ManagedCallService, type ManagedCallControl } from './managedCallService'
+import * as processObservation from '../processObservation'
+import type { ProcessSnapshot } from '@shared/processes'
 import {
   currentAgentToolEffectArtifactId,
   runWithCurrentAgentToolEffect
@@ -427,6 +429,32 @@ describe('ManagedCallService', () => {
     } finally {
       database.close()
     }
+  })
+
+  it('keeps Shell command and process identities in storage while read and wait return compact process details', async () => {
+    const database = openDatabase(':memory:')
+    const service = new ManagedCallService(database.managed, database.results)
+    try {
+      const { thread, run } = createRun(database, 'compact-shell-outcome')
+      const outcome = { ok: true, exit_code: 0, signal: null, timed_out: false, aborted: false, command: 'open music',
+        process_snapshot: { complete: false, checkedAt: 'now', processes: [
+          { pid: 100, parentPid: 1, birth: '1', name: 'zsh', startedAt: '', role: 'shell', status: 'exited' },
+          { pid: 200, parentPid: 100, birth: '2', name: 'Music', startedAt: '', role: 'child', status: 'running' }
+        ] } }
+      const observation = vi.spyOn(processObservation, 'refreshProcesses')
+        .mockReturnValue(outcome.process_snapshot as ProcessSnapshot)
+      let callId = ''
+      await service.start({ kind: 'shell', threadId: thread.id, runId: run.id, summary: 'Open music',
+        execute: async control => { callId = control.callId; control.markRunning(); control.setOutcome(outcome); return 'done' } })
+      const expected = { ok: true, exit_code: 0, remaining_processes: [{ pid: 200, name: 'Music' }] }
+      expect(JSON.parse(service.read({ threadId: thread.id, callId })).outcome).toEqual(expected)
+      expect(JSON.parse(await service.wait({ threadId: thread.id, callId })).outcome).toEqual(expected)
+      observation.mockReturnValue({ ...outcome.process_snapshot as ProcessSnapshot,
+        processes: [], error: 'Cannot inspect process identities' })
+      expect(JSON.parse(service.read({ threadId: thread.id, callId })).outcome).toEqual({ ok: true, exit_code: 0,
+        process_observation_error: 'Cannot inspect process identities' })
+      expect(database.managed.getManagedCall(callId, thread.id)?.outcome).toEqual(outcome)
+    } finally { await service.shutdown(); database.close() }
   })
 
   it('waits for the full timeout regardless of existing output', async () => {
@@ -1188,4 +1216,58 @@ describe('ManagedCallService', () => {
       database.close()
     }
   })
+})
+
+it('keeps ordinary tool capacity available while eight Shells remain live', async () => {
+  vi.useFakeTimers()
+  const h = nativeCapabilityFixture()
+  try {
+    const shells = Array.from({ length: 8 }, () => h.service.start({ kind: 'shell', threadId: h.thread.id, runId: h.run.id,
+      summary: 'server', execute: control => {
+        control.markRunning()
+        return new Promise<string>(resolve => control.signal.addEventListener('abort', () => resolve('Stopped'), { once: true }))
+      } }))
+    await vi.advanceTimersByTimeAsync(10000)
+    await Promise.all(shells)
+    const query = h.service.start({ kind: 'builtin', threadId: h.thread.id, runId: h.run.id, summary: 'read', execute: async control => {
+      control.markRunning(); return 'ready'
+    } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(await query).toBe('ready')
+    expect(h.service.activeCallIds()).toHaveLength(8)
+  } finally { await h.close() }
+})
+
+it.each([false, true])('only preserves a yielded queued Shell after actual dispatch (dispatch: %s)', async dispatch => {
+  vi.useFakeTimers()
+  const h = nativeCapabilityFixture(), parent = new AbortController()
+  let executed = false, aborted = false
+  const run = (control: import('./managedCallService').ManagedCallControl) => {
+    control.markRunning()
+    return new Promise<string>(resolve => control.signal.addEventListener('abort', () => resolve('Stopped'), { once: true }))
+  }
+  try {
+    const occupying = Array.from({ length: 8 }, () => h.service.start({ kind: 'shell', threadId: h.thread.id, runId: h.run.id, summary: 'Occupy Shell slot', execute: run }))
+    await vi.advanceTimersByTimeAsync(10000)
+    const handles = await Promise.all(occupying)
+    const pending = h.service.start({ kind: 'shell', threadId: h.thread.id, runId: h.run.id, summary: 'Queued Shell', parentSignal: parent.signal,
+      execute: control => {
+        executed = true
+        control.signal.addEventListener('abort', () => { aborted = true }, { once: true })
+        return run(control)
+      } })
+    await vi.advanceTimersByTimeAsync(10000)
+    const queued = JSON.parse(await pending)
+    expect(queued.status).toBe('preparing')
+    if (dispatch) {
+      await h.service.cancel(JSON.parse(handles[0]).call_id, h.thread.id)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(h.database.managed.getManagedCall(queued.call_id, h.thread.id)?.status).toBe('running')
+    }
+    parent.abort()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(executed).toBe(dispatch)
+    expect(aborted).toBe(false)
+    expect(h.database.managed.getManagedCall(queued.call_id, h.thread.id)?.status).toBe(dispatch ? 'running' : 'cancelled')
+  } finally { await h.close() }
 })

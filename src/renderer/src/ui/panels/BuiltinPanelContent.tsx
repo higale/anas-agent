@@ -1,3 +1,4 @@
+import { ProcessListPanel } from '../agent/ProcessListPanel'
 import { usePanelReady } from '../agent/PanelViewState'
 import { PreferenceMemoryDocument } from '../PreferenceMemoryDocument'
 import { MemoryActivityPanel } from '../agent/MemoryActivityPanel'
@@ -39,6 +40,7 @@ export function BuiltinPanelContent({ state }: { state: PanelPageContext }) {
     <DiffPreferences.Provider value={{ ...state.preferences, onChange: async update => { await api.updatePreferences(update) } }}>
       {content.kind === 'memory' ? <MemoryActivityPanel preferences={state.preferences} />
         : content.kind === 'projectMemory' ? <section className="project-memory-panel" aria-label={state.view.name}><PreferenceMemoryDocument key={content.projectId} projectId={content.projectId} /></section>
+        : content.kind === 'processes' ? <ProcessListPanel key={content.threadId} threadId={content.threadId} visible={state.view.activity?.visible !== false} />
         : content.kind === 'document' ? <HelpDocumentPanel request={content} onOpen={open} />
         : content.kind === 'files' ? <FileChangesPanel project={project} request={content}
             onReview={request => api.review(state.pageId, request, content.navigationId!)} />

@@ -12,6 +12,7 @@ interface WindowsJobBindings {
   getLastError(): number
   openProcess(access: number, inheritHandle: number, processId: number): unknown
   setInformationJobObject(job: unknown, infoClass: number, info: Buffer, length: number): number
+  queryInformationJobObject?(job: unknown, infoClass: number, info: Buffer, length: number, returned: null): number
   terminateJobObject(job: unknown, exitCode: number): number
   extendedLimitInformationSize: number
   limitFlagsOffset: number
@@ -73,6 +74,7 @@ function bindings(): WindowsJobBindings {
       handleType,
       'uint32'
     ]),
+    queryInformationJobObject: bind('QueryInformationJobObject', 'int', [handleType, 'int', handleType, 'uint32', handleType]),
     terminateJobObject: bind('TerminateJobObject', 'int', [handleType, 'uint32']),
     extendedLimitInformationSize: extendedLimitInformationType.size,
     limitFlagsOffset: extendedLimitInformationType.members!.basicLimitInformation.offset
@@ -118,25 +120,20 @@ export class WindowsProcessJob {
     }
   }
 
+  processIds(): number[] {
+    if (isNullHandle(this.handle) || !this.native.queryInformationJobObject) return []
+    const data = Buffer.alloc(8 + 65536 * 8)
+    if (!this.native.queryInformationJobObject(this.handle, 3, data, data.length, null)) throw win32Failure('QueryInformationJobObject', this.native)
+    const count = data.readUInt32LE(4)
+    if (data.readUInt32LE(0) !== count || count > 65536) throw new Error('Windows process membership is incomplete.')
+    return Array.from({ length: count }, (_, index) => Number(data.readBigUInt64LE(8 + index * 8)))
+  }
+
   close(): void {
     if (isNullHandle(this.handle)) return
     const handle = this.handle
     if (this.native.closeHandle(handle) === 0) throw win32Failure('CloseHandle', this.native)
     this.handle = null
-  }
-
-  release(): void {
-    if (isNullHandle(this.handle)) return
-    const information = Buffer.alloc(this.native.extendedLimitInformationSize)
-    if (this.native.setInformationJobObject(
-      this.handle,
-      jobObjectExtendedLimitInformation,
-      information,
-      information.length
-    ) === 0) {
-      throw win32Failure('SetInformationJobObject', this.native)
-    }
-    this.close()
   }
 
   terminate(exitCode = 1): void {
@@ -147,14 +144,14 @@ export class WindowsProcessJob {
   }
 }
 
-export function createWindowsKillOnCloseJob(): WindowsProcessJob {
+export function createWindowsKillOnCloseJob(killOnClose = true): WindowsProcessJob {
   const native = bindings()
   const handle = native.createJobObjectW(null, null)
   if (isNullHandle(handle)) throw win32Failure('CreateJobObjectW', native)
 
   try {
     const information = Buffer.alloc(native.extendedLimitInformationSize)
-    information.writeUInt32LE(jobObjectLimitKillOnJobClose, native.limitFlagsOffset)
+    information.writeUInt32LE(killOnClose ? jobObjectLimitKillOnJobClose : 0x800, native.limitFlagsOffset)
     if (native.setInformationJobObject(
       handle,
       jobObjectExtendedLimitInformation,

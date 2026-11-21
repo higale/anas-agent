@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
+import { errorDetail } from '@shared/recovery'
 import { notice } from './notice'
 
 export function usePythonRuntimeNotice(): void {
@@ -27,7 +28,7 @@ export function usePythonRuntimeNotice(): void {
         }
       } catch (error) {
         if (!disposed) notice.error(t('startup.python_status_failed'), {
-          id, description: error instanceof Error ? error.message : String(error)
+          id, description: errorDetail(error, '')
         })
       }
     }

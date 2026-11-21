@@ -32,7 +32,41 @@ import { runWithCurrentAgentToolEffect, type AgentToolEffectArm } from './agent/
 import { commandShellToolName } from '@shared/commandShell'
 
 describe('shell runtime result text', () => {
-  it('serializes the full result object for non-stdout-only results', () => {
+  const shell = { pid: 100, parentPid: 1, name: 'zsh', birth: '1', startedAt: '', role: 'shell' as const, status: 'exited' as const }
+  const child = { ...shell, pid: 200, parentPid: 100, name: 'Music', birth: '2', role: 'child' as const, status: 'running' as const }
+  const completed: ShellRunResult = {
+    ok: true, command: 'open music', workingDir: '/tmp', timeoutSec: 0, exitCode: 0,
+    stdout: '', stderr: '', signal: null, timedOut: false, aborted: false,
+    truncated: { stdout: false, stderr: false },
+    process_snapshot: { processes: [shell], checkedAt: 'now', complete: false }
+  }
+  it.each(['hello\n', '{"ok":false,"value":1}', '[1,2]', '42', 'null'])('preserves successful stdout verbatim with internal process observations: %s', stdout => {
+    expect(resultText({ ...completed, stdout }, 'call-1')).toBe(stdout)
+  })
+  it('reports quiet success without empty fields or internal process observations', () => {
+    expect(JSON.parse(resultText(completed, 'call-1'))).toEqual({ ok: true })
+  })
+  it('reports remaining process names and PIDs once without returning their internal identities', () => {
+    expect(JSON.parse(resultText({ ...completed,
+      process_snapshot: { ...completed.process_snapshot!, processes: [shell, child] }
+    }, 'call-1'))).toEqual({ ok: true, remaining_processes: [{ pid: 200, name: 'Music' }] })
+  })
+  it.each(['timedOut', 'aborted'] as const)('keeps %s, termination signals, output and truncation details', flag => {
+    expect(JSON.parse(resultText({ ...completed, ok: false, exitCode: null, [flag]: true, signal: 'SIGTERM',
+      stdout: 'partial', stderr: 'warning', error: 'Stopped', truncated: { stdout: true, stderr: false }
+    }))).toEqual({ ok: false, [flag]: true, signal: 'SIGTERM', stdout: 'partial', stderr: 'warning',
+      error: 'Stopped', truncated: { stdout: true } })
+  })
+  it('keeps observation failures visible without treating them as command failures', () => {
+    expect(JSON.parse(resultText({ ...completed, stdout: 'done',
+      process_snapshot: { ...completed.process_snapshot!, error: 'Enumeration unavailable' }
+    }))).toEqual({ ok: true, stdout: 'done', process_observation_error: 'Enumeration unavailable' })
+  })
+  it('includes a call ID only when truncated output needs further reading', () => {
+    expect(JSON.parse(resultText({ ...completed, stdout: 'partial', truncated: { stdout: true, stderr: false } }, 'call-1')))
+      .toEqual({ ok: true, stdout: 'partial', truncated: { stdout: true }, call_id: 'call-1' })
+  })
+  it('returns failure details without echoing invocation or internal fields', () => {
     const result = {
       ok: false,
       command: 'echo secret',
@@ -44,7 +78,7 @@ describe('shell runtime result text', () => {
       user_guidance: 'try another command'
     } satisfies ShellRunResult & { user_guidance: string }
 
-    expect(JSON.parse(resultText(result))).toEqual(result)
+    expect(JSON.parse(resultText(result))).toEqual({ ok: false, error: 'denied' })
   })
 
   it('keeps raw stdout for simple successful output', () => {
@@ -67,7 +101,6 @@ describe('shell runtime result text', () => {
       command: 'pwd',
       workingDir: defaultWorkingDir,
       timeoutSec: 0,
-      keepProcesses: false
     })
   })
 
@@ -76,19 +109,6 @@ describe('shell runtime result text', () => {
     const input = Object.freeze({ command })
     expect(await prepareShellCommand(input, process.cwd())).toMatchObject({ command })
     expect(input.command).toBe(command)
-  })
-
-  it('preserves an explicit request to keep child processes', async () => {
-    const defaultWorkingDir = process.cwd()
-    await expect(prepareShellCommand({
-      command: 'Start-Process calc',
-      keepProcesses: true
-    }, defaultWorkingDir)).resolves.toMatchObject({
-      command: 'Start-Process calc',
-      workingDir: defaultWorkingDir,
-      timeoutSec: 0,
-      keepProcesses: true
-    })
   })
 
   it('forwards complete process output while bounding only the inline result', async () => {
@@ -426,7 +446,7 @@ describe('shell runtime result text', () => {
         }
       })
 
-      expect(JSON.parse(output)).toMatchObject({ ok: true, exitCode: 0 })
+      expect(JSON.parse(output)).toMatchObject({ ok: true })
       expect(markerExistedAtDispatch).toBe(false)
       expect(existsSync(marker)).toBe(true)
     } finally {
@@ -461,7 +481,7 @@ describe('shell runtime result text', () => {
         timeoutError: 'Descendant cleanup probe timed out.'
       })
 
-      expect(JSON.parse(output)).toMatchObject({ ok: true, exitCode: 0 })
+      expect(JSON.parse(output)).toMatchObject({ ok: true })
       await new Promise((resolve) => setTimeout(resolve, 1_500))
       await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' })
     } finally {
@@ -757,7 +777,7 @@ describe('command shell resolution', () => {
 describe.skipIf(process.platform !== 'win32')('PowerShell output encoding', () => {
   const shell = { executable: 'pwsh.exe', name: 'PowerShell', family: 'powershell' } as const
   const invoke = (command: string, workingDir = process.cwd(), callbacks: ShellRunCallbacks = {}) => runShellCommand({
-    command, workingDir, timeoutSec: 15, keepProcesses: false
+    command, workingDir, timeoutSec: 15
   }, shell, undefined, callbacks)
 
   it('sends Chinese stdout and stderr through the supervisor as UTF-8', async () => {
@@ -774,7 +794,7 @@ describe.skipIf(process.platform !== 'win32')('PowerShell output encoding', () =
       ).push(text)
     })) as ShellRunResult
 
-    expect(result).toMatchObject({ ok: true, exitCode: 0, stderr: expected })
+    expect(result).toMatchObject({ ok: true, stderr: expected })
     expect(result.stdout.replaceAll('\r\n', '\n')).toBe(`65001\n${expected}`)
     expect(stdout.join('')).toBe(result.stdout)
     expect(stderr.join('')).toBe(expected)
@@ -825,7 +845,7 @@ describe.skipIf(process.platform !== 'win32')('PowerShell output encoding', () =
         'Start-Sleep -Milliseconds 300',
         "[Console]::Out.Write('读取完成')"
       ].join('\n'),
-      workingDir: process.cwd(), timeoutSec: 15, keepProcesses: false
+      workingDir: process.cwd(), timeoutSec: 15
     }, shell, undefined, {
       onOutput: (_stream, text) => streamed.push(text)
     })
@@ -864,9 +884,9 @@ describe.skipIf(process.platform !== 'win32')('PowerShell output encoding', () =
     const controller = new AbortController()
     controller.abort()
     const result = JSON.parse(await runShellCommand({
-      command: "param()\n'Not executed'", workingDir: process.cwd(), timeoutSec: 15, keepProcesses: false
+      command: "param()\n'Not executed'", workingDir: process.cwd(), timeoutSec: 15
     }, shell, controller.signal)) as ShellRunResult
-    expect(result).toMatchObject({ ok: false, aborted: true, stdout: '', stderr: '' })
+    expect(result).toMatchObject({ ok: false, aborted: true })
   })
 
   it.each([
@@ -879,14 +899,14 @@ describe.skipIf(process.platform !== 'win32')('PowerShell output encoding', () =
   ])('preserves failure status for %s', async (_name, command, exitCode) => {
     const result = JSON.parse(await invoke(command)) as ShellRunResult
     expect(result).toMatchObject({ ok: false, exitCode })
-    expect(result.stderr).not.toContain('\uFFFD')
+    expect(result.stderr ?? '').not.toContain('\uFFFD')
     if (command.includes('中文错误')) expect(result.stderr).toContain('中文错误')
   })
 
   it('also initializes UTF-8 for the existing Windows PowerShell runtime', async () => {
     const result = await runShellCommand({
       command: "param([string]$text = '中文测试')\n[Console]::Out.Write($text)",
-      workingDir: process.cwd(), timeoutSec: 15, keepProcesses: false
+      workingDir: process.cwd(), timeoutSec: 15
     }, { ...shell, executable: 'powershell.exe', name: 'Windows PowerShell' })
     expect(result).toBe('中文测试')
   })

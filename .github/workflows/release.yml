@@ -74,6 +74,9 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm test -- src/main/windowsReleaseArchive.test.ts src/main/packagedOutput.test.ts
+      - name: Verify native Shell lifecycle and process observation
+        shell: bash
+        run: npm test -- --maxWorkers=2 src/main/shellRuntime.processes.test.ts src/main/ptyShellRuntime.test.ts src/main/windowsProcessJob.test.ts src/main/agent/conversationProcesses.test.ts
       - name: Build and verify package
         run: npm run ${{ matrix.command }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -1181,6 +1181,7 @@
     "review_invalid_location": "无法验证此定位。",
     "review_snapshot": "审核范围快照（不是当前文件）",
     "file_changes": "文件改动",
+    "process_list": "进程列表",
     "project_memory": "项目记忆",
     "workspace_menu": "工作区菜单",
     "changes_mode": "比较方式",
@@ -1526,5 +1527,29 @@
     "capabilities_hint": "工具、技能和提示词统一在能力设置中选择。",
     "contributions_count": "{{tools}} 个工具 · {{skills}} 个技能 · {{prompts}} 段提示词",
     "selection": "插件选择"
+  },
+  "process_list": {
+    "title": "进程列表",
+    "empty": "当前对话没有已识别的存活进程。",
+    "hint": "只显示 Shell 及其直接启动的进程，不包含应用内部的后代进程。",
+    "refresh": "刷新",
+    "more": "加载更多调用",
+    "terminate": "终止",
+    "terminating": "正在终止",
+    "running": "运行中",
+    "unknown": "无法确认",
+    "exited": "已结束",
+    "shell": "Shell",
+    "child": "Shell 直接启动",
+    "command": "来源命令",
+    "duration": "已运行 {{seconds}} 秒",
+    "call_running": "Shell 运行中",
+    "call_preparing": "等待启动",
+    "call_completed": "Shell 已完成",
+    "call_failed": "Shell 失败",
+    "call_cancelled": "Shell 已取消",
+    "call_uncertain": "Shell 结果不确定",
+    "stop_hint": "只终止此进程；未保存的内容可能丢失。",
+    "stale": "刷新失败，以下为上次结果。"
   }
 }

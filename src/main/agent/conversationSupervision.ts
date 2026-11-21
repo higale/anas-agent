@@ -1,6 +1,6 @@
 import type { ConversationMessage } from '../../runtime/conversationMessage'
 import type { ExecutionContext } from '../../runtime/executionState'
-import { managedCallSupervision, subagentSupervision, reconcileTaskObservations, observedManagedCalls, observedSubagents,
+import { continuingShell, managedCallSupervision, subagentSupervision, reconcileTaskObservations, observedManagedCalls, observedSubagents,
   type SupervisionMessage } from '../../runtime/backgroundSupervision'
 import type { AgentManagedCallRecord } from './managedCallStore'
 import type { AgentSubagentCallRecord } from './subagentTaskStore'
@@ -57,5 +57,5 @@ export async function projectConversationSupervision(system: ConversationMessage
   const instruction = [subagentSupervision(subagents, names), managedCallSupervision(calls, names)].filter(Boolean).join('\n\n')
   const systemMessage = instruction ? { ...system, content: typeof system.content === 'string' ? `${system.content}\n\n${instruction}`
     : [...system.content, { type: 'text', text: `\n\n${instruction}` }] } : system
-  return { systemMessage, requiresTools: calls.length > 0 || subagents.length > 0 }
+  return { systemMessage, requiresTools: calls.some(call => !continuingShell(call)) || subagents.length > 0 }
 }

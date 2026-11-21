@@ -90,6 +90,7 @@ const api: GaleApi = {
       }
     },
     changes: contentServices.agent.changes,
+    processes: contentServices.agent.processes,
     workspace: {
       get: (): Promise<AgentWorkspaceState> => ipcRenderer.invoke('agent:workspace:get'),
       set: (state: AgentWorkspaceState): Promise<void> => ipcRenderer.invoke('agent:workspace:set', state)

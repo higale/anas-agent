@@ -305,7 +305,7 @@ it.each(['completed', 'failed', 'retryable', 'interrupted'] as const)('holds par
       expect(h.host.isActive({ threadId: child.childThreadId, runId: child.childRunId })).toBe(true)
       expect(cancelManaged).not.toHaveBeenCalled()
       expect(h.host.cancel(h.owner)).toBe(true)
-      expect(cancelManaged).toHaveBeenCalledWith('run', 'Agent run cancelled.')
+      expect(cancelManaged).toHaveBeenCalledWith('run', 'Agent run cancelled.', true)
     }
     await vi.advanceTimersByTimeAsync(10_000)
     expect(h.database.messages.activities.getRun('run')?.status).toBe(outcome === 'retryable' || outcome === 'interrupted' ? 'cancelled' : outcome)
@@ -484,7 +484,7 @@ it.each(['initial', 'terminal', 'all'] as const)('releases native work and prese
   const h = fixture()
   vi.spyOn(h.database.resources.fileEditStore, 'deleteFileEditRecordsForRequest').mockResolvedValue()
   let aborted = false
-  const starting = h.managed.start({ ...h.owner, kind: 'shell', summary: 'Background work', execute: async control => {
+  const starting = h.managed.start({ ...h.owner, kind: 'custom', summary: 'Background work', execute: async control => {
     control.markRunning()
     await new Promise<void>(resolve => control.signal.addEventListener('abort', () => { aborted = true; resolve() }, { once: true }))
     return 'Stopped'
@@ -755,4 +755,43 @@ it('keeps non-model failures ineligible after later input and history deletion',
     await h.host.truncateMessages({ threadId: 'thread', messageId: 'later:input' })
     expect(h.host.readSnapshot('thread').modelRetries).toBeUndefined()
   } finally { await h.close() }
+})
+
+it('finishes successive turns with a live yielded Shell and stops it only at shutdown', async () => {
+  vi.useFakeTimers()
+  const h = fixture(), parent = new AbortController()
+  let aborted = false
+  const starting = h.managed.start({ ...h.owner, kind: 'shell', summary: 'Preview server', parentSignal: parent.signal,
+    execute: async control => {
+      control.markRunning()
+      await new Promise<void>(resolve => control.signal.addEventListener('abort', () => { aborted = true; resolve() }, { once: true }))
+      return 'Stopped'
+    } })
+  try {
+    await vi.advanceTimersByTimeAsync(10000)
+    const callId = JSON.parse(await starting).call_id
+    parent.abort()
+    const first = h.host.start(h.owner, 'input', async () => h.instance)
+    await vi.advanceTimersByTimeAsync(0)
+    expect((await first.completed).status).toBe('completed')
+    await first.drained
+    expect(aborted).toBe(false)
+    expect(h.host.isActive(h.owner)).toBe(false)
+    expect(h.database.managed.getManagedCall(callId, 'thread')?.status).toBe('running')
+    h.database.runs.createRun({ threadId: 'thread', runId: 'next', operation: 'agent', message: {
+      id: 'next:input', value: { id: 'next:input', kind: 'user', content: 'Continue', context: { runId: 'next' } } } })
+    h.services.prepareModel = async state => ({ kind: 'model', invoke: async () => ({
+      message: { id: 'next:answer', value: { kind: 'assistant', content: 'Next answer' } }, calls: [],
+      context: { ...state.context, modelCalls: state.context.modelCalls + 1 } }) })
+    const next = h.host.start({ threadId: 'thread', runId: 'next' }, 'input', async () => ({ execution: conversationExecution(h.services), dispose: async () => {} }))
+    await vi.advanceTimersByTimeAsync(0)
+    expect((await next.completed).status).toBe('completed')
+    await next.drained
+    expect(aborted).toBe(false)
+    const shutdown = h.host.shutdown()
+    await vi.advanceTimersByTimeAsync(0)
+    expect((await shutdown).drained).toBe(true)
+    expect(aborted).toBe(true)
+    expect(h.database.managed.getManagedCall(callId, 'thread')?.status).toBe('cancelled')
+  } finally { await h.host.shutdown(); await h.close() }
 })

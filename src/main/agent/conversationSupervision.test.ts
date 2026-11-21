@@ -137,3 +137,12 @@ describe('native background supervision', () => {
     } finally { db.close() }
   })
 })
+
+it('allows a final answer with a live Shell, while still requiring other terminal results', async () => {
+  const options: ConversationSupervisionOptions = { managed: { unresolved: () => [{ ...task, kind: 'shell', status: 'running' }] } }
+  expect((await projectConversationSupervision({ kind: 'system', content: '' }, [{ name: 'read_call' }], options)).requiresTools).toBe(false)
+  options.managed!.unresolved = () => [{ ...task, kind: 'shell', status: 'preparing' }]
+  expect((await projectConversationSupervision({ kind: 'system', content: '' }, [{ name: 'read_call' }], options)).requiresTools).toBe(true)
+  options.managed!.unresolved = () => [{ ...task, kind: 'shell', status: 'running' }, task]
+  expect((await projectConversationSupervision({ kind: 'system', content: '' }, [{ name: 'read_call' }], options)).requiresTools).toBe(true)
+})

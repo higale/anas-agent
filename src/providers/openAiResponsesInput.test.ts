@@ -84,6 +84,24 @@ describe('native Responses input', () => {
     expect(output).toEqual(snapshot)
   })
 
+  it.each(['function_call', 'custom_tool_call', 'computer_call'])('omits empty trailing messages after %s without losing meaningful output or reasoning links', type => {
+    const call = { type, call_id: 'call', name: 'fixture' }
+    const empty = { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '', annotations: [] }] }
+    expect(responseReplay([call, empty, empty], false)).toEqual([call])
+    expect(responseReplay([call, empty], true)).toEqual([call])
+    const meaningful = [
+      { ...empty, content: [{ type: 'output_text', text: ' ' }] },
+      { ...empty, content: [{ type: 'refusal', refusal: 'Cannot continue' }] },
+      { ...empty, content: [{ type: 'output_text', text: '', annotations: [{ type: 'url_citation' }] }] },
+      { ...empty, phase: 'final_answer' },
+      { ...empty, vendor_extra: 'keep' }
+    ]
+    for (const message of meaningful) expect(responseReplay([call, message], false)).toEqual([call, message])
+    const reasoning = { type: 'reasoning', id: 'rs', summary: [] }
+    expect(responseReplay([call, reasoning, empty], false)).toEqual([call, reasoning, empty])
+    expect(responseReplay([reasoning, empty], false)).toEqual([reasoning, empty])
+  })
+
   it('does not send server references or unencrypted reasoning in zero-retention requests', () => {
     const output = [{ type: 'item_reference', id: 'old' }, { type: 'reasoning', id: 'rs_1', summary: [] }]
     expect(responseReplay(output, true)).toEqual([])

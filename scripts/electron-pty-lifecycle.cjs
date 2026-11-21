@@ -117,7 +117,6 @@ async function verifyLifecycleAction(launchApplication, action) {
   const identities = []
   const providerErrors = []
   let application
-  let lifecycleVerified = false
   let requests = 0
   let pendingRequestClosed = false
   let shellName
@@ -235,6 +234,10 @@ async function verifyLifecycleAction(launchApplication, action) {
       assert.equal(snapshot.pendingRun?.id, submission.run.id, 'Reopening must preserve the running task.')
       assert.equal(snapshot.pendingRun?.status, 'running')
     }
+    const processList = await page.evaluate(threadId => globalThis.gale.agent.processes.list({ threadId }), submission.thread.id)
+    const shellIdentity = processList.calls.flatMap(call => call.snapshot.processes).find(process => process.role === 'shell' && process.status === 'running')
+    assert.ok(shellIdentity, 'The directly launched Shell must appear in the process list.')
+    if (probe) handles.set('shell', probe.capture(shellIdentity))
     const main = application.process()
     await application.evaluate(({ app, BrowserWindow }, action) => {
       setImmediate(() => action === 'window-close' ? BrowserWindow.getAllWindows()[0].close() : app.quit())
@@ -242,18 +245,17 @@ async function verifyLifecycleAction(launchApplication, action) {
     await expect.poll(() => main.exitCode !== null || main.signalCode !== null, { timeout: 15_000 }).toBe(true)
     assert.equal(main.exitCode, 0, 'Normal quit must exit cleanly.')
     assert.equal(main.signalCode, null, 'The fixture must not replace normal quit with a forced process kill.')
-    await expect.poll(() => identities.every(({ role, pid }) => probe ? probe.exited(handles.get(role)) : !alive(pid)), { timeout: 5_000,
-      message: 'Normal application quit must reap the PTY foreground process and its child.' }).toBe(true)
+    await expect.poll(() => probe ? probe.exited(handles.get('shell')) : !alive(shellIdentity.pid), { timeout: 5_000,
+      message: 'Normal application quit must terminate the directly launched Shell.' }).toBe(true)
     await expect.poll(() => pendingRequestClosed).toBe(true)
     assert.deepEqual(providerErrors, [])
-    lifecycleVerified = true
-    console.log(`${process.platform} PTY lifecycle passed (${shellName}, ${action}): real TTY in parent/child, normal exit cancels the model request and reaps both processes.`)
+    console.log(`${process.platform} PTY lifecycle passed (${shellName}, ${action}): real TTY in parent/child, normal exit cancels the model request and terminates its directly launched Shell.`)
   } finally {
     await application?.close().catch(() => undefined)
     server.closeAllConnections()
     await new Promise((resolve) => server.close(resolve))
     try {
-      if (!lifecycleVerified) await reapFixtureProcesses(workspace, probe, handles)
+      await reapFixtureProcesses(workspace, probe, handles)
     } finally {
       if (probe) for (const handle of handles.values()) probe.close(handle)
     }
@@ -261,4 +263,4 @@ async function verifyLifecycleAction(launchApplication, action) {
   }
 }
 
-module.exports = { verifyPtyLifecycle }
+module.exports = { verifyPtyLifecycle, windowsProbe }

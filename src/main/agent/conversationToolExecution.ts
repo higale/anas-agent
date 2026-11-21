@@ -61,7 +61,7 @@ export function createConversationToolExecutor(options: ConversationToolExecutio
     }
     const cleanup = () => {
       const managed = ownedManaged()
-      if (managed && !managed.detachedAt && !['preparing', 'running', 'uncertain'].includes(managed.status)) options.managed!.remove(managed.id, request.threadId)
+      if (managed && managed.kind !== 'shell' && !managed.detachedAt && !['preparing', 'running', 'uncertain'].includes(managed.status)) options.managed!.remove(managed.id, request.threadId)
     }
     if (existing?.result) { cleanup(); return { kind: 'result' as const, message: existing.result } }
     if (!call.prepared || call.authorization?.approval === 'pending') throw new Error('Tool dispatch requires saved preflight and approval.')

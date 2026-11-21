@@ -1,3 +1,4 @@
+import { continuingShell } from '../../runtime/backgroundSupervision'
 import type Database from 'better-sqlite3'
 import type { AgentBackgroundCleanup } from '../../shared/backgroundCleanup'
 import type { ManagedCallStore, AgentManagedCallRecord } from './managedCallStore'
@@ -19,7 +20,7 @@ export class BackgroundTaskStore {
   }
 
   getManagedCall(callId: string, threadId: string) { return this.managed.getManagedCall(callId, threadId) }
-  hasUnresolvedManagedCallsForThread(threadId: string) { return this.resources.hasUnresolvedManagedCallsForThread(threadId) }
+  hasUnresolvedManagedCallsForThread(threadId: string) { return this.managed.listUnresolvedManagedCallsForThread(threadId).some(call => !continuingShell(call)) }
   listUnresolvedSubagentCallsForRun(runId: string, limit?: number) { return this.resources.listUnresolvedSubagentCallsForRun(runId, limit) }
 
   updateRunBackgroundCleanup(runId: string, cleanup: AgentBackgroundCleanup): void {
@@ -57,7 +58,7 @@ export class BackgroundTaskStore {
     return this.database.transaction(() => {
       const descendants = this.listDescendantSubagentCalls(run.threadId)
       const threadIds = [run.threadId, ...descendants.map((call) => call.childThreadId)]
-      const calls = threadIds.flatMap((id) => this.managed.listUnresolvedManagedCallsForThread(id))
+      const calls = threadIds.flatMap((id) => this.managed.listUnresolvedManagedCallsForThread(id)).filter(call => !continuingShell(call))
       const subagents = [...new Set(descendants.map((call) => call.parentRunId))]
         .flatMap((id) => this.resources.listUnresolvedSubagentCallsForRun(id))
       const now = new Date().toISOString()

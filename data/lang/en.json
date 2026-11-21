@@ -1183,6 +1183,7 @@
     "review_invalid_location": "Location could not be verified.",
     "review_snapshot": "Captured review scope (not current files)",
     "file_changes": "File changes",
+    "process_list": "Process list",
     "project_memory": "Project memory",
     "workspace_menu": "Workspace menu",
     "changes_mode": "Comparison",
@@ -1532,5 +1533,29 @@
     "capabilities_hint": "Choose tools, skills and prompts in capability settings.",
     "contributions_count": "{{tools}} tools · {{skills}} skills · {{prompts}} instructions",
     "selection": "Plugin selection"
+  },
+  "process_list": {
+    "title": "Process list",
+    "empty": "No known live processes in this conversation.",
+    "hint": "Shows the Shell and processes it starts directly, excluding application descendants.",
+    "refresh": "Refresh",
+    "more": "Load more calls",
+    "terminate": "Terminate",
+    "terminating": "Terminating",
+    "running": "Running",
+    "unknown": "Unknown",
+    "exited": "Exited",
+    "shell": "Shell",
+    "child": "Started by Shell",
+    "command": "Source command",
+    "duration": "Running for {{seconds}} seconds",
+    "call_running": "Shell running",
+    "call_preparing": "Queued",
+    "call_completed": "Shell completed",
+    "call_failed": "Shell failed",
+    "call_cancelled": "Shell cancelled",
+    "call_uncertain": "Shell outcome uncertain",
+    "stop_hint": "Terminate only this process. Unsaved work may be lost.",
+    "stale": "Refresh failed. Showing the previous result."
   }
 }

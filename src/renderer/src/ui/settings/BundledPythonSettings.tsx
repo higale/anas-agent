@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { RotateCcw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { errorDetail } from '@shared/recovery'
 import { ConfirmDialog } from '../dialogs/ConfirmDialog'
 import { notice } from '../notice'
 import { UI_ICON_SIZE_MEDIUM } from '../uiConstants'
@@ -21,7 +22,7 @@ export function BundledPythonSettings() {
       notice.success(t('settings.python_reset_success'), { id, description: '' })
     } catch (error) {
       notice.error(t('settings.python_reset_failed'), {
-        id, description: error instanceof Error ? error.message : String(error), duration: Infinity
+        id, description: errorDetail(error, ''), duration: Infinity
       })
     } finally {
       setResetting(false)

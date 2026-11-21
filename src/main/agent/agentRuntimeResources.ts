@@ -22,7 +22,7 @@ import { runtimeToolDefinitions } from '../llm/runtimeTools'
 import { getCachedMcpRuntime, getLoadedMcpRuntime } from '../mcpRuntimeService'
 import { resolveConfiguredLanguage } from '../languageStore'
 import { getProject } from '../projectStore'
-import { describeCommandShell, getCommandShell, prepareShellCommand, resultText, runShellCommand } from '../shellRuntime'
+import { describeCommandShell, getCommandShell, prepareShellCommand, resultText, runShellCommand, type ShellRunResult } from '../shellRuntime'
 import { buildSkillsPrompt, listSkillSnapshot, listSubagentSkills, type SkillAgentScope } from '../skillsStore'
 import type { AgentSubagentCallRecord } from './subagentTaskStore'
 import type { ConversationResourceAccess } from './conversationResourceReader'
@@ -354,7 +354,6 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
     summary?: string
     timeoutSec?: number
     workingDir?: string
-    keepProcesses?: boolean
     pty?: import('@shared/terminal').TerminalSize
   }): Promise<string> => {
     const prepared = await prepareShellCommand(input, workspace.primaryFolder)
@@ -372,21 +371,27 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
     })
     const control = currentToolExecution()
     await verifyCurrentShellAuthorization()
-    return runShellCommand(prepared, commandShell, control?.signal ?? context.signal, {
+    let completed: ShellRunResult | undefined
+    const result = await runShellCommand(prepared, commandShell, control?.signal ?? context.signal, {
       onDispatched: control?.markRunning,
       onOutcomeUncertain: control?.markUncertain,
       onOutput: control?.output,
       onTerminal: control?.setTerminal,
-      onResult: (result) => control?.setOutcome({
-        ok: result.ok,
-        ...(result.detached ? { local_commit_completed: true, detached: result.detached } : {}),
-        ...(result.exitCode === undefined ? {} : { exit_code: result.exitCode }),
-        ...(result.signal === undefined ? {} : { signal: result.signal }),
-        ...(result.timedOut === undefined ? {} : { timed_out: result.timedOut }),
-        ...(result.aborted === undefined ? {} : { aborted: result.aborted }),
-        ...(result.error === undefined ? {} : { error: result.error })
-      })
+      onProcesses: snapshot => control?.setOutcome({ process_snapshot: snapshot, command: prepared.command }),
+      onResult: (result) => {
+        completed = result
+        control?.setOutcome({
+          ok: result.ok,
+          ...(result.process_snapshot ? { process_snapshot: result.process_snapshot } : {}),
+          ...(result.exitCode === undefined ? {} : { exit_code: result.exitCode }),
+          ...(result.signal === undefined ? {} : { signal: result.signal }),
+          ...(result.timedOut === undefined ? {} : { timed_out: result.timedOut }),
+          ...(result.aborted === undefined ? {} : { aborted: result.aborted }),
+          ...(result.error === undefined ? {} : { error: result.error })
+        })
+      }
     })
+    return completed ? resultText(completed, control?.callId) : result
   }
   const runtimeTools = await runtimeToolDefinitions({
     enabled: toolsEnabled,

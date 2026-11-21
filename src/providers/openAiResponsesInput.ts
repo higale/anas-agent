@@ -169,9 +169,28 @@ export function responseToolCall(call: ResponseToolCall, zeroRetention: boolean)
     ...(!zeroRetention && call.itemId !== undefined ? { id: call.itemId } : {}) }
 }
 
-/** Exact provider output takes precedence over the visible presentation. */
+function emptyAssistantMessage(value: unknown): boolean {
+  const item = record(value)
+  return item?.type === 'message' && item.role === 'assistant'
+    && (item.status === undefined || item.status === 'completed')
+    && Object.keys(item).every(key => ['type', 'id', 'role', 'status', 'content'].includes(key))
+    && Array.isArray(item.content) && item.content.every(value => {
+      const block = record(value)
+      return block?.type === 'output_text' && block.text === ''
+        && Object.keys(block).every(key => ['type', 'text', 'annotations', 'logprobs'].includes(key))
+        && [block.annotations, block.logprobs].every(value => value === undefined || Array.isArray(value) && value.length === 0)
+    })
+}
+
+/** Replay native output, omitting only empty trailing placeholders after client
+ * calls. Gateways can turn those placeholders into a new assistant message
+ * between the call and its result. Do not detach reasoning from its next item. */
 export function responseReplay(output: readonly unknown[], zeroRetention: boolean): ResponseInputItem[] {
-  return output.flatMap(value => {
+  let end = output.length
+  while (end > 0 && emptyAssistantMessage(output[end - 1])) end--
+  const replay = ['function_call', 'custom_tool_call', 'computer_call'].includes(String(record(output[end - 1])?.type))
+    ? output.slice(0, end) : output
+  return replay.flatMap(value => {
     const fields = record(value)
     if (!fields || typeof fields.type !== 'string') throw new Error('Invalid Responses replay item.')
     const item = fields as Item

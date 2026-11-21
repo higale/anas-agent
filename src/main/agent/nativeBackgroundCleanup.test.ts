@@ -52,7 +52,7 @@ it.each(['local', 'remote', 'noncooperative remote'] as const)('retains the fina
   database.managed.markManagedCallDetached('other-call', 'other')
   database.managed.finishManagedCall({ callId: 'other-call', threadId: 'other', status: 'completed', result: 'Unrelated result' })
   let finish!: () => void
-  const starting = service.start({ kind: uncertain ? 'mcp' : 'shell', threadId: 'grandchild', runId: 'grandchild-run', summary: 'Background operation', uncertainWhenCancelledAfterDispatch: uncertain,
+  const starting = service.start({ kind: uncertain ? 'mcp' : 'custom', threadId: 'grandchild', runId: 'grandchild-run', summary: 'Background operation', uncertainWhenCancelledAfterDispatch: uncertain,
     execute: async control => {
       control.markRunning()
       await new Promise<void>(resolve => {

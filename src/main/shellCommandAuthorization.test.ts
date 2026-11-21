@@ -47,7 +47,7 @@ it.skipIf(!['win32', 'darwin'].includes(process.platform) || !existsSync(bundled
   const args = { command, working_dir: h.project }
   const plan = await authorization.inspect(args, { name: 'query', sourceAlias: 'user' })
   expect(plan?.skillScript?.executor).toBe(await realpath(bundledPython))
-  const output = await runShellCommand({ command, workingDir: h.project, env, pathPrepend: h.search.directory, timeoutSec: 10, keepProcesses: false }, h.shell)
+  const output = await runShellCommand({ command, workingDir: h.project, env, pathPrepend: h.search.directory, timeoutSec: 10 }, h.shell)
   expect(await realpath(output.trim())).toBe(await realpath(bundledPython))
 }, 20000)
 
@@ -75,7 +75,7 @@ describe.skipIf(process.platform !== 'win32')('Windows Shell read authorization'
     expect(await analyzer.requiresApproval(args)).toBe(true)
   })
 
-  it.each(['sequence', 'pipeline', 'redirect', 'and', 'subexpression', 'splat', 'environment', 'inline', 'preload', 'directory', 'pty', 'keep-processes', 'no-skill'] as const)(
+  it.each(['sequence', 'pipeline', 'redirect', 'and', 'subexpression', 'splat', 'environment', 'inline', 'preload', 'directory', 'pty', 'no-skill'] as const)(
     'does not use Skill approval for the %s execution mode', async mode => {
     const h = await fixture()
     const nodeExecutable = (await execFileAsync('node', ['-p', 'process.execPath'], { encoding: 'utf8', windowsHide: true })).stdout.trim()
@@ -92,8 +92,7 @@ describe.skipIf(process.platform !== 'win32')('Windows Shell read authorization'
       directory: `Set-Location '${h.outside}'; ${call}`
     }
     const command = commands[mode] ?? call
-    const args = Object.freeze({ command, ...(mode === 'pty' ? { pty: { columns: 80, rows: 24 } } : {}),
-      ...(mode === 'keep-processes' ? { keep_processes: true } : {}) })
+    const args = Object.freeze({ command, ...(mode === 'pty' ? { pty: { columns: 80, rows: 24 } } : {}) })
     expect(await (mode === 'no-skill' ? h.authorization : analyzer).requiresApproval(args), command).toBe(true)
     expect(args.command).toBe(command)
     expect(exemption).not.toHaveBeenCalled()
@@ -232,9 +231,9 @@ describe.skipIf(process.platform !== 'win32')('Windows Shell read authorization'
       expect(result.stdout).toContain('needle one')
     }
   })
-  it('preserves full access and rejects keeping processes as an auto-approved read', async () => {
+  it('preserves full access and rejects interactive terminals as auto-approved reads', async () => {
     const h = await fixture()
-    expect(await h.authorization.requiresApproval({ command: 'rg needle .', keep_processes: true })).toBe(true)
+    expect(await h.authorization.requiresApproval({ command: 'rg needle .', pty: { columns: 80, rows: 24 } })).toBe(true)
     const full = createShellCommandAuthorization({ ...h, accessMode: () => 'full_access' })
     const args = { command: 'node arbitrary-script.js' }
     expect(await full.requiresApproval(args)).toBe(false)

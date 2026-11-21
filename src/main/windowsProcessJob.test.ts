@@ -66,8 +66,8 @@ describe.runIf(process.platform === 'win32')('WindowsProcessJob', () => {
     }
   }, 10_000)
 
-  it('lets assigned descendants continue after the job is explicitly released', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'anas-windows-job-release-'))
+  it('observes assigned descendants without killing them when an observation job closes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'anas-windows-job-observation-'))
     const marker = join(root, 'descendant-survived.txt')
     const descendantScript = Buffer.from(
       `Start-Sleep -Milliseconds 1200; [IO.File]::WriteAllText(${JSON.stringify(marker)}, 'survived')`,
@@ -88,13 +88,14 @@ describe.runIf(process.platform === 'win32')('WindowsProcessJob', () => {
 
     try {
       expect(supervisor.pid).toBeTypeOf('number')
-      const job = createWindowsKillOnCloseJob()
+      const job = createWindowsKillOnCloseJob(false)
       jobs.add(job)
       job.addProcess(supervisor.pid!)
 
       await once(supervisor.stdout!, 'data')
 
-      job.release()
+      expect(job.processIds()).toContain(supervisor.pid)
+      job.close()
       jobs.delete(job)
       supervisor.kill('SIGKILL')
       await once(supervisor, 'exit')

@@ -190,6 +190,27 @@ export class ManagedCallStore {
     return row ? managedCallFromRow(row) : undefined
   }
 
+  updateManagedCallOutcome(callId: string, threadId: string, outcome: Record<string, unknown>): void {
+    this.database.prepare('UPDATE agent_managed_calls SET outcome_json = ? WHERE id = ? AND thread_id = ?')
+      .run(JSON.stringify(outcome), callId, threadId)
+  }
+
+  listProcessCalls(threadId: string, cursor?: string): AgentManagedCallRecord[] {
+    const rows = this.database.prepare(`
+      WITH RECURSIVE threads(id) AS (
+        SELECT ? UNION SELECT child_thread_id FROM agent_subagent_calls JOIN threads ON parent_thread_id = threads.id
+      )
+      SELECT call.* FROM agent_managed_calls call JOIN threads ON call.thread_id = threads.id
+      WHERE kind = 'shell' AND (? IS NULL OR call.id > ?)
+        AND (status IN ('preparing', 'running') OR EXISTS (
+          SELECT 1 FROM json_each(call.outcome_json, '$.process_snapshot.processes') process
+          WHERE json_extract(process.value, '$.status') != 'exited'
+        ))
+      ORDER BY call.id LIMIT 101
+    `).all(threadId, cursor ?? null, cursor ?? null) as ManagedCallRow[]
+    return rows.map(managedCallFromRow)
+  }
+
   listUnresolvedManagedCalls(runId: string): AgentManagedCallRecord[] {
     const rows = this.database.prepare(`
       SELECT id, thread_id, run_id, kind, summary, status,

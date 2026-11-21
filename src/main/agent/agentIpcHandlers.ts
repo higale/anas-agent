@@ -1,3 +1,5 @@
+import { processIdentitySchema } from '@shared/processes'
+import { listConversationProcesses, terminateConversationProcess } from './conversationProcesses'
 import { BrowserWindow } from 'electron'
 import { panelPages, panelLabel } from '../panels/panelRegistry'
 import { isMainRendererWindow } from '../ipcSecurity'
@@ -426,12 +428,21 @@ export function validatePanelContext(content: BuiltinPanel): void {
     const database = currentDatabase(content.threadId!)
     const thread = database.getThread(content.threadId!)
     if (!thread || thread.projectId !== content.projectId) throw new Error('Panel conversation does not belong to this project.')
-    if (content.runId && database.getRun(content.runId)?.threadId !== content.threadId) throw new Error('Panel run does not belong to this conversation.')
+    if ('runId' in content && content.runId && database.getRun(content.runId)?.threadId !== content.threadId) throw new Error('Panel run does not belong to this conversation.')
     if (content.kind === 'subagent' && !database.getSubagentActivity(content.runId, content.subagentId)) throw new Error('Subagent activity was not found.')
   })
 }
 
 export function registerAgentIpcHandlers(): void {
+  const processListInput = z.object({ threadId: z.string().min(1).max(256), cursor: z.string().uuid().optional() }).strict()
+  handleAgentIpc('agent:processes:list', (_event, input: unknown) => {
+    const query = processListInput.parse(input)
+    return listConversationProcesses(currentRuntime().databaseForThread(query.threadId), query.threadId, query.cursor)
+  })
+  handleAgentIpc('agent:processes:terminate', (_event, input: unknown) => {
+    const query = z.object({ threadId: z.string().min(1).max(256), callId: z.string().uuid(), process: z.unknown() }).strict().parse(input)
+    terminateConversationProcess(currentRuntime().databaseForThread(query.threadId), { ...query, process: processIdentitySchema.parse(query.process) })
+  })
   onAppConfigChanged(({ snapshot }) => runtime?.memory.settingsChanged(snapshot))
   const preferenceScope = z.discriminatedUnion('kind', [z.object({ kind: z.literal('global') }).strict(),
     z.object({ kind: z.literal('project'), projectId: z.string().min(1).max(200) }).strict()])

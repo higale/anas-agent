@@ -1,11 +1,15 @@
-## Anas v5.2.19
+## Anas v5.2.20
 
-- Windows 和 macOS 随包提供备用 Python，保留 pip 和 venv；窗口加载后后台释放到应用数据目录，耗时或失败不阻塞聊天，并可在设置中重置。
-- 项目和子 Agent 默认启用“内置 Python”：与 rg 一起在初始上下文说明版本、绝对路径和准备状态，由模型选择调用；不修改 Python 的 PATH 或用户保存的系统环境说明。
-- `.py` 自定义工具优先实际探测系统 Python，不可用时使用内置保底，普通与交互式工具行为一致。拒绝未安装的商店占位链接，探测禁用自动安装；脚本失败不换解释器重跑，显式解释器命令不自动替换。
-- 运行时目录不进入备份，恢复备份保留本机环境；更新双语指南与工具参考。配置与数据库版本不变，已有能力配置缺少新增字段时默认启用，不自动改写配置。
+- 移除 Shell 工具的 `keep_processes` 参数。Shell 退出即完成调用；取消、超时和退出 Anas 只停止直接 Shell，不递归关闭其子进程。已交接的长命令可跨轮继续，仍可显式取消。
+- 在工作区菜单的项目记忆下方新增“进程列表”，在右侧查看当前对话及子 Agent 启动的 Shell 和已识别直接子进程，支持刷新和按身份手动终止；不混入应用内部后代进程。进程观察为尽力而为，终端关闭仍可能影响连接终端的程序。
+- 精简 Windows 和 macOS 的 Shell 返回：无需额外状态时保留原始标准输出，其他结果只附必要字段；不重复发送原始命令或内部进程快照，后台查询重新核验存活进程。
+- 统一菜单与侧栏图标，并区分进程列表、项目记忆、记忆活动和对话过程；统一 Python 错误详情，更新双语指南。配置与数据库格式不变；调用 Shell 的扩展需移除旧参数。
+- 更新 MCP SDK、Shell 参数解析、参数校验及相关传递依赖，修复上游已公布的安全问题。
+- 修复部分 Responses 兼容服务在工具调用后附加空消息导致下一次请求返回 400 的问题；请求省略空占位消息，原始记录和工具结果保留。
 
-- Bundle fallback Python with pip and venv on Windows and macOS. Prepare it in the application data directory after the window loads, keep chat available during slow or failed preparation, and offer a reset action in Settings.
-- Enable Bundled Python by default for projects and subagents. Present its version, absolute path and preparation status alongside rg in initial context for the model to choose, without changing Python's PATH or saved system-environment information.
-- Probe system Python first for `.py` custom tools, then use the bundled fallback when needed, including interactive tools. Reject uninstalled Store aliases and disable automatic installation during probes. Failed scripts are not retried with another interpreter; explicit interpreter commands are unchanged.
-- Exclude runtimes from backups and preserve local environments during restore. Update bilingual guides and tool references. Configuration and database versions are unchanged; existing capability files without the new field default to enabled without being rewritten.
+- Remove `keep_processes` from Shell tools. A call completes when its Shell exits; cancellation, timeout and exiting Anas stop only that Shell, without recursively terminating children. Yielded long-running commands can continue across turns and can still be cancelled explicitly.
+- Add **Process list** below **Project memory** in the workspace menu. Inspect Shells and identified direct children from the current conversation and its subagents in the right sidebar, refresh their status, and terminate individual processes after identity checks. Application descendants are excluded. Observation is best-effort, and terminal closure can still affect attached programs.
+- Simplify Shell results on Windows and macOS: preserve raw stdout when no extra status is needed, otherwise include only necessary fields. Omit repeated commands and internal process snapshots, and recheck live processes during background queries.
+- Share menu and sidebar icon mappings and distinguish processes, project memory, memory activity and conversation activity. Standardize Python error details and update bilingual guides. Configuration and database formats are unchanged; extensions calling Shell tools must remove the old parameter.
+- Update the MCP SDK, Shell argument parser, validation library and related transitive dependencies to address published upstream security issues.
+- Fix HTTP 400 errors when a Responses-compatible service appends an empty message after tool calls. Omit the empty placeholder from replay requests while preserving original records and tool results.

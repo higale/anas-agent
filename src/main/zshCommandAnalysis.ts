@@ -3,7 +3,7 @@ import { dirname, isAbsolute, resolve } from 'node:path'
 import { parse } from 'shell-quote'
 import { resolveCanonicalWorkspacePath, resolveShellOperandPath } from './workspacePath'
 import type { ShellCommandAuthorizationOptions, ShellCommandPlan } from './shellCommandAuthorization'
-import { runShellCommand } from './shellRuntime'
+import { resolveShellInvocation, runPreparedProcess } from './shellRuntime'
 import { runWithoutCurrentAgentToolEffect } from './agent/toolEffectScope'
 import { withoutToolExecution } from './agent/toolExecutionContext'
 import { findSkillScriptExemption, type SkillScriptInvocation } from './skillsStore'
@@ -55,10 +55,16 @@ function noFunction(name: string): string {
 async function probeZsh(command: string, workingDir: string, options: ShellCommandAuthorizationOptions): Promise<string> {
   if (Buffer.byteLength(command) > 120000) unknown()
   let output: string | undefined
-  await runWithoutCurrentAgentToolEffect(() => withoutToolExecution(() => runShellCommand({
-    command, pathPrepend: dirname(options.rgExecutable), workingDir, env: options.env,
-    timeoutSec: 2, keepProcesses: false
-  }, options.shell, options.signal, { onResult: result => { if (result.ok) output = result.stdout } })))
+  await runWithoutCurrentAgentToolEffect(() => withoutToolExecution(async () => {
+    // Internal probes retain descendant cleanup; model Shells own only their root.
+    const source = `export PATH=${doubleQuote(dirname(options.rgExecutable))}:"$PATH"\n${command}`
+    const invocation = await resolveShellInvocation(source, options.shell, options.signal)
+    await runPreparedProcess({ command, workingDir, env: options.env, timeoutSec: 2, invocation,
+      logScope: 'shell-probe', successMessage: 'Shell probe finished.', failureMessage: 'Shell probe failed.',
+      abortBeforeStartError: 'Shell probe cancelled before start.', abortError: 'Shell probe cancelled.',
+      timeoutError: 'Shell probe timed out.'
+    }, options.signal, { onResult: result => { if (result.ok) output = result.stdout } })
+  }))
   if (output === undefined) unknown()
   return output
 }

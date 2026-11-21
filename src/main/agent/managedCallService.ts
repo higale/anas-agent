@@ -18,6 +18,8 @@ import { isManagedToolResultReference, toolResultText } from '../../runtime/tool
 import type { ConversationMessage } from '../../runtime/conversationMessage'
 import { terminalActionSchema, type TerminalAction } from '@shared/terminal'
 import type { ShellTerminalControl } from '../ptyShellSupervisor'
+import { processSnapshotSummary } from '@shared/processes'
+import { observeCallProcesses } from './conversationProcesses'
 
 const backgroundYieldMs = 10_000
 const maximumActiveCalls = 8
@@ -88,6 +90,9 @@ export interface ManagedCallOutputReadOptions {
 }
 
 interface ActiveManagedCall {
+  kind: AgentManagedCallKind
+  continuing?: boolean
+  processSnapshotKey?: string
   terminal?: ShellTerminalControl
   threadId: string
   runId: string
@@ -216,6 +221,7 @@ export class ManagedCallService {
   private readonly waiters = new Map<string, Set<() => void>>()
   private readonly idleWaiters = new Set<() => void>()
   private shuttingDown = false
+  private readonly shellQueue = new PQueue({ concurrency: maximumActiveCalls })
   private readonly executionQueue = new PQueue({ concurrency: maximumActiveCalls })
   private readonly serialGroups = new Map<string, PQueue>()
 
@@ -223,7 +229,7 @@ export class ManagedCallService {
     'appendManagedCallOutputBatch' | 'createManagedCall' | 'deleteManagedCall' | 'finishManagedCall' |
     'getManagedCall' | 'listUnresolvedManagedCalls' | 'listUnresolvedManagedCallsForThread' |
     'markManagedCallDetached' | 'markManagedCallRunning' | 'readManagedCallOutputRange' |
-    'resolveManagedCall' | 'updateManagedCallProgress'>, private readonly results: {
+    'resolveManagedCall' | 'updateManagedCallProgress' | 'updateManagedCallOutcome'>, private readonly results: {
     format: 'conversation'
     read(reference: string, threadId: string): Promise<ConversationMessage>
     readSync(reference: string, threadId: string): ConversationMessage
@@ -263,6 +269,7 @@ export class ManagedCallService {
     })
     const controller = new AbortController()
     const active: ActiveManagedCall = {
+      kind: options.kind,
       threadId: options.threadId,
       runId: options.runId,
       controller,
@@ -311,6 +318,10 @@ export class ManagedCallService {
         }
         this.database.markManagedCallRunning(callId, options.threadId)
         active.dispatched = true
+        if (active.kind === 'shell' && current.detachedAt) {
+          active.continuing = true
+          if (active.parentAbort) active.parentSignal?.removeEventListener('abort', active.parentAbort)
+        }
       },
       markLocalCommit: () => {
         if (!active.dispatched) throw new Error('A local commit must be dispatched before it starts.')
@@ -349,6 +360,14 @@ export class ManagedCallService {
       },
       setOutcome: (outcome) => {
         active.outcome = { ...active.outcome, ...outcome }
+        if (outcome.process_snapshot && typeof outcome.process_snapshot === 'object') {
+          const snapshot = outcome.process_snapshot as { processes?: unknown; error?: unknown }
+          const key = JSON.stringify([snapshot.processes, snapshot.error])
+          if (active.processSnapshotKey !== key) {
+            this.database.updateManagedCallOutcome(callId, options.threadId, active.outcome)
+            active.processSnapshotKey = key
+          }
+        }
       }
     }
 
@@ -357,7 +376,9 @@ export class ManagedCallService {
       let result: string
       let failure: string | undefined
       try {
-        result = await this.executeQueued(controller.signal, options.serialGroup, () => options.execute(control))
+        result = await (options.kind === 'shell'
+          ? this.inQueue(this.shellQueue, controller.signal, () => options.execute(control))
+          : this.executeQueued(controller.signal, options.serialGroup, () => options.execute(control)))
       } catch (reason) {
         failure = errorText(reason)
         result = callFailure(failure)
@@ -462,7 +483,7 @@ export class ManagedCallService {
       // the outer tool-effect journal. Keep their terminal result with the
       // owning run so a crash before that journal commits can replay this call
       // without executing the external operation again.
-      if (!stableCallId || options.retainInlineResult === false) this.database.deleteManagedCall(callId, options.threadId)
+      if (options.kind !== 'shell' && (!stableCallId || options.retainInlineResult === false)) this.database.deleteManagedCall(callId, options.threadId)
       return raced.result
     }
 
@@ -472,7 +493,7 @@ export class ManagedCallService {
       if (current.status === 'uncertain') {
         return options.allowBackground === false ? uncertainInlineResult(current) : this.detach(current)
       }
-      if (!stableCallId || options.retainInlineResult === false) this.database.deleteManagedCall(callId, options.threadId)
+      if (options.kind !== 'shell' && (!stableCallId || options.retainInlineResult === false)) this.database.deleteManagedCall(callId, options.threadId)
       return managedCallInlineResult(current)
     }
     return this.detach(current ?? call)
@@ -701,15 +722,15 @@ export class ManagedCallService {
     return [...this.active.values()].some((call) => call.threadId === threadId)
   }
 
-  hasActiveForRun(runId: string): boolean {
-    return [...this.active.values()].some((call) => call.runId === runId)
+  hasActiveForRun(runId: string, preserveShells = false): boolean {
+    return [...this.active.values()].some((call) => call.runId === runId && !(preserveShells && call.continuing))
   }
 
-  waitForRunIdle(runId: string): Promise<void> {
-    if (!this.hasActiveForRun(runId)) return Promise.resolve()
+  waitForRunIdle(runId: string, preserveShells = false): Promise<void> {
+    if (!this.hasActiveForRun(runId, preserveShells)) return Promise.resolve()
     return new Promise((resolve) => {
       const done = (): void => {
-        if (this.hasActiveForRun(runId)) return
+        if (this.hasActiveForRun(runId, preserveShells)) return
         this.idleWaiters.delete(done)
         resolve()
       }
@@ -741,18 +762,19 @@ export class ManagedCallService {
     )
   }
 
-  async cancelThreads(threadIds: readonly string[], reason: string): Promise<ManagedCallCancellationResult> {
+  async cancelThreads(threadIds: readonly string[], reason: string, preserveShells = false): Promise<ManagedCallCancellationResult> {
     const selected = new Set(threadIds)
-    const result = await this.cancelMatching((call) => selected.has(call.threadId), reason)
+    const result = await this.cancelMatching((call) => selected.has(call.threadId) && !(preserveShells && call.continuing), reason)
     return this.withPersistentUncertain(result,
       threadIds.flatMap((threadId) => this.database.listUnresolvedManagedCallsForThread(threadId)))
   }
 
   async cancelRun(
     runId: string,
-    reason = 'Agent run ended while a background call was still active.'
+    reason = 'Agent run ended while a background call was still active.',
+    preserveShells = false
   ): Promise<ManagedCallCancellationResult> {
-    const result = await this.cancelMatching((call) => call.runId === runId, reason)
+    const result = await this.cancelMatching((call) => call.runId === runId && !(preserveShells && call.continuing), reason)
     return this.withPersistentUncertain(
       result,
       this.database.listUnresolvedManagedCalls(runId)
@@ -790,6 +812,16 @@ export class ManagedCallService {
   } {
     const active = this.active.get(call.id)
     const terminal = active?.terminal
+    let outcome = call.outcome
+    if (call.kind === 'shell' && outcome) {
+      const observed = outcome.process_snapshot ? observeCallProcesses(call) : undefined
+      outcome = { ...outcome, ...processSnapshotSummary(observed) }
+      delete outcome.command
+      delete outcome.process_snapshot
+      if (!outcome.signal) delete outcome.signal
+      if (!outcome.timed_out) delete outcome.timed_out
+      if (!outcome.aborted) delete outcome.aborted
+    }
     return {
       ok: true,
       call_id: call.id,
@@ -812,7 +844,7 @@ export class ManagedCallService {
               ...(call.progressUnit === undefined ? {} : { unit: call.progressUnit })
             }
           }),
-      ...(call.outcome ? { outcome: call.outcome } : {}),
+      ...(outcome ? { outcome } : {}),
       ...(call.error ? { error: call.error } : {}),
       created_at: call.createdAt,
       updated_at: call.updatedAt
@@ -874,10 +906,14 @@ export class ManagedCallService {
   }
 
   private detach(call: AgentManagedCallRecord): string {
-    const detached = this.database.markManagedCallDetached(call.id, call.threadId)
     const active = this.active.get(call.id)
+    const detached = this.database.markManagedCallDetached(call.id, call.threadId)
     if (active && (!active.dispatched || active.deferredEffectResult)) {
       active.deferredEffectResult = deferCurrentManagedCallResult(detached) || active.deferredEffectResult
+    }
+    if (active?.kind === 'shell' && active.dispatched && !active.cancelRequested) {
+      active.continuing = true
+      if (active.parentAbort) active.parentSignal?.removeEventListener('abort', active.parentAbort)
     }
     return managedCallHandle(detached)
   }
