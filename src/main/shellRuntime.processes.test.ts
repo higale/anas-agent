@@ -21,12 +21,16 @@ async function cleanup(pid: number | undefined) {
   if (info) terminateObservedProcess({ ...info, role: 'child' })
 }
 describe('model Shell process ownership', () => {
-  it.runIf(process.platform === 'win32').each(['fixture-search-path', ''])('passes the canonical Windows PATH even with an inherited Path alias (%j)', async path => {
-    const script = "process.stdout.write('PATH=' + process.env.PATH + ';CASE=' + process.env.ANAS_CASE)"
-    const result = await runPreparedProcess({ ...prepared(script), invocation: { ...invocation(script), env: {
+  it.runIf(process.platform === 'win32').each([false, true].flatMap(pty => ['fixture-search-path', ''].map(path => ({ pty, path }))))(
+    'passes canonical Windows environment keys (PTY=$pty, PATH=$path)', async ({ pty, path }) => {
+    const script = "console.log('ENV:' + JSON.stringify([process.env.PATH, process.env.ANAS_CASE]) + ':END')"
+    let outcome: ShellRunResult | undefined
+    await runPreparedProcess({ ...prepared(script), ...(pty ? { pty: { columns: 90, rows: 25 } } : {}),
+      invocation: { ...invocation(script), executable: process.env.npm_node_execpath!, env: {
       ELECTRON_RUN_AS_NODE: '1', Path: 'stale-search-path', PATH: path, anas_case: 'stale', ANAS_CASE: 'canonical'
-    } } })
-    expect(result).toBe(`PATH=${path};CASE=canonical`)
+    } } }, undefined, { onResult: value => { outcome = value } })
+    expect(outcome).toMatchObject({ ok: true, exitCode: 0 })
+    expect(outcome!.stdout).toContain(`ENV:${JSON.stringify([path, 'canonical'])}:END`)
   })
 
   it('rechecks completed call children for read and wait without changing recorded outcomes', async () => {

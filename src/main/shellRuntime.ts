@@ -852,11 +852,24 @@ function terminateProcessTree(child: ShellSupervisorProcess, force: boolean): bo
 }
 
 function effectiveProcessEnvironment(prepared: PreparedProcess): NodeJS.ProcessEnv {
-  return Object.fromEntries(Object.entries({
+  const environment = {
     ...process.env,
     ...prepared.invocation.env,
     ...prepared.env
-  }).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+  }
+  let keys = Object.keys(environment)
+  if (process.platform === 'win32') {
+    // Match child_process for native and PTY launches alike. Duplicate Path
+    // spellings can hide the explicit PATH containing bundled executables.
+    const seen = new Set<string>()
+    keys = keys.sort().filter(key => {
+      const canonical = key.toUpperCase()
+      if (seen.has(canonical)) return false
+      seen.add(canonical)
+      return true
+    })
+  }
+  return Object.fromEntries(keys.filter(key => typeof environment[key] === 'string').map(key => [key, environment[key]]))
 }
 
 function processEnvironmentFingerprint(environment: NodeJS.ProcessEnv): string {

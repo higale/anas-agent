@@ -28,7 +28,7 @@ Shell 已移除 `keep_processes`，仅管理直接 Shell；已派发且已交接
 
 PTY 回归通过内部结果检查退出状态，通过明确输出标记获取独立子进程 PID，不假定模型返回始终为 JSON，也不依赖终端控制序列之外的换行布局。
 
-Windows 原生 Shell 环境块遵循 Node `child_process` 的大小写去重规则，避免继承的 `Path` 遮蔽带内置命令目录的 `PATH`，显式空值仍保留。
+Windows 普通与 PTY Shell 在共同执行入口按 Node `child_process` 的规则对环境变量做大小写去重，避免继承的 `Path` 遮蔽带内置命令目录的 `PATH`，显式空值仍保留。
 
 ## 当前显示、能力与记忆
 
