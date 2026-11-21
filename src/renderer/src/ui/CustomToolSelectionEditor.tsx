@@ -1,11 +1,13 @@
+import { ProjectDirectoryAddButton, ProjectResourceGroup, type ProjectDirectoryControls } from './projects/ProjectResourceGroup'
 import { useTranslation } from 'react-i18next'
 import { resolveToolSelection, withToolShadows, type ToolPackage, type ToolRoot, type ToolSelection } from '@shared/toolPackages'
 import { CapabilitySection } from './CapabilitySection'
 import { CapabilityResourceGroup } from './CapabilityResourceGroup'
 import { CapabilityResourceRow, CapabilityResourceToggle } from './CapabilityResource'
 
-export function CustomToolSelectionEditor({ value, tools, roots = [], subagent = false, backgroundTools, disabled, onChange }: {
+export function CustomToolSelectionEditor({ value, tools, roots = [], subagent = false, backgroundTools, disabled, projectTools, onChange }: {
   value: ToolSelection; tools: readonly ToolPackage[]; roots?: readonly ToolRoot[]; subagent?: boolean
+  projectTools?: ProjectDirectoryControls
   backgroundTools: boolean; disabled?: boolean; onChange(value: ToolSelection): void
 }) {
   const { t } = useTranslation()
@@ -61,6 +63,7 @@ export function CustomToolSelectionEditor({ value, tools, roots = [], subagent =
     </CapabilityResourceGroup>
   }
   return <CapabilitySection label={t('custom_tools.title')} customCount={items.filter(tool => value.entries.includes(tool.id)).length + missing.length}
+    actions={projectTools && <ProjectDirectoryAddButton kind="tool" onAddDirectories={projectTools.onAddDirectories} disabled={disabled || projectTools.disabled} />}
     total={items.length + missing.length} mode={mode} disabled={disabled} expandable
     countSuffix={subagent && mode === 'custom' && value.project && <> + {t('custom_tools.project_tools_summary')}</>}
     onChange={mode => onChange({ ...value, mode })}>
@@ -73,8 +76,12 @@ export function CustomToolSelectionEditor({ value, tools, roots = [], subagent =
         {missing.map(id => <CapabilityResourceRow key={id} name={id} status={<span className="ui-badge">{t('capabilities.deleted')}</span>}
           controls={<CapabilityResourceToggle label={id} enabled={selected(id)} disabled={selectionDisabled} onChange={enabled => setSelected(id, enabled)} />} />)}
       </CapabilityResourceGroup>}
-      {groups.filter(group => group.id === 'project').map(renderGroup)}
-      {!groups.length && !missing.length && <small>{t('custom_tools.empty')}</small>}
+      {projectTools ? <ProjectResourceGroup kind="tool" {...projectTools} disabled={disabled || projectTools.disabled}
+        roots={roots.filter(root => root.source === 'project').map(root => ({ ...root, available: !root.error,
+          error: root.error ? t(`custom_tools.load_error_${root.error.code}`) : undefined
+        }))} items={items.filter(tool => tool.source === 'project')} renderItem={renderTool} />
+        : groups.filter(group => group.id === 'project').map(renderGroup)}
+      {!projectTools && !groups.length && !missing.length && <small>{t('custom_tools.empty')}</small>}
     </div>
   </CapabilitySection>
 }

@@ -8,7 +8,5 @@
       "path": "~/.agents/skills"
     }
   ],
-  "availability": {},
-  "script_auto_approve": false,
-  "script_auto_approve_skills": []
+  "availability": {}
 }

@@ -23,7 +23,6 @@ export function inspectSkillText(content: string, expectedName: string): ParsedS
   if (!skillNamePattern.test(name) || name.length > 64) return { code: 'invalid_name', name }
   if (name !== expectedName) return { code: 'name_mismatch', name, expected: expectedName }
   if (!description) return { code: 'missing_description' }
-  if (description.length > 1024) return { code: 'description_too_long' }
   const compatibility = raw.compatibility
   if (compatibility !== undefined && (typeof compatibility !== 'string' || !compatibility.trim() || compatibility.length > 500)) {
     return { code: 'invalid_frontmatter_field', name: 'compatibility' }

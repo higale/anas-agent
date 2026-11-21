@@ -3,19 +3,19 @@ import { useTranslation } from 'react-i18next'
 import type { SkillSnapshot } from '@shared/types'
 import { notice } from '../notice'
 
-export function useProjectSkills(projectId: string, globalSkills: SkillSnapshot | undefined, sourceFolders?: string[], skillDirectories?: string[]): SkillSnapshot | undefined {
+export function useProjectSkills(projectId: string, globalSkills: SkillSnapshot | undefined, skillDirectories?: string[]): SkillSnapshot | undefined {
   const { t } = useTranslation()
-  const [loaded, setLoaded] = useState<{ projectId: string; sourceFolders?: string[]; skillDirectories?: string[]; snapshot: SkillSnapshot }>()
+  const [loaded, setLoaded] = useState<{ projectId: string; skillDirectories?: string[]; snapshot: SkillSnapshot }>()
 
   useEffect(() => {
     let cancelled = false
-    void window.gale.skills.get(projectId, sourceFolders, skillDirectories).then((snapshot) => {
-      if (!cancelled) setLoaded({ projectId, sourceFolders, skillDirectories, snapshot })
+    void window.gale.skills.get(projectId, skillDirectories).then((snapshot) => {
+      if (!cancelled) setLoaded({ projectId, skillDirectories, snapshot })
     }).catch(() => {
       if (!cancelled) notice.error(t('chat.failed_load_skill'))
     })
     return () => { cancelled = true }
-  }, [projectId, sourceFolders, skillDirectories, globalSkills, t])
+  }, [projectId, skillDirectories, globalSkills, t])
 
-  return loaded?.projectId === projectId && loaded.sourceFolders === sourceFolders && loaded.skillDirectories === skillDirectories ? loaded.snapshot : undefined
+  return loaded?.projectId === projectId && loaded.skillDirectories === skillDirectories ? loaded.snapshot : undefined
 }

@@ -1,17 +1,14 @@
 import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
 import { promisify } from 'node:util'
-import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { AgentAccessMode } from '@shared/agentTypes'
 import { bundledSearchEnvironment, withExecutableDirectory } from './bundledRipgrep'
-import { getCommandShell, prepareShellCommand, resolveShellInvocation, runShellCommand } from './shellRuntime'
+import { getCommandShell, prepareShellCommand, resolveShellInvocation } from './shellRuntime'
 import { createShellCommandAuthorization } from './shellCommandAuthorization'
 import { parsePowerShellCommands } from './powershellCommandAnalysis'
-import * as skillsStore from './skillsStore'
-import { defaultCapabilities } from '@shared/agentCapabilities'
 
 const execFileAsync = promisify(execFile)
 const directories: string[] = []
@@ -31,71 +28,17 @@ async function fixture(accessMode: AgentAccessMode = 'strict_approval') {
 }
 afterEach(async () => { await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true }))) })
 
-const bundledPython = resolve('build/python-runtime', `${process.platform}-${process.arch}`, 'python', process.platform === 'win32' ? 'python.exe' : 'bin/python3')
-it.skipIf(!['win32', 'darwin'].includes(process.platform) || !existsSync(bundledPython))('binds Skill authorization to the explicit bundled interpreter used by Shell execution', async () => {
-  const h = await fixture()
-  const script = join(h.project, 'query.py')
-  await writeFile(script, 'import sys\nprint(sys.executable)\n')
-  vi.spyOn(skillsStore, 'findSkillScriptExemption').mockResolvedValue({ skillId: 'user:query', root: await realpath(h.project), script: await realpath(script) })
-  const env = { ...h.env, PYTHONHOME: undefined, PYTHONPATH: undefined,
-    PYTHONNOUSERSITE: '1', PYTHONDONTWRITEBYTECODE: '1', ...(process.platform === 'darwin' ? { ZDOTDIR: h.project } : {}) }
-  if (process.platform === 'darwin') await writeFile(join(h.project, '.zprofile'), 'export PATH="/usr/bin:/bin"\n')
-  const authorization = createShellCommandAuthorization({ ...h, env,
-    skills: { selection: defaultCapabilities.skills, agent: { kind: 'main' } } })
-  const quote = (value: string) => `'${value.replaceAll("'", process.platform === 'win32' ? "''" : "'\\''")}'`
-  const command = `${process.platform === 'win32' ? '& ' : ''}${quote(bundledPython)} query.py`
-  const args = { command, working_dir: h.project }
-  const plan = await authorization.inspect(args, { name: 'query', sourceAlias: 'user' })
-  expect(plan?.skillScript?.executor).toBe(await realpath(bundledPython))
-  const output = await runShellCommand({ command, workingDir: h.project, env, pathPrepend: h.search.directory, timeoutSec: 10 }, h.shell)
-  expect(await realpath(output.trim())).toBe(await realpath(bundledPython))
-}, 20000)
-
 describe.skipIf(process.platform !== 'win32')('Windows Shell read authorization', () => {
-  it('recognizes one Skill invocation outside the project, executes the original command, and observes revocation', async () => {
+  it('requires normal approval for a script inside a Skill directory', async () => {
     const h = await fixture()
-    const nodeExecutable = (await execFileAsync('node', ['-p', 'process.execPath'], { encoding: 'utf8', windowsHide: true })).stdout.trim()
-    const script = join(h.outside, 'query.js')
-    await writeFile(script, 'process.stdout.write(JSON.stringify(process.argv.slice(2)))')
-    const grant = { skillId: 'user:query', root: await realpath(h.outside), script: await realpath(script) }
-    const exemption = vi.spyOn(skillsStore, 'findSkillScriptExemption').mockResolvedValue(grant)
-    const scope = { selection: defaultCapabilities.skills, agent: { kind: 'main' as const } }
-    const analyzer = createShellCommandAuthorization({ ...h, skills: scope })
-    const command = `& '${nodeExecutable}' '${script}' --month 2026-09 --text 'a; b && c 中文'`
-    const args = Object.freeze({ command, working_dir: h.project })
-    const plan = await analyzer.inspect(args, { name: 'query', sourceAlias: 'user' })
-    expect(plan?.skillScript).toMatchObject({ ...grant, executor: await realpath(nodeExecutable) })
-    expect(exemption).toHaveBeenCalledWith(grant.script, scope, { name: 'query', sourceAlias: 'user' })
-    expect(args).toEqual({ command, working_dir: h.project })
-    const invocation = await resolveShellInvocation(command, h.shell)
-    const result = await execFileAsync(invocation.executable, invocation.args, { cwd: h.project, env: h.search.env,
-      windowsHide: true, encoding: 'utf8', timeout: 3000 })
-    expect(JSON.parse(result.stdout)).toEqual(['--month', '2026-09', '--text', 'a; b && c 中文'])
-    exemption.mockResolvedValue(undefined)
-    expect(await analyzer.requiresApproval(args)).toBe(true)
-  })
-
-  it.each(['sequence', 'pipeline', 'redirect', 'and', 'subexpression', 'splat', 'environment', 'inline', 'preload', 'directory', 'pty', 'no-skill'] as const)(
-    'does not use Skill approval for the %s execution mode', async mode => {
-    const h = await fixture()
-    const nodeExecutable = (await execFileAsync('node', ['-p', 'process.execPath'], { encoding: 'utf8', windowsHide: true })).stdout.trim()
-    const script = join(h.outside, 'query.js')
-    await writeFile(script, 'process.stdout.write("ok")')
-    const exemption = vi.spyOn(skillsStore, 'findSkillScriptExemption').mockResolvedValue({
-      skillId: 'user:query', root: h.outside, script })
-    const analyzer = createShellCommandAuthorization({ ...h, skills: { selection: defaultCapabilities.skills, agent: { kind: 'subagent' as const } } })
-    const call = `& '${nodeExecutable}' '${script}'`
-    const commands: Record<string, string> = {
-      sequence: `${call}; Get-Date`, pipeline: `${call} | Select-Object -First 1`, redirect: `${call} > result.txt`, and: `${call} && Get-Date`,
-      subexpression: `${call} $(Get-Date)`, splat: `${call} @args`, environment: `${call} $env:HOME`,
-      inline: `& '${nodeExecutable}' -e 'console.log(1)' '${script}'`, preload: `& '${nodeExecutable}' --require other.js '${script}'`,
-      directory: `Set-Location '${h.outside}'; ${call}`
-    }
-    const command = commands[mode] ?? call
-    const args = Object.freeze({ command, ...(mode === 'pty' ? { pty: { columns: 80, rows: 24 } } : {}) })
-    expect(await (mode === 'no-skill' ? h.authorization : analyzer).requiresApproval(args), command).toBe(true)
-    expect(args.command).toBe(command)
-    expect(exemption).not.toHaveBeenCalled()
+    const directory = join(h.project, '.agents', 'skills', 'query')
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, 'SKILL.md'), '---\nname: query\ndescription: Query\n---\nRun query.ps1')
+    const script = join(directory, 'query.ps1')
+    await writeFile(script, "Set-Content -LiteralPath result.txt -Value changed")
+    const args = Object.freeze({ command: `& '${h.shell.executable}' -File '${script}'` })
+    expect(await h.authorization.inspect(args)).toBeUndefined()
+    expect(await h.authorization.requiresApproval(args)).toBe(true)
   })
 
   it.each([null, [], 'wrong', 3])('leaves malformed arguments %j to tool validation without crashing preflight', async args => {

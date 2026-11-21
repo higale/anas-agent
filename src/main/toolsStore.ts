@@ -1,3 +1,4 @@
+import { parseResourceDirectories, resourceDirectoryName } from './resourceDirectories'
 import { findSubagentPackage, withSubagentPackage } from './subagentPackages'
 import { writeJsonFileAtomic as writeAtomic } from './atomicJson'
 import { createHash, randomUUID } from 'node:crypto'
@@ -241,23 +242,22 @@ export function setToolEnabled(id: string, enabled: boolean): Promise<void> {
   })
 }
 
-export function listToolSnapshot(sourceFolders: readonly string[] = []): Promise<ToolSnapshot> {
-  return serialize(() => readToolSnapshot(sourceFolders))
+export function listToolSnapshot(toolDirectories: readonly string[] = []): Promise<ToolSnapshot> {
+  return serialize(() => readToolSnapshot(toolDirectories))
 }
 
-async function readToolSnapshot(sourceFolders: readonly string[] = []): Promise<ToolSnapshot> {
-  if (!Array.isArray(sourceFolders) || sourceFolders.some(folder => typeof folder !== 'string' || !isAbsolute(folder))) throw new Error('Tool source folders must be absolute paths.')
+async function readToolSnapshot(toolDirectories: readonly string[] = []): Promise<ToolSnapshot> {
   const config = await settings()
   const roots: ToolRoot[] = [
-    ...[...new Set(sourceFolders.map(folder => resolve(folder)))].map(folder => ({
-      id: `project-${createHash('sha256').update(folder).digest('hex').slice(0, 16)}`,
-      name: basename(folder), path: join(folder, '.agents', 'tools'), source: 'project' as const
+    ...parseResourceDirectories(toolDirectories).map(path => ({
+      id: `project-tool-${createHash('sha256').update(process.platform === 'win32' ? path.toLowerCase() : path).digest('hex').slice(0, 16)}`,
+      name: resourceDirectoryName(path, 'tools'), path, source: 'project' as const
     })),
     { id: 'user', name: 'User', path: getToolsDir(), source: 'user' },
     ...config.externalDirectories.map(directory => ({ ...directory, source: 'external' as const }))
   ]
   const tools = (await Promise.all(roots.map(root => scan(root, config)))).flat()
-  return { roots, tools: tools.map(tool => ({ ...tool, enabled: !config.disabledTools?.includes(tool.id) })) }
+  return { roots, tools: tools.map(tool => ({ ...tool, enabled: tool.source === 'project' || !config.disabledTools?.includes(tool.id) })) }
 }
 
 /** Pin resources for the process lifetime; saved runs keep their definition but follow the user's package ID. */
@@ -451,37 +451,37 @@ export function moveExternalToolDirectory(id: string, direction: -1 | 1): Promis
   })
 }
 
-async function findToolPackage(id: string, sourceFolders: readonly string[]) {
-  const tool = (await readToolSnapshot(sourceFolders)).tools.find(t => t.id === id)
+async function findToolPackage(id: string, toolDirectories: readonly string[]) {
+  const tool = (await readToolSnapshot(toolDirectories)).tools.find(t => t.id === id)
   if (!tool) throw new Error('Tool package was not found.')
   return tool
 }
 
-export function listToolFiles(id: string, relativePath?: string, sourceFolders: readonly string[] = []) {
-  return serialize(async () => listPackageFiles((await findToolPackage(id, sourceFolders)).directory, relativePath))
+export function listToolFiles(id: string, relativePath?: string, toolDirectories: readonly string[] = []) {
+  return serialize(async () => listPackageFiles((await findToolPackage(id, toolDirectories)).directory, relativePath))
 }
 
-export function readToolFile(id: string, relativePath: string, sourceFolders: readonly string[] = []) {
+export function readToolFile(id: string, relativePath: string, toolDirectories: readonly string[] = []) {
   return serialize(async () => {
-    const tool = await findToolPackage(id, sourceFolders)
+    const tool = await findToolPackage(id, toolDirectories)
     return { ...await readPackageFile(tool.directory, relativePath), editable: true }
   })
 }
 
-export function createToolFile(id: string, relativePath: string, sourceFolders: readonly string[] = []) {
+export function createToolFile(id: string, relativePath: string, toolDirectories: readonly string[] = []) {
   return serialize(async () => {
-    const tool = await findToolPackage(id, sourceFolders)
+    const tool = await findToolPackage(id, toolDirectories)
     return { ...await createPackageFile(tool.directory, relativePath), editable: true }
   })
 }
 
-export function toolFileExists(id: string, relativePath: string, sourceFolders: readonly string[] = []) {
-  return serialize(async () => packageFileExists((await findToolPackage(id, sourceFolders)).directory, relativePath))
+export function toolFileExists(id: string, relativePath: string, toolDirectories: readonly string[] = []) {
+  return serialize(async () => packageFileExists((await findToolPackage(id, toolDirectories)).directory, relativePath))
 }
 
-export function saveToolFile(id: string, relativePath: string, update: import('@shared/packageFiles').PackageFileUpdate, sourceFolders: readonly string[] = []) {
+export function saveToolFile(id: string, relativePath: string, update: import('@shared/packageFiles').PackageFileUpdate, toolDirectories: readonly string[] = []) {
   return serialize(async () => {
-    const tool = await findToolPackage(id, sourceFolders)
+    const tool = await findToolPackage(id, toolDirectories)
     const definitionPath = await realpath(join(tool.directory, manifestName)).catch(reason => {
       if ((reason as NodeJS.ErrnoException).code === 'ENOENT') return undefined
       throw reason

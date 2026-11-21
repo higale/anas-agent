@@ -52,52 +52,51 @@ describe('framework-free authorization at actual execution', () => {
     await expect(withPatchAuthorization(left, async () => { throw failure })).rejects.toBe(failure)
   })
 
-  it('rechecks delayed Shell dispatch, keeps Skill scope, and rejects grants for another call', async () => {
+  it('rechecks delayed Shell dispatch, keeps call bindings, and rejects grants for another call', async () => {
     let mode: AgentAccessMode = 'full_access'
-    let plan: ShellCommandPlan | undefined = { workingDir: process.cwd(), executable: 'pwsh', paths: [],
-      skillScript: { skillId: 'skill', root: process.cwd(), script: join(process.cwd(), 'script.ps1'), executor: 'pwsh' } }
+    let plan: ShellCommandPlan | undefined = { workingDir: process.cwd(), executable: 'pwsh', paths: [] }
     const analyzer = { inspect: vi.fn(async () => plan), requiresApproval: vi.fn(async () => false) }
-    const options = { analyzer, accessMode: () => mode }, call = { id: 'shell', name: 'pwsh', args: { command: 'script.ps1' } }, skill = { name: 'inspect' }
-    const unrestricted = await prepareShellAuthorization(call, skill, options)
+    const options = { analyzer, accessMode: () => mode }, call = { id: 'shell', name: 'pwsh', args: { command: 'script.ps1' } }
+    const unrestricted = await prepareShellAuthorization(call, options)
     expect(analyzer.inspect).not.toHaveBeenCalled()
-    await withShellAuthorization(unrestricted, call, skill, options, async () => {
+    await withShellAuthorization(unrestricted, call, options, async () => {
       mode = 'smart_approval'
       await expect(verifyCurrentShellAuthorization()).rejects.toThrow('access mode changed')
     })
-    const automatic = await prepareShellAuthorization(call, skill, options)
-    expect(analyzer.inspect).toHaveBeenCalledWith(call.args, skill)
+    const automatic = await prepareShellAuthorization(call, options)
+    expect(analyzer.inspect).toHaveBeenCalledWith(call.args)
     expect(automatic.requiresApproval).toBe(false)
-    await withShellAuthorization(automatic, call, skill, options, async () => {
+    await withShellAuthorization(automatic, call, options, async () => {
       await verifyCurrentShellAuthorization()
       plan = undefined
       await expect(verifyCurrentShellAuthorization()).rejects.toThrow()
     })
-    await withShellAuthorization({ ...automatic, humanApproved: true }, { ...call, id: 'other' }, skill, options,
+    await withShellAuthorization({ ...automatic, humanApproved: true }, { ...call, id: 'other' }, options,
       async () => { await expect(verifyCurrentShellAuthorization()).rejects.toThrow('Missing or changed') })
-    await withShellAuthorization({ ...automatic, humanApproved: true }, call, skill, options, verifyCurrentShellAuthorization)
+    await withShellAuthorization({ ...automatic, humanApproved: true }, call, options, verifyCurrentShellAuthorization)
     await expect(verifyCurrentShellAuthorization()).rejects.toThrow('persisted authorization')
   })
 })
 
-it('checks readonly and Skill plans before a true or omitted model flag and revokes model exemptions on mode changes', async () => {
+it('checks readonly plans before a true or omitted model flag and revokes model exemptions on mode changes', async () => {
   let mode: AgentAccessMode = 'smart_approval'
   let plan: ShellCommandPlan | undefined = { workingDir: process.cwd(), executable: '/bin/zsh', paths: [] }
   const analyzer = { inspect: vi.fn(async () => plan), requiresApproval: vi.fn() }, options = { analyzer, accessMode: () => mode }
   for (const flag of [{}, { needs_approval: true }, { needs_approval: false }]) {
     const call = { id: 'shell', name: 'zsh', args: { command: 'cat file', ...flag } }
-    const receipt = await prepareShellAuthorization(call, undefined, options)
+    const receipt = await prepareShellAuthorization(call, options)
     expect(receipt.requiresApproval).toBe(false)
-    await withShellAuthorization(receipt, call, undefined, options, verifyCurrentShellAuthorization)
+    await withShellAuthorization(receipt, call, options, verifyCurrentShellAuthorization)
   }
   plan = undefined
   for (const flag of [{}, { needs_approval: true }, { needs_approval: false }]) {
     const call = { id: 'shell', name: 'zsh', args: { command: 'some-write', ...flag } }
-    const receipt = await prepareShellAuthorization(call, undefined, options)
+    const receipt = await prepareShellAuthorization(call, options)
     expect(receipt.requiresApproval).toBe(flag.needs_approval !== false)
     if (flag.needs_approval === false) {
-      await withShellAuthorization(receipt, call, undefined, options, verifyCurrentShellAuthorization)
+      await withShellAuthorization(receipt, call, options, verifyCurrentShellAuthorization)
       mode = 'strict_approval'
-      await expect(withShellAuthorization(receipt, call, undefined, options, verifyCurrentShellAuthorization)).rejects.toThrow('requires approval')
+      await expect(withShellAuthorization(receipt, call, options, verifyCurrentShellAuthorization)).rejects.toThrow('requires approval')
       mode = 'smart_approval'
     }
   }

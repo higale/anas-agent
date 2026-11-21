@@ -6,6 +6,7 @@ import type { SkillSnapshot } from '@shared/types'
 import { CheckboxField } from '../CheckboxField'
 import { CapabilitySection } from '../CapabilitySection'
 import { SkillAvailabilityNotice } from '../SkillAvailabilityNotice'
+import { SkillDescriptionWarning } from '../SkillDescriptionWarning'
 import { SegmentedMultiSelect } from '../SegmentedMultiSelect'
 import { PluginIcon } from './PluginIcon'
 
@@ -87,7 +88,7 @@ export function PluginCapabilitySelection({ value, plugins, skills, error, onCha
                   const setSkill = (key: 'model' | 'shortcut', checked: boolean) => change({ ...value, skills: { ...value.skills,
                     entries: [...value.skills.entries.filter(skill => skill.id !== skillId), { id: skillId, model: selected?.model ?? false, shortcut: selected?.shortcut ?? false, [key]: checked }] } })
                   return <div className="ui-field-stack" key={skillId}>
-                    <div className="ui-capability-resource"><span className="ui-field-stack"><span className="ui-row" data-tooltip={skill?.description}><span className="ui-truncate">{skillName}</span></span><SkillAvailabilityNotice skill={skill} selected={shownSelection} subagent={subagent} /></span>
+                    <div className="ui-capability-resource"><span className="ui-field-stack"><span className="ui-row" data-tooltip={skill?.description}><span className="ui-truncate">{skillName}</span><SkillDescriptionWarning description={skill?.description} /></span><SkillAvailabilityNotice skill={skill} selected={shownSelection} subagent={subagent} /></span>
                       {subagent ? <CheckboxField label={t('capabilities.model')} aria-label={`${skillName} ${t('capabilities.model')}`} checked={shownSelection.model} disabled={(!definition || skill?.modelAvailable === false) && !selected?.model} onChange={checked => setSkill('model', checked)} />
                         : <SegmentedMultiSelect<'model' | 'shortcut'> ariaLabel={skillName} options={(['shortcut', 'model'] as const).map(key => ({ value: key, label: t(`capabilities.${key}`), ariaLabel: `${skillName} ${t(`capabilities.${key}`)}`, checked: shownSelection[key], disabled: (!definition || (key === 'model' ? skill?.modelAvailable : skill?.userAvailable) === false) && !selected?.[key] }))} onChange={setSkill} />}
                     </div>

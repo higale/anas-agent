@@ -16,6 +16,7 @@ export type PatchAuthorizationReceipt = z.infer<typeof patchReceiptSchema>['call
 const shellReceiptSchema = z.object({ runId: z.string(), calls: z.array(z.object({
   id: z.string(), name: z.string(), inputHash: z.string(), requiresApproval: z.boolean(), humanApproved: z.boolean(),
   plan: z.object({ workingDir: z.string(), executable: z.string(), paths: z.array(z.string()),
+    // Historical v3/v4 receipts remain readable; these grants no longer authorize dispatch.
     skillScript: z.object({ skillId: z.string(), root: z.string(), script: z.string(), executor: z.string() }).optional()
   }).optional()
 })) })
@@ -74,7 +75,7 @@ export function assertPatchFileBinding(actual: readonly { path: string; access: 
 }
 
 /** Called at actual dispatch, including calls released from a background queue.
- * The caller supplies current environment/Skill inspection, never a cached grant. */
+ * The caller supplies current environment inspection, never a cached grant. */
 export async function verifyShellReceipt(receipt: ShellAuthorizationReceipt | undefined, args: unknown, options: {
   accessMode(): AgentAccessMode
   inspect(): Promise<ShellAuthorizationReceipt['plan']>
@@ -93,12 +94,8 @@ export async function verifyShellReceipt(receipt: ShellAuthorizationReceipt | un
   }
   const current = await options.inspect()
   const expected = receipt.plan
-  const currentSkill = current?.skillScript, expectedSkill = expected.skillScript
-  const sameSkill = !currentSkill && !expectedSkill || currentSkill && expectedSkill
-    && currentSkill.skillId === expectedSkill.skillId && samePath(currentSkill.root, expectedSkill.root)
-    && samePath(currentSkill.script, expectedSkill.script) && samePath(currentSkill.executor, expectedSkill.executor)
   if (!current || !samePath(current.executable, expected.executable) || !samePath(current.workingDir, expected.workingDir)
-    || !sameSkill
+    || expected.skillScript !== undefined
     || current.paths.length !== expected.paths.length || current.paths.some((path, index) => !samePath(path, expected.paths[index]))) {
     throw new Error('Auto-approved Shell targets changed or could not be verified before execution. Submit the original command again for authorization.')
   }

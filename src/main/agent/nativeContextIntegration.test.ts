@@ -1,7 +1,6 @@
 import { mockPreferenceReader } from '../../test/preferenceFixture'
 import { z } from 'zod'
 import { defineContentTool } from '../../runtime/toolDefinition'
-import type { SkillScriptInvocation } from '../skillsStore'
 import * as shellCommandAuthorization from '../shellCommandAuthorization'
 import * as shellRuntime from '../shellRuntime'
 import * as bundledRipgrep from '../bundledRipgrep'
@@ -152,14 +151,14 @@ describe('native context integration', () => {
     appConfigMocks.getAppConfigSnapshot.mockReset().mockResolvedValue(previewConfig())
     vi.mocked(toolsStore.listToolSnapshot).mockReset().mockResolvedValue({ roots: [], tools: [] })
   })
-  it.each([true, false])('binds only the latest host-recorded Skill to Shell checks (explicit=%s)', async explicit => {
+  it.each([true, false])('uses normal Shell authorization for explicit and ordinary requests (explicit=%s)', async explicit => {
     const snapshot = previewConfig(), base = minimalProject()
     const project = { ...base, capabilities: { ...base.capabilities, tools: ['run_shell'] } }
     projectStoreMocks.getProject.mockResolvedValue(project)
     const { database, thread } = openHistoryDatabase([{ id: 'old-user', kind: 'user', content: '/old@user report\n\n<skill>Old instructions</skill>', context: { displayText: '/old@user report' } },
       { id: 'old-answer', kind: 'assistant', content: 'Previous task complete' }])
     database.setAccessMode(thread.id, 'strict_approval')
-    const inspect = vi.fn(async (_args: Readonly<Record<string, unknown>>, _invocation?: SkillScriptInvocation) => ({ workingDir: testPaths.root, executable: '/shell', paths: [] }))
+    const inspect = vi.fn(async (_args: Readonly<Record<string, unknown>>) => ({ workingDir: testPaths.root, executable: '/shell', paths: [] }))
     vi.spyOn(shellCommandAuthorization, 'createShellCommandAuthorization').mockReturnValue({ inspect, requiresApproval: vi.fn() })
     vi.spyOn(shellRuntime, 'getCommandShell').mockResolvedValue({ executable: 'pwsh.exe', name: 'PowerShell', family: 'powershell' })
     vi.spyOn(bundledRipgrep, 'bundledSearchEnvironment').mockResolvedValue({ executable: 'rg.exe', directory: testPaths.root, env: {} })
@@ -177,9 +176,7 @@ describe('native context integration', () => {
       const output = await instance.execution.execute('input', { threadId: thread.id, runId, signal: new AbortController().signal }, observer())
       if (output.result.status === 'rejected') throw output.result.reason
       expect(execute).toHaveBeenCalledOnce()
-      expect(inspect.mock.calls.map(([, invocation]) => invocation)).toEqual(explicit
-        ? [expect.objectContaining({ name: 'query', sourceAlias: 'user' }), expect.objectContaining({ name: 'query', sourceAlias: 'user' })]
-        : [undefined, undefined])
+      expect(inspect).toHaveBeenCalledWith({ command: 'python scripts/query.py' })
     } finally { await instance.dispose(); database.close() }
   })
 

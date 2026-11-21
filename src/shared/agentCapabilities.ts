@@ -410,12 +410,6 @@ export function setSkillSelection(selection: SkillSelection, skills: readonly Sk
   return { ...selection, mode: ordinaryChange ? 'custom' : selection.mode, entries: [...entries.filter(entry => entry.id !== id), { ...current, [key]: enabled }] }
 }
 
-export function parseProjectScriptApprovals(value: unknown): string[] {
-  if (value === undefined) return []
-  if (!Array.isArray(value) || value.some(id => typeof id !== 'string' || !id.trim())) throw new Error('Project Skill script approvals must be Skill IDs.')
-  return [...new Set(value)]
-}
-
 export function projectSkillSnapshot(snapshot: SkillSnapshot | undefined, selection: SkillSelection, pluginTools?: readonly string[]): SkillSnapshot | undefined {
   if (!snapshot) return undefined
   const resolved = resolveSkillSelection(selection, snapshot.skills, false, false, pluginTools)

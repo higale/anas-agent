@@ -1,7 +1,6 @@
 import { runtimeToolDefinitions } from '../llm/runtimeTools'
 import type { AgentAccessMode } from '@shared/agentTypes'
-import type { ShellCommandPlan } from '../shellCommandAuthorization'
-import type { SkillScriptInvocation } from '../skillsStore'
+import type { ShellAuthorizationReceipt } from '../../runtime/authorizationReceipts'
 import { verifyCurrentShellAuthorization } from './toolAuthorizationRuntime'
 import Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
@@ -99,8 +98,8 @@ async function fileApprovalFixture() {
 
 async function shellFixture(commands = ['rg -n needle .']) {
   const h = await fixture()
-  let mode: AgentAccessMode = 'strict_approval', target = '/project/original', supported = true, skillScript: ShellCommandPlan['skillScript']
-  const inspect = vi.fn(async (args: Readonly<Record<string, unknown>>, _invocation?: SkillScriptInvocation): Promise<ShellCommandPlan | undefined> => supported && args.command !== 'unknown command'
+  let mode: AgentAccessMode = 'strict_approval', target = '/project/original', supported = true, skillScript: NonNullable<ShellAuthorizationReceipt['plan']>['skillScript']
+  const inspect = vi.fn(async (args: Readonly<Record<string, unknown>>): Promise<ShellAuthorizationReceipt['plan']> => supported && args.command !== 'unknown command'
     ? { workingDir: '/project', executable: '/shell', paths: [target], ...(skillScript ? { skillScript } : {}) } : undefined)
   const execute = vi.fn(async (args: Record<string, unknown>) => {
     await new Promise<void>(resolve => setImmediate(resolve))
@@ -111,7 +110,7 @@ async function shellFixture(commands = ['rg -n needle .']) {
   h.options.definitions = [tool]; h.options.accessMode = () => mode
   h.options.shell = { toolName: 'shell', analyzer: { inspect, requiresApproval: vi.fn() }, accessMode: h.options.accessMode }
   const calls = commands.map((command, index) => call(`shell-${index}`, 'shell', { command, working_dir: '.' }))
-  return { ...h, tool, calls, execute, inspect, skill: (value: ShellCommandPlan['skillScript']) => { skillScript = value },
+  return { ...h, tool, calls, execute, inspect, skill: (value: NonNullable<ShellAuthorizationReceipt['plan']>['skillScript']) => { skillScript = value },
     mode: (value: AgentAccessMode) => { mode = value }, target: (value: string) => { target = value }, supported: (value: boolean) => { supported = value } }
 }
 
@@ -185,13 +184,12 @@ describe('native capability dispatch and durable effects', () => {
     expect(shellRunner).not.toHaveBeenCalled()
   })
 
-  it.each(['revoke', 'skillId', 'root', 'script', 'executor'] as const)('rechecks changed Skill exemption %s at delayed dispatch after reopening', async change => {
+  it('reads historical Skill grants but rejects them at delayed dispatch after reopening', async () => {
     const h = await shellFixture(['python scripts/query.py --month 2026-09'])
     const binding = { skillId: 'user:query', root: '/skills/query', script: '/skills/query/scripts/query.py', executor: '/python' }
     h.skill(binding); await h.begin(h.calls)
     const store = reopen(h)
     expect(store.load('thread')!.calls[0].authorization?.shell).toMatchObject({ humanApproved: false, plan: { skillScript: binding } })
-    if (change === 'revoke') h.supported(false); else h.skill({ ...binding, [change]: '/changed' })
     await expect(dispatchSavedCalls(h, store, [h.tool])).rejects.toThrow('targets changed')
   })
 

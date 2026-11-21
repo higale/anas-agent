@@ -9,6 +9,7 @@ import type { SkillAvailabilityUpdate, SkillFileNode, SkillFilePreview, SkillRoo
 import { SegmentedMultiSelect } from '../SegmentedMultiSelect'
 import { CommitTextInput } from '../CommitTextField'
 import { notice } from '../notice'
+import { SkillDescriptionWarning } from '../SkillDescriptionWarning'
 
 interface Props {
   sectionClass: string
@@ -19,7 +20,6 @@ interface Props {
   onRefresh: () => void | Promise<void>
   onUpdateDirectory: (rootId: string, update: SkillRootUpdate) => void | Promise<void>
   onRemoveDirectory: (root: SkillRootSummary) => void
-  onUpdateScriptApproval: (skillId: string | undefined, enabled: boolean) => void | Promise<void>
   onUpdateAvailability: (skillId: string, update: SkillAvailabilityUpdate) => void | Promise<void>
 }
 
@@ -38,7 +38,6 @@ export function SkillsSettings({
   onRefresh,
   onUpdateDirectory,
   onRemoveDirectory,
-  onUpdateScriptApproval,
   onUpdateAvailability
 }: Props) {
   const { t } = useTranslation()
@@ -195,10 +194,9 @@ export function SkillsSettings({
     return <PackageTreeItem key={skill.id} name={skill.name} icon={<Wand2 size={14} aria-hidden="true" />} depth={depth}
       buttonRef={!showSource && selection?.kind === 'skill' && selection.skillId === skill.id ? selectedSkillButtonRef : undefined}
       expanded={isExpanded} selected={selection?.kind === 'skill' && selection.skillId === skill.id}
-      linked={skill.linked} highlighted={skill.scriptAutoApprove}
+      linked={skill.linked}
       badge={showSource ? `@${skill.shortcutAlias}` : undefined}
-      status={<SettingsAvailabilityBadge disabled={!skill.modelAvailable && !skill.userAvailable} error={Boolean(skill.loadError)} />}
-      tooltip={skill.scriptAutoApprove ? t('settings.skill_scripts_auto_approve') : undefined}
+      status={<><SettingsAvailabilityBadge disabled={!skill.modelAvailable && !skill.userAvailable} error={Boolean(skill.loadError)} /><SkillDescriptionWarning description={skill.description} /></>}
       expandLabel={t(isExpanded ? 'settings.skill_collapse' : 'settings.skill_expand', { name: skill.name })}
       onExpand={() => void expandFiles(skill.id)} onSelect={() => selectSkill(skill.id)}>
       <PackageFileTree packageId={skill.id} depth={depth + 1} childrenByKey={children} expanded={expanded}
@@ -302,22 +300,20 @@ export function SkillsSettings({
           items={groupSkills.map(skill => ({
             id: skill.id, name: skill.name, description: skill.description,
             detail: selection?.kind === 'all' ? `${rootLabel(rootById.get(skill.rootId)!)} · ${skill.dirPath}` : undefined,
-            status: <SettingsAvailabilityBadge disabled={!skill.modelAvailable && !skill.userAvailable} error={Boolean(skill.loadError)} />
+            status: <><SettingsAvailabilityBadge disabled={!skill.modelAvailable && !skill.userAvailable} error={Boolean(skill.loadError)} /><SkillDescriptionWarning description={skill.description} /></>
           }))} />}
 
         {selectedSkill && !preview && selection?.kind === 'skill' && <>
           <div className="settings-detail-heading ui-toolbar ui-toolbar-between">
-            <div><button className="ui-link-button" type="button" disabled={selectedSkill.linked && !selectedSkill.resolvedDirPath}
-              data-tooltip={t('chat.show_in_folder')} onClick={() => void showItemInFolder(selectedSkill.dirPath)}>{selectedSkill.name}</button></div>
-            <SegmentedMultiSelect<'modelAvailable' | 'userAvailable' | 'scriptAutoApprove'> ariaLabel={selectedSkill.name}
+            <div><span className="ui-row"><button className="ui-link-button" type="button" disabled={selectedSkill.linked && !selectedSkill.resolvedDirPath}
+              data-tooltip={t('chat.show_in_folder')} onClick={() => void showItemInFolder(selectedSkill.dirPath)}>{selectedSkill.name}</button><SkillDescriptionWarning description={selectedSkill.description} /></span></div>
+            <SegmentedMultiSelect<'modelAvailable' | 'userAvailable'> ariaLabel={selectedSkill.name}
               options={[
                 { value: 'userAvailable', label: t('settings.skill_user_available'), checked: selectedSkill.userAvailable },
                 { value: 'modelAvailable', label: t('settings.skill_model_available'), checked: selectedSkill.modelAvailable },
-                { value: 'scriptAutoApprove', label: t('settings.skill_scripts_auto_approve'), checked: selectedSkill.scriptAutoApprove }
               ]}
               onChange={(value, checked) => {
-                if (value === 'scriptAutoApprove') void onUpdateScriptApproval(selectedSkill.id, checked)
-                else void onUpdateAvailability(selectedSkill.id, { [value]: checked })
+                void onUpdateAvailability(selectedSkill.id, { [value]: checked })
               }} />
           </div>
           {selectedSkillIssue && <div className="ui-note ui-note-danger">{selectedSkillIssueText}{selectedSkillIssue.detail ? ` ${selectedSkillIssue.detail}` : ''}</div>}

@@ -412,10 +412,10 @@ describe('native capability snapshots', () => {
       appConfigMocks.getAppConfigSnapshot.mockResolvedValue(snapshot)
       const ownedTools = ['owner', 'other'].map(id => ({ ...toolPackageFixture({ ...customToolDefaults, id: `subagent:${id}:tool:query`, name: 'query', description: 'Private query', inputSchema: { type: 'object' } }), rootId: `subagent:${id}:tool`, source: 'subagent' as const }))
       const ownedSkills = ['owner', 'other'].map(id => ({ id: `subagent:${id}:skill:guide`, rootId: `subagent:${id}:skill`, name: 'guide', description: 'Private guide', source: 'subagent' as const,
-        rootName: id, shortcutAlias: id, linked: false, modelAvailable: true, userAvailable: false, scriptAutoApprove: false, dirPath: `/${id}/skills/guide`, relativePath: 'guide' }))
+        rootName: id, shortcutAlias: id, linked: false, modelAvailable: true, userAvailable: false, dirPath: `/${id}/skills/guide`, relativePath: 'guide' }))
       vi.spyOn(toolsStore, 'listSubagentTools').mockImplementation(async ids => ownedTools.filter(tool => ids.some(id => tool.id.startsWith(`subagent:${id}:`))))
-      vi.spyOn(skillsStore, 'listSubagentSkills').mockImplementation(async ids => ({ roots: [], scriptAutoApprove: false, skills: ownedSkills.filter(skill => ids.some(id => skill.id.startsWith(`subagent:${id}:`))) }))
-      vi.spyOn(skillsStore, 'listSkillSnapshot').mockResolvedValue({ roots: [], skills: [], scriptAutoApprove: false })
+      vi.spyOn(skillsStore, 'listSubagentSkills').mockImplementation(async ids => ({ roots: [], skills: ownedSkills.filter(skill => ids.some(id => skill.id.startsWith(`subagent:${id}:`))) }))
+      vi.spyOn(skillsStore, 'listSkillSnapshot').mockResolvedValue({ roots: [], skills: [], })
       vi.spyOn(skillsStore, 'buildSkillsPrompt').mockImplementation(async ({ agent }) => agent.kind === 'main' ? 'MAIN_SKILL_CATALOG' : `OWNED_SKILL_CATALOG_${agent.id}`)
       projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), restrictSubagents: restrict,
         capabilities: { ...structuredClone(defaultCapabilities), subagents: { mode: 'default', names: [] },
@@ -461,7 +461,7 @@ describe('native capability snapshots', () => {
     projectStoreMocks.getProject.mockResolvedValue(project)
     memoryStoreMocks.buildMemoryRulesPrompt.mockResolvedValue('')
     appConfigMocks.getAppConfigSnapshot.mockResolvedValue(previewConfig())
-    const catalog = vi.spyOn(skillsStore, 'listSkillSnapshot').mockResolvedValue({ scriptAutoApprove: false, roots: [], skills: [{ scriptAutoApprove: false,
+    const catalog = vi.spyOn(skillsStore, 'listSkillSnapshot').mockResolvedValue({ roots: [], skills: [{
       id: 'current-project:search', rootId: 'current-project', name: 'search', description: 'Project skill',
       source: 'project', rootName: 'Current project', shortcutAlias: 'project', linked: false,
       modelAvailable: false, userAvailable: false, dirPath: '/project/search', relativePath: 'search'
@@ -489,9 +489,9 @@ describe('native capability snapshots', () => {
       })
       const selection = resolved.mock.lastCall![0].capabilities.skills
       expect(selection).toMatchObject({ project: false, entries: [{ id: 'current-project:search', model: !restricted, shortcut: false }] })
-      expect(catalog).toHaveBeenCalledWith(owner.projectId, ['/workspace/default'], [], [])
+      expect(catalog).toHaveBeenCalledWith(owner.projectId, [])
       expect(prompt).toHaveBeenCalledWith({ agent: { kind: 'subagent', id: undefined }, projectId: owner.projectId, selection,
-        sourceFolders: ['/workspace/default'], pluginTools: resolved.mock.lastCall![0].capabilities.pluginTools, skillDirectories: [], scriptAutoApproveSkills: [] })
+        pluginTools: resolved.mock.lastCall![0].capabilities.pluginTools, skillDirectories: [] })
     } finally { database.close(); catalog.mockRestore(); prompt.mockRestore() }
   })
 
@@ -501,9 +501,9 @@ describe('native capability snapshots', () => {
     const plugins = vi.spyOn(runtime.store, 'list').mockResolvedValue([{ id: 'example', enabled: true, backendStatus: 'stopped',
       manifest: parsePluginManifest({ version: 0, api_version: 2, id: 'example', name: 'Example', plugin_version: '1.0.0', skills: [{ id: 'guide', path: 'guide/SKILL.md' }] }) }])
     appConfigMocks.getAppConfigSnapshot.mockResolvedValue(settings)
-    const catalog = vi.spyOn(skillsStore, 'listSkillSnapshot').mockResolvedValue({ scriptAutoApprove: false, roots: [], skills: [{
+    const catalog = vi.spyOn(skillsStore, 'listSkillSnapshot').mockResolvedValue({ roots: [], skills: [{
       id: 'example:skill:guide', rootId: 'plugin:example', name: 'guide', description: 'Guide', source: 'plugin', rootName: 'Example', shortcutAlias: 'plugin:example',
-      linked: false, scriptAutoApprove: false, modelAvailable: true, userAvailable: true, dirPath: '/plugin/guide', relativePath: 'guide'
+      linked: false, modelAvailable: true, userAvailable: true, dirPath: '/plugin/guide', relativePath: 'guide'
     }] })
     const prompt = vi.spyOn(skillsStore, 'buildSkillsPrompt').mockResolvedValue('')
     const database = openDatabase()

@@ -1340,14 +1340,14 @@ describe('renderer interaction accessibility', () => {
     const user = userEvent.setup(), onSave = vi.fn().mockResolvedValue(undefined)
     const root: SkillSnapshot['roots'][number] = { id: 'project', kind: 'project', name: 'Project', path: '/project/.agents/skills', shortcutAlias: 'project', available: true, removable: false }
     const local: SkillSnapshot['skills'][number] = { id: 'project:guide', rootId: root.id, name: 'guide', description: 'Local guide', source: 'project', rootName: root.name,
-      dirPath: root.path + '/guide', relativePath: 'guide', shortcutAlias: root.shortcutAlias, modelAvailable: true, userAvailable: true, scriptAutoApprove: false, linked: false }
+      dirPath: root.path + '/guide', relativePath: 'guide', shortcutAlias: root.shortcutAlias, modelAvailable: true, userAvailable: true, linked: false }
     const ownedRoot = { ...root, id: 'subagent:reviewer:skill', kind: 'subagent' as const, name: 'Reviewer', path: '/reviewer/skills' }
     const owned = { ...local, id: 'subagent:reviewer:skill:owned', name: 'owned', rootId: ownedRoot.id, source: 'subagent' as const, userAvailable: false }
-    const resources = { skills: { scriptAutoApprove: false, roots: [ownedRoot], skills: [owned] }, tools: [] }
+    const resources = { skills: { roots: [ownedRoot], skills: [owned] }, tools: [] }
     let resolveResources!: (value: typeof resources) => void
     const pending = new Promise<typeof resources>(resolve => { resolveResources = resolve })
     Object.defineProperty(window, 'gale', { configurable: true, value: { ...capabilityApis,
-      skills: { get: vi.fn(async () => ({ scriptAutoApprove: false, roots: [root], skills: [local] })) },
+      skills: { get: vi.fn(async () => ({ roots: [root], skills: [local] })) },
       config: { subagentResources: vi.fn(() => pending) } } })
     const project: Project = { id: 'project', kind: 'workspace', name: 'Project', sourceFolders: ['/project'],
       codingMode: false, prompt: '', capabilities: { ...structuredClone(defaultCapabilities), skills: { ...defaultCapabilities.skills, mode, entries: [
@@ -1358,7 +1358,7 @@ describe('renderer interaction accessibility', () => {
       description: '', systemPrompt: '', capabilities: structuredClone(defaultCapabilities) }] }
     render(<ProjectDialog open kind="workspace" project={project} config={config} onClose={vi.fn()} onSave={onSave} />)
     await user.click(screen.getByRole('button', { name: 'settings.capability_skills' }))
-    await user.click(screen.getByRole('button', { name: 'settings.skill_group_project' }))
+    await user.click(screen.getByRole('button', { name: 'settings.skill_group_project - Project' }))
     const localModel = await screen.findByRole('checkbox', { name: 'guide capabilities.model' })
     expect(localModel).toBeDisabled()
     expect(screen.getByRole('button', { name: 'project.add_skill_directories' })).toBeEnabled()
@@ -1492,7 +1492,7 @@ describe('renderer interaction accessibility', () => {
       .toHaveTextContent('/workspace/additional')
     await user.click(screen.getByRole('button', { name: 'common.save' }))
     expect(onSave).toHaveBeenCalledWith({
-      skillDirectories: [], scriptAutoApproveSkills: [], capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
+      skillDirectories: [], toolDirectories: [], capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
       kind: 'workspace',
       name: 'Workspace',
       sourceFolders: ['/workspace/additional', '/workspace/primary']
@@ -1754,13 +1754,13 @@ describe('renderer interaction accessibility', () => {
       />
     )
 
-    await waitFor(() => expect(capabilityApis.skills.get).toHaveBeenLastCalledWith(undefined, [], []))
+    await waitFor(() => expect(capabilityApis.skills.get).toHaveBeenLastCalledWith(undefined, []))
     await user.click(screen.getByRole('button', { name: 'project.add_folders' }))
-    await waitFor(() => expect(capabilityApis.skills.get).toHaveBeenLastCalledWith(undefined, ['/workspace'], []))
+    await waitFor(() => expect(capabilityApis.skills.get).toHaveBeenLastCalledWith(undefined, []))
     await user.click(screen.getByRole('button', { name: 'project.create' }))
 
     expect(onSave).toHaveBeenCalledWith({
-      skillDirectories: [], scriptAutoApproveSkills: [], capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
+      skillDirectories: [], toolDirectories: [], capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
       kind: 'workspace',
       name: 'workspace',
       sourceFolders: ['/workspace']

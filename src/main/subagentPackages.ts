@@ -7,6 +7,7 @@ import { normalizeSubagent, rawSubagentFromSave } from './config/subagentConfigM
 import { getBundledDataDir, getDataDir } from './config/dataDir'
 import { writeJsonFileAtomic } from './atomicJson'
 import { mirrorBundledDirectories } from './bundledDirectories'
+import { assertToolDirectoryTreeIdle } from './toolsStore'
 
 const configPath = (root: string) => join(root, 'config', 'subagents.json')
 const maxSourceEntries = 2048
@@ -252,7 +253,6 @@ export async function writeSubagentPackages(agents: RawSubagentConfig[], expecte
     if (old && dirname(target) !== join(root, 'subagents') && !external) throw new Error('Agent source changed; refresh before saving.')
     if (!old && await packageExists(target)) throw new Error('Agent directory already exists.')
     const stage = join(root, 'subagents', '.transaction')
-    const { assertToolDirectoryTreeIdle } = await import('./toolsStore')
     assertToolDirectoryTreeIdle(target)
     await mkdir(stage)
     const stageId = external ? randomUUID() : undefined

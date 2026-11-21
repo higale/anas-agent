@@ -48,8 +48,8 @@ export function PackageTreeRoot({ name, count, expanded, selected, onSelect, onE
   </div>
 }
 
-export function PackageTreeItem({ name, icon, depth, selected, expanded, badge, status, linked, highlighted, expandLabel, tooltip, onExpand, onSelect, onDoubleClick, buttonRef, children }: {
-  name: string; icon: ReactNode; depth: number; selected: boolean; expanded: boolean; badge?: string; status?: ReactNode; linked?: boolean; highlighted?: boolean
+export function PackageTreeItem({ name, icon, depth, selected, expanded, badge, status, linked, expandLabel, tooltip, onExpand, onSelect, onDoubleClick, buttonRef, children }: {
+  name: string; icon: ReactNode; depth: number; selected: boolean; expanded: boolean; badge?: string; status?: ReactNode; linked?: boolean
   expandLabel: string; tooltip?: string; onExpand(): void; onSelect(): void; onDoubleClick?(): void; children?: ReactNode
   buttonRef?: Ref<HTMLButtonElement>
 }) {
@@ -61,7 +61,7 @@ export function PackageTreeItem({ name, icon, depth, selected, expanded, badge, 
       </button>
       <button className="settings-skill-tree-select" type="button" aria-pressed={selected} data-tooltip={tooltip} ref={buttonRef}
         aria-describedby={tooltip ? tooltipId : undefined} onClick={onSelect} onDoubleClick={onDoubleClick}>
-        {linked ? <Link2 size={14} /> : icon}<span className={`settings-skill-tree-label${highlighted ? ' ui-text-success' : ''}`}>{name}</span>
+        {linked ? <Link2 size={14} /> : icon}<span className="settings-skill-tree-label">{name}</span>
         {badge && <em>{badge}</em>}
         {status}
       </button>

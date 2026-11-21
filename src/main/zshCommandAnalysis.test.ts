@@ -6,8 +6,6 @@ import type { AgentAccessMode } from '@shared/agentTypes'
 import { bundledSearchEnvironment } from './bundledRipgrep'
 import { createShellCommandAuthorization } from './shellCommandAuthorization'
 import { runShellCommand, type CommandShellInfo } from './shellRuntime'
-import * as skillsStore from './skillsStore'
-import { defaultCapabilities } from '@shared/agentCapabilities'
 
 vi.mock('./runtimeLogger', () => ({ runtimeLog: vi.fn() }))
 const directories: string[] = []
@@ -29,55 +27,16 @@ async function fixture() {
 afterEach(async () => { await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true }))) })
 
 describe.skipIf(process.platform !== 'darwin')('macOS original-command read authorization', () => {
-  it('requires approval when physical and normalized script paths differ, including after retargeting a link', async () => {
+  it('requires normal approval for a script inside a Skill directory', async () => {
     const h = await fixture()
-    const script = join(h.project, 'query.sh')
-    await writeFile(script, 'printf INSIDE')
-    await writeFile(join(h.outside, 'query.sh'), 'printf OUTSIDE')
-    await mkdir(join(h.project, 'child'))
-    await mkdir(join(h.outside, 'child'))
-    const link = join(h.project, 'link')
-    await symlink(join(h.project, 'child'), link)
-    vi.spyOn(skillsStore, 'findSkillScriptExemption').mockImplementation(async target =>
-      target === script ? { skillId: 'user:query', root: h.project, script } : undefined)
-    const analyzer = createShellCommandAuthorization({ ...h.options, skills: { selection: defaultCapabilities.skills, agent: { kind: 'main' as const } } })
-    const args = Object.freeze({ command: `/bin/sh '${h.project}/link/../query.sh'` })
-    expect((await analyzer.inspect(args))?.skillScript?.script).toBe(script)
-    await rm(link)
-    await symlink(join(h.outside, 'child'), link)
-    for (const operand of ['link/../query.sh', `${h.project}/link/../query.sh`]) {
-      const command = `/bin/sh '${operand}'`
-      expect(await analyzer.requiresApproval({ command })).toBe(true)
-      let output = ''
-      await runShellCommand({ command, workingDir: h.project, env: h.search.env, timeoutSec: 5 }, shell, undefined,
-        { onResult: result => { expect(result.ok).toBe(true); output = result.stdout } })
-      expect(output).toBe('OUTSIDE')
-    }
-    // The inverse traversal must also remain manual: some interpreters open a
-    // normalized entry path while others open the literal physical path.
-    await symlink(join(h.project, 'child'), join(h.outside, 'link'))
-    expect(await analyzer.requiresApproval({ command: `/bin/sh '${h.outside}/link/../query.sh'` })).toBe(true)
-  })
-
-  it('resolves the actual executable through parent traversal without changing the command', async () => {
-    const h = await fixture()
-    await mkdir(join(h.outside, 'child'))
-    await symlink(join(h.outside, 'child'), join(h.project, 'link'))
-    for (const [directory, marker] of [[h.project, 'INSIDE'], [h.outside, 'OUTSIDE']]) {
-      await writeFile(join(directory, 'sh'), `#!/bin/sh\nprintf '${marker}:'\nexec /bin/sh "$@"\n`, { mode: 0o755 })
-    }
-    const script = join(h.project, 'query.sh')
-    await writeFile(script, 'printf SCRIPT')
-    vi.spyOn(skillsStore, 'findSkillScriptExemption').mockResolvedValue({ skillId: 'user:query', root: h.project, script })
-    const analyzer = createShellCommandAuthorization({ ...h.options, skills: { selection: defaultCapabilities.skills, agent: { kind: 'main' as const } } })
-    const command = `'${h.project}/link/../sh' '${script}'`
-    const args = Object.freeze({ command })
-    expect((await analyzer.inspect(args))?.skillScript?.executor).toBe(join(h.outside, 'sh'))
-    let output = ''
-    await runShellCommand({ command, workingDir: h.project, env: h.search.env, timeoutSec: 5 }, shell, undefined,
-      { onResult: result => { expect(result.ok).toBe(true); output = result.stdout } })
-    expect(output).toBe('OUTSIDE:SCRIPT')
-    expect(args.command).toBe(command)
+    const directory = join(h.project, '.agents', 'skills', 'query')
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, 'SKILL.md'), '---\nname: query\ndescription: Query\n---\nRun query.sh')
+    const script = join(directory, 'query.sh')
+    await writeFile(script, 'printf changed > result.txt')
+    const args = Object.freeze({ command: `/bin/sh '${script}'` })
+    expect(await h.authorization.inspect(args)).toBeUndefined()
+    expect(await h.authorization.requiresApproval(args)).toBe(true)
   })
 
   it('allows verified reads of the physical target of parent traversal', async () => {
@@ -88,28 +47,6 @@ describe.skipIf(process.platform !== 'darwin')('macOS original-command read auth
     expect(await h.authorization.requiresApproval(args)).toBe(false)
     h.mode('smart_approval')
     expect((await h.authorization.inspect(args))?.paths).toContain(join(h.outside, '文档 notes.txt'))
-  })
-
-  it('binds a literal Skill script and preserves arguments while rejecting extra commands and revocation', async () => {
-    const h = await fixture()
-    const script = join(h.outside, 'query.sh')
-    await writeFile(script, 'printf "%s\\n" "$@"\n')
-    const grant = vi.spyOn(skillsStore, 'findSkillScriptExemption').mockResolvedValue({ skillId: 'user:query', root: h.outside, script })
-    const analyzer = createShellCommandAuthorization({ ...h.options, skills: { selection: defaultCapabilities.skills, agent: { kind: 'main' as const } } })
-    for (const interpreter of ['/bin/sh', 'sh']) {
-      const command = `${interpreter} '${script}' --month 2026-09 'a; b && c'`
-      const args = Object.freeze({ command })
-      expect((await analyzer.inspect(args))?.skillScript).toMatchObject({ skillId: 'user:query', script })
-      let output = ''
-      await runShellCommand({ command, workingDir: h.project, env: h.search.env, timeoutSec: 5 }, shell, undefined,
-        { onResult: result => { expect(result.ok).toBe(true); output = result.stdout } })
-      expect(output).toBe('--month\n2026-09\na; b && c\n')
-      for (const extra of ['; true', ' | head -n 1', ' > output', ' $(true)']) {
-        expect(await analyzer.requiresApproval({ command: command + extra })).toBe(true)
-      }
-    }
-    grant.mockResolvedValue(undefined)
-    expect(await analyzer.requiresApproval({ command: `/bin/sh '${script}'` })).toBe(true)
   })
 
   it.each([

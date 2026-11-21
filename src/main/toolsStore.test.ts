@@ -413,9 +413,29 @@ describe('directory tool packages', () => {
       await scan
     }
   })
-  it('resolves enabled same-name tools in project folder then user priority order', async () => {
+  it('does not implicitly load workspace .agents/tools and preserves explicit roots across removal and reordering', async () => {
+    const workspace = join(root, 'workspace')
+    const first = join(workspace, '.agents/tools'), second = join(root, 'shared-tools')
+    await packageAt(join(first, 'read'))
+    await packageAt(join(second, 'read'))
+    expect((await store.listToolSnapshot()).tools).toEqual([])
+    expect((await store.listToolSnapshot([workspace])).tools.some(tool => tool.definition)).toBe(false)
+    const catalog = await store.listToolSnapshot([first, first, second])
+    expect(catalog.roots[0].name).toBe('workspace')
+    expect(catalog.roots.filter(source => source.source === 'project').map(source => source.path)).toEqual([first, second])
+    expect(catalog.tools).toHaveLength(2)
+    expect(resolveToolSelection(defaultCapabilities.customTools, catalog.tools).entries).toEqual([catalog.tools[0].id])
+    const reordered = await store.listToolSnapshot([second, first])
+    expect(reordered.tools.map(tool => tool.id)).toEqual(catalog.tools.map(tool => tool.id).reverse())
+    expect((await store.listToolSnapshot([])).tools).toEqual([])
+    expect(await readFile(join(first, 'read/TOOL.json'), 'utf8')).toContain('read_complete')
+    await expect(store.withToolPackageDirectory(catalog.tools[0].definition!, async directory => directory)).resolves.toBe(await realpath(join(first, 'read')))
+    await expect(store.listToolSnapshot(['relative'])).rejects.toThrow('absolute')
+  })
+
+  it('resolves enabled same-name tools in project directory then user priority order', async () => {
     const folders = [join(root, 'p1'), join(root, 'p2')]
-    for (const folder of folders) await packageAt(join(folder, '.agents/tools/read'))
+    for (const folder of folders) await packageAt(join(folder, 'read'))
     await packageAt(join(root, 'tools/read'))
     const snapshot = await store.listToolSnapshot(folders)
     expect(snapshot.tools.map(tool => tool.source)).toEqual(['project', 'project', 'user'])
@@ -436,7 +456,7 @@ describe('directory tool packages', () => {
     await writeFile(join(root, 'tools/broken/TOOL.json'), '{')
     await symlink(join(root, 'missing'), join(root, 'tools/link'), 'dir')
     let snapshot = await store.listToolSnapshot([join(root, 'missing-project')])
-    expect(snapshot.roots[0].error).toMatchObject({ code: 'path_not_found', path: join(root, 'missing-project/.agents/tools') })
+    expect(snapshot.roots[0].error).toMatchObject({ code: 'path_not_found', path: join(root, 'missing-project') })
     expect(snapshot.tools.filter(tool => tool.error)).toHaveLength(2)
     expect(snapshot.tools.find(tool => tool.name === 'broken')?.error).toMatchObject({ code: 'invalid_json', path: join(root, 'tools/broken/TOOL.json') })
     expect(snapshot.tools.find(tool => tool.name === 'link')?.error).toMatchObject({ code: 'manifest_not_found', path: join(root, 'tools/link/TOOL.json') })
@@ -451,11 +471,11 @@ describe('directory tool packages', () => {
   })
   it('uses managed roots and refuses project edits through global settings', async () => {
     const project = join(root, 'project')
-    const directory = join(project, '.agents/tools/read')
+    const directory = join(project, 'read')
     await packageAt(directory)
     await packageAt(join(root, 'unconfigured/read'))
     const snapshot = await store.listToolSnapshot([project])
-    expect(snapshot.roots.map(source => source.path)).toEqual([join(project, '.agents/tools'), join(root, 'tools')])
+    expect(snapshot.roots.map(source => source.path)).toEqual([project, join(root, 'tools')])
     expect(snapshot.tools).toHaveLength(1)
     await expect(store.deleteToolPackage(snapshot.tools[0].id)).rejects.toThrow('Only user')
     await expect(store.saveToolPackage(snapshot.tools[0].definition!)).rejects.toThrow('Only')
@@ -477,7 +497,7 @@ describe('directory tool packages', () => {
   })
   it('uses subagent project opt-in and applies the root identity ceiling after selection', async () => {
     const folder = join(root, 'project')
-    await packageAt(join(folder, '.agents/tools/read'))
+    await packageAt(join(folder, 'read'))
     const catalog = await store.listToolSnapshot([folder])
     const policy = { project: false as const, entries: [] }
     expect(resolveToolSelection(policy, catalog.tools, true).entries).toEqual([])
@@ -520,7 +540,7 @@ describe('tool source settings', () => {
 
   it('discovers all sources with project, user and external precedence, and never enables new tools', async () => {
     const project = join(root, 'project'), external = join(root, 'external')
-    for (const path of [join(project, '.agents/tools/read'), join(root, 'tools/read'), join(external, 'read')]) await packageAt(path)
+    for (const path of [join(project, 'read'), join(root, 'tools/read'), join(external, 'read')]) await packageAt(path)
     await store.addExternalToolDirectory(external)
     const snapshot = await store.listToolSnapshot([project])
     expect(snapshot.tools.map(tool => tool.source)).toEqual(['project', 'user', 'external'])

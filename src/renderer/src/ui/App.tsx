@@ -377,7 +377,6 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
     updateDirectory: updateSkillDirectory,
     removeDirectory: removeSkillDirectory,
     skills,
-    updateScriptApproval: updateSkillScriptApproval,
     updateAvailability: updateSkillAvailability
   } = useSkillsSettingsState({
     openConfirmDialog,
@@ -598,8 +597,7 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
     setResolvedTheme,
     t
   })
-  const projectSkills = useProjectSkills(activeProjectId, skills, activeProject?.kind === 'workspace' ? activeProject.sourceFolders : undefined,
-    activeProject?.kind === 'workspace' ? activeProject.skillDirectories : undefined)
+  const projectSkills = useProjectSkills(activeProjectId, skills, activeProject?.kind === 'workspace' ? activeProject.skillDirectories : undefined)
   const {
     applyComposerSuggestion,
     composerSuggestions,
@@ -1320,7 +1318,6 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
           onUpdateSubagentDraft={updateSubagentDraft}
           onUpdateModelDraft={updateModelDraft}
           onSaveModelDetails={saveModelDetails}
-          onUpdateSkillScriptApproval={updateSkillScriptApproval}
           onUpdateSkillAvailability={updateSkillAvailability}
         />
       ) : null}

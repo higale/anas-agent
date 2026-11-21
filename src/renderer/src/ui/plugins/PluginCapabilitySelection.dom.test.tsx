@@ -14,9 +14,9 @@ const plugin: PluginSummary = { id: 'example', enabled: true, backendStatus: 'st
   skills: [{ id: 'review', path: 'review/SKILL.md', tools: ['echo'] }],
   prompts: [{ id: 'help', path: 'help.md', description: 'Help instructions', scope: 'subagent', tools: ['echo'] }]
 }) }
-const skills: SkillSnapshot = { scriptAutoApprove: false, roots: [], skills: [{ id: 'example:skill:review', name: 'review', description: 'Review', rootId: 'plugin:example',
+const skills: SkillSnapshot = { roots: [], skills: [{ id: 'example:skill:review', name: 'review', description: 'Review', rootId: 'plugin:example',
   rootName: 'Example', source: 'plugin', shortcutAlias: 'plugin:example', dirPath: '/example/review', relativePath: 'review', linked: false,
-  modelAvailable: true, userAvailable: true, scriptAutoApprove: false, requiredTools: ['example:tool:echo'] }] }
+  modelAvailable: true, userAvailable: true, requiredTools: ['example:tool:echo'] }] }
 function Harness({ initial = { ...defaultCapabilities, pluginMode: 'custom' }, plugins = [plugin], subagent = false, changed = vi.fn(), catalog = skills }: {
   initial?: AgentCapabilities; plugins?: PluginSummary[]; subagent?: boolean; changed?: (value: AgentCapabilities) => void; catalog?: SkillSnapshot
 }) {

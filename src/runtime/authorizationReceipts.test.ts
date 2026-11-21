@@ -14,8 +14,7 @@ function patchReceipt(): PatchAuthorizationReceipt {
 }
 function shellReceipt(): ShellAuthorizationReceipt {
   return { id: 'shell', name: 'pwsh', inputHash: authorizationInputHash(args), requiresApproval: false, humanApproved: false,
-    plan: { executable: '/bin/shell', workingDir: '/root', paths: ['/root/file'],
-      skillScript: { skillId: 'inspect', root: '/skills/inspect', script: '/skills/inspect/run.ps1', executor: '/bin/shell' } } }
+    plan: { executable: '/bin/shell', workingDir: '/root', paths: ['/root/file'] } }
 }
 
 describe('native authorization receipts', () => {
@@ -74,13 +73,13 @@ describe('native authorization receipts', () => {
     expect(() => assertPatchFileBinding([], expected, paths.samePath)).toThrow('binding')
   })
 
-  it('rechecks queued Shell environment and Skill identity at every actual dispatch', async () => {
+  it('rechecks queued Shell environment at every actual dispatch', async () => {
     const receipt = shellReceipt(), before = structuredClone(receipt)
     let current = structuredClone(receipt.plan)
     const inspect = vi.fn(async () => current)
     const options = { inspect, accessMode: () => 'smart_approval' as const, samePath: paths.samePath }
     await expect(verifyShellReceipt(receipt, args, options)).resolves.toBeUndefined()
-    current = { ...current!, skillScript: { ...current!.skillScript!, skillId: 'another-skill' } }
+    current = { ...current!, paths: ['/changed'] }
     await expect(verifyShellReceipt(receipt, args, options)).rejects.toThrow('targets changed')
     current = undefined
     await expect(verifyShellReceipt(receipt, args, options)).rejects.toThrow('targets changed')
@@ -93,6 +92,19 @@ describe('native authorization receipts', () => {
     const current = { ...receipt.plan!, [field]: field === 'paths' ? ['/different'] : '/different' }
     await expect(verifyShellReceipt(receipt, args, { accessMode: () => 'smart_approval', samePath: paths.samePath,
       inspect: async () => current })).rejects.toThrow('targets changed')
+  })
+
+  it('keeps historical Skill receipts readable without accepting their automatic grant', async () => {
+    const receipt = shellReceipt()
+    receipt.plan!.skillScript = { skillId: 'inspect', root: '/skills/inspect', script: '/skills/inspect/run.ps1', executor: '/bin/shell' }
+    const state = { anasShellAuthorization: { runId: 'run', calls: [receipt] } }
+    const loaded = shellAuthorizationFor(state, { id: 'shell', name: 'pwsh', args }, 'run')
+    expect(loaded).toEqual(receipt)
+    for (const accessMode of ['strict_approval', 'smart_approval', 'full_access'] as const) {
+      const options = { accessMode: () => accessMode, samePath: paths.samePath, inspect: async () => receipt.plan }
+      await expect(verifyShellReceipt(loaded, args, options)).rejects.toThrow('targets changed')
+      await expect(verifyShellReceipt({ ...loaded!, humanApproved: true }, args, options)).resolves.toBeUndefined()
+    }
   })
 
   it('honors explicit approval and current full access while still rejecting changed original arguments', async () => {

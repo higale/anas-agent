@@ -1093,10 +1093,6 @@ button.ui-icon-box:focus-visible {
   color: var(--text-muted);
 }
 
-.ui-text-success {
-  color: var(--success);
-}
-
 .ui-list-item-badge,
 .ui-badge {
   flex-shrink: 0;

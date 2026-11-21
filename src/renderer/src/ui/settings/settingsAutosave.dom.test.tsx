@@ -23,9 +23,9 @@ afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks() })
 
 describe('autosave page boundaries', () => {
   it('returns the first imported user skill ID, not a same-named external skill or catalog order', async () => {
-    const initial = { scriptAutoApprove: false, roots: [], skills: [] } satisfies SkillSnapshot
+    const initial = { roots: [], skills: [] } satisfies SkillSnapshot
     const skill = { id: 'user:z-first', name: 'z-first', source: 'user', rootId: 'user', description: '',
-      modelAvailable: true, userAvailable: true, scriptAutoApprove: false, dirPath: '', linked: false,
+      modelAvailable: true, userAvailable: true, dirPath: '', linked: false,
       relativePath: 'z-first', rootName: 'User', shortcutAlias: 'user' } as const
     const imported = { ...initial, skills: [
       { ...skill, id: 'external:z-first', source: 'external' as const },
@@ -43,7 +43,7 @@ describe('autosave page boundaries', () => {
   })
 
   it.each(['cancelled', 'error', 'rejected'])('keeps the skill catalog and returns no selection after an import is %s', async status => {
-    const initial = { scriptAutoApprove: false, roots: [], skills: [] } satisfies SkillSnapshot
+    const initial = { roots: [], skills: [] } satisfies SkillSnapshot
     const importDirectories = status === 'rejected' ? vi.fn().mockRejectedValue(new Error('Failed'))
       : vi.fn().mockResolvedValue({ status, error: { code: 'already_exists', name: 'existing' } })
     vi.stubGlobal('gale', { plugins: { onChanged: vi.fn(() => () => {}) }, skills: {
@@ -130,13 +130,12 @@ describe('autosave page boundaries', () => {
 
   it('does not retry failed edits for skills from a removed directory', async () => {
     const root = { id: 'root', name: 'Root', removable: true } as SkillRootSummary
-    const initial = { scriptAutoApprove: false, roots: [root], skills: [] } satisfies SkillSnapshot
-    const removed = { scriptAutoApprove: false, roots: [], skills: [] } satisfies SkillSnapshot
+    const initial = { roots: [root], skills: [] } satisfies SkillSnapshot
+    const removed = { roots: [], skills: [] } satisfies SkillSnapshot
     let confirmation: ConfirmDialogRequest | undefined
     const updateAvailability = vi.fn().mockRejectedValue(new Error('write failed'))
-    const updateScriptApproval = vi.fn().mockResolvedValue({ ...removed, scriptAutoApprove: true })
     vi.stubGlobal('gale', { plugins: { onChanged: vi.fn(() => () => {}) }, skills: {
-      get: vi.fn().mockResolvedValue(initial), updateAvailability, updateScriptApproval,
+      get: vi.fn().mockResolvedValue(initial), updateAvailability,
       removeDirectory: vi.fn().mockResolvedValue(removed)
     } })
     const { result } = renderHook(() => useSkillsSettingsState({
@@ -148,9 +147,7 @@ describe('autosave page boundaries', () => {
     act(() => result.current.removeDirectory(root))
     await act(async () => { await confirmation!.onConfirm() })
     await act(async () => retry.onClick())
-    await act(async () => result.current.updateScriptApproval(undefined, true))
     expect(updateAvailability).toHaveBeenCalledOnce()
-    expect(result.current.skills?.scriptAutoApprove).toBe(true)
   })
 
   it('finishes all queued MCP edits before deleting the server', async () => {
@@ -211,8 +208,8 @@ describe('autosave page boundaries', () => {
   })
 
   it('shows skill toggles immediately and ignores a stale refresh after a save', async () => {
-    const snapshot = { scriptAutoApprove: false, roots: [], skills: [
-      { id: 'skill', modelAvailable: true, userAvailable: true, scriptAutoApprove: false,
+    const snapshot = { roots: [], skills: [
+      { id: 'skill', modelAvailable: true, userAvailable: true,
         rootId: 'root', name: 'skill', description: '', dirPath: '', linked: false,
         relativePath: 'skill', source: 'user', rootName: 'root', shortcutAlias: '' }
     ] } satisfies SkillSnapshot

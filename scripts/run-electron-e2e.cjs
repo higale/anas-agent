@@ -29,7 +29,7 @@ const { verifyMainWindowLifecycle } = require('./electron-main-window-lifecycle.
 const { verifyCapabilities } = require('./electron-capabilities.cjs')
 const { verifyGlobalSettings } = require('./electron-global-settings.cjs')
 const { verifyControlLayout } = require('./electron-control-layout.cjs')
-const { verifySkillApproval } = require('./electron-skill-approval.cjs')
+const { verifySkillSettings } = require('./electron-skill-settings.cjs')
 const { verifyCustomTools } = require('./electron-custom-tools.cjs')
 const { verifyCurrentData } = require('./electron-current-data.cjs')
 const { verifyDataCleanup } = require('./electron-data-cleanup.cjs')
@@ -374,12 +374,12 @@ async function verifySkillSourceLayout(electronApplication) {
     }))
     const skills = roots.map((root) => ({
       id: `${root.id}:search`, rootId: root.id, name: `${root.id}-search`, description: 'Search skill',
-      modelAvailable: true, userAvailable: true, scriptAutoApprove: false, linked: false, dirPath: `${root.path}/search`,
+      modelAvailable: true, userAvailable: true, linked: false, dirPath: `${root.path}/search`,
       relativePath: 'search', source: root.kind, rootName: root.name, shortcutAlias: root.shortcutAlias
     }))
     ipcMain.removeHandler('skills:get')
     ipcMain.handle('skills:get', (_event, projectId) => ({
-      scriptAutoApprove: false,
+
       roots: roots.filter((root) => projectId || root.kind !== 'project'),
       skills: skills.filter((skill) => projectId || skill.source !== 'project')
     }))
@@ -1168,8 +1168,8 @@ async function main() {
     return
   }
 
-  if (process.argv.includes('--skill-approval-only')) {
-    await verifySkillApproval(launchApplication)
+  if (process.argv.includes('--skill-settings-only')) {
+    await verifySkillSettings(launchApplication)
     return
   }
   if (process.argv.includes('--attachment-previews-only')) {
@@ -1288,7 +1288,7 @@ async function main() {
     await verifyAvatarCrop(launchApplication)
     await verifyControlLayout(launchApplication)
     await verifyCustomTools(launchApplication)
-    await verifySkillApproval(launchApplication)
+    await verifySkillSettings(launchApplication)
     await verifyHelpDocuments(launchApplication)
     await verifyWorkspaceTabs(launchApplication)
     await verifyMainWindowLifecycle(launchApplication)

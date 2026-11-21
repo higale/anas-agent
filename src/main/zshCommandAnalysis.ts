@@ -1,13 +1,11 @@
-import { realpath, stat } from 'node:fs/promises'
-import { dirname, isAbsolute, resolve } from 'node:path'
+import { stat } from 'node:fs/promises'
+import { dirname, isAbsolute } from 'node:path'
 import { parse } from 'shell-quote'
 import { resolveCanonicalWorkspacePath, resolveShellOperandPath } from './workspacePath'
 import type { ShellCommandAuthorizationOptions, ShellCommandPlan } from './shellCommandAuthorization'
 import { resolveShellInvocation, runPreparedProcess } from './shellRuntime'
 import { runWithoutCurrentAgentToolEffect } from './agent/toolEffectScope'
 import { withoutToolExecution } from './agent/toolExecutionContext'
-import { findSkillScriptExemption, type SkillScriptInvocation } from './skillsStore'
-import { scriptOperand } from './skillScriptCommand'
 
 const bindingError = 'Shell bindings changed. Resubmit for manual authorization.'
 const programs: Record<string, string> = { cat: '/bin/cat', head: '/usr/bin/head', tail: '/usr/bin/tail', wc: '/usr/bin/wc' }
@@ -69,23 +67,9 @@ async function probeZsh(command: string, workingDir: string, options: ShellComma
   return output
 }
 
-async function resolveZshExecutor(name: string, cwd: string, options: ShellCommandAuthorizationOptions): Promise<string> {
-  if (name.includes('/')) return isAbsolute(name) ? name : `${cwd}/${name}`
-  if (!/^[a-zA-Z0-9.]+$/.test(name)) unknown()
-  // Ask the same login shell for its binding, without invoking the interpreter.
-  // The full binding probe below verifies functions, aliases and that result.
-  const checks = check('${(t)functions}', 'association-hide-hideval-special')
-    + check('${(t)commands}', 'association-hide-hideval-special') + noFunction('/usr/bin/printf')
-  const output = await probeZsh('"' + checks + '/usr/bin/printf" \'%s\' "ANAS_EXECUTOR_START${commands[' + name + ']}ANAS_EXECUTOR_END"', cwd, options)
-  const executable = output.match(/ANAS_EXECUTOR_START([^\0\r\n]+)ANAS_EXECUTOR_END$/)?.[1]
-  if (!executable || !isAbsolute(executable)) unknown()
-  return executable
-}
-
 export async function analyzeZshCommand(
   command: string, workingDir: string, options: ShellCommandAuthorizationOptions,
-  inspectRgArgs: (args: string[], cwd: string, path: (value: string, directoryAllowed?: boolean) => Promise<string>, env: NodeJS.ProcessEnv) => Promise<boolean>,
-  invocation?: SkillScriptInvocation
+  inspectRgArgs: (args: string[], cwd: string, path: (value: string, directoryAllowed?: boolean) => Promise<string>, env: NodeJS.ProcessEnv) => Promise<boolean>
 ): Promise<ShellCommandPlan | undefined> {
   // Bash has no equivalent inspectable special function table. Do not claim its
   // startup/function semantics are proved by a POSIX tokenizer or another shell.
@@ -106,23 +90,7 @@ export async function analyzeZshCommand(
   }
   const bindings: Array<{ name: string; executable: string }> = []
   let usesRgConfig = false
-  let skillScript: ShellCommandPlan['skillScript']
-  const operand = parsed.length === 1 ? scriptOperand(parsed[0][0], parsed[0].slice(1)) : undefined
-  if (operand && options.skills) {
-    const name = parsed[0][0]
-    const executable = await resolveZshExecutor(name, cwd.canonicalPath, options)
-    if (!scriptOperand(executable, parsed[0].slice(1)) || !(await stat(executable)).isFile()) unknown()
-    const script = await path(operand)
-    // Some interpreters (notably Node) normalize their entry path before
-    // opening it. Both interpretations must name the same file for exemption.
-    if (script !== await realpath(resolve(cwd.canonicalPath, operand))) unknown()
-    const exemption = await findSkillScriptExemption(script, options.skills, invocation)
-    if (!exemption) unknown()
-    const executor = await realpath(executable)
-    paths.add(executor)
-    skillScript = { ...exemption, executor }
-    bindings.push({ name, executable })
-  } else for (const [index, [name, ...args]] of parsed.entries()) {
+  for (const [index, [name, ...args]] of parsed.entries()) {
     const rg = name === 'rg' || name === options.rgExecutable
     const executable = rg ? options.rgExecutable : programs[name] ?? Object.values(programs).find((file) => file === name)
     if (!executable || !isAbsolute(executable)) unknown()
@@ -173,6 +141,6 @@ export async function analyzeZshCommand(
   // In particular, a failed probe must leave recovery free to retry that tool.
   if (!(await probeZsh(probe, cwd.canonicalPath, options)).endsWith('ANAS_READ_BINDING_OK')) unknown()
   return {
-    workingDir: cwd.canonicalPath, executable: options.shell.executable, paths: [...paths], ...(skillScript ? { skillScript } : {})
+    workingDir: cwd.canonicalPath, executable: options.shell.executable, paths: [...paths]
   }
 }

@@ -6,7 +6,6 @@ import { conflictingPlanUpdates, conflictingPlanUpdatesError } from '../../runti
 import { authorizationInputHash, isFileEditTool } from '../../runtime/authorizationReceipts'
 import { resolveToolApprovals, toolApprovalRequest, type PendingToolApproval } from '../../runtime/toolApproval'
 import type { ConversationExecutionServices } from '../../runtime/conversationExecution'
-import type { SkillScriptInvocation } from '../skillsStore'
 import type { CodeReviewSnapshot } from '@shared/codeReview'
 import { conversationReviewResults } from './conversationReview'
 import { approvalToolNames, requiresToolApproval } from './toolAuthorization'
@@ -18,7 +17,6 @@ export interface ConversationToolPreparationOptions extends ConversationRulesOpt
   definitions: readonly ToolInputDefinition[]
   includeRules: boolean
   shell?: ShellAuthorizationOptions & { toolName: string }
-  explicitSkill?: SkillScriptInvocation
   review?: CodeReviewSnapshot
 }
 
@@ -94,7 +92,7 @@ export async function prepareConversationToolBatch(state: ExecutionState, option
       requiresApproval = options.accessMode() !== 'full_access' && patch.requiresApproval
     } else if (options.shell?.toolName === call.name) {
       try {
-        const shell = call.authorization?.shell ?? await prepareShellAuthorization(validated, options.explicitSkill, options.shell)
+        const shell = call.authorization?.shell ?? await prepareShellAuthorization(validated, options.shell)
         item.authorization = { shell }
         requiresApproval = options.accessMode() !== 'full_access' && shell.requiresApproval
       } catch (error) {

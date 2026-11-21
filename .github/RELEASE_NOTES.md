@@ -1,17 +1,13 @@
-## Anas v5.2.20
+## Anas v5.2.21
 
-- 移除 Shell 工具的 `keep_processes` 参数。Shell 退出即完成调用；取消、超时和退出 Anas 只停止直接 Shell，不递归关闭其子进程。已交接的长命令可跨轮继续，仍可显式取消。
-- 在工作区菜单的项目记忆下方新增“进程列表”，在右侧查看当前对话及子 Agent 启动的 Shell 和已识别直接子进程，支持刷新和按身份手动终止；不混入应用内部后代进程。进程观察为尽力而为，终端关闭仍可能影响连接终端的程序。
-- 精简 Windows 和 macOS 的 Shell 返回：无需额外状态时保留原始标准输出，其他结果只附必要字段；不重复发送原始命令或内部进程快照，后台查询重新核验存活进程。
-- 统一菜单与侧栏图标，并区分进程列表、项目记忆、记忆活动和对话过程；统一 Python 错误详情，更新双语指南。配置与数据库格式不变；调用 Shell 的扩展需移除旧参数。
-- 更新 MCP SDK、Shell 参数解析、参数校验及相关传递依赖，修复上游已公布的安全问题。
-- 修复部分 Responses 兼容服务在工具调用后附加空消息导致下一次请求返回 400 的问题；请求省略空占位消息，原始记录和工具结果保留。
-- 修复 Windows 原生 Shell 对大小写重复环境变量的处理，保证内置命令所在的 PATH 正确传递。
+- 移除全局、单技能和项目技能的脚本免审设置，技能脚本统一遵循对话权限。旧免审配置不再生效，历史自动免审记录不再作为后续授权依据；读取不改写原配置。
+- 技能描述超过 1024 个字符时显示叹号警告，仍可正常加载、通过快捷方式调用和提供给模型，保留完整描述。
+- 项目技能与自定义工具统一手动添加总目录，仅对当前项目生效；不再自动发现源文件夹中的 `.agents/skills/`、`.agents/tools/`。继续使用原目录需手动添加，并在定制模式下重新选择；原文件不会删除，子 Agent 包内目录加载保持不变。
+- 添加目录的加号移到“技能”和“自定义工具”标题旁，目录以“项目 - 目录名”与其他来源并列显示。支持打开目录、移除引用和取消编辑，移除引用不删除文件。同步双语文档，并消除工具模块混合导入的构建警告。
+- 配置及数据库格式版本不变；缺少项目目录引用字段时使用空列表，不自动补入旧来源。备份保存目录引用，外部文件需单独备份。
 
-- Remove `keep_processes` from Shell tools. A call completes when its Shell exits; cancellation, timeout and exiting Anas stop only that Shell, without recursively terminating children. Yielded long-running commands can continue across turns and can still be cancelled explicitly.
-- Add **Process list** below **Project memory** in the workspace menu. Inspect Shells and identified direct children from the current conversation and its subagents in the right sidebar, refresh their status, and terminate individual processes after identity checks. Application descendants are excluded. Observation is best-effort, and terminal closure can still affect attached programs.
-- Simplify Shell results on Windows and macOS: preserve raw stdout when no extra status is needed, otherwise include only necessary fields. Omit repeated commands and internal process snapshots, and recheck live processes during background queries.
-- Share menu and sidebar icon mappings and distinguish processes, project memory, memory activity and conversation activity. Standardize Python error details and update bilingual guides. Configuration and database formats are unchanged; extensions calling Shell tools must remove the old parameter.
-- Update the MCP SDK, Shell argument parser, validation library and related transitive dependencies to address published upstream security issues.
-- Fix HTTP 400 errors when a Responses-compatible service appends an empty message after tool calls. Omit the empty placeholder from replay requests while preserving original records and tool results.
-- Fix case-insensitive environment variable handling in native Windows Shells so the PATH for bundled commands is passed correctly.
+- Remove global, per-skill, and per-project script auto-approval settings. Skill scripts now follow conversation permissions. Old exemptions no longer apply, and historical automatic approvals are not reused as authorization; reading does not rewrite existing configuration.
+- Show an exclamation warning for skill descriptions longer than 1024 characters while retaining the full text and allowing loading, shortcut invocation, and model use.
+- Add project skill and custom-tool roots explicitly, with references scoped to the current project. Source folders' `.agents/skills/` and `.agents/tools/` are no longer discovered automatically. Add existing roots manually and reselect their resources in Custom mode to keep using them. Existing files remain intact, and subagent package directory discovery is unchanged.
+- Move add-directory buttons beside the Skills and Custom tools headings. Display roots as **Project - directory name** alongside other sources, with open-folder, remove-reference, and cancel-edit behavior. Removing a reference never deletes files. Update bilingual documentation and remove the mixed-import build warning for the tool module.
+- Configuration and database format versions are unchanged. Missing project directory reference fields default to empty lists without adding old sources automatically. Backups preserve references; back up external files separately.

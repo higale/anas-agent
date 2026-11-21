@@ -34,7 +34,7 @@ async function loadSkillsStore(externalDirectories: unknown[] = []) {
   const examplesDir = join(root, 'examples/skills')
   const workspace = join(root, 'workspace')
   const projectCapabilities = structuredClone(defaultCapabilities)
-  const projectSettings: { skillDirectories?: string[]; scriptAutoApproveSkills?: string[] } = { }
+  const projectSettings: { skillDirectories?: string[] } = { }
   await Promise.all([
     mkdir(join(bundledDataDir, 'skills/_system'), { recursive: true }),
     mkdir(join(bundledDataDir, 'examples/skills'), { recursive: true }),
@@ -83,6 +83,33 @@ afterEach(async () => {
 })
 
 describe('skillsStore', () => {
+  it.each([1024, 1025, 1510])('keeps a %i-character description usable through import, model context, shortcuts, editing, and restore', async length => {
+    const h = await loadSkillsStore()
+    const description = '长'.repeat(length)
+    const source = join(h.root, 'import', 'long-description')
+    const content = skillText('long-description', description)
+    await writeText(join(source, 'SKILL.md'), content)
+    const imported = await h.store.importSkillDirectories([source])
+    const skill = imported.snapshot.skills.find(item => item.name === 'long-description')!
+    expect(skill).toMatchObject({ description, modelAvailable: true, userAvailable: true, shortcut: '/long-description' })
+    expect(skill.loadError).toBeUndefined()
+    expect(await h.store.buildSkillsPrompt({ agent: { kind: 'main' }, selection: defaultCapabilities.skills })).toContain(description)
+    expect((await h.store.buildUserSkillInvocation(undefined, skill.name, undefined, 'Use it')).promptText).toContain(content)
+    const before = await h.store.readSkillFile(undefined, skill.id, 'SKILL.md')
+    const edited = skillText(skill.name, `${description}更长`)
+    await h.store.saveSkillFile(undefined, skill.id, 'SKILL.md', {
+      content: edited, revision: before.revision!, resolvedPath: before.resolvedPath
+    })
+    expect(await readFile(join(skill.dirPath, 'SKILL.md'), 'utf8')).toBe(edited)
+    await expect(h.store.validateRestoredSkillsDirectory(h.skillsDir, true)).resolves.toBeUndefined()
+    await h.store.updateSkillAvailability(undefined, skill.id, { modelAvailable: false, userAvailable: false })
+    const disabled = (await h.store.listSkillSnapshot()).skills.find(item => item.id === skill.id)!
+    expect(disabled).toMatchObject({ description: `${description}更长`, modelAvailable: false, userAvailable: false })
+    expect(disabled.loadError).toBeUndefined()
+    expect(await h.store.buildSkillsPrompt({ agent: { kind: 'main' }, selection: defaultCapabilities.skills })).not.toContain(description)
+    expect(await h.store.buildUserSkillInvocation(undefined, skill.name, undefined, '')).toMatchObject({ errorCode: 'user_unavailable' })
+  })
+
   it('discovers project-only custom roots, previews unsaved changes, and preserves local-first precedence and explicit shortcuts', async () => {
     const h = await loadSkillsStore()
     const first = join(h.root, 'custom-one')
@@ -92,18 +119,19 @@ describe('skillsStore', () => {
     await writeSkill(first, 'custom')
     await writeSkill(second, 'custom')
     await writeSkill(h.skillsDir, 'custom')
+    expect((await h.store.listSkillSnapshot('project')).skills.some(skill => skill.source === 'project')).toBe(false)
     h.projectSettings.skillDirectories = [first, second]
     const snapshot = await h.store.listSkillSnapshot('project')
     const custom = snapshot.skills.find(skill => skill.name === 'custom' && skill.rootName === 'custom-one')!
-    expect(custom).toMatchObject({ source: 'project', modelAvailable: true, userAvailable: true, scriptAutoApprove: false, shortcut: '/custom' })
+    expect(custom).toMatchObject({ source: 'project', modelAvailable: true, userAvailable: true, shortcut: '/custom' })
     expect(custom.modelShadowedBy).toBeUndefined()
-    expect(snapshot.skills.find(skill => skill.name === 'shared' && skill.rootName === 'custom-one')?.modelShadowedBy).toBe('workspace')
+    expect(snapshot.skills.find(skill => skill.name === 'shared' && skill.rootName === 'custom-one')?.modelShadowedBy).toBeUndefined()
     expect(snapshot.skills.find(skill => skill.name === 'custom' && skill.rootName === 'custom-two')?.modelShadowedBy).toBe('custom-one')
     expect(snapshot.skills.find(skill => skill.name === 'custom' && skill.source === 'user')?.modelShadowedBy).toBe('custom-one')
     expect((await h.store.listSkillSnapshot()).skills.some(skill => skill.source === 'project')).toBe(false)
-    expect((await h.store.listSkillSnapshot('project', [h.workspace], [])).skills.some(skill => skill.id === custom.id)).toBe(false)
-    expect((await h.store.listSkillSnapshot('project', [h.workspace], [second, first])).skills.find(skill => skill.id === custom.id)?.modelShadowedBy).toBe('custom-two')
-    const preview = await h.store.buildSkillsPrompt({ agent: { kind: 'main' }, projectId: 'project', selection: defaultCapabilities.skills, sourceFolders: [h.workspace], pluginTools: [], skillDirectories: [second] })
+    expect((await h.store.listSkillSnapshot('project', [])).skills.some(skill => skill.id === custom.id)).toBe(false)
+    expect((await h.store.listSkillSnapshot('project', [second, first])).skills.find(skill => skill.id === custom.id)?.modelShadowedBy).toBe('custom-two')
+    const preview = await h.store.buildSkillsPrompt({ agent: { kind: 'main' }, projectId: 'project', selection: defaultCapabilities.skills, pluginTools: [], skillDirectories: [second] })
     expect(preview).toContain(join(second, 'custom', 'SKILL.md'))
     expect(preview).not.toContain(join(first, 'custom', 'SKILL.md'))
     const explicit = await h.store.buildUserSkillInvocation('project', 'shared', 'project-custom-one', 'Use this')
@@ -118,14 +146,14 @@ describe('skillsStore', () => {
     const alias = join(h.root, 'custom-alias')
     await symlink(root, alias, process.platform === 'win32' ? 'junction' : 'dir')
     const missing = join(h.root, 'offline')
-    const snapshot = await h.store.listSkillSnapshot('project', [h.workspace], [root, alias, missing])
+    const snapshot = await h.store.listSkillSnapshot('project', [root, alias, missing])
     const guides = snapshot.skills.filter(skill => skill.name === 'guide')
     expect(guides).toHaveLength(2)
     expect(new Set(guides.map(skill => skill.id)).size).toBe(2)
     expect(guides.map(skill => skill.dirPath)).toEqual([join(root, 'guide'), join(alias, 'guide')])
     expect(snapshot.roots.find(item => item.path === missing)).toMatchObject({ kind: 'project', removable: true, available: false, issue: 'not_found' })
     expect(snapshot.roots.find(item => item.path === alias)).toMatchObject({ removable: true, available: true })
-    await expect(h.store.listSkillSnapshot('project', [h.workspace], ['relative'])).rejects.toThrow('absolute')
+    await expect(h.store.listSkillSnapshot('project', ['relative'])).rejects.toThrow('absolute')
   })
 
   it.each(['default', 'custom'] as const)('preserves %s user selections and explicit aliases when a project references the same directory', async mode => {
@@ -143,50 +171,6 @@ describe('skillsStore', () => {
     expect(await h.store.buildUserSkillInvocation('project', 'guide', 'user', 'check')).toMatchObject({ errorCode: 'user_unavailable' })
     h.projectCapabilities.skills = { mode: 'custom', project: false, entries: [{ id: projectSkill.id, model: true, shortcut: true }] }
     expect((await h.store.buildUserSkillInvocation('project', 'guide', projectSkill.shortcutAlias, 'check')).promptText).toContain('Use guide.')
-  })
-
-  it('keeps added project scripts subject to approval unless existing exemption rules allow them', async () => {
-    const h = await loadSkillsStore()
-    const root = join(h.root, 'custom')
-    const directory = await writeSkill(root, 'query')
-    const script = join(directory, 'run.py')
-    await writeText(script, 'print(1)')
-    h.projectSettings.skillDirectories = [root]
-    const scope = { projectId: 'project', selection: defaultCapabilities.skills, agent: { kind: 'subagent' as const } }
-    expect(await h.store.findSkillScriptExemption(script, scope)).toBeUndefined()
-    await h.store.updateSkillScriptApproval(undefined, undefined, true)
-    expect(await h.store.findSkillScriptExemption(script, scope)).toMatchObject({ script: await realpath(script) })
-    expect(await h.store.findSkillScriptExemption(script, { ...scope, selection: { mode: 'off', project: false, entries: [] } })).toBeUndefined()
-    h.projectSettings.skillDirectories = []
-    expect(await h.store.findSkillScriptExemption(script, scope)).toBeUndefined()
-  })
-
-  it('isolates project script exemptions for the same directory and applies revocation immediately', async () => {
-    const h = await loadSkillsStore()
-    const directory = await writeSkill(join(h.root, 'shared-skills'), 'guide')
-    const script = join(directory, 'run.py')
-    await writeText(script, 'print(1)')
-    h.projectSettings.skillDirectories = [dirname(directory)]
-    const snapshot = await h.store.listSkillSnapshot('project')
-    const id = snapshot.skills.find(skill => skill.name === 'guide')!.id
-    const globalBefore = await readFile(h.configFile, 'utf8')
-    h.projectSettings.scriptAutoApproveSkills = [id]
-    const projectStore = await import('./projectStore')
-    const original = projectStore.getProject
-    vi.spyOn(projectStore, 'getProject').mockImplementation(async projectId => ({ ...await original(projectId),
-      ...(projectId === 'other-project' ? { scriptAutoApproveSkills: [] } : {}) }) as Awaited<ReturnType<typeof original>>)
-    const scope = { projectId: 'project', selection: defaultCapabilities.skills, agent: { kind: 'subagent' as const } }
-    expect(await h.store.findSkillScriptExemption(script, scope)).toMatchObject({ script: await realpath(script) })
-    expect(await h.store.findSkillScriptExemption(script, { ...scope, projectId: 'other-project' })).toBeUndefined()
-    const shortcutOnly = { ...scope, selection: { mode: 'custom' as const, project: true, entries: [{ id, shortcut: true, model: false }] } }
-    expect(await h.store.findSkillScriptExemption(script, shortcutOnly)).toBeUndefined()
-    expect(await h.store.findSkillScriptExemption(script, { ...shortcutOnly, agent: { kind: 'main' as const } }, { name: 'guide' })).toBeDefined()
-    h.projectSettings.scriptAutoApproveSkills = []
-    expect(await h.store.findSkillScriptExemption(script, scope)).toBeUndefined()
-    expect(await readFile(h.configFile, 'utf8')).toBe(globalBefore)
-    await h.store.updateSkillScriptApproval(undefined, undefined, true)
-    expect(await h.store.findSkillScriptExemption(script, scope)).toBeDefined()
-    expect(await h.store.findSkillScriptExemption(script, { ...scope, projectId: 'other-project' })).toBeDefined()
   })
 
   it('keeps nested system skills separate from user packages and excludes the reserved directory on restore', async () => {
@@ -243,7 +227,7 @@ describe('skillsStore', () => {
     await writeSkill(h.skillsDir, 'duplicate')
     const catalog = await h.store.listSkillSnapshot('project')
     const skill = catalog.skills.find(skill => skill.source === 'plugin')!
-    expect(skill).toMatchObject({ id: 'skill-fixture:skill:guide', shortcutAlias: 'plugin:skill-fixture', modelShadowedBy: 'User', requiredTools: ['skill-fixture:tool:echo'], scriptAutoApprove: false })
+    expect(skill).toMatchObject({ id: 'skill-fixture:skill:guide', shortcutAlias: 'plugin:skill-fixture', modelShadowedBy: 'User', requiredTools: ['skill-fixture:tool:echo'], })
     expect(skill.dirPath).toBe(await realpath(join(h.root, 'plugins', 'skill-fixture', 'skills', 'duplicate')))
     expect((await h.store.readSkillFile('project', skill.id, 'SKILL.md')).editable).toBe(false)
     await expect(h.store.saveSkillFile('project', skill.id, 'SKILL.md', {} as never)).rejects.toThrow('read-only')
@@ -272,73 +256,28 @@ describe('skillsStore', () => {
     await plugins.uninstall('skill-fixture')
     expect((await h.store.listSkillSnapshot('project')).skills.some(skill => skill.source === 'plugin')).toBe(false)
   })
-  it('persists independent default-off script switches and applies OR to current and changed scripts', async () => {
+  it.each([true, 'retired-value'])('ignores retired script approval settings without rewriting files (%s)', async global => {
     const h = await loadSkillsStore()
-    const dir = await writeSkill(h.skillsDir, 'query')
-    const script = join(dir, 'scripts', 'query.py')
-    await writeText(script, 'print(1)')
-    const scope = { selection: defaultCapabilities.skills, agent: { kind: 'main' as const } }
-    const snapshot = await h.store.listSkillSnapshot()
-    expect(snapshot.scriptAutoApprove).toBe(false)
-    expect(snapshot.skills[0].scriptAutoApprove).toBe(false)
-    for (const [global, individual] of [[false, false], [false, true], [true, false], [true, true]]) {
-      await h.store.updateSkillScriptApproval(undefined, undefined, global)
-      const saved = await h.store.updateSkillScriptApproval(undefined, 'user:query', individual)
-      expect(saved.scriptAutoApprove).toBe(global)
-      expect(saved.skills[0].scriptAutoApprove).toBe(individual)
-      expect(Boolean(await h.store.findSkillScriptExemption(script, scope))).toBe(global || individual)
-    }
-    await h.store.updateSkillScriptApproval(undefined, undefined, false)
-    await writeText(script, 'print(2)')
-    await expect(h.store.findSkillScriptExemption(script, scope)).resolves.toMatchObject({ skillId: 'user:query' })
-    await writeText(join(dir, 'new.py'), 'print(3)')
-    await expect(h.store.findSkillScriptExemption(join(dir, 'new.py'), scope)).resolves.toBeDefined()
-    await h.store.updateSkillScriptApproval(undefined, 'user:query', false)
-    await expect(h.store.findSkillScriptExemption(script, scope)).resolves.toBeUndefined()
-    expect(JSON.parse(await readFile(h.configFile, 'utf8'))).toMatchObject({ script_auto_approve: false, script_auto_approve_skills: [] })
-  })
-
-  it('does not grant disabled or shortcut-only Skills autonomous script exemptions', async () => {
-    const h = await loadSkillsStore()
-    const dir = await writeSkill(h.skillsDir, 'query')
-    const script = join(dir, 'query.py')
-    await writeText(script, 'print(1)')
-    await h.store.updateSkillScriptApproval(undefined, undefined, true)
-    await h.store.updateSkillAvailability(undefined, 'user:query', { modelAvailable: false })
-    const scope = { selection: defaultCapabilities.skills, agent: { kind: 'main' as const } }
-    await expect(h.store.findSkillScriptExemption(script, scope)).resolves.toBeUndefined()
-    await expect(h.store.findSkillScriptExemption(script, scope, { name: 'query' })).resolves.toMatchObject({ skillId: 'user:query' })
-    await expect(h.store.findSkillScriptExemption(script, { ...scope, agent: { kind: 'subagent' as const } }, { name: 'query' })).resolves.toBeUndefined()
-    await expect(h.store.findSkillScriptExemption(script, { ...scope, selection: { ...scope.selection, mode: 'off' } }, { name: 'query' })).resolves.toBeUndefined()
-    const selected = { ...scope, selection: { mode: 'custom' as const, project: false,
-      entries: [{ id: 'user:query', model: true, shortcut: false }] } }
-    await expect(h.store.findSkillScriptExemption(script, selected)).resolves.toBeUndefined()
-    await expect(h.store.findSkillScriptExemption(script, { ...selected, selection: { ...selected.selection, entries: [] } })).resolves.toBeUndefined()
-  })
-
-  it('binds exemption to source identity and actual containment, including directory links', async () => {
-    const h = await loadSkillsStore()
-    const user = await writeSkill(h.skillsDir, 'duplicate')
-    await writeSkill(h.bundledSystemDir, 'duplicate')
+    await writeSkill(h.skillsDir, 'query')
     await h.store.listSkillSnapshot()
-    const systemScript = join(h.systemDir, 'duplicate', 'query.py')
-    const userScript = join(user, 'query.py')
-    await writeText(systemScript, 'print(1)')
-    await writeText(userScript, 'print(2)')
-    await h.store.updateSkillScriptApproval(undefined, 'system:duplicate', true)
-    const scope = { selection: defaultCapabilities.skills, agent: { kind: 'main' as const } }
-    await expect(h.store.findSkillScriptExemption(userScript, scope)).resolves.toBeUndefined()
-    await expect(h.store.findSkillScriptExemption(systemScript, scope)).resolves.toBeUndefined()
-    await expect(h.store.findSkillScriptExemption(systemScript, scope, { name: 'duplicate', sourceAlias: 'system' })).resolves.toMatchObject({ skillId: 'system:duplicate' })
-    await h.store.updateSkillScriptApproval(undefined, 'user:duplicate', true)
-    const outside = join(h.root, 'outside')
-    await mkdir(outside)
-    await writeText(join(outside, 'query.py'), 'print(3)')
-    await symlink(outside, join(user, 'linked'), 'junction')
-    await expect(h.store.findSkillScriptExemption(join(user, 'linked', 'query.py'), scope)).resolves.toBeUndefined()
-    await expect(h.store.findSkillScriptExemption(join(outside, 'query.py'), scope)).resolves.toBeUndefined()
-    await expect(h.store.updateSkillScriptApproval(undefined, 'missing', true)).rejects.toThrow('not found')
-    await expect(h.store.updateSkillScriptApproval(undefined, undefined, 'true' as never)).rejects.toThrow('boolean')
+    const config = JSON.parse(await readFile(h.configFile, 'utf8'))
+    config.script_auto_approve = global
+    config.script_auto_approve_skills = ['user:query', false]
+    config.availability = { 'user:query': { model_available: false, user_available: true } }
+    const before = JSON.stringify(config)
+    await writeText(h.configFile, before)
+    await expect(h.store.validateSkillsConfigFile(h.configFile)).resolves.toBeUndefined()
+    const snapshot = await h.store.listSkillSnapshot()
+    expect(snapshot.skills[0]).toMatchObject({ id: 'user:query', modelAvailable: false, userAvailable: true })
+    expect(snapshot).not.toHaveProperty('scriptAutoApprove')
+    expect(snapshot.skills[0]).not.toHaveProperty('scriptAutoApprove')
+    expect(await readFile(h.configFile, 'utf8')).toBe(before)
+    await h.store.updateSkillAvailability(undefined, 'user:query', { modelAvailable: true })
+    const saved = JSON.parse(await readFile(h.configFile, 'utf8'))
+    expect(saved).toMatchObject({ version: 0, external_directories: config.external_directories,
+      availability: { 'user:query': { model_available: true, user_available: true } } })
+    expect(saved).not.toHaveProperty('script_auto_approve')
+    expect(saved).not.toHaveProperty('script_auto_approve_skills')
   })
 
   it('injects instructions with their resource directory and preserves the exact prompt in the UI projection', async () => {
@@ -391,7 +330,7 @@ describe('skillsStore', () => {
     await writeSkill(fixture.bundledSystemDir, 'authoring-guide')
     await writeSkill(fixture.skillsDir, 'personal-guide')
     const unusedFolder = join(fixture.root, 'unused-project')
-    const prompt = await fixture.store.buildSkillsPrompt({ agent: { kind: 'main' }, selection: defaultCapabilities.skills, sourceFolders: [fixture.workspace, unusedFolder] })
+    const prompt = await fixture.store.buildSkillsPrompt({ agent: { kind: 'main' }, selection: defaultCapabilities.skills, skillDirectories: [unusedFolder] })
     expect(prompt).toContain('<skills_instructions>')
     expect(prompt).toContain(`(file: ${join(fixture.systemDir, 'authoring-guide', 'SKILL.md')})`)
     expect(prompt).toContain(`(file: ${join(fixture.skillsDir, 'personal-guide', 'SKILL.md')})`)
@@ -401,23 +340,26 @@ describe('skillsStore', () => {
     expect(prompt).not.toContain('Anas Settings')
   })
 
-  it('previews draft source folders and preserves skill identity after project creation', async () => {
+  it('previews explicit draft skill directories and preserves skill identity after project creation', async () => {
     const fixture = await loadSkillsStore()
-    await writeSkill(join(fixture.workspace, '.agents', 'skills'), 'draft-skill')
-    const preview = await fixture.store.listSkillSnapshot(undefined, [fixture.workspace])
+    const directory = join(fixture.workspace, '.agents', 'skills')
+    await writeSkill(directory, 'draft-skill')
+    expect((await fixture.store.listSkillSnapshot('new-project')).skills.some(skill => skill.source === 'project')).toBe(false)
+    const preview = await fixture.store.listSkillSnapshot(undefined, [directory])
     const skill = preview.skills.find((item) => item.name === 'draft-skill')!
     expect(skill).toBeDefined()
+    fixture.projectSettings.skillDirectories = [directory]
     const saved = await fixture.store.listSkillSnapshot('new-project')
     expect(saved.skills.find((item) => item.name === 'draft-skill')?.id).toBe(skill.id)
     const selection = { mode: 'custom' as const, project: false, entries: [{ id: skill.id, shortcut: true, model: true }] }
     await expect(fixture.store.buildSkillsPrompt({ agent: { kind: 'main' }, projectId: 'new-project', selection: selection })).resolves.toContain('draft-skill')
 
     const replacement = join(fixture.root, 'replacement')
-    await writeSkill(join(replacement, '.agents', 'skills'), 'replacement-skill')
+    await writeSkill(replacement, 'replacement-skill')
     const edited = await fixture.store.listSkillSnapshot('new-project', [replacement])
     expect(edited.skills.map((item) => item.name)).toContain('replacement-skill')
     expect(edited.skills.map((item) => item.name)).not.toContain('draft-skill')
-    const draftPrompt = await fixture.store.buildSkillsPrompt({ agent: { kind: 'main' }, projectId: 'new-project', selection: defaultCapabilities.skills, sourceFolders: [replacement] })
+    const draftPrompt = await fixture.store.buildSkillsPrompt({ agent: { kind: 'main' }, projectId: 'new-project', selection: defaultCapabilities.skills, skillDirectories: [replacement] })
     expect(draftPrompt).toContain('replacement-skill')
     expect(draftPrompt).not.toContain('draft-skill')
     const cleared = await fixture.store.listSkillSnapshot('new-project', [])
@@ -425,14 +367,9 @@ describe('skillsStore', () => {
     await expect(fixture.store.listSkillSnapshot(undefined, ['relative-folder'])).rejects.toThrow('absolute directory paths')
   })
 
-  it('identifies the invalid source folder and project in load failures', async () => {
+  it.each([['relative-folder'], [null], null])('rejects invalid resource directory references %j', async directories => {
     const fixture = await loadSkillsStore()
-    const invalidPath = process.platform === 'win32' ? 'relative-folder' : 'C:\\Users\\example\\Documents'
-    await expect(fixture.store.listSkillSnapshot('restored-project', [fixture.workspace, invalidPath])).rejects.toThrow(
-      `sourceFolders[1]=${JSON.stringify(invalidPath)}; project="restored-project", platform=${process.platform}`
-    )
-    await expect(fixture.store.listSkillSnapshot(undefined, [null] as unknown as string[])).rejects.toThrow('sourceFolders[0]=<null>')
-    await expect(fixture.store.listSkillSnapshot('restored-project', null as unknown as string[])).rejects.toThrow('must be an array')
+    await expect(fixture.store.listSkillSnapshot('project', directories as string[])).rejects.toThrow('absolute directory paths')
   })
 
   it('supports project shortcut-only overrides and disables both paths with the Skill capability', async () => {
@@ -551,6 +488,7 @@ describe('skillsStore', () => {
       writeSkill(external, 'external-one')
     ])
 
+    fixture.projectSettings.skillDirectories = [join(fixture.workspace, '.agents', 'skills')]
     const snapshot = await fixture.store.listSkillSnapshot('project-id')
 
     expect(snapshot.roots.map((root) => root.kind)).toEqual(['system', 'user', 'project', 'external'])
@@ -831,6 +769,7 @@ Body
     const fixture = await loadSkillsStore()
     const projectSkills = join(fixture.workspace, '.agents', 'skills')
     await writeSkill(projectSkills, 'project-skill')
+    fixture.projectSettings.skillDirectories = [projectSkills]
     await mkdir(fixture.examplesDir, { recursive: true })
     await fixture.store.initializeSkillsStore()
 

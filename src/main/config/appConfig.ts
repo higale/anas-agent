@@ -1,5 +1,4 @@
 // Skill settings keep their domain store and serialized mutation queue.
-export { updateSkillScriptApproval } from '../skillsStore'
 import { createHash, randomUUID } from 'node:crypto'
 import { dirname } from 'node:path'
 import type { CustomToolSave } from '@shared/customTools'

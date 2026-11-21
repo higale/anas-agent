@@ -6,9 +6,9 @@ import { UI_ICON_SIZE_SMALL } from './uiConstants'
 
 export type CapabilityMode = 'all' | 'custom' | 'off'
 
-export function CapabilitySection({ label, title, customCount, total, countSuffix, mode, disabled = false, reason, expandable = false, onChange, children }: {
+export function CapabilitySection({ label, title, customCount, total, countSuffix, mode, disabled = false, reason, expandable = false, actions, onChange, children }: {
   label: string; title?: ReactNode; customCount: number; total: number; countSuffix?: ReactNode; mode: CapabilityMode; disabled?: boolean; reason?: string; expandable?: boolean
-  onChange(mode: CapabilityMode): void; children: ReactNode
+  actions?: ReactNode; onChange(mode: CapabilityMode): void; children: ReactNode
 }) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
@@ -19,10 +19,13 @@ export function CapabilitySection({ label, title, customCount, total, countSuffi
     {reason && <span className="ui-badge" data-tooltip={reason}>{t('capabilities.inactive')}</span>}</>
   return <section className="ui-form-section ui-capability-section" aria-label={label}>
     <div className="ui-form-row ui-form-row-inline">
-      {canExpand ? <button className="ui-disclosure-trigger ui-row" type="button" aria-label={label}
-        aria-expanded={expanded} aria-controls={contentId} onClick={() => setExpanded(value => !value)}>
-        {heading}<ChevronRight className="ui-disclosure-chevron" size={UI_ICON_SIZE_SMALL} aria-hidden="true" />
-      </button> : <div className="ui-row">{heading}</div>}
+      <div className="ui-row">
+        {canExpand ? <button className="ui-disclosure-trigger ui-row" type="button" aria-label={label}
+          aria-expanded={expanded} aria-controls={contentId} onClick={() => setExpanded(value => !value)}>
+          {heading}<ChevronRight className="ui-disclosure-chevron" size={UI_ICON_SIZE_SMALL} aria-hidden="true" />
+        </button> : <div className="ui-row">{heading}</div>}
+        {actions}
+      </div>
       <SegmentedControl<CapabilityMode> ariaLabel={label} value={mode} disabled={disabled}
         options={(['all', 'custom', 'off'] as const).map(value => ({ value, label: t(`capabilities.${value}`) }))}
         onChange={onChange} />

@@ -38,9 +38,9 @@ async function verifyGlobalSettings(launchApplication) {
           id, kind: id.startsWith('project') ? 'project' : id, name: `${id} directory`, shortcutAlias: id,
           path: `/skills/${id}`, removable: false, available: true
         }))
-        return { projectId, roots, scriptAutoApprove: false, skills: roots.map((source) => ({
+        return { projectId, roots, skills: roots.map((source) => ({
           id: `${source.id}:search`, rootId: source.id, name: `${source.id}-search`, description: 'Search skill',
-          modelAvailable: true, userAvailable: true, scriptAutoApprove: false, linked: false, dirPath: `${source.path}/search`,
+          modelAvailable: true, userAvailable: true, linked: false, dirPath: `${source.path}/search`,
           relativePath: 'search', source: source.kind, rootName: source.name, shortcutAlias: source.shortcutAlias,
           shortcut: `/${source.id}-search`
         })) }

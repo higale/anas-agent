@@ -161,8 +161,8 @@ export async function prepareAgentSystemPrompt(
   const workspace = workspaceContext(project)
   const [memory, skills, commandShell, pluginPrompts] = await Promise.all([
     memoryPrompt(features.memory, config.settings.memoryMode === 'foreground'),
-    features.skills ? buildSkillsPrompt({ agent, projectId: project.id, selection: effective.skills, sourceFolders: project.sourceFolders,
-      pluginTools: effective.pluginTools, skillDirectories: project.skillDirectories ?? [], scriptAutoApproveSkills: project.scriptAutoApproveSkills ?? [] }) : Promise.resolve(''),
+    features.skills ? buildSkillsPrompt({ agent, projectId: project.id, selection: effective.skills,
+      pluginTools: effective.pluginTools, skillDirectories: project.skillDirectories ?? [] }) : Promise.resolve(''),
     shouldIncludeCommandShell(process.platform, config.settings, features)
       ? getCommandShell().then(describeCommandShell)
       : Promise.resolve(undefined),
@@ -223,9 +223,9 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
     const parentLimit = activeSubagent ? context.parentConfiguration?.subagentLimit : undefined
     const skillsEnabled = project.kind === 'workspace' && capabilityFeatures(ownCapabilities).skills && (!parentLimit || capabilityFeatures(parentLimit).skills)
     const globalCatalog = skillsEnabled
-      ? await listSkillSnapshot(thread.projectId, project.sourceFolders, project.skillDirectories ?? [], project.scriptAutoApproveSkills ?? [])
+      ? await listSkillSnapshot(thread.projectId, project.skillDirectories ?? [])
       : { skills: [] }
-    const globalToolCatalog = project.kind === 'workspace' ? await listToolSnapshot(project.sourceFolders) : { tools: [] }
+    const globalToolCatalog = project.kind === 'workspace' ? await listToolSnapshot(project.toolDirectories ?? []) : { tools: [] }
     const packageIds = activeSubagent?.id ? [activeSubagent.id] : []
     const ownedSkills = skillsEnabled ? await listSubagentSkills(packageIds) : { skills: [] }
     const ownedTools = project.kind === 'workspace' && ownCapabilities.customTools.mode !== 'off' && (!parentLimit || parentLimit.customTools.entries.length)
@@ -322,10 +322,6 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
   const shellCommandAuthorization = commandShell && shellEnvironment ? createShellCommandAuthorization({
     shell: commandShell, env: shellEnvironment.env, rgExecutable: shellEnvironment.executable,
     primaryFolder: workspace.primaryFolder, trustedFolders: workspace.trustedFolders,
-    skills: { projectId: thread.projectId, sourceFolders: options.project?.kind === 'workspace' ? options.project.sourceFolders : undefined,
-      skillDirectories: options.project?.kind === 'workspace' ? options.project.skillDirectories ?? [] : undefined,
-      scriptAutoApproveSkills: options.project?.kind === 'workspace' ? options.project.scriptAutoApproveSkills ?? [] : undefined,
-      selection: capabilities.skills, agent: skillAgent, pluginTools: capabilities.pluginTools },
     accessMode: createAgentAccessModeResolver(database, thread.id, context.subagentCall), signal: context.signal
   }) : undefined
   const approvalDirectories = applicationApprovalDirectories()

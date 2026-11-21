@@ -31,7 +31,6 @@ import { SegmentedControl } from '../SegmentedControl'
 import { MemorySettings } from './MemorySettings'
 import { ModelPicker } from '../model/ModelPicker'
 import { PanelViewState } from '../agent/PanelViewState'
-import { CheckboxButton } from '../CheckboxButton'
 import { formatDateTime } from '../formatDateTime'
 import { SkillsSettings } from './SkillsSettings'
 import { PackageActions } from './PackageActions'
@@ -134,7 +133,6 @@ interface SettingsScreenProps {
   onUpdateSubagentDraft: (update: Partial<SubagentDraft>) => void
   onUpdateModelDraft: (update: Partial<ModelDraft>) => void
   onSaveModelDetails: (draft: ModelDraft) => Promise<void>
-  onUpdateSkillScriptApproval: (skillId: string | undefined, enabled: boolean) => void | Promise<void>
   onUpdateSkillAvailability: (skillId: string, update: SkillAvailabilityUpdate) => void | Promise<void>
 }
 
@@ -232,7 +230,6 @@ export function SettingsScreen({
   onUpdateSubagentDraft,
   onUpdateModelDraft,
   onSaveModelDetails,
-  onUpdateSkillScriptApproval,
   onUpdateSkillAvailability
 }: SettingsScreenProps) {
   const { t } = useTranslation()
@@ -291,9 +288,6 @@ export function SettingsScreen({
                   const importedId = await onImportSkills()
                   if (importedId) setSkillToReveal(importedId)
                 }} />
-              <CheckboxButton label={t('settings.skill_scripts_auto_approve_all')}
-                disabled={!skills} checked={skills?.scriptAutoApprove ?? false}
-                onChange={enabled => void onUpdateSkillScriptApproval(undefined, enabled)} />
             </div>}
           </header>
           {error && <div className="settings-error" role="alert">{error}</div>}
@@ -468,7 +462,6 @@ export function SettingsScreen({
               onRefresh={onRefreshSkills}
               onUpdateDirectory={onUpdateSkillDirectory}
               onRemoveDirectory={onRemoveSkillDirectory}
-              onUpdateScriptApproval={onUpdateSkillScriptApproval}
               onUpdateAvailability={onUpdateSkillAvailability}
             />
           )}

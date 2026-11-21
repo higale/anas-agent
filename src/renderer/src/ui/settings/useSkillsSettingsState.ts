@@ -14,8 +14,7 @@ interface Options {
 }
 
 interface SkillEdits {
-  scriptAutoApprove?: boolean
-  skills?: Record<string, SkillAvailabilityUpdate & { scriptAutoApprove?: boolean }>
+  skills?: Record<string, SkillAvailabilityUpdate>
 }
 
 function skillImportErrorText(t: TFunction, error: SkillImportError): string {
@@ -49,12 +48,8 @@ export function useSkillsSettingsState({ openConfirmDialog, settingsOpen, settin
     },
     persist: async (draft) => {
       let result: SkillSnapshot | undefined
-      if (draft.scriptAutoApprove !== undefined) {
-        result = await window.gale.skills.updateScriptApproval(undefined, undefined, draft.scriptAutoApprove)
-      }
-      for (const [id, { scriptAutoApprove, ...availability }] of Object.entries(draft.skills ?? {})) {
+      for (const [id, availability] of Object.entries(draft.skills ?? {})) {
         if (Object.keys(availability).length) result = await window.gale.skills.updateAvailability(undefined, id, availability)
-        if (scriptAutoApprove !== undefined) result = await window.gale.skills.updateScriptApproval(undefined, id, scriptAutoApprove)
       }
       return result ?? await window.gale.skills.get()
     },
@@ -65,7 +60,6 @@ export function useSkillsSettingsState({ openConfirmDialog, settingsOpen, settin
   })
   const skills = savedSkills && edits.draft ? {
     ...savedSkills,
-    scriptAutoApprove: edits.draft.scriptAutoApprove ?? savedSkills.scriptAutoApprove,
     skills: savedSkills.skills.map((skill) => ({ ...skill, ...edits.draft?.skills?.[skill.id] }))
   } : savedSkills
   const refreshSkills = useCallback(async (): Promise<void> => {
@@ -128,7 +122,7 @@ export function useSkillsSettingsState({ openConfirmDialog, settingsOpen, settin
           const remaining = new Set(snapshot.skills.map((skill) => skill.id))
           const hasPendingEdits = edits.discardPending((draft) => {
             const skills = Object.fromEntries(Object.entries(draft.skills ?? {}).filter(([id]) => remaining.has(id)))
-            return draft.scriptAutoApprove === undefined && Object.keys(skills).length === 0
+            return Object.keys(skills).length === 0
               ? undefined : { ...draft, skills }
           })
           if (!hasPendingEdits) notice.dismiss(noticeId)
@@ -161,14 +155,7 @@ export function useSkillsSettingsState({ openConfirmDialog, settingsOpen, settin
     await edits.save({ skills: { [skillId]: update } })
   }
 
-  async function updateScriptApproval(skillId: string | undefined, enabled: boolean): Promise<void> {
-    await edits.save(skillId === undefined
-      ? { scriptAutoApprove: enabled }
-      : { skills: { [skillId]: { scriptAutoApprove: enabled } } })
-  }
-
   return {
-    updateScriptApproval,
     addDirectory,
     importDirectories,
     moveDirectory,

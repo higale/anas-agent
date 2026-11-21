@@ -26,7 +26,7 @@ function projectionKey({ config, project, accessMode, continuationRunId, continu
       id: project.id, kind: project.kind, name: project.name, prompt: project.prompt,
       ...(project.kind === 'workspace' ? {
         codingMode: project.codingMode, compressionPrompt: project.compressionPrompt,
-        sourceFolders: project.sourceFolders, skillDirectories: project.skillDirectories, capabilities: project.capabilities,
+        sourceFolders: project.sourceFolders, skillDirectories: project.skillDirectories, toolDirectories: project.toolDirectories, capabilities: project.capabilities,
         restrictSubagents: project.restrictSubagents
       } : {})
     },

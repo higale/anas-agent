@@ -8,7 +8,6 @@ import type { FilePatchRestoreTarget } from '../filePatchRestore'
 import type { FilePatchTarget } from '../filePatch'
 import { isSameOrInsideDirectory, samePath } from '../pathContainment'
 import type { createShellCommandAuthorization } from '../shellCommandAuthorization'
-import type { SkillScriptInvocation } from '../skillsStore'
 import { approvalToolNames, prepareToolPathAuthorization } from './toolAuthorization'
 import type { ApprovalDirectories } from './approvalDirectories'
 import { modelApprovalDecision } from '../../runtime/smartApproval'
@@ -109,22 +108,22 @@ export function verifyCurrentPatchInputTargets(targets: readonly FilePatchTarget
     locator: ['operations', target.operationIndex, target.field] })), expected, samePath)
 }
 
-export async function prepareShellAuthorization(call: Call, skill: SkillScriptInvocation | undefined,
+export async function prepareShellAuthorization(call: Call,
   options: ShellAuthorizationOptions): Promise<ShellAuthorizationReceipt> {
   const fullAccess = options.accessMode() === 'full_access'
-  const plan = fullAccess ? undefined : await options.analyzer.inspect(call.args, skill)
+  const plan = fullAccess ? undefined : await options.analyzer.inspect(call.args)
   return { id: call.id, name: call.name, inputHash: authorizationInputHash(call.args), requiresApproval: !fullAccess && !plan
     && (options.accessMode() !== 'smart_approval' || modelApprovalDecision(call.args)),
     humanApproved: false, ...(plan ? { plan } : {}) }
 }
 
 /** Carries the saved receipt to the actual runner, including delayed managed
- * dispatch. The environment and Skill scope are rechecked at that boundary. */
+ * dispatch. The environment are rechecked at that boundary. */
 export function withShellAuthorization<T>(receipt: ShellAuthorizationReceipt | undefined, call: Call,
-  skill: SkillScriptInvocation | undefined, options: ShellAuthorizationOptions, operation: () => T): T {
+  options: ShellAuthorizationOptions, operation: () => T): T {
   const bound = receipt?.id === call.id && receipt.name === call.name ? receipt : undefined
   return shellVerifier.run(() => verifyShellReceipt(bound, call.args, { accessMode: options.accessMode, samePath,
-    inspect: () => options.analyzer.inspect(call.args, skill) }), operation)
+    inspect: () => options.analyzer.inspect(call.args) }), operation)
 }
 
 export async function verifyCurrentShellAuthorization(): Promise<void> {

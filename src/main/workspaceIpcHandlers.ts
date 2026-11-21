@@ -4,7 +4,6 @@ import { listSubagentFiles, readSubagentFile, saveSubagentFile } from './subagen
 import { listSubagentSkills } from './skillsStore'
 import { listSubagentTools } from './toolsStore'
 import { setToolEnabled, addExternalToolDirectory, updateExternalToolDirectory, removeExternalToolDirectory, moveExternalToolDirectory, listToolFiles, readToolFile, saveToolFile, createToolFile, toolFileExists, importToolDirectories, initializeToolsStore, listToolSnapshot, toToolImportError } from './toolsStore'
-import { updateSkillScriptApproval } from './config/appConfig'
 import type { ToolImportResult } from '@shared/types'
 import { projectOperation } from './projectOperation'
 import { ProjectOperationFailure } from '@shared/projectOperation'
@@ -124,13 +123,13 @@ export function registerWorkspaceIpcHandlers(): void {
     })
     return result.canceled ? [] : result.filePaths
   }))
-  handleMainIpc('projects:chooseSkillDirectories', async (event) => projectOperation(async () => {
+  for (const channel of ['projects:chooseSkillDirectories', 'projects:chooseToolDirectories']) handleMainIpc(channel, async (event) => projectOperation(async () => {
     const result = await showModalOpenDialog(dialogParentFromEvent(event), {
       properties: ['openDirectory', 'multiSelections']
     })
     if (result.canceled) return []
     return Promise.all(result.filePaths.map(async path => {
-      if (!(await stat(path)).isDirectory()) throw new ProjectOperationFailure({ code: 'not_directory', path }, 'Selected Skill root is not a directory.')
+      if (!(await stat(path)).isDirectory()) throw new ProjectOperationFailure({ code: 'not_directory', path }, 'Selected resource root is not a directory.')
       return realpath(path)
     }))
   }))
@@ -151,9 +150,9 @@ export function registerWorkspaceIpcHandlers(): void {
   handleMainIpc('config:deleteProviderModel', async (_event, providerId: string, modelConfigId: string): Promise<AppConfigSnapshot> => deleteProviderModel(providerId, modelConfigId))
   handleMainIpc('config:moveProviderModel', async (_event, providerId: string, modelConfigId: string, direction: -1 | 1): Promise<AppConfigSnapshot> => moveProviderModel(providerId, modelConfigId, direction))
   handleMainIpc('tools:validateSchema', (_event, schema: unknown) => { validateCustomToolSchema(schema) })
-  handleMainIpc('tools:get', async (_event, projectId?: string, sourceFolders?: string[]) => {
-    const project = sourceFolders === undefined && projectId ? await getProject(projectId) : undefined
-    return listToolSnapshot(sourceFolders ?? (project?.kind === 'workspace' ? project.sourceFolders : []))
+  handleMainIpc('tools:get', async (_event, projectId?: string, toolDirectories?: string[]) => {
+    const project = toolDirectories === undefined && projectId ? await getProject(projectId) : undefined
+    return listToolSnapshot(toolDirectories ?? (project?.kind === 'workspace' ? project.toolDirectories ?? [] : []))
   })
   handleMainIpc('tools:setEnabled', async (_event, id: string, enabled: boolean) => setToolEnabled(id, enabled))
   handleMainIpc('tools:refresh', async () => getAppConfigSnapshot())
@@ -258,8 +257,7 @@ export function registerWorkspaceIpcHandlers(): void {
     runMcpUpdateInBackground(loadMcpRuntimeForCurrentConfig(false), 'apply reordered MCP servers')
     return snapshot
   })
-  handleMainIpc('skills:updateScriptApproval', async (_event, projectId: string | undefined, skillId: string | undefined, enabled: boolean): Promise<SkillSnapshot> => updateSkillScriptApproval(projectId, skillId, enabled))
-  handleMainIpc('skills:get', async (_event, projectId?: string, sourceFolders?: string[], skillDirectories?: string[]): Promise<SkillSnapshot> => listSkillSnapshot(projectId, sourceFolders, skillDirectories))
+  handleMainIpc('skills:get', async (_event, projectId?: string, skillDirectories?: string[]): Promise<SkillSnapshot> => listSkillSnapshot(projectId, skillDirectories))
   handleMainIpc('skills:listFiles', async (_event, projectId: string | undefined, skillId: string, relativePath?: string): Promise<SkillFileNode[]> => listSkillFiles(projectId, skillId, relativePath))
   handleMainIpc('skills:saveFile', async (_event, projectId: string | undefined, skillId: string, path: string, update: import('@shared/packageFiles').PackageFileUpdate) => saveSkillFile(projectId, skillId, path, update))
   handleMainIpc('skills:readFile', async (_event, projectId: string | undefined, skillId: string, relativePath: string): Promise<SkillFilePreview> => readSkillFile(projectId, skillId, relativePath))

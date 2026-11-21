@@ -101,7 +101,7 @@ export function createConversationToolExecutor(options: ConversationToolExecutio
           const authorized = () => isFileEditTool(call.name) ? withPatchAuthorization(call.authorization!.patch!, operation) : operation()
           const shell = options.preparation.shell
           const result = shell?.toolName === call.name
-            ? await withShellAuthorization(call.authorization?.shell, call, options.preparation.explicitSkill, shell, authorized) : await authorized()
+            ? await withShellAuthorization(call.authorization?.shell, call, shell, authorized) : await authorized()
           const message = toInput(options.preparation.includeRules ? conversationRuleResult(current.context, result) : result)
           observer.tool({ kind: 'settled', call: observedCall,
             output: presentToolResult(presentConversationMessage(result, message.id).content), succeeded: true })

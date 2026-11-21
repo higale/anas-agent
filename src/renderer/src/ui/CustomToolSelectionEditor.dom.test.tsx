@@ -20,6 +20,36 @@ function tool(root: ToolRoot, name: string): ToolPackage {
 const tools = [tool(roots[0], 'format'), tool(roots[1], 'inspect')]
 const toggle = (name: string, on = true) => within(screen.getByRole('radiogroup', { name })).getByRole('radio', { name: on ? 'capabilities.on' : 'capabilities.off' })
 
+it.each(['all', 'custom', 'off'] as const)('keeps project directory management available in %s mode with empty and offline roots', async mode => {
+  const add = vi.fn(), remove = vi.fn(), openDirectory = vi.fn().mockResolvedValue(undefined), changed = vi.fn()
+  vi.stubGlobal('gale', { files: { openDirectory } })
+  const offline: ToolRoot = { id: 'offline', name: 'Offline', source: 'project', path: '/offline', error: { code: 'path_not_found', path: '/offline' } }
+  const view = render(<CustomToolSelectionEditor value={{ mode, project: false, entries: [] }} tools={[]} roots={[]} backgroundTools
+    projectTools={{ onAddDirectories: add, onRemoveDirectory: remove }} onChange={changed} />)
+  const disclosure = screen.getByRole('button', { name: 'custom_tools.title' })
+  await userEvent.click(screen.getByRole('button', { name: 'project.add_tool_directories' }))
+  expect(disclosure).toHaveAttribute('aria-expanded', 'false')
+  await userEvent.click(disclosure)
+  expect(add).toHaveBeenCalledOnce()
+  expect(changed).not.toHaveBeenCalled()
+  view.rerender(<CustomToolSelectionEditor value={{ mode, project: false, entries: [] }} tools={[tools[1]]} roots={[roots[1], offline]} backgroundTools
+    projectTools={{ onAddDirectories: add, onRemoveDirectory: remove }} onChange={changed} />)
+  expect(screen.queryByRole('button', { name: 'settings.skill_group_project' })).not.toBeInTheDocument()
+  const liveGroup = within(screen.getByRole('region', { name: roots[1].path }))
+  await userEvent.click(liveGroup.getByRole('button', { name: 'project.open_tools_folder' }))
+  expect(openDirectory).toHaveBeenCalledWith(roots[1].path)
+  await userEvent.click(liveGroup.getByRole('button', { name: 'settings.skill_group_project - Workspace' }))
+  if (mode === 'custom') expect(toggle('Workspace inspect')).toBeEnabled()
+  else expect(toggle('Workspace inspect')).toBeDisabled()
+  const missing = within(screen.getByRole('region', { name: '/offline' }))
+  await userEvent.click(missing.getByRole('button', { name: 'settings.skill_group_project - Offline' }))
+  expect(missing.getByRole('alert')).toHaveTextContent('custom_tools.load_error_path_not_found')
+  expect(missing.getByRole('button', { name: 'project.open_tools_folder' })).toBeDisabled()
+  await userEvent.click(missing.getByRole('button', { name: 'project.remove_tool_directory' }))
+  expect(remove).toHaveBeenCalledWith('/offline')
+  expect(changed).not.toHaveBeenCalled()
+})
+
 it('shows collapsed sources in all modes, opens exact package directories, and preserves custom choices', async () => {
   const openDirectory = vi.fn().mockResolvedValue(undefined), changed = vi.fn(), user = userEvent.setup()
   vi.stubGlobal('gale', { files: { openDirectory } })

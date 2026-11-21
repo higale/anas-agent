@@ -87,35 +87,37 @@ describe('project store', () => {
     expect(capabilities).not.toHaveProperty('bundledPython')
   })
 
-  it('defaults optional Skill roots, persists them in v0, and retains offline references without touching their files', async () => {
+  it.each(['skill', 'tool'] as const)('defaults optional %s roots, persists them in v0, and retains offline references without touching their files', async kind => {
+    const field = kind === 'skill' ? 'skillDirectories' : 'toolDirectories'
+    const storedField = `${kind}_directories`
     const store = await import('./projectStore')
     const request = { kind: 'workspace' as const, name: 'Skills', sourceFolders: [tempDir],
       codingMode: false, prompt: '', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false }
     const project = await store.createProject(request)
     const raw = JSON.parse(await readSnapshot())
     const saved = raw.projects.find((p: Project) => p.id === project.id)
-    delete saved.skill_directories
+    delete saved[storedField]
     await writeSnapshot(JSON.stringify(raw))
     const before = await readSnapshot()
-    expect(await store.getProject(project.id)).toMatchObject({ skillDirectories: [] })
+    expect(await store.getProject(project.id)).toMatchObject({ [field]: [] })
     expect(await readSnapshot()).toBe(before)
 
     const directory = join(tempDir, 'custom-skills')
     const missing = join(tempDir, 'offline-skills')
     await mkdir(directory)
     await writeFile(join(directory, 'retained.txt'), 'Keep this file')
-    const draft = { ...request, skillDirectories: [directory, directory, missing] }
-    expect(await store.prepareProjectPreview(draft)).toMatchObject({ skillDirectories: [directory, missing] })
-    expect(await store.getProject(project.id)).toMatchObject({ skillDirectories: [] })
+    const draft = { ...request, [field]: [directory, directory, missing] }
+    expect(await store.prepareProjectPreview(draft)).toMatchObject({ [field]: [directory, missing] })
+    expect(await store.getProject(project.id)).toMatchObject({ [field]: [] })
     await store.updateProject(project.id, draft)
-    expect(await store.getProject(project.id)).toMatchObject({ skillDirectories: [directory, missing], sourceFolders: [tempDir] })
+    expect(await store.getProject(project.id)).toMatchObject({ [field]: [directory, missing], sourceFolders: [tempDir] })
     const updated = JSON.parse(await readSnapshot())
     expect(updated.version).toBe(0)
-    expect(updated.projects.find((p: Project) => p.id === project.id)).toMatchObject({ skill_directories: [directory, missing] })
-    expect(updated.projects.find((p: Project) => p.id === project.id)).not.toHaveProperty('skillDirectories')
-    await expect(store.updateProject(project.id, { ...request, skillDirectories: ['relative'] })).rejects.toThrow('absolute')
-    await store.updateProject(project.id, { ...request, skillDirectories: [] })
-    expect(await store.getProject(project.id)).toMatchObject({ skillDirectories: [] })
+    expect(updated.projects.find((p: Project) => p.id === project.id)).toMatchObject({ [storedField]: [directory, missing] })
+    expect(updated.projects.find((p: Project) => p.id === project.id)).not.toHaveProperty(field)
+    await expect(store.updateProject(project.id, { ...request, [field]: ['relative'] })).rejects.toThrow('absolute')
+    await store.updateProject(project.id, { ...request, [field]: [] })
+    expect(await store.getProject(project.id)).toMatchObject({ [field]: [] })
     expect(await readFile(join(directory, 'retained.txt'), 'utf8')).toBe('Keep this file')
   })
 
@@ -418,26 +420,22 @@ describe('project store', () => {
     const raw = JSON.parse(await readSnapshot())
     const existing = raw.projects.find((item: Project) => item.id === created.id)
     existing.advanced_settings = false
-    delete existing.script_auto_approve_skills
+    existing.script_auto_approve_skills = ['project-fixture:guide']
     existing.compression_prompt = 'Retained summary: {conversation}'
     await writeSnapshot(JSON.stringify(raw))
     const before = await readSnapshot()
     const loaded = await store.getProject(created.id)
     expect(loaded).toMatchObject({ capabilities: request.capabilities, prompt: request.prompt, restrictSubagents: true,
-      compressionPrompt: 'Retained summary: {conversation}', scriptAutoApproveSkills: [] })
+      compressionPrompt: 'Retained summary: {conversation}' })
     expect(await readSnapshot()).toBe(before)
     expect(loaded).not.toHaveProperty('advancedSettings')
+    expect(loaded).not.toHaveProperty('scriptAutoApproveSkills')
+    expect(loaded).not.toHaveProperty('script_auto_approve_skills')
     if (loaded.kind !== 'workspace') throw new Error('Expected workspace')
-    const approved = ['project-fixture:guide']
-    await store.updateProject(created.id, { ...loaded, scriptAutoApproveSkills: approved })
-    expect(await store.getProject(created.id)).toMatchObject({ scriptAutoApproveSkills: approved })
+    await store.updateProject(created.id, { ...loaded, name: 'Updated' })
     const saved = JSON.parse(await readSnapshot()).projects.find((item: Project) => item.id === created.id)
-    expect(saved.script_auto_approve_skills).toEqual(approved)
-    expect(saved).not.toHaveProperty('scriptAutoApproveSkills')
-    await store.updateProject(created.id, { ...loaded, scriptAutoApproveSkills: [] })
-    expect(await store.getProject(created.id)).toMatchObject({ scriptAutoApproveSkills: [] })
-    await expect(store.updateProject(created.id, { ...loaded, scriptAutoApproveSkills: [false] } as unknown as ProjectCreateRequest)).rejects.toThrow('Skill IDs')
-    expect(await store.getProject(created.id)).toMatchObject({ scriptAutoApproveSkills: [] })
+    expect(saved).not.toHaveProperty('script_auto_approve_skills')
+    expect(saved).toMatchObject({ name: 'Updated', prompt: request.prompt, compression_prompt: existing.compression_prompt })
   })
 
   it('persists project model settings in snake_case and clears both selections together', async () => {

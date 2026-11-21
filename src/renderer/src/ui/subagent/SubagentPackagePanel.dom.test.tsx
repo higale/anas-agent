@@ -12,7 +12,7 @@ const draft: SubagentDraft = { id: 'reporter', index: 0, directory: '/subagents/
   builtIn: false, description: 'Report', systemPrompt: 'Read reports', capabilities: structuredClone(defaultCapabilities) }
 const root = { id: 'subagent:reporter:skill', kind: 'subagent', name: 'reporter', path: '/subagents/reporter/skills', removable: false, available: true }
 function api() {
-  const resources = { skills: { roots: [root], scriptAutoApprove: false, skills: [{ id: 'subagent:reporter:skill:report', rootId: root.id, name: 'report' }] }, tools: [{ id: 'subagent:reporter:tool:query', rootId: 'subagent:reporter:tool', name: 'query' }] }
+  const resources = { skills: { roots: [root], skills: [{ id: 'subagent:reporter:skill:report', rootId: root.id, name: 'report' }] }, tools: [{ id: 'subagent:reporter:tool:query', rootId: 'subagent:reporter:tool', name: 'query' }] }
   const file = { name: 'PROMPT.md', relativePath: 'PROMPT.md', path: '/subagents/reporter/PROMPT.md', kind: 'text' }
   const config = { subagentResources: vi.fn(async () => resources), listSubagentFiles: vi.fn(async () => [file]),
     readSubagentFile: vi.fn(async () => ({ ...file, content: 'Read reports', revision: 'original', resolvedPath: file.path, editable: true })),

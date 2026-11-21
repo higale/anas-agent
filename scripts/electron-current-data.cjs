@@ -272,10 +272,8 @@ async function verifyCurrentData(launch) {
         return error.message
       }
     })
-    assert.match(skillFailure, /Skill source folders must be absolute directory paths/)
-    assert.ok(skillFailure.includes('sourceFolders[0]="relative-skill-source"; project="default-workspace"'))
-    await expect.poll(readMainLogs).toMatch(/\[ipc\] IPC request failed\.[\s\S]*channel: 'skills:get'[\s\S]*Skill source folders must be absolute directory paths[\s\S]*stack:/)
-    await expect.poll(readMainLogs).toContain('sourceFolders[0]="relative-skill-source"; project="default-workspace"')
+    assert.match(skillFailure, /Resource directories must be absolute directory paths/)
+    await expect.poll(readMainLogs).toMatch(/\[ipc\] IPC request failed\.[\s\S]*channel: 'skills:get'[\s\S]*Resource directories must be absolute directory paths[\s\S]*stack:/)
     await application.evaluate(({ dialog }, archive) => {
       dialog.showSaveDialog = async (_parent, options) => {
         globalThis.__backupDefaultPath = options.defaultPath

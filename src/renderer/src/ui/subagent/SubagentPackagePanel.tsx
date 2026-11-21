@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next'
 import type { AgentCapabilities } from '@shared/agentCapabilities'
 import { packageResourceEnabled, packageResourceKey } from '@shared/packageResourceSelection'
 import { CheckboxField } from '../CheckboxField'
+import { SkillDescriptionWarning } from '../SkillDescriptionWarning'
 
 type Resources = Awaited<ReturnType<typeof window.gale.config.subagentResources>>
 export function SubagentPackagePanel({ resources, value, onChange }: { resources: Resources; value: AgentCapabilities; onChange(value: AgentCapabilities): void }) {
@@ -16,7 +17,7 @@ export function SubagentPackagePanel({ resources, value, onChange }: { resources
       <strong className="ui-section-title">{t('settings.subagent_package_skills')}</strong>
       <div className="ui-grid-auto ui-resource-grid">
         {resources.skills.skills.map(skill => <div className="ui-field-stack" key={skill.id}>
-          <CheckboxField label={skill.name} checked={packageResourceEnabled(value.skills.package, skill)} onChange={checked => toggle('skills', skill, checked)} />
+          <div className="ui-row"><CheckboxField label={skill.name} checked={packageResourceEnabled(value.skills.package, skill)} onChange={checked => toggle('skills', skill, checked)} /><SkillDescriptionWarning description={skill.description} /></div>
           {skill.loadError && <small className="ui-status-danger">{skill.loadError.detail ?? skill.loadError.code}</small>}
         </div>)}
       </div>

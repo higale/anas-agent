@@ -7,7 +7,7 @@ import { customToolDefaults } from './customTools'
 import { resolveToolSelection } from './toolPackages'
 import { setSkillSelection } from './agentCapabilities'
 
-const skill = (id: string, modelAvailable = false, userAvailable = false): SkillSummary => ({ scriptAutoApprove: false,
+const skill = (id: string, modelAvailable = false, userAvailable = false): SkillSummary => ({
   id, rootId: 'user', name: id, description: '', modelAvailable, userAvailable, dirPath: `/skills/${id}`, linked: false, relativePath: id, source: 'user', rootName: 'User', shortcutAlias: 'user'
 })
 
@@ -348,7 +348,7 @@ describe('scoped Agent capabilities', () => {
   })
   it('keeps shortcut-only skills out of the model selection', () => {
     const selection = { mode: 'custom' as const, project: false, entries: [{ id: 'private', shortcut: true, model: false }] }
-    const snapshot = projectSkillSnapshot({ scriptAutoApprove: false, roots: [], skills: [skill('private', false, true)] }, selection)
+    const snapshot = projectSkillSnapshot({ roots: [], skills: [skill('private', false, true)] }, selection)
     expect(snapshot?.skills[0]).toMatchObject({ userAvailable: true, modelAvailable: false, shortcut: '/private' })
     expect(projectSkillSnapshot(snapshot, { ...selection, mode: 'off' })?.skills[0]).toMatchObject({ userAvailable: false, modelAvailable: false })
   })
@@ -358,7 +358,7 @@ describe('scoped Agent capabilities', () => {
       { ...skill('user/search', true, true), name: 'search', rootName: 'User' }
     ]
     expect(resolveSkillSelection(defaultCapabilities.skills, skills, true).entries.map((entry) => entry.model)).toEqual([true, false])
-    const snapshot = projectSkillSnapshot({ scriptAutoApprove: false, roots: [], skills }, defaultCapabilities.skills)
+    const snapshot = projectSkillSnapshot({ roots: [], skills }, defaultCapabilities.skills)
     expect(snapshot?.skills[1]).toMatchObject({ modelShadowedBy: 'Project', shortcut: '/search@user' })
   })
   it('applies the project ceiling to tools, every context, environment, and model skills', () => {
@@ -462,7 +462,7 @@ describe('plugin capability scope', () => {
     expect(resolved.entries).toEqual([{ id: pluginSkill.id, model: true, shortcut: true }, { id: 'user:plain', model: false, shortcut: false }])
     expect(resolveSkillSelection(selected.skills, [pluginSkill], true, false, []).entries[0].model).toBe(false)
     expect(resolveSkillSelection(defaultCapabilities.skills, [pluginSkill], true, false, selected.pluginTools).entries[0].model).toBe(false)
-    const snapshot = projectSkillSnapshot({ roots: [], skills: [pluginSkill], scriptAutoApprove: false }, selected.skills, selected.pluginTools)
+    const snapshot = projectSkillSnapshot({ roots: [], skills: [pluginSkill], }, selected.skills, selected.pluginTools)
     expect(snapshot?.skills[0]).toMatchObject({ modelAvailable: true, userAvailable: true })
     const frozen = { customTools: [], codingMode: false, capabilities: { ...selected, skills: resolved } }
     expect(parseRunConfiguration(serializeRunConfiguration(frozen))).toEqual(frozen)

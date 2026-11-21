@@ -11,9 +11,9 @@ import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { getDefaultWorkspaceDir, getProjectStoreFile } from './config/dataDir'
 import { isProjectDirectoryId, isProjectStorageEntry } from './projectStorageEntries'
-import { parseProjectSkillDirectories } from './projectSkillDirectories'
+import { parseResourceDirectories } from './resourceDirectories'
 import { PROJECT_ICON_COLORS, PROJECT_ICON_NAMES } from '@shared/projectAppearance'
-import { defaultCapabilities, parseProjectScriptApprovals, defaultProjectSettings, defaultRestrictSubagents, parseCapabilities, serializeCapabilities, validateCapabilities } from '@shared/agentCapabilities'
+import { defaultCapabilities, defaultProjectSettings, defaultRestrictSubagents, parseCapabilities, serializeCapabilities, validateCapabilities } from '@shared/agentCapabilities'
 import {
   compareProjects,
   DEFAULT_WORKSPACE_PROJECT_ID,
@@ -93,7 +93,7 @@ function requireProject(value: unknown, index: number): Project {
   } else {
     throw new Error(`Project ${index + 1} has an invalid format.`)
   }
-  const { icon_data, model_config_id, model_parameter_preset_id, capabilities, restrict_subagents, advanced_settings: _advancedSettings, script_auto_approve_skills, coding_mode, compression_prompt, access_mode, sort_order, thread_order, skill_directories, ...metadata } = project
+  const { icon_data, model_config_id, model_parameter_preset_id, capabilities, restrict_subagents, advanced_settings: _advancedSettings, script_auto_approve_skills: _scriptApprovals, coding_mode, compression_prompt, access_mode, sort_order, thread_order, skill_directories, tool_directories, ...metadata } = project
   if (sort_order !== undefined && (typeof sort_order !== 'number' || !Number.isSafeInteger(sort_order))) {
     throw new Error(`Project ${index + 1} has an invalid sort order.`)
   }
@@ -113,7 +113,7 @@ function requireProject(value: unknown, index: number): Project {
     ...(icon_data !== undefined ? { iconData: normalizeIconData(icon_data) } : {}),
     ...(sort_order !== undefined ? { sortOrder: sort_order } : {}),
     ...(thread_order !== undefined ? { threadOrder: thread_order } : {}),
-    ...(project.kind === 'workspace' ? { skillDirectories: parseProjectSkillDirectories(skill_directories), accessMode: validateProjectAccessMode(access_mode), capabilities: parseCapabilities(capabilities), restrictSubagents: restrict_subagents, scriptAutoApproveSkills: parseProjectScriptApprovals(script_auto_approve_skills), codingMode: coding_mode, compressionPrompt: normalizeCompressionPrompt(compression_prompt), prompt: validateProjectPrompt(project.prompt) } : {})
+    ...(project.kind === 'workspace' ? { skillDirectories: parseResourceDirectories(skill_directories), toolDirectories: parseResourceDirectories(tool_directories), accessMode: validateProjectAccessMode(access_mode), capabilities: parseCapabilities(capabilities), restrictSubagents: restrict_subagents, codingMode: coding_mode, compressionPrompt: normalizeCompressionPrompt(compression_prompt), prompt: validateProjectPrompt(project.prompt) } : {})
   } as Project
 }
 
@@ -236,20 +236,20 @@ export function serializeProjectStore(store: StoredProjects): { version: 0; proj
       const stored = { ...metadata } as Record<string, unknown>
       delete stored.capabilities
       delete stored.restrictSubagents
-      delete stored.scriptAutoApproveSkills
       delete stored.compressionPrompt
       delete stored.accessMode
       delete stored.codingMode
       delete stored.skillDirectories
+      delete stored.toolDirectories
       return {
         ...stored,
-        ...(project.kind === 'workspace' ? { skill_directories: project.skillDirectories ?? [] } : {}),
+        ...(project.kind === 'workspace' ? { skill_directories: project.skillDirectories ?? [], tool_directories: project.toolDirectories ?? [] } : {}),
         ...(iconData ? { icon_data: iconData } : {}),
         ...(sortOrder !== undefined ? { sort_order: sortOrder } : {}),
         ...(threadOrder !== undefined ? { thread_order: threadOrder } : {}),
         ...(project.kind === 'workspace' && project.accessMode && project.accessMode !== 'smart_approval'
           ? { access_mode: project.accessMode } : {}),
-        ...(project.kind === 'workspace' ? { capabilities: serializeCapabilities(project.capabilities), restrict_subagents: project.restrictSubagents, script_auto_approve_skills: project.scriptAutoApproveSkills ?? [], coding_mode: project.codingMode, ...(project.compressionPrompt ? { compression_prompt: project.compressionPrompt } : {}) } : {}),
+        ...(project.kind === 'workspace' ? { capabilities: serializeCapabilities(project.capabilities), restrict_subagents: project.restrictSubagents, coding_mode: project.codingMode, ...(project.compressionPrompt ? { compression_prompt: project.compressionPrompt } : {}) } : {}),
         ...(modelConfigId ? { model_config_id: modelConfigId } : {}),
         ...(modelConfigId && modelParameterPresetId !== undefined
           ? { model_parameter_preset_id: modelParameterPresetId }
@@ -297,7 +297,7 @@ async function initializeMissingStore(path: string): Promise<void> {
           collapsed: false,
           sourceFolders: [defaultWorkspaceDir],
           skillDirectories: [],
-          scriptAutoApproveSkills: [],
+          toolDirectories: [],
           ...defaultProjectSettings,
           capabilities: structuredClone(defaultCapabilities),
           restrictSubagents: defaultRestrictSubagents,
@@ -464,7 +464,7 @@ function projectCapabilities(request: Extract<ProjectCreateRequest, { kind: 'wor
   } catch {
     throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Invalid capability settings.')
   }
-  return { skillDirectories: parseProjectSkillDirectories(request.skillDirectories), accessMode: validateProjectAccessMode(request.accessMode), compressionPrompt: normalizeCompressionPrompt(request.compressionPrompt), capabilities, restrictSubagents: request.restrictSubagents, scriptAutoApproveSkills: parseProjectScriptApprovals(request.scriptAutoApproveSkills), codingMode: request.codingMode, prompt: validateProjectPrompt(request.prompt) }
+  return { skillDirectories: parseResourceDirectories(request.skillDirectories), toolDirectories: parseResourceDirectories(request.toolDirectories), accessMode: validateProjectAccessMode(request.accessMode), compressionPrompt: normalizeCompressionPrompt(request.compressionPrompt), capabilities, restrictSubagents: request.restrictSubagents, codingMode: request.codingMode, prompt: validateProjectPrompt(request.prompt) }
 }
 
 function hasDuplicateName(projects: Project[], name: string, excludedProjectId?: string): boolean {

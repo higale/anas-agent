@@ -185,7 +185,7 @@ async function verifyCustomTools(launchApplication) {
     await mkdir(projectToolDir, { recursive: true })
     await writeFile(join(projectToolDir, 'TOOL.json'), JSON.stringify({ ...stored, id: 'project-question' }))
     await writeFile(join(projectToolDir, 'question.cjs'), `console.log('PACKAGE_SOURCE:project');` + questionScript)
-    const catalogs = await page.evaluate(async workspace => ({ global: await globalThis.gale.tools.get(), project: await globalThis.gale.tools.get(undefined, [workspace]) }), workspace)
+    const catalogs = await page.evaluate(async workspace => ({ global: await globalThis.gale.tools.get(), project: await globalThis.gale.tools.get(undefined, [workspace]) }), join(workspace, '.agents/tools'))
     assert.equal(catalogs.global.tools.length, 1)
     const selectedIds = catalogs.global.tools.map(tool => tool.id)
     assert.equal(catalogs.project.tools.length, 2)
@@ -231,7 +231,7 @@ async function verifyCustomTools(launchApplication) {
     await editor.getByLabel('Tool name', { exact: true }).fill('ask_custom')
     await editor.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(editor).not.toBeVisible()
-    const submission = await page.evaluate(async ({ workspace, baseUrl, toolIds }) => {
+    const submission = await page.evaluate(async ({ workspace, toolRoot, baseUrl, toolIds }) => {
       const api = globalThis.gale
       const providers = await api.config.saveModelProvider({ name: 'Custom fixture', protocol: 'openai_chat_completions',
         baseUrl, apiKey: '', parameters: {} })
@@ -241,7 +241,7 @@ async function verifyCustomTools(launchApplication) {
         maxContextTokens: 128000, maxOutputTokens: 4096, contextCompressionThreshold: 0.8, contextCompressionEnabled: false })
       const modelConfigId = models.providers.find(provider => provider.id === providerId).models[0].id
       const base = (await api.projects.list()).find(project => project.kind === 'workspace')
-      const project = await api.projects.create({ ...base, name: 'Custom terminal fixture', sourceFolders: [workspace],
+      const project = await api.projects.create({ ...base, name: 'Custom terminal fixture', sourceFolders: [workspace], toolDirectories: [toolRoot],
         codingMode: false, prompt: '', restrictSubagents: false,
         capabilities: { ...base.capabilities, profile: false, environment: false, workspace: false, memory: false,
           applicationEnvironment: false, backgroundTools: true, subagents: { mode: 'off', names: [] }, planning: false,
@@ -251,7 +251,7 @@ async function verifyCustomTools(launchApplication) {
       return api.agent.runs.submit({ requestId: globalThis.crypto.randomUUID(),
         newThread: { title: 'Custom terminal fixture', projectId: project.value.id, modelConfigId, accessMode: 'full_access' },
         text: 'Run the interactive custom tool, read the prompt, send input, and verify completion.' })
-    }, { workspace, baseUrl: `http://127.0.0.1:${server.address().port}/v1`, toolIds: catalogs.project.tools.map(tool => tool.id) })
+    }, { workspace, toolRoot: join(workspace, '.agents/tools'), baseUrl: `http://127.0.0.1:${server.address().port}/v1`, toolIds: catalogs.project.tools.map(tool => tool.id) })
     await expect(async () => {
       assert.deepEqual(errors, [])
       assert.equal(round, 7)

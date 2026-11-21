@@ -62,12 +62,13 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
   const [projectTools, setProjectTools] = useState<ToolSnapshot>()
   const [sourceFolders, setSourceFolders] = useState<string[]>([])
   const [skillDirectories, setSkillDirectories] = useState<string[]>([])
+  const [toolDirectories, setToolDirectories] = useState<string[]>([])
+  const [choosingTools, setChoosingTools] = useState(false)
   const [choosingSkills, setChoosingSkills] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [compressionPrompt, setCompressionPrompt] = useState('')
   const [promptTab, setPromptTab] = useState('project')
   const compressionError = compressionPromptError(compressionPrompt)
-  const [scriptAutoApproveSkills, setScriptAutoApproveSkills] = useState<string[]>([])
   const [codingMode, setCodingMode] = useState(defaultProjectSettings.codingMode)
   const [capabilities, setCapabilities] = useState(() => structuredClone(defaultCapabilities))
   const [restrictSubagents, setRestrictSubagents] = useState(defaultRestrictSubagents)
@@ -98,11 +99,11 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
     }
     return simpleChat
       ? { ...preferences, kind: 'simple_chat', prompt }
-      : { ...preferences, kind: 'workspace', sourceFolders, skillDirectories,
+      : { ...preferences, kind: 'workspace', sourceFolders, skillDirectories, toolDirectories,
         capabilities: config ? removeEmptyMissingMcpSelections(capabilities, new Set(config.mcpServers.map((server) => server.id))) : capabilities,
-        restrictSubagents, prompt, scriptAutoApproveSkills, codingMode, ...(accessMode !== 'smart_approval' ? { accessMode } : {}), ...(compressionPrompt.trim() ? { compressionPrompt } : {}) }
-  }, [accessMode, scriptAutoApproveSkills, capabilities, codingMode, compressionPrompt, config, icon, iconColor, iconData, modelConfigId,
-    modelParameterPresetId, name, prompt, restrictSubagents, simpleChat, sourceFolders, skillDirectories, t])
+        restrictSubagents, prompt, codingMode, ...(accessMode !== 'smart_approval' ? { accessMode } : {}), ...(compressionPrompt.trim() ? { compressionPrompt } : {}) }
+  }, [accessMode, capabilities, codingMode, compressionPrompt, config, icon, iconColor, iconData, modelConfigId,
+    modelParameterPresetId, name, prompt, restrictSubagents, simpleChat, sourceFolders, skillDirectories, toolDirectories, t])
 
   useEffect(() => {
     if (!open) return
@@ -113,8 +114,8 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
     setIconColor(project?.iconColor)
     setSourceFolders(project?.kind === 'workspace' ? project.sourceFolders : [])
     setSkillDirectories(project?.kind === 'workspace' ? project.skillDirectories ?? [] : [])
+    setToolDirectories(project?.kind === 'workspace' ? project.toolDirectories ?? [] : [])
     setPrompt(project?.prompt ?? defaultProjectSettings.prompt)
-    setScriptAutoApproveSkills(project?.kind === 'workspace' ? project.scriptAutoApproveSkills ?? [] : [])
     setCodingMode(initialCodingMode)
     setCapabilities(structuredClone(project?.kind === 'workspace' ? project.capabilities : defaultCapabilities))
     setRestrictSubagents(project?.kind === 'workspace' ? project.restrictSubagents : defaultRestrictSubagents)
@@ -164,19 +165,19 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
     if (!open || simpleChat) return
     let disposed = false
     setSkills(undefined)
-    void window.gale.skills.get(project?.id, sourceFolders, skillDirectories)
+    void window.gale.skills.get(project?.id, skillDirectories)
       .then((snapshot) => { if (!disposed) setSkills(snapshot) })
       .catch((reason) => { if (!disposed) notice.error(t('chat.failed_load_app'), { description: projectErrorDescription(reason, t) }) })
     return () => { disposed = true }
-  }, [open, simpleChat, project?.id, sourceFolders, skillDirectories, t])
+  }, [open, simpleChat, project?.id, skillDirectories, t])
   useEffect(() => {
     let cancelled = false
     setProjectTools(undefined)
-    if (open && !simpleChat) void window.gale.tools.get(project?.id, sourceFolders).then(snapshot => {
+    if (open && !simpleChat) void window.gale.tools.get(project?.id, toolDirectories).then(snapshot => {
       if (!cancelled) setProjectTools(snapshot)
     }).catch(error => { if (!cancelled) notice.error(t('custom_tools.update_failed'), { description: String(error) }) })
     return () => { cancelled = true }
-  }, [open, simpleChat, project?.id, sourceFolders, config?.customTools, t])
+  }, [open, simpleChat, project?.id, toolDirectories, config?.customTools, t])
 
 
   function appendSourceFolders(folders: string[]): void {
@@ -190,16 +191,17 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
     setSourceFolders((current) => [folder, ...current.filter((item) => item !== folder)])
   }
 
-  async function chooseSkillDirectories(): Promise<void> {
-    setChoosingSkills(true)
+  async function chooseDirectories(kind: 'skill' | 'tool'): Promise<void> {
+    const setChoosing = kind === 'skill' ? setChoosingSkills : setChoosingTools
+    const setDirectories = kind === 'skill' ? setSkillDirectories : setToolDirectories
+    setChoosing(true)
     try {
-      const selected = unwrapProjectResult(await window.gale.projects.chooseSkillDirectories())
-      if (selected.length) setSkillDirectories(current => [...new Set([...current, ...selected])])
+      const selected = unwrapProjectResult(await (kind === 'skill'
+        ? window.gale.projects.chooseSkillDirectories() : window.gale.projects.chooseToolDirectories()))
+      if (selected.length) setDirectories(current => [...new Set([...current, ...selected])])
     } catch (reason) {
-      notice.error(t('project.failed_choose_skill_directories'), { description: projectErrorDescription(reason, t) })
-    } finally {
-      setChoosingSkills(false)
-    }
+      notice.error(t(`project.failed_choose_${kind}_directories`), { description: projectErrorDescription(reason, t) })
+    } finally { setChoosing(false) }
   }
 
   async function chooseSourceFolders(): Promise<void> {
@@ -467,11 +469,14 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
                 <CapabilityEditor customTools={projectTools?.tools} customToolRoots={projectTools?.roots} value={capabilities} skills={skills} mcpStatus={mcpStatus} mcpServers={config?.mcpServers} runtimeToolStatus={runtimeToolStatus} disabled={busy}
                   subagents={config?.subagents ?? []} restrictSubagents={restrictSubagents}
                   onChange={setCapabilities}
+                  projectTools={{
+                    disabled: choosingTools,
+                    onAddDirectories: () => void chooseDirectories('tool'),
+                    onRemoveDirectory: path => setToolDirectories(current => current.filter(directory => directory !== path))
+                  }}
                   projectSkills={{
                     disabled: choosingSkills,
-                    scriptAutoApproveSkills,
-                    onChangeScriptAutoApprove: (id, enabled) => setScriptAutoApproveSkills(current => [...current.filter(item => item !== id), ...(enabled ? [id] : [])]),
-                    onAddDirectories: () => void chooseSkillDirectories(),
+                    onAddDirectories: () => void chooseDirectories('skill'),
                     onRemoveDirectory: path => setSkillDirectories(current => current.filter(directory => directory !== path))
                   }}
                   onEnableAll={(capabilities) => { setCapabilities(capabilities); setRestrictSubagents(false) }}

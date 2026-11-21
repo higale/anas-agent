@@ -35,7 +35,7 @@ export function smartApprovalPrompt(safeFolders: readonly string[]): string {
   return [
     '<smart_approval>',
     'Before your first tool call, read these rules. On every JSON tool call whose definition includes needs_approval, explicitly provide true or false. Do not omit the field or rely on its default.',
-    'The application first allows verified reads, safe-directory writes, and enabled Skill exemptions, even when you provide true.',
+    'The application first allows verified reads and safe-directory writes, even when you provide true.',
     'For operations not covered by those automatic checks, assess the complete operation: true requests user approval; false allows execution.',
     'Safe directories (including their descendants, after resolving links):',
     ...safeFolders.map(folder => `- ${JSON.stringify(folder)}`),
@@ -45,7 +45,7 @@ export function smartApprovalPrompt(safeFolders: readonly string[]): string {
     'Do not request approval solely because a path is outside the safe directories. Consider the actual operation and existing contents, not just the directory name.',
     'Assess terminal input as an operation that can execute pending commands. Window resizing and read-only previews do not need approval.',
     'Freeform apply_patch has no needs_approval field. Submit the original patch grammar; the application checks its file targets.',
-    'Enabled Skill script exemptions continue to apply. Do not add needs_approval to tools whose definitions do not include it.',
+    'Do not add needs_approval to tools whose definitions do not include it.',
     '</smart_approval>'
   ].join('\n')
 }

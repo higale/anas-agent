@@ -1,5 +1,5 @@
 import { parseArgs } from 'node:util'
-import { realpath, stat } from 'node:fs/promises'
+import { stat } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import type { AgentAccessMode } from '@shared/agentTypes'
 import { samePath } from './pathContainment'
@@ -7,14 +7,11 @@ import { resolveCanonicalWorkspacePath } from './workspacePath'
 import type { CommandShellInfo } from './shellRuntime'
 import { parsePowerShellCommands, type PowerShellWord } from './powershellCommandAnalysis'
 import { analyzeZshCommand } from './zshCommandAnalysis'
-import { findSkillScriptExemption, type SkillScriptInvocation, type SkillScriptScope } from './skillsStore'
-import { scriptOperand } from './skillScriptCommand'
 
 export interface ShellCommandPlan {
   workingDir: string
   executable: string
   paths: string[]
-  skillScript?: { skillId: string; root: string; script: string; executor: string }
 }
 
 // This is an auto-approval vocabulary, NOT a restriction on Shell execution.
@@ -75,12 +72,11 @@ export interface ShellCommandAuthorizationOptions {
   trustedFolders: string[]
   accessMode(): AgentAccessMode
   signal?: AbortSignal
-  skills?: SkillScriptScope
 }
 
 export function createShellCommandAuthorization(options: ShellCommandAuthorizationOptions) {
-  async function analyze(command: string, workingDir: string, invocation?: SkillScriptInvocation): Promise<ShellCommandPlan | undefined> {
-    if (process.platform === 'darwin') return analyzeZshCommand(command, workingDir, options, inspectRgArgs, invocation)
+  async function analyze(command: string, workingDir: string): Promise<ShellCommandPlan | undefined> {
+    if (process.platform === 'darwin') return analyzeZshCommand(command, workingDir, options, inspectRgArgs)
     if (process.platform !== 'win32' || options.shell.family !== 'powershell') return undefined
     const cwd = await resolveCanonicalWorkspacePath(literalPath(workingDir), options.primaryFolder, 'follow')
     if (!(await stat(cwd.canonicalPath)).isDirectory()) return undefined
@@ -94,22 +90,6 @@ export function createShellCommandAuthorization(options: ShellCommandAuthorizati
       paths.add(target.canonicalPath)
       if (paths.size > 64) unknown()
       return target.canonicalPath
-    }
-    // A Skill exemption applies to exactly one literal invocation, never one
-    // command extracted from a larger pipeline or sequence.
-    if (options.skills && script.pipelines.length === 1 && script.pipelines[0].commands.length === 1) {
-      const item = script.pipelines[0].commands[0]
-      const args = item.words.slice(1).map(word => word.text)
-      if (item.commandType === 'Application' && isAbsolute(item.source)
-        && args.every(value => value && !/["\r\n\0]/.test(value) && !/\s.*\\$/.test(value))) {
-        const operand = scriptOperand(item.source, args)
-        if (operand) {
-          const target = await path(operand, false)
-          const exemption = await findSkillScriptExemption(target, options.skills, invocation)
-          if (exemption) return { workingDir: cwd.canonicalPath, executable: script.executable, paths: [...paths],
-            skillScript: { ...exemption, executor: await realpath(item.source) } }
-        }
-      }
     }
     const rg = async (words: PowerShellWord[]) => {
       const args = words.map(({ text }) => text)
@@ -180,7 +160,7 @@ export function createShellCommandAuthorization(options: ShellCommandAuthorizati
     return { workingDir: cwd.canonicalPath, executable: script.executable, paths: [...paths] }
   }
 
-  async function inspect(args: Readonly<Record<string, unknown>>, invocation?: SkillScriptInvocation): Promise<ShellCommandPlan | undefined> {
+  async function inspect(args: Readonly<Record<string, unknown>>): Promise<ShellCommandPlan | undefined> {
     options.signal?.throwIfAborted()
     if (!args || typeof args !== 'object' || Array.isArray(args)) return undefined
     if (typeof args.command !== 'string' || args.pty !== undefined) return undefined
@@ -189,7 +169,7 @@ export function createShellCommandAuthorization(options: ShellCommandAuthorizati
     let timer: NodeJS.Timeout | undefined
     try {
       const plan = await Promise.race([
-        analyze(command, workingDir, invocation),
+        analyze(command, workingDir),
         new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), 5000) })
       ])
       return plan

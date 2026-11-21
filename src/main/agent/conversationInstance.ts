@@ -11,7 +11,6 @@ import type { CodeReviewSnapshot } from '@shared/codeReview'
 import { commandShellToolName } from '@shared/commandShell'
 import type { CompressionTrackingCallbacks } from '../../runtime/compression'
 import { conversationExecution, type ConversationExecutionServices } from '../../runtime/conversationExecution'
-import type { ExecutionState } from '../../runtime/executionState'
 import type { RunExecution } from '../../runtime/runExecution'
 import { ToolRunScope } from '../../runtime/toolEvents'
 import { planningToolSpec } from '../../runtime/planning'
@@ -27,7 +26,6 @@ import { createConversationSubagentApproval } from './conversationSubagentApprov
 import { completeConversationReview } from './conversationReview'
 import { saveToolResultFile } from './toolResultFile'
 import { observeModelRetry } from './modelRetryLogging'
-import { presentConversationMessage } from './conversationPresentation'
 import type { RunConfiguration } from '../../shared/agentCapabilities'
 
 /** The owner supplies the one authoritative store and durable intent/queue
@@ -115,10 +113,6 @@ export async function createConversationInstance(thread: AgentThread, database: 
     },
     withResources: (args, operation) => withPluginToolResources(definition, args, workspace.primaryFolder, operation)
   }))
-  const preparationFor = (state: ExecutionState): ConversationToolPreparationOptions => {
-    const user = [...state.messages].reverse().find(message => message.value.kind === 'user')
-    return { ...preparation, explicitSkill: user ? presentConversationMessage(user.value, user.id).skillInvocation : undefined }
-  }
   let observationErrors: unknown[] = []
   const observeContext = (status: AgentContextStatus) => {
     try { context.onContextStatus?.(status) } catch (error) { if (!observationErrors.length) observationErrors.push(error) }
@@ -159,9 +153,9 @@ export async function createConversationInstance(thread: AgentThread, database: 
       attachments.addArtifacts(database.listAttachmentsForThread(thread.id))
       return prepareModel(state, request, observer)
     }, afterModel: async () => ({ kind: 'complete' }),
-    prepareTools: state => prepareConversationToolBatch(state, preparationFor(state)),
+    prepareTools: state => prepareConversationToolBatch(state, preparation),
     executeTool: (call, state, request, observer) => createConversationToolExecutor({ store: owner.store, definitions,
-      preparation: preparationFor(state), operations, planning: catalog.planning,
+      preparation, operations, planning: catalog.planning,
       managed: owner.managed, persistFileChange: owner.persistFileChange })(call, state, request, observer), directions: owner.directions,
     completeResponse: context.review ? state => completeConversationReview(state, context.review!) : undefined,
     observeWaiting: (state, observer) => {

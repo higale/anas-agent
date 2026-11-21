@@ -36,10 +36,9 @@ export interface WorkspaceProject extends ProjectBase {
   compressionPrompt?: string
   prompt: string
   sourceFolders: string[]
-  /** Additional project-scoped Skill roots. Missing means no additional roots. */
+  /** Explicit project resource roots. Missing means no project-scoped resources. */
   skillDirectories?: string[]
-  /** Project-local Skill script exemptions; missing means none. */
-  scriptAutoApproveSkills?: string[]
+  toolDirectories?: string[]
   capabilities: AgentCapabilities
   restrictSubagents: boolean
 }
@@ -79,7 +78,7 @@ export interface WorkspaceProjectRequest extends ProjectModelSelection {
   iconColor?: ProjectIconColor
   sourceFolders: string[]
   skillDirectories?: string[]
-  scriptAutoApproveSkills?: string[]
+  toolDirectories?: string[]
   capabilities: AgentCapabilities
   restrictSubagents: boolean
 }
@@ -681,7 +680,6 @@ export interface SkillRootSummary {
 }
 
 export interface SkillSummary {
-  scriptAutoApprove: boolean
   id: string
   rootId: string
   name: string
@@ -711,7 +709,6 @@ export type SkillLoadIssueCode =
   | 'invalid_name'
   | 'name_mismatch'
   | 'missing_description'
-  | 'description_too_long'
   | 'invalid_frontmatter_field'
   | 'missing_skill_file'
   | 'unreadable_skill_file'
@@ -724,7 +721,6 @@ export interface SkillLoadIssue {
 }
 
 export interface SkillSnapshot {
-  scriptAutoApprove: boolean
   projectId?: string
   roots: SkillRootSummary[]
   skills: SkillSummary[]
@@ -793,6 +789,7 @@ export interface GaleApi {
     fromDroppedFiles(files: File[]): Promise<ProjectOperationResult<string[]>>
     chooseSourceFolders(): Promise<ProjectOperationResult<string[]>>
     chooseSkillDirectories(): Promise<ProjectOperationResult<string[]>>
+    chooseToolDirectories(): Promise<ProjectOperationResult<string[]>>
   }
   config: {
     get(): Promise<AppConfigSnapshot>
@@ -832,22 +829,21 @@ export interface GaleApi {
   tools: {
     setEnabled(id: string, enabled: boolean): Promise<void>
     validateSchema(schema: unknown): Promise<void>
-    get(projectId?: string, sourceFolders?: string[]): Promise<import('./toolPackages').ToolSnapshot>
+    get(projectId?: string, toolDirectories?: string[]): Promise<import('./toolPackages').ToolSnapshot>
     refresh(): Promise<AppConfigSnapshot>
     importDirectories(rootId?: string): Promise<ToolImportResult>
     addDirectory(): Promise<{ status: 'added' | 'cancelled' }>
     updateDirectory(id: string, name: string): Promise<void>
     removeDirectory(id: string): Promise<void>
     moveDirectory(id: string, direction: -1 | 1): Promise<void>
-    listFiles(id: string, relativePath?: string, sourceFolders?: string[]): Promise<import('./packageFiles').PackageFileNode[]>
-    createFile(id: string, relativePath: string, sourceFolders?: string[]): Promise<import('./packageFiles').PackageFilePreview>
-    fileExists(id: string, relativePath: string, sourceFolders?: string[]): Promise<boolean>
-    readFile(id: string, relativePath: string, sourceFolders?: string[]): Promise<import('./packageFiles').PackageFilePreview>
-    saveFile(id: string, relativePath: string, update: import('./packageFiles').PackageFileUpdate, sourceFolders?: string[]): Promise<import('./packageFiles').PackageFilePreview>
+    listFiles(id: string, relativePath?: string, toolDirectories?: string[]): Promise<import('./packageFiles').PackageFileNode[]>
+    createFile(id: string, relativePath: string, toolDirectories?: string[]): Promise<import('./packageFiles').PackageFilePreview>
+    fileExists(id: string, relativePath: string, toolDirectories?: string[]): Promise<boolean>
+    readFile(id: string, relativePath: string, toolDirectories?: string[]): Promise<import('./packageFiles').PackageFilePreview>
+    saveFile(id: string, relativePath: string, update: import('./packageFiles').PackageFileUpdate, toolDirectories?: string[]): Promise<import('./packageFiles').PackageFilePreview>
   }
   skills: {
-    updateScriptApproval(projectId: string | undefined, skillId: string | undefined, enabled: boolean): Promise<SkillSnapshot>
-    get(projectId?: string, sourceFolders?: string[], skillDirectories?: string[]): Promise<SkillSnapshot>
+    get(projectId?: string, skillDirectories?: string[]): Promise<SkillSnapshot>
     listFiles(projectId: string | undefined, skillId: string, relativePath?: string): Promise<SkillFileNode[]>
     readFile(projectId: string | undefined, skillId: string, relativePath: string): Promise<SkillFilePreview>
     saveFile(projectId: string | undefined, skillId: string, relativePath: string, update: import('./packageFiles').PackageFileUpdate): Promise<SkillFilePreview>

@@ -3,9 +3,9 @@ import { useTranslation } from 'react-i18next'
 import { SegmentedControl } from './SegmentedControl'
 import { notice } from './notice'
 
-interface ResourceNameProps { name: string; description?: string; directory?: string; highlighted?: boolean }
+interface ResourceNameProps { name: string; description?: string; directory?: string }
 
-export function CapabilityResourceName({ name, description, directory, highlighted }: ResourceNameProps) {
+export function CapabilityResourceName({ name, description, directory }: ResourceNameProps) {
   const { t } = useTranslation()
   async function openDirectory(path: string) {
     try {
@@ -14,7 +14,7 @@ export function CapabilityResourceName({ name, description, directory, highlight
       notice.error(t('capabilities.failed_open_directory'))
     }
   }
-  const text = <code className={highlighted ? 'ui-text-success' : undefined}>{name}</code>
+  const text = <code>{name}</code>
   return directory
     ? <button type="button" className="ui-link-button ui-truncate"
         data-tooltip={[description, t('capabilities.open_directory'), directory].filter(Boolean).join('\n')}

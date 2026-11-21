@@ -15,10 +15,13 @@ import { CheckboxField } from './CheckboxField'
 import { Checkbox } from './Checkbox'
 import { CapabilitySection } from './CapabilitySection'
 import { SkillAvailabilityNotice } from './SkillAvailabilityNotice'
+import { SkillDescriptionWarning } from './SkillDescriptionWarning'
 import { SegmentedMultiSelect } from './SegmentedMultiSelect'
 import { SettingsStatusIndicator } from './settings/SettingsStatusIndicator'
 import { skillSourceGroups } from './skillSourceGroups'
 import { UI_ICON_SIZE_MEDIUM, UI_ICON_SIZE_SMALL } from './uiConstants'
+import type { ProjectDirectoryControls } from './projects/ProjectResourceGroup'
+import { ProjectDirectoryAddButton } from './projects/ProjectResourceGroup'
 import { ProjectSkillGroup } from './projects/ProjectSkillGroup'
 import { CapabilityResourceGroup } from './CapabilityResourceGroup'
 import { CapabilityResourceName } from './CapabilityResource'
@@ -44,18 +47,13 @@ interface Props {
   restrictSubagents?: boolean
   disabled?: boolean
   toolbarEnd?: ReactNode
-  projectSkills?: {
-    disabled?: boolean
-    scriptAutoApproveSkills: readonly string[]
-    onChangeScriptAutoApprove(id: string, enabled: boolean): void
-    onAddDirectories(): void
-    onRemoveDirectory(path: string): void
-  }
+  projectSkills?: ProjectDirectoryControls
+  projectTools?: ProjectDirectoryControls
   onChange(value: AgentCapabilities): void
   onEnableAll?(capabilities: AgentCapabilities): void
 }
 
-export function CapabilityEditor({ customTools: globalTools = [], customToolRoots, value: storedValue, skills: globalSkills, mcpStatus, mcpServers = [], runtimeToolStatus, subagents = [], subagent = false, subagentId, restrictSubagents = false, disabled = false, toolbarEnd, projectSkills, onChange: onValueChange, onEnableAll }: Props) {
+export function CapabilityEditor({ customTools: globalTools = [], customToolRoots, value: storedValue, skills: globalSkills, mcpStatus, mcpServers = [], runtimeToolStatus, subagents = [], subagent = false, subagentId, restrictSubagents = false, disabled = false, toolbarEnd, projectSkills, projectTools, onChange: onValueChange, onEnableAll }: Props) {
   const { t } = useTranslation()
   const [packageCatalog, setPackageCatalog] = useState<{ key: string; resources?: Awaited<ReturnType<typeof window.gale.config.subagentResources>>; error?: string }>()
   const packageIds = subagent ? (subagentId ? `agent:${subagentId}` : '')
@@ -75,7 +73,7 @@ export function CapabilityEditor({ customTools: globalTools = [], customToolRoot
   const packageSelectionPending = Boolean(subagent && subagentId && !ownResources)
   const skillSelectionPending = Boolean(projectSkills && (!globalSkills || (packageIds && !catalog?.resources)))
   const customTools = [...globalTools, ...(resources?.tools ?? []).map(tool => ({ ...tool, rootName: t('settings.subagent_resource_source', { name: tool.rootName }) }))]
-  const skills = resources ? { ...globalSkills, scriptAutoApprove: globalSkills?.scriptAutoApprove ?? false,
+  const skills = resources ? { ...globalSkills,
     roots: [...(globalSkills?.roots ?? []), ...resources.skills.roots.map(root => ({ ...root, name: t('settings.subagent_resource_source', { name: root.name }) }))], skills: [...(globalSkills?.skills ?? []), ...resources.skills.skills.map(skill => ({ ...skill, rootName: t('settings.subagent_resource_source', { name: skill.rootName }) }))] } : globalSkills
   const { plugins, error: pluginsError } = usePlugins()
   const ordinaryTools = builtinToolCatalog.filter((tool) => tool.feature !== 'backgroundTools')
@@ -164,9 +162,9 @@ export function CapabilityEditor({ customTools: globalTools = [], customToolRoot
     const modelUnavailable = skill.unavailable || (skill.source !== 'project' && skill.modelAvailable === false)
     const shortcutUnavailable = skill.unavailable || (skill.source !== 'project' && skill.userAvailable === false)
     const projectControls = skill.source === 'project' ? projectSkills : undefined
-    const scriptAutoApprove = projectControls?.scriptAutoApproveSkills.includes(skill.id) ?? false
-    const name = <CapabilityResourceName name={skill.name} description={skill.description} directory={skill.dirPath} highlighted={scriptAutoApprove} />
+    const name = <CapabilityResourceName name={skill.name} description={skill.description} directory={skill.dirPath} />
     const status = <>
+        <SkillDescriptionWarning description={skill.description} />
         {(skill.unavailable || missing.length > 0) && <span className="ui-badge">{t('capabilities.inactive')}</span>}
         {missing.length > 0 && <SettingsStatusIndicator label={t('plugins.missing_tools')} hint={t('plugins.missing_tools_detail', { tools: missing.join(', ') })} />}
         {skill.missing && <button type="button" className="ui-icon-button"
@@ -199,13 +197,12 @@ export function CapabilityEditor({ customTools: globalTools = [], customToolRoot
           name: skill.loadError.name, expected: skill.loadError.expected
         })}</span>}
       </span>
-      <SegmentedMultiSelect<'shortcut' | 'model' | 'scriptAutoApprove'> ariaLabel={skill.name} disabled={projectControls?.disabled}
+      <SegmentedMultiSelect<'shortcut' | 'model'> ariaLabel={skill.name} disabled={projectControls?.disabled}
           options={[
             { value: 'shortcut', label: t('capabilities.shortcut'), ariaLabel: `${skill.name} ${t('capabilities.shortcut')}`, checked: selected?.shortcut ?? false, disabled: skillSelectionDisabled || (shortcutUnavailable && !selected?.shortcut) },
             { value: 'model', label: t('capabilities.model'), ariaLabel: `${skill.name} ${t('capabilities.model')}`, checked: selected?.model ?? false, disabled: skillSelectionDisabled || (modelUnavailable && !selected?.model) },
-            ...(projectControls ? [{ value: 'scriptAutoApprove' as const, label: t('capabilities.script_auto_approve'), ariaLabel: `${skill.name} ${t('capabilities.script_auto_approve')}`, checked: scriptAutoApprove, disabled: skill.unavailable && !scriptAutoApprove }] : [])
           ]}
-          onChange={(key, checked) => key === 'scriptAutoApprove' ? projectControls?.onChangeScriptAutoApprove(skill.id, checked) : setSkill(skill.id, key, checked)} />
+          onChange={(key, checked) => setSkill(skill.id, key, checked)} />
     </div>
   }
   function setAll(checked: boolean) {
@@ -266,7 +263,7 @@ export function CapabilityEditor({ customTools: globalTools = [], customToolRoot
           })}
         </div>
         <CustomToolSelectionEditor value={value.customTools} tools={customTools} roots={customToolRoots} subagent={subagent}
-          backgroundTools={value.backgroundTools} disabled={disabled} onChange={customTools => onChange({ ...value, customTools })} />
+          backgroundTools={value.backgroundTools} projectTools={projectTools} disabled={disabled} onChange={customTools => onChange({ ...value, customTools })} />
         {mcpGroups.length > 0 && <div className="ui-form-section ui-form-section-divided">
           <CapabilitySection label={t('settings.capability_mcp')} mode={overallMcpMode} expandable disabled={disabled}
             customCount={mcpGroups.filter(group => group.selection.mode !== 'off').length} total={mcpGroups.length}
@@ -294,6 +291,7 @@ export function CapabilityEditor({ customTools: globalTools = [], customToolRoot
           onChange={(subagents) => onChange({ ...value, subagents })} />
         <div className="ui-form-section ui-form-section-divided">
           <CapabilitySection label={t('settings.capability_skills')} customCount={[...skillIds].filter(isSkillSelected).length} total={skillIds.size}
+            actions={projectSkills && <ProjectDirectoryAddButton kind="skill" onAddDirectories={projectSkills.onAddDirectories} disabled={disabled || projectSkills.disabled} />}
             countSuffix={projectSkillsSelected && <> + {t('settings.skill_group_project')}</>}
             mode={value.skills.mode === 'default' ? 'all' : value.skills.mode} disabled={disabled} expandable={Boolean(projectSkills)}
             reason={skillWarning ? t('settings.subagent_skills_require_file_read') : undefined}
@@ -330,7 +328,7 @@ export function CapabilityEditor({ customTools: globalTools = [], customToolRoot
                 </CapabilityResourceGroup>}
                 {!skills && <small>{t('capabilities.loading')}</small>}
                 {projectSkills && <ProjectSkillGroup skills={skills} disabled={disabled || projectSkills.disabled}
-                  onAddDirectories={projectSkills.onAddDirectories} onRemoveDirectory={projectSkills.onRemoveDirectory}
+                  onRemoveDirectory={projectSkills.onRemoveDirectory}
                   renderSkill={skill => renderSkill({ ...skill, unavailable: Boolean(skill.loadError) })} />}
               </div>
             </>}
