@@ -44,7 +44,7 @@ describe('subagent configuration mapping', () => {
       system_prompt: 'Verify sources.',
     }, 2)).toEqual({
  capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: false,
-        memory: false, toolMode: 'selected', tools: ['http_request'], skills: { mode: 'custom' as const, project: false, entries: (['baidu-search'] as string[]).map(id => ({ id, shortcut: false, model: true })) } },
+        memory: false, toolMode: 'selected', tools: ['http_request'], skills: { mode: 'custom' as const, project: false, entries: (['baidu-search'] as string[]).map(id => ({ id, shortcut: true, model: true })) } },
       index: 2,
       preset: 'web-researcher',
       builtIn: true,

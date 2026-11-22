@@ -52,6 +52,7 @@ const api: GaleApi = {
     confirmInstall: (token, deleteData) => ipcRenderer.invoke('plugins:confirmInstall', token, deleteData),
     cancelInstall: token => ipcRenderer.invoke('plugins:cancelInstall', token),
     setEnabled: (id, enabled) => ipcRenderer.invoke('plugins:setEnabled', id, enabled),
+    setCapabilityEnabled: (id, kind, ids, enabled) => ipcRenderer.invoke('plugins:setCapabilityEnabled', id, kind, ids, enabled),
     setShowInTitlebar: (id, show) => ipcRenderer.invoke('plugins:setShowInTitlebar', id, show),
     uninstall: (id, deleteData) => ipcRenderer.invoke('plugins:uninstall', id, deleteData),
     openWindow: id => ipcRenderer.invoke('plugins:openWindow', id),
@@ -252,6 +253,8 @@ const api: GaleApi = {
     moveDirectory: (projectId: string | undefined, rootId: string, direction: -1 | 1): Promise<SkillSnapshot> => ipcRenderer.invoke('skills:moveDirectory', projectId, rootId, direction)
   },
   mcp: {
+    setRunning: (id: string, running: boolean): Promise<McpToolStatus> => ipcRenderer.invoke('mcp:setRunning', id, running),
+    setToolsEnabled: (id: string, names: string[], enabled: boolean): Promise<McpToolStatus> => ipcRenderer.invoke('mcp:setToolsEnabled', id, names, enabled),
     status: (): Promise<McpToolStatus | null> => ipcRenderer.invoke('mcp:status'),
     test: (): Promise<McpToolStatus> => ipcRenderer.invoke('mcp:test'),
     reloadServer: (index: number): Promise<McpToolStatus> => ipcRenderer.invoke('mcp:reloadServer', index),

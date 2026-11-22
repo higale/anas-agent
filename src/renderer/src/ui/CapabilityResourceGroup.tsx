@@ -1,29 +1,30 @@
-import { useId, useState, type ReactNode } from 'react'
-import { ChevronRight, Folder } from 'lucide-react'
-import { UI_ICON_SIZE_MEDIUM, UI_ICON_SIZE_SMALL } from './uiConstants'
+import { useId, type ReactNode } from 'react'
+import { CapabilityGroupActions } from './CapabilityGroupActions'
 
-/** Capability sources and their directories share disclosure behavior and header actions. */
-export function CapabilityResourceGroup({ label, ariaLabel = label, count, actions, fullWidthDivider = false, tooltip, children }: {
+/** Inner resource groups remain visible whenever their top-level capability section is open. */
+export function CapabilityResourceGroup({ label, ariaLabel = label, count, actions, divider = false, tooltip, inactiveReason, onSelectionChange, allSelected = false, selectionDisabled, children }: {
   label: string
   ariaLabel?: string
   count: ReactNode
   actions?: ReactNode
-  fullWidthDivider?: boolean
+  divider?: boolean
   tooltip?: string
+  inactiveReason?: string
+  onSelectionChange?(checked: boolean): void
+  allSelected?: boolean
+  selectionDisabled?: boolean
   children: ReactNode
 }) {
-  const [expanded, setExpanded] = useState(false)
-  const contentId = useId()
-  return <section className={`ui-form-section ui-capability-resource-group${fullWidthDivider ? ' ui-capability-resource-group-full-divider' : ''}`} aria-label={ariaLabel}>
+  const reasonId = useId()
+  return <section className={`ui-form-section ui-capability-resource-group${divider ? ' ui-capability-resource-group-divider' : ''}`} aria-label={ariaLabel} aria-describedby={inactiveReason ? reasonId : undefined}>
+    {inactiveReason && <span id={reasonId} hidden>{inactiveReason}</span>}
     <div className="ui-row">
-      <button type="button" className="ui-disclosure-trigger ui-row" aria-label={label}
-        aria-expanded={expanded} aria-controls={contentId} onClick={() => setExpanded(value => !value)}>
-        <Folder size={UI_ICON_SIZE_MEDIUM} aria-hidden="true" />
-        <span className="ui-truncate" data-tooltip={tooltip}>{label}</span><small>{count}</small>
-        <ChevronRight className="ui-disclosure-chevron" size={UI_ICON_SIZE_SMALL} aria-hidden="true" />
-      </button>
+      <div className="ui-row">
+        <span className={`ui-truncate${inactiveReason ? ' ui-resource-unavailable' : ''}`} data-tooltip={[inactiveReason, tooltip].filter(Boolean).join('\n') || undefined}>{label}</span><small>{count}</small>
+        {onSelectionChange && <CapabilityGroupActions allSelected={allSelected} disabled={selectionDisabled} onChange={onSelectionChange} />}
+      </div>
       {actions}
     </div>
-    <div id={contentId} hidden={!expanded}><div className="ui-form-section">{children}</div></div>
+    <div className="ui-form-section">{children}</div>
   </section>
 }

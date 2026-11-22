@@ -363,6 +363,8 @@ describe('sleep countdown', () => {
 })
 
 describe('running tool shimmer', () => {
+  beforeEach(() => vi.stubGlobal('gale', { mcp: { status: async () => null, onStatus: () => () => {} } }))
+  afterEach(() => vi.unstubAllGlobals())
   const runningContent = '.agent-tool-running > summary'
   const props = { title: 'Thread', messages, panelRef: { current: null }, followOutputRef: { current: true },
     speech: { status: 'idle' as const }, onSpeak: vi.fn() }

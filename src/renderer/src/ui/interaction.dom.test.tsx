@@ -1358,11 +1358,9 @@ describe('renderer interaction accessibility', () => {
       description: '', systemPrompt: '', capabilities: structuredClone(defaultCapabilities) }] }
     render(<ProjectDialog open kind="workspace" project={project} config={config} onClose={vi.fn()} onSave={onSave} />)
     await user.click(screen.getByRole('button', { name: 'settings.capability_skills' }))
-    await user.click(screen.getByRole('button', { name: 'settings.skill_group_project - Project' }))
-    const localModel = await screen.findByRole('checkbox', { name: 'guide capabilities.model' })
+    const localModel = await screen.findByRole('checkbox', { name: 'guide' })
     expect(localModel).toBeDisabled()
     expect(screen.getByRole('button', { name: 'project.add_skill_directories' })).toBeEnabled()
-    await user.click(within(screen.getByRole('radiogroup', { name: 'settings.capability_skills' })).getByRole('radio', { name: 'capabilities.custom' }))
     expect(localModel).toBeDisabled()
     await act(async () => { resolveResources(resources); await pending })
     expect(localModel).toBeEnabled()
@@ -1370,8 +1368,8 @@ describe('renderer interaction accessibility', () => {
     await user.click(screen.getByRole('button', { name: 'common.save' }))
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ capabilities: expect.objectContaining({ skills: expect.objectContaining({ mode: 'custom',
       entries: expect.arrayContaining([
-        { id: local.id, model: false, shortcut: true },
-        { id: owned.id, model: true, shortcut: false }
+        { id: local.id, model: mode === 'off', shortcut: mode === 'off' },
+        { id: owned.id, model: mode !== 'off', shortcut: mode !== 'off' }
       ]) }) }) }))
   })
 
@@ -1382,13 +1380,11 @@ describe('renderer interaction accessibility', () => {
     render(<ProjectDialog open kind="workspace" onClose={vi.fn()} onSave={onSave} />)
     await user.click(screen.getByRole('button', { name: 'project.add_folders' }))
     expect(screen.queryByRole('checkbox', { name: 'project.advanced_settings' })).not.toBeInTheDocument()
-    const tools = within(screen.getByRole('radiogroup', { name: 'custom_tools.title' }))
-    expect(tools.getByRole('radio', { name: 'capabilities.all' })).toBeChecked()
-    await user.click(tools.getByRole('radio', { name: 'capabilities.off' }))
-    expect(within(screen.getByRole('radiogroup', { name: 'custom_tools.title' })).getByRole('radio', { name: 'capabilities.off' })).toBeChecked()
+    await user.click(screen.getByRole('button', { name: 'settings.capabilities_disable_all' }))
     await user.click(screen.getByRole('button', { name: 'project.create' }))
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
-      capabilities: expect.objectContaining({ customTools: expect.objectContaining({ mode: 'off' }), pluginMode: 'default', mcp: { defaultMode: 'all', servers: [] } }) }))
+      capabilities: expect.objectContaining({ customTools: expect.objectContaining({ mode: 'off' }), pluginGroupMode: 'off', pluginMode: 'default',
+        mcp: { mode: 'off', defaultMode: 'all', servers: [] } }) }))
   })
 
   it('edits all default workspace settings except its name and preserves prompt drafts across tabs', async () => {

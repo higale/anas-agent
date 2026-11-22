@@ -96,14 +96,14 @@ export async function createConversationInstance(thread: AgentThread, database: 
   })
   const { workspace, resolveModel, requestSystemPrompt, activeSubagent, runConfiguration, simpleChat, capabilities, outputLanguage } = resources
   const operations = new ToolRunScope()
-  const { catalog, tools, attachments, memory, includeRules, contextRuntime } = prepareConversationContext(thread, database, config, resources, context)
+  const { refreshTools, catalog, tools, attachments, memory, includeRules, contextRuntime } = prepareConversationContext(thread, database, config, resources, context)
   const accessMode = createAgentAccessModeResolver(database, thread.id, context.subagentCall)
   const preparation: ConversationToolPreparationOptions = { runId: context.requestId, folders: workspace.trustedFolders,
     primaryFolder: workspace.primaryFolder, fileEditStore: database.fileEditStore, accessMode, directories: resources.approvalDirectories, signal: context.signal,
     includeRules, definitions: [...catalog.definitions, ...(catalog.planning ? [planningToolSpec] : [])], review: context.review,
     ...(resources.commandShell && resources.shellCommandAuthorization ? { shell: { toolName: commandShellToolName(resources.commandShell.executable),
       analyzer: resources.shellCommandAuthorization, accessMode } } : {}) }
-  const definitions = catalog.definitions.map(definition => createManagedToolRuntime(definition, {
+  const managedDefinitions = () => catalog.definitions.map(definition => createManagedToolRuntime(definition, {
     results: owner.results, service: context.managedCalls, threadId: thread.id, runId: context.requestId,
     allowBackground: capabilities.backgroundTools, signal: context.signal,
     providerCallId: id => {
@@ -113,6 +113,7 @@ export async function createConversationInstance(thread: AgentThread, database: 
     },
     withResources: (args, operation) => withPluginToolResources(definition, args, workspace.primaryFolder, operation)
   }))
+  const definitions = managedDefinitions()
   let observationErrors: unknown[] = []
   const observeContext = (status: AgentContextStatus) => {
     try { context.onContextStatus?.(status) } catch (error) { if (!observationErrors.length) observationErrors.push(error) }
@@ -149,7 +150,10 @@ export async function createConversationInstance(thread: AgentThread, database: 
       const state = owner.store.load(thread.id)
       if (context.onContextStatus && state) observeContext(await contextRuntime.projectedStatus(conversationContextSource(state, owner.store)))
     },
-    prepareModel: (state, request, observer) => {
+    prepareModel: async (state, request, observer) => {
+      await refreshTools()
+      preparation.definitions = [...catalog.definitions, ...(catalog.planning ? [planningToolSpec] : [])]
+      definitions.splice(0, definitions.length, ...managedDefinitions())
       attachments.addArtifacts(database.listAttachmentsForThread(thread.id))
       return prepareModel(state, request, observer)
     }, afterModel: async () => ({ kind: 'complete' }),

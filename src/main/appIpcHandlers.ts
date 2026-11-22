@@ -251,7 +251,7 @@ export function registerAppIpcHandlers(): void {
       const snapshot = await getAppConfigSnapshot()
       configureRuntimeLogger(snapshot.settings.logLevel, snapshot.settings.logRetentionDays)
       applyNativeTheme(snapshot.settings.theme)
-      await loadMcpRuntimeForCurrentConfig(true)
+      await loadMcpRuntimeForCurrentConfig(false)
     }
     const restore = await restoreDataBackupZip(sourcePath, {
       deactivate,

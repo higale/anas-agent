@@ -1,4 +1,8 @@
-import { useEffect, useState } from 'react'
+import { pluginCapabilityEnabled, type PluginCapabilityKind } from '@shared/pluginCapabilities'
+import { CapabilityPreviewItem } from './CapabilityPreviewItem'
+import { CapabilityGroupActions } from '../CapabilityGroupActions'
+import { notice } from '../notice'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { PluginContributionKind, PluginContributionPreview, PluginSummary } from '@shared/plugins'
 import { pluginToolName } from '@shared/pluginTools'
@@ -62,28 +66,59 @@ function ContributionDetails({ plugin, selection, onClose }: { plugin: PluginSum
   </ContentPreviewDialog>
 }
 
-export function PluginContributions({ plugin }: { plugin: PluginSummary }) {
+export function PluginContributions({ plugin, busy, onRefresh }: { plugin: PluginSummary; busy?: boolean; onRefresh(): Promise<void> }) {
   const { t } = useTranslation()
   const [selected, setSelected] = useState<Selection>()
+  const [saving, setSaving] = useState(false)
+  const [choices, setChoices] = useState(plugin.capabilityChoices)
+  const pending = useRef(false)
+  useEffect(() => {
+    if (!pending.current) setChoices(plugin.capabilityChoices)
+  }, [plugin.capabilityChoices])
+  const enabled = (kind: PluginCapabilityKind, id: string) => pluginCapabilityEnabled(choices, kind, id)
+  async function save(kind: PluginCapabilityKind, ids: string[], checked: boolean) {
+    if (pending.current) return
+    pending.current = true
+    const previous = choices
+    setChoices({ ...choices, [kind]: { ...choices?.[kind], ...Object.fromEntries(ids.map(id => [id, checked])) } })
+    setSaving(true)
+    let saved = false
+    try {
+      const next = await window.gale.plugins.setCapabilityEnabled(plugin.id, kind, ids, checked)
+      saved = true
+      setChoices(next)
+      await onRefresh()
+    } catch (reason) {
+      if (!saved) setChoices(previous)
+      notice.error(t('plugins.operation_failed'), { description: errorDetail(reason) })
+    } finally { pending.current = false; setSaving(false) }
+  }
   const manifest = plugin.manifest
   if (!manifest) return null
   const groups = [
     { kind: 'prompt', label: t('plugins.prompts'), items: (manifest.prompts ?? []).map(item => ({ ...item, name: item.id })) },
     { kind: 'skill', label: t('settings.skills'), items: (manifest.skills ?? []).map(item => {
       const summary = plugin.skillSummaries?.find(summary => summary.id === item.id)
-      return { id: item.id, name: summary?.name ?? item.id, description: summary?.description ?? '' }
+      return { id: item.id, tools: item.tools, name: summary?.name ?? item.id, description: summary?.description ?? '' }
     }) },
     { kind: 'tool', label: t('plugins.tools'), items: manifest.tools.map(item => ({ ...item, name: pluginToolName(plugin.id, item.id) })) }
   ] as const
   const selectionExists = selected && groups.some(group => group.kind === selected.kind && group.items.some(item => item.id === selected.id))
   return <>
-    {groups.filter(group => group.items.length).map(group => <details open className="settings-contribution-group ui-form-section-divided" key={group.kind}>
-      <summary><strong>{group.label}</strong><small>{group.items.length}</small></summary>
+    {groups.filter(group => group.items.length).map(group => <details open className="settings-contribution-group ui-form-section-divided" key={group.kind} aria-label={group.label}>
+      <summary><span className="settings-contribution-heading"><strong>{group.label}</strong><small>{group.items.filter(item => enabled(group.kind, item.id)).length}/{group.items.length}</small>
+        <CapabilityGroupActions allSelected={group.items.every(item => enabled(group.kind, item.id))} disabled={busy || Boolean(plugin.error)}
+          busy={saving} onChange={checked => void save(group.kind, group.items.map(item => item.id), checked)} />
+      </span></summary>
       <div className="settings-tool-catalog">
-        {group.items.map(item => <button key={item.id} type="button" className="settings-tool-catalog-row"
-          data-tooltip={item.description || undefined} onClick={() => setSelected({ kind: group.kind, id: item.id })}>
-          <code className="settings-tool-catalog-name ui-tool-name">{item.name}</code>
-        </button>)}
+        {group.items.map(item => {
+          const missing = ('tools' in item ? item.tools : []).filter(id => !enabled('tool', id))
+          const reason = missing.length ? t('plugins.missing_tools_detail', { tools: missing.map(id => pluginToolName(plugin.id, id)).join(', ') }) : undefined
+          return <CapabilityPreviewItem key={item.id} name={item.name} checked={enabled(group.kind, item.id)}
+            disabled={busy || Boolean(plugin.error)} busy={saving} description={item.description} inactiveReason={reason}
+            onChange={checked => void save(group.kind, [item.id], checked)}
+            onPreview={() => setSelected({ kind: group.kind, id: item.id })} />
+        })}
       </div>
     </details>)}
     {selectionExists && <ContributionDetails key={`${selected.kind}:${selected.id}`} plugin={plugin} selection={selected} onClose={() => setSelected(undefined)} />}

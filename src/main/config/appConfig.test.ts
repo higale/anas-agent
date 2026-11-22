@@ -101,7 +101,7 @@ async function loadAppConfig(raw: RawAppConfig, bundled: RawAppConfig = raw) {
   const writeRawSettingsConfig = vi.fn()
   const writeRawModelsConfig = vi.fn()
   const writeRawSubagentsConfig = vi.fn(async (next: RawAppConfig) => { raw.subagents = next.subagents })
-  const writeRawMcpServersConfig = vi.fn()
+  const writeRawMcpServersConfig = vi.fn(async (next: RawAppConfig) => { raw.mcp_servers = next.mcp_servers })
   const userSettingsConfigExists = vi.fn(async () => true)
   const runtimeLog = vi.fn()
   const setDataEnvEnabled = vi.fn()
@@ -274,13 +274,85 @@ describe('profile initialization', () => {
 })
 
 describe('MCP runtime configuration snapshot', () => {
-  it('filters disabled servers in one read', async () => {
+  it.each(['missing', 'empty', 'stale'])('rejects enabling a server with a %s tool catalog through either save path', async catalogState => {
+    const raw = rawConfig()
+    const { appConfig, writeRawMcpServersConfig } = await loadAppConfig(raw)
+    const { mcpConfigKey } = await import('./mcpServerConfigMapper')
+    const server = (await appConfig.getMcpRuntimeConfigSnapshot()).servers[1]
+    if (catalogState !== 'missing') {
+      await appConfig.saveMcpToolCatalog(server.id, { connection_key: mcpConfigKey(server), tools: catalogState === 'empty' ? []
+        : [{ name: 'mcp__disabled__lookup', description: 'Look up', input_schema: { type: 'object' } }] })
+      if (catalogState === 'stale') await appConfig.updateMcpServer(1, { timeoutMs: 5000 })
+    }
+    const detail = (await appConfig.getAppConfigSnapshot()).mcpServers[1]
+    const before = JSON.stringify(raw)
+    writeRawMcpServersConfig.mockClear()
+    await expect(appConfig.updateMcpServer(1, { enabled: true })).rejects.toThrow('discover tools before enabling')
+    await expect(appConfig.saveMcpServer({ ...detail, enabled: true })).rejects.toThrow('discover tools before enabling')
+    await expect(appConfig.saveMcpServer({ ...detail, index: undefined, id: 'new-server', enabled: true })).rejects.toThrow('discover tools before enabling')
+    expect(writeRawMcpServersConfig).not.toHaveBeenCalled()
+    expect(JSON.stringify(raw)).toBe(before)
+  })
+
+  it('allows enabling after discovery even when individual tools are deselected, and lets an existing enabled server without tools be turned off', async () => {
+    const { appConfig } = await loadAppConfig(rawConfig())
+    const { mcpConfigKey } = await import('./mcpServerConfigMapper')
+    await expect(appConfig.updateMcpServer(0, { enabled: false })).resolves.toMatchObject({ mcpServers: [
+      expect.objectContaining({ enabled: false }), expect.anything()
+    ] })
+    const server = (await appConfig.getMcpRuntimeConfigSnapshot()).servers[1]
+    const name = 'mcp__disabled__lookup'
+    await appConfig.saveMcpToolCatalog(server.id, { connection_key: mcpConfigKey(server),
+      tools: [{ name, description: 'Look up', input_schema: { type: 'object' } }] })
+    await appConfig.setMcpToolEnabled(server.id, [name], false)
+    expect((await appConfig.updateMcpServer(1, { enabled: true })).mcpServers[1].enabled).toBe(true)
+    const disabled = await appConfig.updateMcpServer(1, { enabled: false })
+    expect((await appConfig.saveMcpServer({ ...disabled.mcpServers[1], enabled: true })).mcpServers[1].enabled).toBe(true)
+  })
+
+  it('persists discovery and individual choices without changing the configuration version', async () => {
+    const raw = rawConfig()
+    const { appConfig, writeRawMcpServersConfig } = await loadAppConfig(raw)
+    const { mcpConfigKey } = await import('./mcpServerConfigMapper')
+    const initial = (await appConfig.getMcpRuntimeConfigSnapshot()).servers[0]
+    expect(initial.toolCatalog).toBeUndefined()
+    expect(initial.toolChoices).toEqual({})
+    const catalog = { connection_key: mcpConfigKey(initial), tools: [{ name: 'mcp__enabled__lookup', description: 'Look up',
+      input_schema: { type: 'object', properties: { query: { type: 'string' } } }, annotations: { readOnlyHint: true } }] }
+    await expect(appConfig.saveMcpToolCatalog(initial.id, catalog)).resolves.toBe(true)
+    await appConfig.setMcpToolEnabled(initial.id, ['mcp__enabled__lookup'], false)
+    let saved = (await appConfig.getMcpRuntimeConfigSnapshot()).servers[0]
+    expect(saved.toolCatalog).toEqual(catalog)
+    expect(saved.toolChoices).toEqual({ mcp__enabled__lookup: false })
+    await appConfig.updateMcpServer(0, { enabled: false })
+    saved = (await appConfig.getMcpRuntimeConfigSnapshot()).servers[0]
+    expect(saved.toolCatalog).toEqual(catalog)
+    expect(saved.toolChoices).toEqual({ mcp__enabled__lookup: false })
+    await appConfig.saveMcpToolCatalog(initial.id, { ...catalog, tools: [] })
+    expect((await appConfig.getMcpRuntimeConfigSnapshot()).servers[0].toolCatalog?.tools).toEqual([])
+    expect(writeRawMcpServersConfig).toHaveBeenCalled()
+    await expect(appConfig.setMcpToolEnabled(initial.id, ['mcp__enabled__lookup'], true)).rejects.toThrow('no longer exists')
+  })
+
+  it('rejects stale discovery after changing connection settings and preserves newer configuration', async () => {
+    const raw = rawConfig()
+    const { appConfig, writeRawMcpServersConfig } = await loadAppConfig(raw)
+    const { mcpConfigKey } = await import('./mcpServerConfigMapper')
+    const original = (await appConfig.getMcpRuntimeConfigSnapshot()).servers[0]
+    await appConfig.updateMcpServer(0, { timeoutMs: 12345 })
+    writeRawMcpServersConfig.mockClear()
+    await expect(appConfig.saveMcpToolCatalog(original.id, { connection_key: mcpConfigKey(original), tools: [] })).resolves.toBe(false)
+    expect(writeRawMcpServersConfig).not.toHaveBeenCalled()
+    expect((await appConfig.getMcpRuntimeConfigSnapshot()).servers[0].timeoutMs).toBe(12345)
+  })
+
+  it('includes disabled server catalogs for inspection in one read', async () => {
     const raw = rawConfig()
     const { appConfig, readRawConfig } = await loadAppConfig(raw)
 
     await expect(appConfig.getMcpRuntimeConfigSnapshot()).resolves.toMatchObject({
       enabled: true,
-      servers: [{ index: 0, name: 'Enabled', enabled: true }]
+      servers: [{ index: 0, name: 'Enabled', enabled: true }, { index: 1, name: 'Disabled', enabled: false }]
     })
     expect(readRawConfig).toHaveBeenCalledTimes(1)
   })

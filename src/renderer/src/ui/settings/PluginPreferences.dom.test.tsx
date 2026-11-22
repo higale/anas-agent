@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { parsePluginManifest, type PluginSummary } from '@shared/plugins'
@@ -38,4 +38,49 @@ it('keeps failed drafts across catalog refreshes, saves with the original revisi
   await userEvent.click(dialog.getByRole('button', { name: 'common.refresh' }))
   await userEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'common.confirm' }))
   await waitFor(() => expect(dialog.getByRole('textbox', { name: 'Label' })).toHaveValue('remote'))
+})
+
+it('does not flash back to an older background read after saving settings', async () => {
+  const view = render(<PluginPreferences plugin={plugin} />)
+  await waitFor(() => expect(screen.getByRole('button', { name: 'common.edit' })).toBeEnabled())
+  await userEvent.click(screen.getByRole('button', { name: 'common.edit' }))
+  let finish!: (value: unknown) => void
+  invoke.mockImplementation((_id, method) => method === 'settings.get'
+    ? new Promise(resolve => { finish = resolve })
+    : Promise.resolve({ values: { label: 'new saved' }, revision: 'new' }))
+  view.rerender(<PluginPreferences plugin={{ ...plugin }} />)
+  const dialog = within(screen.getByRole('dialog'))
+  await userEvent.clear(dialog.getByRole('textbox', { name: 'Label' }))
+  await userEvent.type(dialog.getByRole('textbox', { name: 'Label' }), 'new saved')
+  await userEvent.click(dialog.getByRole('button', { name: 'common.save' }))
+  expect(screen.getByText('new saved')).toBeVisible()
+  await act(async () => finish({ values: { label: 'old value' }, revision: 'old' }))
+  expect(screen.getByText('new saved')).toBeVisible()
+  expect(screen.queryByText('old value')).toBeNull()
+})
+
+it('locks pending saves without disabling the form, preserves failed drafts and blocks duplicate actions', async () => {
+  render(<PluginPreferences plugin={plugin} />)
+  await waitFor(() => expect(screen.getByRole('button', { name: 'common.edit' })).toBeEnabled())
+  await userEvent.click(screen.getByRole('button', { name: 'common.edit' }))
+  const content = screen.getByRole('dialog')
+  const dialog = within(content)
+  const input = dialog.getByRole('textbox', { name: 'Label' })
+  fireEvent.change(input, { target: { value: 'draft' } })
+  let fail!: (error: Error) => void
+  invoke.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject }))
+  const save = dialog.getByRole('button', { name: 'common.save' })
+  await userEvent.click(save)
+  expect(content).toHaveAttribute('aria-busy', 'true')
+  expect(input.closest('fieldset')).toHaveAttribute('inert')
+  expect(input).toBeEnabled()
+  expect(save).toBeEnabled()
+  await userEvent.click(save)
+  await userEvent.click(dialog.getByRole('button', { name: 'common.cancel' }))
+  expect(invoke.mock.calls.filter(([, method]) => method === 'settings.set')).toHaveLength(1)
+  expect(content).toBeInTheDocument()
+  await act(async () => fail(new Error('disk failure')))
+  expect(input).toHaveValue('draft')
+  expect(input.closest('fieldset')).not.toHaveAttribute('inert')
+  expect(dialog.getByRole('alert')).toHaveTextContent('disk failure')
 })

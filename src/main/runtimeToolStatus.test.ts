@@ -7,7 +7,7 @@ import { serializeToolDefinition } from './toolSchemaSerialization'
 import { runtimeToolDefinitions } from './llm/runtimeTools'
 import { modelToolDeclaration } from './agent/modelToolDeclarations'
 import { updateMemoryToolSpec } from '../runtime/preferenceMemoryTool'
-import { toolDefinitionText } from '../renderer/src/ui/settings/ToolsSettings'
+import { toolDefinitionText } from '../renderer/src/ui/settings/toolDefinitionText'
 
 const subagents = [{
  capabilities: { ...structuredClone(defaultCapabilities), profile: false, workspace: true,

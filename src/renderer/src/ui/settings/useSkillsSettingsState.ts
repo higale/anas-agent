@@ -60,7 +60,9 @@ export function useSkillsSettingsState({ openConfirmDialog, settingsOpen, settin
   })
   const skills = savedSkills && edits.draft ? {
     ...savedSkills,
-    skills: savedSkills.skills.map((skill) => ({ ...skill, ...edits.draft?.skills?.[skill.id] }))
+    skills: savedSkills.skills.map(skill => skill.configuredAvailability
+      ? { ...skill, configuredAvailability: { ...skill.configuredAvailability, ...edits.draft?.skills?.[skill.id] } }
+      : { ...skill, ...edits.draft?.skills?.[skill.id] })
   } : savedSkills
   const refreshSkills = useCallback(async (): Promise<void> => {
     const revision = ++snapshotRevision.current

@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { pluginDisplayText, pluginHomePolicy, pluginIconSources, type PluginSummary, type PluginViewOptions, type PluginInstallPreview } from '@shared/plugins'
 import { errorDetail } from '@shared/recovery'
 import { CheckboxField } from '../CheckboxField'
-import { CheckboxButton } from '../CheckboxButton'
+import { SegmentedMultiSelect } from '../SegmentedMultiSelect'
 import { ConfirmDialog } from '../dialogs/ConfirmDialog'
 import { notice } from '../notice'
 import { SegmentedControl } from '../SegmentedControl'
@@ -16,60 +16,79 @@ import { PluginPreferences } from './PluginPreferences'
 import { PluginContributions } from './PluginContributions'
 import { dataTransferHasFiles } from '../dragDrop'
 
-function PluginLaunchSettings({ plugin, busy, onRefresh }: {
-  plugin: PluginSummary; busy: boolean; onRefresh(): Promise<void>
+function PluginLaunchSettings({ plugin, busy }: {
+  plugin: PluginSummary; busy: boolean
 }) {
   const { t } = useTranslation()
   const [location, setLocation] = useState<PluginViewOptions['location']>()
   const [error, setError] = useState<string>()
   const [saving, setSaving] = useState(false)
+  const pending = useRef(false)
+  const readRevision = useRef(0)
   const policy = pluginHomePolicy(plugin.manifest!)
   useEffect(() => {
+    if (pending.current) return
     let active = true
+    const request = ++readRevision.current
     void window.gale.plugins.invoke(plugin.id, 'host.home').then(value => {
-      if (active) { setLocation((value as { location: PluginViewOptions['location'] }).location); setError(undefined) }
-    }).catch(reason => { if (active) { setLocation(undefined); setError(errorDetail(reason)) } })
+      if (active && request === readRevision.current) { setLocation((value as { location: PluginViewOptions['location'] }).location); setError(undefined) }
+    }).catch(reason => { if (active && request === readRevision.current) setError(errorDetail(reason)) })
     return () => { active = false }
   }, [plugin])
   async function save(value: PluginViewOptions['location']) {
+    if (pending.current) return
+    pending.current = true
+    readRevision.current++
+    const previous = location
+    setLocation(value)
     setSaving(true)
     try {
       await window.gale.plugins.invoke(plugin.id, 'data.set', { key: 'home_open_location', value })
-      setLocation(value)
-    } catch (reason) { notice.error(t('plugins.operation_failed'), { description: errorDetail(reason) }) }
-    finally { setSaving(false) }
+      setError(undefined)
+    } catch (reason) {
+      setLocation(previous)
+      notice.error(t('plugins.operation_failed'), { description: errorDetail(reason) })
+    }
+    finally { pending.current = false; setSaving(false) }
   }
-  async function saveTitlebar(show: boolean) {
-    setSaving(true)
-    try {
-      await window.gale.plugins.setShowInTitlebar(plugin.id, show)
-      await onRefresh()
-    } catch (reason) { notice.error(t('plugins.operation_failed'), { description: errorDetail(reason) }) }
-    finally { setSaving(false) }
-  }
-  return <><div className="ui-form-row ui-form-row-narrow ui-form-row-fit-control">
+  return <div className="ui-form-row ui-form-row-narrow ui-form-row-fit-control">
     <span><strong>{t('plugins.home_location')}</strong><small>{t('plugins.home_location_hint')}</small>
       {error && <small role="alert"><span className="ui-status-danger">{t('plugins.operation_failed')} {error}</span></small>}
     </span>
     <SegmentedControl ariaLabel={t('plugins.home_location')} value={location ?? ''}
-      disabled={busy || saving || !location || policy.locations.length === 1}
+      disabled={busy || !location || policy.locations.length === 1} busy={saving}
       options={policy.locations.map(value => ({ value, label: t(`plugins.home_${value}`) }))}
       onChange={value => void save(value as PluginViewOptions['location'])} />
   </div>
-    <CheckboxField checked={plugin.showInTitlebar ?? false} disabled={busy || saving}
-      label={t('plugins.show_in_titlebar')} onChange={show => void saveTitlebar(show)} />
-  </>
 }
 
-function PluginHeading({ plugin, busy, onEnabledChange }: { plugin: PluginSummary; busy: boolean; onEnabledChange(enabled: boolean): Promise<void> }) {
+function PluginHeading({ plugin, busy, onRefresh }: { plugin: PluginSummary; busy: boolean; onRefresh(): Promise<void> }) {
   const { t, i18n } = useTranslation()
   const [iconFailed, setIconFailed] = useState(false)
   const [saving, setSaving] = useState(false)
-  async function save(enabled: boolean) {
+  const pending = useRef(false)
+  const [choices, setChoices] = useState({ enabled: plugin.enabled, showInTitlebar: plugin.showInTitlebar ?? false })
+  useEffect(() => {
+    if (!pending.current) setChoices({ enabled: plugin.enabled, showInTitlebar: plugin.showInTitlebar ?? false })
+  }, [plugin.enabled, plugin.showInTitlebar])
+  async function save(setting: 'enabled' | 'showInTitlebar', checked: boolean) {
+    if (pending.current) return
+    pending.current = true
+    const previous = choices
+    setChoices({ ...choices, [setting]: checked })
     setSaving(true)
-    try { await onEnabledChange(enabled) }
-    catch (reason) { notice.error(t('plugins.operation_failed'), { description: errorDetail(reason) }) }
-    finally { setSaving(false) }
+    let saved = false
+    try {
+      if (setting === 'enabled') await window.gale.plugins.setEnabled(plugin.id, checked)
+      else await window.gale.plugins.setShowInTitlebar(plugin.id, checked)
+      saved = true
+      await onRefresh()
+    }
+    catch (reason) {
+      if (!saved) setChoices(previous)
+      notice.error(t('plugins.operation_failed'), { description: errorDetail(reason) })
+    }
+    finally { pending.current = false; setSaving(false) }
   }
   return <>
     <div className="settings-detail-heading ui-toolbar ui-toolbar-between">
@@ -77,7 +96,11 @@ function PluginHeading({ plugin, busy, onEnabledChange }: { plugin: PluginSummar
         <strong className="plugin-label"><PluginIcon icon={pluginIconSources(plugin.id, plugin.manifest?.icon)} onError={() => setIconFailed(true)} />{pluginDisplayText(plugin, i18n.language)}</strong>
         <small>{[plugin.id, plugin.manifest?.pluginVersion].filter(Boolean).join(' · ')}</small>
       </div>
-      <CheckboxButton checked={plugin.enabled} disabled={busy || saving || Boolean(plugin.error)} label={t('settings.enabled')} onChange={enabled => void save(enabled)} />
+      <SegmentedMultiSelect<'enabled' | 'showInTitlebar'> ariaLabel={t('plugins.settings')} itemWidth="content"
+        disabled={busy || Boolean(plugin.error)} busy={saving} options={[
+          ...(plugin.manifest?.ui && !plugin.error ? [{ value: 'showInTitlebar' as const, label: t('plugins.show_in_titlebar'), checked: choices.showInTitlebar }] : []),
+          { value: 'enabled', label: t('settings.enabled'), checked: choices.enabled }
+        ]} onChange={(setting, checked) => void save(setting, checked)} />
     </div>
     {iconFailed && <div className="ui-note ui-note-danger" role="alert">{t('plugins.icon_failed')}</div>}
   </>
@@ -88,22 +111,29 @@ function PluginBackendStatus({ plugin, busy, onRefresh }: {
 }) {
   const { t } = useTranslation()
   const [pending, setPending] = useState<'start' | 'stop'>()
+  const pendingAction = useRef<'start' | 'stop'>(undefined)
   const active = plugin.backendStatus === 'running' || plugin.backendStatus === 'starting'
+  const actionBlocked = pending === 'stop' || (pending === 'start' && !active)
   async function changeBackend() {
+    if (pendingAction.current === 'stop' || (pendingAction.current === 'start' && !active)) return
     const action = active ? 'stop' : 'start'
+    pendingAction.current = action
     setPending(action)
     try {
       if (action === 'stop') await window.gale.plugins.stopBackend(plugin.id)
       else await window.gale.plugins.startBackend(plugin.id)
       await onRefresh()
     } catch (reason) { notice.error(t('plugins.operation_failed'), { description: errorDetail(reason) }) }
-    finally { setPending(current => current === action ? undefined : current) }
+    finally {
+      if (pendingAction.current === action) pendingAction.current = undefined
+      setPending(current => current === action ? undefined : current)
+    }
   }
   return <div className="ui-form-section ui-form-section-divided">
     <div className="ui-toolbar ui-toolbar-between">
       <small className="ui-field-hint">{plugin.manifest?.backend ? t(`plugins.backend_${plugin.backendStatus}`) : t('plugins.no_backend')}</small>
       {plugin.manifest?.backend && <button type="button" className="ui-button ui-button-compact"
-        disabled={busy || pending === 'stop' || (pending === 'start' && !active) || !plugin.enabled || Boolean(plugin.error)}
+        disabled={busy || !plugin.enabled || Boolean(plugin.error)} aria-disabled={actionBlocked || undefined} aria-busy={Boolean(pending) || undefined}
         onClick={() => void changeBackend()}>
         {active ? <Square size={UI_ICON_SIZE_SMALL} /> : <Play size={UI_ICON_SIZE_SMALL} />}
         {t(active ? 'plugins.stop_backend' : 'plugins.start_backend')}</button>}
@@ -227,8 +257,7 @@ export function PluginsSettings({ plugins, error, onRefresh, className = 'settin
     <div className="ui-editor">
       {error && <div className="ui-note ui-note-danger" role="alert"><p>{t('plugins.load_failed')}</p><p>{error}</p></div>}
       {selected ? <>
-        <PluginHeading key={JSON.stringify([selected.id, selected.manifest?.icon])} plugin={selected} busy={busy}
-          onEnabledChange={async enabled => { await window.gale.plugins.setEnabled(selected.id, enabled); await onRefresh() }} />
+        <PluginHeading key={JSON.stringify([selected.id, selected.manifest?.icon])} plugin={selected} busy={busy} onRefresh={onRefresh} />
         {tabs.length > 1 && <SegmentedControl ariaLabel={t('plugins.details')} value={tab}
           options={tabs.map(value => ({ value, label: t(`plugins.${value}`) }))} onChange={tab => setSection({ id: selected.id, tab })} />}
         {tab === 'overview' && <div className="ui-form-section">
@@ -238,9 +267,9 @@ export function PluginsSettings({ plugins, error, onRefresh, className = 'settin
           skills: selected.manifest?.skills?.length ?? 0, prompts: selected.manifest?.prompts?.length ?? 0 })}</small>}
         {Boolean(selected.languageErrors?.length) && <div className="ui-note ui-note-danger" role="alert"><p>{t('plugins.language_failed')}</p>{selected.languageErrors?.map((message, index) => <p key={index}>{message}</p>)}</div>}
         {(selected.error || selected.backendError) && <div className="ui-note ui-note-danger" role="alert"><p>{selected.error ?? selected.backendError}</p></div>}
-        {selected.manifest?.ui && !selected.error && <PluginLaunchSettings key={selected.id} plugin={selected} busy={busy} onRefresh={onRefresh} />}
+        {selected.manifest?.ui && !selected.error && <PluginLaunchSettings key={selected.id} plugin={selected} busy={busy} />}
         {selected.manifest && <PluginBackendStatus key={`backend:${selected.id}`} plugin={selected} busy={busy} onRefresh={onRefresh} />}
-        <PluginContributions key={`contributions:${selected.id}`} plugin={selected} />
+        <PluginContributions key={`contributions:${selected.id}`} plugin={selected} busy={busy} onRefresh={onRefresh} />
         </div>}
         {tab === 'settings' && <PluginPreferences key={selected.id} plugin={selected} />}
       </> : <div className="ui-empty-state">{t('plugins.empty')}</div>}

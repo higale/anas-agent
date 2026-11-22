@@ -1,7 +1,12 @@
+import stableStringify from 'fast-json-stable-stringify'
+import { createHash } from 'node:crypto'
+import { parseMcpToolCatalog, parseMcpToolChoices, type McpToolCatalog } from '@shared/mcpCatalog'
 import type { McpServerConfigDetail, McpServerConfigSave, McpServerType } from '@shared/types'
 import { asRecord, type RawMcpServer } from './rawAppConfig'
 
 export interface McpServerConfig {
+  toolCatalog?: McpToolCatalog
+  toolChoices?: Record<string, boolean>
   index: number
   name: string
   enabled: boolean
@@ -47,6 +52,8 @@ export function normalizeMcpServer(raw: unknown, index: number): McpServerConfig
   const command = server.command?.trim() || undefined
   const type = normalizeMcpType(server.type?.trim(), Boolean(command))
   return {
+    toolCatalog: parseMcpToolCatalog(server.tool_catalog),
+    toolChoices: parseMcpToolChoices(server.tool_choices),
     index,
     name: server.name?.trim() || `MCP Server ${index}`,
     enabled: server.enabled ?? false,
@@ -101,4 +108,9 @@ export function rawMcpServerFromSave(server: McpServerConfigSave, existing?: Raw
     working_dir: server.type === 'stdio' ? server.workingDir ?? '' : '',
     env: server.type === 'stdio' ? server.env : {}
   }
+}
+
+export function mcpConfigKey(server: McpServerConfig): string {
+  const { id, type, url, apiKey, command, args, workingDir, env, timeoutMs } = server
+  return createHash('sha256').update(stableStringify({ id, type, url, apiKey, command, args, workingDir, env, timeoutMs })).digest('hex')
 }

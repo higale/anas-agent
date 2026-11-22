@@ -41,12 +41,14 @@ export function useMcpSettingsState({ config, openConfirmDialog, setConfig, t }:
 
   useEffect(() => {
     let cancelled = false
+    let receivedUpdate = false
     void window.gale.mcp.status()
       .then((status) => {
-        if (!cancelled && status) setMcpStatus(status)
+        if (!cancelled && !receivedUpdate && status) setMcpStatus(status)
       })
       .catch(() => undefined)
     const unsubscribe = window.gale.mcp.onStatus((status) => {
+      receivedUpdate = true
       setMcpStatus(status)
     })
     return () => {
@@ -118,12 +120,7 @@ export function useMcpSettingsState({ config, openConfirmDialog, setConfig, t }:
 
   function updateMcpDraft(update: Partial<McpDraft>): void {
     const current = mcpDraftRef.current
-    const stopRunningServerForEdit = mcpRuntimeEnabled && current.enabled && update.enabled === undefined
-    const nextDraft = {
-      ...current,
-      ...update,
-      ...(stopRunningServerForEdit ? { enabled: false } : {})
-    }
+    const nextDraft = { ...current, ...update }
     const invalidIdError = validateMcpDraftId(nextDraft, t)
     if (invalidIdError) {
       notice.error(invalidIdError, { id: mcpNoticeId })
@@ -135,14 +132,11 @@ export function useMcpSettingsState({ config, openConfirmDialog, setConfig, t }:
       return
     }
     if (update.enabled === true) {
-      const error = validateMcpDraftForEnable(nextDraft, t)
+      const error = validateMcpDraftForEnable(nextDraft, t, mcpStatus)
       if (error) {
         notice.error(error, { id: mcpNoticeId })
         return
       }
-    }
-    if (stopRunningServerForEdit) {
-      notice.info(t('settings.mcp_server_stopped_for_edit'), { id: mcpNoticeId })
     }
     mcpDraftRef.current = nextDraft
     setMcpDraft(nextDraft)
@@ -254,6 +248,11 @@ export function useMcpSettingsState({ config, openConfirmDialog, setConfig, t }:
     mcpStatus,
     moveEditingMcpServer,
     reloadFailedMcpServers,
-    updateMcpDraft
+    updateMcpDraft,
+    flushMcpDraft: async () => {
+      await mcpAutosave.waitForIdle()
+      if (saveFailed.current) throw new Error(t('settings.failed_save_mcp'))
+      return mcpDraftRef.current.id
+    }
   }
 }

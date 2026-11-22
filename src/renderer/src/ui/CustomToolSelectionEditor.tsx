@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { resolveToolSelection, withToolShadows, type ToolPackage, type ToolRoot, type ToolSelection } from '@shared/toolPackages'
 import { CapabilitySection } from './CapabilitySection'
 import { CapabilityResourceGroup } from './CapabilityResourceGroup'
-import { CapabilityResourceRow, CapabilityResourceToggle } from './CapabilityResource'
+import { CapabilityResourceRow } from './CapabilityResource'
 
 export function CustomToolSelectionEditor({ value, tools, roots = [], subagent = false, backgroundTools, disabled, projectTools, onChange }: {
   value: ToolSelection; tools: readonly ToolPackage[]; roots?: readonly ToolRoot[]; subagent?: boolean
@@ -12,7 +12,7 @@ export function CustomToolSelectionEditor({ value, tools, roots = [], subagent =
 }) {
   const { t } = useTranslation()
   const mode = value.mode ?? 'custom'
-  const selectionDisabled = disabled || mode !== 'custom'
+  const selectionDisabled = disabled
   const visible = tools.filter(tool => !subagent || tool.source !== 'project')
   const effective = resolveToolSelection(value, visible.filter(tool => backgroundTools || !tool.definition?.interactive), subagent, false).entries
   const items = withToolShadows(visible, effective)
@@ -29,59 +29,82 @@ export function CustomToolSelectionEditor({ value, tools, roots = [], subagent =
     { id: 'project', label: t('settings.skill_group_project'), roots: activeRoots.filter(root => root.source === 'project') }
   ].filter(group => group.roots.length)
   function setSelected(id: string, enabled: boolean) {
-    const retained = value.entries.filter(entry => entry !== id)
-    onChange({ ...value, entries: enabled ? [...retained, id] : retained })
+    setSelections([id], enabled)
+  }
+  function setSelections(ids: readonly string[], enabled: boolean, project = mode === 'all' || (mode === 'custom' && value.project)) {
+    const targets = new Set(ids)
+    const retained = [...new Set([...tools.map(tool => tool.id), ...value.entries])].filter(entry => !targets.has(entry) && selected(entry))
+    onChange({ ...value, mode: 'custom', project, entries: enabled ? [...retained, ...targets] : retained })
+  }
+  const isGroupSelected = (members: readonly ToolPackage[]) => members.every(tool => !tool.definition || selected(tool.id))
+  function setGroupSelected(members: readonly ToolPackage[], enabled: boolean) {
+    setSelections(members.filter(tool => !enabled || tool.definition || selected(tool.id)).map(tool => tool.id), enabled)
+  }
+  const bulkItems = items.filter(tool => !(tool.source === 'project' && projectTools?.disabled))
+  function setMainGroupSelected(checked: boolean) {
+    const ids = [...bulkItems.filter(tool => !checked || tool.definition || selected(tool.id)).map(tool => tool.id), ...missing]
+    setSelections(ids, checked, subagent ? checked : value.project)
   }
   function renderTool(tool: ToolPackage) {
-    const unavailable = tool.enabled === false || Boolean(tool.error)
     const requiresBackground = tool.definition?.interactive && !backgroundTools
+    const inactiveReason = [tool.enabled === false && t('capabilities.globally_disabled'),
+      tool.error && [t(`custom_tools.load_error_${tool.error.code}`), tool.error.detail].filter(Boolean).join('\n'),
+      tool.shadowedBy && t('custom_tools.shadowed_by', { source: tool.shadowedBy }),
+      requiresBackground && t('custom_tools.requires_background')].filter(Boolean).join('\n')
     return <CapabilityResourceRow key={tool.id} name={tool.name} description={tool.description} directory={tool.directory}
-      status={<>
-        {unavailable && <span className="ui-badge">{t('capabilities.inactive')}</span>}
-        {tool.shadowedBy && <span className="ui-badge" data-tooltip={t('custom_tools.shadowed_by', { source: tool.shadowedBy })}>{t('custom_tools.shadowed')}</span>}
-        {requiresBackground && <span className="ui-badge">{t('custom_tools.requires_background')}</span>}
-      </>}
-      controls={<CapabilityResourceToggle label={`${tool.rootName} ${tool.name}`} enabled={selected(tool.id)}
-        disabled={selectionDisabled || (!tool.definition && !value.entries.includes(tool.id))} onChange={enabled => setSelected(tool.id, enabled)} />}>
-      {tool.error && <span role="alert" className="ui-field-hint ui-status-danger">{t(`custom_tools.load_error_${tool.error.code}`)}</span>}
-    </CapabilityResourceRow>
+      inactiveReason={inactiveReason}
+      label={`${tool.rootName} ${tool.name}`} enabled={selected(tool.id)}
+        disabled={selectionDisabled || (!tool.definition && !selected(tool.id))} onChange={enabled => setSelected(tool.id, enabled)} />
   }
   function renderGroup(group: typeof groups[number]) {
     const members = items.filter(tool => group.roots.some(root => root.id === tool.rootId))
-    return <CapabilityResourceGroup key={group.id} label={group.label} fullWidthDivider={group.id === 'project'}
+    const rootError = (root: typeof group.roots[number]) => root.error
+      ? [root.path, t(`custom_tools.load_error_${root.error.code}`), root.error.detail].filter(Boolean).join('\n') : undefined
+    return <CapabilityResourceGroup key={group.id} label={group.label} divider={group.id === 'project'}
+      allSelected={isGroupSelected(members)} onSelectionChange={mode === 'custom' ? checked => setGroupSelected(members, checked) : undefined}
+      selectionDisabled={selectionDisabled || !members.length}
+      inactiveReason={group.roots.length === 1 ? rootError(group.roots[0]) : undefined}
       ariaLabel={group.id === 'project' ? t('project.local_tools') : group.label} count={`${members.filter(tool => selected(tool.id)).length}/${members.length}`}>
       {group.roots.map(root => {
         const rootItems = items.filter(tool => tool.rootId === root.id)
         const content = <>
-          {root.error && <span role="alert" className="ui-field-hint ui-status-danger">{root.path}: {t(`custom_tools.load_error_${root.error.code}`)}</span>}
-          {rootItems.map(renderTool)}
+          <div className="ui-grid-auto">{rootItems.map(renderTool)}</div>
         </>
         return group.roots.length > 1
-          ? <CapabilityResourceGroup key={root.id} label={root.name} ariaLabel={root.path ?? root.id} tooltip={root.path} count={rootItems.length}>{content}</CapabilityResourceGroup>
+          ? <CapabilityResourceGroup key={root.id} label={root.name} ariaLabel={root.path ?? root.id} tooltip={root.path} inactiveReason={rootError(root)} count={rootItems.length}
+            allSelected={isGroupSelected(rootItems)} onSelectionChange={mode === 'custom' ? checked => setGroupSelected(rootItems, checked) : undefined}
+            selectionDisabled={selectionDisabled || !rootItems.length}>{content}</CapabilityResourceGroup>
           : <div key={root.id} className="ui-form-section">{content}</div>
       })}
     </CapabilityResourceGroup>
   }
-  return <CapabilitySection label={t('custom_tools.title')} customCount={items.filter(tool => value.entries.includes(tool.id)).length + missing.length}
-    actions={projectTools && <ProjectDirectoryAddButton kind="tool" onAddDirectories={projectTools.onAddDirectories} disabled={disabled || projectTools.disabled} />}
-    total={items.length + missing.length} mode={mode} disabled={disabled} expandable
-    countSuffix={subagent && mode === 'custom' && value.project && <> + {t('custom_tools.project_tools_summary')}</>}
-    onChange={mode => onChange({ ...value, mode })}>
-    <div className="ui-capability-list">
-      {subagent && <CapabilityResourceRow name={t('custom_tools.project_tools')}
-        controls={<CapabilityResourceToggle label={t('custom_tools.project_tools')} enabled={mode === 'all' || (mode === 'custom' && value.project)}
-          disabled={selectionDisabled} onChange={project => onChange({ ...value, project })} />} />}
-      {groups.filter(group => group.id !== 'project').map(renderGroup)}
-      {missing.length > 0 && <CapabilityResourceGroup label={t('capabilities.other_tools')} count={missing.length}>
-        {missing.map(id => <CapabilityResourceRow key={id} name={id} status={<span className="ui-badge">{t('capabilities.deleted')}</span>}
-          controls={<CapabilityResourceToggle label={id} enabled={selected(id)} disabled={selectionDisabled} onChange={enabled => setSelected(id, enabled)} />} />)}
-      </CapabilityResourceGroup>}
-      {projectTools ? <ProjectResourceGroup kind="tool" {...projectTools} disabled={disabled || projectTools.disabled}
-        roots={roots.filter(root => root.source === 'project').map(root => ({ ...root, available: !root.error,
-          error: root.error ? t(`custom_tools.load_error_${root.error.code}`) : undefined
-        }))} items={items.filter(tool => tool.source === 'project')} renderItem={renderTool} />
-        : groups.filter(group => group.id === 'project').map(renderGroup)}
-      {!projectTools && !groups.length && !missing.length && <small>{t('custom_tools.empty')}</small>}
-    </div>
-  </CapabilitySection>
+  return <div className="ui-form-section ui-form-section-divided">
+    <CapabilitySection label={t('custom_tools.title')} selected={[...items.map(tool => tool.id), ...missing].filter(selected).length}
+      selectionDisabled={!bulkItems.length && !missing.length && !subagent}
+      allSelected={isGroupSelected(bulkItems) && (!subagent || value.project)} onSelectionChange={setMainGroupSelected}
+      mode={mode} disabled={disabled} onChange={mode => onChange({ ...value, mode })}
+      actions={projectTools && <ProjectDirectoryAddButton kind="tool" onAddDirectories={projectTools.onAddDirectories} disabled={disabled || projectTools.disabled} />}
+      total={items.length + missing.length}
+      countSuffix={subagent && (mode === 'all' || (mode === 'custom' && value.project)) && <> + {t('custom_tools.project_tools_summary')}</>}>
+      <div className="ui-capability-list">
+        {subagent && <CapabilityResourceRow name={t('custom_tools.project_tools')}
+          label={t('custom_tools.project_tools')} enabled={mode === 'all' || (mode === 'custom' && value.project)}
+            disabled={selectionDisabled} onChange={project => onChange({ ...value, mode: 'custom', entries: [...new Set([...tools.map(tool => tool.id), ...value.entries])].filter(selected), project })} />}
+        {groups.filter(group => group.id !== 'project').map(renderGroup)}
+        {missing.length > 0 && <CapabilityResourceGroup label={t('capabilities.other_tools')} count={missing.length} allSelected={missing.every(selected)}
+          onSelectionChange={mode === 'custom' ? checked => setSelections(checked ? missing.filter(selected) : missing, checked) : undefined}
+          selectionDisabled={selectionDisabled}>
+          <div className="ui-grid-auto">{missing.map(id => <CapabilityResourceRow key={id} name={id} inactiveReason={t('capabilities.deleted')}
+            label={id} enabled={selected(id)} disabled={selectionDisabled} onChange={enabled => setSelected(id, enabled)} />)}</div>
+        </CapabilityResourceGroup>}
+        {projectTools ? <ProjectResourceGroup kind="tool" {...projectTools} disabled={disabled || projectTools.disabled}
+          isAllSelected={isGroupSelected} onSelectionChange={mode === 'custom' ? setGroupSelected : undefined}
+          roots={roots.filter(root => root.source === 'project').map(root => ({ ...root, available: !root.error,
+            error: root.error ? t(`custom_tools.load_error_${root.error.code}`) : undefined
+          }))} items={items.filter(tool => tool.source === 'project')} renderItem={renderTool} />
+          : groups.filter(group => group.id === 'project').map(renderGroup)}
+        {!projectTools && !groups.length && !missing.length && <small>{t('custom_tools.empty')}</small>}
+      </div>
+    </CapabilitySection>
+  </div>
 }

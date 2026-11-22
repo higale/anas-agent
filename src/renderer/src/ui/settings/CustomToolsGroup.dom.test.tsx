@@ -40,12 +40,10 @@ async function openGroup(button: HTMLElement): Promise<void> {
   if (toggle) await userEvent.click(toggle)
 }
 
-const capabilityToggle = (name: string | RegExp, enabled = true) => within(screen.getByRole('radiogroup', { name }))
-  .getByRole('radio', { name: enabled ? 'capabilities.on' : 'capabilities.off' })
+const capabilityToggle = (name: string | RegExp) => screen.getByRole('checkbox', { name })
 
 function openToolCapabilities() {
   fireEvent.click(screen.getByRole('button', { name: 'custom_tools.title' }))
-  fireEvent.click(screen.getByRole('button', { name: 'settings.skill_group_user' }))
 }
 
 describe('custom tool settings', () => {
@@ -557,28 +555,23 @@ describe('custom tool settings', () => {
     if (status === 'error') expect(notice.error).toHaveBeenCalledWith('custom_tools.import_error_already_exists', { id: 'settings-tool-status' })
     else expect(notice.error).not.toHaveBeenCalled()
   })
-  it.each([false, true])('selects custom tools and retains choices through all and off (%s)', subagent => {
+  it.each([false, true])('selects individual custom tools from default and off states (%s)', subagent => {
     function Capabilities() {
       const [value, setValue] = useState(structuredClone(defaultCapabilities))
       return <CapabilityEditor subagent={subagent} value={value} onChange={setValue}
         customTools={[toolPackageFixture(definition), toolPackageFixture({ ...definition, id: 'other', name: 'other_tool' })]} />
     }
     render(<Capabilities />)
-    const mode = within(screen.getByRole('radiogroup', { name: 'custom_tools.title' }))
-    expect(mode.getByRole('radio', { name: 'capabilities.all' })).toBeChecked()
-    fireEvent.click(mode.getByRole('radio', { name: 'capabilities.custom' }))
-    expect(screen.queryByRole('radiogroup', { name: 'User submit_result' })).toBeNull()
     openToolCapabilities()
-    fireEvent.click(capabilityToggle('User submit_result'))
-    for (const name of ['capabilities.all', 'capabilities.off']) {
-      fireEvent.click(mode.getByRole('radio', { name }))
-      expect(capabilityToggle('User submit_result', name === 'capabilities.all')).toBeChecked()
-      expect(capabilityToggle('User submit_result')).toBeDisabled()
-    }
-    fireEvent.click(mode.getByRole('radio', { name: 'capabilities.custom' }))
     expect(capabilityToggle('User submit_result')).toBeChecked()
-    expect(capabilityToggle('User other_tool', false)).toBeChecked()
-    if (subagent) expect(capabilityToggle('custom_tools.project_tools')).toBeChecked()
+    fireEvent.click(capabilityToggle('User submit_result'))
+    expect(capabilityToggle('User submit_result')).not.toBeChecked()
+    expect(capabilityToggle('User other_tool')).toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: 'settings.capabilities_disable_all' }))
+    fireEvent.click(capabilityToggle('User submit_result'))
+    expect(capabilityToggle('User submit_result')).toBeChecked()
+    expect(capabilityToggle('User other_tool')).not.toBeChecked()
+    if (subagent) expect(capabilityToggle('custom_tools.project_tools')).not.toBeChecked()
   })
   it('shows the project tools grant in the collapsed subagent summary independently of individual tools', () => {
     function Capabilities() {
@@ -590,7 +583,7 @@ describe('custom tool settings', () => {
     expect(heading).toHaveAttribute('aria-expanded', 'false')
     expect(heading).toHaveTextContent('0/0 + custom_tools.project_tools_summary')
     fireEvent.click(heading)
-    fireEvent.click(capabilityToggle('custom_tools.project_tools', false))
+    fireEvent.click(capabilityToggle('custom_tools.project_tools'))
     fireEvent.click(heading)
     expect(heading).toHaveTextContent(/0\/0$/)
   })
@@ -607,10 +600,9 @@ describe('custom tool settings', () => {
     render(<Capabilities />)
     fireEvent.click(screen.getByRole('button', { name: 'custom_tools.title' }))
     for (const name of ['settings.skill_group_user', 'Shared', 'capabilities.other_tools']) expect(screen.getByText(name)).toBeVisible()
-    expect(Boolean(screen.queryByRole('button', { name: 'settings.skill_group_project' }))).toBe(!subagent)
-    fireEvent.click(screen.getByRole('button', { name: 'capabilities.other_tools' }))
+    expect(Boolean(screen.queryByText('settings.skill_group_project'))).toBe(!subagent)
     expect(capabilityToggle('missing')).toBeChecked()
-    fireEvent.click(capabilityToggle('missing', false))
+    fireEvent.click(capabilityToggle('missing'))
     expect(screen.queryByText('capabilities.other_tools')).toBeNull()
   })
   it.each([['', 0], ['0', 0], ['7200', 7200]] as const)('saves the timeout draft %s as %s seconds', async (value, timeoutSeconds) => {
@@ -631,7 +623,7 @@ describe('custom tool settings', () => {
     const view = render(<CapabilityEditor {...props} />)
     openToolCapabilities()
     expect(capabilityToggle('User submit_result')).toBeChecked()
-    expect(screen.getByText('custom_tools.requires_background')).toBeVisible()
+    expect(screen.getByText('custom_tools.requires_background')).not.toBeVisible()
     const count = screen.getByRole('button', { name: 'custom_tools.title' }).querySelector('small')
     expect(count).toHaveTextContent(/^1\/1$/)
     view.rerender(<CapabilityEditor {...props} value={{ ...props.value, backgroundTools: true }} />)
@@ -657,8 +649,9 @@ describe('custom tool settings', () => {
       expect(toggle).toBeChecked()
     }
     expect(screen.getByRole('button', { name: 'custom_tools.title' }).querySelector('small')).toHaveTextContent(/^2\/2$/)
-    expect(screen.getByText('capabilities.inactive')).toBeVisible()
-    expect(screen.getByText('custom_tools.requires_background')).toBeVisible()
+    expect(capabilityToggle('User submit_result')).toHaveAccessibleDescription('capabilities.globally_disabled')
+    expect(screen.queryByText('capabilities.inactive')).toBeNull()
+    expect(screen.getByText('custom_tools.requires_background')).not.toBeVisible()
   })
   it('does not mark a usable tool shadowed by an interactive tool whose dependency is disabled', () => {
     const projectTool: ToolPackage = { ...toolPackageFixture({ ...definition, id: 'project-tool', interactive: true }),
@@ -670,7 +663,8 @@ describe('custom tool settings', () => {
     expect(screen.queryByText('custom_tools.shadowed')).toBeNull()
     expect(capabilityToggle('User submit_result')).toBeChecked()
     view.rerender(<CapabilityEditor {...props} value={{ ...props.value, backgroundTools: true }} />)
-    expect(screen.getByText('custom_tools.shadowed')).toBeVisible()
+    expect(capabilityToggle('User submit_result')).toHaveAccessibleDescription('custom_tools.shadowed_by')
+    expect(screen.queryByText('custom_tools.shadowed')).toBeNull()
   })
   it('selects on click and edits only through the edit button or a double click', async () => {
     const user = userEvent.setup()
@@ -761,10 +755,9 @@ describe('custom tool settings', () => {
     expect(capabilityToggle('User submit_result')).toBeChecked()
     rerender(<CapabilityEditor {...props} customTools={[toolPackageFixture({ ...definition, name: 'renamed' }), toolPackageFixture({ ...definition, id: 'new', name: 'new_tool' })]} />)
     expect(capabilityToggle('User renamed')).toBeChecked()
-    expect(capabilityToggle('User new_tool', false)).toBeChecked()
+    expect(capabilityToggle('User new_tool')).not.toBeChecked()
     rerender(<CapabilityEditor {...props} customTools={[]} />)
-    fireEvent.click(screen.getByRole('button', { name: 'capabilities.other_tools' }))
-    fireEvent.click(capabilityToggle(/stable/, false))
+    fireEvent.click(capabilityToggle(/stable/))
     expect(onChange.mock.lastCall?.[0].customTools).toMatchObject(selectedTools())
   })
 })

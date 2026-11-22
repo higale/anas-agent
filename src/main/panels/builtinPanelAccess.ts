@@ -17,6 +17,7 @@ export function builtinPanelCanInvoke(panel: BuiltinPanel, channel: string, args
   if (panel.kind === 'processes') return ['agent:processes:list', 'agent:processes:terminate'].includes(channel) && input?.threadId === panel.threadId
   if (channel === 'agent:events:subscribe' || channel === 'agent:changes:cancelRead') return true
   // The activity handler resolves request IDs within the sending WebContents.
+  if (channel === 'mcp:status') return panel.kind === 'subagent'
   if (channel === 'agent:activities:cancel') return panel.kind === 'subagent'
   if (channel === 'agent:threads:get') return !!panel.threadId && args[0] === panel.threadId
   if (['agent:activities:get', 'agent:activities:subagent', 'agent:activities:directory', 'agent:activities:detail'].includes(channel)) {

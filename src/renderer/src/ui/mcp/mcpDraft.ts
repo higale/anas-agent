@@ -79,12 +79,17 @@ export function buildMcpPayload(draft: McpDraft): McpServerConfigSave {
   }
 }
 
-export function validateMcpDraftForEnable(draft: McpDraft, t: TFunction): string | undefined {
+export function mcpDraftHasTools(draft: McpDraft, status: McpToolStatus | undefined): boolean {
+  return Boolean(status?.loaded.some(server => server.id === draft.id.trim() && server.index === draft.index && server.toolNames.length > 0))
+}
+
+export function validateMcpDraftForEnable(draft: McpDraft, t: TFunction, status: McpToolStatus | undefined): string | undefined {
   if (!draft.name.trim()) return t('settings.name_required_enable')
   if (!draft.id.trim()) return t('settings.mcp_server_id_required_enable')
   if (!Number.isFinite(draft.timeoutMs) || draft.timeoutMs < 1000) return t('settings.timeout_required_enable')
   if (draft.type === 'stdio' && !draft.command.trim()) return t('settings.command_required_enable')
   if (draft.type !== 'stdio' && !draft.url.trim()) return t('settings.url_required_enable')
+  if (!mcpDraftHasTools(draft, status)) return t('settings.mcp_tools_required_enable')
   return undefined
 }
 

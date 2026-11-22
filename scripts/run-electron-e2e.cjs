@@ -1,3 +1,4 @@
+const { verifyMcp } = require('./electron-mcp.cjs')
 const { panelPage } = require('./electron-panel-helpers.cjs')
 const { verifyBackgroundMemory } = require('./electron-memory.cjs')
 const { verifyPluginTools } = require('./electron-plugin-tools.cjs')
@@ -167,7 +168,7 @@ async function verifyApplication(electronApplication, verifyRestart = false) {
   const subagentCapabilities = page.locator('.settings-subagent-editor').getByRole('group', { name: /^(能力|Capabilities)$/ })
   await expect(subagentCapabilities.locator('.ui-section-title')).toHaveText(/^(能力|Capabilities)$/)
   await expect(subagentCapabilities.getByRole('button', { name: /^(全开|Enable all)$/ })).toBeVisible()
-  await expect(subagentCapabilities.getByRole('radiogroup', { name: /^(技能|Skills)$/ })).toHaveCount(1)
+  await expect(subagentCapabilities.getByRole('button', { name: /^(技能|Skills)$/ })).toHaveCount(1)
   await subagentCapabilities.scrollIntoViewIfNeeded()
   assert.equal(await subagentCapabilities.evaluate((element) => globalThis.getComputedStyle(element).borderTopStyle), 'solid', 'The full capability editor must have a visible shared boundary.')
   if (process.env.ANAS_E2E_SUBAGENT_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_SUBAGENT_SCREENSHOT })
@@ -272,21 +273,14 @@ async function verifyApplication(electronApplication, verifyRestart = false) {
   await capabilityDialog.locator('summary').filter({ hasText: /File read|文件读/ }).click()
   await capabilityDialog.getByRole('checkbox', { name: 'read_multiple_files', exact: true }).uncheck()
   await expect(capabilityDialog.getByRole('checkbox', { name: 'read_file', exact: true })).toBeChecked()
-  const skillPicker = capabilityDialog.getByRole('radiogroup', { name: /^(技能|Skills)$/ })
-  await skillPicker.getByText(/^(定制|Custom)$/, { exact: true }).click()
-  const skillToggleBounds = await capabilityDialog.getByText(/^(技能|Skills)$/, { exact: true }).boundingBox()
-  const skillPickerBounds = await skillPicker.boundingBox()
-  assert.ok(Math.abs(skillToggleBounds.y + skillToggleBounds.height / 2 - skillPickerBounds.y - skillPickerBounds.height / 2) < 3, `Skill mode must align with its label: ${JSON.stringify({ skillToggleBounds, skillPickerBounds })}`)
-  assert.ok(skillPickerBounds.x > skillToggleBounds.x + skillToggleBounds.width, 'Skill mode must be on the right of its label.')
   const skillSection = capabilityDialog.getByRole('region', { name: /^(技能|Skills)$/ })
   const skillDisclosure = skillSection.getByRole('button', { name: /^(技能|Skills)$/ })
   await expect(skillDisclosure).toHaveAttribute('aria-expanded', 'false')
   await skillDisclosure.click()
   await expect(skillDisclosure).toHaveAttribute('aria-expanded', 'true')
   await expect(skillSection.getByRole('searchbox')).toHaveCount(0)
-  await expect(skillPicker).toHaveClass('ui-segmented-control')
+  await expect(skillSection.getByRole('radio')).toHaveCount(0)
   if (process.env.ANAS_E2E_CAPABILITY_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_CAPABILITY_SCREENSHOT })
-  await skillPicker.getByText(/^(全部|All)$/, { exact: true }).click()
   await capabilityDialog.locator('button[type="submit"]').click()
   await expect(capabilityDialog).not.toBeVisible()
   const scopedProject = await page.evaluate(async (id) => (await globalThis.gale.projects.list()).find((project) => project.id === id), editableProject.id)
@@ -399,15 +393,10 @@ async function verifySkillSourceLayout(electronApplication) {
   await page.locator('[data-settings-tab="subagents"]').click()
   await page.getByRole('button', { name: /^(新建子 Agent|New subagent)$/ }).click()
   const editor = page.locator('.settings-subagent-editor')
-  await editor.getByRole('radiogroup', { name: /^(技能|Skills)$/ }).getByText(/^(定制|Custom)$/, { exact: true }).click()
   const skillsSection = editor.getByRole('region', { name: /^(技能|Skills)$/ })
   await skillsSection.getByRole('button', { name: /^(技能|Skills)$/ }).click()
   const editedAgentName = await editor.getByRole('textbox').first().inputValue()
-  for (const name of [/^(系统|System)$/, /^(用户|User)$/]) {
-    const group = skillsSection.getByRole('button', { name })
-    await expect(group).toHaveAttribute('aria-expanded', 'false')
-    await group.click()
-  }
+  await expect(skillsSection.locator('.ui-capability-resource-group [aria-expanded]')).toHaveCount(0)
   await expect(editor.getByText('project directory', { exact: true })).toHaveCount(0)
   await expect(editor.getByText('project-search', { exact: true })).toHaveCount(0)
   const projectSkills = editor.getByRole('checkbox', { name: /^(项目技能|Project skills)$/ })
@@ -447,59 +436,19 @@ async function verifyCapabilityToolListLayout(electronApplication) {
 
   async function verifyLists(editor, context) {
     await editor.getByRole('button', { name: 'MCP', exact: true }).click()
-    await editor.getByRole('radiogroup', { name: 'MCP', exact: true }).getByText(/^(定制|Custom)$/, { exact: true }).click()
+    const group = editor.getByRole('region', { name: 'MCP', exact: true })
+    await expect(group.getByRole('checkbox')).toHaveCount(2)
+    await expect(group.getByRole('radio')).toHaveCount(0)
     for (const count of [24, 100]) {
-      const group = editor.getByRole('region', { name: `Layout MCP ${count}`, exact: true })
-      const toggle = group.getByRole('button', { name: `Layout MCP ${count}`, exact: true })
-      const picker = group.getByRole('radiogroup')
-      const useAll = picker.getByRole('radio', { name: /^(全部|All)$/ })
-      await expect(useAll).toBeChecked()
-      await expect(toggle).toBeVisible()
-      await picker.getByText(/^(全部|All)$/, { exact: true }).click()
-      await expect(useAll).toBeChecked()
-      await picker.getByText(/^(定制|Custom)$/, { exact: true }).click()
-      await expect(toggle).toBeVisible()
-      if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click()
-      const list = group.locator('.ui-capability-list')
-      const layout = await list.evaluate((element) => ({
-        height: element.clientHeight, scrollHeight: element.scrollHeight,
-        width: element.clientWidth, scrollWidth: element.scrollWidth,
-        gap: parseFloat(globalThis.getComputedStyle(element).rowGap),
-        rows: Array.from(element.children).map((row) => {
-          const bounds = row.getBoundingClientRect()
-          const checkbox = row.querySelector('input').getBoundingClientRect()
-          const text = row.querySelector('code').getBoundingClientRect()
-          return { top: bounds.top, bottom: bounds.bottom, left: bounds.left, right: bounds.right, height: bounds.height,
-            contentHeight: Math.max(checkbox.height, text.height) }
-        })
-      }))
-      assert.equal(layout.rows.length, count)
-      assert.ok(layout.scrollHeight <= layout.height + 1, `${context}: tool list must grow naturally without an inner scrollbar.`)
-      assert.ok(layout.scrollWidth <= layout.width + 1, `${context}: long tool names must wrap inside the list.`)
-      layout.rows.forEach((row, index) => {
-        assert.ok(row.height >= row.contentHeight - 1, `${context}: tool row ${index} must not compress its contents.`)
-        for (const previous of layout.rows.slice(0, index)) {
-          if (row.left >= previous.right || row.right <= previous.left) continue
-          assert.ok(row.top >= previous.bottom + layout.gap - 1,
-            `${context}: tool rows in the same column must preserve their gap without overlapping.`)
-        }
-      })
-      const last = list.getByRole('checkbox').last()
-      await last.check()
-      await expect(last).toBeChecked()
-      await last.uncheck()
-      await expect(last).not.toBeChecked()
-      if (count === 24 && process.env.ANAS_E2E_TOOL_LIST_SCREENSHOT) {
-        await list.evaluate((element) => { element.scrollTop = 0 })
-        await page.screenshot({ path: process.env.ANAS_E2E_TOOL_LIST_SCREENSHOT.replace(/\.png$/, `-${context}.png`) })
-      }
-      await toggle.click()
-      await expect(list).not.toBeVisible()
-      await expect(useAll).toBeVisible()
-      await picker.getByText(/^(全部|All)$/, { exact: true }).click()
-      await expect(toggle).toBeVisible()
-      await expect(list).not.toBeVisible()
+      const checkbox = group.getByRole('checkbox', { name: `Layout MCP ${count}`, exact: true })
+      await expect(checkbox).toBeChecked()
+      await checkbox.uncheck()
+      await expect(checkbox).not.toBeChecked()
+      await checkbox.check()
     }
+    const list = group.locator('.ui-capability-list')
+    assert.ok(await list.evaluate(element => element.scrollWidth <= element.clientWidth + 1), `${context}: server labels must fit the list.`)
+    if (process.env.ANAS_E2E_TOOL_LIST_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_TOOL_LIST_SCREENSHOT.replace(/\.png$/, `-${context}.png`) })
   }
   await verifyLists(dialog, 'project')
   await dialog.getByRole('button', { name: /^(取消|Cancel)$/ }).click()
@@ -1204,6 +1153,10 @@ async function main() {
     await verifyLiveSpeech(launchApplication)
     return
   }
+  if (process.argv.includes('--mcp-only')) {
+    await verifyMcp(launchApplication)
+    return
+  }
   if (process.argv.includes('--custom-tools-only')) {
     await verifyCustomTools(launchApplication)
     return
@@ -1288,6 +1241,7 @@ async function main() {
     await verifyAvatarCrop(launchApplication)
     await verifyControlLayout(launchApplication)
     await verifyCustomTools(launchApplication)
+    await verifyMcp(launchApplication)
     await verifySkillSettings(launchApplication)
     await verifyHelpDocuments(launchApplication)
     await verifyWorkspaceTabs(launchApplication)

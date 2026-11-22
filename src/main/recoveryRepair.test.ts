@@ -30,6 +30,25 @@ async function fixture() {
 }
 
 describe('field-level recovery', () => {
+  it('salvages MCP discovery metadata without losing server connections or valid tool choices', () => {
+    const tool = { name: 'mcp__alpha__lookup', description: 'Look up', input_schema: { type: 'object' } }
+    const server = { id: 'alpha', name: 'Alpha', enabled: true, type: 'http', url: 'https://example.test/mcp',
+      timeout_ms: 30000, args: [], env: {}, tool_choices: { [tool.name]: false, another: true, broken: 'false' },
+      tool_catalog: { connection_key: 'a'.repeat(64), tools: [null, tool, { ...tool, name: 'bad', input_schema: null }, tool] } }
+    const original = { version: 0, mcp_servers: [server] }
+    const repaired = repairDocument('mcp_servers.json', original)
+    const fixed = (repaired.value.mcp_servers as Record<string, unknown>[])[0]
+    expect(fixed).toEqual({ ...server, tool_catalog: { ...server.tool_catalog, tools: [tool] }, tool_choices: { [tool.name]: false, another: true } })
+    expect(repaired.fields).toEqual(['mcp_servers.json: mcp_servers[0].tool_catalog', 'mcp_servers.json: mcp_servers[0].tool_choices'])
+    expect(original.mcp_servers[0]).toBe(server)
+    expect(server.tool_catalog.tools).toHaveLength(4)
+    expect(repairDocument('mcp_servers.json', repaired.value).fields).toEqual([])
+    const noIdentity = repairDocument('mcp_servers.json', { ...original, mcp_servers: [{ ...server,
+      tool_catalog: { ...server.tool_catalog, connection_key: 'broken' } }] })
+    expect((noIdentity.value.mcp_servers as Record<string, unknown>[])[0]).not.toHaveProperty('tool_catalog')
+    expect((noIdentity.value.mcp_servers as Record<string, unknown>[])[0]).toMatchObject({ id: 'alpha', url: server.url, enabled: true })
+  })
+
   it.each([undefined, 1, 99])('rescues input history version %s without pruning, reordering, or changing pinned entries', async version => {
     const { root, data } = await fixture()
     const items = Array.from({ length: 59 }, (_, index) => ({ text: `Prompt ${index}`, pinned: index % 3 === 0,

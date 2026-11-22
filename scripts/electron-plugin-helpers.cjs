@@ -43,4 +43,44 @@ async function tooltipPage(application, label) {
   }).toBe(true)
   return found
 }
-module.exports = { pluginPage, windowCount, pluginGeometry, pluginWindow, pluginByTitle, tooltipPage }
+// Watch the whole save interval, including transient disabled styles between rendered states.
+async function observeStableControls(page, locator) {
+  await locator.evaluate(root => {
+    const elements = [root, ...root.querySelectorAll('input, button, select, textarea, .ui-checkbox-field-label, .ui-segmented-option > span')]
+    const opacity = elements.map(element => globalThis.getComputedStyle(element).opacity)
+    const bounds = root.getBoundingClientRect()
+    const changes = []
+    const sample = () => {
+      // A successfully saved dialog may close; its fields must stay stable until then.
+      if (!root.isConnected) return
+      elements.forEach((element, index) => {
+        if (!root.contains(element)) changes.push(`Control ${index} was replaced`)
+        else if (globalThis.getComputedStyle(element).opacity !== opacity[index]) changes.push(`Control ${index} changed opacity`)
+      })
+      const next = root.getBoundingClientRect()
+      if (next.width !== bounds.width || next.height !== bounds.height) changes.push('Control size changed')
+    }
+    const observer = new globalThis.MutationObserver(sample)
+    observer.observe(root, { subtree: true, childList: true, attributes: true })
+    globalThis.__finishStablePluginControls = () => { sample(); observer.disconnect(); return changes }
+  })
+  return async () => {
+    const changes = await page.evaluate(() => {
+      const result = globalThis.__finishStablePluginControls()
+      delete globalThis.__finishStablePluginControls
+      return result
+    })
+    expect(changes).toEqual([])
+  }
+}
+async function expectWarningColor(locator) {
+  await expect.poll(() => locator.evaluate(element => {
+    const probe = globalThis.document.createElement('span')
+    probe.style.color = 'var(--warning)'
+    element.append(probe)
+    const expected = globalThis.getComputedStyle(probe).color
+    probe.remove()
+    return globalThis.getComputedStyle(element).color === expected
+  })).toBe(true)
+}
+module.exports = { pluginPage, windowCount, pluginGeometry, pluginWindow, pluginByTitle, tooltipPage, observeStableControls, expectWarningColor }

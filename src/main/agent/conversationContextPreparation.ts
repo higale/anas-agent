@@ -31,5 +31,11 @@ export function prepareConversationContext(thread: AgentThread, database: Conver
     tools: model => [...tools(model), ...(context.review ? [codeReviewToolDeclaration(context.review.id)] : [])],
     projectHistory: simpleChat ? simpleConversationHistory : undefined,
     projectMessages: (messages, model) => attachments.project(messages, model.capabilities.vision) })
-  return { catalog, tools, attachments, memory, includeRules, contextRuntime }
+  async function refreshTools(): Promise<void> {
+    await resources.refreshMcpTools()
+    const current = conversationToolCatalog(resources)
+    catalog.definitions.splice(0, catalog.definitions.length, ...current.definitions)
+    catalog.declarations.splice(0, catalog.declarations.length, ...current.declarations)
+  }
+  return { refreshTools, catalog, tools, attachments, memory, includeRules, contextRuntime }
 }

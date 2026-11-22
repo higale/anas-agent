@@ -1,7 +1,10 @@
+import stableStringify from 'fast-json-stable-stringify'
 import { BrowserWindow } from 'electron'
+import type { McpCatalogTool, McpToolCatalog } from '@shared/mcpCatalog'
+import { mcpConfigKey } from './config/mcpServerConfigMapper'
 import type { ToolDefinition } from '../runtime/toolDefinition'
 import { McpToolResultError } from '../mcp/toolResult'
-import { getMcpRuntimeConfigSnapshot, type McpServerConfig } from './config/appConfig'
+import { getMcpRuntimeConfigSnapshot, saveMcpToolCatalog, type McpServerConfig } from './config/appConfig'
 import {
   createMcpClientForServer,
   mcpErrorMessage,
@@ -18,7 +21,7 @@ import type { ManagedCallControl } from './agent/managedCallService'
 
 type McpRuntimeState = 'idle' | 'starting' | 'ready' | 'degraded' | 'recovering' | 'failed' | 'stopped'
 type McpManagerLifecycle = 'open' | 'opening' | 'quiescing' | 'closed'
-type McpStartReason = 'startup' | 'config_changed' | 'manual_reload' | 'recovery' | 'tools_changed'
+type McpStartReason = 'tool_call' | 'config_changed' | 'manual_reload' | 'recovery' | 'tools_changed'
 type McpRecoverReason = 'startup_failed' | 'ping_failed' | 'tool_failed' | 'tools_changed' | 'connection_closed' | 'manual_maintenance'
 
 interface McpServerRuntimeStatus {
@@ -29,6 +32,7 @@ interface McpServerRuntimeStatus {
   state: McpRuntimeState
   toolCount: number
   toolNames: string[]
+  toolChoices?: Record<string, boolean>
   lastCheckedAt?: string
   lastError?: string
   lastStartedAt?: string
@@ -42,13 +46,22 @@ const mcpOperationWaitMaxMs = 10_000
 const mcpRecoveryBaseDelayMs = 2_000
 const mcpRecoveryMaxDelayMs = 60_000
 
-function runtimeKey(server: McpServerConfig): string {
-  const { enabled: _enabled, index: _index, name: _name, ...runtimeConfig } = server
-  return JSON.stringify(runtimeConfig)
+const runtimeKey = mcpConfigKey
+function serverId(server: Pick<McpServerConfig, 'id'>): string { return server.id }
+
+function cachedTool(tool: ToolDefinition): McpCatalogTool {
+  return { name: tool.name, description: tool.description, input_schema: serializeToolDefinition(tool).inputSchema as Record<string, unknown>,
+    ...(tool.metadata?.annotations ? { annotations: tool.metadata.annotations as Record<string, unknown> } : {}) }
 }
 
-function serverId(server: Pick<McpServerConfig, 'index'>): string {
-  return String(server.index)
+async function waitForStart(operation: Promise<void>, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted()
+  if (!signal) return operation
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason)
+    signal.addEventListener('abort', abort, { once: true })
+    operation.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort))
+  })
 }
 
 function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
@@ -150,6 +163,7 @@ class McpServerRuntime {
   private recoveryAttempt = 0
   private recoveryTimer?: ReturnType<typeof setTimeout>
   private state: McpRuntimeState = 'idle'
+  private catalog?: McpToolCatalog
   private tools: ToolDefinition[] = []
   private toolNames: string[] = []
   private lastCheckedAt?: string
@@ -157,17 +171,15 @@ class McpServerRuntime {
   private lastStartedAt?: string
   private activeInvocations = 0
   private pendingRecoveryReason?: McpRecoverReason
+  private stopping = false
 
-  constructor(private server: McpServerConfig, private onStatusChanged: () => void) {
+  constructor(private server: McpServerConfig, private onStatusChanged: () => void, private canUse: () => boolean) {
     this.configKey = runtimeKey(server)
+    this.catalog = server.toolCatalog?.connection_key === this.configKey ? server.toolCatalog : undefined
   }
 
   get id(): string {
     return serverId(this.server)
-  }
-
-  get index(): number {
-    return this.server.index
   }
 
   get isBusy(): boolean {
@@ -185,18 +197,12 @@ class McpServerRuntime {
   updateServer(server: McpServerConfig): void {
     this.server = server
     this.configKey = runtimeKey(server)
+    this.catalog = server.toolCatalog?.connection_key === this.configKey ? server.toolCatalog : undefined
   }
 
   result(): McpToolLoadResult {
-    const loaded = this.state === 'ready'
-      ? [{
-          id: this.server.id,
-          index: this.server.index,
-          name: this.server.name,
-          toolCount: this.tools.length,
-          toolNames: this.toolNames
-        }]
-      : []
+    const loaded = this.catalog ? [{ id: this.server.id, index: this.server.index, name: this.server.name,
+      toolCount: this.catalog.tools.length, toolNames: this.catalog.tools.map(tool => tool.name) }] : []
     const errors = this.lastError && (this.state === 'degraded' || this.state === 'failed')
       ? [{
           id: this.server.id,
@@ -205,7 +211,41 @@ class McpServerRuntime {
           error: this.lastError
         }]
       : []
-    return asMcpToolLoadResult(this.state === 'ready' ? this.tools : [], loaded, errors)
+    return asMcpToolLoadResult(this.server.enabled ? this.catalogDefinitions().filter(tool => this.server.toolChoices?.[tool.name] !== false) : [], loaded, errors)
+  }
+
+  catalogDefinitions(): ToolDefinition[] {
+    const key = this.configKey
+    return (this.catalog?.tools ?? []).map(definition => ({ name: definition.name, description: definition.description,
+      inputSchema: definition.input_schema, metadata: { annotations: definition.annotations },
+      execute: async (args, context) => {
+        const requireCurrent = async () => {
+          const config = await getMcpRuntimeConfigSnapshot()
+          if (!this.canUse() || this.stopping) throw new Error('MCP runtime is unavailable while stopping.')
+          const current = config.servers.find(server => server.id === this.server.id)
+          if (!config.enabled || !current?.enabled || current.toolChoices?.[definition.name] === false) throw new Error(`MCP tool is disabled: ${definition.name}`)
+          if (runtimeKey(current) !== key || this.configKey !== key) throw new Error(`MCP connection changed; refresh the tool catalog: ${definition.name}`)
+          if (!current.toolCatalog?.tools.some(tool => tool.name === definition.name)) throw new Error(`此工具已不存在: ${definition.name} (${this.server.name})`)
+        }
+        await requireCurrent()
+        context.signal?.throwIfAborted()
+        if (!this.isReady) {
+          currentToolExecution()?.output('progress', `正在启动 MCP ${this.server.name}…\n`)
+          await waitForStart(this.start('tool_call'), context.signal)
+          if (!this.isReady) throw new Error(`MCP 启动失败 (${this.server.name}): ${this.lastError ?? '启动已取消或连接已停止。'}`)
+        }
+        const generation = this.generation
+        await requireCurrent()
+        context.signal?.throwIfAborted()
+        if (!this.isReady || this.generation !== generation) throw new Error(`MCP connection stopped: ${this.server.name}`)
+        const live = this.tools.find(tool => tool.name === definition.name)
+        if (!live) throw new Error(`此工具已不存在: ${definition.name} (${this.server.name})`)
+        const discovered = cachedTool(live)
+        if (stableStringify(discovered.input_schema) !== stableStringify(definition.input_schema)
+          || stableStringify(discovered.annotations) !== stableStringify(definition.annotations)) throw new Error(`MCP tool definition changed; use the refreshed definition: ${definition.name}`)
+        return live.execute(args, context)
+      }
+    }))
   }
 
   status(): McpServerRuntimeStatus {
@@ -215,8 +255,9 @@ class McpServerRuntime {
       name: this.server.name,
       type: this.server.type,
       state: this.state,
-      toolCount: this.state === 'ready' ? this.tools.length : 0,
-      toolNames: this.state === 'ready' ? this.toolNames : [],
+      toolCount: this.catalog?.tools.length ?? 0,
+      toolNames: this.catalog?.tools.map(tool => tool.name) ?? [],
+      toolChoices: this.server.toolChoices ?? {},
       lastCheckedAt: this.lastCheckedAt,
       lastError: this.lastError,
       lastStartedAt: this.lastStartedAt,
@@ -225,6 +266,7 @@ class McpServerRuntime {
   }
 
   start(reason: McpStartReason, force = false): Promise<void> {
+    if (!this.canUse() || this.stopping) return Promise.resolve()
     if (this.latestOperation && !force) return this.latestOperation
     const generation = this.nextGeneration()
     return this.trackOperation(this.startNow(reason, generation))
@@ -248,31 +290,34 @@ class McpServerRuntime {
     return this.scheduleRecovery('manual_maintenance', 0)
   }
 
-  async stop(reason: 'disabled' | 'deleted' | 'shutdown' | 'config_changed'): Promise<void> {
-    this.pendingRecoveryReason = undefined
-    this.nextGeneration()
-    this.clearHealthTimer()
-    this.clearRecoveryTimer()
-    this.state = 'stopped'
-    this.nextRetryAt = undefined
-    this.tools = []
-    this.toolNames = []
-    this.lastError = undefined
-    mcpServerLog('info', this.server, 'Stopping MCP server runtime.', { reason })
-    const hadPendingOperations = this.operations.size > 0
-    const clientsToClose = new Set(this.clients)
-    const firstCloseFailures = await this.closeClients(clientsToClose)
-    // Forced reloads may overlap. Drain the complete, stable operation set so
-    // an older start cannot publish a connection after shutdown has returned.
-    await this.drainOperations()
-    for (const client of this.clients) clientsToClose.add(client)
-    const closeFailures = hadPendingOperations || firstCloseFailures.length > 0
-      ? await this.closeClients(clientsToClose)
-      : []
-    this.onStatusChanged()
-    if (closeFailures.length > 0) {
-      throw new AggregateError(closeFailures, `Failed to stop MCP server ${this.server.name}.`)
-    }
+  async stop(reason: 'disabled' | 'deleted' | 'shutdown' | 'config_changed' | 'manual'): Promise<void> {
+    this.stopping = true
+    try {
+      this.pendingRecoveryReason = undefined
+      this.nextGeneration()
+      this.clearHealthTimer()
+      this.clearRecoveryTimer()
+      this.state = 'stopped'
+      this.nextRetryAt = undefined
+      this.tools = []
+      this.toolNames = []
+      this.lastError = undefined
+      mcpServerLog('info', this.server, 'Stopping MCP server runtime.', { reason })
+      const hadPendingOperations = this.operations.size > 0
+      const clientsToClose = new Set(this.clients)
+      const firstCloseFailures = await this.closeClients(clientsToClose)
+      // Forced reloads may overlap. Drain the complete, stable operation set so
+      // an older start cannot publish a connection after shutdown has returned.
+      await this.drainOperations()
+      for (const client of this.clients) clientsToClose.add(client)
+      const closeFailures = hadPendingOperations || firstCloseFailures.length > 0
+        ? await this.closeClients(clientsToClose)
+        : []
+      this.onStatusChanged()
+      if (closeFailures.length > 0) {
+        throw new AggregateError(closeFailures, `Failed to stop MCP server ${this.server.name}.`)
+      }
+    } finally { this.stopping = false }
   }
 
   checkHealth(reason: McpRecoverReason | 'scheduled'): Promise<void> {
@@ -311,7 +356,7 @@ class McpServerRuntime {
         return
       }
       this.markDegraded('MCP server ping failed.', error)
-      this.scheduleRecovery('ping_failed')
+      if (reason === 'manual_maintenance') this.scheduleRecovery('manual_maintenance', 0)
     }
   }
 
@@ -392,6 +437,10 @@ class McpServerRuntime {
         await this.closeClient(client)
         return
       }
+      const catalog = { connection_key: this.configKey, tools: tools.map(cachedTool) }
+      if (!await saveMcpToolCatalog(this.server.id, catalog)) throw new Error('MCP configuration changed during discovery.')
+      if (!this.isCurrentGeneration(generation)) return
+      this.catalog = catalog
       this.tools = tools.map((tool) => wrapMcpTool(tool,
         (error) => this.handleToolFailure(error, generation),
         () => {
@@ -488,7 +537,8 @@ class McpServerRuntime {
 
   private scheduleRecovery(reason: McpRecoverReason, overrideDelayMs?: number): boolean {
     if (this.state === 'stopped' || this.recoveryTimer) return false
-    const waitForInvocations = reason === 'tools_changed' || reason === 'ping_failed' || reason === 'tool_failed' || reason === 'connection_closed'
+    if (reason !== 'tools_changed' && reason !== 'manual_maintenance') return false
+    const waitForInvocations = reason === 'tools_changed'
     if (waitForInvocations && this.activeInvocations > 0) {
       this.pendingRecoveryReason = reason
       return true
@@ -511,7 +561,7 @@ class McpServerRuntime {
         this.pendingRecoveryReason = reason
         return
       }
-      void this.start(reason === 'tools_changed' ? 'tools_changed' : 'recovery', true)
+      void this.start(reason === 'tools_changed' ? 'tools_changed' : 'recovery', true).catch(() => undefined)
     }, delay)
     unrefTimer(this.recoveryTimer)
     return true
@@ -658,20 +708,29 @@ class McpRuntimeManager {
     return task
   }
 
-  async stopServerIndex(index: number): Promise<void> {
+  async setServerRunning(id: string, running: boolean): Promise<McpToolStatus> {
     this.assertOpen()
-    await this.enqueueMutation(async () => {
-      await this.stopServerIndexNow(index)
-      this.broadcast()
+    const runtime = await this.enqueueMutation(async () => {
+      await this.applyCurrentConfig(false, false)
+      const config = await getMcpRuntimeConfigSnapshot()
+      const server = config.servers.find(item => item.id === id)
+      if (!server) throw new Error(`MCP server does not exist: ${id}`)
+      const runtime = this.runtimes.get(id)
+      if (!runtime) throw new Error('MCP runtime is unavailable.')
+      if (running) {
+        if (!runtime.isReady) void runtime.start('manual_reload')
+      } else await runtime.stop('manual')
+      this.broadcast(false)
+      return runtime
     })
+    // Start waits for discovery and persistence, but does not block Stop's queue.
+    if (running) await runtime.waitForCurrentOperation()
+    return this.enqueueMutation(async () => this.broadcast(false))
   }
 
   async loadFromCurrentConfig(forceReload = false): Promise<McpToolStatus> {
     this.assertOpen()
-    const application = await this.enqueueMutation(() => this.applyCurrentConfig(
-      forceReload,
-      forceReload ? 'manual_reload' : 'startup'
-    ))
+    const application = await this.enqueueMutation(() => this.applyCurrentConfig(forceReload))
     if (!forceReload || application.waitFor.length === 0) return application.status
     await this.waitForRuntimes(application.waitFor)
     return this.enqueueMutation(async () => this.broadcast())
@@ -679,13 +738,8 @@ class McpRuntimeManager {
 
   async runtimeFromCurrentConfig(forceReload = false): Promise<McpToolLoadResult> {
     this.assertOpen()
-    const application = await this.enqueueMutation(() => this.applyCurrentConfig(
-      forceReload,
-      forceReload ? 'manual_reload' : 'startup',
-      false
-    ))
-    // Chat preparation uses the tools that are ready now. Startup and automatic
-    // recovery run independently; only an explicit reload waits for them.
+    const application = await this.enqueueMutation(() => this.applyCurrentConfig(forceReload, false))
+    // Chat preparation reads persisted definitions without opening connections.
     if (forceReload) await this.waitForRuntimes(application.waitFor)
     return this.enqueueMutation(async () => this.aggregate())
   }
@@ -738,7 +792,7 @@ class McpRuntimeManager {
       const alreadyRunning: Array<{ id: string; name: string }> = []
       for (const server of config.servers) {
         const runtime = this.runtimes.get(serverId(server))
-        if (!runtime) continue
+        if (!runtime || ['idle', 'stopped'].includes(runtime.status().state)) continue
         if (!runtime.matches(server)) {
           runtime.updateServer(server)
           void runtime.start('config_changed', true)
@@ -773,7 +827,7 @@ class McpRuntimeManager {
 
   private async ensureServers(
     servers: McpServerConfig[],
-    options: { forceReload: boolean; reason: McpStartReason }
+    forceReload: boolean
   ): Promise<McpServerRuntime[]> {
     await this.reconcileServers(servers)
 
@@ -781,30 +835,26 @@ class McpRuntimeManager {
     for (const server of servers) {
       const runtime = this.runtimes.get(serverId(server))
       if (!runtime) continue
-      const requiresRestart = options.forceReload || !runtime.matches(server)
+      if (!runtime.matches(server)) await runtime.stop('config_changed')
       runtime.updateServer(server)
-      if (requiresRestart) {
-        runtime.start(options.forceReload ? 'manual_reload' : 'config_changed', true)
-        waitFor.push(runtime)
-      } else if (runtime.status().state === 'idle') {
-        runtime.start(options.reason)
-        waitFor.push(runtime)
-      } else if (runtime.isBusy) {
+      if (forceReload) {
+        runtime.start('manual_reload', true)
         waitFor.push(runtime)
       }
+
     }
 
     return waitFor
   }
 
-  private async applyCurrentConfig(forceReload: boolean, reason: McpStartReason, logStatus = true): Promise<{ status: McpToolStatus; waitFor: McpServerRuntime[] }> {
+  private async applyCurrentConfig(forceReload: boolean, logStatus = true): Promise<{ status: McpToolStatus; waitFor: McpServerRuntime[] }> {
     const config = await getMcpRuntimeConfigSnapshot()
     if (!config.enabled) {
       await this.stopAll('disabled')
       return { status: this.broadcast(logStatus), waitFor: [] }
     }
 
-    const waitFor = await this.ensureServers(config.servers, { forceReload, reason })
+    const waitFor = await this.ensureServers(config.servers, forceReload)
     return { status: this.broadcast(logStatus), waitFor }
   }
 
@@ -819,7 +869,8 @@ class McpRuntimeManager {
     for (const server of servers) {
       let runtime = this.runtimes.get(serverId(server))
       if (!runtime) {
-        runtime = new McpServerRuntime(server, () => this.broadcast(false))
+        runtime = new McpServerRuntime(server, () => this.broadcast(false),
+          () => this.lifecycle === 'open' && this.runtimes.get(server.id) === runtime)
         this.runtimes.set(runtime.id, runtime)
       }
     }
@@ -851,14 +902,6 @@ class McpRuntimeManager {
     }
   }
 
-  private async stopServerIndexNow(index: number): Promise<void> {
-    const runtimes = Array.from(this.runtimes.values()).filter((runtime) => runtime.index === index)
-    await Promise.all(runtimes.map(async (runtime) => {
-      await runtime.stop('deleted')
-      if (this.runtimes.get(runtime.id) === runtime) this.runtimes.delete(runtime.id)
-    }))
-  }
-
   private async waitForRuntimes(runtimes: McpServerRuntime[]): Promise<void> {
     await Promise.all(Array.from(new Set(runtimes)).map((runtime) => runtime.waitForCurrentOperation()))
   }
@@ -882,8 +925,8 @@ class McpRuntimeManager {
       servers: Array.from(this.runtimes.values()).map((runtime) => runtime.status()),
       loaded: result.loaded,
       errors: result.errors,
-      tools: result.tools.map(serializeToolDefinition),
-      toolNames: result.tools.map((tool) => tool.name)
+      tools: Array.from(this.runtimes.values()).flatMap(runtime => runtime.catalogDefinitions().map(serializeToolDefinition)),
+      toolNames: Array.from(this.runtimes.values()).flatMap(runtime => runtime.status().toolNames)
     }
   }
 
@@ -914,10 +957,6 @@ export async function reopenCachedMcpRuntime(): Promise<void> {
   await mcpRuntimeManager.reopen()
 }
 
-export async function closeCachedMcpServerIndex(index: number): Promise<void> {
-  await mcpRuntimeManager.stopServerIndex(index)
-}
-
 export async function getCachedMcpRuntime(forceReload = false): Promise<McpToolLoadResult> {
   return mcpRuntimeManager.runtimeFromCurrentConfig(forceReload)
 }
@@ -941,4 +980,8 @@ export async function pingAndReloadFailedMcpServers(): Promise<McpMaintenanceRes
 
 export function getCachedMcpStatus(): McpToolStatus | null {
   return mcpRuntimeManager.status
+}
+
+export async function setMcpServerRunning(id: string, running: boolean): Promise<McpToolStatus> {
+  return mcpRuntimeManager.setServerRunning(id, running)
 }

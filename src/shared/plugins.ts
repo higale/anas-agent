@@ -1,4 +1,5 @@
 import { matchLanguageCode } from './languages'
+import type { PluginCapabilityChoices, PluginCapabilityKind } from './pluginCapabilities'
 import { parsePluginTools, pluginToolName, type PluginToolDefinition } from './pluginTools'
 import { parsePluginSettings, type PluginSetting } from './pluginSettings'
 import { parsePluginWidgets, type PluginWidgetDefinition, type PluginWidgetContent } from './pluginWidgets'
@@ -154,6 +155,7 @@ export interface PluginSummary {
   manifest?: PluginManifest
   enabled: boolean
   showInTitlebar?: boolean
+  capabilityChoices?: PluginCapabilityChoices
   error?: string
   backendStatus: 'stopped' | 'starting' | 'running' | 'failed'
   backendError?: string
@@ -182,6 +184,7 @@ export interface PluginsApi {
   confirmInstall(token: string, deleteData?: boolean): Promise<PluginSummary>
   cancelInstall(token: string): Promise<void>
   setEnabled(id: string, enabled: boolean): Promise<void>
+  setCapabilityEnabled(id: string, kind: PluginCapabilityKind, ids: string[], enabled: boolean): Promise<PluginCapabilityChoices>
   setShowInTitlebar(id: string, show: boolean): Promise<void>
   uninstall(id: string, deleteData?: boolean): Promise<void>
   openWindow(id: string): Promise<void>

@@ -989,3 +989,40 @@ describe('executing package resources', () => {
     expect(await read).toBe('new package')
   })
 })
+
+it('persists host capability switches across toggles, restart and replacement without modifying plugin code', async () => {
+  const definition = { ...manifest, backend: 'backend.cjs', tools: [
+    { id: 'echo', handler: 'echo', description: 'Echo', input_schema: { type: 'object' }, effect: 'read' },
+    { id: 'second', handler: 'echo', description: 'Second', input_schema: { type: 'object' }, effect: 'read' }
+  ], skills: [{ id: 'guide', path: 'skills/guide/SKILL.md' }], prompts: [{ id: 'tone', path: 'tone.md', description: 'Tone' }] }
+  await mkdir(join(source, 'skills/guide'), { recursive: true })
+  await writeFile(join(source, 'skills/guide/SKILL.md'), '---\nname: guide\ndescription: Guide\n---\nGuide body')
+  await writeFile(join(source, 'tone.md'), 'Tone body')
+  await writeFile(join(source, 'backend.cjs'), 'module.exports = {}')
+  await writeFile(join(source, 'PLUGIN.json'), JSON.stringify(definition))
+  await store.install(join(source, 'PLUGIN.json'))
+  const path = join(root, 'data/db/plugins/test-plugin/anas-installation.json')
+  const before = await readFile(path, 'utf8')
+  const pluginBefore = await readFile(await store.packageFile(manifest.id, 'PLUGIN.json'), 'utf8')
+  expect((await store.read(manifest.id)).capabilityChoices).toBeUndefined()
+  expect(await readFile(path, 'utf8')).toBe(before)
+  await store.setCapabilityEnabled(manifest.id, 'tool', ['echo', 'second'], false)
+  await store.setCapabilityEnabled(manifest.id, 'skill', ['guide'], false)
+  await store.setCapabilityEnabled(manifest.id, 'prompt', ['tone'], false)
+  const choices = { tool: { echo: false, second: false }, skill: { guide: false }, prompt: { tone: false } }
+  await store.setEnabled(manifest.id, false)
+  await store.setShowInTitlebar(manifest.id, true)
+  await store.setEnabled(manifest.id, true)
+  expect((await new PluginStore(join(root, 'data')).read(manifest.id)).capabilityChoices).toEqual(choices)
+  expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({ version: 0, enabled: true, show_in_titlebar: true, capability_choices: choices })
+  expect(await readFile(await store.packageFile(manifest.id, 'PLUGIN.json'), 'utf8')).toBe(pluginBefore)
+  await expect(store.resolveTools(['test-plugin:tool:echo'])).rejects.toThrow('unavailable')
+  const saved = await readFile(path, 'utf8')
+  await expect(store.setCapabilityEnabled(manifest.id, 'tool', ['echo', 'unknown'], true)).rejects.toThrow('unavailable')
+  expect(await readFile(path, 'utf8')).toBe(saved)
+  await store.finishInstall((await store.prepareInstall(join(source, 'PLUGIN.json'))).token, { replace: true })
+  expect((await store.read(manifest.id)).capabilityChoices).toEqual(choices)
+  await store.setCapabilityEnabled(manifest.id, 'tool', ['echo'], true)
+  expect((await store.resolveTools(['test-plugin:tool:echo']))[0].name).toBe('plugin__test-plugin__echo')
+  expect((await store.read(manifest.id)).capabilityChoices).toEqual({ ...choices, tool: { echo: true, second: false } })
+})

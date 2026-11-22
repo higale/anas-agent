@@ -141,6 +141,8 @@ export interface RawAppConfig {
 }
 
 export interface RawMcpServer {
+  tool_catalog?: unknown
+  tool_choices?: unknown
   name?: string
   enabled?: boolean
   timeout_ms?: number

@@ -1,3 +1,5 @@
+import { mcpConfigKey } from './config/mcpServerConfigMapper'
+import type { McpToolCatalog } from '@shared/mcpCatalog'
 import { defineContentTool } from '../runtime/toolDefinition'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { McpRuntimeConfigSnapshot, McpServerConfig } from './config/appConfig'
@@ -37,6 +39,8 @@ interface Harness {
   runtimeLog: ReturnType<typeof vi.fn>
   service: McpRuntimeService
   toolEffectScope: typeof import('./agent/toolEffectScope')
+  getConfig(): McpRuntimeConfigSnapshot
+  saveCatalog: ReturnType<typeof vi.fn>
   setConfig(config: McpRuntimeConfigSnapshot): void
 }
 
@@ -47,6 +51,7 @@ async function loadHarness(
   pingImplementation?: () => Promise<void>
 ): Promise<Harness> {
   vi.resetModules()
+  executeMcpMock.mockReset().mockResolvedValue('pong')
   let config: McpRuntimeConfigSnapshot = { enabled: true, servers: [server] }
   const initialize = vi.fn(initializeImplementation ?? (async () => ([mcpTool])))
   const closeClient = vi.fn(async () => {})
@@ -73,8 +78,14 @@ async function loadHarness(
     app: undefined,
     BrowserWindow: { getAllWindows: () => [] }
   }))
+  const saveCatalog = vi.fn(async (id: string, catalog: McpToolCatalog) => {
+    const item = config.servers.find(server => server.id === id)
+    if (!item || mcpConfigKey(item) !== catalog.connection_key) return false
+    config = { ...config, servers: config.servers.map(server => server.id === id ? { ...server, toolCatalog: catalog } : server) }
+    return true
+  })
   vi.doMock('./config/appConfig', () => ({
-    getMcpRuntimeConfigSnapshot: vi.fn(async () => config)
+    getMcpRuntimeConfigSnapshot: vi.fn(async () => config), saveMcpToolCatalog: saveCatalog
   }))
   vi.doMock('./mcpTools', async () => {
     const actual = await vi.importActual<typeof import('./mcpTools')>('./mcpTools')
@@ -102,6 +113,8 @@ async function loadHarness(
     runtimeLog,
     service,
     toolEffectScope,
+    getConfig: () => config,
+    saveCatalog,
     setConfig(nextConfig) {
       config = nextConfig
     }
@@ -118,10 +131,207 @@ afterEach(async () => {
   vi.resetModules()
 })
 
+function withCatalog(): McpServerConfig {
+  return { ...server, toolCatalog: { connection_key: mcpConfigKey(server), tools: [{ name: mcpTool.name,
+    description: mcpTool.description, input_schema: mcpTool.inputSchema as Record<string, unknown> }] } }
+}
+
 describe('MCP runtime lifecycle', () => {
+  it('hydrates saved tools without starting on application or conversation startup', async () => {
+    const harness = await loadHarness()
+    harness.setConfig({ enabled: true, servers: [withCatalog()] })
+    const status = await harness.service.loadMcpRuntimeForCurrentConfig()
+    expect(status.servers[0].state).toBe('idle')
+    expect(status.tools.map(tool => tool.name)).toEqual([mcpTool.name])
+    const runtime = await harness.service.getCachedMcpRuntime()
+    expect(runtime.tools.map(tool => tool.name)).toEqual([mcpTool.name])
+    expect(harness.createClient).not.toHaveBeenCalled()
+    await runtime.tools[0].execute({}, {})
+    expect(harness.createClient).toHaveBeenCalledOnce()
+    expect(harness.saveCatalog).toHaveBeenCalledOnce()
+    expect(executeMcpMock).toHaveBeenCalledOnce()
+  })
+
+  it('reopens restored data with saved definitions and no automatic connections', async () => {
+    const harness = await loadHarness()
+    await harness.service.getCachedMcpRuntime(true)
+    await harness.service.closeCachedMcpRuntime()
+    await harness.service.reopenCachedMcpRuntime()
+    const status = await harness.service.loadMcpRuntimeForCurrentConfig(false)
+    expect(status.servers[0]).toMatchObject({ state: 'idle', toolCount: 1 })
+    expect(harness.createClient).toHaveBeenCalledOnce()
+    expect((await harness.service.getCachedMcpRuntime()).tools).toHaveLength(1)
+  })
+
+  it('coalesces concurrent starts, reports progress, and cancels one waiter without cancelling others', async () => {
+    let release!: (tools: unknown[]) => void
+    const harness = await loadHarness(() => new Promise(resolve => { release = resolve }))
+    harness.setConfig({ enabled: true, servers: [withCatalog()] })
+    const runtime = await harness.service.getCachedMcpRuntime()
+    const { withToolExecution } = await import('./agent/toolExecutionContext')
+    const controller = new AbortController()
+    const control = { callId: 'lazy', signal: controller.signal, markRunning: vi.fn(), markLocalCommit: vi.fn(), markUncertain: vi.fn(),
+      progress: vi.fn(), output: vi.fn(), setOutcome: vi.fn() }
+    const first = withToolExecution(control, false, () => runtime.tools[0].execute({}, { signal: controller.signal }))
+    const rejected = expect(first).rejects.toThrow('cancelled')
+    const second = runtime.tools[0].execute({}, {})
+    try {
+      await vi.waitFor(() => expect(harness.initialize).toHaveBeenCalledOnce())
+      expect(control.output).toHaveBeenCalledWith('progress', expect.stringContaining('正在启动 MCP Alpha'))
+      controller.abort(new Error('cancelled'))
+      await rejected
+      release([mcpTool])
+      await second
+      expect(executeMcpMock).toHaveBeenCalledOnce()
+      expect(harness.createClient).toHaveBeenCalledOnce()
+    } finally { release?.([]) }
+  })
+
+  it('stores an empty discovery and returns a missing-tool error through the original call', async () => {
+    const harness = await loadHarness(async () => [])
+    harness.setConfig({ enabled: true, servers: [withCatalog()] })
+    const runtime = await harness.service.getCachedMcpRuntime()
+    await expect(runtime.tools[0].execute({}, {})).rejects.toThrow('此工具已不存在')
+    expect(harness.getConfig().servers[0].toolCatalog?.tools).toEqual([])
+    expect((await harness.service.getCachedMcpRuntime()).tools).toEqual([])
+    expect(executeMcpMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps the previous catalog after discovery failure without background retries', async () => {
+    vi.useFakeTimers()
+    try {
+      const harness = await loadHarness(async () => { throw new Error('connection refused') })
+      harness.setConfig({ enabled: true, servers: [withCatalog()] })
+      const runtime = await harness.service.getCachedMcpRuntime()
+      await expect(runtime.tools[0].execute({}, {})).rejects.toThrow('MCP 启动失败 (Alpha): connection refused')
+      expect(harness.getConfig().servers[0].toolCatalog?.tools).toHaveLength(1)
+      expect(harness.saveCatalog).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(harness.createClient).toHaveBeenCalledOnce()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('preserves selections and catalogs on stop and reconnects only when an enabled tool is called', async () => {
+    const harness = await loadHarness()
+    harness.setConfig({ enabled: true, servers: [{ ...withCatalog(), toolChoices: { [mcpTool.name]: false } }] })
+    await harness.service.setMcpServerRunning('alpha', true)
+    expect((await harness.service.getCachedMcpRuntime()).tools).toEqual([])
+    await harness.service.setMcpServerRunning('alpha', false)
+    expect(harness.getConfig().servers[0].toolChoices).toEqual({ [mcpTool.name]: false })
+    expect(harness.service.getCachedMcpStatus()?.toolNames).toEqual([mcpTool.name])
+    expect(harness.clients).toHaveLength(1)
+    harness.setConfig({ enabled: true, servers: [{ ...harness.getConfig().servers[0], toolChoices: {} }] })
+    const runtime = await harness.service.getCachedMcpRuntime()
+    await runtime.tools[0].execute({}, {})
+    expect(harness.clients).toHaveLength(2)
+    expect(harness.saveCatalog).toHaveBeenCalledTimes(2)
+  })
+
+  it('manually starts a disabled server and retains its connection through catalog reads and selection saves', async () => {
+    const harness = await loadHarness()
+    harness.setConfig({ enabled: true, servers: [{ ...server, enabled: false }] })
+    expect((await harness.service.getCachedMcpRuntime()).tools).toEqual([])
+    expect(harness.createClient).not.toHaveBeenCalled()
+    const started = await harness.service.setMcpServerRunning('alpha', true)
+    expect(started.servers[0]).toMatchObject({ state: 'ready', toolCount: 1 })
+    expect(harness.getConfig().servers[0]).toMatchObject({ enabled: false, toolCatalog: { tools: [expect.objectContaining({ name: mcpTool.name })] } })
+    harness.setConfig({ enabled: true, servers: [{ ...harness.getConfig().servers[0], toolChoices: { [mcpTool.name]: false } }] })
+    await harness.service.loadMcpRuntimeForCurrentConfig()
+    expect((await harness.service.getCachedMcpRuntime()).tools).toEqual([])
+    expect(harness.service.getCachedMcpStatus()?.servers[0].state).toBe('ready')
+    expect(harness.closeClient).not.toHaveBeenCalled()
+    await harness.service.setMcpServerRunning('alpha', false)
+    expect(harness.service.getCachedMcpStatus()?.servers[0]).toMatchObject({ state: 'stopped', toolCount: 1 })
+    await harness.service.reloadMcpRuntimeForServer(0)
+    expect(harness.service.getCachedMcpStatus()?.servers[0].state).toBe('ready')
+    expect(harness.saveCatalog).toHaveBeenCalledTimes(2)
+  })
+
+  it('changes model availability without changing the connection when a running server is disabled or enabled', async () => {
+    const harness = await loadHarness()
+    const runtime = await harness.service.getCachedMcpRuntime(true)
+    harness.setConfig({ enabled: true, servers: [{ ...harness.getConfig().servers[0], enabled: false }] })
+    expect((await harness.service.getCachedMcpRuntime()).tools).toEqual([])
+    await expect(runtime.tools[0].execute({}, {})).rejects.toThrow('disabled')
+    expect(harness.service.getCachedMcpStatus()?.servers[0].state).toBe('ready')
+    expect(harness.closeClient).not.toHaveBeenCalled()
+    harness.setConfig({ enabled: true, servers: [{ ...harness.getConfig().servers[0], enabled: true }] })
+    expect((await harness.service.getCachedMcpRuntime()).tools).toHaveLength(1)
+    await runtime.tools[0].execute({}, {})
+    expect(harness.createClient).toHaveBeenCalledOnce()
+    expect(executeMcpMock).toHaveBeenCalledOnce()
+  })
+
+  it('rejects stale calls after disabling a tool, disabling its server, changing its connection, or closing data', async () => {
+    const harness = await loadHarness()
+    harness.setConfig({ enabled: true, servers: [withCatalog()] })
+    const runtime = await harness.service.getCachedMcpRuntime()
+    harness.setConfig({ enabled: true, servers: [{ ...withCatalog(), toolChoices: { [mcpTool.name]: false } }] })
+    await expect(runtime.tools[0].execute({}, {})).rejects.toThrow('disabled')
+    harness.setConfig({ enabled: true, servers: [{ ...withCatalog(), enabled: false }] })
+    await expect(runtime.tools[0].execute({}, {})).rejects.toThrow('disabled')
+    harness.setConfig({ enabled: true, servers: [{ ...withCatalog(), command: 'other-server' }] })
+    await expect(runtime.tools[0].execute({}, {})).rejects.toThrow('connection changed')
+    expect((await harness.service.getCachedMcpRuntime()).tools).toEqual([])
+    await harness.service.closeCachedMcpRuntime()
+    harness.setConfig({ enabled: true, servers: [withCatalog()] })
+    await expect(runtime.tools[0].execute({}, {})).rejects.toThrow('unavailable')
+    expect(harness.createClient).not.toHaveBeenCalled()
+  })
+
+  it('does not reconnect or invalidate the catalog for rename and reorder', async () => {
+    const harness = await loadHarness()
+    await harness.service.getCachedMcpRuntime(true)
+    harness.setConfig({ enabled: true, servers: [{ ...harness.getConfig().servers[0], name: 'Renamed', index: 2 }] })
+    const status = await harness.service.loadMcpRuntimeForCurrentConfig()
+    expect(status.servers[0]).toMatchObject({ id: 'alpha', name: 'Renamed', index: 2, state: 'ready', toolCount: 1 })
+    expect(harness.createClient).toHaveBeenCalledOnce()
+  })
+
+  it('rejects changed schemas and annotations before invoking the refreshed tool', async () => {
+    const harness = await loadHarness(async () => [{ ...mcpTool, metadata: { annotations: { readOnlyHint: false } } }])
+    harness.setConfig({ enabled: true, servers: [withCatalog()] })
+    const runtime = await harness.service.getCachedMcpRuntime()
+    await expect(runtime.tools[0].execute({}, {})).rejects.toThrow('definition changed')
+    expect(executeMcpMock).not.toHaveBeenCalled()
+    const refreshed = await harness.service.getCachedMcpRuntime()
+    await refreshed.tools[0].execute({}, {})
+    expect(executeMcpMock).toHaveBeenCalledOnce()
+  })
+
+  it('stops a pending lazy start without executing the call or publishing late discovery', async () => {
+    let release!: (tools: unknown[]) => void
+    const harness = await loadHarness(() => new Promise(resolve => { release = resolve }))
+    harness.setConfig({ enabled: true, servers: [withCatalog()] })
+    const runtime = await harness.service.getCachedMcpRuntime()
+    const invocation = runtime.tools[0].execute({}, {})
+    const rejected = expect(invocation).rejects.toThrow('MCP 启动失败')
+    try {
+      await vi.waitFor(() => expect(harness.initialize).toHaveBeenCalledOnce())
+      const stopping = harness.service.setMcpServerRunning('alpha', false)
+      await vi.waitFor(() => expect(harness.closeClient).toHaveBeenCalled())
+      release([])
+      await Promise.all([stopping, rejected])
+      expect(harness.saveCatalog).not.toHaveBeenCalled()
+      expect(harness.service.getCachedMcpStatus()?.servers[0]).toMatchObject({ state: 'stopped', toolCount: 1 })
+      expect(executeMcpMock).not.toHaveBeenCalled()
+    } finally { release?.([]) }
+  })
+
+  it('retains previous definitions and returns discovery persistence failure through the tool call', async () => {
+    const harness = await loadHarness(async () => [])
+    harness.setConfig({ enabled: true, servers: [withCatalog()] })
+    harness.saveCatalog.mockRejectedValueOnce(new Error('disk unavailable'))
+    const runtime = await harness.service.getCachedMcpRuntime()
+    await expect(runtime.tools[0].execute({}, {})).rejects.toThrow('disk unavailable')
+    expect((await harness.service.getCachedMcpRuntime()).tools).toHaveLength(1)
+    expect(harness.service.getCachedMcpStatus()?.servers[0].state).toBe('failed')
+    expect(executeMcpMock).not.toHaveBeenCalled()
+  })
+
   it('blocks new effects after disconnect and replaces the session without replaying a tool', async () => {
     const harness = await loadHarness()
-    await harness.service.getCachedMcpRuntime()
+    await harness.service.getCachedMcpRuntime(true)
     const hooks = harness.createClient.mock.calls[0][1] as {
       onConnectionClosed(): void
       beforeToolCall(info: { name: string; args: object }): void
@@ -141,7 +351,7 @@ describe('MCP runtime lifecycle', () => {
 
   it('routes equal-argument progress to the invocation that owns the exact args object', async () => {
     const harness = await loadHarness()
-    await harness.service.getCachedMcpRuntime()
+    await harness.service.getCachedMcpRuntime(true)
     const { withToolExecution } = await import('./agent/toolExecutionContext')
     const hooks = harness.createClient.mock.calls[0][1] as {
       beforeToolCall(info: { name: string; args: object }): void
@@ -167,7 +377,7 @@ describe('MCP runtime lifecycle', () => {
 
   it('distinguishes a confirmed MCP isError result from a transport failure', async () => {
     const harness = await loadHarness()
-    const runtime = await harness.service.getCachedMcpRuntime()
+    const runtime = await harness.service.getCachedMcpRuntime(true)
     const { withToolExecution } = await import('./agent/toolExecutionContext')
     const control = { callId: 'mcp-error-fixture', signal: new AbortController().signal, markRunning: vi.fn(), markLocalCommit: vi.fn(), markUncertain: vi.fn(),
       progress: vi.fn(), output: vi.fn(), setOutcome: vi.fn() }
@@ -181,7 +391,7 @@ describe('MCP runtime lifecycle', () => {
 
   it('does not reconnect for a normal tool error on a healthy connection', async () => {
     const harness = await loadHarness()
-    const runtime = await harness.service.getCachedMcpRuntime()
+    const runtime = await harness.service.getCachedMcpRuntime(true)
     executeMcpMock.mockRejectedValueOnce(new Error('application error'))
     await expect(runtime.tools[0].execute({}, {})).rejects.toThrow('application error')
     await harness.service.getCachedMcpRuntime()
@@ -192,11 +402,12 @@ describe('MCP runtime lifecycle', () => {
 
   it('does not probe a busy connection or reconnect when its tool is cancelled', async () => {
     const harness = await loadHarness()
-    const runtime = await harness.service.getCachedMcpRuntime()
+    const runtime = await harness.service.getCachedMcpRuntime(true)
     let finish!: (value: string) => void
     const done = new Promise<string>((resolve) => { finish = resolve })
     executeMcpMock.mockImplementationOnce(() => done)
     const active = runtime.tools[0].execute({}, {})
+      await vi.waitFor(() => expect(executeMcpMock).toHaveBeenCalled())
     await runtime.ping()
     expect(harness.ping).not.toHaveBeenCalled()
     expect(harness.closeClient).not.toHaveBeenCalled()
@@ -204,7 +415,6 @@ describe('MCP runtime lifecycle', () => {
     await active
     const controller = new AbortController()
     controller.abort(new Error('cancelled'))
-    executeMcpMock.mockRejectedValueOnce(controller.signal.reason)
     await expect(runtime.tools[0].execute({}, { signal: controller.signal })).rejects.toThrow('cancelled')
     expect(harness.ping).not.toHaveBeenCalled()
     expect(harness.closeClient).not.toHaveBeenCalled()
@@ -214,12 +424,13 @@ describe('MCP runtime lifecycle', () => {
     vi.useFakeTimers()
     try {
       const harness = await loadHarness()
-      const runtime = await harness.service.getCachedMcpRuntime()
+      const runtime = await harness.service.getCachedMcpRuntime(true)
       const hooks = harness.createClient.mock.calls[0][1] as { onToolsListChanged(): void }
       let finish!: (value: string) => void
       const done = new Promise<string>((resolve) => { finish = resolve })
       executeMcpMock.mockImplementationOnce(() => done)
       const active = runtime.tools[0].execute({}, {})
+      await vi.waitFor(() => expect(executeMcpMock).toHaveBeenCalled())
       hooks.onToolsListChanged()
       await vi.advanceTimersByTimeAsync(10_000)
       expect(harness.clients).toHaveLength(1)
@@ -238,13 +449,14 @@ describe('MCP runtime lifecycle', () => {
       let rejectPing!: (reason: Error) => void
       const ping = vi.fn(() => new Promise<void>((_resolve, reject) => { rejectPing = reject }))
       const harness = await loadHarness(undefined, ping)
-      const runtime = await harness.service.getCachedMcpRuntime()
+      const runtime = await harness.service.getCachedMcpRuntime(true)
       const probing = runtime.ping()
       await vi.advanceTimersByTimeAsync(0)
       expect(ping).toHaveBeenCalledOnce()
 
       executeMcpMock.mockImplementationOnce(() => new Promise<string>((resolve) => { finish = resolve }))
       const active = runtime.tools[0].execute({}, {})
+      await vi.waitFor(() => expect(executeMcpMock).toHaveBeenCalled())
       rejectPing(new Error('Ping timed out while a tool was running'))
       await probing
       await vi.advanceTimersByTimeAsync(10_000)
@@ -262,31 +474,31 @@ describe('MCP runtime lifecycle', () => {
     }
   })
 
-  it('defers a scheduled health recovery if a tool starts before its timer fires', async () => {
+  it('keeps the catalog after a failed health check and reconnects only on demand', async () => {
+    const harness = await loadHarness(undefined, async () => { throw new Error('Temporary ping failure') })
+    const runtime = await harness.service.getCachedMcpRuntime(true)
+    await runtime.ping()
+    expect(harness.service.getCachedMcpStatus()?.servers[0].state).toBe('degraded')
+    expect((await harness.service.getCachedMcpRuntime()).tools).toHaveLength(1)
+    expect(harness.clients).toHaveLength(1)
+    await runtime.tools[0].execute({}, {})
+    expect(harness.clients).toHaveLength(2)
+  })
+
+  it('reconnects an unreachable running server after one manual refresh, but does not retry a failed restart automatically', async () => {
     vi.useFakeTimers()
-    let finish!: (value: string) => void
     try {
-      const ping = vi.fn(async () => { throw new Error('Temporary ping failure') })
-      const harness = await loadHarness(undefined, ping)
-      const runtime = await harness.service.getCachedMcpRuntime()
-      await runtime.ping()
-      expect(harness.service.getCachedMcpStatus()?.servers[0].state).toBe('degraded')
-
-      executeMcpMock.mockImplementationOnce(() => new Promise<string>((resolve) => { finish = resolve }))
-      const active = runtime.tools[0].execute({}, {})
-      await vi.advanceTimersByTimeAsync(10_000)
-      expect(harness.closeClient).not.toHaveBeenCalled()
-      expect(harness.clients).toHaveLength(1)
-
-      finish('done')
-      await active
-      await vi.advanceTimersByTimeAsync(1)
-      expect(harness.clients).toHaveLength(2)
-      expect(harness.closeClient).toHaveBeenCalledOnce()
-    } finally {
-      finish?.('done')
-      vi.useRealTimers()
-    }
+      const harness = await loadHarness(undefined, async () => { throw new Error('Ping failed') })
+      await harness.service.setMcpServerRunning('alpha', true)
+      harness.initialize.mockRejectedValueOnce(new Error('Restart failed'))
+      expect(await harness.service.pingAndReloadFailedMcpServers()).toMatchObject({ scheduled: true })
+      await vi.advanceTimersByTimeAsync(10)
+      expect(harness.initialize).toHaveBeenCalledTimes(2)
+      expect(harness.service.getCachedMcpStatus()?.servers[0].state).toBe('failed')
+      expect(harness.service.getCachedMcpStatus()?.tools).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(harness.initialize).toHaveBeenCalledTimes(2)
+    } finally { vi.useRealTimers() }
   })
 
   it('still closes an explicitly disabled server while automatic recovery is waiting for a call', async () => {
@@ -294,10 +506,11 @@ describe('MCP runtime lifecycle', () => {
     let finish!: (value: string) => void
     try {
       const harness = await loadHarness()
-      const runtime = await harness.service.getCachedMcpRuntime()
+      const runtime = await harness.service.getCachedMcpRuntime(true)
       const hooks = harness.createClient.mock.calls[0][1] as { onToolsListChanged(): void }
       executeMcpMock.mockImplementationOnce(() => new Promise<string>((resolve) => { finish = resolve }))
       const active = runtime.tools[0].execute({}, {})
+      await vi.waitFor(() => expect(executeMcpMock).toHaveBeenCalled())
       hooks.onToolsListChanged()
 
       harness.setConfig({ enabled: false, servers: [] })
@@ -317,7 +530,7 @@ describe('MCP runtime lifecycle', () => {
     const harness = await loadHarness()
     harness.setConfig({ enabled: false, servers: [] })
 
-    const runtime = await harness.service.getCachedMcpRuntime()
+    const runtime = await harness.service.getCachedMcpRuntime(true)
 
     expect(runtime.tools).toEqual([])
     expect(runtime.loaded).toEqual([])
@@ -344,7 +557,7 @@ describe('MCP runtime lifecycle', () => {
   it('loads tools from the current atomic configuration snapshot', async () => {
     const harness = await loadHarness()
 
-    const runtime = await harness.service.getCachedMcpRuntime()
+    const runtime = await harness.service.getCachedMcpRuntime(true)
 
     expect(runtime.errors).toEqual([])
     expect(runtime.tools.map((tool) => tool.name)).toEqual(['mcp_alpha_ping'])
@@ -355,7 +568,7 @@ describe('MCP runtime lifecycle', () => {
 
   it('arms the journal from the MCP hook immediately before a remote tool call', async () => {
     const harness = await loadHarness()
-    await harness.service.getCachedMcpRuntime()
+    await harness.service.getCachedMcpRuntime(true)
     const hooks = harness.createClient.mock.calls[0]?.[1] as {
       beforeToolCall(input: { name: string; args: Record<string, unknown> }): void
     }
@@ -413,7 +626,7 @@ describe('MCP runtime lifecycle', () => {
       }]
     })
     await harness.service.loadMcpRuntimeForCurrentConfig(false)
-    await harness.service.getCachedMcpRuntime()
+    await harness.service.getCachedMcpRuntime(true)
     invokeHook(0)
 
     harness.setConfig({
@@ -426,7 +639,7 @@ describe('MCP runtime lifecycle', () => {
       }]
     })
     await harness.service.loadMcpRuntimeForCurrentConfig(false)
-    await harness.service.getCachedMcpRuntime()
+    await harness.service.getCachedMcpRuntime(true)
     invokeHook(1)
 
     expect(effects).toHaveLength(2)
@@ -456,7 +669,7 @@ describe('MCP runtime lifecycle', () => {
         }))
       }
 
-      await harness.service.getCachedMcpRuntime()
+      await harness.service.getCachedMcpRuntime(true)
       const firstHooks = harness.createClient.mock.calls[0]?.[1] as {
         beforeToolCall(input: { name: string; args: Record<string, unknown> }): void
       }
@@ -484,7 +697,7 @@ describe('MCP runtime lifecycle', () => {
   it('reconciles an unchanged configuration without restarting its client', async () => {
     const harness = await loadHarness()
 
-    await harness.service.getCachedMcpRuntime()
+    await harness.service.getCachedMcpRuntime(true)
     await harness.service.loadMcpRuntimeForCurrentConfig(false)
 
     expect(harness.createClient).toHaveBeenCalledTimes(1)
@@ -495,10 +708,12 @@ describe('MCP runtime lifecycle', () => {
     let release!: (tools: unknown[]) => void
     const pending = new Promise<unknown[]>(resolve => { release = resolve })
     const harness = await loadHarness()
-    await harness.service.getCachedMcpRuntime()
+    await harness.service.getCachedMcpRuntime(true)
     harness.initialize.mockImplementationOnce(() => pending)
-    harness.setConfig({ enabled: true, servers: [server, { ...server, id: 'beta', index: 1, name: 'Beta' }] })
+    harness.setConfig({ enabled: true, servers: [harness.getConfig().servers[0], { ...server, id: 'beta', index: 1, name: 'Beta' }] })
     try {
+      void harness.service.setMcpServerRunning('beta', true)
+      await vi.waitFor(() => expect(harness.initialize).toHaveBeenCalledTimes(2))
       const reading = harness.service.getCachedMcpRuntime()
       let returned = false
       void reading.then(() => { returned = true })
@@ -513,11 +728,11 @@ describe('MCP runtime lifecycle', () => {
     } finally { release([]) }
   })
 
-  it('does not wait for automatic reconnection when a chat reads the tool catalog', async () => {
+  it('does not wait for manual reconnection when a chat reads the tool catalog', async () => {
     let release!: (tools: unknown[]) => void
     const pending = new Promise<unknown[]>(resolve => { release = resolve })
     const harness = await loadHarness()
-    await harness.service.getCachedMcpRuntime()
+    await harness.service.getCachedMcpRuntime(true)
     harness.initialize.mockImplementationOnce(() => pending)
     const hooks = harness.createClient.mock.calls[0][1] as { onConnectionClosed(): void }
     try {
@@ -529,7 +744,7 @@ describe('MCP runtime lifecycle', () => {
       let returned = false
       void reading.then(() => { returned = true })
       await vi.waitFor(() => expect(returned).toBe(true), { timeout: 500 })
-      expect((await reading).tools).toEqual([])
+      expect((await reading).tools).toHaveLength(1)
       release([mcpTool])
       await vi.waitFor(() => expect(harness.service.getCachedMcpStatus()?.servers[0].state).toBe('ready'))
       expect((await harness.service.getCachedMcpRuntime()).tools).toHaveLength(1)
@@ -543,7 +758,7 @@ describe('MCP runtime lifecycle', () => {
     })
     const harness = await loadHarness(() => initialization)
 
-    const loading = harness.service.getCachedMcpRuntime()
+    const loading = harness.service.getCachedMcpRuntime(true)
     await vi.waitFor(() => expect(harness.initialize).toHaveBeenCalledTimes(1))
 
     try {
@@ -573,7 +788,7 @@ describe('MCP runtime lifecycle', () => {
       resolvers.push(resolve)
     }))
 
-    const firstLoad = harness.service.getCachedMcpRuntime()
+    const firstLoad = harness.service.getCachedMcpRuntime(true)
     await vi.waitFor(() => expect(harness.initialize).toHaveBeenCalledTimes(1))
     const forcedLoad = harness.service.loadMcpRuntimeForCurrentConfig(true)
     await vi.waitFor(() => expect(harness.initialize).toHaveBeenCalledTimes(2))
@@ -599,7 +814,7 @@ describe('MCP runtime lifecycle', () => {
     const harness = await loadHarness(undefined, () => new Promise((resolve) => {
       releaseHealthCheck = resolve
     }))
-    const runtime = await harness.service.getCachedMcpRuntime()
+    const runtime = await harness.service.getCachedMcpRuntime(true)
 
     const healthCheck = runtime.ping()
     await vi.waitFor(() => expect(harness.ping).toHaveBeenCalledTimes(1))
@@ -618,7 +833,7 @@ describe('MCP runtime lifecycle', () => {
 
   it('does not let an older reopen race reopen a newer shutdown', async () => {
     const harness = await loadHarness()
-    await harness.service.getCachedMcpRuntime()
+    await harness.service.getCachedMcpRuntime(true)
     await harness.service.closeCachedMcpRuntime()
 
     const reopening = harness.service.reopenCachedMcpRuntime()
@@ -632,7 +847,7 @@ describe('MCP runtime lifecycle', () => {
 
   it('retains a client whose close failed so shutdown can be retried', async () => {
     const harness = await loadHarness()
-    await harness.service.getCachedMcpRuntime()
+    await harness.service.getCachedMcpRuntime(true)
     harness.closeClient
       .mockRejectedValueOnce(new Error('first close failed'))
       .mockRejectedValueOnce(new Error('retry within stop failed'))
@@ -646,7 +861,7 @@ describe('MCP runtime lifecycle', () => {
 
   it('retains a stale client whose close failed during a forced reload', async () => {
     const harness = await loadHarness()
-    await harness.service.getCachedMcpRuntime()
+    await harness.service.getCachedMcpRuntime(true)
     const staleClient = harness.clients[0]
     expect(staleClient).toBeDefined()
     staleClient!.close.mockRejectedValueOnce(new Error('reload close failed'))

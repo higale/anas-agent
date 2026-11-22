@@ -305,11 +305,13 @@ export interface McpToolStatus {
     state: 'idle' | 'starting' | 'ready' | 'degraded' | 'recovering' | 'failed' | 'stopped'
     toolCount: number
     toolNames: string[]
+    toolChoices?: Record<string, boolean>
     lastCheckedAt?: string
     lastError?: string
     lastStartedAt?: string
     nextRetryAt?: string
   }>
+  /** Saved discovery catalogs, including stopped servers; use servers[].state for connection status. */
   loaded: Array<{ id: string; index: number; name: string; toolCount: number; toolNames: string[] }>
   errors: Array<{ id: string; index: number; name: string; error: string }>
   tools: RuntimeToolDefinition[]
@@ -687,6 +689,8 @@ export interface SkillSummary {
   compatibility?: string
   modelAvailable: boolean
   userAvailable: boolean
+  /** Saved usage choices before plugin capability and dependency restrictions. */
+  configuredAvailability?: { modelAvailable: boolean; userAvailable: boolean }
   dirPath: string
   linked: boolean
   linkTarget?: string
@@ -857,6 +861,8 @@ export interface GaleApi {
   }
   mcp: {
     status(): Promise<McpToolStatus | null>
+    setRunning(id: string, running: boolean): Promise<McpToolStatus>
+    setToolsEnabled(id: string, names: string[], enabled: boolean): Promise<McpToolStatus>
     test(): Promise<McpToolStatus>
     reloadServer(index: number): Promise<McpToolStatus>
     reloadFailed(): Promise<McpMaintenanceResult>

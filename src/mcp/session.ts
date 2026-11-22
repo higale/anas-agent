@@ -45,9 +45,9 @@ export class McpSession {
     this.client.setNotificationHandler(ToolListChangedNotificationSchema, () => { events.onToolsChanged?.() })
   }
 
-  async connect(): Promise<void> {
+  async connect(timeoutMs?: number): Promise<void> {
     if (this.stopped) throw new Error('MCP session has been closed.')
-    this.opening ??= this.open()
+    this.opening ??= this.open(timeoutMs)
     await this.opening
     if (this.stopped) throw new Error('MCP session closed during initialization.')
   }
@@ -60,29 +60,30 @@ export class McpSession {
     await this.transport.close()
   }
 
-  private async open(): Promise<void> {
-    const signal = this.lifetime.signal
+  private async open(timeoutMs?: number): Promise<void> {
+    const signal = AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(timeoutMs ?? 60_000)])
     // SSE may still be waiting for its endpoint event. Closing that transport
-    // releases the socket but does not settle the SDK's start promise.
+    // releases the socket but does not settle the SDK's start promise. Bound
+    // the transport handshake as well as the later initialize request.
     let onClose!: () => void
     const closed = new Promise<never>((_resolve, reject) => {
       onClose = () => reject(signal.reason)
       signal.addEventListener('abort', onClose, { once: true })
     })
     try {
-      await Promise.race([this.client.connect(this.transport, { signal }), closed])
+      await Promise.race([this.client.connect(this.transport, { signal, timeout: timeoutMs }), closed])
     } finally {
       signal.removeEventListener('abort', onClose)
     }
   }
 }
 
-export async function listMcpTools(client: Pick<Client, 'listTools'>): Promise<Tool[]> {
+export async function listMcpTools(client: Pick<Client, 'listTools'>, timeoutMs?: number): Promise<Tool[]> {
   const tools: Tool[] = []
   const cursors = new Set<string>()
   let cursor: string | undefined
   do {
-    const page = await client.listTools(cursor === undefined ? {} : { cursor })
+    const page = await client.listTools(cursor === undefined ? {} : { cursor }, { timeout: timeoutMs })
     tools.push(...page.tools)
     cursor = page.nextCursor
     if (cursor !== undefined) {

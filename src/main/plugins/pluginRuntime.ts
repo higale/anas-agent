@@ -1,3 +1,4 @@
+import { pluginCapabilityEnabled } from '@shared/pluginCapabilities'
 import { BrowserWindow } from 'electron'
 import type { ResolvedPluginTool } from '@shared/pluginTools'
 import type { PluginBackendCallContext } from '@shared/plugins'
@@ -75,11 +76,12 @@ export async function buildPluginPrompts(selection: readonly string[], selectedT
     for (const id of [...new Set(selection)].sort()) {
       const [pluginId, , localId] = id.split(':')
       const plugin = await store.read(pluginId, false)
-      if (!plugin.enabled || plugin.error) continue
+      if (!plugin.enabled || plugin.error || !pluginCapabilityEnabled(plugin.capabilityChoices, 'prompt', localId)) continue
       const prompt = plugin.manifest?.prompts?.find(item => item.id === localId)
       if (!prompt || (prompt.scope !== 'all' && prompt.scope !== agent)) continue
       const dependencies = prompt.tools.map(id => pluginToolId(pluginId, id))
-      if (dependencies.some(id => !selectedTools.includes(id))) continue
+      if (dependencies.some(id => !selectedTools.includes(id))
+        || prompt.tools.some(id => !pluginCapabilityEnabled(plugin.capabilityChoices, 'tool', id))) continue
       const contents = await store.promptText(pluginId, prompt.path)
       bytes += Buffer.byteLength(contents)
       if (bytes > 64 * 1024) throw new Error('Selected plugin prompts exceed 64 KiB.')

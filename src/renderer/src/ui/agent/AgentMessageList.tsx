@@ -21,6 +21,7 @@ import {
   Terminal,
   Trash2
 } from 'lucide-react'
+import { McpStartupLabel } from '../mcp/McpStartupLabel'
 import { ToolsIcon } from '../ToolsIcon'
 import { memo, type ReactNode, type RefObject, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -684,7 +685,7 @@ interface ToolDisclosureInput {
   active: boolean
 }
 
-function ToolActivityLabel({ tool, progress }: Pick<ToolDisclosureInput, 'tool' | 'progress'>) {
+function ToolActivityLabel({ tool, progress, active }: Pick<ToolDisclosureInput, 'tool' | 'progress' | 'active'>) {
   const { t } = useTranslation()
   const presentation = toolPresentation(tool.call)
   const args = tool.call.args
@@ -698,6 +699,7 @@ function ToolActivityLabel({ tool, progress }: Pick<ToolDisclosureInput, 'tool' 
       ? <code>{presentation.title}</code> : <span>{presentation.title}</span>}
     {freeform && <span className="ui-badge ui-badge-inline" data-tooltip={t('agent.tool_call_freeform_hint')}>{t('agent.tool_call_freeform')}</span>}
     {presentation.showArgumentSummary && summary && <span className="agent-activity-argument">{summary}</span>}
+    {active && !progress && tool.approval?.status !== 'pending_approval' && tool.call.name.startsWith('mcp__') && <McpStartupLabel toolName={tool.call.name} />}
     {duration && <small>· {duration}</small>}
     {progress && <small>· {t(progress.complete ? 'agent.tool_arguments_ready' : 'agent.tool_arguments_generating', { count: progress.characterCount })}</small>}
   </>
@@ -722,7 +724,7 @@ function ToolActivityDisclosure({ tool, progress, active, standalone = false, pr
         : active && tool.status === 'running'
           ? deadline !== undefined ? <SleepCountdown key={`${tool.call.id}:${deadline}`} deadline={deadline} /> : <LoaderCircle className="agent-spin" size={13} />
           : undefined}
-      label={<ToolActivityLabel tool={tool} progress={progress} />}
+      label={<ToolActivityLabel tool={tool} progress={progress} active={executing} />}
       renderWhenEmpty
     >
       {() => tool.detail
@@ -818,7 +820,7 @@ function ProcessGroup({ group, run, expanded, onExpanded }: { group: ActivityGro
   const thinking = active?.type === 'model' && (active.model.hasReasoning || Boolean(active.model.reasoning))
   let label: ReactNode = group.hasThought ? t(group.hasTools ? 'agent.process_thought_tools' : 'agent.process_thought')
     : t(group.hasTools ? 'agent.process_tools' : 'agent.process_model')
-  if (active?.type === 'tool') label = <ToolActivityLabel tool={active.tool} progress={active.progress} />
+  if (active?.type === 'tool') label = <ToolActivityLabel tool={active.tool} progress={active.progress} active={toolIsActive(run, active.tool)} />
   else if (active?.type === 'model') label = thinking ? <ReasoningActivityLabel model={active.model} /> : t('agent.process_waiting')
   const recovery = active?.type === 'model' ? active.model.recovery : undefined
   const deadline = active?.type === 'tool' && !active.progress ? sleepDeadline(active.tool) : undefined

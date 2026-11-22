@@ -1,5 +1,5 @@
 import * as Dialog from '@radix-ui/react-dialog'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Check, Pencil, X } from 'lucide-react'
 import type { PluginSummary } from '@shared/plugins'
@@ -20,13 +20,16 @@ function PreferencesEditor({ plugin, initial, onClose, onSaved }: {
   const [draft, setDraft] = useState<PluginSettingValues>(initial.values)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const pending = useRef(false)
   const [discard, setDiscard] = useState(false)
   const [reload, setReload] = useState(false)
   const dirty = JSON.stringify(draft) !== JSON.stringify(snapshot.values)
-  const update = (key: string, value: string | number | boolean) => setDraft(previous => ({ ...previous, [key]: value }))
-  const close = () => { if (!busy) { if (dirty) setDiscard(true); else onClose() } }
+  const update = (key: string, value: string | number | boolean) => { if (!pending.current) setDraft(previous => ({ ...previous, [key]: value })) }
+  const close = () => { if (!pending.current) { if (dirty) setDiscard(true); else onClose() } }
   async function save() {
-    setBusy(true); setError('')
+    if (pending.current) return
+    pending.current = true
+    setBusy(true)
     try {
       const values = pluginSettingValues(fields, Object.fromEntries(fields.map(field => {
         const value = draft[field.key]
@@ -37,9 +40,11 @@ function PreferencesEditor({ plugin, initial, onClose, onSaved }: {
     } catch (reason) {
       const detail = errorDetail(reason)
       setError(detail.includes('Plugin settings changed.') ? t('plugins.settings_conflict') : detail)
-    } finally { setBusy(false) }
+    } finally { pending.current = false; setBusy(false) }
   }
   async function refresh() {
+    if (pending.current) return
+    pending.current = true
     setBusy(true)
     try {
       // Close and reopen when the installed form changed; do not apply old field definitions to new values.
@@ -47,23 +52,23 @@ function PreferencesEditor({ plugin, initial, onClose, onSaved }: {
       if (JSON.stringify(fields) !== JSON.stringify(plugin.manifest?.settings)) { onSaved(latest); onClose(); return }
       setSnapshot(latest); setDraft(latest.values); setError('')
     } catch (reason) { setError(errorDetail(reason)) }
-    finally { setBusy(false) }
+    finally { pending.current = false; setBusy(false) }
   }
   return <>
     <Dialog.Root open onOpenChange={open => { if (!open) close() }}>
       <Dialog.Portal><Dialog.Overlay className="ui-backdrop" />
-        <Dialog.Content className="ui-dialog ui-dialog-medium ui-dialog-font-scaled ui-dialog-centered ui-dialog-fixed-footer ui-popover" onPointerDownOutside={event => event.preventDefault()}>
+        <Dialog.Content className="ui-dialog ui-dialog-medium ui-dialog-font-scaled ui-dialog-centered ui-dialog-fixed-footer ui-popover" aria-busy={busy || undefined} onPointerDownOutside={event => event.preventDefault()}>
           <header className="ui-dialog-header-group">
           <Dialog.Title className="ui-dialog-title">{t('plugins.settings')}</Dialog.Title>
           <Dialog.Description className="ui-dialog-description">{plugin.manifest?.name}</Dialog.Description>
           </header>
           <div className="ui-dialog-body ui-form-section">
-          <fieldset className="ui-form-section" disabled={busy || !plugin.enabled || Boolean(plugin.error)}>
+          <fieldset className="ui-form-section" inert={busy} disabled={!plugin.enabled || Boolean(plugin.error)}>
             {fields.map(field => <div className="ui-field-stack" key={field.key}>
               {field.type === 'boolean' ? <CheckboxField checked={draft[field.key] === true} label={field.label} onChange={value => update(field.key, value)} /> : <>
                 <label htmlFor={`plugin-setting-${field.key}`}>{field.label}</label>
                 {field.type === 'enum' ? <SearchableOptionPicker ariaLabel={field.label} options={field.choices!} value={String(draft[field.key])}
-                  emptyLabel={t('settings.no_options')} searchable={false} disabled={busy || !plugin.enabled} onChange={value => update(field.key, value)} />
+                  emptyLabel={t('settings.no_options')} searchable={false} disabled={!plugin.enabled} onChange={value => update(field.key, value)} />
                   : field.type === 'number' ? <CommitNumberInput id={`plugin-setting-${field.key}`} aria-label={field.label} integer={false}
                     value={String(draft[field.key])} min={field.minimum} max={field.maximum}
                     onCommit={value => update(field.key, value)} onDraftChange={value => update(field.key, value)} />
@@ -73,12 +78,12 @@ function PreferencesEditor({ plugin, initial, onClose, onSaved }: {
             </div>)}
           </fieldset>
           {error && <div role="alert" className="ui-note ui-note-danger"><p>{error}</p>
-            <button type="button" className="ui-button" disabled={busy} onClick={() => dirty ? setReload(true) : void refresh()}>{t('common.refresh')}</button>
+            <button type="button" className="ui-button" aria-disabled={busy || undefined} onClick={() => { if (!pending.current) { if (dirty) setReload(true); else void refresh() } }}>{t('common.refresh')}</button>
           </div>}
           </div>
           <footer className="ui-dialog-footer">
-            <button type="button" className="ui-button" disabled={busy} onClick={close}><X size={14} />{t('common.cancel')}</button>
-            <button type="button" className="ui-button ui-button-primary" disabled={busy || !dirty || !plugin.enabled || Boolean(plugin.error)} onClick={() => void save()}><Check size={14} />{t('common.save')}</button>
+            <button type="button" className="ui-button" aria-disabled={busy || undefined} onClick={close}><X size={14} />{t('common.cancel')}</button>
+            <button type="button" className="ui-button ui-button-primary" disabled={!dirty || !plugin.enabled || Boolean(plugin.error)} aria-disabled={busy || undefined} onClick={() => void save()}><Check size={14} />{t('common.save')}</button>
           </footer>
         </Dialog.Content>
       </Dialog.Portal>
@@ -93,11 +98,13 @@ export function PluginPreferences({ plugin }: { plugin: PluginSummary }) {
   const [snapshot, setSnapshot] = useState<PluginSettingsSnapshot>()
   const [editing, setEditing] = useState<PluginSettingsSnapshot>()
   const [error, setError] = useState('')
+  const readRevision = useRef(0)
   useEffect(() => {
     let active = true
+    const request = ++readRevision.current
     void window.gale.plugins.invoke(plugin.id, 'settings.get').then(value => {
-      if (active) { setSnapshot(value as PluginSettingsSnapshot); setError('') }
-    }).catch(reason => { if (active) setError(errorDetail(reason)) })
+      if (active && request === readRevision.current) { setSnapshot(value as PluginSettingsSnapshot); setError('') }
+    }).catch(reason => { if (active && request === readRevision.current) setError(errorDetail(reason)) })
     return () => { active = false }
   }, [plugin])
   return <div className="ui-form-section">
@@ -110,6 +117,6 @@ export function PluginPreferences({ plugin }: { plugin: PluginSummary }) {
       <span>{field.label}</span><span>{field.type === 'boolean' ? t(snapshot.values[field.key] ? 'settings.enabled' : 'settings.disabled')
         : field.choices?.find(choice => choice.value === snapshot.values[field.key])?.label ?? String(snapshot.values[field.key])}</span>
     </div>)}
-    {editing && <PreferencesEditor plugin={plugin} initial={editing} onClose={() => setEditing(undefined)} onSaved={setSnapshot} />}
+    {editing && <PreferencesEditor plugin={plugin} initial={editing} onClose={() => setEditing(undefined)} onSaved={value => { readRevision.current++; setSnapshot(value) }} />}
   </div>
 }

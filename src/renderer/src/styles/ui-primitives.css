@@ -433,21 +433,9 @@ details[open] > .ui-disclosure-trigger .ui-disclosure-count > .ui-disclosure-che
 }
 
 .ui-grid-auto {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--ui-grid-min-width, 160px)), 1fr));
+  grid-template-columns: repeat(var(--ui-grid-repeat, auto-fit), minmax(min(100%, var(--ui-grid-min-width, 160px)), 1fr));
 }
 
-.ui-grid-auto.ui-resource-grid {
-  --ui-grid-min-width: 14em;
-  column-gap: 24px;
-  row-gap: 4px;
-  align-items: start;
-}
-
-.ui-resource-grid .ui-checkbox-field-label {
-  display: block;
-  overflow-wrap: anywhere;
-  line-height: var(--font-line-height-ui);
-}
 
 .ui-resource-item {
   display: flex;
@@ -1447,6 +1435,10 @@ fieldset.ui-form-section {
   line-height: var(--font-line-height-ui);
 }
 
+.ui-resource-unavailable {
+  color: var(--warning);
+}
+
 .ui-checkbox-field:has(> .ui-checkbox:disabled),
 .ui-check-card:has(> :is(.ui-checkbox, .ui-radio):disabled),
 .ui-checkbox:disabled,
@@ -1459,6 +1451,10 @@ fieldset.ui-form-section {
 .ui-checkbox:disabled + .ui-checkbox-field-label,
 .ui-check-card > :is(.ui-checkbox, .ui-radio):disabled + span {
   opacity: 0.48;
+}
+
+.ui-checkbox:disabled + .ui-checkbox-field-label.ui-resource-unavailable {
+  opacity: 1;
 }
 
 @media (forced-colors: active) {

@@ -22,6 +22,31 @@ function deferred<T>() {
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks() })
 
 describe('autosave page boundaries', () => {
+  it('keeps disabled plugin skill usage edits selected before and after persistence and refresh', async () => {
+    const skill = { id: 'plugin:skill:guide', rootId: 'plugin:example', source: 'plugin', name: 'guide', description: '',
+      dirPath: '', linked: false, relativePath: 'guide', rootName: 'Example', shortcutAlias: 'plugin:example',
+      modelAvailable: false, userAvailable: false, configuredAvailability: { modelAvailable: false, userAvailable: false } } as const
+    let saved: SkillSnapshot = { roots: [], skills: [skill] }
+    const pending = deferred<void>()
+    const updateAvailability = vi.fn(async (_project, _id, update) => {
+      await pending.promise
+      saved = { ...saved, skills: [{ ...skill, configuredAvailability: { ...saved.skills[0].configuredAvailability!, ...update } }] }
+      return saved
+    })
+    vi.stubGlobal('gale', { plugins: { onChanged: vi.fn(() => () => {}) }, skills: { get: vi.fn(async () => saved), updateAvailability } })
+    const { result } = renderHook(() => useSkillsSettingsState({ openConfirmDialog: vi.fn(), settingsOpen: false, settingsTab: 'skills', t }))
+    await waitFor(() => expect(result.current.skills).toBeDefined())
+    act(() => { void result.current.updateAvailability(skill.id, { userAvailable: true }) })
+    act(() => { void result.current.updateAvailability(skill.id, { modelAvailable: true }) })
+    const expected = { modelAvailable: false, userAvailable: false, configuredAvailability: { modelAvailable: true, userAvailable: true } }
+    expect(result.current.skills?.skills[0]).toMatchObject(expected)
+    await act(async () => pending.resolve())
+    await waitFor(() => expect(updateAvailability).toHaveBeenCalledTimes(2))
+    await act(async () => result.current.refreshSkills())
+    expect(result.current.skills?.skills[0]).toMatchObject(expected)
+    expect(saved.skills[0]).toMatchObject(expected)
+  })
+
   it('returns the first imported user skill ID, not a same-named external skill or catalog order', async () => {
     const initial = { roots: [], skills: [] } satisfies SkillSnapshot
     const skill = { id: 'user:z-first', name: 'z-first', source: 'user', rootId: 'user', description: '',

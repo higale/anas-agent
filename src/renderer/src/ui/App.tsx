@@ -406,7 +406,8 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
     mcpStatus,
     moveEditingMcpServer,
     reloadFailedMcpServers,
-    updateMcpDraft
+    updateMcpDraft,
+    flushMcpDraft
   } = useMcpSettingsState({ config, openConfirmDialog, setConfig, t })
 
   const {
@@ -1314,6 +1315,7 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
           onRemoveSkillDirectory={removeSkillDirectory}
           onToggleSidebar={toggleSidebar}
           onUpdateEnvDraft={updateEnvDraft}
+          onFlushMcpDraft={flushMcpDraft}
           onUpdateMcpDraft={updateMcpDraft}
           onUpdateSubagentDraft={updateSubagentDraft}
           onUpdateModelDraft={updateModelDraft}
@@ -1354,7 +1356,7 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
         speech={speech.state}
         selectedProjectId={activeProjectId}
         selectedProjectThreadCount={activeProjectThreadCount}
-        showComposerSuggestions={showComposerSuggestions}
+        showComposerSuggestions={!settingsOpen && showComposerSuggestions}
         sidebarVisible={sidebarVisible}
         snapshot={agent.activeSnapshot}
         thread={agent.activeThread}

@@ -6,15 +6,15 @@ import { CommitNumberInput } from '../CommitNumberInput'
 import { CommitTextInput, CommitTextarea } from '../CommitTextField'
 import { SearchableOptionPicker } from '../SearchableOptionPicker'
 import { SETTINGS_MCP_TIMEOUT_MIN_MS, SETTINGS_MILLISECONDS_STEP, UI_TEXTAREA_ROWS_COMPACT } from '../uiConstants'
-import { mcpErrorStatus, mcpLoadedStatus, mcpServerRuntimeStatus } from './mcpDraft'
-import type { McpDraft } from './mcpDraft'
+import { McpRuntimeControls } from './McpRuntimeControls'
+import { mcpDraftHasTools, type McpDraft } from './mcpDraft'
 
 type SelectedMcpServer = AppConfigSnapshot['mcpServers'][number]
 
 interface McpEditorProps {
   disabled?: boolean
   mcpDraft: McpDraft
-  runtimeEnabled: boolean
+  onFlushDraft(): Promise<string>
   selectedServer?: SelectedMcpServer
   status: McpToolStatus | undefined
   onAutosizeInput: (event: FormEvent<HTMLTextAreaElement>) => void
@@ -24,7 +24,7 @@ interface McpEditorProps {
 export function McpEditor({
   disabled = false,
   mcpDraft,
-  runtimeEnabled,
+  onFlushDraft,
   selectedServer,
   status,
   onAutosizeInput,
@@ -33,6 +33,7 @@ export function McpEditor({
   const { t } = useTranslation()
   const timeoutId = useId()
   const [apiKeyFocused, setApiKeyFocused] = useState(false)
+  const enableBlocked = !mcpDraft.enabled && !mcpDraftHasTools(mcpDraft, status)
   const transportOptions = [
     { value: 'stdio', label: 'stdio' },
     { value: 'http', label: 'HTTP' },
@@ -44,7 +45,8 @@ export function McpEditor({
       <div className="ui-toolbar">
         <CheckboxButton
           checked={mcpDraft.enabled}
-          disabled={disabled}
+          disabled={disabled || enableBlocked}
+          tooltip={enableBlocked ? t('settings.mcp_tools_required_enable') : undefined}
           label={t('settings.enabled')}
           onChange={(enabled) => onUpdateDraft({ enabled })}
         />
@@ -145,29 +147,8 @@ export function McpEditor({
         </>
       )}
 
-      {(() => {
-        const runtimeStatus = selectedServer && runtimeEnabled ? mcpServerRuntimeStatus(status, selectedServer) : undefined
-        const loaded = selectedServer && runtimeEnabled ? mcpLoadedStatus(status, selectedServer) : undefined
-        const errorText = selectedServer && runtimeEnabled ? mcpErrorStatus(status, selectedServer) : undefined
-        const loading = Boolean(selectedServer && runtimeEnabled && selectedServer.enabled && !loaded && !errorText && (!runtimeStatus || runtimeStatus.state === 'idle' || runtimeStatus.state === 'starting' || runtimeStatus.state === 'recovering'))
-        if (!selectedServer || (!loaded && !errorText && !loading && !runtimeStatus)) return null
-        return (
-          <div className="ui-note">
-            {errorText ? (
-              <p className="ui-status-danger">{errorText}</p>
-            ) : loaded ? (
-              <>
-                <div>{t('settings.running')} - {t('settings.tools_count', { count: loaded.toolCount })}</div>
-                {loaded.toolNames.length > 0 && (
-                  <pre className="ui-code-block ui-code-block-subtle ui-code-block-compact ui-code-block-plain">{loaded.toolNames.join('\n')}</pre>
-                )}
-              </>
-            ) : loading ? (
-              <div>{runtimeStatus?.state === 'recovering' ? t('settings.mcp_state_recovering') : t('settings.waiting_for_mcp_status')}</div>
-            ) : null}
-          </div>
-        )
-      })()}
+      {selectedServer && <McpRuntimeControls key={selectedServer.id} id={selectedServer.id}
+        enabled={mcpDraft.enabled} status={status} onFlushDraft={onFlushDraft} />}
     </div>
   )
 }

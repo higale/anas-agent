@@ -492,7 +492,14 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
       throw new ModelSelectionError(`The selected model has invalid tool parameters: ${cause instanceof Error ? cause.message : String(cause)}. Correct its settings and send again.`, { cause })
     }
   }
-  return { resolveModel, initialModel, offersMemoryWrite, developerHttpTrace, activeSubagent, runConfiguration, capabilities, features, requestSystemPrompt, selectModelTools,
+  async function refreshMcpTools(): Promise<void> {
+    const previous = new Set(activeMcpTools.map(tool => tool.name))
+    const current = toolsEnabled ? await loadMcpTools(config, simpleChat, capabilities, true) : []
+    runtimeTools.splice(0, runtimeTools.length, ...runtimeTools.filter(tool => !previous.has(tool.name)), ...current)
+    activeMcpTools.splice(0, activeMcpTools.length, ...current)
+  }
+
+  return { refreshMcpTools, resolveModel, initialModel, offersMemoryWrite, developerHttpTrace, activeSubagent, runConfiguration, capabilities, features, requestSystemPrompt, selectModelTools,
     workspace, approvalDirectories, systemPrompt, simpleChatPrompt, simpleChat, toolsEnabled, review, hasUnresolvedManagedCalls,
     commandShell, shellCommandAuthorization, activeMcpTools, runtimeTools, fileTools, subagentTools, customTools, pluginTools, outputLanguage }
 }

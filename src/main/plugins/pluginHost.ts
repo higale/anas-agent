@@ -2,6 +2,7 @@ import { app, ipcMain, nativeTheme, net, protocol, shell, type BrowserWindow } f
 import { pathToFileURL } from 'node:url'
 import { stat } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
+import type { PluginCapabilityKind } from '@shared/pluginCapabilities'
 import { PLUGIN_API_VERSION, PLUGIN_ICON_PATH, PLUGIN_SCHEME, requirePluginJson, requirePluginView, type PluginSummary, type PluginViewOptions, type PluginInstallResult } from '@shared/plugins'
 import { getAppConfigSnapshot } from '../config/appConfig'
 import { getPluginExamplesDir } from '../config/dataDir'
@@ -243,6 +244,12 @@ export function registerPluginIpc(): void {
       if (!enabled) { views.closeWhere(content => content.kind === 'plugin' && content.pluginId === id); await backends.stop(id) }
     })
     changed()
+  })
+  handleMainIpc('plugins:setCapabilityEnabled', async (_event, id: string, kind: PluginCapabilityKind, ids: string[], enabled: boolean) => {
+    const { store } = runtime()
+    const choices = await store.exclusive(() => store.setCapabilityEnabled(id, kind, ids, enabled))
+    changed()
+    return choices
   })
   handleMainIpc('plugins:setShowInTitlebar', async (_event, id: string, show: boolean) => {
     const { store } = runtime()

@@ -1,4 +1,5 @@
 import { normalizeSubagentPackageSettings } from '@shared/subagentPackages'
+import { parseMcpToolCatalog, parseMcpToolChoices } from '@shared/mcpCatalog'
 import { compressionPromptError } from '@shared/summaryPrompt'
 import { requireDataVersion } from '@shared/dataVersion'
 import { UI_FONT_SIZE_MAX, UI_FONT_SIZE_MIN } from '@shared/uiPreferences'
@@ -228,6 +229,31 @@ export function repairDocument(file: string, input: unknown): { value: RecordVal
         const path = `mcp_servers[${index}]`
         repair.fill(server, { enabled: false, timeout_ms: 30000, args: [], env: {} }, path)
         repair.number(server, 'timeout_ms', 0, Number.MAX_SAFE_INTEGER, 30000, path)
+        try { parseMcpToolCatalog(server.tool_catalog) } catch {
+          const raw = isObject(server.tool_catalog) ? server.tool_catalog : {}
+          let catalog: ReturnType<typeof parseMcpToolCatalog>
+          try { catalog = parseMcpToolCatalog({ ...raw, tools: [] }) } catch { /* The connection identity cannot be recovered. */ }
+          if (catalog && Array.isArray(raw.tools)) {
+            const seen = new Set<string>()
+            const tools = raw.tools.flatMap(tool => {
+              try {
+                const parsed = parseMcpToolCatalog({ ...catalog, tools: [tool] })!.tools[0]
+                if (seen.has(parsed.name)) return []
+                seen.add(parsed.name)
+                return [parsed]
+              } catch { return [] }
+            })
+            repair.replace(server, 'tool_catalog', { ...catalog, tools }, `${path}.tool_catalog`)
+          } else {
+            delete server.tool_catalog
+            repair.record(`${path}.tool_catalog`)
+          }
+        }
+        try { parseMcpToolChoices(server.tool_choices) } catch {
+          const choices = isObject(server.tool_choices) ? server.tool_choices : {}
+          repair.replace(server, 'tool_choices', Object.fromEntries(Object.entries(choices)
+            .filter(([name, enabled]) => name && typeof enabled === 'boolean')), `${path}.tool_choices`)
+        }
         // Connection endpoints and transport identity are not guessed.
         if (!['stdio', 'http', 'sse'].includes(server.type as string)) throw new Error(`${path}.type: cannot determine the transport; review or reset.`)
         if ((server.args as unknown[]).some((arg) => typeof arg !== 'string') || Object.values(server.env as RecordValue).some((entry) => typeof entry !== 'string')) {

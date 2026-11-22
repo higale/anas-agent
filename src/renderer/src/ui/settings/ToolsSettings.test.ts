@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { builtinToolCatalog, runtimeToolSelectionId } from '@shared/toolRegistry'
-import { mcpToolDisplayGroups, toolDefinitionText } from './ToolsSettings'
+import { mcpToolDisplayGroups } from './ToolsSettings'
+import { toolDefinitionText } from './toolDefinitionText'
 
 describe('tool definition JSON', () => {
   it('formats the model-facing name, description, and input schema', () => {

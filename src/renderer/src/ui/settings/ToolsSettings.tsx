@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   toolGroupOrder,
@@ -7,11 +7,13 @@ import {
 } from '@shared/toolRegistry'
 import type { McpServerConfigDetail, McpToolStatus, RuntimeToolDefinition, RuntimeToolStatus } from '@shared/types'
 import { ContentPreviewDialog } from './ContentPreviewDialog'
+import { toolDefinitionText } from './toolDefinitionText'
 import { CustomToolsGroup } from './CustomToolsGroup'
 import type { AppConfigSnapshot } from '@shared/types'
 import type { ToolPackage } from '@shared/toolPackages'
 import { pluginDisplayText, type PluginSummary } from '@shared/plugins'
 import { pluginToolName } from '@shared/pluginTools'
+import { pluginCapabilityEnabled } from '@shared/pluginCapabilities'
 import { SegmentedControl } from '../SegmentedControl'
 import type { AgentAccessMode } from '@shared/agentTypes'
 
@@ -26,18 +28,19 @@ interface ToolsSettingsProps {
   runtimeToolStatus: RuntimeToolStatus | undefined
 }
 
-type CatalogEntry = RuntimeToolDefinition | { name: string; description?: undefined }
+type CatalogEntry = (RuntimeToolDefinition | { name: string; description?: undefined }) & { inactiveReason?: string }
 interface ToolDisplayGroup {
   id: string
   name: string
   tools: CatalogEntry[]
-  disabled?: boolean
+  inactiveReason?: string
   error?: string
 }
 
 export function mcpToolDisplayGroups(
   status: McpToolStatus | undefined,
-  configuredServers: McpServerConfigDetail[]
+  configuredServers: McpServerConfigDetail[],
+  disabledReason = 'MCP tool is disabled'
 ): ToolDisplayGroup[] {
   const definitions = new Map<string, RuntimeToolDefinition[]>()
   for (const tool of status?.tools ?? []) {
@@ -50,11 +53,12 @@ export function mcpToolDisplayGroups(
     const loaded = status?.loaded.find((item) =>
       item.id === server.id && item.index === server.index
     )
+    const runtime = status?.servers.find(item => item.id === server.id)
     const tools = (loaded?.toolNames ?? []).map((name) => {
       const matches = definitions.get(name) ?? []
       const definition = matches.shift()
       definitions.set(name, matches)
-      return definition ?? { name }
+      return { ...(definition ?? { name }), inactiveReason: ('enabled' in server && !server.enabled || runtime?.toolChoices?.[name] === false) ? disabledReason : undefined }
     })
     return {
       id: `${server.id}:${server.index}`,
@@ -73,26 +77,8 @@ export function mcpToolDisplayGroups(
   return groups
 }
 
-export function toolDefinitionText(tool: RuntimeToolDefinition): string {
-  return JSON.stringify({
-    name: tool.name,
-    description: tool.description,
-    parameters: tool.inputSchema ?? {
-      type: 'object',
-      properties: Object.fromEntries(tool.parameters.map((parameter) => [
-        parameter.name,
-        {
-          description: parameter.description,
-          ...(parameter.schema && typeof parameter.schema === 'object'
-            ? parameter.schema as Record<string, unknown>
-            : {})
-        }
-      ]))
-    }
-  }, null, 2)
-}
-
 export function ToolsSettings({ actionsTarget, plugins, pluginError, customTools, onConfigChange, mcpServers, mcpStatus, runtimeToolStatus }: ToolsSettingsProps) {
+  const reasonId = useId()
   const { t, i18n } = useTranslation()
   const [selectedGroup, setSelectedGroup] = useState<'builtin' | 'mcp' | 'plugins' | 'customTools'>('builtin')
   const [selectedToolKey, setSelectedToolKey] = useState<string>()
@@ -102,26 +88,30 @@ export function ToolsSettings({ actionsTarget, plugins, pluginError, customTools
     <strong className="settings-tool-group-title">{label}</strong>
   )
   const mcpGroups = useMemo(
-    () => mcpToolDisplayGroups(mcpStatus, mcpServers),
-    [mcpServers, mcpStatus]
+    () => mcpToolDisplayGroups(mcpStatus, mcpServers, t('settings.mcp_tool_disabled')),
+    [mcpServers, mcpStatus, t]
   )
   const pluginGroups = useMemo<ToolDisplayGroup[]>(() => plugins
     .filter(plugin => plugin.manifest?.tools.length || plugin.error)
-    .map(plugin => ({
-      id: plugin.id,
-      name: pluginDisplayText(plugin, i18n.language),
-      disabled: !plugin.enabled,
-      error: plugin.error,
-      tools: (plugin.manifest?.tools ?? []).map(tool => ({
-        name: pluginToolName(plugin.id, tool.id),
-        description: tool.description,
-        inputSchema: tool.inputSchema,
-        parameters: []
-      }))
-    })), [plugins, i18n.language])
+    .map(plugin => {
+      const inactiveReason = plugin.error || (!plugin.enabled ? t('capabilities.globally_disabled') : undefined)
+      return {
+        id: plugin.id,
+        name: pluginDisplayText(plugin, i18n.language),
+        inactiveReason,
+        error: plugin.error,
+        tools: (plugin.manifest?.tools ?? []).map(tool => ({
+          name: pluginToolName(plugin.id, tool.id),
+          description: tool.description,
+          inactiveReason: inactiveReason || (!pluginCapabilityEnabled(plugin.capabilityChoices, 'tool', tool.id) ? t('plugins.tool_disabled') : undefined),
+          inputSchema: tool.inputSchema,
+          parameters: []
+        }))
+      }
+    }), [plugins, i18n.language, t])
   const catalogGroups = { mcp: mcpGroups, plugins: pluginGroups }
   const catalogLabels = { builtin: 'custom_tools.builtin', mcp: 'settings.mcp', plugins: 'plugins.title' }
-  const toolDefinitions = useMemo(() => new Map([
+  const toolDefinitions = useMemo(() => new Map<string, CatalogEntry>([
     ...(runtimeToolStatus?.tools ?? []).map((tool): [string, RuntimeToolDefinition] => [
       `runtime:${runtimeToolSelectionId(tool)}`, tool
     ]),
@@ -142,16 +132,21 @@ export function ToolsSettings({ actionsTarget, plugins, pluginError, customTools
   const selectedToolText = smartDefinition ? JSON.stringify(smartDefinition, null, 2) : selectedVariant ? JSON.stringify(selectedVariant.definition, null, 2)
     : selectedTool ? toolDefinitionText(selectedTool) : ''
   function renderToolRow(key: string, catalogName: string) {
-    const name = toolDefinitions.get(key)?.name ?? catalogName
+    const entry = toolDefinitions.get(key)
+    const name = entry?.name ?? catalogName
+    const inactiveReason = entry?.inactiveReason
     return (
       <button
         aria-label={`${name}: ${t('settings.tools_view_details')}`}
+        aria-describedby={inactiveReason ? `${reasonId}-${key}` : undefined}
+        data-tooltip={inactiveReason}
         className="settings-tool-catalog-row"
         key={key}
         type="button"
         onClick={() => { setSelectedFormat('json'); setSelectedToolKey(key) }}
       >
-        <code className="settings-tool-catalog-name ui-tool-name">{name}</code>
+        <code className={`settings-tool-catalog-name ui-tool-name${inactiveReason ? ' ui-resource-unavailable' : ''}`}>{name}</code>
+        {inactiveReason && <span id={`${reasonId}-${key}`} hidden>{inactiveReason}</span>}
       </button>
     )
   }
@@ -167,16 +162,12 @@ export function ToolsSettings({ actionsTarget, plugins, pluginError, customTools
         </button>)}</>}
         catalogView={selectedGroup === 'customTools' ? undefined : selectedGroup === 'mcp' || selectedGroup === 'plugins' ? <div className="ui-form-section settings-tool-group">
           {renderGroupTitle(t(catalogLabels[selectedGroup]))}
-          {selectedGroup === 'plugins' && <>
-            <small className="ui-field-hint">{t('plugins.tools_catalog_hint')}</small>
-            {pluginError && <div className="ui-note ui-note-danger" role="alert">{t('plugins.load_failed')} {pluginError}</div>}
-          </>}
+          {selectedGroup === 'plugins' && pluginError && <div className="ui-note ui-note-danger" role="alert">{t('plugins.load_failed')} {pluginError}</div>}
           <div className="settings-tool-source-groups">
             {catalogGroups[selectedGroup].map(group => <section className="settings-tool-source-group" key={group.id}
               aria-label={group.name || t('settings.tools_mcp_other')}>
-              <div className="settings-tool-source-group-header ui-row"><strong>{group.name || t('settings.tools_mcp_other')}</strong>
+              <div className="settings-tool-source-group-header ui-row"><strong className={group.inactiveReason ? 'ui-resource-unavailable' : undefined} data-tooltip={group.inactiveReason}>{group.name || t('settings.tools_mcp_other')}</strong>
                 <small>{t('settings.tools_count', { count: group.tools.length })}</small>
-                {group.disabled && <small>{t('settings.disabled')}</small>}
               </div>
               {group.error && <div className="ui-note ui-note-danger" role="alert">{group.error}</div>}
               <div className="settings-tool-catalog">

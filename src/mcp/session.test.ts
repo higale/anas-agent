@@ -15,8 +15,8 @@ describe('native MCP sessions', () => {
   it('loads every tools page and rejects a repeated cursor without looping forever', async () => {
     const listTools = vi.fn().mockResolvedValueOnce({ tools: [{ name: 'first' }], nextCursor: 'next' })
       .mockResolvedValueOnce({ tools: [{ name: 'second' }] })
-    expect(await listMcpTools({ listTools })).toEqual([{ name: 'first' }, { name: 'second' }])
-    expect(listTools.mock.calls).toEqual([[{}], [{ cursor: 'next' }]])
+    expect(await listMcpTools({ listTools }, 1234)).toEqual([{ name: 'first' }, { name: 'second' }])
+    expect(listTools.mock.calls).toEqual([[{}, { timeout: 1234 }], [{ cursor: 'next' }, { timeout: 1234 }]])
     listTools.mockReset().mockResolvedValue({ tools: [], nextCursor: 'again' })
     await expect(listMcpTools({ listTools })).rejects.toThrow('repeated page cursor')
     expect(listTools).toHaveBeenCalledTimes(2)
@@ -38,6 +38,25 @@ describe('native MCP sessions', () => {
       expect(onClose).not.toHaveBeenCalled()
     } finally { await session.close(); await rm(directory, { recursive: true, force: true }) }
   })
+
+  it.each(['http', 'sse'] as const)('bounds a stalled %s transport handshake by the configured timeout', async protocol => {
+    const http = createServer((_request, response) => {
+      if (protocol === 'sse') {
+        response.writeHead(200, { 'Content-Type': 'text/event-stream' })
+        response.write(': waiting for endpoint\n\n')
+      }
+    })
+    await new Promise<void>(resolve => http.listen(0, '127.0.0.1', resolve))
+    const address = http.address()
+    if (!address || typeof address === 'string') throw new Error('Missing fixture address')
+    const session = new McpSession({ transport: protocol, url: `http://127.0.0.1:${address.port}/mcp` })
+    try { await expect(session.connect(100)).rejects.toThrow(/timeout|timed out/i) }
+    finally {
+      await session.close()
+      http.closeAllConnections()
+      await new Promise<void>(resolve => http.close(() => resolve()))
+    }
+  }, 2000)
 
   it.each(['http', 'sse'] as const)('settles initialization when %s is closed before the handshake completes', async protocol => {
     let received!: () => void

@@ -17,198 +17,90 @@ const plugin: PluginSummary = { id: 'example', enabled: true, backendStatus: 'st
 const skills: SkillSnapshot = { roots: [], skills: [{ id: 'example:skill:review', name: 'review', description: 'Review', rootId: 'plugin:example',
   rootName: 'Example', source: 'plugin', shortcutAlias: 'plugin:example', dirPath: '/example/review', relativePath: 'review', linked: false,
   modelAvailable: true, userAvailable: true, requiredTools: ['example:tool:echo'] }] }
-function Harness({ initial = { ...defaultCapabilities, pluginMode: 'custom' }, plugins = [plugin], subagent = false, changed = vi.fn(), catalog = skills }: {
-  initial?: AgentCapabilities; plugins?: PluginSummary[]; subagent?: boolean; changed?: (value: AgentCapabilities) => void; catalog?: SkillSnapshot
+function Harness({ initial = defaultCapabilities, plugins = [plugin], changed = vi.fn() }: {
+  initial?: AgentCapabilities; plugins?: PluginSummary[]; changed?: (value: AgentCapabilities) => void
 }) {
   const [value, setValue] = useState(initial)
-  return <PluginCapabilitySelection plugins={plugins} skills={catalog} value={value} subagent={subagent}
-    onChange={next => { setValue(next); changed(next) }} />
+  return <PluginCapabilitySelection plugins={plugins} value={value} onChange={next => { setValue(next); changed(next) }} />
 }
-async function openPlugins() {
+it('restores custom plugin checkboxes after toggling the outer group all and off', async () => {
+  const changed = vi.fn()
+  const second = { ...plugin, id: 'second', manifest: { ...plugin.manifest!, id: 'second', name: 'Second' } }
+  render(<Harness plugins={[plugin, second]} changed={changed} initial={{ ...defaultCapabilities,
+    pluginGroupMode: 'custom', pluginMode: 'custom', plugins: [{ id: 'example', mode: 'all' }, { id: 'second', mode: 'off' }] }} />)
   await userEvent.click(screen.getByRole('button', { name: 'plugins.title' }))
-  await userEvent.click(within(screen.getByRole('radiogroup', { name: 'plugins.title' })).getByRole('radio', { name: 'capabilities.custom' }))
-}
-it.each([false, true])('restores saved plugin policies when leaving the original off mode without coupling individual edits (subagent %s)', async subagent => {
-  const second: PluginSummary = { ...plugin, id: 'second', manifest: { ...plugin.manifest!, id: 'second', name: 'Second' } }
-  const initial: AgentCapabilities = { ...defaultCapabilities, pluginMode: 'off',
-    plugins: [{ id: 'example', mode: 'custom' }, { id: 'second', mode: 'all' }], pluginTools: ['example:tool:echo'] }
+  const modes = within(screen.getByRole('radiogroup', { name: 'plugins.title' }))
+  await userEvent.click(modes.getByRole('radio', { name: 'capabilities.all' }))
+  expect(screen.getByRole('checkbox', { name: 'Second' })).toBeChecked()
+  await userEvent.click(modes.getByRole('radio', { name: 'capabilities.off' }))
+  expect(screen.getByRole('checkbox', { name: 'Example' })).not.toBeChecked()
+  expect(resolvePluginCapabilities(changed.mock.lastCall![0], [plugin, second]).pluginTools).toEqual([])
+  await userEvent.click(modes.getByRole('radio', { name: 'capabilities.custom' }))
+  expect(screen.getByRole('checkbox', { name: 'Example' })).toBeChecked()
+  expect(screen.getByRole('checkbox', { name: 'Second' })).not.toBeChecked()
+  expect(resolvePluginCapabilities(changed.mock.lastCall![0], [plugin, second]).pluginTools).toEqual(['example:tool:echo'])
+})
+it.each([false, true])('selects the complete plugin including applicable prompts and skills (subagent %s)', async subagent => {
   const changed = vi.fn()
-  render(<Harness initial={initial} changed={changed} subagent={subagent} plugins={[plugin, second]} />)
-  expect(within(screen.getByRole('radiogroup', { name: 'plugins.title' })).getByRole('radio', { name: 'capabilities.off' })).toBeChecked()
-  await openPlugins()
-  const firstModes = within(screen.getByRole('radiogroup', { name: 'Example' }))
-  const secondModes = within(screen.getByRole('radiogroup', { name: 'Second' }))
-  expect(firstModes.getByRole('radio', { name: 'capabilities.custom' })).toBeChecked()
-  expect(secondModes.getByRole('radio', { name: 'capabilities.all' })).toBeChecked()
-  await userEvent.click(screen.getByRole('button', { name: 'Example' }))
-  expect(screen.getByRole('checkbox', { name: 'plugin__example__echo' })).toBeChecked()
-  await userEvent.click(firstModes.getByRole('radio', { name: 'capabilities.off' }))
-  expect(secondModes.getByRole('radio', { name: 'capabilities.all' })).toBeChecked()
-  const saved: AgentCapabilities = changed.mock.lastCall![0]
-  expect(saved).toEqual({ ...initial, pluginGroupMode: 'custom', plugins: [{ id: 'second', mode: 'all' }, { id: 'example', mode: 'off' }] })
-  expect(resolvePluginCapabilities(saved, [plugin, second], subagent).pluginTools).toEqual(['second:tool:echo'])
+  render(<Harness initial={{ ...defaultCapabilities, pluginMode: 'off' }} changed={changed} />)
+  await userEvent.click(screen.getByRole('button', { name: 'plugins.title' }))
+  expect(screen.getAllByRole('radiogroup')).toHaveLength(1)
+  expect(screen.getAllByRole('checkbox')).toHaveLength(1)
+  const checkbox = screen.getByRole('checkbox', { name: 'Example' })
+  expect(checkbox).not.toBeChecked()
+  await userEvent.click(checkbox)
+  const resolved = resolvePluginCapabilities(changed.mock.lastCall![0], [plugin], subagent)
+  expect(resolved.pluginTools).toEqual(['example:tool:echo'])
+  expect(resolved.pluginPrompts).toEqual(subagent ? ['example:prompt:help'] : [])
+  expect(resolveSkillSelection(resolved.skills, skills.skills, false, subagent, resolved.pluginTools).entries)
+    .toEqual([{ id: 'example:skill:review', model: true, shortcut: !subagent }])
+  await userEvent.click(checkbox)
+  expect(resolvePluginCapabilities(changed.mock.lastCall![0], [plugin], subagent).pluginTools).toEqual([])
 })
-it('folds the overall plugin group and preserves per-plugin settings through all and off', async () => {
+it('keeps other plugins enabled when changing one default choice', async () => {
+  const second = { ...plugin, id: 'second', manifest: { ...plugin.manifest!, id: 'second', name: 'Second' } }
   const changed = vi.fn()
-  const initial: AgentCapabilities = { ...defaultCapabilities, pluginMode: 'custom', plugins: [{ id: 'example', mode: 'custom' }],
-    pluginTools: ['example:tool:echo'], pluginPrompts: [], skills: { ...defaultCapabilities.skills, entries: [] } }
-  render(<Harness initial={initial} changed={changed} plugins={[{ ...plugin, enabled: false }]} />)
-  const heading = screen.getByRole('button', { name: 'plugins.title' })
-  expect(heading).toHaveAttribute('aria-expanded', 'false')
-  await userEvent.click(heading)
-  await userEvent.click(screen.getByRole('button', { name: 'Example' }))
-  const groupModes = within(screen.getByRole('radiogroup', { name: 'plugins.title' }))
-  const innerModes = within(screen.getByRole('radiogroup', { name: 'Example' }))
-  for (const mode of ['all', 'off', 'custom'] as const) {
-    await userEvent.click(groupModes.getByRole('radio', { name: `capabilities.${mode}` }))
-    expect(heading).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByRole('checkbox', { name: 'plugin__example__echo' })).toHaveProperty('checked', mode !== 'off')
-    expect(screen.getByRole('checkbox', { name: 'review capabilities.model' })).toHaveProperty('checked', mode === 'all')
-    if (mode !== 'custom') {
-      for (const radio of innerModes.getAllByRole('radio')) expect(radio).toBeDisabled()
-      for (const input of screen.getAllByRole('checkbox')) expect(input).toBeDisabled()
-    } else expect(screen.getByRole('checkbox', { name: 'plugin__example__echo' })).toBeEnabled()
-    expect(changed.mock.lastCall![0]).toEqual({ ...initial, pluginGroupMode: mode })
-    await userEvent.click(heading)
-    expect(screen.queryByRole('checkbox')).toBeNull()
-    await userEvent.click(heading)
-  }
+  render(<Harness plugins={[plugin, second]} changed={changed} />)
+  await userEvent.click(screen.getByRole('button', { name: 'plugins.title' }))
+  await userEvent.click(screen.getByRole('checkbox', { name: 'Example' }))
+  expect(screen.getByRole('checkbox', { name: 'Second' })).toBeChecked()
+  expect(resolvePluginCapabilities(changed.mock.lastCall![0], [plugin, second]).pluginTools).toEqual(['second:tool:echo'])
 })
-it('keeps an ordinary user skill out of the mode, count and list of a plugin named user', async () => {
-  const userPlugin = { ...plugin, id: 'user', manifest: { ...plugin.manifest!, id: 'user', skills: [], prompts: [] } }
-  render(<Harness plugins={[userPlugin]} initial={{ ...defaultCapabilities, pluginMode: 'custom',
-    skills: { mode: 'custom', project: false, entries: [{ id: 'user:review', model: true, shortcut: true }] } }} />)
-  await openPlugins()
-  const region = within(screen.getByRole('region', { name: 'Example' }))
-  expect(region.getByRole('radio', { name: 'capabilities.off' })).toBeChecked()
-  await userEvent.click(region.getByRole('radio', { name: 'capabilities.custom' }))
-  const heading = region.getByRole('button', { name: 'Example' })
-  expect(heading).toHaveTextContent('0/1')
-  await userEvent.click(heading)
-  expect(region.getAllByRole('checkbox')).toEqual([region.getByRole('checkbox', { name: 'plugin__user__echo' })])
-})
-it('groups contributions and explains tool dependencies and prompt scope without locking choices', async () => {
-  const changed = vi.fn()
-  render(<Harness changed={changed} initial={{ ...defaultCapabilities, pluginMode: 'custom', skills: { mode: 'off', project: false, entries: [] }, pluginPrompts: ['example:prompt:help'] }} />)
-  await openPlugins()
-  const group = within(screen.getByRole('region', { name: 'Example' }))
-  expect(group.queryByRole('checkbox')).toBeNull()
-  await userEvent.click(group.getByRole('button', { name: 'Example' }))
-  expect(group.getByRole('checkbox', { name: 'help' })).toBeChecked()
-  expect(group.getByRole('checkbox', { name: 'review capabilities.model' })).toBeEnabled()
-  expect(group.getAllByText('plugins.missing_tools_detail: plugin__example__echo')).toHaveLength(2)
-  await userEvent.click(group.getByRole('checkbox', { name: 'plugin__example__echo' }))
-  expect(group.queryByText(/plugins.missing_tools_detail/)).toBeNull()
-  expect(group.getByText('plugins.scope_subagent')).toBeVisible()
-  expect(group.getByRole('checkbox', { name: 'help' })).toBeEnabled()
-  await userEvent.click(group.getByRole('checkbox', { name: 'review capabilities.model' }))
-  expect(changed.mock.lastCall?.[0]).toMatchObject({ skills: { mode: 'off', entries: [{ id: 'example:skill:review', model: true }] } })
-})
-it('starts new plugins off, collapses custom choices and retains them through all and off', async () => {
-  const changed = vi.fn()
-  render(<Harness changed={changed} />)
-  await openPlugins()
-  const mode = within(screen.getByRole('radiogroup', { name: 'Example' }))
-  expect(mode.getByRole('radio', { name: 'capabilities.off' })).toBeChecked()
-  await userEvent.click(mode.getByRole('radio', { name: 'capabilities.custom' }))
-  expect(screen.queryByRole('checkbox')).toBeNull()
-  await userEvent.click(screen.getByRole('button', { name: 'Example' }))
-  await userEvent.click(screen.getByRole('checkbox', { name: 'plugin__example__echo' }))
-  for (const name of ['capabilities.all', 'capabilities.off']) {
-    await userEvent.click(mode.getByRole('radio', { name }))
-    for (const checkbox of screen.getAllByRole('checkbox')) {
-      expect(checkbox).toBeDisabled()
-      expect(checkbox).toHaveProperty('checked', name === 'capabilities.all')
-    }
-  }
-  await userEvent.click(mode.getByRole('radio', { name: 'capabilities.custom' }))
-  expect(screen.getByRole('checkbox', { name: 'plugin__example__echo' })).toBeChecked()
-  expect(changed.mock.lastCall?.[0].pluginTools).toEqual(['example:tool:echo'])
-})
-it('fully edits disabled plugin contributions from the manifest without activating them', async () => {
+it('allows saving a disabled plugin choice without activating it globally', async () => {
   const changed = vi.fn(), disabledPlugin = { ...plugin, enabled: false }
-  render(<Harness changed={changed} plugins={[disabledPlugin]} catalog={{ ...skills, skills: [] }} initial={{ ...defaultCapabilities, pluginMode: 'custom', pluginTools: ['example:tool:echo'] }} />)
-  await openPlugins()
-  await userEvent.click(screen.getByRole('button', { name: 'Example' }))
-  expect(screen.getByRole('checkbox', { name: 'plugin__example__echo' })).toBeChecked()
-  for (const name of ['plugin__example__echo', 'review capabilities.model', 'review capabilities.shortcut', 'help']) {
-    const checkbox = screen.getByRole('checkbox', { name })
-    expect(checkbox).toBeEnabled()
-    await userEvent.click(checkbox)
-  }
-  await userEvent.click(screen.getByRole('checkbox', { name: 'plugin__example__echo' }))
-  expect(screen.getAllByText('capabilities.inactive')).toHaveLength(1)
-  expect(screen.getByRole('button', { name: 'Example' })).toHaveTextContent('3/3')
-  const resolved = resolvePluginCapabilities(changed.mock.lastCall![0], [disabledPlugin])
-  expect(resolved.pluginTools).toEqual([])
-  expect(resolved.pluginPrompts).toEqual([])
-  expect(resolved.skills.entries).toEqual([])
-  await userEvent.click(within(screen.getByRole('radiogroup', { name: 'Example' })).getByRole('radio', { name: 'capabilities.all' }))
-  expect(within(screen.getByRole('radiogroup', { name: 'Example' })).getByRole('radio', { name: 'capabilities.all' })).toBeChecked()
-  await userEvent.click(within(screen.getByRole('radiogroup', { name: 'Example' })).getByRole('radio', { name: 'capabilities.custom' }))
-  expect(screen.getByRole('checkbox', { name: 'review capabilities.model' })).toBeChecked()
+  render(<Harness initial={{ ...defaultCapabilities, pluginMode: 'off' }} plugins={[disabledPlugin]} changed={changed} />)
+  await userEvent.click(screen.getByRole('button', { name: 'plugins.title' }))
+  expect(screen.getByRole('checkbox', { name: 'Example' })).toHaveAccessibleDescription('capabilities.globally_disabled')
+  expect(screen.queryByText('capabilities.inactive')).toBeNull()
+  await userEvent.click(screen.getByRole('checkbox', { name: 'Example' }))
+  expect(screen.getByRole('checkbox', { name: 'Example' })).toBeChecked()
+  expect(resolvePluginCapabilities(changed.mock.lastCall![0], [disabledPlugin]).pluginTools).toEqual([])
 })
-it.each([false, true])('blocks unselected disabled plugin skill uses without warnings (subagent %s)', async subagent => {
+it('accepts previous partial selections as a whole plugin and allows removing missing plugins', async () => {
   const changed = vi.fn()
-  render(<Harness changed={changed} subagent={subagent} initial={{ ...defaultCapabilities, pluginMode: 'custom', pluginTools: ['example:tool:echo'] }}
-    catalog={{ ...skills, skills: skills.skills.map(skill => ({ ...skill, modelAvailable: false, userAvailable: false })) }} />)
-  await openPlugins()
-  await userEvent.click(screen.getByRole('button', { name: 'Example' }))
-  if (subagent) expect(screen.queryByRole('checkbox', { name: 'review capabilities.shortcut' })).toBeNull()
-  for (const option of subagent ? ['model'] : ['model', 'shortcut']) {
-    const checkbox = screen.getByRole('checkbox', { name: `review capabilities.${option}` })
-    expect(checkbox).toBeDisabled()
-    await userEvent.click(checkbox)
-    expect(checkbox).not.toBeChecked()
-  }
-  expect(screen.getByRole('checkbox', { name: 'help' })).toBeEnabled()
-  expect(screen.queryByRole('alert')).toBeNull()
-  expect(changed).not.toHaveBeenCalled()
-})
-it.each([false, true])('warns for saved conflicting plugin skill uses until they are cleared (subagent %s)', async subagent => {
-  const changed = vi.fn()
-  const catalog = { ...skills, skills: skills.skills.map(skill => ({ ...skill, modelAvailable: false, userAvailable: false })) }
-  const initial: AgentCapabilities = { ...defaultCapabilities, pluginMode: 'custom', pluginTools: ['example:tool:echo'],
-    skills: { ...defaultCapabilities.skills, entries: [{ id: 'example:skill:review', model: true, shortcut: true }] } }
-  const view = render(<Harness changed={changed} subagent={subagent} initial={initial} catalog={catalog} />)
-  await openPlugins()
-  await userEvent.click(screen.getByRole('button', { name: 'Example' }))
-  expect(screen.getByRole('alert')).toHaveTextContent('capabilities.skill_model_globally_off')
-  expect(Boolean(screen.queryByText(/capabilities.skill_user_globally_off/))).toBe(!subagent)
-  for (const option of subagent ? ['model'] : ['model', 'shortcut']) {
-    const checkbox = screen.getByRole('checkbox', { name: `review capabilities.${option}` })
-    expect(checkbox).toBeChecked()
-    expect(checkbox).toBeEnabled()
-    await userEvent.click(checkbox)
-    expect(checkbox).not.toBeChecked()
-    expect(checkbox).toBeDisabled()
-    expect(screen.queryByText(new RegExp(`capabilities.skill_${option === 'model' ? 'model' : 'user'}_globally_off`))).toBeNull()
-    if (!subagent && option === 'model') expect(screen.getByRole('alert')).toHaveTextContent('capabilities.skill_user_globally_off')
-    await userEvent.click(checkbox)
-    expect(checkbox).not.toBeChecked()
-  }
-  expect(screen.queryByRole('alert')).toBeNull()
-  expect(resolveSkillSelection(changed.mock.lastCall![0].skills, catalog.skills, false, subagent).entries[0])
-    .toMatchObject({ model: false, shortcut: false })
-  view.rerender(<Harness changed={changed} subagent={subagent} initial={initial} catalog={skills} />)
-  const model = screen.getByRole('checkbox', { name: 'review capabilities.model' })
-  expect(model).not.toBeChecked()
-  expect(model).toBeEnabled()
-  await userEvent.click(model)
-  expect(model).toBeChecked()
-  expect(screen.queryByRole('alert')).toBeNull()
+  render(<Harness initial={{ ...defaultCapabilities, pluginMode: 'custom', pluginTools: ['example:tool:echo', 'missing:tool:read'] }} changed={changed} />)
+  await userEvent.click(screen.getByRole('button', { name: 'plugins.title' }))
+  expect(screen.getByRole('checkbox', { name: 'Example' })).toBeChecked()
+  await userEvent.click(screen.getByRole('checkbox', { name: 'missing' }))
+  expect(screen.getByRole('checkbox', { name: 'missing' })).not.toBeChecked()
+  expect(resolvePluginCapabilities(changed.mock.lastCall![0], [plugin]).skills.entries).toHaveLength(1)
 })
 
-it('keeps other available plugins enabled when changing one plugin from the shared defaults', async () => {
-  const second: PluginSummary = { ...plugin, id: 'second', manifest: { ...plugin.manifest!, id: 'second', name: 'Second' } }
+it('bulk selects and clears all plugins without switching away from Custom', async () => {
   const changed = vi.fn()
-  render(<Harness initial={defaultCapabilities} plugins={[plugin, second]} changed={changed} />)
-  await openPlugins()
-  const firstMode = within(screen.getByRole('radiogroup', { name: 'Example' }))
-  const secondMode = within(screen.getByRole('radiogroup', { name: 'Second' }))
-  expect(firstMode.getByRole('radio', { name: 'capabilities.all' })).toBeChecked()
-  expect(secondMode.getByRole('radio', { name: 'capabilities.all' })).toBeChecked()
-  await userEvent.click(firstMode.getByRole('radio', { name: 'capabilities.off' }))
-  expect(secondMode.getByRole('radio', { name: 'capabilities.all' })).toBeChecked()
-  expect(resolvePluginCapabilities(changed.mock.lastCall![0], [plugin, second]).pluginTools).toEqual(['second:tool:echo'])
+  const second = { ...plugin, id: 'second', enabled: false, manifest: { ...plugin.manifest!, id: 'second', name: 'Second' } }
+  render(<Harness plugins={[plugin, second]} changed={changed} initial={{ ...defaultCapabilities,
+    pluginGroupMode: 'custom', pluginMode: 'custom', plugins: [{ id: 'example', mode: 'all' }, { id: 'second', mode: 'off' }] }} />)
+  const button = screen.getByRole('button', { name: 'capabilities.select_group_all' })
+  await userEvent.click(button)
+  expect(changed).toHaveBeenCalledOnce()
+  expect(changed.mock.lastCall![0].pluginGroupMode).toBe('custom')
+  await userEvent.click(screen.getByRole('button', { name: 'plugins.title' }))
+  expect(screen.getByRole('checkbox', { name: 'Example' })).toBeChecked()
+  expect(screen.getByRole('checkbox', { name: 'Second' })).toBeChecked()
+  await userEvent.click(button)
+  expect(changed).toHaveBeenCalledTimes(2)
+  expect(changed.mock.lastCall![0].pluginGroupMode).toBe('custom')
+  expect(screen.getByRole('checkbox', { name: 'Example' })).not.toBeChecked()
+  expect(screen.getByRole('checkbox', { name: 'Second' })).not.toBeChecked()
 })

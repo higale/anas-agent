@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -9,9 +9,9 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => k
 
 afterEach(() => vi.unstubAllGlobals())
 
-const toggle = (name: string, on = true) => within(screen.getByRole('radiogroup', { name })).getByRole('radio', { name: on ? 'capabilities.on' : 'capabilities.off' })
+const toggle = (name: string) => screen.getByRole('checkbox', { name })
 
-it('edits global references, clears missing entries, and retains custom choices across mode and enable changes', async () => {
+it('edits global references, clears missing entries, without per-item modes', async () => {
   const user = userEvent.setup()
   const changed = vi.fn(), openDirectory = vi.fn().mockResolvedValue(undefined)
   vi.stubGlobal('gale', { files: { openDirectory } })
@@ -24,42 +24,22 @@ it('edits global references, clears missing entries, and retains custom choices 
   render(<Harness />)
   await user.click(screen.getByRole('button', { name: 'settings.capability_subagents' }))
   expect(toggle('disabled')).toBeChecked()
-  expect(screen.getByText('capabilities.deleted')).toBeInTheDocument()
-  expect(screen.getByText('capabilities.inactive')).toBeInTheDocument()
+  expect(toggle('missing')).toHaveAccessibleDescription('capabilities.deleted')
+  expect(screen.getByText('capabilities.deleted')).not.toBeVisible()
+  expect(toggle('disabled')).toHaveAccessibleDescription('capabilities.globally_disabled')
+  expect(screen.queryByText('capabilities.inactive')).toBeNull()
   expect(screen.getByText('2/3')).toBeInTheDocument()
-  await user.click(screen.getByRole('button', { name: 'researcher' }))
-  expect(openDirectory).toHaveBeenLastCalledWith('/agents/researcher')
   expect(changed).not.toHaveBeenCalled()
-  await user.click(toggle('disabled', false))
+  await user.click(toggle('disabled'))
   expect(screen.getByText('1/3')).toBeInTheDocument()
   expect(toggle('disabled')).toBeEnabled()
   await user.click(toggle('disabled'))
   expect(toggle('disabled')).toBeChecked()
   expect(screen.getByText('2/3')).toBeInTheDocument()
-  await user.click(toggle('missing', false))
-  expect(screen.queryByRole('radiogroup', { name: 'missing' })).not.toBeInTheDocument()
+  await user.click(toggle('missing'))
+  expect(screen.queryByRole('checkbox', { name: 'missing' })).not.toBeInTheDocument()
   expect(screen.queryByRole('searchbox')).toBeNull()
   await user.click(toggle('researcher'))
   expect(changed).toHaveBeenLastCalledWith({ mode: 'custom', names: ['disabled', 'researcher'] })
-  const picker = within(screen.getByRole('radiogroup', { name: 'settings.capability_subagents' }))
-  await user.click(picker.getByRole('radio', { name: 'capabilities.all' }))
-  expect(toggle('researcher')).toBeChecked()
-  expect(toggle('researcher')).toBeDisabled()
-  expect(toggle('disabled')).toBeChecked()
-  expect(toggle('disabled')).toBeDisabled()
-  expect(screen.getByText('capabilities.inactive')).toBeVisible()
-  await user.click(picker.getByRole('radio', { name: 'capabilities.custom' }))
-  const researcher = toggle('researcher')
-  expect(researcher).toBeChecked()
-  expect(researcher).toBeEnabled()
-  expect(screen.queryByRole('checkbox', { name: 'settings.capability_subagents' })).toBeNull()
-  await user.click(picker.getByRole('radio', { name: 'capabilities.off' }))
-  expect(screen.queryByRole('searchbox')).toBeNull()
-  expect(toggle('researcher', false)).toBeChecked()
-  expect(toggle('disabled', false)).toBeChecked()
-  expect(toggle('researcher')).toBeDisabled()
-  expect(screen.getByText('0/2')).toBeVisible()
-  expect(changed).toHaveBeenLastCalledWith({ mode: 'off', names: ['disabled', 'researcher'] })
-  await user.click(picker.getByRole('radio', { name: 'capabilities.custom' }))
-  expect(toggle('researcher')).toBeChecked()
+  expect(screen.getAllByRole('radiogroup')).toHaveLength(1)
 })

@@ -64,6 +64,7 @@ export function SkillsSettings({
   const groupSkills = selection?.kind === 'all' ? sortedSkills
     : selectedRoot ? sortedSkills.filter(skill => skill.rootId === selectedRoot.id) : undefined
   const selectedSkill = selection?.kind === 'skill' || selection?.kind === 'file' ? skillById.get(selection.skillId) : undefined
+  const selectedAvailability = selectedSkill?.configuredAvailability ?? selectedSkill
   const selectedSkillIssue = selectedSkill?.loadError
   const selectedSkillIssueText = selectedSkillIssue
     ? t(`settings.skill_issue_${selectedSkillIssue.code}`, {
@@ -309,8 +310,8 @@ export function SkillsSettings({
               data-tooltip={t('chat.show_in_folder')} onClick={() => void showItemInFolder(selectedSkill.dirPath)}>{selectedSkill.name}</button><SkillDescriptionWarning description={selectedSkill.description} /></span></div>
             <SegmentedMultiSelect<'modelAvailable' | 'userAvailable'> ariaLabel={selectedSkill.name}
               options={[
-                { value: 'userAvailable', label: t('settings.skill_user_available'), checked: selectedSkill.userAvailable },
-                { value: 'modelAvailable', label: t('settings.skill_model_available'), checked: selectedSkill.modelAvailable },
+                { value: 'userAvailable', label: t('settings.skill_user_available'), checked: selectedAvailability!.userAvailable },
+                { value: 'modelAvailable', label: t('settings.skill_model_available'), checked: selectedAvailability!.modelAvailable },
               ]}
               onChange={(value, checked) => {
                 void onUpdateAvailability(selectedSkill.id, { [value]: checked })

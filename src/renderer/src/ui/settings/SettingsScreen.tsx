@@ -129,6 +129,7 @@ interface SettingsScreenProps {
   onRemoveSkillDirectory: (root: SkillRootSummary) => void
   onToggleSidebar: () => void | Promise<void>
   onUpdateEnvDraft: (value: string) => void
+  onFlushMcpDraft(): Promise<string>
   onUpdateMcpDraft: (update: Partial<McpDraft>) => void
   onUpdateSubagentDraft: (update: Partial<SubagentDraft>) => void
   onUpdateModelDraft: (update: Partial<ModelDraft>) => void
@@ -226,6 +227,7 @@ export function SettingsScreen({
   onRemoveSkillDirectory,
   onToggleSidebar,
   onUpdateEnvDraft,
+  onFlushMcpDraft,
   onUpdateMcpDraft,
   onUpdateSubagentDraft,
   onUpdateModelDraft,
@@ -431,6 +433,7 @@ export function SettingsScreen({
               onEditServer={onEditMcpServer}
               onMoveServer={onMoveMcpServer}
               onReloadFailedServers={onReloadFailedMcpServers}
+              onFlushDraft={onFlushMcpDraft}
               onUpdateDraft={onUpdateMcpDraft}
             />
           )}

@@ -29,6 +29,12 @@ describe('built-in panel context boundaries', () => {
       expect(builtinPanelCanInvoke(subagent, channel, [{ threadId: 'thread-b', runId: 'run-a' }])).toBe(false)
     }
   })
+  it('lets subagent activity read MCP status without administering servers or tools', () => {
+    expect(builtinPanelCanInvoke(subagent, 'mcp:status', [])).toBe(true)
+    for (const channel of ['mcp:setRunning', 'mcp:setToolsEnabled', 'mcp:reloadServer']) {
+      expect(builtinPanelCanInvoke(subagent, channel, [])).toBe(false)
+    }
+  })
   it('allows subagent pages to cancel their own pending activity reads', () => {
     expect(builtinPanelCanInvoke(subagent, 'agent:activities:cancel', ['request-a'])).toBe(true)
     expect(builtinPanelCanInvoke(files, 'agent:activities:cancel', ['request-a'])).toBe(false)

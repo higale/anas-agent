@@ -1,6 +1,7 @@
 import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
-import { pluginToolId, pluginToolName, type ResolvedPluginTool } from '@shared/pluginTools'
+import { parsePluginCapabilityChoices, pluginCapabilityEnabled, type PluginCapabilityChoices, type PluginCapabilityKind } from '@shared/pluginCapabilities'
+import { pluginToolId, pluginToolName, type PluginToolDefinition, type ResolvedPluginTool } from '@shared/pluginTools'
 import { basename, dirname, extname, join } from 'node:path'
 import fs from 'stubborn-fs'
 import { parsePluginManifest, pluginHomePolicy, requirePluginHomeLocation, requirePluginIconPath, requirePluginId, requirePluginJson, requirePluginPath, type PluginManifest, type PluginSummary, type PluginInstallPreview } from '@shared/plugins'
@@ -149,7 +150,7 @@ export class PluginStore {
       const skillSummaries = await this.validateContributions(manifest, entry => this.packageFile(id, entry))
       const error = manifest.platforms && !manifest.platforms.includes(process.platform) ? 'Plugin does not support this platform.' : undefined
       const language = includeLanguages ? await loadPluginLanguages(await this.packageDirectory(id), manifest) : undefined
-      return { id, ...(builtin ? { builtin: true } : {}), manifest, skillSummaries, enabled: state.enabled, showInTitlebar: state.show_in_titlebar ?? false, error, backendStatus: 'stopped', languages: language?.languages, languageErrors: language?.errors }
+      return { id, ...(builtin ? { builtin: true } : {}), manifest, skillSummaries, capabilityChoices: state.capability_choices, enabled: state.enabled, showInTitlebar: state.show_in_titlebar ?? false, error, backendStatus: 'stopped', languages: language?.languages, languageErrors: language?.errors }
     } catch (error) {
       return { id, ...(this.isBuiltin(id) ? { builtin: true } : {}), enabled: false, error: error instanceof Error ? error.message : String(error), backendStatus: 'stopped' }
     }
@@ -167,10 +168,11 @@ export class PluginStore {
   private async installationState(id: string, create = false) {
     const path = await this.installationPath(id, create)
     const saved = await optionalJson(path)
-    const raw = (saved === undefined ? { version: 0 } : saved) as { version?: unknown; enabled?: unknown; show_in_titlebar?: unknown } | undefined
+    const raw = (saved === undefined ? { version: 0 } : saved) as { version?: unknown; enabled?: unknown; show_in_titlebar?: unknown; capability_choices?: unknown } | undefined
     if (!raw || raw.version !== 0 || (raw.enabled !== undefined && typeof raw.enabled !== 'boolean')
       || (raw.show_in_titlebar !== undefined && typeof raw.show_in_titlebar !== 'boolean')) throw new Error('Invalid plugin installation state.')
     return { path, exists: saved !== undefined, state: { version: 0, enabled: raw.enabled ?? true,
+      ...(raw.capability_choices === undefined ? {} : { capability_choices: parsePluginCapabilityChoices(raw.capability_choices) }),
       ...(raw.show_in_titlebar === undefined ? {} : { show_in_titlebar: raw.show_in_titlebar }) } }
   }
 
@@ -238,9 +240,7 @@ export class PluginStore {
     const tools: ResolvedPluginTool[] = []
     for (const id of selection) {
       const [pluginId, , localId] = id.split(':')
-      const manifest = await this.requireEnabled(pluginId)
-      const definition = manifest.tools.find(tool => tool.id === localId)
-      if (!definition) throw new Error(`Plugin tool is unavailable: ${id}`)
+      const definition = await this.requireTool({ pluginId, id: localId })
       const name = pluginToolName(pluginId, localId)
       tools.push({ ...definition, pluginId, name })
     }
@@ -248,9 +248,14 @@ export class PluginStore {
     return tools
   }
 
-  async requireTool(tool: Pick<ResolvedPluginTool, 'pluginId' | 'id'>): Promise<void> {
-    const manifest = await this.requireEnabled(tool.pluginId)
-    if (!manifest.tools.some(item => item.id === tool.id)) throw new Error(`Plugin tool is unavailable: ${pluginToolId(tool.pluginId, tool.id)}`)
+  async requireTool(tool: Pick<ResolvedPluginTool, 'pluginId' | 'id'>): Promise<PluginToolDefinition> {
+    const plugin = await this.read(tool.pluginId, false)
+    if (plugin.error || !plugin.enabled || !plugin.manifest) throw new Error(plugin.error ?? 'Plugin is disabled.')
+    const definition = plugin.manifest.tools.find(item => item.id === tool.id)
+    if (!definition || !pluginCapabilityEnabled(plugin.capabilityChoices, 'tool', tool.id)) {
+      throw new Error(`Plugin tool is unavailable: ${pluginToolId(tool.pluginId, tool.id)}`)
+    }
+    return definition
   }
 
   async requireEnabled(id: string): Promise<PluginManifest> {
@@ -474,6 +479,20 @@ export class PluginStore {
     if (enabled && item.error) throw new Error(item.error)
     const { path, state } = await this.installationState(id, true)
     await writeJsonFileAtomic(path, { ...state, enabled })
+  }
+
+  async setCapabilityEnabled(id: string, kind: PluginCapabilityKind, ids: string[], enabled: boolean): Promise<PluginCapabilityChoices> {
+    if (!['tool', 'skill', 'prompt'].includes(kind) || typeof enabled !== 'boolean' || !Array.isArray(ids)
+      || !ids.length || ids.length > 128 || ids.some(id => typeof id !== 'string')) throw new Error('Invalid plugin capability update.')
+    const plugin = await this.read(id, false)
+    if (plugin.error || !plugin.manifest) throw new Error(plugin.error ?? 'Plugin manifest is unavailable.')
+    const declarations = kind === 'tool' ? plugin.manifest.tools : kind === 'skill' ? plugin.manifest.skills : plugin.manifest.prompts
+    if (ids.some(id => !declarations?.some(item => item.id === id))) throw new Error('Plugin capability is unavailable.')
+    const { path, state } = await this.installationState(id, true)
+    const choices = state.capability_choices ?? {}
+    const capability_choices = parsePluginCapabilityChoices({ ...choices, [kind]: { ...choices[kind], ...Object.fromEntries(ids.map(id => [id, enabled])) } })
+    await writeJsonFileAtomic(path, { ...state, capability_choices })
+    return capability_choices
   }
 
   async setShowInTitlebar(id: string, show: boolean): Promise<void> {

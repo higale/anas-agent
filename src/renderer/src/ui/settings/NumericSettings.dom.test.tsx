@@ -44,7 +44,7 @@ describe('numeric settings', () => {
     const user = userEvent.setup()
     const onUpdateDraft = vi.fn()
     const t = ((key: string) => key) as Parameters<typeof emptyMcpDraft>[0]
-    render(<McpEditor mcpDraft={emptyMcpDraft(t)} runtimeEnabled={false} status={undefined}
+    render(<McpEditor mcpDraft={emptyMcpDraft(t)} onFlushDraft={async () => 'alpha'} status={undefined}
       onAutosizeInput={vi.fn()} onUpdateDraft={onUpdateDraft} />)
     const input = screen.getByRole('spinbutton', { name: 'settings.timeout_ms' })
     expect(input).toHaveValue('30,000')

@@ -80,6 +80,7 @@ export type PanelPreferences = Pick<AppSettings, 'diffViewMode' | 'diffFoldUncha
 export type PanelPreferencesSnapshot = PanelPreferences & { revision: number }
 /** The content renderer has only the services needed by shared presentation components. */
 export interface ContentServices {
+  mcp: Pick<GaleApi['mcp'], 'status' | 'onStatus'>
   preferences: import('./preferenceMemory').PreferenceMemoryApi
   app: Pick<GaleApi['app'], 'readHelp' | 'openExternalUrl'>
   files: Pick<GaleApi['files'], 'showItemInFolder' | 'readFileIcon' | 'readAttachmentPreview'>

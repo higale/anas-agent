@@ -1,3 +1,4 @@
+import { pluginCapabilityEnabled } from './pluginCapabilities'
 import { isPluginSkillId, validatePluginToolSelection, validatePluginPromptSelection } from './pluginTools'
 import { normalizeCompressionPrompt } from './summaryPrompt'
 import { requireDataVersion } from './dataVersion'
@@ -24,7 +25,7 @@ export interface SkillSelection {
 export interface McpServerToolSelection {
   id: string
   mode: 'all' | 'selected' | 'off'
-  /** Retained when switching to all, restored when switching back to selected. */
+  /** Exact tool subset retained in frozen runs and accepted from earlier definitions. */
   tools: string[]
 }
 
@@ -200,6 +201,59 @@ export function pluginSelectionMode(value: AgentCapabilities, id: string): 'all'
   return hasSelection ? 'custom' : 'off'
 }
 
+/** Editable definitions use whole-resource choices; immutable run snapshots keep their original detail. */
+export function normalizeCapabilityChoices(value: AgentCapabilities): AgentCapabilities {
+  const pluginIds = new Set([
+    ...(value.plugins ?? []).map(plugin => plugin.id),
+    ...value.pluginTools.map(id => id.split(':')[0]), ...value.pluginPrompts.map(id => id.split(':')[0]),
+    ...value.skills.entries.filter(entry => isPluginSkillId(entry.id)).map(entry => entry.id.split(':')[0])
+  ])
+  return { ...value,
+    mcp: { ...value.mcp, servers: value.mcp.servers.map(server => ({ id: server.id,
+      mode: server.mode === 'all' || (server.mode === 'selected' && server.tools.length > 0) ? 'all' : 'off', tools: [] })) },
+    ...(value.plugins || pluginIds.size ? { plugins: [...pluginIds].map(id => {
+      const mode = pluginSelectionMode({ ...value, pluginGroupMode: 'custom' }, id)
+      const selected = value.pluginTools.some(key => key.startsWith(`${id}:`)) || value.pluginPrompts.some(key => key.startsWith(`${id}:`))
+        || value.skills.entries.some(entry => entry.id.startsWith(`${id}:skill:`) && (entry.model || entry.shortcut))
+      return { id, mode: mode === 'all' || (mode === 'custom' && selected) ? 'all' : 'off' }
+    }) } : {}),
+    pluginTools: [], pluginPrompts: [],
+    skills: { ...value.skills, entries: value.skills.entries.filter(entry => !isPluginSkillId(entry.id))
+      .map(entry => ({ id: entry.id, model: entry.model || entry.shortcut, shortcut: entry.model || entry.shortcut })) }
+  }
+}
+
+export function setMcpServerEnabled(value: AgentCapabilities, id: string, enabled: boolean): AgentCapabilities {
+  const next = normalizeCapabilityChoices(value)
+  return withMcpServerSelection({ ...next, mcp: { mode: 'custom', defaultMode: mcpDefaultMode(next.mcp),
+    servers: next.mcp.servers.map(({ id }) => mcpServerSelection(next.mcp, id)) } }, { id, mode: enabled ? 'all' : 'off', tools: [] })
+}
+
+export function setPluginEnabled(value: AgentCapabilities, id: string, enabled: boolean): AgentCapabilities {
+  const next = normalizeCapabilityChoices(value)
+  const group = pluginGroupMode(next)
+  return { ...next, pluginGroupMode: 'custom',
+    pluginMode: group === 'all' || (group === 'custom' && next.pluginMode === 'default') ? 'default' : 'custom',
+    plugins: [...(next.plugins ?? []).filter(plugin => plugin.id !== id).map(plugin => ({ ...plugin,
+      mode: pluginSelectionMode(next, plugin.id) })), { id, mode: enabled ? 'all' : 'off' }] }
+}
+
+export function skillSelected(selection: SkillSelection, id: string): boolean {
+  return selection.mode === 'default' || (selection.mode === 'custom' && selection.entries.some(entry => entry.id === id && (entry.model || entry.shortcut)))
+}
+
+export function editableSkillSelection(selection: SkillSelection, skills: readonly SkillSummary[]): SkillSelection {
+  if (selection.mode === 'custom') return selection
+  const ids = new Set([...skills.filter(skill => skill.source !== 'plugin').map(skill => skill.id), ...selection.entries.map(entry => entry.id)])
+  return { ...selection, mode: 'custom', project: selection.mode === 'default',
+    entries: [...ids].map(id => ({ id, model: skillSelected(selection, id), shortcut: skillSelected(selection, id) })) }
+}
+
+export function setSkillEnabled(selection: SkillSelection, skills: readonly SkillSummary[], id: string, enabled: boolean): SkillSelection {
+  const next = editableSkillSelection(selection, skills)
+  return { ...next, entries: [...next.entries.filter(entry => entry.id !== id), { id, model: enabled, shortcut: enabled }] }
+}
+
 /** Resolve current declarations once before freezing a run. No global capability inheritance. */
 export function resolvePluginCapabilities(value: AgentCapabilities, plugins: readonly PluginSummary[], subagent = false): AgentCapabilities {
   const tools: string[] = [], prompts: string[] = []
@@ -209,15 +263,18 @@ export function resolvePluginCapabilities(value: AgentCapabilities, plugins: rea
     const mode = pluginSelectionMode(value, plugin.id)
     if (mode === 'off') continue
     for (const tool of plugin.manifest.tools) {
+      if (!pluginCapabilityEnabled(plugin.capabilityChoices, 'tool', tool.id)) continue
       const id = pluginToolId(plugin.id, tool.id)
       if (mode === 'all' || value.pluginTools.includes(id)) tools.push(id)
     }
     for (const prompt of plugin.manifest.prompts ?? []) {
+      if (!pluginCapabilityEnabled(plugin.capabilityChoices, 'prompt', prompt.id)) continue
       const id = pluginPromptId(plugin.id, prompt.id)
       if ((mode === 'all' || value.pluginPrompts.includes(id)) && (prompt.scope === 'all' || prompt.scope === (subagent ? 'subagent' : 'main'))
         && prompt.tools.every(tool => tools.includes(pluginToolId(plugin.id, tool)))) prompts.push(id)
     }
     for (const skill of plugin.manifest.skills ?? []) {
+      if (!pluginCapabilityEnabled(plugin.capabilityChoices, 'skill', skill.id)) continue
       const id = `${plugin.id}:skill:${skill.id}`
       const selected = value.skills.entries.find(entry => entry.id === id)
       if (mode === 'all') entries.push({ id, model: true, shortcut: !subagent })
@@ -288,10 +345,6 @@ export function toolAllowed(capabilities: AgentCapabilities, id: string): boolea
   return toolSelected(capabilities, id)
 }
 
-export function mcpGroupMode(selection: McpSelection): CapabilityGroupMode {
-  return selection.mode ?? (selection.defaultMode === 'all' && !selection.servers.length ? 'all' : 'custom')
-}
-
 function mcpDefaultMode(selection: McpSelection): McpSelection['defaultMode'] {
   return selection.mode === 'all' ? 'all' : selection.mode === 'off' ? 'selected' : selection.defaultMode
 }
@@ -310,16 +363,6 @@ function withMcpServerSelection(value: AgentCapabilities, server: McpServerToolS
   const exists = value.mcp.servers.some((entry) => entry.id === server.id)
   const servers = exists ? value.mcp.servers.map((entry) => entry.id === server.id ? server : entry) : [...value.mcp.servers, server]
   return { ...value, mcp: { ...value.mcp, servers } }
-}
-
-export function setMcpServerMode(value: AgentCapabilities, id: string, mode: McpServerToolSelection['mode']): AgentCapabilities {
-  return withMcpServerSelection(value, { ...mcpServerSelection(value.mcp, id), mode })
-}
-
-export function setMcpToolSelection(value: AgentCapabilities, id: string, name: string, checked: boolean): AgentCapabilities {
-  const server = mcpServerSelection(value.mcp, id)
-  const retained = server.tools.filter((tool) => tool !== name)
-  return withMcpServerSelection(value, { ...server, mode: 'selected', tools: checked ? [...retained, name] : retained })
 }
 
 export function mcpToolAllowed(value: AgentCapabilities, id: string, name: string): boolean {
@@ -391,23 +434,6 @@ export function resolveSkillSelection(selection: SkillSelection, skills: readonl
       return { id: skill.id, shortcut: !subagent && available && enabled && shortcutAllowed && Boolean(chosen?.shortcut), model }
     })
   }
-}
-
-/** Editing one Skill from All/Off starts with the currently effective ordinary selections. */
-export function setSkillSelection(selection: SkillSelection, skills: readonly SkillSummary[], id: string, key: 'shortcut' | 'model', enabled: boolean): SkillSelection {
-  let entries = selection.entries
-  const ordinaryChange = !isPluginSkillId(id)
-  if (ordinaryChange && selection.mode !== 'custom') {
-    const ordinary = skills.filter(skill => skill.source !== 'plugin')
-    entries = [
-      ...selection.entries.filter(entry => isPluginSkillId(entry.id)),
-      ...selection.entries.filter(entry => !isPluginSkillId(entry.id) && !ordinary.some(skill => skill.id === entry.id))
-        .map(entry => ({ ...entry, shortcut: false, model: false })),
-      ...resolveSkillSelection(selection, ordinary).entries
-    ]
-  }
-  const current = entries.find(entry => entry.id === id) ?? { id, shortcut: false, model: false }
-  return { ...selection, mode: ordinaryChange ? 'custom' : selection.mode, entries: [...entries.filter(entry => entry.id !== id), { ...current, [key]: enabled }] }
 }
 
 export function projectSkillSnapshot(snapshot: SkillSnapshot | undefined, selection: SkillSelection, pluginTools?: readonly string[]): SkillSnapshot | undefined {

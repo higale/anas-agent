@@ -21,6 +21,26 @@ function api() {
   return config
 }
 describe('Agent package resource panel', () => {
+  it('applies package group actions without changing global choices or enabling broken package skills', async () => {
+    const config = api()
+    const resources = await config.subagentResources()
+    const broken = { ...resources.skills.skills[0], name: 'broken', id: 'subagent:reporter:skill:broken', loadError: { code: 'missing_frontmatter' as const } }
+    config.subagentResources.mockResolvedValue({ ...resources, skills: { ...resources.skills, skills: [...resources.skills.skills, broken] } })
+    const initial = { ...structuredClone(defaultCapabilities), skills: { mode: 'custom' as const, project: true,
+      entries: [{ id: 'user:private', model: true, shortcut: true }], package: { report: false, broken: false, retained: false } } }
+    const changed = vi.fn()
+    function Editor() {
+      const [value, setValue] = useState(initial)
+      return <CapabilityEditor subagent subagentId={draft.id} value={value} onChange={next => { setValue(next as typeof initial); changed(next) }} />
+    }
+    render(<Editor />)
+    const group = within(await screen.findByRole('group', { name: 'settings.subagent_package_skills' }))
+    await userEvent.click(group.getByRole('button', { name: 'capabilities.select_group_all' }))
+    expect(changed).toHaveBeenCalledOnce()
+    expect(changed.mock.lastCall![0].skills).toEqual({ ...initial.skills, package: { report: true, broken: false, retained: false } })
+    await userEvent.click(group.getByRole('button', { name: 'capabilities.clear_group_all' }))
+    expect(changed.mock.lastCall![0].skills).toEqual(initial.skills)
+  })
   it('defaults resources on and persists explicit off choices', async () => {
     api()
     const changes = vi.fn()
@@ -74,6 +94,27 @@ describe('Agent package resource panel', () => {
       expect(value.skills).toMatchObject({ mode: checked ? 'default' : 'off', package: { report: checked, retained: checked } })
       expect(value.customTools).toMatchObject({ mode: checked ? 'all' : 'off', package: { query: checked } })
     }
+  })
+
+  it('enables a package resource independently after disabling all capabilities', async () => {
+    api()
+    const changed = vi.fn()
+    function Harness() {
+      const [value, setValue] = useState(defaultCapabilities)
+      return <CapabilityEditor subagent subagentId="reporter" value={value} onChange={next => { setValue(next); changed(next) }} />
+    }
+    render(<Harness />)
+    const skill = await screen.findByRole('checkbox', { name: 'report' })
+    const tool = screen.getByRole('checkbox', { name: 'query' })
+    await userEvent.click(screen.getByRole('button', { name: 'settings.capabilities_disable_all' }))
+    await userEvent.click(skill)
+    expect(skill).toBeChecked()
+    expect(tool).not.toBeChecked()
+    expect(changed.mock.lastCall![0].skills).toMatchObject({ mode: 'custom', project: false, entries: [], package: { report: true } })
+    await userEvent.click(tool)
+    expect(tool).toBeChecked()
+    expect(changed.mock.lastCall![0].customTools).toMatchObject({ mode: 'custom', project: false, entries: [], package: { query: true } })
+    expect(screen.getByRole('checkbox', { name: 'settings.capability_commandExecution' })).not.toBeChecked()
   })
 
   it('waits for the current Agent catalog and ignores a late result from a previous Agent', async () => {

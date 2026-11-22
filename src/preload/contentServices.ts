@@ -4,6 +4,14 @@ import { subscribeAgentRuntimeEvents } from './agentEventSubscription'
 
 /** The same content bridge is used by main and built-in content renderers. */
 export const contentServices: ContentServices = {
+  mcp: {
+    status: () => ipcRenderer.invoke('mcp:status'),
+    onStatus: listener => {
+      const handler = (_event: Electron.IpcRendererEvent, status: import('@shared/types').McpToolStatus) => listener(status)
+      ipcRenderer.on('mcp:status', handler)
+      return () => ipcRenderer.removeListener('mcp:status', handler)
+    }
+  },
   preferences: {
     clear: () => ipcRenderer.invoke('memory:clear'),
     save: (scope, hash, content) => ipcRenderer.invoke('memory:document:save', scope, hash, content),

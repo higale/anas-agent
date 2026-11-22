@@ -13,6 +13,7 @@ interface McpSettingsProps {
   runtimeEnabled: boolean
   sectionClass: string
   status: McpToolStatus | undefined
+  onFlushDraft(): Promise<string>
   onAutosizeInput: (event: FormEvent<HTMLTextAreaElement>) => void
   onDeleteServer: () => void | Promise<void>
   onEditServer: (index: number) => void | Promise<void>
@@ -30,6 +31,7 @@ export function McpSettings({
   runtimeEnabled,
   sectionClass,
   status,
+  onFlushDraft,
   onAutosizeInput,
   onDeleteServer,
   onEditServer,
@@ -58,7 +60,7 @@ export function McpSettings({
 
       <McpEditor
         mcpDraft={mcpDraft}
-        runtimeEnabled={runtimeEnabled}
+        onFlushDraft={onFlushDraft}
         selectedServer={selectedServer}
         status={status}
         onAutosizeInput={onAutosizeInput}

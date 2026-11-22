@@ -1,3 +1,4 @@
+import { pluginCapabilityEnabled } from '@shared/pluginCapabilities'
 import { findSubagentPackage } from './subagentPackages'
 import { requireDataVersion } from '@shared/dataVersion'
 import { listPackageFiles, readPackageFile, savePackageFile } from './packageFiles'
@@ -436,10 +437,20 @@ async function loadPluginSkills(config: SkillsConfigFile): Promise<RootScan[]> {
       const path = await store.packageDirectory(plugin.id)
       const root: SkillRootSummary = { id: `plugin:${plugin.id}`, kind: 'plugin', name: plugin.manifest.name,
         shortcutAlias: `plugin:${plugin.id}`, path, removable: false, available: true }
-      scans.push(await scanRoot(root, config, plugin.manifest.skills.map(skill => ({
+      const scan = await scanRoot(root, config, plugin.manifest.skills.map(skill => ({
         id: `${plugin.id}:skill:${skill.id}`, name: basename(dirname(skill.path)), path: join(path, dirname(skill.path)), linked: false,
         requiredTools: skill.tools.map(id => pluginToolId(plugin.id, id))
-      }))))
+      })))
+      for (const skill of scan.skills) {
+        skill.summary.configuredAvailability = { modelAvailable: skill.summary.modelAvailable, userAvailable: skill.summary.userAvailable }
+        const declaration = plugin.manifest.skills.find(item => `${plugin.id}:skill:${item.id}` === skill.summary.id)!
+        if (!pluginCapabilityEnabled(plugin.capabilityChoices, 'skill', declaration.id)
+          || declaration.tools.some(id => !pluginCapabilityEnabled(plugin.capabilityChoices, 'tool', id))) {
+          skill.summary.modelAvailable = false
+          skill.summary.userAvailable = false
+        }
+      }
+      scans.push(scan)
     }
     return scans
   })
@@ -586,9 +597,10 @@ export async function updateSkillAvailability(projectId: string | undefined, ski
   const currentSkill = await findSkill(projectId, skillId)
   if (currentSkill.summary.source === 'project') throw new Error('Select project skills in project capability settings.')
   return mutateSkillsConfig(async (config) => {
+    const configured = currentSkill.summary.configuredAvailability ?? currentSkill.summary
     const current = config.availability[skillId] ?? {
-      model_available: currentSkill.summary.modelAvailable,
-      user_available: currentSkill.summary.userAvailable
+      model_available: configured.modelAvailable,
+      user_available: configured.userAvailable
     }
     config.availability[skillId] = {
       model_available: update.modelAvailable ?? current.model_available,

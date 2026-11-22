@@ -81,6 +81,22 @@ async function openGroup(button: HTMLElement): Promise<void> {
 }
 
 describe('Skills settings tree', () => {
+  it('edits configured plugin skill uses even while its effective availability is off', async () => {
+    renderSkills({ ...snapshot, skills: [{ ...snapshot.skills[0], source: 'plugin', modelAvailable: false, userAvailable: false,
+      configuredAvailability: { modelAvailable: true, userAvailable: false } }] })
+    await openGroup(screen.getByRole('button', { name: /^settings.skill_group_system/ }))
+    await userEvent.click(within(document.querySelector('.settings-skill-tree') as HTMLElement).getByRole('button', { name: /^config/ }))
+    const group = within(screen.getByRole('group', { name: 'config' }))
+    const model = group.getByRole('checkbox', { name: 'settings.skill_model_available' })
+    const shortcut = group.getByRole('checkbox', { name: 'settings.skill_user_available' })
+    expect(model).toBeChecked()
+    expect(shortcut).not.toBeChecked()
+    await userEvent.click(model)
+    expect(updateAvailability).toHaveBeenLastCalledWith('system:config', { modelAvailable: false })
+    await userEvent.click(shortcut)
+    expect(updateAvailability).toHaveBeenLastCalledWith('system:config', { userAvailable: true })
+  })
+
   it.each([1024, 1025, 1510])('warns only above 1024 characters and keeps a %i-character skill selectable', async length => {
     renderSkills({ ...snapshot, skills: [{ ...snapshot.skills[0], description: '长'.repeat(length) }] })
     await openGroup(screen.getByRole('button', { name: /^settings.skill_group_system/ }))

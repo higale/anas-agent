@@ -54,11 +54,11 @@ export function McpListPane({
       <div className="ui-scroll-list ui-list" ref={listRef}>
         {config && config.mcpServers.length === 0 && <div className="ui-empty-state ui-empty-state-compact">{t('settings.no_mcp_servers_configured')}</div>}
         {config?.mcpServers.map((server) => {
-          const runtimeStatus = runtimeEnabled && server.enabled ? mcpServerRuntimeStatus(status, server) : undefined
-          const loaded = runtimeEnabled && server.enabled ? mcpLoadedStatus(status, server) : undefined
-          const errorText = runtimeEnabled && server.enabled ? mcpErrorStatus(status, server) : undefined
+          const runtimeStatus = runtimeEnabled ? mcpServerRuntimeStatus(status, server) : undefined
+          const loaded = runtimeEnabled ? mcpLoadedStatus(status, server) : undefined
+          const errorText = runtimeEnabled ? mcpErrorStatus(status, server) : undefined
           const recovering = runtimeStatus?.state === 'recovering'
-          const loading = runtimeEnabled && server.enabled && !loaded && !errorText && (!runtimeStatus || runtimeStatus.state === 'idle' || runtimeStatus.state === 'starting')
+          const loading = runtimeStatus?.state === 'starting'
           const detailText = loaded
             ? t('settings.tools_count', { count: loaded.toolCount })
             : errorText
@@ -71,7 +71,7 @@ export function McpListPane({
           return (
             <button
               className={server.index === editingIndex ? 'ui-list-item-split ui-list-item ui-list-item-active active' : 'ui-list-item-split ui-list-item'}
-              key={`${server.index}-${server.name}`}
+              key={server.id}
               type="button"
               aria-pressed={server.index === editingIndex}
               onClick={() => void onEditServer(server.index)}
@@ -82,15 +82,16 @@ export function McpListPane({
                   {server.type} - {server.id || '-'}{detailText ? ` · ${detailText}` : ''}
                 </small>
               </span>
-              {!server.enabled || errorText ? (
-                <SettingsAvailabilityBadge disabled={!server.enabled} error={Boolean(errorText)} />
-              ) : loaded ? (
-                <em className="ui-list-item-badge ui-badge-success">{t('settings.running')}</em>
-              ) : recovering ? (
-                <em className="ui-list-item-badge ui-badge-warning">{t('settings.mcp_state_recovering')}</em>
-              ) : loading ? (
-                <em className="ui-list-item-badge ui-badge-warning">{t('settings.pending')}</em>
-              ) : null}
+              <span className="ui-row">
+                {(!server.enabled || errorText) && <SettingsAvailabilityBadge disabled={!server.enabled} error={Boolean(errorText)} />}
+                {runtimeStatus?.state === 'ready' ? (
+                  <em className="ui-list-item-badge ui-badge-success">{t('settings.running')}</em>
+                ) : recovering ? (
+                  <em className="ui-list-item-badge ui-badge-warning">{t('settings.mcp_state_recovering')}</em>
+                ) : loading ? (
+                  <em className="ui-list-item-badge ui-badge-warning">{t('settings.pending')}</em>
+                ) : null}
+              </span>
             </button>
           )
         })}

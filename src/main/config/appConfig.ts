@@ -1,3 +1,5 @@
+import { parseMcpToolCatalog, parseMcpToolChoices, type McpToolCatalog } from '@shared/mcpCatalog'
+import { mcpConfigKey } from './mcpServerConfigMapper'
 // Skill settings keep their domain store and serialized mutation queue.
 import { createHash, randomUUID } from 'node:crypto'
 import { dirname } from 'node:path'
@@ -462,7 +464,7 @@ export async function getMcpRuntimeConfigSnapshot(): Promise<McpRuntimeConfigSna
   const raw = await readRawConfig()
   return {
     enabled: true,
-    servers: (raw.mcp_servers ?? []).map(normalizeMcpServer).filter((server) => server.enabled)
+    servers: (raw.mcp_servers ?? []).map(normalizeMcpServer)
   }
 }
 
@@ -1014,6 +1016,14 @@ export async function updateSpeechReply(settings: Partial<SpeechReplyConfig>): P
   })
 }
 
+function assertMcpEnablingHasTools(previous: unknown, next: RawMcpServer, index: number): void {
+  if (next.enabled !== true || asRecord(previous).enabled === true) return
+  const server = normalizeMcpServer(next, index)
+  if (!server.toolCatalog?.tools.length || server.toolCatalog.connection_key !== mcpConfigKey(server)) {
+    throw new Error('Start the MCP server and discover tools before enabling it.')
+  }
+}
+
 export async function updateMcpServer(index: number, update: McpServerUpdate): Promise<AppConfigSnapshot> {
   return serializeConfigMutation(async () => {
     const raw = await readRawConfig()
@@ -1025,6 +1035,7 @@ export async function updateMcpServer(index: number, update: McpServerUpdate): P
       enabled: update.enabled ?? server.enabled,
       timeout_ms: update.timeoutMs ?? server.timeout_ms
     }
+    assertMcpEnablingHasTools(server, servers[index] as RawMcpServer, index)
     assertUniqueMcpServerIds(servers)
     raw.mcp_servers = servers
     await writeRawMcpServersConfig(raw)
@@ -1037,10 +1048,14 @@ export async function saveMcpServer(server: McpServerConfigSave): Promise<AppCon
     const raw = await readRawConfig()
     const servers = Array.isArray(raw.mcp_servers) ? [...raw.mcp_servers] : []
     if (server.index === undefined) {
-      servers.push(rawMcpServerFromSave(server))
+      const created = rawMcpServerFromSave(server)
+      assertMcpEnablingHasTools(undefined, created, servers.length)
+      servers.push(created)
     } else {
       if (server.index < 0 || server.index >= servers.length) throw new Error(`MCP server index ${server.index} is out of range.`)
-      servers[server.index] = rawMcpServerFromSave(server, asRecord(servers[server.index]) as RawMcpServer)
+      const previous = servers[server.index]
+      servers[server.index] = rawMcpServerFromSave(server, asRecord(previous) as RawMcpServer)
+      assertMcpEnablingHasTools(previous, servers[server.index] as RawMcpServer, server.index)
     }
     assertUniqueMcpServerIds(servers)
     raw.mcp_servers = servers
@@ -1073,5 +1088,31 @@ export async function moveMcpServer(index: number, direction: -1 | 1): Promise<A
     raw.mcp_servers = servers
     await writeRawMcpServersConfig(raw)
     return getAppConfigSnapshot()
+  })
+}
+
+export async function saveMcpToolCatalog(id: string, catalog: McpToolCatalog): Promise<boolean> {
+  return serializeConfigMutation(async () => {
+    const raw = await readRawConfig()
+    const servers = raw.mcp_servers ?? []
+    const index = servers.findIndex((server, index) => normalizeMcpServer(server, index).id === id)
+    if (index < 0 || mcpConfigKey(normalizeMcpServer(servers[index], index)) !== catalog.connection_key) return false
+    servers[index] = { ...asRecord(servers[index]), tool_catalog: parseMcpToolCatalog(catalog) }
+    await writeRawMcpServersConfig(raw)
+    return true
+  })
+}
+
+export async function setMcpToolEnabled(id: string, names: string[], enabled: boolean): Promise<void> {
+  await serializeConfigMutation(async () => {
+    if (typeof enabled !== 'boolean' || !Array.isArray(names) || !names.length || names.some(name => typeof name !== 'string')) throw new Error('Invalid MCP tool selection.')
+    const raw = await readRawConfig()
+    const servers = raw.mcp_servers ?? []
+    const index = servers.findIndex((server, index) => normalizeMcpServer(server, index).id === id)
+    if (index < 0) throw new Error('MCP server no longer exists.')
+    const server = normalizeMcpServer(servers[index], index)
+    if (server.toolCatalog?.connection_key !== mcpConfigKey(server) || names.some(name => !server.toolCatalog?.tools.some(tool => tool.name === name))) throw new Error('MCP tool no longer exists.')
+    servers[index] = { ...asRecord(servers[index]), tool_choices: parseMcpToolChoices({ ...server.toolChoices, ...Object.fromEntries(names.map(name => [name, enabled])) }) }
+    await writeRawMcpServersConfig(raw)
   })
 }

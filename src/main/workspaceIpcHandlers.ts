@@ -11,12 +11,12 @@ import { BrowserWindow, shell } from 'electron'
 import { realpath, stat } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import type { AppAvatarImage, AppConfigSnapshot, AppProfileUpdate, AppSettingsUpdate, AttachmentPreview, AttachmentPreviewOptions, AvatarCropSource, AvatarCropSourceReadResult, FileIconImage, FileIconSize, InputHistorySnapshot, McpMaintenanceResult, McpServerConfigSave, McpServerUpdate, McpToolStatus, ModelListRequest, ModelListResponse, ModelProviderConfigSave, Project, ProjectCreateRequest, ProjectStateUpdate, ProjectUpdateRequest, ProviderModelConfigSave, SelectedAttachment, SkillAvailabilityUpdate, SkillDirectoryAddResult, SkillFileNode, SkillFilePreview, SkillImportResult, SkillInvocationResult, SkillRootUpdate, SkillSnapshot, SpeechReplyConfig, SubagentConfigSave } from '@shared/types'
-import { saveCustomTool, deleteCustomTool, moveCustomTool, addProviderModels, deleteMcpServer, deleteModelProvider, deleteProviderModel, deleteSubagent, getAppConfigSnapshot, moveMcpServer, moveModelProvider, moveProviderModel, moveSubagent, onAppConfigChanged, saveMcpServer, saveModelProvider, saveProviderModel, saveSubagent, selectDefaultModel, updateMcpServer, updateProfile, updateSettings, updateSpeechReply } from './config/appConfig'
+import { setMcpToolEnabled, saveCustomTool, deleteCustomTool, moveCustomTool, addProviderModels, deleteMcpServer, deleteModelProvider, deleteProviderModel, deleteSubagent, getAppConfigSnapshot, moveMcpServer, moveModelProvider, moveProviderModel, moveSubagent, onAppConfigChanged, saveMcpServer, saveModelProvider, saveProviderModel, saveSubagent, selectDefaultModel, updateMcpServer, updateProfile, updateSettings, updateSpeechReply } from './config/appConfig'
 import { validateCustomToolSchema } from '@shared/customTools'
 import { addExternalSkillDirectory, buildUserSkillInvocation, importSkillDirectories, listSkillFiles, listSkillSnapshot, moveExternalSkillDirectory, readSkillFile, saveSkillFile, removeExternalSkillDirectory, toSkillImportError, updateExternalSkillDirectory, updateSkillAvailability } from './skillsStore'
 import { getSkillExamplesDir, getSubagentExamplesDir, getToolExamplesDir } from './config/dataDir'
 import { addInputHistory, getInputHistory, removeInputHistory, setInputHistoryPinned } from './inputHistoryStore'
-import { closeCachedMcpServerIndex, getCachedMcpStatus, loadMcpRuntimeForCurrentConfig, pingAndReloadFailedMcpServers, reloadMcpRuntimeForServer } from './mcpRuntimeService'
+import { setMcpServerRunning, getCachedMcpStatus, loadMcpRuntimeForCurrentConfig, pingAndReloadFailedMcpServers, reloadMcpRuntimeForServer } from './mcpRuntimeService'
 import { fetchAvailableModels, getCachedAvailableModels } from './modelListService'
 import { attachmentExtensions, clearAvatarImage, onAvatarChanged, readAttachmentPreview, readAvatarCropSource, readAvatarCropSourceResult, readAvatarImage, readCurrentAvatarCropSource, readFileIcon, readSelectedAttachments, releaseTemporaryAttachments, retainTemporaryAttachment, saveAvatarCrop } from './attachments'
 import { avatarImageExtensions } from './avatarAssets'
@@ -233,13 +233,13 @@ export function registerWorkspaceIpcHandlers(): void {
   })
   handleMainIpc('config:updateMcpServer', async (_event, index: number, update: McpServerUpdate): Promise<AppConfigSnapshot> => {
     const snapshot = await updateMcpServer(index, update)
-    runMcpUpdateInBackground(reloadMcpRuntimeForServer(index), 'reload an updated MCP server')
+    runMcpUpdateInBackground(loadMcpRuntimeForCurrentConfig(false), 'apply an updated MCP server')
     return snapshot
   })
   handleMainIpc('config:saveMcpServer', async (_event, server: McpServerConfigSave): Promise<AppConfigSnapshot> => {
     const snapshot = await saveMcpServer(server)
     runMcpUpdateInBackground(
-      reloadMcpRuntimeForServer(server.index ?? snapshot.mcpServers.length - 1),
+      loadMcpRuntimeForCurrentConfig(false),
       'load a saved MCP server'
     )
     return snapshot
@@ -247,7 +247,7 @@ export function registerWorkspaceIpcHandlers(): void {
   handleMainIpc('config:deleteMcpServer', async (_event, index: number): Promise<AppConfigSnapshot> => {
     const snapshot = await deleteMcpServer(index)
     runMcpUpdateInBackground(
-      closeCachedMcpServerIndex(index).then(() => loadMcpRuntimeForCurrentConfig(false)),
+      loadMcpRuntimeForCurrentConfig(false),
       'remove a deleted MCP server'
     )
     return snapshot
@@ -288,6 +288,14 @@ export function registerWorkspaceIpcHandlers(): void {
   handleMainIpc('skills:updateDirectory', async (_event, projectId: string | undefined, rootId: string, update: SkillRootUpdate): Promise<SkillSnapshot> => updateExternalSkillDirectory(rootId, update, projectId))
   handleMainIpc('skills:removeDirectory', async (_event, projectId: string | undefined, rootId: string): Promise<SkillSnapshot> => removeExternalSkillDirectory(rootId, projectId))
   handleMainIpc('skills:moveDirectory', async (_event, projectId: string | undefined, rootId: string, direction: -1 | 1): Promise<SkillSnapshot> => moveExternalSkillDirectory(rootId, direction, projectId))
+  handleMainIpc('mcp:setRunning', async (_event, id: string, running: boolean): Promise<McpToolStatus> => {
+    if (typeof id !== 'string' || !id || typeof running !== 'boolean') throw new Error('Invalid MCP start/stop request.')
+    return setMcpServerRunning(id, running)
+  })
+  handleMainIpc('mcp:setToolsEnabled', async (_event, id: string, names: string[], enabled: boolean): Promise<McpToolStatus> => {
+    await setMcpToolEnabled(id, names, enabled)
+    return loadMcpRuntimeForCurrentConfig(false)
+  })
   handleMainIpc('mcp:test', async (): Promise<McpToolStatus> => {
     return loadMcpRuntimeForCurrentConfig(true)
   })

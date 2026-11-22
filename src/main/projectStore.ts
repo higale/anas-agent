@@ -13,7 +13,7 @@ import { getDefaultWorkspaceDir, getProjectStoreFile } from './config/dataDir'
 import { isProjectDirectoryId, isProjectStorageEntry } from './projectStorageEntries'
 import { parseResourceDirectories } from './resourceDirectories'
 import { PROJECT_ICON_COLORS, PROJECT_ICON_NAMES } from '@shared/projectAppearance'
-import { defaultCapabilities, defaultProjectSettings, defaultRestrictSubagents, parseCapabilities, serializeCapabilities, validateCapabilities } from '@shared/agentCapabilities'
+import { normalizeCapabilityChoices, defaultCapabilities, defaultProjectSettings, defaultRestrictSubagents, parseCapabilities, serializeCapabilities, validateCapabilities } from '@shared/agentCapabilities'
 import {
   compareProjects,
   DEFAULT_WORKSPACE_PROJECT_ID,
@@ -113,7 +113,7 @@ function requireProject(value: unknown, index: number): Project {
     ...(icon_data !== undefined ? { iconData: normalizeIconData(icon_data) } : {}),
     ...(sort_order !== undefined ? { sortOrder: sort_order } : {}),
     ...(thread_order !== undefined ? { threadOrder: thread_order } : {}),
-    ...(project.kind === 'workspace' ? { skillDirectories: parseResourceDirectories(skill_directories), toolDirectories: parseResourceDirectories(tool_directories), accessMode: validateProjectAccessMode(access_mode), capabilities: parseCapabilities(capabilities), restrictSubagents: restrict_subagents, codingMode: coding_mode, compressionPrompt: normalizeCompressionPrompt(compression_prompt), prompt: validateProjectPrompt(project.prompt) } : {})
+    ...(project.kind === 'workspace' ? { skillDirectories: parseResourceDirectories(skill_directories), toolDirectories: parseResourceDirectories(tool_directories), accessMode: validateProjectAccessMode(access_mode), capabilities: normalizeCapabilityChoices(parseCapabilities(capabilities)), restrictSubagents: restrict_subagents, codingMode: coding_mode, compressionPrompt: normalizeCompressionPrompt(compression_prompt), prompt: validateProjectPrompt(project.prompt) } : {})
   } as Project
 }
 
@@ -460,7 +460,7 @@ function projectCapabilities(request: Extract<ProjectCreateRequest, { kind: 'wor
   if (typeof request.codingMode !== 'boolean') throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Invalid project coding mode.')
   let capabilities
   try {
-    capabilities = validateCapabilities(request.capabilities)
+    capabilities = normalizeCapabilityChoices(validateCapabilities(request.capabilities))
   } catch {
     throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Invalid capability settings.')
   }

@@ -21,7 +21,7 @@ async function verifyGlobalSettings(launchApplication) {
         skills: { ...project.capabilities.skills, mode: 'off' }, mcp: { defaultMode: 'selected', servers: [] }
       }
       const first = await globalThis.gale.projects.create({ ...project, name: 'Custom workspace', capabilities })
-      const second = await globalThis.gale.projects.create({ ...project, name: 'Other workspace', sourceFolders: [root] })
+      const second = await globalThis.gale.projects.create({ ...project, name: 'Other workspace', sourceFolders: [root], skillDirectories: [root] })
       if (first.status !== 'ok' || second.status !== 'ok') throw new Error('Project fixture setup failed.')
       return [first.value.name, second.value.name]
     }, root)
@@ -33,8 +33,8 @@ async function verifyGlobalSettings(launchApplication) {
         return { scheduled: false, reason: 'no_servers' }
       })
       ipcMain.removeHandler('skills:get')
-      ipcMain.handle('skills:get', (_event, projectId, sourceFolders) => {
-        const roots = ['system', 'user', ...(projectId ? ['project'] : []), ...(sourceFolders?.length > 1 ? ['project-extra'] : [])].map((id) => ({
+      ipcMain.handle('skills:get', (_event, projectId, skillDirectories) => {
+        const roots = ['system', 'user', ...(projectId && skillDirectories?.length ? ['project'] : []), ...(skillDirectories?.length > 1 ? ['project-extra'] : [])].map((id) => ({
           id, kind: id.startsWith('project') ? 'project' : id, name: `${id} directory`, shortcutAlias: id,
           path: `/skills/${id}`, removable: false, available: true
         }))
@@ -47,6 +47,8 @@ async function verifyGlobalSettings(launchApplication) {
       })
       ipcMain.removeHandler('projects:chooseSourceFolders')
       ipcMain.handle('projects:chooseSourceFolders', () => ({ status: 'ok', value: [extraFolder] }))
+      ipcMain.removeHandler('projects:chooseSkillDirectories')
+      ipcMain.handle('projects:chooseSkillDirectories', () => ({ status: 'ok', value: [extraFolder] }))
     }, extraFolder)
     await page.reload()
     let globalPreferences = ''
@@ -76,14 +78,20 @@ async function verifyGlobalSettings(launchApplication) {
           'Project editing must be centered between the title bar and the bottom inset.')
         await dialog.getByRole('button', { name: 'Add folders', exact: true }).click()
         await expect(dialog.locator('.project-folder-item')).toHaveCount(2)
+        await dialog.getByRole('button', { name: 'Add skill directories', exact: true }).click()
         await dialog.locator('button[type="submit"]').click()
         await expect(dialog).not.toBeVisible()
         await page.locator('[data-agent-composer-input]').fill('/project-extra')
         await expect(page.locator('.composer-suggestion-apply').filter({ hasText: 'project-extra-search' })).toBeVisible()
         await page.locator('[data-agent-composer-input]').fill('')
       }
+      const composer = page.locator('[data-agent-composer-input]')
+      await composer.fill('/')
+      await expect(page.locator('.composer-suggestions')).toBeVisible()
       await page.locator('.sidebar-settings').click()
       await page.locator('.app-menu-item').first().click()
+      await expect(page.locator('main.settings-workspace')).toBeVisible()
+      await expect(page.locator('.composer-suggestions')).toHaveCount(0)
       await page.locator('[data-settings-tab="general"]').click()
       await expect(page.getByRole('heading', { name: 'General', exact: true })).toBeVisible()
       await expect(page.locator('[data-settings-tab="appearance"], [data-settings-tab="localData"]')).toHaveCount(0)
@@ -133,9 +141,12 @@ async function verifyGlobalSettings(launchApplication) {
       await expect.poll(() => page.evaluate(async () => (await globalThis.gale.preferences.read({ kind: 'global' })).content.split(/\r?\n/))).toEqual(globalPreferences.split('\n'))
       if (process.env.ANAS_E2E_GLOBAL_SETTINGS_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_GLOBAL_SETTINGS_SCREENSHOT })
       await page.getByRole('button', { name: 'Back to app', exact: true }).click()
+      await expect(composer).toHaveValue('/')
+      await expect(page.locator('.composer-suggestions')).toBeVisible()
+      await composer.fill('')
     }
     assert.equal(await application.evaluate(() => globalThis.__globalSettingsReloads), 2)
-    console.log('Global settings E2E passed: unified General page with profile/theme saves and cleanup access, project-independent pages, global skills and memories, MCP without a model, and project composer skills including edited source folders.')
+    console.log('Global settings E2E passed: unified General page with profile/theme saves and cleanup access, project-independent pages, global skills and memories, MCP without a model, manual project skill directories, and composer suggestions hidden in settings while preserving the draft.')
   } finally {
     await application?.close()
     await rm(root, { recursive: true, force: true })

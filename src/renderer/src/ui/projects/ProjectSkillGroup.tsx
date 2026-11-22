@@ -6,6 +6,9 @@ import { ProjectResourceGroup, type ProjectDirectoryControls } from './ProjectRe
 export function ProjectSkillGroup({ skills, renderSkill, ...controls }: Omit<ProjectDirectoryControls, 'onAddDirectories'> & {
   skills?: SkillSnapshot
   renderSkill(skill: SkillSummary): ReactNode
+  onSelectionChange?(skills: SkillSummary[], checked: boolean): void
+  isAllSelected?(skills: SkillSummary[]): boolean
+  selectionDisabled?: boolean
 }) {
   const { t } = useTranslation()
   return <ProjectResourceGroup kind="skill" {...controls}

@@ -195,8 +195,8 @@ export function createMcpClientForServer(server: McpServerConfig, hooks: McpClie
   return Object.freeze({
     client: {
       initialize: async () => {
-        await session.connect()
-        return mcpToolDefinitions(server.id, session.client, await listMcpTools(session.client), { ...hooks, timeoutMs: server.timeoutMs })
+        await session.connect(server.timeoutMs)
+        return mcpToolDefinitions(server.id, session.client, await listMcpTools(session.client, server.timeoutMs), { ...hooks, timeoutMs: server.timeoutMs })
       },
       ping: (options: { timeout: number }) => session.client.ping(options),
       close: () => session.close()

@@ -4,7 +4,7 @@ import type {
   SubagentPreset
 } from '@shared/types'
 import type { RawSubagentConfig } from './rawAppConfig'
-import { parseCapabilities, serializeCapabilities } from '@shared/agentCapabilities'
+import { normalizeCapabilityChoices, parseCapabilities, serializeCapabilities } from '@shared/agentCapabilities'
 import { validateSubagentModelSelection } from '@shared/subagentConfig'
 import { subagentPresetIds } from '@shared/subagentPackages'
 
@@ -55,7 +55,7 @@ export function normalizeSubagent(raw: RawSubagentConfig, index: number): Subage
     description: text(raw.description, `${path}.description`),
     systemPrompt: text(raw.system_prompt, `${path}.system_prompt`),
     ...validateSubagentModelSelection({ modelConfigId: raw.model_config_id, modelParameterPresetId: raw.model_parameter_preset_id }),
-    capabilities: parseCapabilities(raw.capabilities)
+    capabilities: normalizeCapabilityChoices(parseCapabilities(raw.capabilities))
   }
 }
 
@@ -86,6 +86,6 @@ export function rawSubagentFromSave(
     system_prompt: systemPrompt,
     ...(selection.modelConfigId ? { model_config_id: selection.modelConfigId } : {}),
     ...(selection.modelParameterPresetId !== undefined ? { model_parameter_preset_id: selection.modelParameterPresetId } : {}),
-    capabilities: serializeCapabilities(subagent.capabilities)
+    capabilities: serializeCapabilities(normalizeCapabilityChoices(subagent.capabilities))
   }
 }
