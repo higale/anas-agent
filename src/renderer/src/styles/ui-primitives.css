@@ -920,6 +920,8 @@ button.ui-icon-box:focus-visible {
 }
 
 .ui-tool-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-size: var(--font-size-code);
   font-weight: 400;
 }

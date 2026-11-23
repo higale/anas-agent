@@ -15,6 +15,7 @@ import { PluginIcon } from '../plugins/PluginIcon'
 import { PluginPreferences } from './PluginPreferences'
 import { PluginContributions } from './PluginContributions'
 import { dataTransferHasFiles } from '../dragDrop'
+import type { SkillAvailabilityUpdate, SkillSnapshot } from '@shared/types'
 
 function PluginLaunchSettings({ plugin, busy }: {
   plugin: PluginSummary; busy: boolean
@@ -141,8 +142,12 @@ function PluginBackendStatus({ plugin, busy, onRefresh }: {
   </div>
 }
 
-export function PluginsSettings({ plugins, error, onRefresh, className = 'settings-workbench ui-workbench ui-grid-sidebar' }: {
+export function PluginsSettings({ plugins, error, skills, onUpdateSkillAvailability, revealPluginId, onPluginRevealed, onRefresh, className = 'settings-workbench ui-workbench ui-grid-sidebar' }: {
   plugins: PluginSummary[]; error?: string; onRefresh(): Promise<void>; className?: string
+  skills?: SkillSnapshot
+  onUpdateSkillAvailability(skillIds: string | string[], update: SkillAvailabilityUpdate): void | Promise<void>
+  revealPluginId?: string
+  onPluginRevealed?(): void
 }) {
   const { t, i18n } = useTranslation()
   const [selectedId, setSelectedId] = useState<string>()
@@ -151,6 +156,12 @@ export function PluginsSettings({ plugins, error, onRefresh, className = 'settin
   const [deleteData, setDeleteData] = useState(false)
   const [replacing, setReplacing] = useState<PluginInstallPreview>()
   const [section, setSection] = useState({ id: '', tab: 'overview' })
+  useEffect(() => {
+    if (!revealPluginId || !plugins.some(plugin => plugin.id === revealPluginId)) return
+    setSelectedId(revealPluginId)
+    setSection({ id: revealPluginId, tab: 'overview' })
+    onPluginRevealed?.()
+  }, [revealPluginId, plugins, onPluginRevealed])
   const [dragActive, setDragActive] = useState(false)
   const dragDepth = useRef(0)
   const installing = useRef(false)
@@ -269,7 +280,8 @@ export function PluginsSettings({ plugins, error, onRefresh, className = 'settin
         {(selected.error || selected.backendError) && <div className="ui-note ui-note-danger" role="alert"><p>{selected.error ?? selected.backendError}</p></div>}
         {selected.manifest?.ui && !selected.error && <PluginLaunchSettings key={selected.id} plugin={selected} busy={busy} />}
         {selected.manifest && <PluginBackendStatus key={`backend:${selected.id}`} plugin={selected} busy={busy} onRefresh={onRefresh} />}
-        <PluginContributions key={`contributions:${selected.id}`} plugin={selected} busy={busy} onRefresh={onRefresh} />
+        <PluginContributions key={`contributions:${selected.id}`} plugin={selected} busy={busy} onRefresh={onRefresh}
+          skills={skills} onUpdateSkillAvailability={onUpdateSkillAvailability} />
         </div>}
         {tab === 'settings' && <PluginPreferences key={selected.id} plugin={selected} />}
       </> : <div className="ui-empty-state">{t('plugins.empty')}</div>}

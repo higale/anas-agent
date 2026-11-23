@@ -80,7 +80,7 @@ export function useSkillsSettingsState({ openConfirmDialog, settingsOpen, settin
   }, [refreshSkills])
 
   useEffect(() => {
-    if (settingsOpen && settingsTab === 'skills') void refreshSkills()
+    if (settingsOpen && (settingsTab === 'skills' || settingsTab === 'plugins')) void refreshSkills()
   }, [refreshSkills, settingsOpen, settingsTab])
 
   async function addDirectory(): Promise<void> {
@@ -153,8 +153,9 @@ export function useSkillsSettingsState({ openConfirmDialog, settingsOpen, settin
     }
   }
 
-  async function updateAvailability(skillId: string, update: SkillAvailabilityUpdate): Promise<void> {
-    await edits.save({ skills: { [skillId]: update } })
+  async function updateAvailability(skillIds: string | string[], update: SkillAvailabilityUpdate): Promise<void> {
+    const ids = Array.isArray(skillIds) ? skillIds : [skillIds]
+    await edits.save({ skills: Object.fromEntries(ids.map(id => [id, update])) })
   }
 
   return {

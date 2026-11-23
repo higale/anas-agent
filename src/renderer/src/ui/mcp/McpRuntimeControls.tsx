@@ -4,9 +4,7 @@ import { errorDetail } from '@shared/recovery'
 import type { McpToolStatus } from '@shared/types'
 import { CapabilityGroupActions } from '../CapabilityGroupActions'
 import { notice } from '../notice'
-import { CapabilityPreviewItem } from '../settings/CapabilityPreviewItem'
-import { ContentPreviewDialog } from '../settings/ContentPreviewDialog'
-import { toolDefinitionText } from '../settings/toolDefinitionText'
+import { CheckboxField } from '../CheckboxField'
 
 export function McpRuntimeControls({ id, enabled, status, onFlushDraft }: {
   id: string
@@ -20,12 +18,9 @@ export function McpRuntimeControls({ id, enabled, status, onFlushDraft }: {
   const [pendingChoices, setPendingChoices] = useState<Record<string, boolean>>()
   const choicesPending = useRef(false)
   const [pendingAction, setPendingAction] = useState(false)
-  const [selectedName, setSelectedName] = useState<string>()
   const actionPending = useRef(false)
   const choices = pendingChoices ?? runtime?.toolChoices ?? {}
   const names = catalog?.toolNames ?? []
-  const selectedTool = status?.tools.find(tool => tool.name === selectedName)
-  const selectedText = selectedTool ? toolDefinitionText(selectedTool) : undefined
   const starting = runtime?.state === 'starting' || runtime?.state === 'recovering'
   const running = runtime?.state === 'ready'
   async function setRunning(value: boolean) {
@@ -63,17 +58,13 @@ export function McpRuntimeControls({ id, enabled, status, onFlushDraft }: {
           busy={Boolean(pendingChoices)} onChange={enabled => void setTools(names, enabled)} />}
       </div>
       {names.length > 0 ? <div className="ui-capability-list ui-grid-auto">
-        {names.map(name => <CapabilityPreviewItem key={name} name={name.replace(`mcp__${id}__`, '')}
-          checked={choices[name] !== false} busy={Boolean(pendingChoices)}
+        {names.map(name => <CheckboxField key={name}
+          label={<code className="ui-tool-name">{name.replace(`mcp__${id}__`, '')}</code>}
+          checked={choices[name] !== false} aria-disabled={Boolean(pendingChoices) || undefined} aria-busy={Boolean(pendingChoices) || undefined}
           inactiveReason={!enabled ? t('capabilities.globally_disabled') : undefined}
-          description={status?.tools.find(tool => tool.name === name)?.description}
-          onChange={value => void setTools([name], value)} onPreview={() => setSelectedName(name)} />)}
+          tooltip={status?.tools.find(tool => tool.name === name)?.description}
+          onChange={value => void setTools([name], value)} />)}
       </div> : <div className="ui-muted">{t(catalog ? 'settings.mcp_empty_catalog' : 'settings.mcp_no_catalog')}</div>}
     </div>
-    {selectedName && names.includes(selectedName) && <ContentPreviewDialog title={selectedName}
-      description={t('settings.tool_definition_hint')} copyText={selectedText} onClose={() => setSelectedName(undefined)}>
-      {selectedText ? <pre className="ui-code-block settings-code-preview-code">{selectedText}</pre>
-        : <p role="status">{t('settings.tool_definition_unavailable')}</p>}
-    </ContentPreviewDialog>}
   </>
 }

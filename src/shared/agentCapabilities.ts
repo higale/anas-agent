@@ -274,7 +274,6 @@ export function resolvePluginCapabilities(value: AgentCapabilities, plugins: rea
         && prompt.tools.every(tool => tools.includes(pluginToolId(plugin.id, tool)))) prompts.push(id)
     }
     for (const skill of plugin.manifest.skills ?? []) {
-      if (!pluginCapabilityEnabled(plugin.capabilityChoices, 'skill', skill.id)) continue
       const id = `${plugin.id}:skill:${skill.id}`
       const selected = value.skills.entries.find(entry => entry.id === id)
       if (mode === 'all') entries.push({ id, model: true, shortcut: !subagent })

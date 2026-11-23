@@ -29,11 +29,9 @@ export function ProjectDetailsContent({
   const { t } = useTranslation()
   const defaultWorkspace = isDefaultWorkspaceProject(project)
   const Separator = itemKind === 'context' ? ContextMenu.Separator : DropdownMenu.Separator
-  const statuses = project.kind === 'simple_chat'
-    ? [{ Icon: MessageCircle, label: t('project.simple_chat'), enabled: true }]
-    : [
-        { Icon: CodeXml, label: t('project.coding_mode'), enabled: project.codingMode }
-      ]
+  const simpleChat = project.kind === 'simple_chat'
+  const StatusIcon = simpleChat ? MessageCircle : CodeXml
+  const statusLabel = simpleChat ? `${t('project.simple_chat')}: ${t('common.on')}` : t('project.coding_mode')
 
   function runAfterSelect(action: () => void): void {
     window.requestAnimationFrame(action)
@@ -52,15 +50,11 @@ export function ProjectDetailsContent({
       <header className="project-details-header">
         <ProjectIcon iconData={project.iconData} color={project.iconColor} icon={project.icon} kind={project.kind} size={16} />
         <strong className={defaultWorkspace ? 'project-default-workspace-name' : undefined}>{project.name}</strong>
-        <div className="ui-row">
-          {statuses.map(({ Icon, label, enabled }) => {
-            const description = `${label}: ${t(enabled ? 'common.on' : 'common.off')}`
-            return <span key={label} className="ui-status-icon" data-active={enabled}
-              role="img" aria-label={description} data-tooltip={description}>
-              <Icon size={15} aria-hidden="true" />
-            </span>
-          })}
-        </div>
+        {(simpleChat || project.codingMode) && (
+          <span className="ui-status-icon" data-active="true" role="img" aria-label={statusLabel} data-tooltip={statusLabel}>
+            <StatusIcon size={15} aria-hidden="true" />
+          </span>
+        )}
       </header>
       <div className="project-details-stat">
         <MessageCircle size={14} />

@@ -11,7 +11,7 @@ import { isSameOrInsideDirectory, samePath } from '../pathContainment'
 import { extractZipArchive, type ZipArchiveLimits } from '../zipArchive'
 import { loadPluginLanguages } from './pluginLanguages'
 import { inspectSkillText } from '../skillDefinition'
-import type { PluginContributionKind, PluginContributionPreview, PluginSkillSummary } from '@shared/plugins'
+import type { PluginPromptPreview, PluginSkillSummary } from '@shared/plugins'
 import { pluginSettingValues, type PluginSettingsSnapshot } from '@shared/pluginSettings'
 import { newPluginTransaction, PluginTransactionError, PluginTransactions, writePluginTransaction } from './pluginTransactions'
 
@@ -201,18 +201,15 @@ export class PluginStore {
     return summaries
   }
 
-  /** Inspect declared package content without enabling or starting the plugin. */
-  async readContribution(id: string, kind: PluginContributionKind, contributionId: string): Promise<PluginContributionPreview> {
-    if (kind !== 'skill' && kind !== 'prompt') throw new Error('Invalid plugin contribution kind.')
+  /** Inspect a declared prompt without enabling or starting the plugin. */
+  async readPrompt(id: string, promptId: string): Promise<PluginPromptPreview> {
     const manifest = await this.readManifest(id)
-    const items = kind === 'skill' ? manifest.skills : manifest.prompts
-    const item = items?.find(item => item.id === contributionId)
-    if (!item) throw new Error('Plugin contribution is not declared.')
+    const item = manifest.prompts?.find(item => item.id === promptId)
+    if (!item) throw new Error('Plugin prompt is not declared.')
     const resolvedPath = await this.packageFile(id, item.path)
-    const limit = kind === 'skill' ? 1024 * 1024 : MAX_PLUGIN_PROMPT_BYTES
-    if ((await stat(resolvedPath)).size > limit) throw new Error('Plugin contribution exceeds its size limit.')
+    if ((await stat(resolvedPath)).size > MAX_PLUGIN_PROMPT_BYTES) throw new Error('Plugin prompt exceeds its size limit.')
     const content = await readFile(resolvedPath, 'utf8')
-    if (Buffer.byteLength(content) > limit) throw new Error('Plugin contribution exceeds its size limit.')
+    if (Buffer.byteLength(content) > MAX_PLUGIN_PROMPT_BYTES) throw new Error('Plugin prompt exceeds its size limit.')
     return { content, resolvedPath }
   }
 
@@ -482,11 +479,11 @@ export class PluginStore {
   }
 
   async setCapabilityEnabled(id: string, kind: PluginCapabilityKind, ids: string[], enabled: boolean): Promise<PluginCapabilityChoices> {
-    if (!['tool', 'skill', 'prompt'].includes(kind) || typeof enabled !== 'boolean' || !Array.isArray(ids)
+    if (!['tool', 'prompt'].includes(kind) || typeof enabled !== 'boolean' || !Array.isArray(ids)
       || !ids.length || ids.length > 128 || ids.some(id => typeof id !== 'string')) throw new Error('Invalid plugin capability update.')
     const plugin = await this.read(id, false)
     if (plugin.error || !plugin.manifest) throw new Error(plugin.error ?? 'Plugin manifest is unavailable.')
-    const declarations = kind === 'tool' ? plugin.manifest.tools : kind === 'skill' ? plugin.manifest.skills : plugin.manifest.prompts
+    const declarations = kind === 'tool' ? plugin.manifest.tools : plugin.manifest.prompts
     if (ids.some(id => !declarations?.some(item => item.id === id))) throw new Error('Plugin capability is unavailable.')
     const { path, state } = await this.installationState(id, true)
     const choices = state.capability_choices ?? {}

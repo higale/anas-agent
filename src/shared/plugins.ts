@@ -165,8 +165,7 @@ export interface PluginSummary {
 }
 
 export interface PluginSkillSummary { id: string; name: string; description: string }
-export type PluginContributionKind = 'skill' | 'prompt'
-export interface PluginContributionPreview { content: string; resolvedPath: string }
+export interface PluginPromptPreview { content: string; resolvedPath: string }
 
 export interface PluginInstallPreview {
   token: string
@@ -179,7 +178,7 @@ export type PluginInstallResult = PluginSummary | { replacement: PluginInstallPr
 export interface PluginsApi {
   readWidget(id: string, widgetId: string, modelConfigId?: string, action?: string): Promise<PluginWidgetContent | null>
   list(): Promise<PluginSummary[]>
-  readContribution(id: string, kind: PluginContributionKind, contributionId: string): Promise<PluginContributionPreview>
+  readPrompt(id: string, promptId: string): Promise<PluginPromptPreview>
   install(file?: File): Promise<PluginInstallResult | null>
   confirmInstall(token: string, deleteData?: boolean): Promise<PluginSummary>
   cancelInstall(token: string): Promise<void>

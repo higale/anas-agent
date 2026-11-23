@@ -430,10 +430,10 @@ describe('plugin capability scope', () => {
     expect(resolved.pluginPrompts).toEqual([])
     expect(resolveSkillSelection(resolved.skills, [pluginSkill], false, subagent, resolved.pluginTools).entries)
       .toEqual([{ id: pluginSkill.id, model: false, shortcut: false }])
-    const contentOff = resolvePluginCapabilities(defaultCapabilities, [{ ...plugin, capabilityChoices: { prompt: { help: false }, skill: { review: false } } }], subagent)
+    const contentOff = resolvePluginCapabilities(defaultCapabilities, [{ ...plugin, capabilityChoices: { prompt: { help: false } } }], subagent)
     expect(contentOff.pluginTools).toEqual(['writer:tool:read', 'writer:tool:new_tool'])
     expect(contentOff.pluginPrompts).toEqual([])
-    expect(contentOff.skills.entries).toEqual([])
+    expect(contentOff.skills.entries).toEqual([{ id: pluginSkill.id, model: true, shortcut: !subagent }])
     expect(plugin.manifest!.skills).toHaveLength(1)
   })
   it('round trips overall modes without losing source choices or changing configurations without them', () => {

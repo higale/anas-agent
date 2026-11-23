@@ -47,6 +47,7 @@ interface SettingsScreenProps {
   onRefreshPlugins(): Promise<void>
   onConfigChange(config: AppConfigSnapshot): void
   activeTab: SettingsTab
+  onSelectTab(tab: SettingsTab): void
   avatar: AppAvatarImage | null
   avatarDragActive: boolean
   backupDir?: string
@@ -134,7 +135,7 @@ interface SettingsScreenProps {
   onUpdateSubagentDraft: (update: Partial<SubagentDraft>) => void
   onUpdateModelDraft: (update: Partial<ModelDraft>) => void
   onSaveModelDetails: (draft: ModelDraft) => Promise<void>
-  onUpdateSkillAvailability: (skillId: string, update: SkillAvailabilityUpdate) => void | Promise<void>
+  onUpdateSkillAvailability: (skillIds: string | string[], update: SkillAvailabilityUpdate) => void | Promise<void>
 }
 
 function settingsSectionClass(activeTab: SettingsTab, tab: SettingsTab, extra = ''): string {
@@ -232,10 +233,12 @@ export function SettingsScreen({
   onUpdateSubagentDraft,
   onUpdateModelDraft,
   onSaveModelDetails,
-  onUpdateSkillAvailability
+  onUpdateSkillAvailability,
+  onSelectTab
 }: SettingsScreenProps) {
   const { t } = useTranslation()
   const [skillToReveal, setSkillToReveal] = useState<string>()
+  const [pluginToReveal, setPluginToReveal] = useState<string>()
   const [packageActionsTarget, setPackageActionsTarget] = useState<HTMLDivElement | null>(null)
   const sectionClass = (tab: SettingsTab, extra = ''): string => settingsSectionClass(activeTab, tab, extra)
   const sidebarLabel = t('chat.show_sidebar')
@@ -439,7 +442,9 @@ export function SettingsScreen({
           )}
 
           {activeTab === 'plugins' && <PluginsSettings className={sectionClass('plugins', 'settings-workbench ui-workbench ui-grid-sidebar')}
-            plugins={plugins} error={pluginError} onRefresh={onRefreshPlugins} />}
+            plugins={plugins} error={pluginError} onRefresh={async () => { await Promise.all([onRefreshPlugins(), onRefreshSkills()]) }}
+            skills={skills} onUpdateSkillAvailability={onUpdateSkillAvailability}
+            revealPluginId={pluginToReveal} onPluginRevealed={() => setPluginToReveal(undefined)} />}
           {activeTab === 'tools' && (
             <section className={sectionClass('tools', 'settings-workbench ui-workbench ui-grid-sidebar')}>
               <ToolsSettings
@@ -461,6 +466,7 @@ export function SettingsScreen({
               skills={skills}
               revealSkillId={skillToReveal}
               onSkillRevealed={() => setSkillToReveal(undefined)}
+              onOpenPluginSettings={id => { setPluginToReveal(id); onSelectTab('plugins') }}
               onMoveDirectory={onMoveSkillDirectory}
               onRefresh={onRefreshSkills}
               onUpdateDirectory={onUpdateSkillDirectory}

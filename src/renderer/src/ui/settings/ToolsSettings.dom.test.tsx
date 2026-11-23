@@ -13,7 +13,9 @@ function ToolsSettings(props: ComponentProps<typeof ToolsSettingsContent>) {
 }
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'en' } })
+  useTranslation: () => ({ t: (key: string, values?: { effect: string; code: string; count: number }) =>
+    key === 'plugins.tool_execution_summary' && values ? `${key}: ${values.effect} (${values.code}); ${values.count}` : key,
+  i18n: { language: 'en' } })
 }))
 
 const runtimeToolStatus: RuntimeToolStatus = {
@@ -171,6 +173,7 @@ describe('tool catalog', () => {
     await user.click(within(second).getByRole('button', { name: /^plugin__second__lookup:/ }))
     const dialog = screen.getByRole('dialog')
     const expected = { name: 'plugin__second__lookup', description: 'Look up with second.', parameters: inputSchema }
+    expect(within(dialog).getByText('plugins.tool_execution_summary: plugins.effect_read (read); 30')).toBeVisible()
     expect(JSON.parse(dialog.querySelector('pre')!.textContent!)).toEqual(expected)
     await user.click(within(dialog).getByRole('button', { name: 'common.copy' }))
     expect(JSON.parse(writeText.mock.calls[0][0])).toEqual(expected)
@@ -202,9 +205,10 @@ describe('tool catalog', () => {
     await user.click(screen.getByRole('button', { name: /^plugins\.title\s*1$/ }))
     await user.click(screen.getByRole('button', { name: /^plugin__source__lookup:/ }))
     view.rerender(<ToolsSettings {...props} plugins={[{ ...source, backendStatus: 'failed', backendError: 'Backend exited',
-      manifest: { ...source.manifest!, tools: [{ ...source.manifest!.tools[0], description: 'Updated lookup.' }] }
+      manifest: { ...source.manifest!, tools: [{ ...source.manifest!.tools[0], description: 'Updated lookup.', effect: 'confirm', timeoutSeconds: 300 }] }
     }]} />)
     expect(screen.getByRole('dialog')).toHaveTextContent('Updated lookup.')
+    expect(within(screen.getByRole('dialog')).getByText('plugins.tool_execution_summary: plugins.effect_confirm (confirm); 300')).toBeVisible()
     view.rerender(<ToolsSettings {...props} plugins={[]} />)
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(screen.getByText('plugins.tools_catalog_empty')).toBeVisible()

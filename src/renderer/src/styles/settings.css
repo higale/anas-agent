@@ -255,6 +255,12 @@
   margin: 0;
 }
 
+.settings-tool-execution-summary {
+  margin: 0 0 12px;
+  flex-shrink: 0;
+  color: var(--text-subtle);
+}
+
 .settings-contribution-metadata dd > code + code {
   margin-inline-start: 12px;
 }

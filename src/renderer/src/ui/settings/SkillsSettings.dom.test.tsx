@@ -81,20 +81,28 @@ async function openGroup(button: HTMLElement): Promise<void> {
 }
 
 describe('Skills settings tree', () => {
-  it('edits configured plugin skill uses even while its effective availability is off', async () => {
-    renderSkills({ ...snapshot, skills: [{ ...snapshot.skills[0], source: 'plugin', modelAvailable: false, userAvailable: false,
-      configuredAvailability: { modelAvailable: true, userAvailable: false } }] })
-    await openGroup(screen.getByRole('button', { name: /^settings.skill_group_system/ }))
+  it('previews disabled plugin skills with read-only uses and opens their plugin settings', async () => {
+    const openPlugin = vi.fn()
+    readFile.mockResolvedValue({ skillId: 'example:skill:config', name: 'SKILL.md', path: '/plugins/example/SKILL.md',
+      relativePath: 'SKILL.md', resolvedPath: '/plugins/example/SKILL.md', kind: 'text', content: '# Plugin skill body', size: 19 })
+    render(<SkillsSettings sectionClass="settings-section" skills={{ ...snapshot, skills: [{ ...snapshot.skills[0],
+      id: 'example:skill:config', rootId: 'plugin:example', source: 'plugin', modelAvailable: false, userAvailable: false,
+      configuredAvailability: { modelAvailable: true, userAvailable: false } }], roots: [{
+      id: 'plugin:example', kind: 'plugin', name: 'Example', shortcutAlias: 'plugin:example', path: '/plugins/example', removable: false, available: true
+    }] }} onMoveDirectory={vi.fn()} onRefresh={vi.fn()} onRemoveDirectory={vi.fn()} onUpdateDirectory={vi.fn()}
+      onUpdateAvailability={updateAvailability} onOpenPluginSettings={openPlugin} />)
+    await openGroup(screen.getByRole('button', { name: /^Example/ }))
     await userEvent.click(within(document.querySelector('.settings-skill-tree') as HTMLElement).getByRole('button', { name: /^config/ }))
-    const group = within(screen.getByRole('group', { name: 'config' }))
-    const model = group.getByRole('checkbox', { name: 'settings.skill_model_available' })
-    const shortcut = group.getByRole('checkbox', { name: 'settings.skill_user_available' })
-    expect(model).toBeChecked()
-    expect(shortcut).not.toBeChecked()
-    await userEvent.click(model)
-    expect(updateAvailability).toHaveBeenLastCalledWith('system:config', { modelAvailable: false })
-    await userEvent.click(shortcut)
-    expect(updateAvailability).toHaveBeenLastCalledWith('system:config', { userAvailable: true })
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(screen.getByText('settings.skill_model_available')).toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: 'settings.skill_expand:config' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'SKILL.md' }))
+    expect(await screen.findByRole('heading', { name: 'Plugin skill body' })).toBeVisible()
+    expect(readFile).toHaveBeenCalledWith(undefined, 'example:skill:config', 'SKILL.md')
+    await userEvent.click(within(document.querySelector('.settings-skill-tree') as HTMLElement).getByRole('button', { name: /^config/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'plugins.manage' }))
+    expect(openPlugin).toHaveBeenCalledWith('example')
+    expect(updateAvailability).not.toHaveBeenCalled()
   })
 
   it.each([1024, 1025, 1510])('warns only above 1024 characters and keeps a %i-character skill selectable', async length => {

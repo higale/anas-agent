@@ -1,7 +1,7 @@
 const { openCapabilityProject } = require('./electron-capabilities.cjs')
 const assert = require('node:assert/strict')
 const { createServer } = require('node:http')
-const { mkdir, mkdtemp, rm, writeFile, readFile, cp, appendFile } = require('node:fs/promises')
+const { mkdir, mkdtemp, rm, writeFile, readFile, cp, appendFile, realpath } = require('node:fs/promises')
 const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
 const { expect } = require('playwright/test')
@@ -27,8 +27,8 @@ async function readHistoryImages(page, threadId) {
 }
 
 async function verifyPluginTools(launchApplication) {
-  const home = await mkdtemp(join(tmpdir(), 'anas-plugin-tools-'))
-  const archiveRoot = await mkdtemp(join(tmpdir(), 'anas-plugin-backup-'))
+  const home = await realpath(await mkdtemp(join(tmpdir(), 'anas-plugin-tools-')))
+  const archiveRoot = await realpath(await mkdtemp(join(tmpdir(), 'anas-plugin-backup-')))
   const requests = [], errors = []
   let application, mode = 'echo'
   const server = createServer((request, response) => {
@@ -115,10 +115,21 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
     await page.screenshot({ path: join(tmpdir(), 'anas-plugin-tools-catalog.png') })
     await page.getByRole('button', { name: /^plugin__example-text-tools__echo:/ }).click()
     const definition = page.getByRole('dialog')
+    await expect(definition.getByText('Operation type: Read-only (read) · Timeout: 30 seconds', { exact: true })).toBeVisible()
     const modelDefinition = JSON.parse(await definition.locator('pre').textContent())
     assert.equal(modelDefinition.name, 'plugin__example-text-tools__echo')
     assert.deepEqual(modelDefinition.parameters, JSON.parse(await readFile(join(fixture, 'PLUGIN.json'), 'utf8')).tools[0].input_schema)
-    await page.screenshot({ path: join(tmpdir(), 'anas-plugin-tool-definition.png') })
+    await page.evaluate(() => globalThis.gale.config.updateSettings({ language: 'zh-CN' }))
+    const executionSummary = definition.getByText('操作类型：只读 (read)　超时：30秒', { exact: true })
+    await expect(executionSummary).toBeVisible()
+    assert.ok(await executionSummary.evaluate(element => {
+      const range = element.ownerDocument.createRange()
+      range.selectNodeContents(element)
+      return range.getClientRects().length === 1
+    }),
+      'Plugin operation type and timeout should fit on one line.')
+    await page.screenshot({ path: resolve('tmp/plugin-tool-details.png') })
+    await page.evaluate(() => globalThis.gale.config.updateSettings({ language: 'en' }))
     await definition.getByRole('button', { name: 'Close', exact: true }).click()
     assert.equal((await page.evaluate(() => globalThis.gale.plugins.list()))[0].backendStatus, 'stopped', 'Browsing the catalog must not start plugin code.')
     assert.deepEqual(await page.evaluate(async () => (await globalThis.gale.projects.list()).find(project => project.name === 'Plugin capability fixture').capabilities.pluginTools), [], 'Browsing definitions must not enable tools.')
@@ -145,15 +156,17 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
     await page.getByRole('menuitem', { name: 'Settings', exact: true }).click()
     await page.locator('[data-settings-tab="plugins"]').click()
     await expect(page.getByRole('radio', { name: 'Capabilities', exact: true })).toHaveCount(0)
-    const echoChoice = page.getByRole('checkbox', { name: 'plugin__example-text-tools__echo', exact: true })
+    const echoChoice = page.getByRole('checkbox', { name: 'echo', exact: true })
     await expect(echoChoice).toBeChecked()
+    await expect(page.getByRole('button', { name: 'echo', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'echo-guide', exact: true })).toHaveCount(0)
     const previewCapabilities = () => page.evaluate(async () => {
       const api = globalThis.gale
       const project = (await api.projects.list()).find(item => item.name === 'Plugin capability fixture')
       return (await api.agent.context.previewModelRequest({ projectId: project.id, project, settings: (await api.config.get()).settings })).content
     })
     await page.evaluate(() => {
-      const selector = 'input[aria-label="plugin__example-text-tools__wait"]'
+      const selector = 'input[aria-label="wait"]'
       const original = globalThis.document.querySelector(selector)
       const samples = []
       const sample = () => {
@@ -178,16 +191,22 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
     for (const theme of ['dark', 'light']) {
       await page.evaluate(theme => globalThis.gale.config.updateSettings({ theme }), theme)
       for (const name of ['echo-guide', 'echo-hint']) {
-        const dependent = page.getByRole('button', { name, exact: true })
-        await expect(page.getByRole('checkbox', { name, exact: true })).toBeChecked()
+        const dependent = name === 'echo-guide' ? page.locator('code').filter({ hasText: /^echo-guide$/ }) : page.getByRole('button', { name, exact: true })
+        const dependentName = name === 'echo-guide' ? dependent : dependent.locator('code')
+        const choice = name === 'echo-guide'
+          ? page.getByRole('group', { name, exact: true }).getByRole('checkbox', { name: 'Shortcut', exact: true })
+          : page.getByRole('checkbox', { name, exact: true })
+        await expect(choice).toBeChecked()
         await expect(dependent).toHaveAttribute('data-tooltip', /plugin__example-text-tools__echo/)
-        await expectWarningColor(dependent.locator('code'))
+        await expectWarningColor(dependentName)
         await dependent.hover()
-        await expectWarningColor(dependent.locator('code'))
-        await page.getByRole('checkbox', { name, exact: true }).focus()
-        await page.keyboard.press('Tab')
-        await expect(dependent).toBeFocused()
-        await expectWarningColor(dependent.locator('code'))
+        await expectWarningColor(dependentName)
+        if (name === 'echo-hint') {
+          await choice.focus()
+          await page.keyboard.press('Tab')
+          await expect(dependent).toBeFocused()
+          await expectWarningColor(dependentName)
+        }
       }
       await page.locator('[data-settings-tab="tools"]').click()
       await page.getByRole('button', { name: /^Plugins\s*3$/ }).click()
@@ -200,15 +219,26 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
     }
     await page.screenshot({ path: resolve('tmp/plugin-dependency-warning.png') })
     await page.evaluate(() => globalThis.gale.config.updateSettings({ theme: 'dark' }))
-    const toolChoices = page.getByRole('group', { name: 'Plugin tools', exact: true })
+    const toolChoices = page.getByRole('group', { name: 'Tools', exact: true })
     await toolChoices.getByRole('button', { name: 'Select all', exact: true }).click()
     await expect(echoChoice).toBeChecked()
     await expect(toolChoices).toHaveAttribute('open', '')
-    await expect(page.getByRole('button', { name: 'echo-guide', exact: true }).locator('code')).not.toHaveClass(/ui-resource-unavailable/)
+    await expect(page.locator('code').filter({ hasText: /^echo-guide$/ })).not.toHaveClass(/ui-resource-unavailable/)
     assert.ok((await previewCapabilities()).includes('ECHO_DEPENDENCY_HINT'))
     assert.ok((await previewCapabilities()).replace(/\\+/g, '/').includes('echo-guide/SKILL.md'))
     assert.ok((await previewCapabilities()).includes('plugin__example-text-tools__echo'))
+    const skillChoices = page.getByRole('group', { name: 'Skills', exact: true })
+    await skillChoices.getByRole('button', { name: 'Deselect all', exact: true }).click()
+    for (const checkbox of await skillChoices.getByRole('checkbox').all()) await expect(checkbox).not.toBeChecked()
+    await expect(skillChoices).toHaveAttribute('open', '')
+    await expect.poll(async () => (await previewCapabilities()).replace(/\\+/g, '/').includes('echo-guide/SKILL.md')).toBe(false)
+    await skillChoices.getByRole('button', { name: 'Select all', exact: true }).click()
+    for (const checkbox of await skillChoices.getByRole('checkbox').all()) await expect(checkbox).toBeChecked()
+    await expect.poll(async () => (await previewCapabilities()).replace(/\\+/g, '/').includes('echo-guide/SKILL.md')).toBe(true)
     await page.screenshot({ path: join(__dirname, '../tmp/plugin-capability-switches.png') })
+    await page.getByRole('button', { name: 'echo-hint', exact: true }).click()
+    await expect(page.getByRole('dialog').getByText('ECHO_DEPENDENCY_HINT', { exact: true })).toBeVisible()
+    await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click()
 
     await page.getByRole('radiogroup', { name: 'Plugin details' }).getByText('Settings', { exact: true }).click()
     await page.getByRole('button', { name: 'Edit', exact: true }).click()
@@ -299,7 +329,7 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
     })
     await page.evaluate(async () => {
       await globalThis.gale.plugins.setCapabilityEnabled('writing-helper', 'prompt', ['writing-tone'], false)
-      await globalThis.gale.plugins.setCapabilityEnabled('writing-helper', 'skill', ['proofread'], false)
+      await globalThis.gale.skills.updateAvailability(undefined, 'writing-helper:skill:proofread', { userAvailable: false, modelAvailable: false })
     })
     const withoutInstructions = await previewCapabilities()
     assert.equal(withoutInstructions.includes('writing-helper:prompt:writing-tone'), false)
@@ -309,17 +339,26 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
       return globalThis.gale.skills.invoke(project.id, 'proofread', 'plugin:writing-helper', 'Check this prose.')
     })
     assert.equal(disabledInvocation.errorCode, 'user_unavailable')
+    await page.evaluate(() => globalThis.gale.plugins.setEnabled('writing-helper', false))
     await page.locator('.sidebar-settings').click()
     await page.getByRole('menuitem', { name: 'Settings', exact: true }).click()
     await page.locator('[data-settings-tab="skills"]').click()
     await page.getByRole('button', { name: /^Writing helper/ }).click()
     await page.locator('.settings-skill-viewer').getByRole('button', { name: /^proofread/ }).click()
+    await expect(page.locator('.settings-skill-viewer').getByRole('checkbox')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Expand Skill “proofread”', exact: true }).click()
+    await page.getByRole('button', { name: 'SKILL.md', exact: true }).click()
+    await expect(page.locator('.settings-skill-viewer')).toContainText('Read the supplied text and identify its intended audience.')
+    await page.locator('.settings-skill-tree-select').filter({ hasText: /^proofread/ }).click()
+    await page.getByRole('button', { name: 'Plugin settings', exact: true }).click()
     const usage = page.getByRole('group', { name: 'proofread', exact: true })
     const storedSkill = () => page.evaluate(async () => (await globalThis.gale.skills.get()).skills.find(skill => skill.id === 'writing-helper:skill:proofread'))
     for (const [label, field] of [['Shortcut', 'userAvailable'], ['Available to model', 'modelAvailable']]) {
       const checkbox = usage.getByRole('checkbox', { name: label, exact: true })
-      await expect(checkbox).toBeChecked()
+      await expect(checkbox).not.toBeChecked()
       const stable = await observeStableControls(page, usage)
+      await checkbox.check()
+      await expect.poll(async () => (await storedSkill()).configuredAvailability[field]).toBe(true)
       await checkbox.uncheck()
       await expect.poll(async () => (await storedSkill()).configuredAvailability[field]).toBe(false)
       await checkbox.check()
@@ -335,7 +374,7 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
     await page.getByRole('button', { name: 'Back to app', exact: true }).click()
     await page.evaluate(async () => {
       await globalThis.gale.plugins.setCapabilityEnabled('writing-helper', 'prompt', ['writing-tone'], true)
-      await globalThis.gale.plugins.setCapabilityEnabled('writing-helper', 'skill', ['proofread'], true)
+      await globalThis.gale.plugins.setEnabled('writing-helper', true)
     })
     mode = 'instructions'
     await page.locator('[data-agent-composer-input]').fill('Check this prose using the selected static instructions.')
@@ -357,7 +396,8 @@ for (const [name, handler] of Object.entries(module.exports.tools)) {
     await page.evaluate(() => globalThis.gale.plugins.uninstall('example-notepad', true))
     await expect(page.getByRole('button', { name: 'Workspace menu', exact: true })).toBeVisible()
     await page.evaluate(() => globalThis.gale.plugins.setEnabled('writing-helper', false))
-    await expect.poll(() => page.evaluate(async () => (await globalThis.gale.skills.get()).skills.some(skill => skill.id === 'writing-helper:skill:proofread'))).toBe(false)
+    await expect.poll(() => page.evaluate(async () => (await globalThis.gale.skills.get()).skills.find(skill => skill.id === 'writing-helper:skill:proofread')))
+      .toMatchObject({ modelAvailable: false, userAvailable: false })
     await page.evaluate(() => globalThis.gale.plugins.setCapabilityEnabled('example-text-tools', 'tool', ['echo'], false))
     const archivePath = join(archiveRoot, 'plugin-history.zip')
     await page.evaluate(() => globalThis.gale.plugins.setEnabled('usage-meter', false))

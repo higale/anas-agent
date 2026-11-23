@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, act, within } from '@testing-library/react'
+import { fireEvent, render, screen, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { McpToolStatus } from '@shared/types'
@@ -59,6 +59,9 @@ it('renders a stopped catalog, saves selections optimistically without replacing
   expect(choice).not.toBeDisabled()
   expect(screen.getByRole('checkbox', { name: 'lookup' })).toBe(choice)
   expect(setToolsEnabled).toHaveBeenCalledWith('alpha', [names[0]], false)
+  fireEvent.click(screen.getByText('lookup', { selector: 'code' }))
+  expect(choice).not.toBeChecked()
+  expect(setToolsEnabled).toHaveBeenCalledTimes(1)
   expect(setRunning).not.toHaveBeenCalled()
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   await act(async () => reject(new Error('save failed')))
@@ -69,7 +72,7 @@ it('renders a stopped catalog, saves selections optimistically without replacing
   await act(async () => reject(new Error('save failed')))
 })
 
-it('opens a saved definition by name without toggling or starting a disabled, stopped server', () => {
+it('toggles a tool by name without opening details or starting a disabled, stopped server', async () => {
   const setToolsEnabled = vi.fn()
   const setRunning = vi.fn()
   const flush = vi.fn()
@@ -80,23 +83,19 @@ it('opens a saved definition by name without toggling or starting a disabled, st
   const { rerender } = render(<McpRuntimeControls id="alpha" enabled={false}
     status={{ ...status, tools: [tool] }} onFlushDraft={flush} />)
   const choice = screen.getByRole('checkbox', { name: 'lookup' })
-  fireEvent.click(screen.getByRole('button', { name: 'lookup' }))
-  const dialog = screen.getByRole('dialog', { name: names[0] })
-  expect(JSON.parse(dialog.querySelector('pre')!.textContent!)).toEqual({
-    name: tool.name, description: tool.description, parameters: tool.inputSchema
-  })
-  expect(within(dialog).getByRole('button', { name: 'common.copy' })).not.toBeDisabled()
   expect(choice).toBeChecked()
-  expect(setToolsEnabled).not.toHaveBeenCalled()
+  expect(choice).toHaveAccessibleDescription('capabilities.globally_disabled')
+  expect(choice.closest('label')).toHaveAttribute('data-tooltip', 'capabilities.globally_disabled\nLook up an item')
+  expect(screen.queryByRole('button', { name: 'lookup' })).not.toBeInTheDocument()
+  await userEvent.click(screen.getByText('lookup', { selector: 'code' }))
+  expect(setToolsEnabled).toHaveBeenCalledExactlyOnceWith('alpha', [names[0]], false)
   expect(setRunning).not.toHaveBeenCalled()
   expect(flush).not.toHaveBeenCalled()
-  fireEvent.click(within(dialog).getByRole('button', { name: 'common.close' }))
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   expect(screen.getByRole('checkbox', { name: 'lookup' })).toBe(choice)
-  fireEvent.click(screen.getByRole('button', { name: 'lookup' }))
   rerender(<McpRuntimeControls id="alpha" enabled={false}
     status={{ ...status, loaded: [], tools: [] }} onFlushDraft={flush} />)
-  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
 })
 
 it('waits for autosave before starting and allows stopping while discovery is pending', async () => {

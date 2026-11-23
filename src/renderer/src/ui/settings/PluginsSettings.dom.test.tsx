@@ -2,19 +2,24 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { SkillSnapshot } from '@shared/types'
 import type { PluginSummary } from '@shared/plugins'
 import { PluginsSettings } from './PluginsSettings'
 import { notice } from '../notice'
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'en' } }) }))
 vi.mock('../notice', () => ({ notice: { error: vi.fn(), success: vi.fn() } }))
-const invoke = vi.fn(), uninstall = vi.fn(), install = vi.fn(), confirmInstall = vi.fn(), cancelInstall = vi.fn(), readContribution = vi.fn(), setEnabled = vi.fn()
+const invoke = vi.fn(), uninstall = vi.fn(), install = vi.fn(), confirmInstall = vi.fn(), cancelInstall = vi.fn(), readPrompt = vi.fn(), setEnabled = vi.fn()
 const startBackend = vi.fn(), stopBackend = vi.fn(), setShowInTitlebar = vi.fn(), setCapabilityEnabled = vi.fn()
 const plugin: PluginSummary = { id: 'example', enabled: true, backendStatus: 'stopped', manifest: { tools: [],
   id: 'example', name: 'Example', pluginVersion: '1.0.0', apiVersion: 2, description: '', ui: 'index.html',
   home: { defaultLocation: 'window', locations: ['window', 'sidebar'] }
 } }
-const renderSettings = (plugins = [plugin]) => render(<PluginsSettings plugins={plugins} onRefresh={vi.fn(async () => {})} />)
+const updateSkillAvailability = vi.fn()
+const skillSnapshot: SkillSnapshot = { roots: [], skills: [{ id: 'example:skill:guide', rootId: 'plugin:example', name: 'actual-skill-name', description: 'Skill summary',
+  modelAvailable: false, userAvailable: false, configuredAvailability: { modelAvailable: true, userAvailable: true }, source: 'plugin',
+  rootName: 'Example', shortcutAlias: 'plugin:example', linked: false, dirPath: '/plugins/example/skills/guide', relativePath: 'guide' }] }
+const renderSettings = (plugins = [plugin]) => render(<PluginsSettings skills={skillSnapshot} onUpdateSkillAvailability={updateSkillAvailability} plugins={plugins} onRefresh={vi.fn(async () => {})} />)
 beforeEach(() => {
   vi.clearAllMocks()
   invoke.mockReset().mockImplementation(async (_id, method) => method === 'host.home' ? { location: 'window', locations: ['window', 'sidebar'] } : null)
@@ -27,21 +32,21 @@ beforeEach(() => {
   setShowInTitlebar.mockReset().mockResolvedValue(undefined)
   startBackend.mockReset().mockResolvedValue(undefined)
   stopBackend.mockReset().mockResolvedValue(undefined)
-  readContribution.mockReset().mockResolvedValue({ content: '# Guide body', resolvedPath: 'C:/plugins/guide/SKILL.md' })
-  Object.defineProperty(window, 'gale', { configurable: true, value: { plugins: { invoke, uninstall, install, confirmInstall, cancelInstall, readContribution, setEnabled, setShowInTitlebar, setCapabilityEnabled, startBackend, stopBackend } } })
+  readPrompt.mockReset().mockResolvedValue({ content: '# Guide body', resolvedPath: 'C:/plugins/guide/SKILL.md' })
+  Object.defineProperty(window, 'gale', { configurable: true, value: { plugins: { invoke, uninstall, install, confirmInstall, cancelInstall, readPrompt, setEnabled, setShowInTitlebar, setCapabilityEnabled, startBackend, stopBackend } } })
 })
 
 describe('plugin settings', () => {
   it.each([true, false])('saves a titlebar shortcut without launching the plugin when enabled=%s', async enabled => {
     const refresh = vi.fn(async () => {})
-    const view = render(<PluginsSettings plugins={[{ ...plugin, enabled }]} onRefresh={refresh} />)
+    const view = render(<PluginsSettings skills={skillSnapshot} onUpdateSkillAvailability={updateSkillAvailability} plugins={[{ ...plugin, enabled }]} onRefresh={refresh} />)
     const checkbox = screen.getByRole('checkbox', { name: 'plugins.show_in_titlebar' })
     expect(checkbox).not.toBeChecked()
     expect(checkbox).toBeEnabled()
     await userEvent.click(checkbox)
     expect(setShowInTitlebar).toHaveBeenCalledExactlyOnceWith('example', true)
     expect(refresh).toHaveBeenCalledOnce()
-    view.rerender(<PluginsSettings plugins={[{ ...plugin, enabled, showInTitlebar: true }]} onRefresh={refresh} />)
+    view.rerender(<PluginsSettings skills={skillSnapshot} onUpdateSkillAvailability={updateSkillAvailability} plugins={[{ ...plugin, enabled, showInTitlebar: true }]} onRefresh={refresh} />)
     expect(checkbox).toBeChecked()
     expect(invoke.mock.calls.every(([, method]) => method === 'host.home')).toBe(true)
   })
@@ -54,7 +59,7 @@ describe('plugin settings', () => {
     expect(checkbox).toBeChecked()
     expect(checkbox).toBeEnabled()
     expect(notice.error).toHaveBeenCalledWith('plugins.operation_failed', { description: 'disk failure' })
-    view.rerender(<PluginsSettings plugins={[{ ...plugin, manifest: { ...plugin.manifest!, ui: undefined } }]} onRefresh={vi.fn()} />)
+    view.rerender(<PluginsSettings skills={skillSnapshot} onUpdateSkillAvailability={updateSkillAvailability} plugins={[{ ...plugin, manifest: { ...plugin.manifest!, ui: undefined } }]} onRefresh={vi.fn()} />)
     expect(screen.queryByRole('checkbox', { name: 'plugins.show_in_titlebar' })).toBeNull()
   })
 
@@ -63,7 +68,7 @@ describe('plugin settings', () => {
     const write = setting === 'enabled' ? setEnabled : setShowInTitlebar
     write.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve }))
     const refresh = vi.fn(async () => { throw new Error('refresh failed') })
-    const view = render(<PluginsSettings plugins={[plugin]} onRefresh={refresh} />)
+    const view = render(<PluginsSettings skills={skillSnapshot} onUpdateSkillAvailability={updateSkillAvailability} plugins={[plugin]} onRefresh={refresh} />)
     const enabled = screen.getByRole('checkbox', { name: 'settings.enabled' })
     const titlebar = screen.getByRole('checkbox', { name: 'plugins.show_in_titlebar' })
     const checkbox = setting === 'enabled' ? enabled : titlebar
@@ -77,7 +82,7 @@ describe('plugin settings', () => {
     expect(write).toHaveBeenCalledTimes(1)
     expect(setting === 'enabled' ? setShowInTitlebar : setEnabled).not.toHaveBeenCalled()
     expect(checkbox).toHaveAttribute('aria-checked', String(setting !== 'enabled'))
-    view.rerender(<PluginsSettings plugins={[{ ...plugin }]} onRefresh={refresh} />)
+    view.rerender(<PluginsSettings skills={skillSnapshot} onUpdateSkillAvailability={updateSkillAvailability} plugins={[{ ...plugin }]} onRefresh={refresh} />)
     expect(checkbox).toHaveAttribute('aria-checked', String(setting !== 'enabled'))
     await act(async () => finish())
     expect(checkbox).toHaveAttribute('aria-checked', String(setting !== 'enabled'))
@@ -114,19 +119,19 @@ describe('plugin settings', () => {
     })
     function Editor() {
       const [value, setValue] = useState(stored)
-      return <PluginsSettings plugins={[value]} onRefresh={async () => setValue(structuredClone(stored))} />
+      return <PluginsSettings skills={skillSnapshot} onUpdateSkillAvailability={updateSkillAvailability} plugins={[value]} onRefresh={async () => setValue(structuredClone(stored))} />
     }
     render(<Editor />)
-    const tool = screen.getByRole('checkbox', { name: 'plugin__example__echo' })
-    const skill = screen.getByRole('checkbox', { name: 'actual-skill-name' })
+    const tool = screen.getByRole('checkbox', { name: 'echo' })
+    const skill = within(screen.getByRole('group', { name: 'actual-skill-name' })).getByRole('checkbox', { name: 'settings.skill_model_available' })
     expect(tool).toBeChecked()
     expect(skill).toBeChecked()
     await userEvent.click(tool)
     expect(setCapabilityEnabled).toHaveBeenCalledExactlyOnceWith('example', 'tool', ['echo'], false)
     expect(tool).not.toBeChecked()
     expect(skill).toBeChecked()
-    expect(skill).toHaveAccessibleDescription('plugins.missing_tools_detail')
-    expect(screen.getByRole('button', { name: 'actual-skill-name' }).querySelector('code')).toHaveClass('ui-resource-unavailable')
+    expect(screen.getByText('actual-skill-name', { selector: 'code' })).toHaveAttribute('data-tooltip', expect.stringContaining('plugins.disabled'))
+    expect(screen.getByText('actual-skill-name', { selector: 'code' })).toHaveClass('ui-resource-unavailable')
     const group = screen.getByRole('group', { name: 'plugins.tools' })
     await userEvent.click(within(group).getByRole('button', { name: 'capabilities.select_group_all' }))
     expect(group).toHaveAttribute('open')
@@ -138,16 +143,51 @@ describe('plugin settings', () => {
     expect(skill).toBeChecked()
     expect(startBackend).not.toHaveBeenCalled()
   })
+  it('edits and bulk-selects both uses only for the current plugin while disabled', async () => {
+    const second = { ...skillSnapshot.skills[0], id: 'example:skill:second', name: 'second' }
+    const unrelated = { ...second, id: 'other:skill:second' }
+    let stored = { ...skillSnapshot, skills: [...skillSnapshot.skills, second, unrelated] }
+    const twoSkills = { ...previewPlugin, manifest: { ...previewPlugin.manifest!, skills: [
+      ...previewPlugin.manifest!.skills!, { id: 'second', path: 'skills/second/SKILL.md', tools: [] }
+    ] } }
+    function Editor() {
+      const [snapshot, setSnapshot] = useState(stored)
+      return <PluginsSettings plugins={[twoSkills]} skills={snapshot} onRefresh={vi.fn(async () => {})}
+        onUpdateSkillAvailability={(ids, update) => {
+          updateSkillAvailability(ids, update)
+          const selected = Array.isArray(ids) ? ids : [ids]
+          stored = { ...stored, skills: stored.skills.map(skill => selected.includes(skill.id)
+            ? { ...skill, configuredAvailability: { ...skill.configuredAvailability!, ...update } } : skill) }
+          setSnapshot(stored)
+        }} />
+    }
+    render(<Editor />)
+    const uses = within(screen.getByRole('group', { name: 'actual-skill-name' }))
+    expect(uses.getAllByRole('checkbox')).toHaveLength(2)
+    await userEvent.click(uses.getByRole('checkbox', { name: 'settings.skill_user_available' }))
+    expect(updateSkillAvailability).toHaveBeenLastCalledWith('example:skill:guide', { userAvailable: false })
+    const group = screen.getByRole('group', { name: 'settings.skills' })
+    await userEvent.click(within(group).getByRole('button', { name: 'capabilities.select_group_all' }))
+    expect(updateSkillAvailability).toHaveBeenLastCalledWith(['example:skill:guide', 'example:skill:second'], { userAvailable: true, modelAvailable: true })
+    for (const checkbox of within(group).getAllByRole('checkbox')) expect(checkbox).toBeChecked()
+    await userEvent.click(within(group).getByRole('button', { name: 'capabilities.clear_group_all' }))
+    expect(updateSkillAvailability).toHaveBeenLastCalledWith(['example:skill:guide', 'example:skill:second'], { userAvailable: false, modelAvailable: false })
+    for (const checkbox of within(group).getAllByRole('checkbox')) expect(checkbox).not.toBeChecked()
+    expect(group).toHaveAttribute('open')
+    expect(stored.skills[2]).toEqual(unrelated)
+    expect(setCapabilityEnabled).not.toHaveBeenCalled()
+    expect(startBackend).not.toHaveBeenCalled()
+  })
   it('shows the clicked choice while saving and ignores stale refreshes, then rolls back a failed write', async () => {
     let reject!: (reason: Error) => void
     setCapabilityEnabled.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail }))
     const view = renderSettings([previewPlugin])
-    const checkbox = screen.getByRole('checkbox', { name: 'actual-skill-name' })
+    const checkbox = screen.getByRole('checkbox', { name: 'tone' })
     await userEvent.click(checkbox)
     expect(checkbox).not.toBeChecked()
     expect(checkbox).not.toBeDisabled()
     expect(checkbox).toHaveAttribute('aria-busy', 'true')
-    const tool = screen.getByRole('checkbox', { name: 'plugin__example__echo' })
+    const tool = screen.getByRole('checkbox', { name: 'echo' })
     expect(tool).not.toBeDisabled()
     await userEvent.click(tool)
     expect(tool).toBeChecked()
@@ -155,7 +195,7 @@ describe('plugin settings', () => {
     expect(action).not.toBeDisabled()
     await userEvent.click(action)
     expect(setCapabilityEnabled).toHaveBeenCalledTimes(1)
-    view.rerender(<PluginsSettings plugins={[{ ...previewPlugin, capabilityChoices: {} }]} onRefresh={vi.fn(async () => {})} />)
+    view.rerender(<PluginsSettings skills={skillSnapshot} onUpdateSkillAvailability={updateSkillAvailability} plugins={[{ ...previewPlugin, capabilityChoices: {} }]} onRefresh={vi.fn(async () => {})} />)
     expect(checkbox).not.toBeChecked()
     await act(async () => reject(new Error('write failed')))
     expect(checkbox).toBeChecked()
@@ -164,43 +204,39 @@ describe('plugin settings', () => {
   it('keeps saved capability choices after a failed write and supports editing while the plugin is disabled', async () => {
     setCapabilityEnabled.mockRejectedValueOnce(new Error('disk full'))
     renderSettings([previewPlugin])
-    const checkbox = screen.getByRole('checkbox', { name: 'actual-skill-name' })
+    const checkbox = screen.getByRole('checkbox', { name: 'tone' })
     expect(checkbox).toBeEnabled()
     await userEvent.click(checkbox)
     expect(checkbox).toBeChecked()
     expect(checkbox).toBeEnabled()
     expect(notice.error).toHaveBeenCalledWith('plugins.operation_failed', { description: 'disk full' })
   })
-  it('previews disabled plugin declarations on demand without executing plugin code', async () => {
+  it('keeps only prompt previews in plugin settings while skill and tool controls remain usable', async () => {
     const user = userEvent.setup()
     renderSettings([previewPlugin])
-    expect(readContribution).not.toHaveBeenCalled()
-    expect(screen.getByRole('button', { name: 'actual-skill-name' })).toHaveAttribute('data-tooltip', 'Skill summary')
+    expect(screen.queryByRole('button', { name: 'actual-skill-name' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'echo' })).not.toBeInTheDocument()
+    expect(screen.getByText('actual-skill-name', { selector: 'code' })).toHaveAttribute('data-tooltip', 'plugins.disabled\nSkill summary')
+    await user.click(screen.getByText('actual-skill-name', { selector: 'code' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await user.click(screen.getByText('echo', { selector: 'code' }))
+    expect(setCapabilityEnabled).toHaveBeenCalledExactlyOnceWith('example', 'tool', ['echo'], false)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(readPrompt).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'tone' })).toHaveAttribute('data-tooltip', 'Prompt summary')
-    await user.click(screen.getByRole('button', { name: 'actual-skill-name' }))
-    expect(readContribution).toHaveBeenCalledWith('example', 'skill', 'guide')
-    expect(await screen.findByRole('heading', { name: 'Guide body' })).toBeVisible()
-    let dialog = within(screen.getByRole('dialog'))
-    expect(dialog.getByText('plugin__example__echo')).toBeVisible()
-    await user.click(dialog.getByRole('button', { name: 'common.copy' }))
-    expect(await navigator.clipboard.readText()).toBe('# Guide body')
-    await user.click(dialog.getByRole('button', { name: 'common.close' }))
-    await user.click(screen.getByRole('button', { name: 'plugin__example__echo' }))
-    dialog = within(screen.getByRole('dialog'))
-    expect(dialog.getByText('60')).toBeVisible()
-    const code = screen.getByRole('dialog').querySelector('pre')!.textContent!
-    expect(JSON.parse(code)).toEqual({ name: 'plugin__example__echo', description: 'Echo text', parameters: previewPlugin.manifest!.tools[0].inputSchema })
-    expect(readContribution).toHaveBeenCalledTimes(1)
-    await user.click(dialog.getByRole('button', { name: 'common.close' }))
     await user.click(screen.getByRole('button', { name: 'tone' }))
     expect(await screen.findByRole('heading', { name: 'Guide body' })).toBeVisible()
-    expect(readContribution).toHaveBeenLastCalledWith('example', 'prompt', 'tone')
-    expect(screen.getByText('plugins.scope_all')).toBeVisible()
+    expect(readPrompt).toHaveBeenCalledExactlyOnceWith('example', 'tone')
+    const dialog = within(screen.getByRole('dialog'))
+    expect(dialog.getByText('plugins.scope_all')).toBeVisible()
+    await user.click(dialog.getByRole('button', { name: 'common.copy' }))
+    expect(await navigator.clipboard.readText()).toBe('# Guide body')
     expect(invoke).not.toHaveBeenCalled()
+    expect(startBackend).not.toHaveBeenCalled()
   })
 
   it('reports preview read failures and permits retry while keeping copy unavailable', async () => {
-    readContribution.mockRejectedValueOnce(new Error('File removed'))
+    readPrompt.mockRejectedValueOnce(new Error('File removed'))
     renderSettings([previewPlugin])
     await userEvent.click(screen.getByRole('button', { name: 'tone' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('File removed')
@@ -210,14 +246,14 @@ describe('plugin settings', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  it('ignores a closed preview response after opening another contribution', async () => {
+  it('ignores a closed preview response after reopening the prompt', async () => {
     let finish!: (value: unknown) => void
-    readContribution.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    readPrompt.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
     renderSettings([previewPlugin])
     await userEvent.click(screen.getByRole('button', { name: 'tone' }))
     expect(screen.getByRole('status')).toHaveTextContent('common.loading')
     await userEvent.click(screen.getByRole('button', { name: 'common.close' }))
-    await userEvent.click(screen.getByRole('button', { name: 'actual-skill-name' }))
+    await userEvent.click(screen.getByRole('button', { name: 'tone' }))
     expect(await screen.findByRole('heading', { name: 'Guide body' })).toBeVisible()
     await act(async () => finish({ content: '# Old prompt', resolvedPath: 'C:/plugins/tone.md' }))
     expect(screen.queryByText('Old prompt')).toBeNull()
@@ -226,7 +262,7 @@ describe('plugin settings', () => {
   it('shows global capability switches directly in plugin management', () => {
     renderSettings([{ ...plugin, manifest: { ...plugin.manifest!, tools: [{ id: 'echo', description: 'Echo', handler: 'echo', effect: 'read', timeoutSeconds: 30, inputSchema: { type: 'object' } }] } }])
     expect(screen.queryByRole('radio', { name: 'plugins.capabilities' })).toBeNull()
-    expect(screen.getByRole('checkbox', { name: 'plugin__example__echo' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'echo' })).toBeChecked()
     expect(screen.getByRole('checkbox', { name: 'settings.enabled' })).toBeEnabled()
     expect(screen.getByText('plugins.contributions_count')).toBeVisible()
   })
@@ -267,7 +303,7 @@ describe('plugin settings', () => {
     let finishRead!: (value: unknown) => void
     invoke.mockImplementation((_id, method) => method === 'host.home'
       ? new Promise(resolve => { finishRead = resolve }) : Promise.resolve())
-    view.rerender(<PluginsSettings plugins={[{ ...plugin }]} onRefresh={vi.fn(async () => {})} />)
+    view.rerender(<PluginsSettings skills={skillSnapshot} onUpdateSkillAvailability={updateSkillAvailability} plugins={[{ ...plugin }]} onRefresh={vi.fn(async () => {})} />)
     await userEvent.click(screen.getByRole('radio', { name: 'plugins.home_sidebar' }))
     await act(async () => finishRead({ location: 'window' }))
     expect(screen.getByRole('radio', { name: 'plugins.home_sidebar' })).toBeChecked()
@@ -276,7 +312,7 @@ describe('plugin settings', () => {
   it('saves home location without disabling unrelated controls or refreshing the catalog', async () => {
     let finish!: () => void
     const refresh = vi.fn(async () => {})
-    render(<PluginsSettings plugins={[plugin]} onRefresh={refresh} />)
+    render(<PluginsSettings skills={skillSnapshot} onUpdateSkillAvailability={updateSkillAvailability} plugins={[plugin]} onRefresh={refresh} />)
     await waitFor(() => expect(screen.getByRole('radio', { name: 'plugins.home_window' })).toBeChecked())
     invoke.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve }))
     await userEvent.click(screen.getByRole('radio', { name: 'plugins.home_sidebar' }))
@@ -318,7 +354,7 @@ describe('plugin settings', () => {
     stopBackend.mockImplementationOnce(() => new Promise<void>(resolve => { finishStop = resolve }))
     const backendPlugin = { ...plugin, manifest: { ...plugin.manifest!, backend: 'backend.cjs' } }
     const refresh = vi.fn(async () => {})
-    const view = render(<PluginsSettings plugins={[backendPlugin]} onRefresh={refresh} />)
+    const view = render(<PluginsSettings skills={skillSnapshot} onUpdateSkillAvailability={updateSkillAvailability} plugins={[backendPlugin]} onRefresh={refresh} />)
     await waitFor(() => expect(screen.getByRole('radio', { name: 'plugins.home_window' })).toBeChecked())
     await userEvent.click(screen.getByRole('button', { name: 'plugins.start_backend' }))
     expect(startBackend).toHaveBeenCalledExactlyOnceWith('example')
@@ -328,7 +364,7 @@ describe('plugin settings', () => {
     expect(screen.getByRole('radio', { name: 'plugins.home_sidebar' })).toBeEnabled()
     expect(screen.getByRole('checkbox', { name: 'settings.enabled' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'plugins.install' })).toBeEnabled()
-    view.rerender(<PluginsSettings plugins={[{ ...backendPlugin, backendStatus: 'starting' }]} onRefresh={refresh} />)
+    view.rerender(<PluginsSettings skills={skillSnapshot} onUpdateSkillAvailability={updateSkillAvailability} plugins={[{ ...backendPlugin, backendStatus: 'starting' }]} onRefresh={refresh} />)
     await userEvent.click(screen.getByRole('button', { name: 'plugins.stop_backend' }))
     expect(stopBackend).toHaveBeenCalledExactlyOnceWith('example')
     await act(async () => finishStart())
@@ -412,7 +448,7 @@ describe('plugin replacement confirmation', () => {
   it('keeps the preview across rerenders and discards it when leaving settings', async () => {
     const view = renderSettings()
     await open()
-    view.rerender(<PluginsSettings plugins={[{ ...plugin }]} onRefresh={vi.fn(async () => {})} />)
+    view.rerender(<PluginsSettings skills={skillSnapshot} onUpdateSkillAvailability={updateSkillAvailability} plugins={[{ ...plugin }]} onRefresh={vi.fn(async () => {})} />)
     expect(screen.getByRole('alertdialog')).toBeVisible()
     expect(cancelInstall).not.toHaveBeenCalled()
     view.unmount()

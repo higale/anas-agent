@@ -1311,6 +1311,7 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
           onSaveSpeechReply={saveSpeechReply}
           onMoveSkillDirectory={moveSkillDirectory}
           onRefreshSkills={refreshSkills}
+          onSelectTab={setSettingsTab}
           onUpdateSkillDirectory={updateSkillDirectory}
           onRemoveSkillDirectory={removeSkillDirectory}
           onToggleSidebar={toggleSidebar}

@@ -428,12 +428,12 @@ function precedence(kind: SkillRootKind): number {
   return kind === 'project' ? 0 : kind === 'user' ? 1 : kind === 'external' ? 2 : kind === 'system' ? 3 : 4
 }
 
-async function loadPluginSkills(config: SkillsConfigFile): Promise<RootScan[]> {
+async function loadPluginSkills(config: SkillsConfigFile, includeDisabledPlugins: boolean): Promise<RootScan[]> {
   const { store } = pluginRuntime()
   return store.exclusive(async () => {
     const scans: RootScan[] = []
     for (const plugin of await store.list()) {
-      if (!plugin.enabled || plugin.error || !plugin.manifest?.skills?.length) continue
+      if ((!plugin.enabled && !includeDisabledPlugins) || plugin.error || !plugin.manifest?.skills?.length) continue
       const path = await store.packageDirectory(plugin.id)
       const root: SkillRootSummary = { id: `plugin:${plugin.id}`, kind: 'plugin', name: plugin.manifest.name,
         shortcutAlias: `plugin:${plugin.id}`, path, removable: false, available: true }
@@ -444,7 +444,7 @@ async function loadPluginSkills(config: SkillsConfigFile): Promise<RootScan[]> {
       for (const skill of scan.skills) {
         skill.summary.configuredAvailability = { modelAvailable: skill.summary.modelAvailable, userAvailable: skill.summary.userAvailable }
         const declaration = plugin.manifest.skills.find(item => `${plugin.id}:skill:${item.id}` === skill.summary.id)!
-        if (!pluginCapabilityEnabled(plugin.capabilityChoices, 'skill', declaration.id)
+        if (!plugin.enabled
           || declaration.tools.some(id => !pluginCapabilityEnabled(plugin.capabilityChoices, 'tool', id))) {
           skill.summary.modelAvailable = false
           skill.summary.userAvailable = false
@@ -517,9 +517,10 @@ export interface SkillCatalogRequest {
   skillDirectories?: string[]
   selection?: SkillSelection
   pluginTools?: readonly string[]
+  includeDisabledPlugins?: boolean
 }
 
-async function loadCatalog({ agent, projectId, selection, pluginTools, skillDirectories }: SkillCatalogRequest): Promise<{ roots: SkillRootSummary[]; skills: LoadedSkill[] }> {
+async function loadCatalog({ agent, projectId, selection, pluginTools, skillDirectories, includeDisabledPlugins = false }: SkillCatalogRequest): Promise<{ roots: SkillRootSummary[]; skills: LoadedSkill[] }> {
   if (projectId && skillDirectories === undefined) {
     const project = await getProject(projectId)
     if (project.kind === 'workspace') {
@@ -530,7 +531,7 @@ async function loadCatalog({ agent, projectId, selection, pluginTools, skillDire
   // A source owns its IDs, availability and explicit shortcut alias even when
   // another source points to the same directory. Resolve winners after selection.
   const scans = await Promise.all(roots.map(root => scanRoot(root, config)))
-  scans.push(...await loadPluginSkills(config))
+  scans.push(...await loadPluginSkills(config, includeDisabledPlugins))
   if (agent.kind === 'subagent' && agent.id) {
     const prefix = `${subagentSkillRootId(agent.id)}:`
     // Resolved custom selections enumerate dependencies within the explicit owner's scope.
@@ -554,12 +555,12 @@ async function loadCatalog({ agent, projectId, selection, pluginTools, skillDire
 
 export async function listSkillSnapshot(projectId?: string, skillDirectories?: string[]): Promise<SkillSnapshot> {
   const directories = skillDirectories === undefined ? undefined : parseResourceDirectories(skillDirectories)
-  const catalog = await loadCatalog({ agent: { kind: 'main' }, projectId, skillDirectories: directories })
+  const catalog = await loadCatalog({ agent: { kind: 'main' }, projectId, skillDirectories: directories, includeDisabledPlugins: !projectId })
   return { ...(projectId ? { projectId } : {}), roots: catalog.roots, skills: catalog.skills.map((skill) => skill.summary) }
 }
 
 async function findSkill(projectId: string | undefined, skillId: string): Promise<LoadedSkill> {
-  const skill = (await loadCatalog({ agent: { kind: 'main' }, projectId })).skills.find((candidate) => candidate.summary.id === skillId)
+  const skill = (await loadCatalog({ agent: { kind: 'main' }, projectId, includeDisabledPlugins: !projectId })).skills.find((candidate) => candidate.summary.id === skillId)
   if (!skill) throw new Error(`Skill was not found: ${skillId}`)
   return skill
 }

@@ -182,10 +182,10 @@ export function registerPluginIpc(): void {
     const { store, backends } = runtime()
     return store.exclusive(async () => (await store.list()).map(item => ({ ...item, ...backends.status(item.id) })))
   })
-  handleMainIpc('plugins:readContribution', async (_event, id, kind, contributionId) => {
-    if (typeof id !== 'string' || typeof contributionId !== 'string' || (kind !== 'skill' && kind !== 'prompt')) throw new Error('Invalid plugin contribution request.')
+  handleMainIpc('plugins:readPrompt', async (_event, id, promptId) => {
+    if (typeof id !== 'string' || typeof promptId !== 'string') throw new Error('Invalid plugin prompt request.')
     const { store } = runtime()
-    return store.exclusive(() => store.readContribution(id, kind, contributionId))
+    return store.exclusive(() => store.readPrompt(id, promptId))
   })
   handleMainIpc('plugins:install', async (event, sourcePath?: unknown): Promise<PluginInstallResult | null> => {
     if (sourcePath === undefined) {

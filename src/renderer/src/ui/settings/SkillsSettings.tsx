@@ -16,6 +16,7 @@ interface Props {
   skills?: SkillSnapshot
   revealSkillId?: string
   onSkillRevealed?: () => void
+  onOpenPluginSettings?: (pluginId: string) => void
   onMoveDirectory: (rootId: string, direction: -1 | 1) => void | Promise<void>
   onRefresh: () => void | Promise<void>
   onUpdateDirectory: (rootId: string, update: SkillRootUpdate) => void | Promise<void>
@@ -34,6 +35,7 @@ export function SkillsSettings({
   skills,
   revealSkillId,
   onSkillRevealed,
+  onOpenPluginSettings,
   onMoveDirectory,
   onRefresh,
   onUpdateDirectory,
@@ -308,14 +310,19 @@ export function SkillsSettings({
           <div className="settings-detail-heading ui-toolbar ui-toolbar-between">
             <div><span className="ui-row"><button className="ui-link-button" type="button" disabled={selectedSkill.linked && !selectedSkill.resolvedDirPath}
               data-tooltip={t('chat.show_in_folder')} onClick={() => void showItemInFolder(selectedSkill.dirPath)}>{selectedSkill.name}</button><SkillDescriptionWarning description={selectedSkill.description} /></span></div>
-            <SegmentedMultiSelect<'modelAvailable' | 'userAvailable'> ariaLabel={selectedSkill.name}
+            {selectedSkill.source === 'plugin' ? <div className="ui-row">
+              {selectedAvailability?.userAvailable && <span className="ui-field-hint">{t('settings.skill_user_available')}</span>}
+              {selectedAvailability?.modelAvailable && <span className="ui-field-hint">{t('settings.skill_model_available')}</span>}
+              {onOpenPluginSettings && <button type="button" className="ui-button"
+                onClick={() => onOpenPluginSettings(selectedSkill.rootId.slice('plugin:'.length))}>{t('plugins.manage')}</button>}
+            </div> : <SegmentedMultiSelect<'modelAvailable' | 'userAvailable'> ariaLabel={selectedSkill.name}
               options={[
                 { value: 'userAvailable', label: t('settings.skill_user_available'), checked: selectedAvailability!.userAvailable },
                 { value: 'modelAvailable', label: t('settings.skill_model_available'), checked: selectedAvailability!.modelAvailable },
               ]}
               onChange={(value, checked) => {
                 void onUpdateAvailability(selectedSkill.id, { [value]: checked })
-              }} />
+              }} />}
           </div>
           {selectedSkillIssue && <div className="ui-note ui-note-danger">{selectedSkillIssueText}{selectedSkillIssue.detail ? ` ${selectedSkillIssue.detail}` : ''}</div>}
           <p>{selectedSkill.description}</p>

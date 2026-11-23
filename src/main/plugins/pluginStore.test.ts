@@ -173,19 +173,18 @@ describe('plugin installation and data', () => {
     await store.setEnabled(manifest.id, false)
     await expect(store.promptText(manifest.id, 'tone.md')).rejects.toThrow('disabled')
     expect((await store.read(manifest.id)).skillSummaries).toEqual(installed.skillSummaries)
-    const preview = await store.readContribution(manifest.id, 'skill', 'local-guide')
-    expect(preview.content).toBe('---\nname: guide\ndescription: Guide\n---\nKeep the source meaning.\n')
-    expect(preview.resolvedPath).toBe(await realpath(join(await store.packageDirectory(manifest.id), 'skills/guide/SKILL.md')))
-    expect((await store.readContribution(manifest.id, 'prompt', 'tone')).content).toBe('Be concise.')
-    await expect(store.readContribution(manifest.id, 'prompt', '../tone.md')).rejects.toThrow('not declared')
-    await expect(store.readContribution(manifest.id, 'skill', 'tone')).rejects.toThrow('not declared')
-    await expect(store.readContribution(manifest.id, 'tool' as never, 'tone')).rejects.toThrow('Invalid')
+    const preview = await store.readPrompt(manifest.id, 'tone')
+    expect(preview.content).toBe('Be concise.')
+    expect(preview.resolvedPath).toBe(await realpath(join(await store.packageDirectory(manifest.id), 'tone.md')))
+    await expect(store.readPrompt(manifest.id, '../tone.md')).rejects.toThrow('not declared')
+    await expect(store.readPrompt(manifest.id, 'local-guide')).rejects.toThrow('not declared')
+    // Previewing an intact prompt does not depend on unrelated skill files remaining valid.
+    await rm(await store.packageFile(manifest.id, 'skills/guide/SKILL.md'))
+    expect((await store.readPrompt(manifest.id, 'tone')).content).toBe(preview.content)
     await writeFile(await store.packageFile(manifest.id, 'tone.md'), 'Updated content.')
-    expect((await store.readContribution(manifest.id, 'prompt', 'tone')).content).toBe('Updated content.')
+    expect((await store.readPrompt(manifest.id, 'tone')).content).toBe('Updated content.')
     await writeFile(await store.packageFile(manifest.id, 'tone.md'), 'x'.repeat(16 * 1024 + 1))
-    await expect(store.readContribution(manifest.id, 'prompt', 'tone')).rejects.toThrow('size limit')
-    // Previewing an intact contribution does not depend on the other files remaining valid.
-    expect((await store.readContribution(manifest.id, 'skill', 'local-guide')).content).toBe(preview.content)
+    await expect(store.readPrompt(manifest.id, 'tone')).rejects.toThrow('size limit')
   })
   it('reads bounded icon assets while disabled without granting access to plugin execution', async () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M1 1h20v20H1z"/></svg>'
@@ -1007,9 +1006,8 @@ it('persists host capability switches across toggles, restart and replacement wi
   expect((await store.read(manifest.id)).capabilityChoices).toBeUndefined()
   expect(await readFile(path, 'utf8')).toBe(before)
   await store.setCapabilityEnabled(manifest.id, 'tool', ['echo', 'second'], false)
-  await store.setCapabilityEnabled(manifest.id, 'skill', ['guide'], false)
   await store.setCapabilityEnabled(manifest.id, 'prompt', ['tone'], false)
-  const choices = { tool: { echo: false, second: false }, skill: { guide: false }, prompt: { tone: false } }
+  const choices = { tool: { echo: false, second: false }, prompt: { tone: false } }
   await store.setEnabled(manifest.id, false)
   await store.setShowInTitlebar(manifest.id, true)
   await store.setEnabled(manifest.id, true)

@@ -212,7 +212,7 @@ describe('skillsStore', () => {
     expect(await h.store.buildUserSkillInvocation('project', 'guide', `plugin:${id}`, '')).toMatchObject({ errorCode: 'user_unavailable' })
   })
 
-  it.each([['skill', 'guide'], ['tool', 'echo']] as const)('saves usage choices while the plugin %s is disabled without enabling execution', async (kind, id) => {
+  it.each(['plugin', 'tool'] as const)('saves usage choices while the %s is disabled without enabling execution', async kind => {
     const h = await loadSkillsStore()
     const source = join(h.root, 'plugin-source')
     await writeText(join(source, 'skills/guide/SKILL.md'), skillText('guide'))
@@ -222,7 +222,8 @@ describe('skillsStore', () => {
       skills: [{ id: 'guide', path: 'skills/guide/SKILL.md', tools: ['echo'] }] }))
     const { store: plugins } = (await import('./plugins/pluginRuntime')).pluginRuntime()
     await plugins.install(join(source, 'PLUGIN.json'))
-    await plugins.setCapabilityEnabled('skill-fixture', kind, [id], false)
+    if (kind === 'plugin') await plugins.setEnabled('skill-fixture', false)
+    else await plugins.setCapabilityEnabled('skill-fixture', 'tool', ['echo'], false)
     const skillId = 'skill-fixture:skill:guide'
     for (const [field, value] of [['userAvailable', false], ['userAvailable', true], ['modelAvailable', false], ['modelAvailable', true]] as const) {
       const updated = await h.store.updateSkillAvailability(undefined, skillId, { [field]: value })
@@ -233,10 +234,11 @@ describe('skillsStore', () => {
       expect(JSON.parse(await readFile(h.configFile, 'utf8')).availability[skillId]).toEqual({
         model_available: configured.modelAvailable, user_available: configured.userAvailable
       })
-      expect((await h.store.buildUserSkillInvocation('project', 'guide', 'plugin:skill-fixture', '')).errorCode).toBe('user_unavailable')
+      expect((await h.store.buildUserSkillInvocation('project', 'guide', 'plugin:skill-fixture', '')).promptText).toBe('')
       expect(await h.store.buildSkillsPrompt({ agent: { kind: 'main' }, projectId: 'project', pluginTools: ['skill-fixture:tool:echo'] })).toBe('')
     }
-    await plugins.setCapabilityEnabled('skill-fixture', kind, [id], true)
+    if (kind === 'plugin') await plugins.setEnabled('skill-fixture', true)
+    else await plugins.setCapabilityEnabled('skill-fixture', 'tool', ['echo'], true)
     expect((await h.store.listSkillSnapshot()).skills.find(skill => skill.id === skillId)).toMatchObject({ modelAvailable: true, userAvailable: true })
     expect((await h.store.buildUserSkillInvocation('project', 'guide', 'plugin:skill-fixture', '')).promptText).toContain('Use guide.')
   })
@@ -261,12 +263,15 @@ describe('skillsStore', () => {
     expect((await h.store.readSkillFile('project', skill.id, 'SKILL.md')).editable).toBe(false)
     await expect(h.store.saveSkillFile('project', skill.id, 'SKILL.md', {} as never)).rejects.toThrow('read-only')
     expect((await h.store.buildUserSkillInvocation('project', 'duplicate', 'plugin:skill-fixture', 'check')).promptText).toContain(original)
-    for (const [kind, id] of [['skill', 'guide'], ['tool', 'echo']] as const) {
-      await plugins.setCapabilityEnabled('skill-fixture', kind, [id], false)
-      const disabled = (await h.store.listSkillSnapshot('project')).skills.find(item => item.id === skill.id)!
+    for (const kind of ['plugin', 'tool'] as const) {
+      if (kind === 'plugin') await plugins.setEnabled('skill-fixture', false)
+      else await plugins.setCapabilityEnabled('skill-fixture', 'tool', ['echo'], false)
+      const disabled = (await h.store.listSkillSnapshot()).skills.find(item => item.id === skill.id)!
       expect(disabled).toMatchObject({ modelAvailable: false, userAvailable: false })
-      expect((await h.store.buildUserSkillInvocation('project', 'duplicate', 'plugin:skill-fixture', 'check')).errorCode).toBe('user_unavailable')
-      await plugins.setCapabilityEnabled('skill-fixture', kind, [id], true)
+      expect((await h.store.buildUserSkillInvocation('project', 'duplicate', 'plugin:skill-fixture', 'check')).errorCode)
+        .toBe(kind === 'plugin' ? 'source_not_found' : 'user_unavailable')
+      if (kind === 'plugin') await plugins.setEnabled('skill-fixture', true)
+      else await plugins.setCapabilityEnabled('skill-fixture', 'tool', ['echo'], true)
       expect((await h.store.buildUserSkillInvocation('project', 'duplicate', 'plugin:skill-fixture', 'check')).promptText).toContain(original)
     }
     h.projectCapabilities.pluginMode = 'off'

@@ -941,6 +941,7 @@ describe('renderer interaction accessibility', () => {
       fireEvent.contextMenu(heading, { clientX: 80, clientY: 120 })
 
       expect(await screen.findByText('project.thread_count')).toBeVisible()
+      expect(screen.queryByRole('img', { name: /project\.coding_mode/ })).not.toBeInTheDocument()
       fireEvent.click(screen.getByRole('menuitem', { name: '/workspace' }))
       await waitFor(() => expect(openSourceFolder).toHaveBeenCalledWith(project.id, '/workspace'))
 
@@ -1028,6 +1029,7 @@ describe('renderer interaction accessibility', () => {
     else fireEvent.contextMenu(trigger)
     const menu = await screen.findByRole('menu')
     expect(menu).toHaveTextContent('Simple chat')
+    expect(within(menu).getByRole('img', { name: 'project.simple_chat: common.on' })).toBeVisible()
     expect(menu).not.toHaveTextContent(project.prompt)
     expect(menu).not.toHaveTextContent('project.simple_chat_prompt')
     expect(menu.querySelectorAll('.project-details-separator')).toHaveLength(1)
@@ -1084,7 +1086,7 @@ describe('renderer interaction accessibility', () => {
   it('opens project details and thread actions from the topbar', async () => {
     const user = userEvent.setup()
     const project: Project = {
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
+      capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: true, prompt: '',
       id: 'project-1',
       kind: 'workspace',
       name: 'Project',
@@ -1124,13 +1126,15 @@ describe('renderer interaction accessibility', () => {
 
     await user.click(screen.getByRole('button', { name: 'project.show_details' }))
     expect(await screen.findByText('project.thread_count')).toBeVisible()
+    expect(screen.getByRole('img', { name: 'project.coding_mode' }))
+      .toHaveAttribute('data-tooltip', 'project.coding_mode')
     await user.click(screen.getByRole('button', { name: 'common.more' }))
     expect(await screen.findByRole('menu')).toBeVisible()
     expect(screen.getByText('chat.rename_thread')).toBeVisible()
     await waitFor(() => expect(screen.queryByText('project.thread_count')).not.toBeInTheDocument())
   })
 
-  it('groups the default workspace with workspace projects and italicizes its name', async () => {
+  it('shows the default workspace as a separate section and omits its custom image from the heading', async () => {
     const user = userEvent.setup()
     const workspace: Project = {
  capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
@@ -1161,6 +1165,7 @@ describe('renderer interaction accessibility', () => {
       pinned: false,
       collapsed: false,
       sourceFolders: ['/default-workspace'],
+      iconData: 'data:image/png;base64,iVBORw0KGgo=',
       createdAt: '2026-08-13T00:00:00.000Z',
       updatedAt: '2026-08-13T00:00:00.000Z'
     }
@@ -1224,6 +1229,7 @@ describe('renderer interaction accessibility', () => {
     expect(within(defaultWorkspaceGroup as HTMLElement).getByText('common.default'))
       .not.toHaveClass('project-default-workspace-name')
     expect(defaultWorkspaceGroup.querySelector('.thread-group-chevron')).toBeInTheDocument()
+    expect(defaultWorkspaceGroup.querySelector('.thread-group-label img')).not.toBeInTheDocument()
     expect(screen.getByText('Workspace project')).not.toHaveClass('project-default-workspace-name')
     expect(screen.getByText('Workspace project').closest('.project-thread-heading'))
       .toHaveAttribute('data-selected', 'true')

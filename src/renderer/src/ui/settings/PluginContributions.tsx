@@ -4,71 +4,66 @@ import { CapabilityGroupActions } from '../CapabilityGroupActions'
 import { notice } from '../notice'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { PluginContributionKind, PluginContributionPreview, PluginSummary } from '@shared/plugins'
+import type { PluginPromptPreview, PluginSummary } from '@shared/plugins'
 import { pluginToolName } from '@shared/pluginTools'
 import { errorDetail } from '@shared/recovery'
 import { ContentPreviewDialog } from './ContentPreviewDialog'
 import { PackageMarkdownPreview } from './PackageTree'
 import { SegmentedControl } from '../SegmentedControl'
+import { SegmentedMultiSelect } from '../SegmentedMultiSelect'
+import type { SkillAvailabilityUpdate, SkillSnapshot } from '@shared/types'
+import { CheckboxField } from '../CheckboxField'
 
-type Selection = { kind: PluginContributionKind | 'tool'; id: string }
-
-function ContributionDetails({ plugin, selection, onClose }: { plugin: PluginSummary; selection: Selection; onClose(): void }) {
+function PromptDetails({ plugin, id, onClose }: { plugin: PluginSummary; id: string; onClose(): void }) {
   const { t } = useTranslation()
-  const [preview, setPreview] = useState<PluginContributionPreview>()
+  const [preview, setPreview] = useState<PluginPromptPreview>()
   const [error, setError] = useState<string>()
   const [retry, setRetry] = useState(0)
   const [source, setSource] = useState(false)
-  const { kind, id } = selection
   const manifest = plugin.manifest!
-  const tool = kind === 'tool' ? manifest.tools.find(item => item.id === id) : undefined
-  const prompt = kind === 'prompt' ? manifest.prompts?.find(item => item.id === id) : undefined
-  const skill = kind === 'skill' ? manifest.skills?.find(item => item.id === id) : undefined
-  const summary = plugin.skillSummaries?.find(item => item.id === id)
-  const declaration = prompt ?? skill
-  const title = tool ? pluginToolName(plugin.id, tool.id) : skill ? summary?.name ?? id : id
-  const toolText = tool ? JSON.stringify({ name: title, description: tool.description, parameters: tool.inputSchema }, null, 2) : undefined
+  const prompt = manifest.prompts!.find(item => item.id === id)!
   useEffect(() => {
-    if (kind === 'tool') return
     let active = true
     setPreview(undefined)
     setError(undefined)
-    void window.gale.plugins.readContribution(plugin.id, kind, id).then(value => {
+    void window.gale.plugins.readPrompt(plugin.id, id).then(value => {
       if (active) setPreview(value)
     }).catch(reason => { if (active) setError(errorDetail(reason)) })
     return () => { active = false }
-  }, [plugin.id, manifest.pluginVersion, declaration?.path, kind, id, retry])
-  return <ContentPreviewDialog title={title} description={t('plugins.preview_hint')}
-    copyText={toolText ?? preview?.content} onClose={onClose}>
+  }, [plugin.id, manifest.pluginVersion, prompt.path, id, retry])
+  return <ContentPreviewDialog title={id} description={t('plugins.preview_hint')}
+    copyText={preview?.content} onClose={onClose}>
     <div className="settings-contribution-preview ui-form-section">
       <dl className="settings-contribution-metadata">
-        {declaration && <><dt>{t('plugins.declaration_id')}</dt><dd><code>{id}</code></dd>
-          <dt>{t('plugins.file_path')}</dt><dd><code>{declaration.path}</code></dd></>}
-        {prompt && <><dt>{t('plugins.prompt_scope')}</dt><dd>{t(`plugins.scope_${prompt.scope}`)}</dd></>}
-        {Boolean(declaration?.tools.length) && <><dt>{t('plugins.required_tools')}</dt><dd>{declaration!.tools.map(localId =>
+        <dt>{t('plugins.declaration_id')}</dt><dd><code>{id}</code></dd>
+        <dt>{t('plugins.file_path')}</dt><dd><code>{prompt.path}</code></dd>
+        <dt>{t('plugins.prompt_scope')}</dt><dd>{t(`plugins.scope_${prompt.scope}`)}</dd>
+        {Boolean(prompt.tools.length) && <><dt>{t('plugins.required_tools')}</dt><dd>{prompt.tools.map(localId =>
           <code key={localId}>{pluginToolName(plugin.id, localId)}</code>)}</dd></>}
-        {tool && <><dt>{t('plugins.tool_effect')}</dt><dd>{t(`plugins.effect_${tool.effect}`)} <code>({tool.effect})</code></dd>
-          <dt>{t('custom_tools.timeout')}</dt><dd>{tool.timeoutSeconds}</dd></>}
       </dl>
-      {toolText ? <pre className="ui-code-block settings-code-preview-code">{toolText}</pre> : <>
-        {(prompt?.description || summary?.description) && <p className="ui-field-hint">{prompt?.description ?? summary?.description}</p>}
-        {error ? <div className="ui-note ui-note-danger" role="alert">
-          <p>{t('plugins.preview_failed')}</p><p>{error}</p>
-          <button type="button" className="ui-button" onClick={() => setRetry(value => value + 1)}>{t('common.retry')}</button>
-        </div> : preview ? <>
-          <div className="ui-toolbar"><SegmentedControl ariaLabel={t('settings.file_view_mode')} value={source ? 'source' : 'preview'}
-            options={[{ value: 'preview', label: t('settings.file_preview') }, { value: 'source', label: t('settings.file_source') }]}
-            onChange={value => setSource(value === 'source')} /></div>
-          {source ? <pre className="ui-code-block settings-code-preview-code">{preview.content}</pre> : <PackageMarkdownPreview preview={preview} t={t} />}
-        </> : <div role="status" className="ui-field-hint">{t('common.loading')}</div>}
-      </>}
+      {prompt.description && <p className="ui-field-hint">{prompt.description}</p>}
+      {error ? <div className="ui-note ui-note-danger" role="alert">
+        <p>{t('plugins.preview_failed')}</p><p>{error}</p>
+        <button type="button" className="ui-button" onClick={() => setRetry(value => value + 1)}>{t('common.retry')}</button>
+      </div> : preview ? <>
+        <div className="ui-toolbar"><SegmentedControl ariaLabel={t('settings.file_view_mode')} value={source ? 'source' : 'preview'}
+          options={[{ value: 'preview', label: t('settings.file_preview') }, { value: 'source', label: t('settings.file_source') }]}
+          onChange={value => setSource(value === 'source')} /></div>
+        {source ? <pre className="ui-code-block settings-code-preview-code">{preview.content}</pre> : <PackageMarkdownPreview preview={preview} t={t} />}
+      </> : <div role="status" className="ui-field-hint">{t('common.loading')}</div>}
     </div>
   </ContentPreviewDialog>
 }
 
-export function PluginContributions({ plugin, busy, onRefresh }: { plugin: PluginSummary; busy?: boolean; onRefresh(): Promise<void> }) {
+export function PluginContributions({ plugin, busy, skills, onUpdateSkillAvailability, onRefresh }: {
+  plugin: PluginSummary
+  busy?: boolean
+  skills?: SkillSnapshot
+  onUpdateSkillAvailability(skillIds: string | string[], update: SkillAvailabilityUpdate): void | Promise<void>
+  onRefresh(): Promise<void>
+}) {
   const { t } = useTranslation()
-  const [selected, setSelected] = useState<Selection>()
+  const [selectedPrompt, setSelectedPrompt] = useState<string>()
   const [saving, setSaving] = useState(false)
   const [choices, setChoices] = useState(plugin.capabilityChoices)
   const pending = useRef(false)
@@ -101,26 +96,65 @@ export function PluginContributions({ plugin, busy, onRefresh }: { plugin: Plugi
       const summary = plugin.skillSummaries?.find(summary => summary.id === item.id)
       return { id: item.id, tools: item.tools, name: summary?.name ?? item.id, description: summary?.description ?? '' }
     }) },
-    { kind: 'tool', label: t('plugins.tools'), items: manifest.tools.map(item => ({ ...item, name: pluginToolName(plugin.id, item.id) })) }
+    { kind: 'tool', label: t('plugins.tools'), items: manifest.tools.map(item => ({ ...item, name: item.id })) }
   ] as const
-  const selectionExists = selected && groups.some(group => group.kind === selected.kind && group.items.some(item => item.id === selected.id))
+  const selectedPromptExists = selectedPrompt && manifest.prompts?.some(item => item.id === selectedPrompt)
   return <>
-    {groups.filter(group => group.items.length).map(group => <details open className="settings-contribution-group ui-form-section-divided" key={group.kind} aria-label={group.label}>
-      <summary><span className="settings-contribution-heading"><strong>{group.label}</strong><small>{group.items.filter(item => enabled(group.kind, item.id)).length}/{group.items.length}</small>
-        <CapabilityGroupActions allSelected={group.items.every(item => enabled(group.kind, item.id))} disabled={busy || Boolean(plugin.error)}
-          busy={saving} onChange={checked => void save(group.kind, group.items.map(item => item.id), checked)} />
-      </span></summary>
+    {groups.filter(group => group.items.length).map(group => {
+      if (group.kind === 'skill') {
+        const items = group.items.map(item => {
+          const skillId = `${plugin.id}:skill:${item.id}`
+          const skill = skills?.skills.find(skill => skill.id === skillId)
+          return { ...item, skillId, availability: skill?.configuredAvailability ?? skill }
+        })
+        return <details open className="settings-contribution-group ui-form-section-divided" key={group.kind} aria-label={group.label}>
+        <summary><span className="settings-contribution-heading"><strong>{group.label}</strong><small>{items.length}</small>
+          <CapabilityGroupActions allSelected={items.every(({ availability }) => availability?.userAvailable && availability.modelAvailable)}
+            disabled={busy || Boolean(plugin.error) || items.some(item => !item.availability)}
+            onChange={checked => void onUpdateSkillAvailability(items.map(item => item.skillId), { userAvailable: checked, modelAvailable: checked })} />
+        </span></summary>
+        <div className="ui-form-section">
+          {items.map(item => {
+            const { skillId, availability } = item
+            const missing = item.tools.filter(id => !enabled('tool', id))
+            const reason = !plugin.enabled ? t('plugins.disabled')
+              : missing.length ? t('plugins.missing_tools_detail', { tools: missing.map(id => pluginToolName(plugin.id, id)).join(', ') }) : undefined
+            return <div key={item.id} className="ui-form-row ui-form-row-fit-control">
+              <code className={`settings-tool-catalog-name ui-tool-name${reason ? ' ui-resource-unavailable' : ''}`}
+                data-tooltip={[reason, item.description].filter(Boolean).join('\n') || undefined}>{item.name}</code>
+              <SegmentedMultiSelect<'userAvailable' | 'modelAvailable'> ariaLabel={item.name}
+                disabled={busy || Boolean(plugin.error) || !availability}
+                options={[
+                  { value: 'userAvailable', label: t('settings.skill_user_available'), checked: availability?.userAvailable ?? false },
+                  { value: 'modelAvailable', label: t('settings.skill_model_available'), checked: availability?.modelAvailable ?? false }
+                ]}
+                onChange={(field, checked) => void onUpdateSkillAvailability(skillId, { [field]: checked })} />
+            </div>
+          })}
+        </div>
+      </details>
+      }
+      return <details open className="settings-contribution-group ui-form-section-divided" key={group.kind} aria-label={group.label}>
+        <summary><span className="settings-contribution-heading"><strong>{group.label}</strong><small>{group.items.filter(item => enabled(group.kind, item.id)).length}/{group.items.length}</small>
+          <CapabilityGroupActions allSelected={group.items.every(item => enabled(group.kind, item.id))} disabled={busy || Boolean(plugin.error)}
+            busy={saving} onChange={checked => void save(group.kind, group.items.map(item => item.id), checked)} />
+        </span></summary>
       <div className="settings-tool-catalog">
         {group.items.map(item => {
           const missing = ('tools' in item ? item.tools : []).filter(id => !enabled('tool', id))
           const reason = missing.length ? t('plugins.missing_tools_detail', { tools: missing.map(id => pluginToolName(plugin.id, id)).join(', ') }) : undefined
+          if (group.kind === 'tool') return <CheckboxField key={item.id} aria-label={item.name}
+            label={<code className="ui-tool-name">{item.name}</code>} tooltip={item.description}
+            checked={enabled('tool', item.id)} disabled={busy || Boolean(plugin.error)}
+            aria-disabled={saving || undefined} aria-busy={saving || undefined}
+            onChange={checked => void save('tool', [item.id], checked)} />
           return <CapabilityPreviewItem key={item.id} name={item.name} checked={enabled(group.kind, item.id)}
             disabled={busy || Boolean(plugin.error)} busy={saving} description={item.description} inactiveReason={reason}
             onChange={checked => void save(group.kind, [item.id], checked)}
-            onPreview={() => setSelected({ kind: group.kind, id: item.id })} />
+            onPreview={() => setSelectedPrompt(item.id)} />
         })}
       </div>
-    </details>)}
-    {selectionExists && <ContributionDetails key={`${selected.kind}:${selected.id}`} plugin={plugin} selection={selected} onClose={() => setSelected(undefined)} />}
+    </details>})}
+    {selectedPromptExists && <PromptDetails key={selectedPrompt} plugin={plugin} id={selectedPrompt} onClose={() => setSelectedPrompt(undefined)} />}
   </>
 }

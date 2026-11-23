@@ -26,11 +26,12 @@ describe('autosave page boundaries', () => {
     const skill = { id: 'plugin:skill:guide', rootId: 'plugin:example', source: 'plugin', name: 'guide', description: '',
       dirPath: '', linked: false, relativePath: 'guide', rootName: 'Example', shortcutAlias: 'plugin:example',
       modelAvailable: false, userAvailable: false, configuredAvailability: { modelAvailable: false, userAvailable: false } } as const
-    let saved: SkillSnapshot = { roots: [], skills: [skill] }
+    let saved: SkillSnapshot = { roots: [], skills: [skill, { ...skill, id: 'plugin:skill:second' }] }
     const pending = deferred<void>()
     const updateAvailability = vi.fn(async (_project, _id, update) => {
       await pending.promise
-      saved = { ...saved, skills: [{ ...skill, configuredAvailability: { ...saved.skills[0].configuredAvailability!, ...update } }] }
+      saved = { ...saved, skills: saved.skills.map(item => item.id === _id
+        ? { ...item, configuredAvailability: { ...item.configuredAvailability!, ...update } } : item) }
       return saved
     })
     vi.stubGlobal('gale', { plugins: { onChanged: vi.fn(() => () => {}) }, skills: { get: vi.fn(async () => saved), updateAvailability } })
@@ -45,6 +46,9 @@ describe('autosave page boundaries', () => {
     await act(async () => result.current.refreshSkills())
     expect(result.current.skills?.skills[0]).toMatchObject(expected)
     expect(saved.skills[0]).toMatchObject(expected)
+    await act(async () => result.current.updateAvailability([skill.id, 'plugin:skill:second'], { userAvailable: true, modelAvailable: true }))
+    expect(updateAvailability).toHaveBeenCalledTimes(4)
+    expect(saved.skills.every(item => item.configuredAvailability?.userAvailable && item.configuredAvailability.modelAvailable)).toBe(true)
   })
 
   it('returns the first imported user skill ID, not a same-named external skill or catalog order', async () => {

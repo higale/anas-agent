@@ -12,7 +12,7 @@ import { CustomToolsGroup } from './CustomToolsGroup'
 import type { AppConfigSnapshot } from '@shared/types'
 import type { ToolPackage } from '@shared/toolPackages'
 import { pluginDisplayText, type PluginSummary } from '@shared/plugins'
-import { pluginToolName } from '@shared/pluginTools'
+import { pluginToolName, type PluginToolDefinition } from '@shared/pluginTools'
 import { pluginCapabilityEnabled } from '@shared/pluginCapabilities'
 import { SegmentedControl } from '../SegmentedControl'
 import type { AgentAccessMode } from '@shared/agentTypes'
@@ -28,7 +28,10 @@ interface ToolsSettingsProps {
   runtimeToolStatus: RuntimeToolStatus | undefined
 }
 
-type CatalogEntry = (RuntimeToolDefinition | { name: string; description?: undefined }) & { inactiveReason?: string }
+type CatalogEntry = (RuntimeToolDefinition | { name: string; description?: undefined }) & {
+  inactiveReason?: string
+  pluginTool?: PluginToolDefinition
+}
 interface ToolDisplayGroup {
   id: string
   name: string
@@ -105,6 +108,7 @@ export function ToolsSettings({ actionsTarget, plugins, pluginError, customTools
           description: tool.description,
           inactiveReason: inactiveReason || (!pluginCapabilityEnabled(plugin.capabilityChoices, 'tool', tool.id) ? t('plugins.tool_disabled') : undefined),
           inputSchema: tool.inputSchema,
+          pluginTool: tool,
           parameters: []
         }))
       }
@@ -192,6 +196,10 @@ export function ToolsSettings({ actionsTarget, plugins, pluginError, customTools
 
       {selectedName && <ContentPreviewDialog title={selectedName} description={t('settings.tool_definition_hint')}
         copyText={selectedToolText} onClose={() => setSelectedToolKey(undefined)}>
+        {selectedEntry?.pluginTool && <p className="settings-tool-execution-summary">{t('plugins.tool_execution_summary', {
+          effect: t(`plugins.effect_${selectedEntry.pluginTool.effect}`), code: selectedEntry.pluginTool.effect,
+          count: selectedEntry.pluginTool.timeoutSeconds
+        })}</p>}
         {selectedTool?.smartApprovalDefinition && <div className="settings-tool-definition-formats">
           <SegmentedControl<AgentAccessMode> ariaLabel={t('chat.access_mode')} value={previewAccessMode} onChange={setPreviewAccessMode}
             options={(['strict_approval', 'smart_approval', 'full_access'] as const).map(value => ({ value,

@@ -22,12 +22,12 @@ Select an external directory, then use the left toolbar to move it up or down or
 
 Project skills appear in **Project - directory name** groups alongside other sources in **Capabilities > Skills**. Each uses a standard checkbox, with multiple entries per row. Selecting a project skill enables both shortcuts and model use. Only the top-level Skills section can collapse; its sources and directories are displayed directly. Add directories beside the outer Skills heading; open or remove references beside each directory heading. Changes are saved with the project; Cancel does not write them.
 
-Skill details show **Shortcut** and **Available to model**. These control separate uses:
+Ordinary skill details show **Shortcut** and **Available to model**. Plugin skills configure these options in **Settings → Plugins**, with read-only usage choices and a link from the Skills page. These control separate uses:
 
 - **Shortcut** allows explicit invocation with `/skill-name request` in the message input. Type `/` to see suggestions. Anas sends the complete, unchanged `SKILL.md` and its source path, with the text after the command as a separate user request; expand the skill entry in the conversation to inspect the actual submitted text.
 - **Available to model** supplies the Agent with the name, description, and absolute `SKILL.md` path so it can read the instructions when relevant.
 
-When both options are off, the list shows **Disabled** on the right; the skill can still be viewed and edited. For ordinary skills, turning off only one option does not mark it disabled. Plugin skills also depend on their contribution switch and required tools. When either is disabled, the usage checkboxes retain their saved choices and remain editable; the skill stays inactive until its dependencies are enabled again. Loading failures show **Error** separately, without strikethrough.
+When both options are off, the list shows **Disabled** on the right; the skill can still be viewed and edited. For ordinary skills, turning off only one option does not mark it disabled. Plugin skills also depend on the plugin’s overall switch and required tools. When either is disabled, the usage checkboxes retain their saved choices and remain editable; the skill stays inactive until its dependencies are enabled again. Loading failures show **Error** separately, without strikethrough.
 
 Project and subagent skill entries have one checkbox, without separate shortcut and model choices. Selected ordinary skills follow their global availability settings. Selected project skills enable both uses; subagents only use skills through the model. A local selection cannot enable a globally unavailable or invalid skill. Plugin skills are selected with their entire plugin.
 
