@@ -105,20 +105,26 @@ describe('native model preparation in the durable conversation loop', () => {
     expect(state.messages[1].value.source?.metadata.id).toBe('repeated-provider-id')
   })
 
-  it.each([true, false])('keeps simple-chat tool history out of the request without deleting the original conversation (tool use: %s)', async toolUse => {
-    const h = fixture(); h.options.simpleChat = true
+  it.each([true, false])('preserves tool history when no tools are enabled (tool use: %s)', async toolUse => {
+    const h = fixture()
     h.options.resolveModel = async () => ({ ...model, capabilities: { ...model.capabilities, toolUse } })
-    // Runtime resources select tools before model preparation; simple chat has no host tools.
     const original: ConversationMessage[] = [{ id: 'user', kind: 'user', content: 'task' },
       { id: 'call', kind: 'assistant', content: 'Visible answer', calls: [{ id: 'provider-call', name: 'read_file', args: { path: 'file' } }] },
       { id: 'result', kind: 'tool', resultFor: 'provider-call', content: 'Internal tool result' },
       { id: 'next', kind: 'user', content: 'Continue' }]
     h.begin(original)
-    expect((await conversationExecution(h.services()).execute('continue', request(), h.observer)).result.status).toBe('fulfilled')
-    const body = JSON.parse(String(h.fetch.mock.calls[0][1]?.body))
-    expect(body.tools ?? []).toEqual([])
-    expect(JSON.stringify(body)).not.toContain('Internal tool result')
-    expect(JSON.stringify(body)).toContain('Visible answer')
+    const result = await conversationExecution(h.services()).execute('continue', request(), h.observer)
+    if (toolUse) {
+      expect(result.result.status).toBe('fulfilled')
+      const body = JSON.parse(String(h.fetch.mock.calls[0][1]?.body))
+      expect(body.tools ?? []).toEqual([])
+      expect(JSON.stringify(body)).toContain('Internal tool result')
+      expect(JSON.stringify(body)).toContain('Visible answer')
+    } else {
+      expect(result.result.status).toBe('rejected')
+      if (result.result.status === 'rejected') expect(String(result.result.reason)).toContain('does not support the tool context')
+      expect(h.fetch).not.toHaveBeenCalled()
+    }
     expect(h.store.load('thread')!.messages.slice(0, 4).map(message => message.value)).toEqual(original)
   })
 

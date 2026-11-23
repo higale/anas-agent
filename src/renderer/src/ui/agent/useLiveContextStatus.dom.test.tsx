@@ -27,7 +27,7 @@ function contextStatus(config = model, tokens = 100): AgentContextStatus {
 const continuation = { config: undefined, project: undefined, continuationRunId: 'run', continuationStatus: 'running' as const,
   liveStatus: contextStatus() }
 const project: Project = {
-  id: 'project', name: 'Project', kind: 'workspace', sourceFolders: ['C:/workspace'],
+  id: 'project', name: 'Project', sourceFolders: ['C:/workspace'],
   prompt: 'Project instructions.', codingMode: false,
   capabilities: structuredClone(defaultCapabilities), restrictSubagents: false,
   pinned: false, collapsed: false, createdAt: '', updatedAt: ''
@@ -130,6 +130,21 @@ describe('useLiveContextStatus', () => {
     expect(result.current?.estimatedInputTokens).toBe(900)
     expect(result.current?.inputCapacityTokens).toBe(19_000)
     expect(reader.mock.calls).toHaveLength(calls)
+  })
+
+  it.each([{ sourceFolders: [] }, { sourceFolders: ['/explicit'] }])('refreshes the default directory only when the project inherits it: $sourceFolders', async ({ sourceFolders }) => {
+    const reader = vi.fn().mockResolvedValue(contextStatus(model, 300))
+    installStatusReader(reader)
+    const config = { settings: { projectDefaultDirectory: '/first' } } as AppConfigSnapshot
+    const reported = contextStatus()
+    const { result, rerender } = renderHook(({ currentConfig }) => useLiveContextStatus('thread', model, reported, {
+      config: currentConfig, project: { ...project, sourceFolders }, continuationRunId: undefined
+    }), { initialProps: { currentConfig: config } })
+    await waitFor(() => expect(result.current?.estimatedInputTokens).toBe(300))
+    reader.mockResolvedValue(contextStatus(model, 500))
+    rerender({ currentConfig: { ...config, settings: { ...config.settings, projectDefaultDirectory: '/second' } } })
+    await waitFor(() => expect(result.current?.estimatedInputTokens).toBe(sourceFolders.length ? 300 : 500))
+    expect(reader).toHaveBeenCalledTimes(sourceFolders.length ? 1 : 2)
   })
 
   it('keeps running product settings until the run ends and then refreshes the same model', async () => {

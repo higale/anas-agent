@@ -1,5 +1,3 @@
-import type { ProjectKind } from './types'
-
 export const PROJECT_ICON_NAMES = [
   'folder',
   'message-circle',
@@ -35,9 +33,7 @@ export const PROJECT_ICON_NAMES = [
 
 export type ProjectIconName = typeof PROJECT_ICON_NAMES[number]
 
-export function defaultProjectIcon(kind: ProjectKind, codingMode = false): ProjectIconName {
-  return kind === 'simple_chat' ? 'message-circle' : codingMode ? 'braces' : 'folder'
-}
+export const DEFAULT_PROJECT_ICON: ProjectIconName = 'folder'
 
 export const PROJECT_ICON_COLORS = [
   'red',

@@ -14,6 +14,7 @@ import { preserveRecoveryData } from './recoveryData'
 import { AgentStorage } from './agent/agentStorage'
 import { readInputHistoryStoreFile } from './inputHistoryStore'
 import * as avatarRepair from './recoveryAvatar'
+import { parseProjectStore } from './projectStore'
 
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))) })
@@ -246,7 +247,7 @@ describe('field-level recovery', () => {
   })
 
   it.each([undefined, 'strict_approval', 'smart_approval', 'full_access', 'unknown', null])('preserves optional project permissions and repairs only invalid choices: %s', accessMode => {
-    const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep', pinned: false, collapsed: true,
+    const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, name: 'Keep', pinned: false, collapsed: true,
       createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z', sourceFolders: ['/keep/path'],
       prompt: 'Keep project rules', coding_mode: false, advanced_settings: false, restrict_subagents: false,
       capabilities: structuredClone(capabilities), ...(accessMode === undefined ? {} : { access_mode: accessMode }) }
@@ -258,7 +259,7 @@ describe('field-level recovery', () => {
   })
 
   it.each([undefined, '', 'Keep sources: {conversation}', 42, 'Missing placeholder'])('preserves valid optional compression prompts and repairs only invalid values: %s', compressionPrompt => {
-    const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep', pinned: false, collapsed: true,
+    const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, name: 'Keep', pinned: false, collapsed: true,
       createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z', sourceFolders: ['/keep/path'],
       prompt: 'Keep project rules', coding_mode: false, advanced_settings: false, restrict_subagents: false,
       capabilities: structuredClone(capabilities), ...(compressionPrompt === undefined ? {} : { compression_prompt: compressionPrompt }) }
@@ -275,7 +276,7 @@ describe('field-level recovery', () => {
     const selection = { ...structuredClone(capabilities),
       skills: { mode: 'off', project: true, entries: [{ id: 'user:kept', shortcut: false, model: true }] },
       subagents: { mode: 'off', names: ['web-researcher'] }, workspace: false }
-    const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep project', pinned: false, collapsed: true,
+    const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, name: 'Keep project', pinned: false, collapsed: true,
       createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z', sourceFolders: ['/keep/path'],
       prompt: 'Keep prompt', coding_mode: true, advanced_settings: true, restrict_subagents: true, capabilities: selection }
     const raw: any = { version: 0, projects: [project] }
@@ -297,7 +298,7 @@ describe('field-level recovery', () => {
 
   function repairScope(capabilities: unknown) {
     const result = repairDocument('projects.json', { version: 0, projects: [{
-      id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep', pinned: false, collapsed: false,
+      id: DEFAULT_WORKSPACE_PROJECT_ID, name: 'Keep', pinned: false, collapsed: false,
       createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z', sourceFolders: [],
       prompt: '', coding_mode: false, advanced_settings: false, restrict_subagents: false, capabilities
     }] })
@@ -343,7 +344,7 @@ describe('field-level recovery', () => {
   })
 
   it.each([undefined, null, 'true', 1, false, true])('repairs invalid coding mode %s only through explicit recovery', (codingMode) => {
-    const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep',
+    const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, name: 'Keep',
       createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z',
       coding_mode: codingMode, advanced_settings: false, capabilities }
     const result = repairDocument('projects.json', { version: 0, projects: [project] })
@@ -403,9 +404,23 @@ describe('field-level recovery', () => {
     expect(plan.candidates).toEqual([])
   })
 
+  it.each([{ sourceFolders: undefined }, { sourceFolders: [] }, { sourceFolders: ['/keep/path'] }])('preserves effective project folders during field repair: $sourceFolders', ({ sourceFolders }) => {
+    const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, name: 'Keep project', pinned: false, collapsed: false,
+      createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z',
+      ...(sourceFolders === undefined ? {} : { sourceFolders }) }
+    const raw = { version: 0, projects: [project] }
+    const before = parseProjectStore(raw).projects[0]
+    const repaired = repairDocument('projects.json', raw)
+    const after = parseProjectStore(repaired.value).projects[0]
+    expect(before.sourceFolders).toEqual(sourceFolders ?? [])
+    expect(after.sourceFolders).toEqual(before.sourceFolders)
+    if (sourceFolders === undefined) expect(project).not.toHaveProperty('sourceFolders')
+    expect(repairDocument('projects.json', repaired.value).fields).toEqual([])
+  })
+
   it('repairs project fields without changing project identities and rejects unidentifiable projects', () => {
     const project: any = {
-      id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep project',
+      id: DEFAULT_WORKSPACE_PROJECT_ID, name: 'Keep project',
       createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z', sourceFolders: ['/keep/path'],
       capabilities: { ...capabilities, workspace: false }, pinned: false
     }
@@ -417,7 +432,7 @@ describe('field-level recovery', () => {
   })
 
   it.each([{ invalid: null }, { invalid: ['project:guide', false, '', 'project:extra'] }])('leaves retired project exemptions untouched during repair: $invalid', ({ invalid }) => {
-    const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep project',
+    const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, name: 'Keep project',
       createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z', sourceFolders: ['/keep/path'],
       capabilities: { ...capabilities, workspace: false }, pinned: false, script_auto_approve_skills: invalid }
     const repaired = repairDocument('projects.json', { version: 0, projects: [project] }).value as { projects: Record<string, unknown>[] }
@@ -446,7 +461,7 @@ describe('field-level recovery', () => {
 
   it('repairs project capability settings without resetting projects or conversation data', async () => {
     const { root, data } = await fixture()
-    const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep project', pinned: false, collapsed: true,
+    const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, name: 'Keep project', pinned: false, collapsed: true,
       createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z', sourceFolders: ['/keep/path'],
       prompt: 'Keep prompt', coding_mode: true, advanced_settings: true, restrict_subagents: true,
       capabilities: { ...structuredClone(capabilities), subagents: false } }

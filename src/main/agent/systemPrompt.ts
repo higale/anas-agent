@@ -118,7 +118,6 @@ export function buildAgentSystemPrompt(
     pluginPrompts?: string
     commandShell?: string
     bundledPython?: BundledPythonInfo
-    simpleChatPrompt?: string
     projectPrompt?: string
     codingMode?: boolean
     toolsEnabled?: boolean
@@ -134,13 +133,6 @@ export function buildAgentSystemPrompt(
     if (trimmed) sections.push({ kind, content: trimmed })
   }
 
-  if (context.simpleChatPrompt !== undefined) {
-    appendSection('system_instruction', context.simpleChatPrompt)
-    return {
-      text: sections.map((section) => section.content).join('\n\n'),
-      sections
-    }
-  }
   if (features.profile) appendSection('profile', buildProfileBlock(config.settings.profile))
   if (context.codingMode) appendSection('coding_instruction', buildCodingInstruction(features, context.toolsEnabled ?? true))
   const bundledPython = (context.toolsEnabled ?? true) ? context.bundledPython : undefined

@@ -95,12 +95,10 @@ export function createConversationContextRuntime(options: {
   systemPrompt: (model: ResolvedModelConfig) => string | AgentSystemPrompt
   includeProjectRules?: boolean
   tools: (model: ResolvedModelConfig) => unknown[]
-  projectHistory?: (messages: ConversationMessage[]) => ConversationMessage[]
   projectMessages?: (messages: ConversationMessage[], model: ResolvedModelConfig) => Promise<ConversationMessage[]>
   projectSystemMessage?: (systemMessage: ConversationMessage, messages: ConversationMessage[]) => Promise<ConversationMessage>
 }): ConversationContextRuntime {
   const { outputLanguage, projectMessages } = options
-  const projectHistory = (messages: ConversationMessage[]): ConversationMessage[] => projectConversationToolHistory(options.projectHistory?.(messages) ?? messages)
 
   function calculateStatus(
     messages: ConversationMessage[],
@@ -168,7 +166,7 @@ export function createConversationContextRuntime(options: {
 
   function statusWithModel(values: ConversationContextSource, model: ResolvedModelConfig): AgentContextStatus {
     return calculateStatus(
-      [...projectHistory(effectiveMessages(values)), ...modelRecoveryFeedback(values.modelRecovery)],
+      [...projectConversationToolHistory(effectiveMessages(values)), ...modelRecoveryFeedback(values.modelRecovery)],
       model,
       Boolean(summarizationEvent(values)),
       requestWithRules(values, model)
@@ -193,7 +191,7 @@ export function createConversationContextRuntime(options: {
   }
 
   async function projectedStatusWithModel(values: ConversationContextSource, model: ResolvedModelConfig): Promise<AgentContextStatus> {
-    const messages = projectHistory(effectiveMessages(values))
+    const messages = projectConversationToolHistory(effectiveMessages(values))
     if (!projectMessages && !options.projectSystemMessage) return statusWithModel(values, model)
     const projectedMessages = projectMessages ? await projectMessages(messages, model) : messages
     const request = await projectedRequest(values, requestSourceMessages(stateMessages(values), projectedMessages), model)
@@ -249,8 +247,8 @@ export function createConversationContextRuntime(options: {
     }
 
     // Cutoffs always address persisted conversation messages; request-only filtering
-    // must happen after selecting the source range, including for plain chats.
-    const history = projectHistory(messages.slice(0, effectiveCutoffIndex))
+    // must happen after selecting the source range.
+    const history = projectConversationToolHistory(messages.slice(0, effectiveCutoffIndex))
     const projectedMessages = projectMessages
       ? await projectMessages(history, model)
       : history
@@ -285,7 +283,7 @@ export function createConversationContextRuntime(options: {
     const cutoffIndex = previousEvent
       ? previousEvent.cutoffIndex + effectiveCutoffIndex - 1
       : effectiveCutoffIndex
-    const afterMessages = projectHistory(projectConversationToolImages([summaryMessage, ...rawMessages.slice(cutoffIndex)]))
+    const afterMessages = projectConversationToolHistory(projectConversationToolImages([summaryMessage, ...rawMessages.slice(cutoffIndex)]))
     const projectedAfterMessages = projectMessages
       ? await projectMessages(afterMessages, model)
       : afterMessages

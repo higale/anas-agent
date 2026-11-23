@@ -30,7 +30,7 @@ export class NativeRuntimeCoordinator extends ConversationRuntimeDirectory<Nativ
         && this.databaseForThread(id).runs.store.readHead(id)?.revisionId === revision),
       current: async source => {
         const project = (await listProjects()).find(item => item.id === source.projectId)
-        if (project?.kind !== 'workspace' || !project.capabilities.memory) return false
+        if (!project || !project.capabilities.memory) return false
         return this.useStorage(store => this.readableThread(source.threadId)?.projectId === source.projectId
           && store.conversationForThread(source.threadId).runs.store.readHead(source.threadId)?.revisionId === source.sourceRevision)
       },
@@ -55,7 +55,6 @@ export class NativeRuntimeCoordinator extends ConversationRuntimeDirectory<Nativ
         continue
       }
       const project = projects.get(thread.projectId)
-      if (project?.kind === 'simple_chat') { this.memory.store.forgetThread(id); continue }
       if (!barrier && (!project || !project.capabilities.memory)) continue
       const snapshot = withConversationLeaseScope(() => {
         const store = this.databaseForThread(thread.id).runs.store, head = store.readHead(thread.id)

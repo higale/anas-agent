@@ -61,7 +61,7 @@ async function verifyModelSelection(launchApplication) {
     const timestamp = new Date().toISOString()
     await mkdir(join(profile, 'db/projects/default-workspace'), { recursive: true })
     await writeFile(join(profile, 'db/projects/default-workspace/project.json'), `${JSON.stringify({ version: 0, project: {
-      id: 'default-workspace', kind: 'workspace', name: 'Model selection test',
+      id: 'default-workspace', name: 'Model selection test',
       sourceFolders: [workspace], capabilities, restrict_subagents, advanced_settings: true,
       coding_mode: false, prompt: '', createdAt: timestamp, updatedAt: timestamp
     } })}\n`)

@@ -2,7 +2,7 @@ import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultCapabilities } from '@shared/agentCapabilities'
-import type { WorkspaceProject } from '@shared/types'
+import type { Project } from '@shared/types'
 import type { GitChangeReadInput, GitChangeResult } from '@shared/gitChanges'
 import { referenceFixture } from '../diff/diffTestFixtures'
 import { FileChangesPanel } from './FileChangesPanel'
@@ -12,7 +12,7 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t }) }))
 vi.mock('../notice', () => ({ notice: { success: vi.fn(), error: vi.fn() } }))
 vi.mock('../diff/DiffContentView', () => ({ DiffContentView: ({ request }: { request: { input: { filePath: string } } }) => <div>{request.input.filePath}</div> }))
 const get = vi.fn(), refs = vi.fn()
-const project: WorkspaceProject = { id: 'project', kind: 'workspace', name: 'Project', sourceFolders: ['/one', '/two'],
+const project: Project = { id: 'project', name: 'Project', sourceFolders: ['/one', '/two'],
   capabilities: defaultCapabilities, restrictSubagents: false, codingMode: false, prompt: '', pinned: false, collapsed: false, createdAt: '', updatedAt: '' }
 function result(input: GitChangeReadInput): GitChangeResult {
   return { scope: input.scope, sourceFolder: input.sourceFolder, repositoryRoot: input.sourceFolder,

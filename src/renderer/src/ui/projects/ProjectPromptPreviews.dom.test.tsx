@@ -4,7 +4,7 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultCapabilities } from '@shared/agentCapabilities'
-import type { WorkspaceProjectRequest, AppSettings, GaleApi } from '@shared/types'
+import type { ProjectCreateRequest, AppSettings, GaleApi } from '@shared/types'
 import { ProjectPromptPreviews } from './ProjectPromptPreviews'
 
 const contextMocks = vi.hoisted(() => ({
@@ -41,11 +41,11 @@ const settings = {
   sidebarVisible: true,
   sidebarWidth: 260,
       workspacePanelWidth: 480, memoryMode: 'background', showMemoryActivityInTitlebar: true, ...diffViewSettingsFixture,
-  sidebarCollapsedSections: { pinnedProjects: false, projects: false, simpleChats: false },
-  backupDir: ''
+  sidebarCollapsedSections: { pinnedProjects: false, projects: false },
+  projectDefaultDirectory: '', backupDir: ''
 } satisfies AppSettings
 
-const project: WorkspaceProjectRequest = { kind: 'workspace', name: 'Draft', sourceFolders: ['C:/draft'], prompt: 'Unsaved prompt', codingMode: false, capabilities: defaultCapabilities, restrictSubagents: false, modelConfigId: 'model-2', modelParameterPresetId: 'preset-2' }
+const project: ProjectCreateRequest = { name: 'Draft', sourceFolders: ['C:/draft'], prompt: 'Unsaved prompt', codingMode: false, capabilities: defaultCapabilities, restrictSubagents: false, modelConfigId: 'model-2', modelParameterPresetId: 'preset-2' }
 
 describe('model request preview', () => {
   beforeEach(() => {
@@ -93,7 +93,7 @@ describe('model request preview', () => {
 
   it('keeps unavailable request previews disabled while compression remains accessible by keyboard', async () => {
     const user = userEvent.setup()
-    render(<ProjectPromptPreviews project={{ ...project, sourceFolders: [] }} settings={settings} />)
+    render(<ProjectPromptPreviews project={project} settings={undefined} />)
     const trigger = screen.getByRole('button', { name: 'common.more' })
     trigger.focus()
     await user.keyboard('{Enter}')
@@ -119,6 +119,17 @@ describe('model request preview', () => {
     expect(await screen.findByText('settings.preview_select_model')).toBeInTheDocument()
     expect(contextMocks[method]).toHaveBeenCalledWith(expect.objectContaining({ project, settings, currentModelSelection }))
     expect(screen.getByRole('button', { name: 'common.copy' })).toBeDisabled()
+  })
+
+  it('allows request previews with an empty folder selection', async () => {
+    const draft = { ...project, name: '', sourceFolders: [] }
+    contextMocks.preview.mockResolvedValue({ content: 'Default directory context' })
+    render(<ProjectPromptPreviews project={draft} settings={settings} />)
+    await userEvent.click(screen.getByRole('button', { name: 'common.more' }))
+    expect(screen.getByRole('menuitem', { name: 'settings.view_model_request' })).not.toHaveAttribute('aria-disabled', 'true')
+    await userEvent.click(screen.getByRole('menuitem', { name: 'settings.view_effective_system_context' }))
+    expect(await screen.findByText('Default directory context')).toBeInTheDocument()
+    expect(contextMocks.preview).toHaveBeenCalledWith(expect.objectContaining({ project: draft }))
   })
 
   it.each([

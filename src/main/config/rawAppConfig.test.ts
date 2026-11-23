@@ -172,7 +172,6 @@ describe('domain config storage', () => {
       sidebar_collapsed_sections: {
         pinned_projects: false,
         projects: false,
-        simple_chats: false
       },
       speech_reply: { enabled: false, speed: 1 }
     })
@@ -233,7 +232,6 @@ describe('domain config storage', () => {
       sidebar_collapsed_sections: {
         pinned_projects: false,
         projects: true,
-        simple_chats: false
       }
     })
     expect(result.settings).not.toHaveProperty('persona_name')

@@ -193,7 +193,7 @@ async function verifyCustomTools(launchApplication) {
     if (process.env.ANAS_E2E_CUSTOM_TOOL_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_CUSTOM_TOOL_SCREENSHOT + '.catalog.png' })
     await expect(page.getByRole('checkbox', { name: 'Enabled', exact: true })).toBeChecked()
     await page.evaluate(async () => {
-      const base = (await globalThis.gale.projects.list()).find(project => project.kind === 'workspace')
+      const base = (await globalThis.gale.projects.list()).find(project => project.id === 'default-workspace')
       const result = await globalThis.gale.projects.create({ ...base, name: 'Custom tool selections' })
       if (result.status !== 'ok') throw new Error(JSON.stringify(result))
     })
@@ -239,7 +239,7 @@ async function verifyCustomTools(launchApplication) {
         parameters: {}, parameterPresetMode: 'none', capabilities: { vision: false, toolUse: true }, stream: false,
         maxContextTokens: 128000, maxOutputTokens: 4096, contextCompressionThreshold: 0.8, contextCompressionEnabled: false })
       const modelConfigId = models.providers.find(provider => provider.id === providerId).models[0].id
-      const base = (await api.projects.list()).find(project => project.kind === 'workspace')
+      const base = (await api.projects.list()).find(project => project.id === 'default-workspace')
       const project = await api.projects.create({ ...base, name: 'Custom terminal fixture', sourceFolders: [workspace], toolDirectories: [toolRoot],
         codingMode: false, prompt: '', restrictSubagents: false,
         capabilities: { ...base.capabilities, profile: false, environment: false, workspace: false, memory: false,

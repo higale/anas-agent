@@ -44,9 +44,8 @@ function config(): AppConfigSnapshot {
       sidebarCollapsedSections: {
         pinnedProjects: false,
         projects: false,
-        simpleChats: false
       },
-      backupDir: ''
+      projectDefaultDirectory: '', backupDir: ''
     }
   }
 }
@@ -119,12 +118,6 @@ describe('effective agent system prompt', () => {
     expect(coding).not.toContain('Use the available planning capability')
     expect(coding).not.toContain('Delegate only')
     expect(coding).toContain('explain the limitation')
-  })
-
-  it('keeps simple chat unchanged even when coding mode is supplied', () => {
-    const prompt = buildAgentSystemPrompt(config(), { workspace: 'WORKSPACE', memory: 'MEMORY', skills: 'SKILLS', codingMode: true, simpleChatPrompt: 'Plain chat' })
-    expect(prompt.text).toBe('Plain chat')
-    expect(prompt.sections).toEqual([{ kind: 'system_instruction', content: 'Plain chat' }])
   })
 
   it('keeps structured preview sections identical to the final prompt composition', () => {

@@ -85,7 +85,7 @@ async function verifyProcessList(launchApplication) {
         maxContextTokens: 128000, maxOutputTokens: 4096, contextCompressionThreshold: 0.8, contextCompressionEnabled: false })
       const modelConfigId = models.providers.find(provider => provider.id === providerId).models[0].id
       await api.config.selectDefaultModel(modelConfigId)
-      const result = await api.projects.create({ kind: 'workspace', name: '进程列表验证', sourceFolders: [workspace], codingMode: true,
+      const result = await api.projects.create({ name: '进程列表验证', sourceFolders: [workspace], codingMode: true,
         prompt: '', restrictSubagents: false, capabilities: { profile: false, environment: false, workspace: true, memory: false,
           applicationEnvironment: false, backgroundTools: true, subagents: { mode: 'off', names: [] }, planning: false,
           toolMode: 'selected', tools: ['run_shell', 'read_call', 'cancel_call'], customTools: { project: false, entries: [] },

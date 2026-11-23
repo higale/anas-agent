@@ -25,7 +25,12 @@ import { formatDateTime } from './formatDateTime'
 import { NoFocusButton } from './NoFocusButton'
 import { installNativeContextMenuPolicy } from '../nativeContextMenuPolicy'
 
+function projectSettings() {
+  return { sourceFolders: ['D:/project'], skillDirectories: [], toolDirectories: [], capabilities: structuredClone(defaultCapabilities), codingMode: false, restrictSubagents: false }
+}
+
 const capabilityApis = {
+  projects: { getDefaultDirectory: vi.fn(async () => 'D:/Documents'), chooseSourceFolders: vi.fn(async () => ({ status: 'ok', value: ['D:/project'] })) },
   plugins: { list: vi.fn(async () => []), onChanged: vi.fn(() => () => {}) },
   tools: { get: vi.fn(async () => ({ roots: [], tools: [] })) },
   skills: { get: vi.fn(async () => ({ roots: [], skills: [] })) },
@@ -40,7 +45,7 @@ beforeEach(() => {
 
 vi.mock('react-i18next', () => {
   const t = (key: string, options?: { name?: string }) => {
-      if (key === 'project.untitled_name') return '未命名项目'
+      if (key === 'project.untitled_name_prefix') return '未命名项目'
       if ((key === 'project.expand_section' || key === 'project.collapse_section') && options?.name) {
         return `${key}:${options.name}`
       }
@@ -173,8 +178,8 @@ describe('renderer interaction accessibility', () => {
     const user = userEvent.setup()
     const onSave = vi.fn()
     const onClose = vi.fn()
-    render(<ProjectDialog open kind="simple_chat" project={preferredProject} config={modelPickerConfig(true)} onClose={onClose} onSave={onSave} />)
-    const input = screen.getByLabelText('project.simple_chat_prompt')
+    render(<ProjectDialog open project={preferredProject} config={modelPickerConfig(true)} onClose={onClose} onSave={onSave} />)
+    const input = screen.getByRole('textbox', { name: 'project.project_prompt' })
     await user.type(input, 'Unsaved instructions')
     await user.click(screen.getByRole('button', { name: 'common.more' }))
     await user.click(screen.getByRole('menuitem', { name: 'settings.view_effective_system_context' }))
@@ -197,33 +202,28 @@ describe('renderer interaction accessibility', () => {
   })
 
   const preferredProject: Project = {
-    id: 'project-preference', kind: 'simple_chat', name: 'Preferred project', prompt: '',
+    id: 'project-preference', ...projectSettings(), name: 'Preferred project', prompt: '',
     pinned: false, collapsed: false, createdAt: '2026-09-05T00:00:00Z', updatedAt: '2026-09-05T00:00:00Z',
     modelConfigId: 'model-1', modelParameterPresetId: 'thinking-off'
   }
 
-  it.each(['workspace', 'simple_chat'] as const)('keeps %s labels accessible after moving model selection below project content', (kind) => {
-    render(<ProjectDialog open kind={kind} config={modelPickerConfig(true)} onClose={vi.fn()} onSave={vi.fn()} />)
+  it('keeps labels accessible after moving model selection below project content', () => {
+    render(<ProjectDialog open config={modelPickerConfig(true)} onClose={vi.fn()} onSave={vi.fn()} />)
     const label = screen.getByText('project.name')
     const header = label.parentElement!
     expect(within(header).queryByRole('button', { name: 'chat.select_model' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'chat.select_model' })).toBeVisible()
     expect(screen.getByRole('textbox', { name: 'project.name' })).toBeVisible()
     expect(header.closest('label')).toBeNull()
-    if (kind === 'simple_chat') {
-      expect(screen.getByRole('textbox', { name: 'project.simple_chat_prompt' })).toBeVisible()
-      expect(screen.queryByRole('button', { name: 'chat.access_mode' })).not.toBeInTheDocument()
-    }
+    expect(screen.getByRole('textbox', { name: 'project.project_prompt' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'chat.access_mode' })).toBeVisible()
   })
 
-  it.each(['workspace', 'simple_chat'] as const)('keeps the %s project dialog and edits when clicking outside, but allows explicit dismissal', async (kind) => {
+  it.each([false, true])('keeps the %s project dialog and edits when clicking outside, but allows explicit dismissal', async (codingMode) => {
     const user = userEvent.setup()
     const onClose = vi.fn()
-    const project: Project = kind === 'simple_chat'
-      ? preferredProject
-      : {
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, ...preferredProject, kind: 'workspace', sourceFolders: ['D:/project'] }
-    render(<ProjectDialog open kind={kind} project={project} config={modelPickerConfig(true)}
+    const project: Project = { ...preferredProject, codingMode }
+    render(<ProjectDialog open project={project} config={modelPickerConfig(true)}
       onClose={onClose} onSave={vi.fn()} />)
     const nameInput = screen.getByRole('textbox', { name: 'project.name' })
     await user.clear(nameInput)
@@ -250,7 +250,7 @@ describe('renderer interaction accessibility', () => {
   it('uses the same two direct model/reasoning segments in project settings without global actions', async () => {
     const user = userEvent.setup()
     const onSave = vi.fn().mockResolvedValue(preferredProject)
-    render(<ProjectDialog open kind="simple_chat" project={preferredProject}
+    render(<ProjectDialog open project={preferredProject}
       config={modelPickerConfig(true)} onClose={vi.fn()} onSave={onSave} />)
     const modelButton = screen.getByRole('button', { name: 'chat.select_model' })
     const reasoningButton = screen.getByRole('button', { name: 'chat.select_model_parameter_preset' })
@@ -269,7 +269,7 @@ describe('renderer interaction accessibility', () => {
     await waitFor(() => expect(reasoningButton).toHaveFocus())
     await user.click(screen.getByRole('button', { name: 'common.save' }))
     expect(onSave).toHaveBeenCalledWith({
-      kind: 'simple_chat', name: preferredProject.name, prompt: '',
+      ...projectSettings(), name: preferredProject.name, prompt: '',
       modelConfigId: 'model-1', modelParameterPresetId: 'thinking-on'
     })
   })
@@ -279,7 +279,7 @@ describe('renderer interaction accessibility', () => {
     const onSave = vi.fn().mockResolvedValue(preferredProject)
     const config = modelPickerConfig(true)
     config.providers[0].models[0].defaultParameterPresetId = 'thinking-on'
-    const props = { open: true, kind: 'simple_chat' as const, config, onClose: vi.fn(), onSave }
+    const props = { open: true, config, onClose: vi.fn(), onSave }
     const project = { ...preferredProject, modelParameterPresetId: null }
     const { rerender } = render(<ProjectDialog {...props} project={project} />)
     expect(screen.getByRole('button', { name: 'chat.select_model_parameter_preset' }))
@@ -291,14 +291,14 @@ describe('renderer interaction accessibility', () => {
     await user.click(screen.getByRole('menuitemradio', { name: 'chat.clear_model_selection' }))
     await waitFor(() => expect(screen.queryByRole('button', { name: 'chat.select_model_parameter_preset' })).not.toBeInTheDocument())
     await user.click(screen.getByRole('button', { name: 'common.save' }))
-    expect(onSave).toHaveBeenLastCalledWith({ kind: 'simple_chat', name: project.name, prompt: '' })
+    expect(onSave).toHaveBeenLastCalledWith({ ...projectSettings(), name: project.name, prompt: '' })
   })
 
   it('leaves new projects unselected and initializes reasoning when a model is picked', async () => {
     const user = userEvent.setup()
     const config = modelPickerConfig(true)
     config.providers[0].models[0].defaultParameterPresetId = 'thinking-on'
-    render(<ProjectDialog open kind="simple_chat" config={config} onClose={vi.fn()} onSave={vi.fn()} />)
+    render(<ProjectDialog open config={config} onClose={vi.fn()} onSave={vi.fn()} />)
     const button = screen.getByRole('button', { name: 'chat.select_model' })
     expect(button).toHaveTextContent('chat.select_model')
     expect(screen.queryByRole('button', { name: 'chat.select_model_parameter_preset' })).not.toBeInTheDocument()
@@ -310,14 +310,14 @@ describe('renderer interaction accessibility', () => {
   it('lets users clear unavailable project models even when the provider list is empty', async () => {
     const user = userEvent.setup()
     const onSave = vi.fn().mockResolvedValue(preferredProject)
-    render(<ProjectDialog open kind="simple_chat" project={preferredProject}
+    render(<ProjectDialog open project={preferredProject}
       config={{ ...modelPickerConfig(), providers: [] }} onClose={vi.fn()} onSave={onSave} />)
     await user.click(screen.getByRole('button', { name: 'chat.select_model' }))
     await user.click(screen.getByRole('menuitemradio', { name: 'chat.clear_model_selection' }))
     await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument())
     await waitFor(() => expect(screen.getByRole('button', { name: 'chat.select_model' })).toHaveTextContent('chat.select_model'))
     await user.click(screen.getByRole('button', { name: 'common.save' }))
-    expect(onSave).toHaveBeenCalledWith({ kind: 'simple_chat', name: preferredProject.name, prompt: '' })
+    expect(onSave).toHaveBeenCalledWith({ ...projectSettings(), name: preferredProject.name, prompt: '' })
   })
 
   it.each([
@@ -358,7 +358,7 @@ describe('renderer interaction accessibility', () => {
       <ThreadSidebarContent
         loading={false}
         projects={[]}
-        sidebarCollapsedSections={{ pinnedProjects: false, projects: false, simpleChats: false }}
+        sidebarCollapsedSections={{ pinnedProjects: false, projects: false }}
         threads={[]}
         onDeleteProject={vi.fn()}
         onDeleteProjectThreads={vi.fn()}
@@ -860,7 +860,7 @@ describe('renderer interaction accessibility', () => {
     const project: Project = {
  capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
       id: 'project-1',
-      kind: 'workspace',
+
       name: 'Project',
       pinned: false,
       collapsed: false,
@@ -903,7 +903,7 @@ describe('renderer interaction accessibility', () => {
     const project: Project = {
  capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
       id: 'project-1',
-      kind: 'workspace',
+
       name: 'Project',
       pinned: false,
       collapsed: false,
@@ -917,7 +917,7 @@ describe('renderer interaction accessibility', () => {
     })
     Object.defineProperty(window, 'gale', {
       configurable: true,
-      value: { ...capabilityApis, projects: { openSourceFolder } }
+      value: { ...capabilityApis, projects: { ...capabilityApis.projects, openSourceFolder } }
     })
     const { container } = render(
       <ProjectGroup
@@ -960,7 +960,7 @@ describe('renderer interaction accessibility', () => {
     const project: Project = {
  capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
       id: 'project-1',
-      kind: 'workspace',
+
       name: 'Project',
       pinned: false,
       collapsed: false,
@@ -983,7 +983,7 @@ describe('renderer interaction accessibility', () => {
       <ThreadList
         loading={false}
         projects={[project]}
-        sidebarCollapsedSections={{ pinnedProjects: false, projects: false, simpleChats: false }}
+        sidebarCollapsedSections={{ pinnedProjects: false, projects: false }}
         threads={[thread]}
         onDeleteProject={vi.fn()}
         onDeleteProjectThreads={vi.fn()}
@@ -1015,9 +1015,9 @@ describe('renderer interaction accessibility', () => {
     }
   })
 
-  it.each(['dropdown', 'context'] as const)('omits simple-chat instructions from the %s menu', async (kind) => {
+  it.each(['dropdown', 'context'] as const)('omits project instructions from the %s menu', async (kind) => {
     const user = userEvent.setup()
-    const project: Project = { id: 'simple', kind: 'simple_chat', name: 'Simple chat', prompt: 'Private system instructions',
+    const project: Project = { id: 'simple', ...projectSettings(), name: 'Simple chat', prompt: 'Private system instructions',
       pinned: false, collapsed: false, createdAt: '2026-09-06T00:00:00Z', updatedAt: '2026-09-06T00:00:00Z' }
     const onEdit = vi.fn()
     const props = { project, threadCount: 2, onEdit, onDelete: vi.fn(), onDeleteThreads: vi.fn(), onTogglePinned: vi.fn() }
@@ -1029,17 +1029,17 @@ describe('renderer interaction accessibility', () => {
     else fireEvent.contextMenu(trigger)
     const menu = await screen.findByRole('menu')
     expect(menu).toHaveTextContent('Simple chat')
-    expect(within(menu).getByRole('img', { name: 'project.simple_chat: common.on' })).toBeVisible()
+    expect(within(menu).queryByRole('img', { name: 'project.coding_mode' })).not.toBeInTheDocument()
     expect(menu).not.toHaveTextContent(project.prompt)
-    expect(menu).not.toHaveTextContent('project.simple_chat_prompt')
-    expect(menu.querySelectorAll('.project-details-separator')).toHaveLength(1)
+    expect(menu).not.toHaveTextContent('project.project_prompt')
+    expect(menu.querySelectorAll('.project-details-separator')).toHaveLength(2)
     await user.click(screen.getByRole('menuitem', { name: 'project.edit' }))
     await waitFor(() => expect(onEdit).toHaveBeenCalledWith(project))
   })
 
   it.each(['dropdown', 'context'] as const)('deletes conversations from the %s project menu', async (kind) => {
     const user = userEvent.setup()
-    const project: Project = { id: 'simple', kind: 'simple_chat', name: 'Chat', prompt: '',
+    const project: Project = { id: 'simple', ...projectSettings(), name: 'Chat', prompt: '',
       pinned: false, collapsed: false, createdAt: '', updatedAt: '' }
     const onDeleteThreads = vi.fn()
     const props = { project, threadCount: 2, onEdit: vi.fn(), onDelete: vi.fn(), onDeleteThreads, onTogglePinned: vi.fn() }
@@ -1088,7 +1088,7 @@ describe('renderer interaction accessibility', () => {
     const project: Project = {
       capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: true, prompt: '',
       id: 'project-1',
-      kind: 'workspace',
+
       name: 'Project',
       pinned: false,
       collapsed: false,
@@ -1139,7 +1139,7 @@ describe('renderer interaction accessibility', () => {
     const workspace: Project = {
  capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
       id: 'workspace-project',
-      kind: 'workspace',
+
       name: 'Workspace project',
       pinned: false,
       collapsed: false,
@@ -1147,10 +1147,10 @@ describe('renderer interaction accessibility', () => {
       createdAt: '2026-08-13T00:00:00.000Z',
       updatedAt: '2026-08-13T00:00:00.000Z'
     }
-    const simpleChat: Project = {
-      id: 'simple-project',
-      kind: 'simple_chat',
-      name: 'Simple project',
+    const otherProject: Project = {
+      id: 'other-project',
+      ...projectSettings(),
+      name: 'Other project',
       pinned: false,
       collapsed: false,
       prompt: '',
@@ -1160,7 +1160,7 @@ describe('renderer interaction accessibility', () => {
     const defaultWorkspace: Project = {
  capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
       id: DEFAULT_WORKSPACE_PROJECT_ID,
-      kind: 'workspace',
+
       name: 'Default Workspace',
       pinned: false,
       collapsed: false,
@@ -1184,17 +1184,16 @@ describe('renderer interaction accessibility', () => {
       const [sidebarCollapsedSections, setSidebarCollapsedSections] = useState({
         pinnedProjects: false,
         projects: false,
-        simpleChats: false
       })
       return (
         <ThreadList
           loading={false}
-          projects={[simpleChat, workspace, defaultWorkspace]}
+          projects={[otherProject, workspace, defaultWorkspace]}
           selectedProjectId={workspace.id}
           sidebarCollapsedSections={sidebarCollapsedSections}
           threads={[
             makeThread('default-thread', 'Default workspace thread', defaultWorkspace.id),
-            makeThread('simple-thread', 'Simple thread', simpleChat.id),
+            makeThread('other-thread', 'Other thread', otherProject.id),
             makeThread('workspace-thread', 'Workspace thread', workspace.id)
           ]}
           onDeleteProject={vi.fn()}
@@ -1218,12 +1217,11 @@ describe('renderer interaction accessibility', () => {
 
     expect([...container.querySelectorAll('.thread-group-label')].map((element) => element.textContent)).toEqual([
       'project.projects',
-      'project.simple_chats',
       'common.default'
     ])
     const content = container.textContent ?? ''
     expect(content.indexOf('Workspace thread')).toBeLessThan(content.indexOf('Default workspace thread'))
-    expect(content.indexOf('Simple thread')).toBeLessThan(content.indexOf('Default workspace thread'))
+    expect(content.indexOf('Other thread')).toBeLessThan(content.indexOf('Default workspace thread'))
     const defaultWorkspaceGroup = container.querySelector('.project-thread-group[data-default-workspace]')
     if (!defaultWorkspaceGroup) throw new Error('Default workspace project group was not rendered.')
     expect(within(defaultWorkspaceGroup as HTMLElement).getByText('common.default'))
@@ -1249,23 +1247,62 @@ describe('renderer interaction accessibility', () => {
     expect(projectsToggle).toHaveAttribute('aria-expanded', 'false')
     expect(screen.queryByText('Workspace thread')).not.toBeInTheDocument()
     expect(screen.getByText('Default workspace thread')).toBeVisible()
-    expect(screen.getByText('Simple thread')).toBeVisible()
+    expect(screen.queryByText('Other thread')).not.toBeInTheDocument()
 
     await user.click(projectsToggle)
     expect(projectsToggle).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByText('Workspace thread')).toBeVisible()
     expect(screen.getByText('Default workspace thread')).toBeVisible()
 
-    await user.click(screen.getByRole('button', {
-      name: 'project.collapse_section:project.simple_chats'
-    }))
-    expect(screen.queryByText('Simple thread')).not.toBeInTheDocument()
+    expect(screen.getByText('Other thread')).toBeVisible()
   })
-  it('submits the default project name while allowing an empty simple-chat prompt', async () => {
+  it('refreshes the inherited directory when a pending setting is acknowledged', async () => {
+    capabilityApis.projects.getDefaultDirectory.mockResolvedValueOnce('D:/Documents').mockResolvedValueOnce('D:/Projects')
+    const config = { ...modelPickerConfig(true), settings: { ...modelPickerConfig(true).settings, projectDefaultDirectory: 'D:/Projects' } }
+    const props = { open: true, onClose: vi.fn(), onSave: vi.fn() }
+    const view = render(<ProjectDialog {...props} config={config} />)
+    const hint = screen.getByText('project.default_directory_hint')
+    await waitFor(() => expect(hint).toHaveAttribute('title', 'D:/Documents'))
+    view.rerender(<ProjectDialog {...props} config={{ ...config, settings: { ...config.settings } }} />)
+    await waitFor(() => expect(hint).toHaveAttribute('title', 'D:/Projects'))
+  })
+
+  it('shows the available automatic name and excludes the project being edited', async () => {
+    const first = { ...preferredProject, id: 'first', name: '未命名项目1' }
+    const third = { ...preferredProject, id: 'third', name: '未命名项目3' }
+    const props = { open: true, onClose: vi.fn(), onSave: vi.fn() }
+    const view = render(<ProjectDialog {...props} projects={[first, third]} />)
+    const input = screen.getByRole('textbox', { name: 'project.name' })
+    expect(input).toHaveValue('')
+    expect(input).toHaveAttribute('placeholder', '未命名项目2')
+    view.rerender(<ProjectDialog {...props} project={first} projects={[first, third]} />)
+    await userEvent.setup().clear(input)
+    expect(input).toHaveAttribute('placeholder', '未命名项目1')
+    view.rerender(<ProjectDialog {...props} projects={[]} />)
+    expect(input).toHaveValue('')
+    expect(input).toHaveAttribute('placeholder', '未命名项目1')
+  })
+
+  it.each([false, true])('saves blank names and folders without inserting defaults when editing: %s', async editing => {
+    const user = userEvent.setup(), onSave = vi.fn().mockResolvedValue(preferredProject)
+    render(<ProjectDialog open project={editing ? { ...preferredProject, sourceFolders: [] } : undefined} onClose={vi.fn()} onSave={onSave} />)
+    const hint = screen.getByText('project.default_directory_hint')
+    expect(hint.closest('.project-folders')).not.toBeNull()
+    expect(hint.closest('.project-folder-item')?.querySelector('svg')).toBeNull()
+    await user.click(hint)
+    expect(screen.queryByText('project.default_directory_hint')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'project.remove_folder' }))
+    expect(screen.getByText('project.default_directory_hint')).toBeInTheDocument()
+    await user.clear(screen.getByRole('textbox', { name: 'project.name' }))
+    await user.click(screen.getByRole('button', { name: editing ? 'common.save' : 'project.create' }))
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ name: '', sourceFolders: [] }))
+  })
+
+  it('sends a blank project name for automatic numbering while allowing an empty prompt', async () => {
     const user = userEvent.setup()
     const onSave = vi.fn(async () => ({
       id: 'project-1',
-      kind: 'simple_chat' as const,
+      ...projectSettings(),
       name: '未命名项目',
       prompt: '',
       pinned: false,
@@ -1276,17 +1313,18 @@ describe('renderer interaction accessibility', () => {
     render(
       <ProjectDialog
         open
-        kind="simple_chat"
         onClose={vi.fn()}
         onSave={onSave}
       />
     )
 
-    await user.click(screen.getByRole('button', { name: 'project.create_simple_chat' }))
+    await user.click(screen.getByRole('button', { name: 'project.add_folders' }))
+    await user.clear(screen.getByRole('textbox', { name: 'project.name' }))
+    await user.click(screen.getByRole('button', { name: 'project.create' }))
 
     expect(onSave).toHaveBeenCalledWith({
-      kind: 'simple_chat',
-      name: '未命名项目',
+      ...projectSettings(),
+      name: '',
       prompt: ''
     })
   })
@@ -1297,8 +1335,9 @@ describe('renderer interaction accessibility', () => {
     const decode = vi.fn(() => new Promise<void>(resolve => { decoded = resolve }))
     vi.stubGlobal('Image', class { naturalWidth = 16; naturalHeight = 16; decode = decode })
     try {
-      render(<ProjectDialog open kind="simple_chat" onClose={vi.fn()} onSave={onSave} />)
-      const submit = screen.getByRole('button', { name: 'project.create_simple_chat' })
+      render(<ProjectDialog open onClose={vi.fn()} onSave={onSave} />)
+      await user.click(screen.getByRole('button', { name: 'project.add_folders' }))
+      const submit = screen.getByRole('button', { name: 'project.create' })
       await user.click(screen.getByRole('button', { name: 'project.choose_icon' }))
       fireEvent.change(screen.getByLabelText('project.upload_icon', { selector: 'input' }), {
         target: { files: [new File(['<svg/>'], 'icon.svg', { type: 'image/svg+xml' })] }
@@ -1322,14 +1361,15 @@ describe('renderer interaction accessibility', () => {
     const onClose = vi.fn()
     const failure = new ProjectOperationFailure({ code: 'duplicate_name', name: 'Existing' })
     const onSave = vi.fn().mockRejectedValueOnce(failure).mockResolvedValue(preferredProject)
-    render(<ProjectDialog open kind="simple_chat" project={editing ? preferredProject : undefined}
+    render(<ProjectDialog open project={editing ? preferredProject : undefined}
       onClose={onClose} onSave={onSave} />)
     const nameInput = screen.getByRole('textbox', { name: 'project.name' })
-    const promptInput = screen.getByRole('textbox', { name: 'project.simple_chat_prompt' })
+    const promptInput = screen.getByRole('textbox', { name: 'project.project_prompt' })
+    if (!editing) await user.click(screen.getByRole('button', { name: 'project.add_folders' }))
     await user.clear(nameInput)
     await user.type(nameInput, 'Existing')
     await user.type(promptInput, 'Keep this draft')
-    const save = screen.getByRole('button', { name: editing ? 'common.save' : 'project.create_simple_chat' })
+    const save = screen.getByRole('button', { name: editing ? 'common.save' : 'project.create' })
     await user.click(save)
     expect(notice.error).toHaveBeenCalledWith(editing ? 'project.failed_update' : 'project.failed_create', { description: 'project.errors.duplicate_name' })
     expect(onClose).not.toHaveBeenCalled()
@@ -1355,14 +1395,14 @@ describe('renderer interaction accessibility', () => {
     Object.defineProperty(window, 'gale', { configurable: true, value: { ...capabilityApis,
       skills: { get: vi.fn(async () => ({ roots: [root], skills: [local] })) },
       config: { subagentResources: vi.fn(() => pending) } } })
-    const project: Project = { id: 'project', kind: 'workspace', name: 'Project', sourceFolders: ['/project'],
+    const project: Project = { id: 'project', name: 'Project', sourceFolders: ['/project'],
       codingMode: false, prompt: '', capabilities: { ...structuredClone(defaultCapabilities), skills: { ...defaultCapabilities.skills, mode, entries: [
         { id: local.id, model: true, shortcut: true }, { id: owned.id, model: true, shortcut: false }
       ] } }, restrictSubagents: true,
       pinned: false, collapsed: false, createdAt: '', updatedAt: '' }
     const config = { ...modelPickerConfig(), subagents: [{ id: 'reviewer', name: 'reviewer', index: 0, enabled: true, builtIn: false,
       description: '', systemPrompt: '', capabilities: structuredClone(defaultCapabilities) }] }
-    render(<ProjectDialog open kind="workspace" project={project} config={config} onClose={vi.fn()} onSave={onSave} />)
+    render(<ProjectDialog open project={project} config={config} onClose={vi.fn()} onSave={onSave} />)
     await user.click(screen.getByRole('button', { name: 'settings.capability_skills' }))
     const localModel = await screen.findByRole('checkbox', { name: 'guide' })
     expect(localModel).toBeDisabled()
@@ -1382,8 +1422,8 @@ describe('renderer interaction accessibility', () => {
   it('starts new projects with all custom tools and saves explicit changes', async () => {
     const user = userEvent.setup(), onSave = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(window, 'gale', { configurable: true, value: { ...capabilityApis,
-      projects: { chooseSourceFolders: vi.fn(async () => ({ status: 'ok', value: ['/workspace'] })) } } })
-    render(<ProjectDialog open kind="workspace" onClose={vi.fn()} onSave={onSave} />)
+      projects: { getDefaultDirectory: vi.fn(async () => 'D:/Documents'), chooseSourceFolders: vi.fn(async () => ({ status: 'ok', value: ['/workspace'] })) } } })
+    render(<ProjectDialog open onClose={vi.fn()} onSave={onSave} />)
     await user.click(screen.getByRole('button', { name: 'project.add_folders' }))
     expect(screen.queryByRole('checkbox', { name: 'project.advanced_settings' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'settings.capabilities_disable_all' }))
@@ -1400,7 +1440,7 @@ describe('renderer interaction accessibility', () => {
  capabilities: { ...structuredClone(defaultCapabilities), memory: false }, restrictSubagents: false, codingMode: false,
       prompt: 'Saved project instructions', compressionPrompt: 'Saved summary: {conversation}',
       id: DEFAULT_WORKSPACE_PROJECT_ID,
-      kind: 'workspace',
+
       name: 'Default Workspace',
       pinned: false,
       collapsed: false,
@@ -1411,7 +1451,6 @@ describe('renderer interaction accessibility', () => {
     render(
       <ProjectDialog
         open
-        kind="workspace"
         project={defaultWorkspace}
         config={modelPickerConfig(true)}
         onClose={vi.fn()}
@@ -1466,7 +1505,7 @@ describe('renderer interaction accessibility', () => {
     const project: Project = {
  capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
       id: 'project-1',
-      kind: 'workspace',
+
       name: 'Workspace',
       pinned: false,
       collapsed: false,
@@ -1478,7 +1517,6 @@ describe('renderer interaction accessibility', () => {
     render(
       <ProjectDialog
         open
-        kind="workspace"
         project={project}
         onClose={vi.fn()}
         onSave={onSave}
@@ -1495,7 +1533,7 @@ describe('renderer interaction accessibility', () => {
     await user.click(screen.getByRole('button', { name: 'common.save' }))
     expect(onSave).toHaveBeenCalledWith({
       skillDirectories: [], toolDirectories: [], capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
-      kind: 'workspace',
+
       name: 'Workspace',
       sourceFolders: ['/workspace/additional', '/workspace/primary']
     })
@@ -1503,12 +1541,12 @@ describe('renderer interaction accessibility', () => {
 
   it.each(['workspace-project', DEFAULT_WORKSPACE_PROJECT_ID])('edits tool permissions independently of capabilities in project %s', async (id) => {
     const user = userEvent.setup()
-    const project: Project = { id, kind: 'workspace', name: 'Permissions', sourceFolders: ['/workspace'],
+    const project: Project = { id, name: 'Permissions', sourceFolders: ['/workspace'],
       codingMode: false, prompt: '', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false,
       pinned: false, collapsed: false, createdAt: '2026-10-06T00:00:00Z', updatedAt: '2026-10-06T00:00:00Z' }
     const onSave = vi.fn().mockResolvedValue(project)
     const onClose = vi.fn()
-    const view = render(<ProjectDialog open kind="workspace" project={project} config={modelPickerConfig(true)} onClose={onClose} onSave={onSave} />)
+    const view = render(<ProjectDialog open project={project} config={modelPickerConfig(true)} onClose={onClose} onSave={onSave} />)
     const access = screen.getByRole('button', { name: 'chat.access_mode' })
     expect(access).toHaveTextContent('chat.access_smart_approval')
     await user.click(access)
@@ -1522,7 +1560,7 @@ describe('renderer interaction accessibility', () => {
     await user.click(screen.getByRole('button', { name: 'common.save' }))
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ accessMode: 'full_access', }))
 
-    view.rerender(<ProjectDialog open kind="workspace" project={{ ...project, accessMode: 'full_access' }} config={modelPickerConfig(true)} onClose={onClose} onSave={onSave} />)
+    view.rerender(<ProjectDialog open project={{ ...project, accessMode: 'full_access' }} config={modelPickerConfig(true)} onClose={onClose} onSave={onSave} />)
     await user.click(access)
     await user.click(screen.getByRole('menuitem', { name: /^chat.access_smart_approval/ }))
     await waitFor(() => expect(access).toHaveTextContent('chat.access_smart_approval'))
@@ -1535,7 +1573,6 @@ describe('renderer interaction accessibility', () => {
     render(
       <ProjectDialog
         open
-        kind="simple_chat"
         onClose={vi.fn()}
         onSave={vi.fn()}
       />
@@ -1555,40 +1592,41 @@ describe('renderer interaction accessibility', () => {
   })
 
   it.each([
-    { codingMode: false, icon: undefined, iconColor: 'blue', expected: 'braces' },
-    { codingMode: false, icon: 'folder', iconColor: 'red', expected: 'braces' },
-    { codingMode: true, icon: 'braces', iconColor: 'green', expected: 'folder' },
-    { codingMode: false, icon: 'brain', iconColor: 'purple', expected: 'brain' },
-    { codingMode: true, icon: 'brain', iconColor: 'pink', expected: 'brain' },
-    { codingMode: false, icon: 'folder', iconColor: undefined, expected: 'braces' }
-  ] as const)('toggles coding=$codingMode with icon=$icon and preserves color=$iconColor', async ({ codingMode, icon, iconColor, expected }) => {
+    { codingMode: false, icon: undefined, iconColor: 'blue' },
+    { codingMode: false, icon: 'folder', iconColor: 'red' },
+    { codingMode: true, icon: 'braces', iconColor: 'green' },
+    { codingMode: false, icon: 'brain', iconColor: 'purple' },
+    { codingMode: true, icon: 'brain', iconColor: 'pink' },
+    { codingMode: false, icon: 'folder', iconColor: undefined }
+  ] as const)('preserves icon=$icon and color=$iconColor when toggling coding=$codingMode', async ({ codingMode, icon, iconColor }) => {
     const user = userEvent.setup()
     const project: Project = {
-      id: 'appearance-project', kind: 'workspace', name: 'Appearance', sourceFolders: ['D:/project'],
+      id: 'appearance-project', name: 'Appearance', sourceFolders: ['D:/project'],
       codingMode, icon, iconColor, prompt: '',
       capabilities: structuredClone(defaultCapabilities), restrictSubagents: false,
       pinned: false, collapsed: false, createdAt: '2026-09-08T00:00:00Z', updatedAt: '2026-09-08T00:00:00Z'
     }
     const onSave = vi.fn().mockResolvedValue(project)
-    render(<ProjectDialog open kind="workspace" project={project} onClose={vi.fn()} onSave={onSave} />)
+    render(<ProjectDialog open project={project} onClose={vi.fn()} onSave={onSave} />)
     await user.click(screen.getByRole('checkbox', { name: 'project.coding_mode' }))
     await user.click(screen.getByRole('button', { name: 'common.save' }))
     const saved = onSave.mock.calls[0][0]
-    expect(saved).toMatchObject({ codingMode: !codingMode, icon: expected })
+    expect(saved).toMatchObject({ codingMode: !codingMode })
+    expect(saved.icon).toBe(icon)
     expect(saved.iconColor).toBe(iconColor)
     expect(project).toMatchObject({ codingMode, icon, iconColor })
   })
 
-  it('resumes icon following after manually selecting the current mode default', async () => {
+  it('preserves the manually selected icon when coding mode changes', async () => {
     const user = userEvent.setup()
     const project: Project = {
-      id: 'appearance-project', kind: 'workspace', name: 'Appearance', sourceFolders: ['D:/project'],
+      id: 'appearance-project', name: 'Appearance', sourceFolders: ['D:/project'],
       codingMode: false, icon: 'brain', iconColor: 'blue', prompt: '',
       capabilities: structuredClone(defaultCapabilities), restrictSubagents: false,
       pinned: false, collapsed: false, createdAt: '2026-09-08T00:00:00Z', updatedAt: '2026-09-08T00:00:00Z'
     }
     const onSave = vi.fn().mockResolvedValue(project)
-    render(<ProjectDialog open kind="workspace" project={project} onClose={vi.fn()} onSave={onSave} />)
+    render(<ProjectDialog open project={project} onClose={vi.fn()} onSave={onSave} />)
     const mode = screen.getByRole('checkbox', { name: 'project.coding_mode' })
     await user.click(mode)
     await user.click(screen.getByRole('button', { name: 'project.choose_icon' }))
@@ -1598,7 +1636,7 @@ describe('renderer interaction accessibility', () => {
     await user.click(screen.getByRole('button', { name: 'common.done' }))
     await user.click(mode)
     await user.click(screen.getByRole('button', { name: 'project.choose_icon' }))
-    expect(screen.getAllByRole('button', { name: 'project.icon_option' })[PROJECT_ICON_NAMES.indexOf('folder')])
+    expect(screen.getAllByRole('button', { name: 'project.icon_option' })[PROJECT_ICON_NAMES.indexOf('braces')])
       .toHaveAttribute('aria-pressed', 'true')
     await user.click(screen.getByRole('button', { name: 'common.done' }))
     await user.click(mode)
@@ -1609,14 +1647,14 @@ describe('renderer interaction accessibility', () => {
   it('retains coding mode only after save and preserves the draft when saving fails', async () => {
     const user = userEvent.setup()
     const project: Project = {
-      id: 'coding-project', kind: 'workspace', name: 'Coding', sourceFolders: ['D:/project'],
+      id: 'coding-project', name: 'Coding', sourceFolders: ['D:/project'],
       codingMode: false, prompt: '', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false,
       pinned: false, collapsed: false, createdAt: '2026-09-08T00:00:00Z', updatedAt: '2026-09-08T00:00:00Z'
     }
-    const saved = { ...project, codingMode: true, icon: 'braces' as const }
+    const saved = { ...project, codingMode: true }
     const onSave = vi.fn().mockRejectedValueOnce(new Error('Save failed')).mockResolvedValue(saved)
     const onClose = vi.fn()
-    const props = { kind: 'workspace' as const, project, onSave, onClose }
+    const props = { project, onSave, onClose }
     const { rerender } = render(<ProjectDialog {...props} open />)
     const mode = () => screen.getByRole('checkbox', { name: 'project.coding_mode' })
     expect(mode()).not.toBeChecked()
@@ -1633,23 +1671,24 @@ describe('renderer interaction accessibility', () => {
     expect(mode()).toBeChecked()
     expect(onClose).toHaveBeenCalledOnce()
     await user.click(screen.getByRole('button', { name: 'common.save' }))
-    expect(onSave).toHaveBeenLastCalledWith(expect.objectContaining({ codingMode: true, icon: 'braces' }))
+    expect(onSave).toHaveBeenLastCalledWith(expect.objectContaining({ codingMode: true }))
+    expect(onSave.mock.lastCall?.[0]).not.toHaveProperty('icon')
     expect(onClose).toHaveBeenCalledTimes(2)
     rerender(<ProjectDialog {...props} project={saved} open={false} />)
     rerender(<ProjectDialog {...props} project={saved} open />)
     expect(mode()).toBeChecked()
     rerender(<ProjectDialog {...props} project={project} open />)
     expect(mode()).not.toBeChecked()
-    rerender(<ProjectDialog open kind="simple_chat" onClose={onClose} onSave={onSave} />)
-    expect(screen.queryByRole('checkbox', { name: 'project.coding_mode' })).not.toBeInTheDocument()
+    rerender(<ProjectDialog open onClose={onClose} onSave={onSave} />)
+    expect(screen.getByRole('checkbox', { name: 'project.coding_mode' })).not.toBeChecked()
   })
 
   it('edits both prompt tabs as one project draft and restores default compression by clearing it', async () => {
     const user = userEvent.setup(), onSave = vi.fn(), onClose = vi.fn()
-    const project: Project = { id: 'summary-project', kind: 'workspace', name: 'Summary', sourceFolders: ['D:/project'],
+    const project: Project = { id: 'summary-project', name: 'Summary', sourceFolders: ['D:/project'],
       codingMode: false, prompt: 'Retained project rules', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false,
       pinned: false, collapsed: false, createdAt: '2026-09-06T00:00:00Z', updatedAt: '2026-09-06T00:00:00Z' }
-    const view = render(<ProjectDialog open kind="workspace" project={project} onClose={onClose} onSave={onSave} />)
+    const view = render(<ProjectDialog open project={project} onClose={onClose} onSave={onSave} />)
     const compression = () => screen.getByRole('textbox', { name: 'settings.view_context_compression_prompt' })
     expect(screen.getByRole('tab', { name: 'settings.view_context_compression_prompt' })).toBeVisible()
     expect(screen.queryByRole('button', { name: 'project.load_default_prompt' })).not.toBeInTheDocument()
@@ -1680,12 +1719,12 @@ describe('renderer interaction accessibility', () => {
     await user.click(screen.getByRole('button', { name: 'common.save' }))
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ compressionPrompt: 'Keep citations: {conversation}', prompt: project.prompt }))
     const saved = { ...project, compressionPrompt: 'Keep citations: {conversation}' }
-    view.rerender(<ProjectDialog open kind="workspace" project={saved} onClose={onClose} onSave={onSave} />)
+    view.rerender(<ProjectDialog open project={saved} onClose={onClose} onSave={onSave} />)
     await user.click(screen.getByRole('tab', { name: 'settings.view_context_compression_prompt' }))
     await user.clear(compression())
     await user.click(screen.getByRole('button', { name: 'common.save' }))
     expect(onSave.mock.lastCall![0]).not.toHaveProperty('compressionPrompt')
-    view.rerender(<ProjectDialog open kind="workspace" project={{ ...saved }} onClose={onClose} onSave={onSave} />)
+    view.rerender(<ProjectDialog open project={{ ...saved }} onClose={onClose} onSave={onSave} />)
     await user.click(screen.getByRole('tab', { name: 'settings.view_context_compression_prompt' }))
     fireEvent.change(compression(), { target: { value: 'Unsaved: {conversation}' } })
     await user.click(screen.getByRole('button', { name: 'common.cancel' }))
@@ -1697,11 +1736,11 @@ describe('renderer interaction accessibility', () => {
     const user = userEvent.setup()
     const onSave = vi.fn()
     const project: Project = {
-      id: 'advanced-project', kind: 'workspace', name: 'Advanced', sourceFolders: ['D:/project'],
+      id: 'advanced-project', name: 'Advanced', sourceFolders: ['D:/project'],
       codingMode: false, prompt: 'Saved rules', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false,
       pinned: false, collapsed: false, createdAt: '2026-09-06T00:00:00Z', updatedAt: '2026-09-06T00:00:00Z'
     }
-    render(<ProjectDialog open kind="workspace" project={project} onClose={vi.fn()} onSave={onSave} />)
+    render(<ProjectDialog open project={project} onClose={vi.fn()} onSave={onSave} />)
     expect(screen.queryByRole('checkbox', { name: 'project.advanced_settings' })).not.toBeInTheDocument()
     const coding = screen.getByRole('checkbox', { name: 'project.coding_mode' })
     expect(coding).not.toBeChecked()
@@ -1709,7 +1748,6 @@ describe('renderer interaction accessibility', () => {
     expect(screen.getByRole('region', { name: 'settings.capabilities' })).toBeVisible()
     const prompt = screen.getByRole('textbox', { name: 'project.project_prompt' })
     expect(prompt).toHaveClass('ui-textarea')
-    expect(prompt).not.toHaveClass('project-prompt-input')
     expect(prompt).toHaveAttribute('rows', '2')
     expect(prompt).toHaveValue('Saved rules')
     await user.clear(prompt)
@@ -1725,12 +1763,12 @@ describe('renderer interaction accessibility', () => {
     }))
   })
 
-  it('prefers the first source folder name for a workspace project', async () => {
+  it('leaves a blank name for automatic numbering after choosing a folder', async () => {
     const user = userEvent.setup()
     const onSave = vi.fn(async () => ({
  capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
       id: 'project-1',
-      kind: 'workspace' as const,
+
       name: '未命名项目',
       sourceFolders: ['/workspace'],
       pinned: false,
@@ -1743,6 +1781,7 @@ describe('renderer interaction accessibility', () => {
       value: {
         ...capabilityApis,
         projects: {
+          ...capabilityApis.projects,
           chooseSourceFolders: vi.fn(async () => ({ status: 'ok', value: ['/workspace'] }))
         }
       }
@@ -1750,7 +1789,6 @@ describe('renderer interaction accessibility', () => {
     render(
       <ProjectDialog
         open
-        kind="workspace"
         onClose={vi.fn()}
         onSave={onSave}
       />
@@ -1763,8 +1801,8 @@ describe('renderer interaction accessibility', () => {
 
     expect(onSave).toHaveBeenCalledWith({
       skillDirectories: [], toolDirectories: [], capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
-      kind: 'workspace',
-      name: 'workspace',
+
+      name: '',
       sourceFolders: ['/workspace']
     })
   })

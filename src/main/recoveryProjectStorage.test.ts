@@ -39,7 +39,7 @@ async function fixture(projectVersion = 4, variant = 'base') {
   const { thread } = metadata
   await placeFrozenConversationsInProject(data, DEFAULT_WORKSPACE_PROJECT_ID)
   const { version: _version, ...defaults } = projectDefaults
-  const project = { ...defaults, id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep project',
+  const project = { ...defaults, id: DEFAULT_WORKSPACE_PROJECT_ID, name: 'Keep project',
     pinned: false, collapsed: false, sourceFolders: ['/keep/source'], restrict_subagents: false,
     capabilities, createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z' }
   const projects = { version: projectVersion, projects: [project] }
@@ -54,6 +54,25 @@ async function fixture(projectVersion = 4, variant = 'base') {
   }
   return { root, data, projects, databases, thread, metadata }
 }
+
+it.each([
+  { sourceFolders: undefined, damaged: false },
+  { sourceFolders: undefined, damaged: true },
+  { sourceFolders: [], damaged: true },
+  { sourceFolders: ['/keep/source'], damaged: true }
+])('preserves effective folders $sourceFolders when repairing storage with damaged metadata: $damaged', async ({ sourceFolders, damaged }) => {
+  const { root, data, thread, projects } = await fixture(0)
+  const { sourceFolders: _sourceFolders, ...project } = projects.projects[0]
+  await writeProjectFixture(data, { version: 0, projects: [{ ...project,
+    ...(sourceFolders === undefined ? {} : { sourceFolders }), ...(damaged ? { name: null } : {}) }] })
+  const result = await repairRecoveryData(data, 'projects.json', () => preserveRecoveryData(data, root))
+  expect(result.readyToRestart).toBe(true)
+  const repaired = JSON.parse(await readProjectFixture(data)).projects[0]
+  expect(repaired.sourceFolders).toEqual(sourceFolders ?? [])
+  expect(repaired.prompt).toBe(project.prompt)
+  const storage = AgentStorage.openNative(data)
+  try { expect(storage.listThreads().map(value => value.id)).toContain(thread.id) } finally { storage.close() }
+})
 
 it('detects and repairs a missing memory initialization field without losing the cursor or pending publication', async () => {
   const { root, data, thread } = await fixture(0)

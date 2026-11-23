@@ -70,7 +70,7 @@ import { useSidebarPeek } from './useSidebarPeek'
 import { focusAfterRender } from './focusAfterRender'
 import { useAppLifecycle } from './useAppLifecycle'
 import { GlobalTooltip } from './GlobalTooltip'
-import { ProjectDialog, type ProjectCreationKind } from './projects/ProjectDialog'
+import { ProjectDialog } from './projects/ProjectDialog'
 import { useAgentSpeech } from './speech/useAgentSpeech'
 import { parseSlashSkillInput } from '@shared/skillShortcuts'
 import { AppIssueTray, InitialAppGate } from './InitialAppStatus'
@@ -84,7 +84,6 @@ function orderProjects(projects: Project[]): Project[] {
 const expandedSidebarSections: SidebarCollapsedSections = {
   pinnedProjects: false,
   projects: false,
-  simpleChats: false
 }
 
 export function App() {
@@ -98,7 +97,6 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
   const { t, i18n } = useTranslation()
   const [projects, setProjects] = useState<Project[]>([])
   const [projectDialogOpen, setProjectDialogOpen] = useState(false)
-  const [projectDialogKind, setProjectDialogKind] = useState<ProjectCreationKind>('workspace')
   const [editingProject, setEditingProject] = useState<Project | undefined>()
   const [appError, setAppError] = useState<string | undefined>()
   const [settingsError, setSettingsError] = useState<string | undefined>()
@@ -164,7 +162,6 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
   const activeProject = projects.find((project) => project.id === activeProjectId)
   const draftProject = projects.find((project) => project.id === agentDraftProjectId)
   const activeProjectThreadCount = agent.threads.filter((thread) => thread.projectId === activeProjectId).length
-  const simpleChatEnabled = activeProject?.kind === 'simple_chat'
   const composerDraftKey = agent.activeThreadId
     ? threadComposerDraftKey(agent.activeThreadId)
     : newThreadComposerDraftKey(agent.draftProjectId)
@@ -176,7 +173,7 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
     setAttachments,
     setAccessMode: setDraftAccessMode,
     setInput
-  } = useComposerDrafts(composerDraftKey, draftProject?.kind === 'workspace' ? draftProject.accessMode : undefined)
+  } = useComposerDrafts(composerDraftKey, draftProject ? draftProject.accessMode : undefined)
   const speech = useAgentSpeech(config?.settings.speechReply, agent.activeThreadId)
   const threadLocked = submissionBusy || Boolean(agent.activeRun)
     || isAgentThreadLocked(agent.activeThread?.status)
@@ -199,7 +196,7 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
       : selectedModel }
     : undefined
   const visionEnabled = selectedModel?.capabilities.vision ?? false
-  const agentCapabilitiesEnabled = Boolean(config && !simpleChatEnabled)
+  const agentCapabilitiesEnabled = Boolean(config)
 
   useEffect(() => {
     if (agentActiveThreadId) {
@@ -598,7 +595,7 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
     setResolvedTheme,
     t
   })
-  const projectSkills = useProjectSkills(activeProjectId, skills, activeProject?.kind === 'workspace' ? activeProject.skillDirectories : undefined)
+  const projectSkills = useProjectSkills(activeProjectId, skills, activeProject ? activeProject.skillDirectories : undefined)
   const {
     applyComposerSuggestion,
     composerSuggestions,
@@ -612,7 +609,7 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
     inputHistory,
     setInput,
     skills: (() => {
-      const capabilities = resolvePluginCapabilities(activeProject?.kind === 'workspace' ? activeProject.capabilities : defaultCapabilities, pluginRegistry.plugins)
+      const capabilities = resolvePluginCapabilities(activeProject ? activeProject.capabilities : defaultCapabilities, pluginRegistry.plugins)
       return projectSkillSnapshot(projectSkills, capabilities.skills, capabilities.pluginTools)
     })(),
     skillShortcutsEnabled: agentCapabilitiesEnabled,
@@ -849,15 +846,13 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
     return project
   }
 
-  function openCreateProjectDialog(kind: ProjectCreationKind): void {
+  function openCreateProjectDialog(): void {
     setEditingProject(undefined)
-    setProjectDialogKind(kind)
     setProjectDialogOpen(true)
   }
 
   function openEditProjectDialog(project: Project): void {
     setEditingProject(project)
-    setProjectDialogKind(project.kind)
     setProjectDialogOpen(true)
   }
 
@@ -1351,7 +1346,6 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
         assistantName={assistantName}
         projects={projects}
         queuedMessages={agent.activeQueuedMessages}
-        simpleChatEnabled={simpleChatEnabled}
         run={agent.activeRun}
         submissionBusy={submissionBusy || attachmentConversionBusy}
         speech={speech.state}
@@ -1442,9 +1436,9 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
       />
       <ProjectDialog
         config={config}
+        projects={projects}
         currentModelSelection={currentModelSelection}
         open={projectDialogOpen}
-        kind={projectDialogKind}
         project={editingProject}
         onClose={() => setProjectDialogOpen(false)}
         onSave={saveProject}

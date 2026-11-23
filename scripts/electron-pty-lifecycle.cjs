@@ -183,7 +183,7 @@ async function verifyLifecycleAction(launchApplication, action) {
         maxContextTokens: 128000, maxOutputTokens: 4096, contextCompressionThreshold: 0.8, contextCompressionEnabled: false })
       const modelConfigId = models.providers.find((provider) => provider.id === providerId).models[0].id
       await api.config.selectDefaultModel(modelConfigId)
-      const projectResult = await api.projects.create({ kind: 'workspace', name: 'PTY lifecycle', sourceFolders: [workspace],
+      const projectResult = await api.projects.create({ name: 'PTY lifecycle', sourceFolders: [workspace],
         codingMode: true, prompt: '', restrictSubagents: false,
         capabilities: { profile: false, environment: false, workspace: true, memory: false, applicationEnvironment: false,
           backgroundTools: true, subagents: { mode: 'off', names: [] }, planning: false, toolMode: 'selected',

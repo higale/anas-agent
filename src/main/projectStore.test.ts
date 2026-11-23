@@ -8,7 +8,7 @@ import { serializeCapabilities } from '@shared/agentCapabilities'
 
 function storedProjectJson(value: unknown): string {
   return JSON.stringify(value, (_key, item) => {
-    if (item?.kind !== 'workspace' || !item.capabilities) return item
+    if (!item || !item.capabilities) return item
     const { restrictSubagents, capabilities, codingMode, ...metadata } = item
     return { ...metadata, restrict_subagents: restrictSubagents, coding_mode: codingMode, capabilities: serializeCapabilities(capabilities) }
   })
@@ -18,10 +18,12 @@ const storePaths = vi.hoisted(() => ({
   projectFile: ''
 }))
 
+vi.mock('./config/appConfig', () => ({ getAppSettings: async () => ({ language: 'zh-CN', projectDefaultDirectory: '' }) }))
+vi.mock('./languageStore', () => ({ getConfiguredTranslator: async () => () => '未命名项目' }))
+
 vi.mock('./config/dataDir', () => ({
   getAgentCatalogFile: () => join(tempDir, 'db', 'catalog.sqlite'),
-  getProjectStoreFile: () => storePaths.projectFile,
-  getDefaultWorkspaceDir: () => join(tempDir, 'default-workspace')
+  getProjectStoreFile: () => storePaths.projectFile
 }))
 
 async function readSnapshot(): Promise<string> {
@@ -54,6 +56,10 @@ async function writeSnapshot(content: string, _encoding?: string): Promise<void>
 
 let tempDir = ''
 
+function projectSettings() {
+  return { sourceFolders: [tempDir], capabilities: structuredClone(defaultCapabilities), codingMode: false, restrictSubagents: false }
+}
+
 beforeEach(async () => {
   tempDir = await mkdtemp(join(tmpdir(), 'anas-project-store-'))
   storePaths.projectFile = join(tempDir, 'db/projects/state.json')
@@ -65,9 +71,88 @@ afterEach(async () => {
 })
 
 describe('project store', () => {
+  it('keeps empty folders on create, edit and unrelated saves and numbers blank names atomically', async () => {
+    const store = await import('./projectStore')
+    const request = { ...projectSettings(), name: '', sourceFolders: [], prompt: '' }
+    await store.createProject({ ...request, name: '未命名项目1' })
+    const [second, third] = await Promise.all([store.createProject(request), store.createProject({ ...request, name: '  ' })])
+    expect([second.name, third.name]).toEqual(['未命名项目2', '未命名项目3'])
+    expect(second.sourceFolders).toEqual([])
+    const preview = await store.prepareProjectPreview(request)
+    expect(preview).toMatchObject({ name: '未命名项目4', sourceFolders: [] })
+    expect((await store.listProjects()).some(project => project.name === preview.name)).toBe(false)
+    const updated = await store.updateProject(third.id, request)
+    expect(updated).toMatchObject({ name: '未命名项目3', sourceFolders: [] })
+    await store.updateProject(second.id, { ...second, sourceFolders: [tempDir] })
+    await store.updateProject(second.id, request)
+    await store.updateProjectState(second.id, { pinned: true })
+    expect((await store.listProjects()).every(project => project.sourceFolders.length === 0)).toBe(true)
+    expect(JSON.parse(await readSnapshot()).projects.every((project: Project) => project.sourceFolders.length === 0)).toBe(true)
+  })
+  it.each([undefined, 'workspace', 'simple_chat'])('reads v0 projects with missing settings independently of kind %s without rewriting files', async kind => {
+    const store = await import('./projectStore')
+    await store.listProjects()
+    const snapshot = JSON.parse(await readSnapshot())
+    const original = {
+      id: 'retained-project', name: 'Retained project', ...(kind === undefined ? {} : { kind }),
+      prompt: 'Keep my instructions', icon: 'message-circle', iconColor: 'blue',
+      pinned: true, collapsed: true, sort_order: 0, thread_order: ['retained-thread'],
+      model_config_id: 'unavailable-model', model_parameter_preset_id: null,
+      createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z'
+    }
+    snapshot.projects.push(original)
+    await writeSnapshot(JSON.stringify(snapshot))
+    const directory = join(tempDir, 'db/projects', original.id)
+    const definition = join(directory, 'project.json')
+    const conversation = join(directory, 'conversations/retained-thread/retained.txt')
+    await mkdir(join(directory, 'conversations/retained-thread'), { recursive: true })
+    await writeFile(conversation, 'Existing conversation data')
+    const before = await readFile(definition, 'utf8')
+    const stateBefore = await readFile(storePaths.projectFile, 'utf8')
+
+    const loaded = await store.getProject(original.id)
+    expect(loaded).toMatchObject({
+      id: original.id, name: original.name, prompt: original.prompt, icon: original.icon, iconColor: original.iconColor,
+      pinned: true, collapsed: true, sortOrder: 0, threadOrder: ['retained-thread'],
+      modelConfigId: 'unavailable-model', modelParameterPresetId: null,
+      createdAt: original.createdAt, updatedAt: original.updatedAt,
+      sourceFolders: [], skillDirectories: [], toolDirectories: [],
+      codingMode: false, restrictSubagents: false, accessMode: 'smart_approval', capabilities: defaultCapabilities
+    })
+    expect(loaded).not.toHaveProperty('kind')
+    expect(await readFile(definition, 'utf8')).toBe(before)
+    expect(await readFile(storePaths.projectFile, 'utf8')).toBe(stateBefore)
+
+    const updated = await store.updateProject(loaded.id, { ...loaded, capabilities: { ...loaded.capabilities, memory: false } })
+    expect(await store.getProject(loaded.id)).toEqual(updated)
+    expect(updated).toMatchObject({ id: original.id, threadOrder: ['retained-thread'], capabilities: { memory: false } })
+    const saved = JSON.parse(await readFile(definition, 'utf8'))
+    expect(saved.version).toBe(0)
+    expect(saved.project).not.toHaveProperty('kind')
+    expect(saved.project).toMatchObject({ model_config_id: 'unavailable-model', model_parameter_preset_id: null })
+    expect(await readFile(conversation, 'utf8')).toBe('Existing conversation data')
+  })
+
+  it('preserves explicit empty selections and false settings, and rejects malformed optional settings', async () => {
+    const store = await import('./projectStore')
+    await store.listProjects()
+    const snapshot = JSON.parse(await readSnapshot())
+    const project = snapshot.projects[0]
+    Object.assign(project, { sourceFolders: [], coding_mode: false, restrict_subagents: false,
+      prompt: '', skill_directories: [], tool_directories: [], capabilities: {
+        ...project.capabilities, memory: false, tool_mode: 'selected', tools: []
+      } })
+    expect(store.parseProjectStore(snapshot).projects[0]).toMatchObject({ sourceFolders: [], codingMode: false,
+      restrictSubagents: false, prompt: '', skillDirectories: [], toolDirectories: [],
+      capabilities: { memory: false, toolMode: 'selected', tools: [] } })
+    for (const field of ['sourceFolders', 'coding_mode', 'restrict_subagents', 'capabilities', 'prompt']) {
+      expect(() => store.parseProjectStore({ ...snapshot, projects: [{ ...project, [field]: null }] })).toThrow()
+    }
+  })
+
   it('defaults missing bundled Python capability without rewriting v0 and saves each project independently', async () => {
     const store = await import('./projectStore')
-    const request = { kind: 'workspace' as const, name: 'Python', sourceFolders: [tempDir],
+    const request = { name: 'Python', sourceFolders: [tempDir],
       codingMode: false, prompt: '', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false }
     const first = await store.createProject(request)
     const second = await store.createProject({ ...request, name: 'System Python' })
@@ -91,7 +176,7 @@ describe('project store', () => {
     const field = kind === 'skill' ? 'skillDirectories' : 'toolDirectories'
     const storedField = `${kind}_directories`
     const store = await import('./projectStore')
-    const request = { kind: 'workspace' as const, name: 'Skills', sourceFolders: [tempDir],
+    const request = { name: 'Skills', sourceFolders: [tempDir],
       codingMode: false, prompt: '', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false }
     const project = await store.createProject(request)
     const raw = JSON.parse(await readSnapshot())
@@ -127,7 +212,7 @@ describe('project store', () => {
     const metadata = join(tempDir, 'db/projects', name)
     await writeFile(metadata, 'Desktop metadata')
     expect(await store.listProjects()).toMatchObject([{ id: DEFAULT_WORKSPACE_PROJECT_ID }])
-    const project = await store.createProject({ kind: 'simple_chat', name: 'Retained', prompt: 'Keep this prompt' })
+    const project = await store.createProject({ ...projectSettings(), name: 'Retained', prompt: 'Keep this prompt' })
     expect(await store.getProject(project.id)).toMatchObject({ prompt: 'Keep this prompt' })
     expect(await readFile(metadata, 'utf8')).toBe('Desktop metadata')
   })
@@ -143,7 +228,7 @@ describe('project store', () => {
 
   it('separates definitions from UI state and defaults missing state without rewriting definitions', async () => {
     const store = await import('./projectStore')
-    const project = await store.createProject({ kind: 'simple_chat', name: 'Separate', prompt: 'Keep this prompt' })
+    const project = await store.createProject({ ...projectSettings(), name: 'Separate', prompt: 'Keep this prompt' })
     const path = join(tempDir, 'db/projects', project.id, 'project.json')
     const before = await readFile(path, 'utf8')
     expect(JSON.parse(before).project).not.toHaveProperty('pinned')
@@ -163,7 +248,7 @@ describe('project store', () => {
     await mkdir(join(tempDir, 'db/conversations/old'), { recursive: true })
     await writeFile(join(tempDir, 'db/conversations/old/conversation.sqlite'), 'unreadable old database')
     expect(await store.listProjects()).toMatchObject([{ id: DEFAULT_WORKSPACE_PROJECT_ID }])
-    const project = await store.createProject({ kind: 'simple_chat', name: 'New project', prompt: '' })
+    const project = await store.createProject({ ...projectSettings(), name: 'New project', prompt: '' })
     expect(await store.getProject(project.id)).toMatchObject({ name: 'New project' })
     expect(await readFile(previous, 'utf8')).toBe('preserve these bytes')
     expect(await readFile(join(tempDir, 'db/conversations/old/conversation.sqlite'), 'utf8')).toBe('unreadable old database')
@@ -179,7 +264,7 @@ describe('project store', () => {
 
   it('completes a journaled project write after interrupted publication', async () => {
     const store = await import('./projectStore')
-    const project = await store.createProject({ kind: 'simple_chat', name: 'Before', prompt: 'Keep' })
+    const project = await store.createProject({ ...projectSettings(), name: 'Before', prompt: 'Keep' })
     const next = JSON.parse(await readSnapshot())
     next.projects.find((item: { id: string }) => item.id === project.id).name = 'After'
     await writeFile(join(tempDir, 'db/project-write.json'), JSON.stringify({ version: 0, next, removed: [] }))
@@ -188,14 +273,14 @@ describe('project store', () => {
   })
   it('persists group order independently of updates, preserves it on editing, and puts new projects first', async () => {
     const store = await import('./projectStore')
-    const a = await store.createProject({ kind: 'simple_chat', name: 'A', prompt: '' })
-    const b = await store.createProject({ kind: 'simple_chat', name: 'B', prompt: '' })
+    const a = await store.createProject({ ...projectSettings(), name: 'A', prompt: '' })
+    const b = await store.createProject({ ...projectSettings(), name: 'B', prompt: '' })
     expect(a.sortOrder).toBeUndefined()
-    const request = { kind: 'project' as const, groupId: 'simple_chat', pinned: false, id: a.id, beforeId: b.id }
+    const request = { kind: 'project' as const, groupId: 'projects', pinned: false, id: a.id, beforeId: b.id }
     await store.reorderSidebar(request, () => [])
-    await store.updateProject(b.id, { kind: 'simple_chat', name: 'Edited B', prompt: '' })
+    await store.updateProject(b.id, { ...projectSettings(), name: 'Edited B', prompt: '' })
     expect((await store.listProjects()).map(p => p.id)).toEqual([a.id, b.id, DEFAULT_WORKSPACE_PROJECT_ID])
-    const c = await store.createProject({ kind: 'simple_chat', name: 'C', prompt: '' })
+    const c = await store.createProject({ ...projectSettings(), name: 'C', prompt: '' })
     expect((await store.listProjects()).map(p => p.id)).toEqual([c.id, a.id, b.id, DEFAULT_WORKSPACE_PROJECT_ID])
     await store.updateProjectState(b.id, { pinned: true })
     const before = await readSnapshot()
@@ -210,12 +295,12 @@ describe('project store', () => {
     expect((await store.getProject(a.id)).updatedAt).toBe(a.updatedAt)
   })
 
-  it('persists one pinned order across project kinds and returns unpinned projects to their own group', async () => {
+  it('persists one pinned order and returns unpinned projects to the project group', async () => {
     const store = await import('./projectStore')
     const defaults = await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)
     const workspace = await store.createProject({ ...defaults, name: 'Workspace' })
-    const chat = await store.createProject({ kind: 'simple_chat', name: 'Chat', prompt: '' })
-    const otherChat = await store.createProject({ kind: 'simple_chat', name: 'Other chat', prompt: '' })
+    const chat = await store.createProject({ ...projectSettings(), name: 'Chat', prompt: '' })
+    const otherChat = await store.createProject({ ...projectSettings(), name: 'Other chat', prompt: '' })
     await store.updateProjectState(workspace.id, { pinned: true })
     await store.updateProjectState(chat.id, { pinned: true })
     const request = { kind: 'project' as const, groupId: 'pinned', pinned: true, id: chat.id, beforeId: workspace.id }
@@ -230,18 +315,17 @@ describe('project store', () => {
     await expect(store.reorderSidebar(request, () => [])).rejects.toThrow('target changed')
     expect(JSON.parse(await readSnapshot())).toEqual(JSON.parse(before))
     await store.updateProjectState(otherChat.id, { pinned: false })
-    await store.reorderSidebar({ ...request, groupId: 'simple_chat', pinned: false, id: chat.id, beforeId: otherChat.id }, () => [])
+    await store.reorderSidebar({ ...request, groupId: 'projects', pinned: false, id: chat.id, beforeId: otherChat.id }, () => [])
     expect((await store.listProjects()).map(project => project.id)).toEqual([workspace.id, chat.id, otherChat.id, DEFAULT_WORKSPACE_PROJECT_ID])
   })
 
-  it.each(['workspace', 'simple_chat'] as const)('prepends a new %s pin to mixed ordering without changing the existing relative order', async kind => {
+  it('prepends a new pin to mixed ordering without changing the existing relative order', async () => {
     const store = await import('./projectStore')
     const defaults = await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)
     const a = await store.createProject({ ...defaults, name: 'Ordered A' })
     const b = await store.createProject({ ...defaults, name: 'Ordered B' })
-    const c = await store.createProject({ kind: 'simple_chat', name: 'Automatic C', prompt: '' })
-    const d = await store.createProject(kind === 'workspace'
-      ? { ...defaults, name: 'New pin D' } : { kind, name: 'New pin D', prompt: '' })
+    const c = await store.createProject({ ...projectSettings(), name: 'Automatic C', prompt: '' })
+    const d = await store.createProject({ ...defaults, name: 'New pin D' })
     const previous = JSON.parse(await readSnapshot())
     for (const [id, sortOrder] of [[a.id, 0], [b.id, 1], [c.id, undefined]] as const) {
       const project = previous.projects.find((item: Project) => item.id === id)
@@ -257,7 +341,7 @@ describe('project store', () => {
 
     expect(await pinnedIds()).toEqual([d.id, c.id, a.id, b.id])
     // Editing a formerly automatic member must retain the normalized order.
-    await store.updateProject(c.id, { kind: 'simple_chat', name: 'Renamed C', prompt: '' })
+    await store.updateProject(c.id, { ...projectSettings(), name: 'Renamed C', prompt: '' })
     expect(await pinnedIds()).toEqual([d.id, c.id, a.id, b.id])
     expect(await store.getProject(a.id)).toMatchObject({ updatedAt: a.updatedAt, collapsed: a.collapsed })
     expect(await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)).toEqual(defaults)
@@ -265,7 +349,7 @@ describe('project store', () => {
 
   it('saves default project conversation order and rejects cross-project, cross-pin and deleted targets without writing', async () => {
     const store = await import('./projectStore')
-    const project = await store.createProject({ kind: 'simple_chat', name: 'Other', prompt: '' })
+    const project = await store.createProject({ ...projectSettings(), name: 'Other', prompt: '' })
     const makeThread = (id: string, projectId = DEFAULT_WORKSPACE_PROJECT_ID, pinned = false): import('@shared/agentTypes').AgentThread => ({
       id, projectId, pinned, title: id, accessMode: 'full_access', status: 'idle', userTurnCount: 0,
       createdAt: '2026-10-01', updatedAt: '2026-10-01'
@@ -289,7 +373,7 @@ describe('project store', () => {
 
   it('defaults missing v0 tool permissions to read-only and persists explicit choices without a format upgrade', async () => {
     const store = await import('./projectStore')
-    const request = { kind: 'workspace' as const, name: 'Permissions', sourceFolders: [tempDir],
+    const request = { name: 'Permissions', sourceFolders: [tempDir],
       codingMode: false, prompt: '', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false }
     const project = await store.createProject(request)
     const original = await readSnapshot()
@@ -317,7 +401,7 @@ describe('project store', () => {
 
   it('loads existing v0 projects without compression settings and saves or clears a custom prompt without changing the format', async () => {
     const store = await import('./projectStore')
-    const request = { kind: 'workspace' as const, name: 'Summary', sourceFolders: [tempDir],
+    const request = { name: 'Summary', sourceFolders: [tempDir],
       codingMode: false, prompt: 'Keep project rules', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false }
     const original = await store.createProject(request)
     const file = await readSnapshot()
@@ -338,15 +422,15 @@ describe('project store', () => {
 
   it('validates a project preview without creating or updating stored projects', async () => {
     const store = await import('./projectStore')
-    const saved = await store.createProject({ kind: 'simple_chat', name: 'Saved', prompt: 'Original' })
+    const saved = await store.createProject({ ...projectSettings(), name: 'Saved', prompt: 'Original' })
     const before = await readSnapshot()
     const preview = await store.prepareProjectPreview({
-      kind: 'workspace', name: 'Unsaved', prompt: 'Draft instructions', sourceFolders: [tempDir],
+      name: 'Unsaved', prompt: 'Draft instructions', sourceFolders: [tempDir],
       capabilities: defaultCapabilities, restrictSubagents: false, codingMode: true
     }, saved.id)
     expect(preview).toMatchObject({ id: saved.id, prompt: 'Draft instructions', sourceFolders: [tempDir], codingMode: true })
     expect(JSON.parse(await readSnapshot())).toEqual(JSON.parse(before))
-    await expect(store.prepareProjectPreview({ kind: 'simple_chat', name: 'Invalid', prompt: 42 } as unknown as ProjectCreateRequest))
+    await expect(store.prepareProjectPreview({ ...projectSettings(), name: 'Invalid', prompt: 42 } as unknown as ProjectCreateRequest))
       .rejects.toThrow('prompt')
   })
 
@@ -354,7 +438,7 @@ describe('project store', () => {
     const store = await import('./projectStore')
     const results = await Promise.all([
       ...Array.from({ length: 30 }, () => store.listProjects()),
-      store.createProject({ kind: 'simple_chat', name: 'Created during startup', prompt: '' })
+      store.createProject({ ...projectSettings(), name: 'Created during startup', prompt: '' })
     ])
     const created = results.at(-1) as Project
     const projects = await store.listProjects()
@@ -368,7 +452,7 @@ describe('project store', () => {
     const store = await import('./projectStore')
     const folder = join(tempDir, 'selection')
     await mkdir(folder)
-    const request = { kind: 'workspace' as const, name: 'Selected agents', sourceFolders: [folder],
+    const request = { name: 'Selected agents', sourceFolders: [folder],
       codingMode: false, prompt: '', capabilities: { ...structuredClone(defaultCapabilities), subagents: { mode: 'custom' as const, names: ['general-purpose', 'removed-agent'] } }, restrictSubagents: false }
     const created = await store.createProject(request)
     expect((await store.getProject(created.id))).toMatchObject({ capabilities: { subagents: request.capabilities.subagents }, restrictSubagents: false })
@@ -388,7 +472,7 @@ describe('project store', () => {
     expect(await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)).toMatchObject({ codingMode: false })
     const folder = join(tempDir, 'coding')
     await mkdir(folder)
-    const request = { kind: 'workspace' as const, name: 'Coding', sourceFolders: [folder], codingMode: true,
+    const request = { name: 'Coding', sourceFolders: [folder], codingMode: true,
       prompt: '', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false }
     const created = await store.createProject(request)
     expect(await store.getProject(created.id)).toEqual(created)
@@ -414,7 +498,7 @@ describe('project store', () => {
 
   it('reads existing project choices directly without rewriting a retired customization flag', async () => {
     const store = await import('./projectStore')
-    const request = { kind: 'workspace' as const, name: 'Existing', sourceFolders: [tempDir], codingMode: false,
+    const request = { name: 'Existing', sourceFolders: [tempDir], codingMode: false,
       prompt: 'Retained instructions', capabilities: { ...structuredClone(defaultCapabilities), workspace: false }, restrictSubagents: true }
     const created = await store.createProject(request)
     const raw = JSON.parse(await readSnapshot())
@@ -431,7 +515,7 @@ describe('project store', () => {
     expect(loaded).not.toHaveProperty('advancedSettings')
     expect(loaded).not.toHaveProperty('scriptAutoApproveSkills')
     expect(loaded).not.toHaveProperty('script_auto_approve_skills')
-    if (loaded.kind !== 'workspace') throw new Error('Expected workspace')
+
     await store.updateProject(created.id, { ...loaded, name: 'Updated' })
     const saved = JSON.parse(await readSnapshot()).projects.find((item: Project) => item.id === created.id)
     expect(saved).not.toHaveProperty('script_auto_approve_skills')
@@ -441,7 +525,7 @@ describe('project store', () => {
   it('persists project model settings in snake_case and clears both selections together', async () => {
     const store = await import('./projectStore')
     const project = await store.createProject({
-      kind: 'simple_chat', name: 'Model preference', prompt: '',
+      ...projectSettings(), name: 'Model preference', prompt: '',
       modelConfigId: 'project-model', modelParameterPresetId: null
     })
     expect(await store.getProject(project.id)).toEqual(project)
@@ -451,11 +535,11 @@ describe('project store', () => {
     expect(raw).not.toHaveProperty('modelConfigId')
     expect(raw).not.toHaveProperty('modelParameterPresetId')
     const updated = await store.updateProject(project.id, {
-      kind: 'simple_chat', name: project.name, prompt: '',
+      ...projectSettings(), name: project.name, prompt: '',
       modelConfigId: 'project-model', modelParameterPresetId: 'thinking-on'
     })
     expect(await store.getProject(project.id)).toEqual(updated)
-    const cleared = await store.updateProject(project.id, { kind: 'simple_chat', name: project.name, prompt: '' })
+    const cleared = await store.updateProject(project.id, { ...projectSettings(), name: project.name, prompt: '' })
     expect(cleared).not.toHaveProperty('modelConfigId')
     expect(cleared).not.toHaveProperty('modelParameterPresetId')
     expect(await store.getProject(project.id)).toEqual(cleared)
@@ -468,16 +552,16 @@ describe('project store', () => {
     { modelParameterPresetId: 'preset' }, { modelParameterPresetId: null }
   ])('rejects malformed project model preferences: %j', async (selection) => {
     const store = await import('./projectStore')
-    await expect(store.createProject({ kind: 'simple_chat', name: 'Invalid', prompt: '', ...selection } as ProjectCreateRequest))
+    await expect(store.createProject({ ...projectSettings(), name: 'Invalid', prompt: '', ...selection } as ProjectCreateRequest))
       .rejects.toThrow(/Project model/)
   })
 
   it('preserves unavailable model references and surviving project preferences through deletion', async () => {
     const store = await import('./projectStore')
     const preferred = await store.createProject({
-      kind: 'simple_chat', name: 'Keep', prompt: '', modelConfigId: 'deleted-model', modelParameterPresetId: 'deleted-preset'
+      ...projectSettings(), name: 'Keep', prompt: '', modelConfigId: 'deleted-model', modelParameterPresetId: 'deleted-preset'
     })
-    const removed = await store.createProject({ kind: 'simple_chat', name: 'Remove', prompt: '' })
+    const removed = await store.createProject({ ...projectSettings(), name: 'Remove', prompt: '' })
     await store.deleteProjectWithThreads(removed.id, [], (commit) => commit())
     expect(await store.getProject(preferred.id)).toEqual(preferred)
     const previous = JSON.parse(await readSnapshot())
@@ -501,7 +585,7 @@ describe('project store', () => {
 
     const project = await createProject({
  capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
-      kind: 'workspace',
+
       name: '  My   Project  ',
       sourceFolders: [firstFolder, secondFolder, firstFolder]
     })
@@ -509,7 +593,7 @@ describe('project store', () => {
     expect(project.name).toBe('My Project')
     expect(project).toMatchObject({
  capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
-      kind: 'workspace',
+
       pinned: false,
       collapsed: false,
       sourceFolders: [firstFolder, secondFolder]
@@ -517,71 +601,71 @@ describe('project store', () => {
     expect(await listProjects()).toEqual([
       project,
       expect.objectContaining({
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace' })
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', id: DEFAULT_WORKSPACE_PROJECT_ID,  })
     ])
   })
 
-  it('requires at least one existing directory and a unique name', async () => {
+  it('allows empty folders and rejects invalid explicit directories and duplicate names', async () => {
     const sourceFolder = join(tempDir, 'source')
     await mkdir(sourceFolder, { recursive: true })
     const { createProject } = await import('./projectStore')
 
     await expect(createProject({
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', kind: 'workspace', name: 'Example', sourceFolders: [] }))
-      .rejects.toThrow('At least one source folder is required.')
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', name: 'Default folder', sourceFolders: [] }))
+      .resolves.toMatchObject({ sourceFolders: [] })
     await expect(createProject({
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', kind: 'workspace', name: 'Example', sourceFolders: [join(tempDir, 'missing')] }))
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', name: 'Example', sourceFolders: [join(tempDir, 'missing')] }))
       .rejects.toThrow()
 
     await createProject({
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', kind: 'workspace', name: 'Example', sourceFolders: [sourceFolder] })
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', name: 'Example', sourceFolders: [sourceFolder] })
     await expect(createProject({
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', kind: 'workspace', name: 'example', sourceFolders: [sourceFolder] }))
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', name: 'example', sourceFolders: [sourceFolder] }))
       .rejects.toThrow('already exists')
   })
 
-  it('creates and updates a simple chat project with an optional prompt', async () => {
+  it('creates and updates a project with an optional prompt', async () => {
     const { createProject, updateProject } = await import('./projectStore')
 
     const project = await createProject({
-      kind: 'simple_chat',
+      ...projectSettings(),
       name: '  Plain   chat  ',
       prompt: '  Answer only from this conversation.  '
     })
 
     expect(project).toMatchObject({
-      kind: 'simple_chat',
+      ...projectSettings(),
       name: 'Plain chat',
       prompt: 'Answer only from this conversation.'
     })
-    const emptyPrompt = await createProject({ kind: 'simple_chat', name: '未命名项目', prompt: '   ' })
+    const emptyPrompt = await createProject({ ...projectSettings(), name: '未命名项目', prompt: '   ' })
     expect(emptyPrompt).toMatchObject({
-      kind: 'simple_chat',
+      ...projectSettings(),
       name: '未命名项目',
       prompt: ''
     })
-    await expect(createProject({ kind: 'simple_chat', name: '   ', prompt: '' }))
-      .rejects.toThrow('Project name is required.')
+    await expect(createProject({ ...projectSettings(), name: '   ', prompt: '' }))
+      .resolves.toMatchObject({ name: '未命名项目1' })
 
     const updated = await updateProject(project.id, {
-      kind: 'simple_chat',
+      ...projectSettings(),
       name: 'Plain chat',
       prompt: 'Be concise.'
     })
-    expect(updated).toMatchObject({ kind: 'simple_chat', prompt: 'Be concise.' })
+    expect(updated).toMatchObject({ ...projectSettings(), prompt: 'Be concise.' })
     await expect(updateProject(project.id, {
  capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
-      kind: 'workspace',
+
       name: 'Plain chat',
       sourceFolders: []
-    })).rejects.toThrow('kind cannot be changed')
+    })).resolves.toMatchObject({ sourceFolders: [] })
   })
 
   it('persists project appearance and clears it when automatic defaults are selected', async () => {
     const { createProject, updateProject, listProjects } = await import('./projectStore')
     const iconData = 'data:image/svg+xml;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>').toString('base64')
     const project = await createProject({
-      kind: 'simple_chat',
+      ...projectSettings(),
       name: 'Styled chat',
       icon: 'heart',
       iconColor: 'pink',
@@ -592,7 +676,7 @@ describe('project store', () => {
     expect((await listProjects()).find(item => item.id === project.id)).toMatchObject({ icon: 'heart', iconColor: 'pink', iconData })
 
     const updated = await updateProject(project.id, {
-      kind: 'simple_chat',
+      ...projectSettings(),
       name: project.name,
       prompt: ''
     })
@@ -602,7 +686,7 @@ describe('project store', () => {
     await expect(updateProject(project.id, { ...updated, iconData: 'file:///outside.png' })).rejects.toThrow('Project icon image is invalid.')
 
     await expect(createProject({
-      kind: 'simple_chat',
+      ...projectSettings(),
       name: 'Invalid icon',
       icon: 'unknown' as 'folder',
       prompt: ''
@@ -614,9 +698,9 @@ describe('project store', () => {
     await mkdir(sourceFolder, { recursive: true })
     const { createProject, listProjects, updateProjectState } = await import('./projectStore')
     const first = await createProject({
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', kind: 'workspace', name: 'First', sourceFolders: [sourceFolder] })
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', name: 'First', sourceFolders: [sourceFolder] })
     const second = await createProject({
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', kind: 'workspace', name: 'Second', sourceFolders: [sourceFolder] })
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', name: 'Second', sourceFolders: [sourceFolder] })
 
     const updated = await updateProjectState(first.id, { pinned: true, collapsed: true })
 
@@ -639,13 +723,13 @@ describe('project store', () => {
     ])
     const { createProject, listProjects, updateProject } = await import('./projectStore')
     const first = await createProject({
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', kind: 'workspace', name: 'First', sourceFolders: [firstFolder] })
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', name: 'First', sourceFolders: [firstFolder] })
     await createProject({
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', kind: 'workspace', name: 'Second', sourceFolders: [secondFolder] })
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', name: 'Second', sourceFolders: [secondFolder] })
 
     const updated = await updateProject(first.id, {
  capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
-      kind: 'workspace',
+
       name: '  Updated   Project ',
       sourceFolders: [secondFolder, firstFolder, secondFolder]
     })
@@ -658,10 +742,10 @@ describe('project store', () => {
     })
     expect((await listProjects()).find((project) => project.id === first.id)).toEqual(updated)
     await expect(updateProject(first.id, {
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', kind: 'workspace', name: 'second', sourceFolders: [firstFolder] }))
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', name: 'second', sourceFolders: [firstFolder] }))
       .rejects.toThrow('already exists')
     await expect(updateProject('missing', {
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', kind: 'workspace', name: 'Missing', sourceFolders: [firstFolder] }))
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', name: 'Missing', sourceFolders: [firstFolder] }))
       .rejects.toThrow('not found')
   })
 
@@ -683,7 +767,7 @@ describe('project store', () => {
     await mkdir(sourceFolder, { recursive: true })
     const { createProject, deleteProjectWithThreads, listProjects } = await import('./projectStore')
     const project = await createProject({
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', kind: 'workspace', name: 'Disposable', sourceFolders: [sourceFolder] })
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', name: 'Disposable', sourceFolders: [sourceFolder] })
 
     await deleteProjectWithThreads(project.id, [], (commit) => commit())
 
@@ -699,17 +783,17 @@ describe('project store', () => {
 
     const [first, second, third] = await Promise.all([
       createProject({
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', kind: 'workspace', name: 'First', sourceFolders: [sourceFolder] }),
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', name: 'First', sourceFolders: [sourceFolder] }),
       createProject({
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', kind: 'workspace', name: 'Second', sourceFolders: [sourceFolder] }),
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', name: 'Second', sourceFolders: [sourceFolder] }),
       createProject({
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', kind: 'workspace', name: 'Third', sourceFolders: [sourceFolder] })
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', name: 'Third', sourceFolders: [sourceFolder] })
     ])
     await Promise.all([
       updateProject(first.id, {
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', kind: 'workspace', name: 'First updated', sourceFolders: [sourceFolder] }),
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', name: 'First updated', sourceFolders: [sourceFolder] }),
       updateProject(second.id, {
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', kind: 'workspace', name: 'Second updated', sourceFolders: [sourceFolder] })
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', name: 'Second updated', sourceFolders: [sourceFolder] })
     ])
 
     expect((await listProjects()).filter((project) => project.id !== DEFAULT_WORKSPACE_PROJECT_ID).map((project) => project.id).sort()).toEqual(
@@ -727,7 +811,7 @@ describe('project store', () => {
     await mkdir(sourceFolder, { recursive: true })
     const { createProject, deleteProjectWithThreads, listProjects } = await import('./projectStore')
     const project = await createProject({
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', kind: 'workspace', name: 'Keep', sourceFolders: [sourceFolder] })
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', name: 'Keep', sourceFolders: [sourceFolder] })
 
     await expect(deleteProjectWithThreads(project.id, ['thread-1'], (commit) => {
       commit()
@@ -745,7 +829,7 @@ describe('project store', () => {
     await mkdir(sourceFolder, { recursive: true })
     const store = await import('./projectStore')
     const project = await store.createProject({
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', kind: 'workspace', name: 'Crash', sourceFolders: [sourceFolder] })
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', name: 'Crash', sourceFolders: [sourceFolder] })
     const previous = { version: 0, projects: await store.listProjects() }
     const next = {
       version: 0,
@@ -785,7 +869,7 @@ describe('project store', () => {
     await mkdir(sourceFolder, { recursive: true })
     const store = await import('./projectStore')
     const project = await store.createProject({
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', kind: 'workspace', name: 'Empty', sourceFolders: [sourceFolder] })
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', name: 'Empty', sourceFolders: [sourceFolder] })
     const previous = { version: 0, projects: await store.listProjects() }
     const next = {
       version: 0,
@@ -815,27 +899,27 @@ describe('project store', () => {
   it('defaults projects to all available capabilities and preserves explicit restrictions', async () => {
     const store = await import('./projectStore')
     const initial = await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)
-    if (initial.kind !== 'workspace') throw new Error('Expected workspace')
+
     const before = initial.capabilities
     const customized = await store.updateProject(initial.id, initial)
-    if (customized.kind !== 'workspace') throw new Error('Expected workspace')
+
     expect(customized.capabilities).toEqual(before)
     expect(customized.capabilities).toMatchObject({ customTools: { mode: 'all' }, pluginMode: 'default', mcp: { defaultMode: 'all' } })
     const restricted = { ...customized.capabilities, customTools: { ...customized.capabilities.customTools, mode: 'off' as const }, pluginMode: 'off' as const }
     await store.updateProject(initial.id, { ...customized, capabilities: restricted })
     const saved = await store.getProject(initial.id)
-    if (saved.kind !== 'workspace') throw new Error('Expected workspace')
+
     expect(saved.capabilities).toEqual(restricted)
   })
 
   it('persists default workspace settings like a regular project while retaining its fixed identity', async () => {
     const store = await import('./projectStore')
     const initial = await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)
-    if (initial.kind !== 'workspace') throw new Error('Expected workspace')
+    await mkdir(join(tempDir, 'default-workspace'))
 
     const updated = await store.updateProject(DEFAULT_WORKSPACE_PROJECT_ID, {
       ...initial,
-      kind: 'workspace',
+
       icon: 'folder',
       accessMode: 'full_access',
       modelConfigId: 'workspace-model',
@@ -872,21 +956,20 @@ describe('project store', () => {
       coding_mode: true, restrict_subagents: true,
       compression_prompt: 'Keep decisions: {conversation}'
     })
-    if (updated.kind !== 'workspace') throw new Error('Expected workspace')
+
   })
   it('keeps projects readable and allows correcting an unavailable default directory', async () => {
     const store = await import('./projectStore')
-    const other = await store.createProject({ kind: 'simple_chat', name: 'Other', prompt: '' })
+    const other = await store.createProject({ ...projectSettings(), name: 'Other', prompt: '' })
     const project = await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)
-    if (project.kind !== 'workspace') throw new Error('Expected workspace')
+
     const before = await readSnapshot()
     const directory = join(tempDir, 'default-workspace')
-    await rm(directory, { recursive: true })
     await writeFile(directory, 'Keep this file')
     expect(await store.listProjects()).toContainEqual(other)
     expect(await store.getProject(other.id)).toEqual(other)
     expect(JSON.parse(await readSnapshot())).toEqual(JSON.parse(before))
-    await expect(store.updateProject(project.id, { ...project, icon: 'braces' })).rejects.toThrow('not a directory')
+    await expect(store.updateProject(project.id, { ...project, sourceFolders: [directory], icon: 'braces' })).rejects.toThrow('not a directory')
     expect(JSON.parse(await readSnapshot())).toEqual(JSON.parse(before))
     expect(await store.updateProject(project.id, { ...project, sourceFolders: [tempDir], icon: 'braces' }))
       .toMatchObject({ sourceFolders: [tempDir], icon: 'braces' })
@@ -896,31 +979,31 @@ describe('project store', () => {
   it('allows unchanged names when fixed default naming collides with an existing v0 project', async () => {
     const store = await import('./projectStore')
     const project = await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)
-    if (project.kind !== 'workspace') throw new Error('Expected workspace')
-    const other = await store.createProject({ kind: 'simple_chat', name: 'Other', prompt: '' })
+
+    const other = await store.createProject({ ...projectSettings(), name: 'Other', prompt: '' })
     const raw = JSON.parse(await readSnapshot())
     raw.projects.find((item: Project) => item.id === project.id).name = 'Previously renamed default'
     raw.projects.find((item: Project) => item.id === other.id).name = project.name
     await writeSnapshot( JSON.stringify(raw))
     expect(await store.updateProject(project.id, { ...project, icon: 'braces', modelConfigId: 'model' }))
       .toMatchObject({ name: project.name, icon: 'braces', modelConfigId: 'model' })
-    expect(await store.updateProject(other.id, { kind: 'simple_chat', name: project.name, prompt: 'Updated' }))
+    expect(await store.updateProject(other.id, { ...projectSettings(), name: project.name, prompt: 'Updated' }))
       .toMatchObject({ prompt: 'Updated' })
-    await expect(store.createProject({ kind: 'simple_chat', name: project.name, prompt: '' }))
+    await expect(store.createProject({ ...projectSettings(), name: project.name, prompt: '' }))
       .rejects.toThrow('already exists')
-    const third = await store.createProject({ kind: 'simple_chat', name: 'Third', prompt: '' })
-    await expect(store.updateProject(third.id, { kind: 'simple_chat', name: project.name, prompt: '' }))
+    const third = await store.createProject({ ...projectSettings(), name: 'Third', prompt: '' })
+    await expect(store.updateProject(third.id, { ...projectSettings(), name: project.name, prompt: '' }))
       .rejects.toThrow('already exists')
   })
 
   it('rejects renaming the default workspace and validates its editable settings without writing invalid changes', async () => {
     const store = await import('./projectStore')
     const project = await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)
-    if (project.kind !== 'workspace') throw new Error('Expected workspace')
+
     const before = await readSnapshot()
     await expect(store.updateProject(project.id, { ...project, name: 'Renamed' }))
       .rejects.toThrow('The default project name cannot be changed')
-    const changes = [{ sourceFolders: [] }, { compressionPrompt: 'Missing placeholder' }, { capabilities: {} }]
+    const changes = [{ compressionPrompt: 'Missing placeholder' }, { capabilities: {} }]
     for (const change of changes) {
       await expect(store.updateProject(project.id, { ...project, ...change } as ProjectCreateRequest)).rejects.toThrow()
     }
@@ -950,7 +1033,7 @@ describe('project store', () => {
     })
     expect((await store.listProjects()).at(-1)).toEqual(effective)
     expect(JSON.parse(await readSnapshot())).toEqual(JSON.parse(before))
-    const request = { ...effective, kind: 'workspace' as const, sourceFolders: [tempDir],
+    const request = { ...effective, sourceFolders: [tempDir],
       capabilities: defaultCapabilities, restrictSubagents: true, codingMode: true,
       compressionPrompt: 'Draft summary: {conversation}', prompt: 'Draft override', modelConfigId: undefined, modelParameterPresetId: undefined }
     expect(await store.prepareProjectPreview(request, project.id)).toMatchObject({

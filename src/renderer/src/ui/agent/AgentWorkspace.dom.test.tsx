@@ -76,7 +76,6 @@ function workspaceProps(
     assistantName: 'Anas',
     projects: [],
     queuedMessages: [],
-    simpleChatEnabled: false,
     submissionBusy: false,
     run,
     selectedProjectId: '',
@@ -265,7 +264,7 @@ describe('AgentWorkspace', () => {
         workspaceTokens: 0, memoryTokens: 0, skillTokens: 0, toolDefinitionTokens: 0,
         messageTokens: 200, attachmentTokens: 0 }
     }
-    const project = { id: 'project', name: 'Project', kind: 'workspace' as const,
+    const project = { id: 'project', name: 'Project',
       prompt: 'Original project instructions.', codingMode: false,
       sourceFolders: ['C:/workspace'], capabilities: structuredClone(defaultCapabilities),
       restrictSubagents: false, pinned: false, collapsed: false, createdAt: '', updatedAt: '' }

@@ -26,7 +26,7 @@ async function fixture(parentDirectory = tmpdir()) {
   for (const name of configFileNames) await cp(join(process.cwd(), 'data/config', name), join(root, 'config', name))
   const { version: _version, ...defaults } = projectDefaults
   const document = { version: 0, projects: [{ ...defaults, capabilities: serializeCapabilities(defaultCapabilities),
-    id: 'default-workspace', kind: 'workspace', name: 'Retained name', pinned: false, collapsed: false,
+    id: 'default-workspace', name: 'Retained name', pinned: false, collapsed: false,
     prompt: 'Retained prompt', restrict_subagents: false, sourceFolders: ['D:/retained-source'], createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z' }] }
   await writeProjectFixture(root, document)
   const storage = AgentStorage.openNative(root)
@@ -132,6 +132,7 @@ it.each(['conversation', 'catalog', 'project'])('returns usable project data aft
   await validateExecutionStorageDirectory(f.root)
   const definitions = await readProjectStoreFile(getProjectStoreFile(f.root))
   if (fault !== 'project') expect(definitions.projects[0]).toMatchObject({ sourceFolders: ['D:/retained-source'] })
+  else expect(definitions.projects[0].sourceFolders).toEqual([])
   const storage = AgentStorage.openNative(f.root)
   try {
     expect(storage.conversationForThread(f.good.id).getThread(f.good.id)?.title).toBe('Healthy conversation')
@@ -177,7 +178,7 @@ it('reconstructs a complete project when both definition and UI state are missin
   expect(result.readyToRestart).toBe(true)
   const storage = AgentStorage.openNative(f.root)
   try { expect(storage.conversationForThread(f.good.id).getThread(f.good.id)?.title).toBe('Healthy conversation') } finally { storage.close() }
-  expect((await readProjectStoreFile(getProjectStoreFile(f.root))).projects[0]).toMatchObject({ kind: 'workspace', restrictSubagents: false })
+  expect((await readProjectStoreFile(getProjectStoreFile(f.root))).projects[0]).toMatchObject({ restrictSubagents: false })
 })
 
 it('reconstructs missing workspace state before declaring repaired storage usable', async () => {

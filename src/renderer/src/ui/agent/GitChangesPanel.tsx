@@ -2,7 +2,7 @@ import { contentServices } from '../panels/contentServices'
 import { RefreshCw } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { WorkspaceProject } from '@shared/types'
+import type { Project } from '@shared/types'
 import type { GitChangeQuery, GitChangeResult, GitReadErrorCode } from '@shared/gitChanges'
 import type { CodeReviewRequest } from '@shared/codeReview'
 import { SearchableOptionPicker } from '../SearchableOptionPicker'
@@ -11,7 +11,7 @@ import { usePanelReady, usePanelRef, usePanelScroll, usePanelState } from './Pan
 import { GitBaselinePicker, type GitBaseline } from './GitBaselinePicker'
 import { DiffContentView } from '../diff/DiffContentView'
 
-export function GitChangesPanel({ project, scope, onReview }: { project: WorkspaceProject; scope: GitChangeQuery['scope']; onReview?(request: CodeReviewRequest): Promise<void> }) {
+export function GitChangesPanel({ project, scope, onReview }: { project: Project; scope: GitChangeQuery['scope']; onReview?(request: CodeReviewRequest): Promise<void> }) {
   const { t } = useTranslation()
   const [folder, setFolder] = usePanelState('folder', project.sourceFolders[0] ?? '')
   const validFolder = project.sourceFolders.includes(folder) ? folder : project.sourceFolders[0] ?? ''
@@ -24,7 +24,7 @@ export function GitChangesPanel({ project, scope, onReview }: { project: Workspa
       : <p className="ui-detail-panel-empty">{t('agent.git_no_folder')}</p>}
   </>
 }
-function GitRepositoryChanges({ project, folder, scope, onReview }: { project: WorkspaceProject; folder: string; scope: GitChangeQuery['scope']; onReview?(request: CodeReviewRequest): Promise<void> }) {
+function GitRepositoryChanges({ project, folder, scope, onReview }: { project: Project; folder: string; scope: GitChangeQuery['scope']; onReview?(request: CodeReviewRequest): Promise<void> }) {
   const { t } = useTranslation()
   const [baseline, setBaseline] = usePanelState<GitBaseline | undefined>(`baseline:${folder}`, undefined)
   const [cursors, setCursors] = usePanelState(`git.cursors:${folder}:${scope}`, [0])

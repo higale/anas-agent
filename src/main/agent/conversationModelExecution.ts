@@ -11,7 +11,7 @@ import type { ConversationAttachmentProjector } from './conversationAttachments'
 import type { createConversationMemoryProjector } from './conversationMemory'
 import { invokeConversationWithCompression, type ConversationCompressionOptions } from './conversationCompression'
 import type { ConversationContextRuntime, ConversationContextSource } from './conversationContextRuntime'
-import { effectiveConversationHistory, simpleConversationHistory } from './conversationHistoryProjection'
+import { effectiveConversationHistory } from './conversationHistoryProjection'
 import { projectConversationToolImages } from './conversationContext'
 import { prepareConversationRules, conversationRuleSystemMessage, type ConversationRulesOptions } from './conversationRules'
 import { ToolArgumentProgress } from './toolArgumentProgress'
@@ -28,7 +28,6 @@ export interface ConversationModelExecutionOptions extends Omit<ConversationComp
   requiresTools(): boolean | Promise<boolean>
   /** Root-run limit; the product supplies zero for subagents. */
   maxModelCalls: number
-  simpleChat?: boolean
   review?: CodeReviewSnapshot
   attachments?: ConversationAttachmentProjector
   memory?: ReturnType<typeof createConversationMemoryProjector>
@@ -75,7 +74,7 @@ export function createConversationModelPreparation(options: ConversationModelExe
     request.signal.throwIfAborted()
     const included = new Set(effectiveConversationHistory(projectConversationToolImages(source.messages), source.summary)
       .flatMap(message => message.id ? [message.id] : []))
-    let messages = options.attachments ? await options.attachments.project(source.messages, model.capabilities.vision, included) : source.messages
+    const messages = options.attachments ? await options.attachments.project(source.messages, model.capabilities.vision, included) : source.messages
     let systemMessage: ConversationMessage = { kind: 'system', content: options.systemPrompt(model) }
     const memoryGeneration = options.memoryWriteGeneration?.(model)
     const tools = options.tools(model)
@@ -84,10 +83,9 @@ export function createConversationModelPreparation(options: ConversationModelExe
     let documentHashes: { global: string; project: string } | undefined
     if (options.memory) systemMessage = await options.memory(systemMessage, messages, hashes => { documentHashes = hashes })
     if (options.rules) systemMessage = conversationRuleSystemMessage(systemMessage, state.context, request.runId)
-    if (options.simpleChat) messages = simpleConversationHistory(effectiveConversationHistory(messages, source.summary))
     const context = { messages, systemMessage, tools, modelRecovery: state.context.modelRecovery,
       requiresTools: await options.requiresTools() || supervised?.requiresTools === true, review: options.review,
-      ...(!options.simpleChat && source.summary ? { summary: source.summary } : {}),
+      ...(source.summary ? { summary: source.summary } : {}),
       ...(options.rules ? { projectRules: state.context.projectRules } : {}) }
     return { kind: 'model', invoke: async () => {
       const modelId = observer.startModel(options.subagentId, state.context.modelRecovery?.attempts ? state.context.modelRecovery : undefined)
@@ -103,7 +101,7 @@ export function createConversationModelPreparation(options: ConversationModelExe
           requestId: request.runId, requestRole: options.requestRole, streaming: options.streaming, timeoutMs: options.timeoutMs,
           runId: request.runId, signal: request.signal, resolveModel: options.resolveModel,
           outputLanguage: options.outputLanguage, codingMode: options.codingMode, compressionPrompt: options.compressionPrompt,
-          enabled: options.simpleChat ? false : options.enabled,
+          enabled: options.enabled,
           compressionTracking: options.compressionTracking, saveToolResult: options.saveToolResult,
           onRequest: options.onRequest,
           observe: event => {

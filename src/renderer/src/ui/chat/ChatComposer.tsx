@@ -1,6 +1,6 @@
 import { useId, useState, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
 import * as Popover from '@radix-ui/react-popover'
-import { MessageCircle, Plus, Send, Square } from 'lucide-react'
+import { Plus, Send, Square } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { isSelectableModelConfig } from '@shared/modelConfig'
 import { userGuideId } from '@shared/helpDocuments'
@@ -21,7 +21,6 @@ import { ComposerSpeechInputButton } from './ComposerSpeechInputButton'
 import { ComposerSuggestions } from './ComposerSuggestions'
 import type { ComposerSuggestion } from './composerTypes'
 import { ProjectPicker } from '../projects/ProjectPicker'
-import type { ProjectCreationKind } from '../projects/ProjectDialog'
 import { AgentTaskPlan } from '../agent/AgentTaskPlan'
 import {
   activeSubagentsForRun,
@@ -48,7 +47,6 @@ interface ChatComposerProps {
   assistantName: string
   projects: Project[]
   queuedMessages: QueuedAgentMessage[]
-  simpleChatEnabled: boolean
   submissionBusy: boolean
   run?: AgentRunActivity
   selectedProjectId: string
@@ -70,7 +68,7 @@ interface ChatComposerProps {
   onDragOver: (event: DragEvent<HTMLFormElement>) => void
   onDrop: (event: DragEvent<HTMLFormElement>) => void | Promise<void>
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void
-  onCreateProject: (kind: ProjectCreationKind) => void
+  onCreateProject: () => void
   onOpenModelSettings: () => void | Promise<void>
   onOpenSubagent: (runId: string, subagentId: string) => void
   onConvertAttachmentToPath: (path: string) => Promise<void>
@@ -107,7 +105,6 @@ export function ChatComposer({
   assistantName,
   projects,
   queuedMessages,
-  simpleChatEnabled,
   submissionBusy,
   run,
   selectedProjectId,
@@ -168,7 +165,7 @@ export function ChatComposer({
       && !config?.defaultModel?.capabilities.vision
   )
   const toolsEnabled = Boolean(
-    !simpleChatEnabled && config?.defaultModel?.capabilities.toolUse
+    config?.defaultModel?.capabilities.toolUse
   )
   const messageDraftLocked = submissionBusy || (
     locked && !(run?.operation === 'agent' && run.status === 'running')
@@ -301,9 +298,7 @@ export function ChatComposer({
                 if (!['Shift', 'Control', 'Alt', 'Meta'].includes(event.key)) setSuggestionSelection(undefined)
                 onKeyDown(event)
               }}
-              placeholder={simpleChatEnabled
-                ? t('chat.simple_message_placeholder')
-                : t('chat.message_placeholder', { name: assistantName })}
+              placeholder={t('chat.message_placeholder', { name: assistantName })}
               rows={1}
             />
             <div className="composer-toolbar">
@@ -317,22 +312,12 @@ export function ChatComposer({
               >
                 <Plus size={16} />
               </NoFocusButton>
-              {simpleChatEnabled
-                ? (
-                    <span className="composer-simple-mode">
-                      <MessageCircle size={14} />
-                      <span>{t('chat.simple_chat_mode')}</span>
-                    </span>
-                  )
-                : (
-                    <ComposerAccessPicker
-                      onOpenHelp={() => { void openAccessHelp() }}
-                      disabled={locked || !toolsEnabled}
-                      accessMode={accessMode}
-                      onChange={onChangeAccessMode}
-                    />
-                  )}
-              {simpleChatEnabled && <span className="composer-toolbar-spacer" />}
+              <ComposerAccessPicker
+                onOpenHelp={() => { void openAccessHelp() }}
+                disabled={locked || !toolsEnabled}
+                accessMode={accessMode}
+                onChange={onChangeAccessMode}
+              />
               <ComposerSpeechReplyToggle
                 disabled={!config}
                 enabled={config?.settings.speechReply.enabled ?? false}

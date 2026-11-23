@@ -1,4 +1,5 @@
 import { getDataDir } from './config/dataDir'
+import { resolveProjectSourceFolders } from './projectWorkspace'
 import { addExternalSubagentDirectory, listSubagentRoots, updateExternalSubagentDirectory, importSubagentPackages, readSubagentPackages } from './subagentPackages'
 import { listSubagentFiles, readSubagentFile, saveSubagentFile } from './subagentPackageFiles'
 import { listSubagentSkills } from './skillsStore'
@@ -82,6 +83,7 @@ export function registerWorkspaceIpcHandlers(): void {
     await recoverPendingProjectDeletion()
     return listProjects()
   })
+  handleMainIpc('projects:getDefaultDirectory', async (): Promise<string> => (await resolveProjectSourceFolders({ sourceFolders: [] }))[0])
   handleMainIpc('projects:create', async (_event, request: ProjectCreateRequest) => projectOperation(async () => {
     await recoverPendingProjectDeletion()
     return createProject(request)
@@ -89,7 +91,7 @@ export function registerWorkspaceIpcHandlers(): void {
   handleMainIpc('projects:update', async (_event, projectId: string, request: ProjectUpdateRequest) => projectOperation(async () => {
     await recoverPendingProjectDeletion()
     const project = await updateProject(projectId, request)
-    updatePanelProject(project)
+    await updatePanelProject(project)
     return project
   }))
   handleMainIpc('projects:updateState', async (_event, projectId: string, update: ProjectStateUpdate): Promise<Project> => {
@@ -98,12 +100,14 @@ export function registerWorkspaceIpcHandlers(): void {
   })
   handleMainIpc('projects:delete', async (_event, projectId: string) => deleteProjectLifecycle(projectId))
   handleMainIpc('projects:deleteThreads', async (_event, projectId: string) => deleteProjectThreadsLifecycle(projectId))
-  handleMainIpc('projects:openSourceFolder', async (_event, projectId: string, sourceFolder: string): Promise<string> => {
-    if (typeof projectId !== 'string' || typeof sourceFolder !== 'string') {
+  handleMainIpc('projects:openSourceFolder', async (_event, projectId: string, sourceFolder?: string): Promise<string> => {
+    if (typeof projectId !== 'string' || (sourceFolder !== undefined && typeof sourceFolder !== 'string')) {
       throw new Error('Project source folder is invalid.')
     }
     const project = await getProject(projectId)
-    if (project.kind !== 'workspace' || !project.sourceFolders.includes(sourceFolder)) {
+    const folders = await resolveProjectSourceFolders(project)
+    sourceFolder ??= folders[0]
+    if (!folders.includes(sourceFolder)) {
       throw new Error('Source folder does not belong to the project.')
     }
     const info = await stat(sourceFolder)
@@ -116,10 +120,11 @@ export function registerWorkspaceIpcHandlers(): void {
     if (!Array.isArray(filePaths)) throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Dropped project folders are invalid.')
     return validateProjectSourceFolders(filePaths)
   }))
-  handleMainIpc('projects:chooseSourceFolders', async (event) => projectOperation(async () => {
+  handleMainIpc('projects:chooseSourceFolders', async (event, multiple = true) => projectOperation(async () => {
+    if (typeof multiple !== 'boolean') throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Invalid folder selection mode.')
     const result = await showModalOpenDialog(dialogParentFromEvent(event), {
       title: 'Choose project source folders',
-      properties: ['openDirectory', 'multiSelections', 'createDirectory']
+      properties: ['openDirectory', ...(multiple ? ['multiSelections' as const] : []), 'createDirectory']
     })
     return result.canceled ? [] : result.filePaths
   }))
@@ -152,7 +157,7 @@ export function registerWorkspaceIpcHandlers(): void {
   handleMainIpc('tools:validateSchema', (_event, schema: unknown) => { validateCustomToolSchema(schema) })
   handleMainIpc('tools:get', async (_event, projectId?: string, toolDirectories?: string[]) => {
     const project = toolDirectories === undefined && projectId ? await getProject(projectId) : undefined
-    return listToolSnapshot(toolDirectories ?? (project?.kind === 'workspace' ? project.toolDirectories ?? [] : []))
+    return listToolSnapshot(toolDirectories ?? (project ? project.toolDirectories ?? [] : []))
   })
   handleMainIpc('tools:setEnabled', async (_event, id: string, enabled: boolean) => setToolEnabled(id, enabled))
   handleMainIpc('tools:refresh', async () => getAppConfigSnapshot())

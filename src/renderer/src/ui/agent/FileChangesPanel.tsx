@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { CodeReviewRequest } from '@shared/codeReview'
 import type { GitChangeQuery } from '@shared/gitChanges'
-import type { WorkspaceProject } from '@shared/types'
+import type { Project } from '@shared/types'
 import { DropdownMenuContent, DropdownMenuRoot } from '../DropdownMenuShell'
 import { DiffView } from '../diff/DiffView'
 import { AgentChangesPanel } from './AgentChangesPanel'
@@ -15,7 +15,7 @@ import { usePanelRef, usePanelState } from './PanelViewState'
 type ChangesMode = GitChangeQuery['scope'] | 'recorded'
 
 export function FileChangesPanel({ project, request, onReview }: {
-  project?: WorkspaceProject
+  project?: Project
   request: { threadId?: string; runId?: string }
   onReview?(request: CodeReviewRequest): Promise<void>
 }) {

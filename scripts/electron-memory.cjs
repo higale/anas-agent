@@ -77,7 +77,7 @@ async function verifyBackgroundMemory(launch) {
         model, parameters: {}, parameterPresetMode: 'none', parameterPresets: [], capabilities: { toolUse: true, vision: false }, stream: false,
         maxContextTokens: 64000, maxOutputTokens: 4096, contextCompressionEnabled: false, contextCompressionThreshold: 0.8 })
       const models = config.providers.find(item => item.id === providerId).models
-      const triggerProject = await api.projects.create({ kind: 'simple_chat', name: 'Other chats', prompt: '' })
+      const triggerProject = await api.projects.create({ ...updated.value, name: 'Other chats', prompt: '', capabilities: { ...updated.value.capabilities, memory: false } })
       if (triggerProject.status !== 'ok') throw new Error(JSON.stringify(triggerProject))
       return { foreground: models.find(item => item.model === 'foreground').id, memory: models.find(item => item.model === 'memory').id,
         triggerProjectId: triggerProject.value.id }

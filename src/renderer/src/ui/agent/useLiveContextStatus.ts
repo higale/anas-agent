@@ -23,12 +23,10 @@ function projectionKey({ config, project, accessMode, continuationRunId, continu
     continuationRunId,
     continuationStatus,
     project: project && {
-      id: project.id, kind: project.kind, name: project.name, prompt: project.prompt,
-      ...(project.kind === 'workspace' ? {
-        codingMode: project.codingMode, compressionPrompt: project.compressionPrompt,
-        sourceFolders: project.sourceFolders, skillDirectories: project.skillDirectories, toolDirectories: project.toolDirectories, capabilities: project.capabilities,
-        restrictSubagents: project.restrictSubagents
-      } : {})
+      id: project.id, name: project.name, prompt: project.prompt,
+      codingMode: project.codingMode, compressionPrompt: project.compressionPrompt,
+      sourceFolders: project.sourceFolders, skillDirectories: project.skillDirectories, toolDirectories: project.toolDirectories, capabilities: project.capabilities,
+      restrictSubagents: project.restrictSubagents
     },
     customTools: config?.customTools,
     subagents: config?.subagents,
@@ -36,6 +34,7 @@ function projectionKey({ config, project, accessMode, continuationRunId, continu
     profile: config?.settings.profile,
     environmentContext: config?.settings.environmentContext,
     language: config?.settings.language,
+    projectDefaultDirectory: project?.sourceFolders.length === 0 ? config?.settings.projectDefaultDirectory : undefined,
     attachmentTextMaxChars: config?.settings.attachmentTextMaxChars,
     attachmentTextOverflow: config?.settings.attachmentTextOverflow
   })

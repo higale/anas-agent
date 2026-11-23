@@ -67,12 +67,12 @@ import {
 import { findResolvedModelConfig, getAppConfigSnapshot, onAppConfigChanged } from '../config/appConfig'
 import { runtimeLog } from '../runtimeLogger'
 import { getProject, recoverProjectDeletion, reorderSidebar } from '../projectStore'
+import { resolveProjectSourceFolders } from '../projectWorkspace'
 import { hasModelImageLimits } from '@shared/modelImageLimits'
 import { validateSubmittedImageAttachments } from './conversationAttachments'
 import { ModelImageSelectionError } from './modelImageSelectionError'
 import { ModelSelectionError } from '../../runtime/errors'
 import { getConfiguredTranslator } from '../languageStore'
-import { simpleConversationHistory } from './conversationHistoryProjection'
 import type { ConversationMessage } from '../../runtime/conversationMessage'
 import type { SidebarReorderRequest } from '@shared/sidebarOrder'
 import type {
@@ -451,7 +451,7 @@ export function registerAgentIpcHandlers(): void {
   handleAgentIpc('memory:document:save', (_event, value: unknown, hash: string, content: string) =>
     enqueueWorkspaceMutation(() => withApplicationDataMutation(async () => {
       const scope = preferenceScope.parse(value)
-      if (scope.kind === 'project' && (await getProject(scope.projectId)).kind !== 'workspace') throw new Error('Project memory requires a workspace project.')
+      if (scope.kind === 'project') await getProject(scope.projectId)
       return currentStorage().preferences.save(scope, hash, content)
     })))
   const userInputClients = new WeakSet<WebContents>()
@@ -524,8 +524,9 @@ export function registerAgentIpcHandlers(): void {
   }
   const validateFolder = async (query: { projectId: string; sourceFolder: string }, signal: AbortSignal) => {
     const project = await getProject(query.projectId)
+    const folders = await resolveProjectSourceFolders(project)
     signal.throwIfAborted()
-    if (project.kind !== 'workspace' || !project.sourceFolders.includes(query.sourceFolder)) throw new Error('Git source folder does not belong to the selected project.')
+    if (!folders.includes(query.sourceFolder)) throw new Error('Git source folder does not belong to the selected project.')
   }
   handleAgentIpc('agent:changes:availability', async (_event, input: unknown) => {
     const query = availabilityQuery.parse(input)
@@ -811,10 +812,8 @@ export function registerAgentIpcHandlers(): void {
       if (hasModelImageLimits(selectedModel.imageLimits)) {
         const database = input.threadId ? currentRuntime().databaseForThread(input.threadId) : undefined
         const history = database?.runs.store.readHistory(executionInput.threadId)
-        let messages: ConversationMessage[] = (history?.messages.slice(history.context.summary?.cutoffIndex ?? 0) ?? [])
+        const messages: ConversationMessage[] = (history?.messages.slice(history.context.summary?.cutoffIndex ?? 0) ?? [])
           .map(record => ({ ...record.value, id: record.id }))
-        const project = await getProject(thread?.projectId ?? executionInput.newThread!.projectId)
-        if (project.kind === 'simple_chat') messages = simpleConversationHistory(messages)
         try {
           await validateSubmittedImageAttachments(executionInput, selectedModel, messages,
             database?.resources.listAttachmentsForThread(executionInput.threadId))
@@ -862,7 +861,7 @@ export function registerAgentIpcHandlers(): void {
       ...(content.threadId ? { threadId: content.threadId } : { newThread: {
         title, projectId: content.projectId, modelConfigId: content.draft?.modelConfigId ?? project.modelConfigId,
         modelParameterPresetId: content.draft ? content.draft.modelParameterPresetId : project.modelParameterPresetId,
-        accessMode: content.draft?.accessMode ?? (project.kind === 'workspace' ? project.accessMode : undefined)
+        accessMode: content.draft?.accessMode ?? project.accessMode
       } })
     })
     // Finish in the captured context, but never restore it after the user navigates away.
@@ -879,10 +878,6 @@ export function registerAgentIpcHandlers(): void {
   ): Promise<AgentRun> => {
     const thread = currentDatabase(threadId).getThread(threadId)
     if (!thread) throw new Error(`Thread ${threadId} was not found.`)
-    const project = await getProject(thread.projectId)
-    if (project.kind === 'simple_chat') {
-      throw new Error('Context compression is unavailable in simple chat mode.')
-    }
     const runId = randomUUID()
     subscribeAgentEvents(event.sender)
     const { run } = await currentRuntime().startCompression(threadId, runId)

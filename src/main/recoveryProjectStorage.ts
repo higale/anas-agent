@@ -339,7 +339,7 @@ export async function repairProjectsForStartup(
     const timestamp = new Date().toISOString()
     const defaultProject = (id: string) => ({ ...defaults, capabilities: serializeCapabilities(defaultCapabilities),
       restrict_subagents: defaultRestrictSubagents,
-      id, name: id === DEFAULT_WORKSPACE_PROJECT_ID ? 'Default Project' : id, kind: 'workspace',
+      id, name: id === DEFAULT_WORKSPACE_PROJECT_ID ? 'Default Project' : id,
       pinned: false, collapsed: false, sourceFolders: [], createdAt: timestamp, updatedAt: timestamp })
     const base = defaultProject(DEFAULT_WORKSPACE_PROJECT_ID)
     const definitions = new Map<string, Record<string, unknown>>([[DEFAULT_WORKSPACE_PROJECT_ID, base]])

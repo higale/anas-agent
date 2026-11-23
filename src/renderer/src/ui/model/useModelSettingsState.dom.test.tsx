@@ -65,8 +65,8 @@ const config = { customTools: [],
     sidebarVisible: true,
     sidebarWidth: 260,
       workspacePanelWidth: 480, memoryMode: 'background', showMemoryActivityInTitlebar: true, ...diffViewSettingsFixture,
-    sidebarCollapsedSections: { pinnedProjects: false, projects: false, simpleChats: false },
-    backupDir: ''
+    sidebarCollapsedSections: { pinnedProjects: false, projects: false },
+    projectDefaultDirectory: '', backupDir: ''
   }
 } satisfies AppConfigSnapshot
 

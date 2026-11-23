@@ -21,6 +21,7 @@
   "font_size": 14,
   "chat_content_width": "narrow",
   "default_model_id": null,
+  "project_default_directory": "",
   "attachment_text_max_chars": 200000,
   "attachment_text_overflow": "truncate",
   "log_level": "info",
@@ -45,8 +46,7 @@
   "workspace_panel_width": 480,
   "sidebar_collapsed_sections": {
     "pinned_projects": false,
-    "projects": false,
-    "simple_chats": false
+    "projects": false
   },
   "backup_dir": "",
   "diff_view_mode": "inline",

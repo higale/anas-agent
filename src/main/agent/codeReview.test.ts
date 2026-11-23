@@ -69,7 +69,7 @@ describe('code review scope capture', () => {
     } finally { await rm(root, { recursive: true, force: true }) }
   })
   it('pins every Git page to the user-selected version and uses resolved commits', async () => {
-    mocks.project.mockResolvedValue({ kind: 'workspace', sourceFolders: ['/repo'] })
+    mocks.project.mockResolvedValue({ sourceFolders: ['/repo'] })
     mocks.git.mockResolvedValueOnce({ files: [{ path: '/repo/a', patch: createPatch('a', 'old\n', 'new\n') }],
       baseline: 'b'.repeat(40), head: 'c'.repeat(40), sourceFolder: '/repo', hasMore: true, nextAfter: 20 })
       .mockResolvedValueOnce({ files: [], baseline: 'b'.repeat(40), head: 'c'.repeat(40), sourceFolder: '/repo', hasMore: false })

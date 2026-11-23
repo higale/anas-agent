@@ -44,10 +44,10 @@ async function preparePreview(thread: AgentThread, database: ConversationResourc
       managed: { unresolved: () => managedCalls.unresolvedForThread(thread.id) }
     })).systemMessage
   }
-  systemMessage = await createConversationMemoryProjector({ enabled: resources.capabilities.memory && !resources.simpleChat,
+  systemMessage = await createConversationMemoryProjector({ enabled: resources.capabilities.memory,
     store: database.memoryStore, projectId: thread.projectId })(systemMessage, messages)
   let projectRules
-  if (!resources.simpleChat && resources.runConfiguration.codingMode) {
+  if (resources.runConfiguration.codingMode) {
     const rules = await prepareConversationRules({ modelCalls: 0, todos: [] }, {
       runId: 'preview', primaryFolder: workspace.primaryFolder, folders: workspace.trustedFolders,
       accessMode: createAgentAccessModeResolver(database, thread.id)

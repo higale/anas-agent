@@ -21,6 +21,10 @@ vi.mock('./runtimeLogger', () => ({ runtimeLog: vi.fn() }))
 
 let root = ''
 
+function projectSettings() {
+  return { sourceFolders: [root], capabilities: structuredClone(defaultCapabilities), codingMode: false, restrictSubagents: false }
+}
+
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'anas-project-lifecycle-'))
   paths.projectFile = join(root, 'db/projects/state.json')
@@ -48,7 +52,7 @@ async function busyRun(database: NativeConversationDatabase, threadId: string, s
 }
 
 describe('project deletion lifecycle', () => {
-  it.each(['simple_chat', 'default'] as const)('clears %s conversations while preserving the project, memories, and other projects', async (kind) => {
+  it.each(['project', 'default'] as const)('clears %s conversations while preserving the project, memories, and other projects', async (kind) => {
     const [{ AgentStorage }, { NativeRuntimeCoordinator }, projectStore] = await Promise.all([
       import('./agent/agentStorage'),
       import('./agent/nativeRuntimeCoordinator'),
@@ -56,14 +60,14 @@ describe('project deletion lifecycle', () => {
     ])
     const project = kind === 'default'
       ? await projectStore.getProject(DEFAULT_WORKSPACE_PROJECT_ID)
-      : await projectStore.createProject({ kind: 'simple_chat', name: 'Chat', prompt: '' })
+      : await projectStore.createProject({ ...projectSettings(), name: 'Chat', prompt: '' })
     const storage = AgentStorage.openNative(root)
     const runtime = new NativeRuntimeCoordinator(storage, { push: vi.fn() }, { prepareWorkspace: false })
     try {
       const first = storage.createThread({ projectId: project.id })
       const second = storage.createThread({ projectId: project.id })
       storage.updateThread(second.id, { pinned: true })
-      const otherProject = await projectStore.createProject({ kind: 'simple_chat', name: 'Other', prompt: '' })
+      const otherProject = await projectStore.createProject({ ...projectSettings(), name: 'Other', prompt: '' })
       const other = storage.createThread({ projectId: otherProject.id })
       await legacyMemory(storage.memoryStore).saveMemory({ scope: 'project', projectId: project.id,
         kind: 'fact', content: 'Keep this project memory', keywords: ['keep'], importance: 3 }, { origin: 'user' })
@@ -90,7 +94,7 @@ describe('project deletion lifecycle', () => {
     const [{ AgentStorage }, { NativeRuntimeCoordinator }, projectStore] = await Promise.all([
       import('./agent/agentStorage'), import('./agent/nativeRuntimeCoordinator'), import('./projectStore')
     ])
-    const project = await projectStore.createProject({ kind: 'simple_chat', name: 'Chat', prompt: '' })
+    const project = await projectStore.createProject({ ...projectSettings(), name: 'Chat', prompt: '' })
     const storage = AgentStorage.openNative(root)
     const runtime = new NativeRuntimeCoordinator(storage, { push: vi.fn() }, { prepareWorkspace: false })
     try {
@@ -116,13 +120,13 @@ describe('project deletion lifecycle', () => {
     const source = join(root, 'source')
     await mkdir(source)
     const project = await projectStore.createProject({
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', kind: 'workspace', name: 'Project', sourceFolders: [source] })
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', name: 'Project', sourceFolders: [source] })
     const storage = AgentStorage.openNative(root)
     const runtime = new NativeRuntimeCoordinator(storage, { push: vi.fn() }, { prepareWorkspace: false })
     try {
       const first = storage.createThread({ projectId: project.id })
       const second = storage.createThread({ projectId: project.id })
-      const otherProject = await projectStore.createProject({ kind: 'simple_chat', name: 'Other', prompt: '' })
+      const otherProject = await projectStore.createProject({ ...projectSettings(), name: 'Other', prompt: '' })
       const other = storage.createThread({ projectId: otherProject.id })
 
       const result = await runtime.deleteProject(project.id)
@@ -151,7 +155,7 @@ describe('project deletion lifecycle', () => {
     const source = join(root, 'source')
     await mkdir(source)
     const project = await projectStore.createProject({
- capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', kind: 'workspace', name: 'Project', sourceFolders: [source] })
+ capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '', name: 'Project', sourceFolders: [source] })
     const storage = AgentStorage.openNative(root)
     const runtime = new NativeRuntimeCoordinator(storage, { push: vi.fn() }, { prepareWorkspace: false })
     try {

@@ -119,7 +119,7 @@ describe('restored native data validation', () => {
  capabilities: serializeCapabilities(defaultCapabilities), restrict_subagents: false, coding_mode: false, advanced_settings: true, prompt: '',
         id: 'project-1',
         name: 'Project',
-        kind: 'workspace',
+
         pinned: false,
         collapsed: false,
         sourceFolders: ['D:/workspace'],
@@ -129,7 +129,7 @@ describe('restored native data validation', () => {
  capabilities: serializeCapabilities(defaultCapabilities), restrict_subagents: false, coding_mode: false, advanced_settings: true, prompt: '',
         id: 'default-workspace',
         name: 'Default Workspace',
-        kind: 'workspace',
+
         pinned: false,
         collapsed: false,
         sourceFolders: ['D:/default-workspace'],

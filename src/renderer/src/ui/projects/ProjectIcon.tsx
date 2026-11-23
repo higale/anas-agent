@@ -31,9 +31,9 @@ import {
   Wrench
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import type { ProjectIconColor, ProjectIconName, ProjectKind } from '@shared/types'
+import type { ProjectIconColor, ProjectIconName } from '@shared/types'
 import { IconImage } from '../IconImage'
-import { defaultProjectIcon } from '@shared/projectAppearance'
+import { DEFAULT_PROJECT_ICON } from '@shared/projectAppearance'
 
 const projectIcons: Record<ProjectIconName, LucideIcon> = {
   folder: FolderKanban,
@@ -73,13 +73,12 @@ interface ProjectIconProps {
   className?: string
   color?: ProjectIconColor
   icon?: ProjectIconName
-  kind: ProjectKind
   size: number
 }
 
-export function ProjectIcon({ className, color, icon, iconData, kind, size }: ProjectIconProps) {
+export function ProjectIcon({ className, color, icon, iconData, size }: ProjectIconProps) {
   if (iconData) return <IconImage data={iconData} size={size} className={className} />
-  const Icon = projectIcons[icon ?? defaultProjectIcon(kind)]
+  const Icon = projectIcons[icon ?? DEFAULT_PROJECT_ICON]
 
   return (
     <Icon

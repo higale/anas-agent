@@ -7,14 +7,12 @@ import type { ProjectIconColor, ProjectIconName } from './projectAppearance'
 
 export type { ProjectIconColor, ProjectIconName } from './projectAppearance'
 
-export type ProjectKind = 'workspace' | 'simple_chat'
-
 export interface ProjectModelSelection {
   modelConfigId?: string
   modelParameterPresetId?: string | null
 }
 
-interface ProjectBase extends ProjectModelSelection {
+export interface Project extends ProjectModelSelection {
   id: string
   name: string
   icon?: ProjectIconName
@@ -27,10 +25,6 @@ interface ProjectBase extends ProjectModelSelection {
   threadOrder?: string[]
   createdAt: string
   updatedAt: string
-}
-
-export interface WorkspaceProject extends ProjectBase {
-  kind: 'workspace'
   accessMode?: AgentAccessMode
   codingMode: boolean
   compressionPrompt?: string
@@ -42,13 +36,6 @@ export interface WorkspaceProject extends ProjectBase {
   capabilities: AgentCapabilities
   restrictSubagents: boolean
 }
-
-export interface SimpleChatProject extends ProjectBase {
-  kind: 'simple_chat'
-  prompt: string
-}
-
-export type Project = WorkspaceProject | SimpleChatProject
 
 export const DEFAULT_WORKSPACE_PROJECT_ID = 'default-workspace'
 
@@ -66,8 +53,7 @@ export function compareProjects(left: Project, right: Project): number {
     || Date.parse(right.updatedAt) - Date.parse(left.updatedAt)
 }
 
-export interface WorkspaceProjectRequest extends ProjectModelSelection {
-  kind: 'workspace'
+export interface ProjectCreateRequest extends ProjectModelSelection {
   accessMode?: AgentAccessMode
   codingMode: boolean
   compressionPrompt?: string
@@ -83,16 +69,6 @@ export interface WorkspaceProjectRequest extends ProjectModelSelection {
   restrictSubagents: boolean
 }
 
-export interface SimpleChatProjectRequest extends ProjectModelSelection {
-  kind: 'simple_chat'
-  name: string
-  icon?: ProjectIconName
-  iconData?: string
-  iconColor?: ProjectIconColor
-  prompt: string
-}
-
-export type ProjectCreateRequest = WorkspaceProjectRequest | SimpleChatProjectRequest
 export type ProjectUpdateRequest = ProjectCreateRequest
 
 export interface ProjectStateUpdate {
@@ -547,7 +523,6 @@ export type AttachmentTextOverflowMode = 'truncate' | 'error'
 export interface SidebarCollapsedSections {
   pinnedProjects: boolean
   projects: boolean
-  simpleChats: boolean
 }
 
 export type SidebarSectionId = keyof SidebarCollapsedSections
@@ -604,6 +579,8 @@ export interface SystemEnvironmentDetection {
 }
 
 export interface AppSettings {
+  /** Empty uses the system Documents directory. */
+  projectDefaultDirectory: string
   profile: AppProfile
   speechReply: SpeechReplyConfig
   language: string
@@ -782,6 +759,7 @@ export interface GaleApi {
   speechInput: import('./speechInput').SpeechInputApi
   agent: AgentApi
   projects: {
+    getDefaultDirectory(): Promise<string>
     list(): Promise<Project[]>
     reorder(request: import('./sidebarOrder').SidebarReorderRequest): Promise<Project[]>
     create(request: ProjectCreateRequest): Promise<ProjectOperationResult<Project>>
@@ -789,9 +767,9 @@ export interface GaleApi {
     updateState(projectId: string, update: ProjectStateUpdate): Promise<Project>
     delete(projectId: string): Promise<ProjectDeleteResult>
     deleteThreads(projectId: string): Promise<ProjectDeleteResult>
-    openSourceFolder(projectId: string, sourceFolder: string): Promise<string>
+    openSourceFolder(projectId: string, sourceFolder?: string): Promise<string>
     fromDroppedFiles(files: File[]): Promise<ProjectOperationResult<string[]>>
-    chooseSourceFolders(): Promise<ProjectOperationResult<string[]>>
+    chooseSourceFolders(multiple?: boolean): Promise<ProjectOperationResult<string[]>>
     chooseSkillDirectories(): Promise<ProjectOperationResult<string[]>>
     chooseToolDirectories(): Promise<ProjectOperationResult<string[]>>
   }

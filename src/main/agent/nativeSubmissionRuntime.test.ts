@@ -17,7 +17,7 @@ import { FileEditStore } from '../fileEditStore'
 import { getProject } from '../projectStore'
 
 vi.mock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
-vi.mock('../projectStore', () => ({ getProject: vi.fn(async () => ({ kind: 'workspace', accessMode: 'full_access' })) }))
+vi.mock('../projectStore', () => ({ getProject: vi.fn(async () => ({ accessMode: 'full_access' })) }))
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done }); return { promise, resolve } }
 function fixture(configure?: (services: ConversationExecutionServices) => void) {
   const root = mkdtempSync(join(tmpdir(), 'anas-native-submission-')), global = new Database(':memory:')
@@ -53,7 +53,7 @@ it('finishes an accepted submission during shutdown without dispatching its save
   const h = fixture(), pendingProject = deferred(), input = h.input()
   vi.mocked(getProject).mockImplementationOnce(async () => {
     await pendingProject.promise
-    return { kind: 'workspace', accessMode: 'full_access' } as Awaited<ReturnType<typeof getProject>>
+    return { accessMode: 'full_access' } as Awaited<ReturnType<typeof getProject>>
   })
   try {
     const submitting = h.host.submitRunWithAttachments(input, h.create)
@@ -98,7 +98,7 @@ it.each([
 ] as const)('deduplicates submissions and preserves project permission $projectMode with override $override', async ({ projectMode, override, expected }) => {
   const h = fixture(), input = h.input(), assembly = deferred()
   const project = await getProject('project')
-  if (project.kind !== 'workspace' || !input.newThread) throw new Error('Expected a new workspace conversation')
+  if (!input.newThread) throw new Error('Expected a new workspace conversation')
   vi.mocked(getProject).mockResolvedValueOnce({ ...project, accessMode: projectMode })
   input.newThread = { ...input.newThread, accessMode: override }
   const duplicateInput = { ...input, threadId: randomUUID(), runId: randomUUID(), text: 'Duplicate text', newThread: { ...input.newThread, accessMode: 'strict_approval' as const } }

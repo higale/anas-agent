@@ -34,7 +34,7 @@ vi.mock('node:fs/promises', async (original) => {
   } }
 })
 vi.mock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
-vi.mock('../projectStore', () => ({ getProject: vi.fn(async (id: string) => ({ id, kind: 'workspace', sourceFolders: [] })) }))
+vi.mock('../projectStore', () => ({ getProject: vi.fn(async (id: string) => ({ id, sourceFolders: [] })) }))
 
 const roots: string[] = []
 type NativeStorage = ReturnType<typeof AgentStorage.openNative>

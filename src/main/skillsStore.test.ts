@@ -56,7 +56,7 @@ async function loadSkillsStore(externalDirectories: unknown[] = []) {
   vi.doMock('./config/appConfig', () => ({ getAppConfigSnapshot: async () => ({ customTools: [] }) }))
   vi.doMock('./projectStore', () => ({
     getProject: async (id: string) => ({
- capabilities: projectCapabilities, restrictSubagents: false, ...projectSettings, prompt: '', id, kind: 'workspace', name: 'Test', sourceFolders: [workspace] })
+ capabilities: projectCapabilities, restrictSubagents: false, ...projectSettings, prompt: '', id, name: 'Test', sourceFolders: [workspace] })
   }))
   return {
     projectCapabilities,

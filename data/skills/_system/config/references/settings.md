@@ -33,7 +33,6 @@ For an avatar request, report success only when the tool returns `ok: true` and 
 | `workspace_panel_width` | safe integer of at least `320`; the UI limits the displayed width to available space |
 | `sidebar_collapsed_sections.projects` | boolean |
 | `sidebar_collapsed_sections.pinned_projects` | boolean |
-| `sidebar_collapsed_sections.simple_chats` | boolean |
 | `diff_view_mode` | `"inline"` or `"side_by_side"` |
 | `diff_fold_unchanged` | boolean |
 | `diff_word_wrap` | boolean |

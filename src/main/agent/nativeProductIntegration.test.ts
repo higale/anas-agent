@@ -103,7 +103,7 @@ it.each(['openai_chat_completions', 'openai_responses', 'anthropic_messages'] as
       const snapshot = previewConfig(); snapshot.providers[0].protocol = protocol
       appConfigMocks.getAppConfigSnapshot.mockResolvedValue(snapshot)
       const project = defaultWorkspaceProject()
-      if (project.kind !== 'workspace') throw new Error('Expected workspace')
+
       project.sourceFolders = [testPaths.root]
       project.capabilities = { ...structuredClone(defaultCapabilities), environment: false, memory: false,
         skills: { mode: 'off', project: false, entries: [] }, customTools: { mode: 'off', project: false, entries: [] },
@@ -111,7 +111,8 @@ it.each(['openai_chat_completions', 'openai_responses', 'anthropic_messages'] as
       snapshot.subagents = [{ name: 'helper', index: 0, enabled: true, builtIn: false, description: 'Delegate work',
         systemPrompt: 'PRODUCT_CHILD_MARKER: complete only your assigned task.',
         capabilities: { ...structuredClone(project.capabilities), subagents: { mode: 'off', names: [] } } }]
-      projectStoreMocks.getProject.mockImplementation(async id => id === 'simple-project' ? { ...project, id, kind: 'simple_chat' } : project)
+      projectStoreMocks.getProject.mockImplementation(async id => id === 'conversation-project'
+        ? { ...project, id, capabilities: { ...project.capabilities, subagents: { mode: 'off', names: [] } } } : project)
       const root = join(testPaths.root, 'native-product-' + protocol), events: AgentRuntimeEvent[] = [], requests: Record<string, unknown>[] = []
       let mode: 'plain' | 'review' | 'delegate' = 'plain', parentRequests = 0, childRequests = 0, delegateRunId = ''
       const captured = { request: { kind: 'git' as const, projectId: project.id, sourceFolder: testPaths.root, scope: 'workspace' as const, version: 'a'.repeat(64) },
@@ -199,16 +200,16 @@ it.each(['openai_chat_completions', 'openai_responses', 'anthropic_messages'] as
         expect(children).toMatchObject([{ status: 'completed', result: 'Child completed' }])
         expect(runtime.forThread(children[0].childThreadId)).toBe(runtime.forThread(threadId))
         mode = 'plain'
-        const simpleId = randomUUID()
-        await finish(await runtime.submitRunWithAttachments({ threadId: simpleId, runId: randomUUID(), submissionId: randomUUID(),
-          newThread: { projectId: 'simple-project', modelConfigId: 'preview-model' }, text: 'Simple chat' }))
+        const textChatId = randomUUID()
+        await finish(await runtime.submitRunWithAttachments({ threadId: textChatId, runId: randomUUID(), submissionId: randomUUID(),
+          newThread: { projectId: 'conversation-project', modelConfigId: 'preview-model' }, text: 'Chat with all capabilities disabled' }))
         expect(requests.at(-1)?.tools ?? []).toEqual([])
         const countBeforeInspection = requests.length
         snapshot.providers[0].models[0].maxContextTokens = 120_000
-        expect(await runtime.getContextStatus(simpleId)).toMatchObject({ maxContextTokens: 120_000 })
-        expect(runtime.loadEarlierActivities({ threadId: simpleId, runId: storage.conversationForThread(simpleId).messages.activities.getLatestRunForThread(simpleId)!.id,
+        expect(await runtime.getContextStatus(textChatId)).toMatchObject({ maxContextTokens: 120_000 })
+        expect(runtime.loadEarlierActivities({ threadId: textChatId, runId: storage.conversationForThread(textChatId).messages.activities.getLatestRunForThread(textChatId)!.id,
           beforeSequence: Number.MAX_SAFE_INTEGER }).models).toHaveLength(1)
-        expect((await runtime.loadEarlierMessages({ threadId: simpleId, beforeIndex: 0 })).messages).toHaveLength(2)
+        expect((await runtime.loadEarlierMessages({ threadId: textChatId, beforeIndex: 0 })).messages).toHaveLength(2)
         expect(requests).toHaveLength(countBeforeInspection)
         expect(storage.listThreads()).toHaveLength(2)
       } finally { await runtime.shutdown(); storage.close() }
@@ -221,7 +222,7 @@ it.each(['openai_chat_completions', 'openai_responses', 'anthropic_messages'] as
       snapshot.settings.maxModelCallsPerRun = 2
       appConfigMocks.getAppConfigSnapshot.mockResolvedValue(snapshot)
       const project = defaultWorkspaceProject()
-      if (project.kind !== 'workspace') throw new Error('Expected fixture workspace')
+
       project.sourceFolders = [testPaths.root]
       project.capabilities = { ...structuredClone(defaultCapabilities), environment: false, memory: false,
         skills: { mode: 'off', project: false, entries: [] }, customTools: { mode: 'off', project: false, entries: [] },
@@ -324,7 +325,7 @@ it.each(['openai_chat_completions', 'openai_responses', 'anthropic_messages'] as
       const snapshot = previewConfig(); snapshot.providers[0].protocol = protocol
       appConfigMocks.getAppConfigSnapshot.mockResolvedValue(snapshot)
       const project = defaultWorkspaceProject()
-      if (project.kind !== 'workspace') throw new Error('Expected fixture workspace')
+
       project.sourceFolders = [testPaths.root]
       project.capabilities = { ...structuredClone(defaultCapabilities), environment: false, memory: false,
         skills: { mode: 'off', project: false, entries: [] }, customTools: { mode: 'off', project: false, entries: [] },

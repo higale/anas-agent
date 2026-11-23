@@ -46,7 +46,7 @@ async function verifyModelRetry(launchApplication) {
     const timestamp = new Date().toISOString()
     await mkdir(join(profile, 'db/projects/default-workspace'), { recursive: true })
     await writeFile(join(profile, 'db/projects/default-workspace/project.json'), JSON.stringify({ version: 0, project: {
-      id: 'default-workspace', kind: 'workspace', name: 'Model retry test', sourceFolders: [workspace], capabilities,
+      id: 'default-workspace', name: 'Model retry test', sourceFolders: [workspace], capabilities,
       restrict_subagents, coding_mode: false, prompt: '', createdAt: timestamp, updatedAt: timestamp
     } }))
     await writeFile(join(profile, 'db/projects/state.json'), JSON.stringify({ version: 0, storage_layout: 'project-directories', projects: [] }))

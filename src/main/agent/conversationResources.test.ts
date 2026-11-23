@@ -30,7 +30,6 @@ import { ManagedCallService } from './managedCallService'
 import { captureAgentSystemPrompt, captureAgentModelRequest } from './conversationPreview'
 import { prepareAgentSystemPrompt, shouldIncludeCommandShell } from './agentRuntimeResources'
 import { buildSubagentSystemPrompt } from './subagentPrompt'
-import * as skillsStore from '../skillsStore'
 
 const testPaths = vi.hoisted(() => ({ root: '' }))
 const projectStoreMocks = vi.hoisted(() => ({ getProject: vi.fn() }))
@@ -114,12 +113,25 @@ describe('prepareAgentSystemPrompt workspace context', () => {
     expect(workspace?.content).toContain('Resolve every relative path from the primary/default folder')
   })
 
+  it('uses the configured default for empty folders in runtime and draft previews without filling the project', async () => {
+    const project = { ...defaultWorkspaceProject(), sourceFolders: [] }
+    projectStoreMocks.getProject.mockResolvedValue(project)
+    const snapshot = config({ projectDefaultDirectory: '/isolated/project-default' })
+    for (const draft of [undefined, project]) {
+      const prepared = await prepareAgentSystemPrompt(thread(), snapshot, undefined, undefined, true, draft)
+      expect(prepared.workspace.primaryFolder).toBe('/isolated/project-default')
+      expect(prepared.workspace.trustedFolders).toEqual(['/isolated/project-default'])
+      expect(prepared.systemPrompt.text).toContain('/isolated/project-default')
+    }
+    expect(project.sourceFolders).toEqual([])
+  })
+
   it('includes a tagged workspace context when the task has a project', async () => {
     const project: Project = {
  capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
       id: 'project-1',
       name: 'Anas',
-      kind: 'workspace',
+
       pinned: false,
       collapsed: false,
       sourceFolders: ['/workspace/Anas', '/workspace/docs'],
@@ -139,32 +151,6 @@ describe('prepareAgentSystemPrompt workspace context', () => {
     expect(workspace?.content).toContain('`/workspace/docs`')
     expect(workspace?.content).toContain('relative paths refer only to the primary/default folder')
     expect(workspace?.content).toMatch(/\n<\/workspace_context>$/)
-  })
-
-  it('uses only the custom prompt and does not load agent context in simple chat', async () => {
-    const project: Project = {
-      id: 'simple-chat-1',
-      name: 'Plain chat',
-      kind: 'simple_chat',
-      pinned: false,
-      collapsed: false,
-      prompt: 'Answer only from the conversation.',
-      createdAt: '2026-07-29T00:00:00.000Z',
-      updatedAt: '2026-07-29T00:00:00.000Z'
-    }
-    projectStoreMocks.getProject.mockImplementation(async (projectId: string) => (
-      projectId === project.id ? project : defaultWorkspaceProject()
-    ))
-
-    const prepared = await prepareAgentSystemPrompt(thread(project.id), config())
-
-    expect(prepared.systemPrompt.text).toBe('Answer only from the conversation.')
-    expect(prepared.systemPrompt.sections).toEqual([{
-      kind: 'system_instruction',
-      content: 'Answer only from the conversation.'
-    }])
-    expect(projectStoreMocks.getProject).toHaveBeenCalledWith(project.id)
-    expect(memoryStoreMocks.buildMemoryRulesPrompt).not.toHaveBeenCalled()
   })
 
   it('does not load disabled workspace or memory context', async () => {
@@ -260,7 +246,7 @@ describe('general-purpose subagent context', () => {
 describe('captureAgentSystemPrompt', () => {
   it('assembles the unsaved project prompt and folders without reading the saved project', async () => {
     const project = defaultWorkspaceProject()
-    if (project.kind !== 'workspace') throw new Error('Expected a workspace fixture.')
+
     project.prompt = 'Use the unsaved project instructions.'
     project.sourceFolders = [testPaths.root]
     const customSkills = join(testPaths.root, 'draft-skills')
@@ -375,46 +361,11 @@ describe('captureAgentSystemPrompt', () => {
       database.close()
     }
   })
-
-  it('sends exactly the custom prompt in simple chat mode', async () => {
-    const skillCatalog = vi.spyOn(skillsStore, 'listSkillSnapshot').mockRejectedValue(new Error('Skill catalog must not be used by simple chat.'))
-    const project: Project = {
-      id: 'simple-chat-1',
-      name: 'Plain chat',
-      kind: 'simple_chat',
-      pinned: false,
-      collapsed: false,
-      prompt: 'You are a plain conversational model.',
-      createdAt: '2026-07-29T00:00:00.000Z',
-      updatedAt: '2026-07-29T00:00:00.000Z'
-    }
-    projectStoreMocks.getProject.mockImplementation(async (projectId: string) => (
-      projectId === project.id ? project : defaultWorkspaceProject()
-    ))
-    const provider = previewProvider()
-    const defaultModel = resolveProviderModelConfig(provider, provider.models[0])
-    const snapshot: AppConfigSnapshot = {
-      ...config(),
-      providers: [provider],
-      defaultModelId: defaultModel.id,
-      defaultModel
-    }
-    const database = openDatabase()
-    const previewThread = configuredThread(database, { title: 'Simple chat preview', projectId: project.id })
-
-    try {
-      await expect(captureAgentSystemPrompt(previewThread, database.resources, snapshot))
-        .resolves.toBe('You are a plain conversational model.')
-      expect(skillCatalog).not.toHaveBeenCalled()
-    } finally {
-      database.close()
-    }
-  })
 })
 
 it.each([false, true])('previews the selected planning tools and product prompt without creating execution state (planning=%s)', async planning => {
   const project = defaultWorkspaceProject()
-  if (project.kind !== 'workspace') throw new Error('Expected workspace')
+
   project.capabilities.planning = planning
   projectStoreMocks.getProject.mockResolvedValue(project)
   memoryStoreMocks.buildMemoryRulesPrompt.mockResolvedValue('')
@@ -451,8 +402,12 @@ it.each([
   { toolUse: true, configured: true, stream: true },
   { toolUse: false, configured: true, stream: false },
   { toolUse: true, configured: false, stream: false }
-])('preserves only configured server tools in simple chat preview and execution ($toolUse, $configured, $stream)', async ({ toolUse, configured, stream }) => {
-  const project: Project = { id: 'server-tools-chat', name: 'Simple chat', kind: 'simple_chat', pinned: false,
+])('preserves configured server tools when project capabilities are disabled in preview and execution ($toolUse, $configured, $stream)', async ({ toolUse, configured, stream }) => {
+  const project: Project = { ...defaultWorkspaceProject(), id: 'server-tools-chat', name: 'Server tools', pinned: false,
+    capabilities: { ...structuredClone(defaultCapabilities), profile: false, environment: false, workspace: false, memory: false,
+      toolMode: 'selected', tools: [], planning: false, backgroundTools: false, bundledPython: false,
+      subagents: { mode: 'off', names: [] }, skills: { mode: 'off', project: false, entries: [] },
+      customTools: { mode: 'off', project: false, entries: [] }, mcp: { mode: 'off', defaultMode: 'selected', servers: [] }, pluginMode: 'off' },
     collapsed: false, prompt: 'Answer the question.', createdAt: '', updatedAt: '' }
   projectStoreMocks.getProject.mockImplementation(async (id: string) => id === project.id ? project : defaultWorkspaceProject())
   const snapshot = previewConfig(toolUse)

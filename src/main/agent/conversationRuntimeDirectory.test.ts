@@ -17,7 +17,7 @@ import { getProject } from '../projectStore'
 
 vi.mock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
 vi.mock('../projectStore', () => ({
-  getProject: vi.fn(async (id: string) => ({ id, kind: 'workspace', sourceFolders: [] })),
+  getProject: vi.fn(async (id: string) => ({ id, sourceFolders: [] })),
   deleteProjectWithThreads: vi.fn(async (_id: string, _threads: string[], commit: (apply: () => void) => void) => commit(() => {}))
 }))
 

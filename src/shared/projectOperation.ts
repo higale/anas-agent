@@ -1,7 +1,7 @@
 export type ProjectIssueCode =
   | 'duplicate_name' | 'name_required' | 'name_too_long'
   | 'prompt_invalid' | 'prompt_too_long' | 'invalid_settings' | 'not_found'
-  | 'folders_required' | 'not_directory' | 'path_not_found'
+  | 'not_directory' | 'path_not_found'
   | 'permission_denied' | 'storage_full' | 'unexpected'
 
 export interface ProjectIssue {

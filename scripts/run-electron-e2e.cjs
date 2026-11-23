@@ -192,7 +192,8 @@ async function verifyApplication(electronApplication, verifyRestart = false) {
   await page.locator('.project-details-action').filter({ hasText: /Edit|编辑/ }).click()
   const capabilityDialog = page.locator('.project-dialog')
   const duplicate = await page.evaluate(async () => {
-    const result = await globalThis.gale.projects.create({ kind: 'simple_chat', name: 'E2E duplicate project', prompt: '' })
+    const defaults = (await globalThis.gale.projects.list()).find(project => project.id === 'default-workspace')
+    const result = await globalThis.gale.projects.create({ ...defaults, name: 'E2E duplicate project', prompt: '' })
     if (result.status !== 'ok') throw new Error(JSON.stringify(result.error))
     return result.value
   })
@@ -530,8 +531,8 @@ async function verifyProjectModelSelection(electronApplication) {
     const preferredId = models.find((model) => model.displayName === 'Project Model').id
     await api.selectDefaultModel(null)
     await globalThis.gale.agent.workspace.set({ mode: 'new_thread', projectId: 'default-workspace', modelParameterPresetId: null })
-    const defaultProjectName = (await globalThis.gale.projects.list()).find(project => project.id === 'default-workspace').name
-    return { providerId, globalId, preferredId, defaultProjectName }
+    const defaultProject = (await globalThis.gale.projects.list()).find(project => project.id === 'default-workspace')
+    return { providerId, globalId, preferredId, defaultProjectName: defaultProject.name, sourceFolders: defaultProject.sourceFolders }
   })
   await page.reload()
   const composerModel = page.locator('form .composer-model-trigger')
@@ -585,7 +586,7 @@ async function verifyProjectModelSelection(electronApplication) {
   await page.locator('.project-thread-group[data-default-workspace] .project-thread-more').click()
   await page.locator('.project-details-action').filter({ hasText: 'Edit' }).click()
   await expect(dialog).toBeVisible()
-  await page.locator('.ui-backdrop').click({ position: { x: 30, y: 300 } })
+  await page.locator('.ui-backdrop').click({ position: { x: 5, y: 5 } })
   await expect(dialog).toBeVisible()
   await dialog.locator('.composer-model-trigger').click()
   await page.getByRole('menuitemradio', { name: /^Project Model/ }).click()
@@ -598,9 +599,30 @@ async function verifyProjectModelSelection(electronApplication) {
   await dialog.locator('.ui-dialog-footer button').first().click()
   await expect(dialog).not.toBeVisible()
   await page.locator('.project-picker-trigger').click()
-  await page.locator('.project-picker-item').last().click()
+  await expect(page.getByRole('menuitem', { name: 'New chat', exact: true })).toHaveCount(1)
+  if (process.env.ANAS_E2E_PROJECT_SCREENSHOT) {
+    await page.screenshot({ path: process.env.ANAS_E2E_PROJECT_SCREENSHOT.replace(/\.png$/, '-new-chat-menu.png') })
+  }
+  await page.getByRole('menuitem', { name: 'New chat', exact: true }).click()
+  const creationCodingMode = dialog.getByRole('checkbox', { name: 'Coding mode', exact: true })
+  await expect(creationCodingMode).not.toBeChecked()
+  const creationIcon = dialog.locator('.project-appearance-trigger svg').first()
+  const initialIcon = await creationIcon.getAttribute('class')
+  await creationCodingMode.check()
+  await expect(creationIcon).toHaveAttribute('class', initialIcon)
+  await creationCodingMode.uncheck()
+  await expect(creationIcon).toHaveAttribute('class', initialIcon)
+  await electronApplication.evaluate(({ dialog }, filePaths) => {
+    const original = dialog.showOpenDialog
+    dialog.showOpenDialog = async () => {
+      dialog.showOpenDialog = original
+      return { canceled: false, filePaths }
+    }
+  }, fixture.sourceFolders)
+  await dialog.locator('.project-folder-add').click()
+  await expect(dialog.locator('.project-folder-item')).toHaveCount(fixture.sourceFolders.length)
   await dialog.locator('input').first().fill('Model preference E2E')
-  await page.locator('.ui-backdrop').click({ position: { x: 30, y: 300 } })
+  await page.locator('.ui-backdrop').click({ position: { x: 5, y: 5 } })
   await expect(dialog).toBeVisible()
   await expect(dialog.locator('input').first()).toHaveValue('Model preference E2E')
   await expect(dialog.locator('.composer-model-trigger')).toHaveText('Select model')
@@ -625,7 +647,7 @@ async function verifyProjectModelSelection(electronApplication) {
   await verifySegmentFocus(reasoningSegment)
   await modelSegment.click()
   await expect(page.locator('.composer-model-menu')).toBeVisible()
-  await page.locator('.ui-backdrop').click({ position: { x: 30, y: 300 } })
+  await page.locator('.ui-backdrop').click({ position: { x: 5, y: 5 } })
   await expect(page.locator('.composer-model-menu')).not.toBeVisible()
   await expect(dialog).toBeVisible()
   // Modal menus restore focus before the user continues editing the project name.
@@ -1256,9 +1278,8 @@ async function main() {
     const page = await electronApplication.firstWindow()
     await page.locator('[data-agent-composer-input]').waitFor()
     const defaultWorkspace = await page.evaluate(async () =>
-      (await globalThis.gale.projects.list()).find(project => project.id === 'default-workspace').sourceFolders[0])
-    const documents = await electronApplication.evaluate(({ app }) => app.getPath('documents'))
-    assert.equal(resolve(defaultWorkspace), resolve(documents), 'New default projects must use Documents directly.')
+      (await globalThis.gale.projects.list()).find(project => project.id === 'default-workspace').sourceFolders)
+    assert.deepEqual(defaultWorkspace, [], 'New default projects must keep the folder selection empty.')
     // All writes and cleanup must stay in the isolated fixture, never the user's Documents.
     const workspace = join(testHome, 'workspace')
     await mkdir(workspace)

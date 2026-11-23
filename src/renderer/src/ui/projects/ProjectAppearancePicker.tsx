@@ -3,8 +3,8 @@ import * as Popover from '@radix-ui/react-popover'
 import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
-import { defaultProjectIcon, PROJECT_ICON_COLORS, PROJECT_ICON_NAMES } from '@shared/projectAppearance'
-import type { ProjectIconColor, ProjectIconName, ProjectKind } from '@shared/types'
+import { DEFAULT_PROJECT_ICON, PROJECT_ICON_COLORS, PROJECT_ICON_NAMES } from '@shared/projectAppearance'
+import type { ProjectIconColor, ProjectIconName } from '@shared/types'
 import { useIconUpload } from '../useIconUpload'
 import { ProjectIcon } from './ProjectIcon'
 
@@ -15,7 +15,6 @@ interface ProjectAppearancePickerProps {
   onChangeImage(data?: string): void
   color?: ProjectIconColor
   icon?: ProjectIconName
-  kind: ProjectKind
   onChangeColor(color?: ProjectIconColor): void
   onChangeIcon(icon: ProjectIconName): void
 }
@@ -25,7 +24,6 @@ export function ProjectAppearancePicker({
   onPendingChange,
   color,
   icon,
-  kind,
   iconData,
   onChangeImage,
   onChangeColor,
@@ -44,7 +42,7 @@ export function ProjectAppearancePicker({
           disabled={disabled}
           aria-label={t('project.choose_icon')}
         >
-          <ProjectIcon iconData={iconData} color={color} icon={icon} kind={kind} size={18} />
+          <ProjectIcon iconData={iconData} color={color} icon={icon} size={18} />
         </button>
       </Popover.Trigger>
       <Popover.Portal>
@@ -85,14 +83,14 @@ export function ProjectAppearancePicker({
                 type="button"
                 key={option}
                 aria-label={t('project.icon_option', { index: index + 1 })}
-                aria-pressed={!iconData && option === (icon ?? defaultProjectIcon(kind))}
+                aria-pressed={!iconData && option === (icon ?? DEFAULT_PROJECT_ICON)}
                 onClick={() => {
                   upload.cancelUpload()
                   onChangeImage(undefined)
                   onChangeIcon(option)
                 }}
               >
-                <ProjectIcon color={color} icon={option} kind={kind} size={18} />
+                <ProjectIcon color={color} icon={option} size={18} />
               </button>
             ))}
           </div>

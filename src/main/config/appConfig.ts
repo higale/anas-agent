@@ -200,7 +200,6 @@ function normalizeSidebarCollapsedSections(raw: RawAppConfig): SidebarCollapsedS
   return {
     pinnedProjects: requireBoolean(sections.pinned_projects === undefined ? false : sections.pinned_projects, 'settings.sidebar_collapsed_sections.pinned_projects'),
     projects: requireBoolean(sections.projects, 'settings.sidebar_collapsed_sections.projects'),
-    simpleChats: requireBoolean(sections.simple_chats, 'settings.sidebar_collapsed_sections.simple_chats')
   }
 }
 
@@ -246,6 +245,7 @@ function normalizeSettings(raw: RawAppConfig): AppSettings {
   const settings = raw.settings
   if (!settings) throw new Error('Config settings are missing.')
   return {
+    projectDefaultDirectory: settings.project_default_directory === undefined ? '' : requireString(settings.project_default_directory, 'settings.project_default_directory').trim(),
     profile: normalizeAppProfile(settings.profile),
     speechReply: normalizeSpeechReply(raw),
     language: requireString(settings.language, 'settings.language'),
@@ -401,6 +401,7 @@ function rawSettingsFromSnapshot(snapshot: AppConfigSnapshot, previousProfile?: 
       speed: settings.speechReply.speed
     },
     default_model_id: snapshot.defaultModelId ?? null,
+    project_default_directory: settings.projectDefaultDirectory,
     language: settings.language,
     theme: settings.theme,
     font_size: settings.fontSize,
@@ -433,7 +434,6 @@ function rawSettingsFromSnapshot(snapshot: AppConfigSnapshot, previousProfile?: 
     sidebar_collapsed_sections: {
       pinned_projects: settings.sidebarCollapsedSections.pinnedProjects,
       projects: settings.sidebarCollapsedSections.projects,
-      simple_chats: settings.sidebarCollapsedSections.simpleChats
     },
     backup_dir: settings.backupDir
   }
@@ -849,6 +849,7 @@ export async function updateSettings(settings: AppSettingsUpdate): Promise<AppCo
     const raw = await readRawConfig()
     raw.settings = {
       ...raw.settings,
+      project_default_directory: settings.projectDefaultDirectory === undefined ? raw.settings?.project_default_directory : requireString(settings.projectDefaultDirectory, 'settings.project_default_directory').trim(),
       language: settings.language ?? raw.settings?.language,
       theme: settings.theme === undefined ? raw.settings?.theme : normalizeTheme(settings.theme),
       font_size: settings.fontSize === undefined
@@ -896,7 +897,6 @@ export async function updateSettings(settings: AppSettingsUpdate): Promise<AppCo
           ? {
             pinned_projects: settings.sidebarCollapsedSections.pinnedProjects,
             projects: settings.sidebarCollapsedSections.projects,
-            simple_chats: settings.sidebarCollapsedSections.simpleChats
           }
         : raw.settings?.sidebar_collapsed_sections,
       backup_dir: settings.backupDir ?? raw.settings?.backup_dir

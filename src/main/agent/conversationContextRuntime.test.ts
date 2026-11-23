@@ -3,8 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ResolvedModelConfig } from '@shared/types'
 import { ModelSelectionError } from '../../runtime/errors'
 import { createConversationContextRuntime, type ConversationContextSource } from './conversationContextRuntime'
-import { conversationSummaryTranscript, projectConversationToolHistory, simpleConversationHistory } from './conversationHistoryProjection'
-import { projectConversationInput } from './conversationContext'
+import { conversationSummaryTranscript, projectConversationToolHistory } from './conversationHistoryProjection'
 
 const mocks = vi.hoisted(() => ({ generate: vi.fn(), selected: vi.fn() }))
 vi.mock('./compressionModel', () => ({ createCompressionModel: (model: ResolvedModelConfig, options: { beforeRequest?: () => Promise<void> }) => {
@@ -142,18 +141,13 @@ describe('native context status and manual compression', () => {
     expect(oversized.messages[0].content).toHaveLength('Do not drop this goal '.length * 5000)
   })
 
-  it('projects plain chat and missing results without modifying durable history', () => {
+  it('projects missing results without modifying durable history', () => {
     const native: ConversationMessage[] = [
       { kind: 'user', content: '/skill\nexpanded context', context: { displayText: '/skill' } },
       { kind: 'assistant', content: 'Inspecting', calls: [{ id: 'call', name: 'read', args: { path: 'fixture' } }] },
       { kind: 'tool', resultFor: 'call', content: 'Tool result' }, { kind: 'assistant', content: 'Answer' }
     ]
     const before = structuredClone(native)
-    for (const protocol of ['openai_chat_completions', 'openai_responses', 'anthropic_messages'] as const) {
-      expect(projectConversationInput(simpleConversationHistory(native), protocol)).toEqual({ messages: [
-        { role: 'user', content: '/skill' }, { role: 'assistant', content: 'Inspecting' }, { role: 'assistant', content: 'Answer' }
-      ].map(message => protocol === 'openai_responses' ? { type: 'message', ...message } : message) })
-    }
     expect(conversationSummaryTranscript(native)).toBe("Human: /skill\nexpanded context\nAI: Inspecting[{\"id\":\"call\",\"name\":\"read\",\"args\":{\"path\":\"fixture\"}}]\nTool: Tool result\nAI: Answer")
     const missing = projectConversationToolHistory(native.slice(0, 2))
     expect(missing.at(-1)).toMatchObject({ kind: 'tool', resultFor: 'call', resultStatus: 'error', context: { unrecordedResult: true } })

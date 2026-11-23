@@ -1031,11 +1031,6 @@
   min-width: 0;
 }
 
-.composer-toolbar-spacer {
-  flex: 1 1 auto;
-  min-width: 8px;
-}
-
 .composer-attachment-button {
   width: var(--control-height);
   height: var(--control-height);
@@ -1265,20 +1260,6 @@
   width: var(--control-height);
   justify-content: center;
   padding: 0;
-}
-
-.composer-simple-mode {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  height: var(--control-height);
-  padding: 0 8px;
-  color: var(--text-muted);
-  font-size: var(--font-size-small);
-  font-weight: 650;
-  line-height: var(--font-line-height-small);
-  white-space: nowrap;
 }
 
 .composer-access-trigger:hover:not(:disabled),

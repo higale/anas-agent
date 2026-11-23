@@ -1,8 +1,8 @@
 import type { AgentThread } from './agentTypes'
 import type { Project } from './types'
 
-export function projectSidebarGroup(project: Project): 'pinned' | Project['kind'] {
-  return project.pinned ? 'pinned' : project.kind
+export function projectSidebarGroup(project: Project): 'pinned' | 'projects' {
+  return project.pinned ? 'pinned' : 'projects'
 }
 
 export interface SidebarReorderRequest {

@@ -9,7 +9,6 @@ const translationKeys: Record<ProjectIssueCode, string> = {
   prompt_too_long: 'project.errors.prompt_too_long',
   invalid_settings: 'project.errors.invalid_settings',
   not_found: 'project.errors.not_found',
-  folders_required: 'project.errors.folders_required',
   not_directory: 'project.errors.not_directory',
   path_not_found: 'project.errors.path_not_found',
   permission_denied: 'project.errors.permission_denied',

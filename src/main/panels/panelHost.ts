@@ -10,6 +10,7 @@ import { runApplicationDataOperation } from '../applicationDataLifecycle'
 import { getLanguageResources, resolveConfiguredLanguage } from '../languageStore'
 import { handleMainIpc } from '../ipcSecurity'
 import { getProject } from '../projectStore'
+import { resolveProjectSourceFolders } from '../projectWorkspace'
 import { runtimeLog } from '../runtimeLogger'
 import { panelPages, panelLabel, setPanelLanguages } from './panelRegistry'
 import type { PanelDefinition } from './panelPages'
@@ -30,13 +31,15 @@ function prepareFiles<T>(action: () => Promise<T>): Promise<T> {
   filesPreparation = result.catch(() => undefined)
   return result
 }
-function presentation(content: BuiltinPanel, project?: Project): Pick<PanelDefinition, 'name' | 'project'> {
-  return { project, name: (language, currentProject) => content.kind === 'document' ? helpDocuments[content.documentId]
+async function presentation(content: BuiltinPanel, project?: Project): Promise<Pick<PanelDefinition, 'name' | 'project'>> {
+  return { project: project ? { ...project, sourceFolders: await resolveProjectSourceFolders(project) } : undefined, name: (language, currentProject) => content.kind === 'document' ? helpDocuments[content.documentId]
     : content.kind === 'memory' ? panelLabel(language, 'memory_activity')
     : content.kind === 'processes' ? panelLabel(language, 'process_list')
     : content.kind === 'subagent' ? content.name : `${panelLabel(language, content.kind === 'projectMemory' ? 'project_memory' : 'file_changes')} · ${currentProject!.name}` }
 }
-export function updatePanelProject(project: Project): void { panelPages.updateProject(project) }
+export async function updatePanelProject(project: Project): Promise<void> {
+  panelPages.updateProject({ ...project, sourceFolders: await resolveProjectSourceFolders(project) })
+}
 let appearanceRevision = 0
 let appearanceRefresh: Promise<void>
 export function refreshPanelAppearance(snapshot?: Pick<AppConfigSnapshot, 'settings'>): Promise<void> {
@@ -46,6 +49,15 @@ export function refreshPanelAppearance(snapshot?: Pick<AppConfigSnapshot, 'setti
     // An opening page must consume the latest preparation, including its
     // languages, rather than install settings from a superseded read.
     if (revision !== appearanceRevision) return appearanceRefresh
+    if (snapshot) {
+      const ids = new Set(panelPages.list().flatMap(view => 'projectId' in view.content ? [view.content.projectId] : []))
+      const projects = await Promise.all([...ids].map(async id => {
+        const project = await getProject(id)
+        return { ...project, sourceFolders: await resolveProjectSourceFolders(project, settings) }
+      }))
+      if (revision !== appearanceRevision) return appearanceRefresh
+      for (const project of projects) panelPages.updateProject(project)
+    }
     const { diffViewMode, diffFoldUnchanged, diffWordWrap, showMemoryActivityInTitlebar, runningProcessDisplay, showModelRounds } = settings
     panelPages.setPreferences({ diffViewMode, diffFoldUnchanged, diffWordWrap, showMemoryActivityInTitlebar, runningProcessDisplay, showModelRounds })
     const language = await resolveConfiguredLanguage(settings.language)
@@ -64,10 +76,10 @@ export async function openBuiltinPanel(value: unknown, location: PanelLocation =
   const prepare = () => runApplicationDataOperation(async () => {
     const content: BuiltinPanel = parsed.kind === 'files' ? { ...parsed, navigationId: randomUUID() } : parsed
     const project = content.kind !== 'document' && content.kind !== 'memory' ? await getProject(content.projectId) : undefined
-    if (content.kind === 'projectMemory' && project?.kind !== 'workspace') throw new Error('Project memory requires a workspace project.')
+    if (content.kind === 'projectMemory' && !project) throw new Error('Project memory requires a workspace project.')
     validatePanelContext(content)
     await refreshPanelAppearance()
-    return { ready: panelPages.open({ content, location, locations: ['sidebar', 'window'], ownerId: 'builtin', ...presentation(content, project) }) }
+    return { ready: panelPages.open({ content, location, locations: ['sidebar', 'window'], ownerId: 'builtin', ...await presentation(content, project) }) }
   })
   const prepared = await (parsed.kind === 'files' ? prepareFiles(prepare) : prepare())
   await prepared.ready
@@ -87,7 +99,9 @@ export function followFilesPanel(value: unknown): Promise<void> {
     validatePanelContext(content)
     // Closing while the project is being read must not recreate the panel.
     if (!panelPages.list().some(current => current.viewId === view.viewId)) return
-    panelPages.updateContent(view.viewId, content, presentation(content, project))
+    const details = await presentation(content, project)
+    if (!panelPages.list().some(current => current.viewId === view.viewId)) return
+    panelPages.updateContent(view.viewId, content, details)
   }))
 }
 

@@ -89,6 +89,7 @@ export interface RawAppProfile {
 }
 
 export interface RawAppSettings {
+  project_default_directory?: string
   profile?: RawAppProfile
   speech_reply?: Partial<{
     enabled: boolean
@@ -128,7 +129,6 @@ export interface RawAppSettings {
   sidebar_collapsed_sections?: Partial<{
     pinned_projects: boolean
     projects: boolean
-    simple_chats: boolean
   }>
   backup_dir?: string
 }

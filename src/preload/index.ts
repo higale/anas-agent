@@ -167,6 +167,7 @@ const api: GaleApi = {
     })
   },
   projects: {
+    getDefaultDirectory: (): Promise<string> => ipcRenderer.invoke('projects:getDefaultDirectory'),
     reorder: (request) => ipcRenderer.invoke('projects:reorder', request),
     list: (): Promise<Project[]> => ipcRenderer.invoke('projects:list'),
     create: (request: ProjectCreateRequest): Promise<ProjectOperationResult<Project>> => ipcRenderer.invoke('projects:create', request),
@@ -174,13 +175,13 @@ const api: GaleApi = {
     updateState: (projectId: string, update: ProjectStateUpdate): Promise<Project> => ipcRenderer.invoke('projects:updateState', projectId, update),
     delete: (projectId: string): Promise<ProjectDeleteResult> => ipcRenderer.invoke('projects:delete', projectId),
     deleteThreads: (projectId: string): Promise<ProjectDeleteResult> => ipcRenderer.invoke('projects:deleteThreads', projectId),
-    openSourceFolder: (projectId: string, sourceFolder: string): Promise<string> =>
+    openSourceFolder: (projectId: string, sourceFolder?: string): Promise<string> =>
       ipcRenderer.invoke('projects:openSourceFolder', projectId, sourceFolder),
     fromDroppedFiles: (files: File[]): Promise<ProjectOperationResult<string[]>> => {
       const paths = files.map((file) => webUtils.getPathForFile(file)).filter((path) => path.trim().length > 0)
       return ipcRenderer.invoke('projects:fromDroppedFiles', paths)
     },
-    chooseSourceFolders: (): Promise<ProjectOperationResult<string[]>> => ipcRenderer.invoke('projects:chooseSourceFolders'),
+    chooseSourceFolders: (multiple?: boolean): Promise<ProjectOperationResult<string[]>> => ipcRenderer.invoke('projects:chooseSourceFolders', multiple),
     chooseSkillDirectories: (): Promise<ProjectOperationResult<string[]>> => ipcRenderer.invoke('projects:chooseSkillDirectories'),
     chooseToolDirectories: (): Promise<ProjectOperationResult<string[]>> => ipcRenderer.invoke('projects:chooseToolDirectories')
   },

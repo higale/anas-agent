@@ -2,17 +2,20 @@ import { defaultCapabilities, } from '@shared/agentCapabilities'
 import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
-import type { WorkspaceProject } from '@shared/types'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { Project } from '@shared/types'
 import { resolveWorkspaceImagePath } from './workspaceImagePath'
+
+const settings = vi.hoisted(() => ({ projectDefaultDirectory: '' }))
+vi.mock('./config/appConfig', () => ({ getAppSettings: async () => settings }))
 
 const roots: string[] = []
 
-function workspaceProject(sourceFolder: string): WorkspaceProject {
+function workspaceProject(sourceFolder: string): Project {
   return {
  capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
     id: 'workspace-project',
-    kind: 'workspace',
+
     name: 'Workspace',
     pinned: false,
     collapsed: false,
@@ -33,6 +36,15 @@ afterEach(async () => {
 })
 
 describe('workspace Markdown image paths', () => {
+  it('resolves an empty project folder selection from the configured default', async () => {
+    const root = await temporaryDirectory('anas-default-markdown-')
+    settings.projectDefaultDirectory = root
+    const imagePath = join(root, 'avatar.png')
+    await writeFile(imagePath, 'image')
+    const project = { ...workspaceProject(root), sourceFolders: [] }
+    await expect(resolveWorkspaceImagePath('avatar.png', project)).resolves.toBe(await realpath(imagePath))
+    expect(project.sourceFolders).toEqual([])
+  })
   it('resolves relative images from the primary project folder', async () => {
     const root = await temporaryDirectory('anas-markdown-image-')
     const imagePath = join(root, 'images', 'avatar.png')

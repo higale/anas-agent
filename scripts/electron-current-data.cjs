@@ -59,10 +59,124 @@ async function verifyCurrentData(launch) {
     await writeFile(join(root, 'db/projects/default-workspace/conversations/.DS_Store'), 'Finder metadata')
     application = await launchApplication(root)
     await expect((await application.firstWindow()).locator('[data-agent-composer-input]')).toBeVisible({ timeout: 20000 })
-    const projectCreated = await (await application.firstWindow()).evaluate(() => globalThis.gale.projects.create({
-      kind: 'simple_chat', name: 'Retained after database reset', prompt: 'Keep project prompt'
+    const projectCreated = await (await application.firstWindow()).evaluate(async () => globalThis.gale.projects.create({
+      ...(await globalThis.gale.projects.list()).find(project => project.id === 'default-workspace'), name: 'Retained after database reset', prompt: 'Keep project prompt'
     }))
     assert.equal(projectCreated.status, 'ok')
+    await closeElectronTestApplication(application)
+    application = undefined
+
+    // A former simple project uses the same v0 reader without rewriting it at startup.
+    const projectFile = join(root, 'db/projects', projectCreated.value.id, 'project.json')
+    const oldDefinition = JSON.parse(await readFile(projectFile, 'utf8'))
+    oldDefinition.project.kind = 'simple_chat'
+    for (const key of ['sourceFolders', 'capabilities', 'coding_mode', 'restrict_subagents', 'skill_directories', 'tool_directories']) {
+      delete oldDefinition.project[key]
+    }
+    const oldBytes = JSON.stringify(oldDefinition)
+    await writeFile(projectFile, oldBytes)
+    application = await launchApplication(root)
+    const unifiedPage = await application.firstWindow()
+    await expect(unifiedPage.locator('[data-agent-composer-input]')).toBeVisible({ timeout: 20000 })
+    const loaded = await unifiedPage.evaluate(async id => (await globalThis.gale.projects.list()).find(project => project.id === id), projectCreated.value.id)
+    assert.equal(loaded.kind, undefined)
+    assert.deepEqual(loaded.sourceFolders, [])
+    assert.equal(loaded.capabilities.memory, true)
+    assert.equal(loaded.codingMode, false)
+    assert.equal(await readFile(projectFile, 'utf8'), oldBytes)
+    await unifiedPage.locator('.project-thread-group').filter({ hasText: loaded.name }).locator('.project-thread-more').click()
+    await unifiedPage.locator('.project-details-action').filter({ hasText: /Edit|编辑/ }).click()
+    const projectDialog = unifiedPage.locator('.project-dialog')
+    await expect(projectDialog.locator('.project-folder-item:not([data-default])')).toHaveCount(0)
+    await expect(projectDialog.locator('.project-folder-item[data-default]')).toContainText(documents)
+    await expect(projectDialog.getByRole('textbox', { name: /^(项目提示词|Project prompt)$/ })).toHaveValue('Keep project prompt')
+    if (process.env.ANAS_E2E_PROJECT_SCREENSHOT) await unifiedPage.screenshot({ path: process.env.ANAS_E2E_PROJECT_SCREENSHOT })
+    await projectDialog.locator('button[type="submit"]').click()
+    await expect(projectDialog).not.toBeVisible()
+    const savedDefinition = JSON.parse(await readFile(projectFile, 'utf8'))
+    assert.equal(savedDefinition.version, 0)
+    assert.equal(savedDefinition.project.kind, undefined)
+    assert.equal(savedDefinition.project.id, projectCreated.value.id)
+    assert.deepEqual(savedDefinition.project.sourceFolders, [])
+    await unifiedPage.evaluate(() => globalThis.gale.config.updateSettings({ language: 'zh-CN' }))
+    await unifiedPage.reload()
+    for (const number of [1, 2]) {
+      await unifiedPage.locator('.project-picker-trigger').click()
+      await unifiedPage.getByRole('menuitem', { name: '新建对话', exact: true }).click()
+      const creation = unifiedPage.locator('.project-dialog')
+      await expect(creation.getByRole('textbox', { name: '项目名称', exact: true })).toHaveValue('')
+      await expect(creation.getByRole('textbox', { name: '项目名称', exact: true })).toHaveAttribute('placeholder', `未命名项目${number}`)
+      await expect(creation.locator('.project-folder-item[data-default]')).toHaveText(`默认：${documents}`)
+      await expect(creation.locator('.project-folder-item[data-default] svg')).toHaveCount(0)
+      assert.deepEqual(await creation.locator('.project-folders').evaluate(element => {
+        const style = selector => globalThis.getComputedStyle(element.querySelector(selector))
+        const label = element.querySelector('.project-folder-add-label').getBoundingClientRect()
+        const path = element.querySelector('.project-folder-item').getBoundingClientRect()
+        return [style('.project-folder-item').textAlign, style('.project-folder-add').justifyContent, style('.project-folder-add').borderTopWidth, label.bottom <= path.top]
+      }), ['center', 'center', '0px', true])
+      if (number === 1) {
+        await application.evaluate(({ dialog }, folder) => {
+          const original = dialog.showOpenDialog
+          dialog.showOpenDialog = async () => {
+            dialog.showOpenDialog = original
+            return { canceled: false, filePaths: [folder] }
+          }
+        }, documents)
+        await creation.locator('.project-folder-item[data-default]').click()
+        await expect(creation.locator('.project-folder-item[data-default]')).toHaveCount(0)
+        await expect(creation.locator('.project-folder-item')).toHaveCount(1)
+        await creation.locator('.project-folder-item .ui-icon-button').click()
+        await expect(creation.locator('.project-folder-item[data-default]')).toHaveText(`默认：${documents}`)
+        if (process.env.ANAS_E2E_PROJECT_SCREENSHOT) await unifiedPage.screenshot({ path: process.env.ANAS_E2E_PROJECT_SCREENSHOT.replace(/\.png$/, '-new.png') })
+      }
+      await creation.locator('button[type="submit"]').click()
+      await expect(creation).not.toBeVisible()
+      const named = await unifiedPage.evaluate(async name => (await globalThis.gale.projects.list()).find(project => project.name === name), `未命名项目${number}`)
+      assert.ok(named)
+      assert.deepEqual(named.sourceFolders, [])
+      assert.deepEqual(JSON.parse(await readFile(join(root, 'db/projects', named.id, 'project.json'), 'utf8')).project.sourceFolders, [])
+    }
+    const customDirectory = join(temporaryRoot, 'custom-projects')
+    await mkdir(customDirectory)
+    await unifiedPage.locator('.sidebar-settings').click()
+    await unifiedPage.locator('.app-menu-item').first().click()
+    await unifiedPage.locator('[data-settings-tab="chatMode"]').click()
+    const directoryInput = unifiedPage.getByRole('textbox', { name: /项目默认目录/ })
+    await expect(directoryInput).toHaveValue('')
+    await application.evaluate(({ dialog }, folder) => {
+      const original = dialog.showOpenDialog
+      dialog.showOpenDialog = async (...args) => {
+        dialog.showOpenDialog = original
+        const options = args.at(-1)
+        if (options.properties.includes('multiSelections')) throw new Error('The default directory picker must select one folder.')
+        return { canceled: false, filePaths: [folder] }
+      }
+    }, customDirectory)
+    await unifiedPage.getByRole('button', { name: '选择项目默认目录', exact: true }).click()
+    await expect(directoryInput).toHaveValue(customDirectory)
+    await expect.poll(async () => JSON.parse(await readFile(join(root, 'config/settings.json'), 'utf8')).project_default_directory).toBe(customDirectory)
+    assert.equal(await unifiedPage.evaluate(() => globalThis.gale.projects.getDefaultDirectory()), customDirectory)
+    const editedDirectory = join(temporaryRoot, 'edited projects')
+    await mkdir(editedDirectory)
+    await directoryInput.fill(editedDirectory)
+    await expect.poll(async () => JSON.parse(await readFile(join(root, 'config/settings.json'), 'utf8')).project_default_directory).toBe(editedDirectory)
+    assert.equal(await unifiedPage.evaluate(() => globalThis.gale.projects.getDefaultDirectory()), editedDirectory)
+    if (process.env.ANAS_E2E_PROJECT_SCREENSHOT) await unifiedPage.screenshot({ path: process.env.ANAS_E2E_PROJECT_SCREENSHOT.replace(/\.png$/, '-settings.png') })
+    // Editing an empty project keeps following the setting without inserting the selected directory.
+    await unifiedPage.getByRole('button', { name: /返回应用|Back to app/ }).click()
+    await unifiedPage.locator('.project-thread-group').filter({ hasText: loaded.name }).locator('.project-thread-more').click()
+    await unifiedPage.locator('.project-details-action').filter({ hasText: /Edit|编辑/ }).click()
+    await expect(projectDialog.locator('.project-folder-item[data-default]')).toHaveText(`默认：${editedDirectory}`)
+    await expect(projectDialog.locator('.project-folder-item:not([data-default])')).toHaveCount(0)
+    await projectDialog.locator('button[type="submit"]').click()
+    assert.deepEqual(JSON.parse(await readFile(projectFile, 'utf8')).project.sourceFolders, [])
+    await unifiedPage.locator('.sidebar-settings').click()
+    await unifiedPage.locator('.app-menu-item').first().click()
+    await unifiedPage.locator('[data-settings-tab="chatMode"]').click()
+    await directoryInput.fill('')
+    await expect(directoryInput).toHaveValue('')
+    await expect.poll(async () => JSON.parse(await readFile(join(root, 'config/settings.json'), 'utf8')).project_default_directory).toBe('')
+    assert.equal(await unifiedPage.evaluate(() => globalThis.gale.projects.getDefaultDirectory()), documents)
     await closeElectronTestApplication(application)
     application = undefined
     const projectsBeforeReset = await readFile(join(root, 'db/projects/state.json'))

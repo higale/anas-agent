@@ -174,18 +174,16 @@ export function repairDocument(file: string, input: unknown): { value: RecordVal
     // result during rescue: retain every original entry and its metadata.
     parseInputHistoryStore(value)
   } else if (file === 'projects.json') {
-    // Project IDs, kinds, names and timestamps have no recoverable defaults.
+    // Project IDs, names and timestamps have no recoverable defaults.
     // Never replace a project list or generate IDs behind existing DB records.
     for (const [index, project] of repair.list(value.projects, 'projects').entries()) {
       const path = `projects[${index}]`
       repair.fill(project, { pinned: false, collapsed: false, prompt: projectDefaults.prompt }, path)
       if (project.id === DEFAULT_WORKSPACE_PROJECT_ID && project.pinned !== false) repair.replace(project, 'pinned', false, `${path}.pinned`)
-      if (project.kind === 'workspace') {
-        repair.fill(project, { ...projectDefaults, sourceFolders: [], restrict_subagents: capabilityDefaults.restrict_subagents }, path)
-        if (compressionPromptError(project.compression_prompt)) repair.replace(project, 'compression_prompt', '', `${path}.compression_prompt`)
-        if (project.access_mode !== undefined) repair.choice(project, 'access_mode', ['strict_approval', 'smart_approval', 'full_access'], 'smart_approval', path)
-        repair.capabilities(project, projectCapabilityDefaults, path)
-      }
+      repair.fill(project, { ...projectDefaults, sourceFolders: [], restrict_subagents: capabilityDefaults.restrict_subagents }, path)
+      if (compressionPromptError(project.compression_prompt)) repair.replace(project, 'compression_prompt', '', `${path}.compression_prompt`)
+      if (project.access_mode !== undefined) repair.choice(project, 'access_mode', ['strict_approval', 'smart_approval', 'full_access'], 'smart_approval', path)
+      repair.capabilities(project, projectCapabilityDefaults, path)
     }
     parseProjectStore(value)
   } else {

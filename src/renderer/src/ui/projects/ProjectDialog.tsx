@@ -11,11 +11,11 @@ import {
   type ProjectCreateRequest,
   type ProjectIconColor,
   type ProjectIconName,
-  type ProjectKind,
   type ProjectModelSelection
 } from '@shared/types'
 import { findProviderModelConfig } from '@shared/modelConfig'
 import { unwrapProjectResult } from '@shared/projectOperation'
+import { getAvailableProjectName } from '@shared/projectName'
 import { projectErrorDescription } from './projectErrorDescription'
 import { defaultCapabilities, defaultProjectSettings, defaultRestrictSubagents, removeEmptyMissingMcpSelections } from '@shared/agentCapabilities'
 import type { SkillSnapshot, McpToolStatus, RuntimeToolStatus } from '@shared/types'
@@ -30,37 +30,31 @@ import { ModelParameterPresetPicker } from '../model/ModelParameterPresetPicker'
 import { projectDraftModelSelection } from '@shared/draftModelSelection'
 import { dataTransferHasFiles } from '../dragDrop'
 import { ProjectAppearancePicker } from './ProjectAppearancePicker'
-import { getSourceFolderName } from './projectName'
 import { ProjectPromptPreviews } from './ProjectPromptPreviews'
-import { defaultProjectIcon } from '@shared/projectAppearance'
-import { CommitTextarea } from '../CommitTextField'
 import { compressionPromptError, COMPRESSION_PROMPT_MAX_LENGTH, summaryPromptForLanguage } from '@shared/summaryPrompt'
 import { getLanguageOptions, resolveLanguagePreference } from '../../i18n'
-import { UI_TEXTAREA_ROWS_COMPACT } from '../uiConstants'
 import type { ToolSnapshot } from '@shared/toolPackages'
-
-export type ProjectCreationKind = ProjectKind | 'coding'
 
 interface ProjectDialogProps {
   open: boolean
-  kind: ProjectCreationKind
   project?: Project
+  projects?: Project[]
   config?: AppConfigSnapshot
   currentModelSelection?: ProjectModelSelection
   onClose: () => void
   onSave: (request: ProjectCreateRequest) => Promise<Project>
 }
 
-export function ProjectDialog({ open, kind, project, config, currentModelSelection, onClose, onSave }: ProjectDialogProps) {
+export function ProjectDialog({ open, project, projects = [], config, currentModelSelection, onClose, onSave }: ProjectDialogProps) {
   const { t } = useTranslation()
   const nameInputId = useId()
-  const promptInputId = useId()
   const [name, setName] = useState('')
   const [icon, setIcon] = useState<ProjectIconName>()
   const [iconData, setIconData] = useState<string>()
   const [iconColor, setIconColor] = useState<ProjectIconColor>()
   const [projectTools, setProjectTools] = useState<ToolSnapshot>()
   const [sourceFolders, setSourceFolders] = useState<string[]>([])
+  const [defaultDirectory, setDefaultDirectory] = useState('')
   const [skillDirectories, setSkillDirectories] = useState<string[]>([])
   const [toolDirectories, setToolDirectories] = useState<string[]>([])
   const [choosingTools, setChoosingTools] = useState(false)
@@ -85,49 +79,58 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
   const dragDepthRef = useRef(0)
   const editing = Boolean(project)
   const defaultWorkspace = project ? isDefaultWorkspaceProject(project) : false
-  const projectKind = project?.kind ?? (kind === 'coding' ? 'workspace' : kind)
-  const simpleChat = projectKind === 'simple_chat'
   const selection = projectDraftModelSelection(config?.providers, { modelConfigId, modelParameterPresetId })
   const selectedModel = findProviderModelConfig(config?.providers ?? [], selection?.modelConfigId)
   const draft = useMemo<ProjectCreateRequest>(() => {
     const preferences = {
-      name: name.trim() || t('project.untitled_name'),
+      name: name.trim(),
       ...(icon ? { icon } : {}),
       ...(iconData ? { iconData } : {}),
       ...(iconColor ? { iconColor } : {}),
       ...(modelConfigId ? { modelConfigId, modelParameterPresetId } : {})
     }
-    return simpleChat
-      ? { ...preferences, kind: 'simple_chat', prompt }
-      : { ...preferences, kind: 'workspace', sourceFolders, skillDirectories, toolDirectories,
+    return { ...preferences, sourceFolders, skillDirectories, toolDirectories,
         capabilities: config ? removeEmptyMissingMcpSelections(capabilities, new Set(config.mcpServers.map((server) => server.id))) : capabilities,
         restrictSubagents, prompt, codingMode, ...(accessMode !== 'smart_approval' ? { accessMode } : {}), ...(compressionPrompt.trim() ? { compressionPrompt } : {}) }
   }, [accessMode, capabilities, codingMode, compressionPrompt, config, icon, iconColor, iconData, modelConfigId,
-    modelParameterPresetId, name, prompt, restrictSubagents, simpleChat, sourceFolders, skillDirectories, toolDirectories, t])
+    modelParameterPresetId, name, prompt, restrictSubagents, sourceFolders, skillDirectories, toolDirectories])
 
   useEffect(() => {
     if (!open) return
-    const initialCodingMode = project?.kind === 'workspace' ? project.codingMode : kind === 'coding' || defaultProjectSettings.codingMode
+    const selectedCodingMode = project?.codingMode ?? defaultProjectSettings.codingMode
     setName(project?.name ?? '')
-    setIcon(project ? project.icon : initialCodingMode ? defaultProjectIcon(projectKind, initialCodingMode) : undefined)
+    setIcon(project?.icon)
     setIconData(project?.iconData)
     setIconColor(project?.iconColor)
-    setSourceFolders(project?.kind === 'workspace' ? project.sourceFolders : [])
-    setSkillDirectories(project?.kind === 'workspace' ? project.skillDirectories ?? [] : [])
-    setToolDirectories(project?.kind === 'workspace' ? project.toolDirectories ?? [] : [])
+    setSourceFolders(project ? project.sourceFolders : [])
+    setSkillDirectories(project ? project.skillDirectories ?? [] : [])
+    setToolDirectories(project ? project.toolDirectories ?? [] : [])
     setPrompt(project?.prompt ?? defaultProjectSettings.prompt)
-    setCodingMode(initialCodingMode)
-    setCapabilities(structuredClone(project?.kind === 'workspace' ? project.capabilities : defaultCapabilities))
-    setRestrictSubagents(project?.kind === 'workspace' ? project.restrictSubagents : defaultRestrictSubagents)
-    setAccessMode(project?.kind === 'workspace' ? project.accessMode ?? 'smart_approval' : 'smart_approval')
+    setCodingMode(selectedCodingMode)
+    setCapabilities(structuredClone(project ? project.capabilities : defaultCapabilities))
+    setRestrictSubagents(project ? project.restrictSubagents : defaultRestrictSubagents)
+    setAccessMode(project ? project.accessMode ?? 'smart_approval' : 'smart_approval')
     setModelConfigId(project?.modelConfigId)
     setModelParameterPresetId(project?.modelParameterPresetId)
-    setCompressionPrompt(project?.kind === 'workspace' ? project.compressionPrompt ?? '' : '')
+    setCompressionPrompt(project ? project.compressionPrompt ?? '' : '')
     setPromptTab('project')
     setBusy(false)
     dragDepthRef.current = 0
     setDragActive(false)
-  }, [open, project, kind, projectKind])
+  }, [open, project])
+
+  // Saving can acknowledge an optimistic setting without changing its value.
+  // Re-read the effective path when that settings snapshot is replaced.
+  useEffect(() => {
+    if (!open) return
+    let disposed = false
+    void window.gale.projects.getDefaultDirectory().then(directory => {
+      if (!disposed) setDefaultDirectory(directory)
+    }).catch(reason => {
+      if (!disposed) notice.error(t('chat.failed_load_app'), { description: projectErrorDescription(reason, t) })
+    })
+    return () => { disposed = true }
+  }, [open, config?.settings, t])
 
   function loadDefaultCompressionPrompt(): void {
     const code = resolveLanguagePreference(config?.settings.language)
@@ -135,15 +138,8 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
     setCompressionPrompt(summaryPromptForLanguage({ code, name }, codingMode))
   }
 
-  function updateCodingMode(next: boolean): void {
-    if ((icon ?? defaultProjectIcon(projectKind)) === defaultProjectIcon(projectKind, codingMode)) {
-      setIcon(defaultProjectIcon(projectKind, next))
-    }
-    setCodingMode(next)
-  }
-
   useEffect(() => {
-    if (!open || simpleChat) return
+    if (!open) return
     let disposed = false
     let receivedMcpStatus = false
     setMcpStatus(undefined)
@@ -159,31 +155,28 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
         setRuntimeToolStatus(tools)
       }).catch((reason) => { if (!disposed) notice.error(t('chat.failed_load_app'), { description: projectErrorDescription(reason, t) }) })
     return () => { disposed = true; unsubscribe() }
-  }, [open, simpleChat, project?.id, t])
+  }, [open, project?.id, t])
 
   useEffect(() => {
-    if (!open || simpleChat) return
+    if (!open) return
     let disposed = false
     setSkills(undefined)
     void window.gale.skills.get(project?.id, skillDirectories)
       .then((snapshot) => { if (!disposed) setSkills(snapshot) })
       .catch((reason) => { if (!disposed) notice.error(t('chat.failed_load_app'), { description: projectErrorDescription(reason, t) }) })
     return () => { disposed = true }
-  }, [open, simpleChat, project?.id, skillDirectories, t])
+  }, [open, project?.id, skillDirectories, t])
   useEffect(() => {
     let cancelled = false
     setProjectTools(undefined)
-    if (open && !simpleChat) void window.gale.tools.get(project?.id, toolDirectories).then(snapshot => {
+    if (open) void window.gale.tools.get(project?.id, toolDirectories).then(snapshot => {
       if (!cancelled) setProjectTools(snapshot)
     }).catch(error => { if (!cancelled) notice.error(t('custom_tools.update_failed'), { description: String(error) }) })
     return () => { cancelled = true }
-  }, [open, simpleChat, project?.id, toolDirectories, config?.customTools, t])
+  }, [open, project?.id, toolDirectories, config?.customTools, t])
 
 
   function appendSourceFolders(folders: string[]): void {
-    if (!editing && sourceFolders.length === 0 && folders.length > 0) {
-      setName((current) => current.trim() ? current : getSourceFolderName(folders[0]))
-    }
     setSourceFolders((current) => Array.from(new Set([...current, ...folders])))
   }
 
@@ -254,7 +247,7 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
   async function handleSubmit(event: FormEvent): Promise<void> {
     event.preventDefault()
     if (compressionError || iconPending) return
-    if ((!simpleChat && sourceFolders.length === 0) || busy) return
+    if (busy) return
     setBusy(true)
     try {
       await onSave(draft)
@@ -271,7 +264,7 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
         <Dialog.Overlay className="ui-backdrop" />
         <Dialog.Content
           asChild
-          className={`ui-dialog ui-dialog-medium ui-dialog-font-scaled ui-dialog-centered ui-dialog-safe-area ui-dialog-fixed-footer ui-popover project-dialog${!simpleChat ? ' ui-dialog-split' : ''}`}
+          className="ui-dialog ui-dialog-medium ui-dialog-font-scaled ui-dialog-centered ui-dialog-safe-area ui-dialog-fixed-footer ui-popover project-dialog ui-dialog-split"
           onPointerDownOutside={(event) => event.preventDefault()}
           onOpenAutoFocus={(event) => {
             if (!defaultWorkspace) {
@@ -286,31 +279,26 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
                 <div className="ui-form-section ui-form-section-fill">
                   <header className="ui-dialog-header project-dialog-header">
                     <ProjectAppearancePicker
-                      key={project?.id ?? kind}
+                      key={project?.id ?? 'new'}
                       disabled={busy}
                       onPendingChange={setIconPending}
                       iconData={iconData}
                       onChangeImage={setIconData}
                       color={iconColor}
                       icon={icon}
-                      kind={projectKind}
                       onChangeColor={setIconColor}
                       onChangeIcon={setIcon}
                     />
                     <div>
                       <div className="project-dialog-title-row">
                         <Dialog.Title asChild>
-                          <h2 className="ui-dialog-title">{t(simpleChat
-                            ? editing ? 'project.edit_simple_chat_title' : 'project.create_simple_chat_title'
-                            : editing ? 'project.edit_title' : kind === 'coding' ? 'project.create_coding_title' : 'project.create_title')}</h2>
+                          <h2 className="ui-dialog-title">{t(editing ? 'project.edit_title' : 'project.create_title')}</h2>
                         </Dialog.Title>
                         {defaultWorkspace && <span className="project-default-badge">{t('common.default')}</span>}
                       </div>
                       <Dialog.Description asChild>
                         <p className="ui-dialog-description">
-                          {t(defaultWorkspace ? 'project.edit_default_description' : simpleChat
-                            ? editing ? 'project.edit_simple_chat_description' : 'project.create_simple_chat_description'
-                            : editing ? 'project.edit_description' : 'project.create_description')}
+                          {t(defaultWorkspace ? 'project.edit_default_description' : editing ? 'project.edit_description' : 'project.create_description')}
                         </p>
                       </Dialog.Description>
                     </div>
@@ -328,11 +316,11 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
                       readOnly={defaultWorkspace}
                       maxLength={80}
                       onChange={(event) => setName(event.target.value)}
-                      placeholder={t('project.name_placeholder')}
+                      placeholder={getAvailableProjectName(projects, t('project.untitled_name_prefix'), project?.id)}
                     />
                   </div>
 
-                  {!simpleChat && <Tabs.Root value={promptTab} onValueChange={setPromptTab}
+                  <Tabs.Root value={promptTab} onValueChange={setPromptTab}
                     className="ui-field-stack ui-field-stack-fill project-prompt-tabs">
                     <div className="ui-toolbar ui-toolbar-between">
                       <Tabs.List className="ui-tab-list" aria-label={t('project.prompt_tabs')}>
@@ -358,30 +346,14 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
                         {t(compressionError ? 'project.compression_prompt_invalid' : 'project.compression_prompt_hint')}
                       </div>
                     </Tabs.Content>
-                  </Tabs.Root>}
+                  </Tabs.Root>
 
                   <section className="ui-field-stack">
                     <div className="ui-row-between">
-                      {simpleChat ? (
-                        <label className="ui-field-label" htmlFor={promptInputId}>{t('project.simple_chat_prompt')}</label>
-                      ) : (
-                        <span className="ui-field-label">{t('project.source_folders')}</span>
-                      )}
+                      <span className="ui-field-label">{t('project.source_folders')}</span>
                     </div>
 
-                    {simpleChat ? (
-                      <CommitTextarea
-                        id={promptInputId}
-                        className="ui-autosize-textarea ui-code-textarea ui-textarea-wrap project-prompt-input"
-                        value={prompt}
-                        maxLength={50_000}
-                        rows={UI_TEXTAREA_ROWS_COMPACT}
-                        disabled={busy}
-                        onDraftChange={setPrompt}
-                        onCommit={setPrompt}
-                        placeholder={t('project.simple_chat_prompt_placeholder')}
-                      />
-                    ) : <div
+                    <div
                       className={dragActive ? 'project-folders drag-active' : 'project-folders'}
                       data-empty={sourceFolders.length === 0 ? true : undefined}
                       onDragEnter={handleDragEnter}
@@ -389,54 +361,60 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
                       onDragLeave={handleDragLeave}
                       onDrop={(event) => void handleDrop(event)}
                     >
-                      {sourceFolders.length > 0 && (
-                        <div className="project-folder-list">
-                          {sourceFolders.map((folder, index) => (
-                            <div
-                              className="project-folder-item"
-                              data-multiple={sourceFolders.length > 1 ? true : undefined}
-                              key={folder}
-                            >
-                              <Folder size={15} />
-                              <span className="ui-truncate" title={folder}>{folder}</span>
-                              {sourceFolders.length > 1 && (index === 0 ? (
-                                <span className="project-folder-primary-badge">{t('project.primary_folder')}</span>
-                              ) : (
-                                <button
-                                  className="project-folder-set-primary"
-                                  type="button"
-                                  disabled={busy}
-                                  onClick={() => setPrimarySourceFolder(folder)}
-                                >
-                                  {t('project.set_primary_folder')}
-                                </button>
-                              ))}
+                      {sourceFolders.length > 0 && <div className="project-folder-list">
+                        {sourceFolders.map((folder, index) => (
+                          <div
+                            className="project-folder-item"
+                            data-multiple={sourceFolders.length > 1 ? true : undefined}
+                            key={folder}
+                          >
+                            <Folder size={15} />
+                            <span className="ui-truncate" title={folder}>{folder}</span>
+                            {sourceFolders.length > 1 && (index === 0 ? (
+                              <span className="project-folder-primary-badge">{t('project.primary_folder')}</span>
+                            ) : (
                               <button
-                                className="ui-icon-button"
+                                className="project-folder-set-primary"
                                 type="button"
                                 disabled={busy}
-                                aria-label={t('project.remove_folder', { folder })}
-                                onClick={() => setSourceFolders((folders) => folders.filter((item) => item !== folder))}
+                                onClick={() => setPrimarySourceFolder(folder)}
                               >
-                                <X size={14} />
+                                {t('project.set_primary_folder')}
                               </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                            ))}
+                            <button
+                              className="ui-icon-button"
+                              type="button"
+                              disabled={busy}
+                              aria-label={t('project.remove_folder', { folder })}
+                              onClick={() => setSourceFolders((folders) => folders.filter((item) => item !== folder))}
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>}
                       <button
                         className="project-folder-add"
                         type="button"
+                        aria-label={t(dragActive ? 'project.drop_folders' : 'project.add_folders')}
                         onClick={() => void chooseSourceFolders()}
                         disabled={busy}
                       >
-                        <FolderPlus size={18} />
-                        <span>{t(dragActive ? 'project.drop_folders' : 'project.add_folders')}</span>
+                        <span className="project-folder-add-label">
+                          <FolderPlus size={18} />
+                          <span>{t(dragActive ? 'project.drop_folders' : 'project.add_folders')}</span>
+                        </span>
+                        {sourceFolders.length === 0 && <span className="project-folder-item" data-default>
+                          <span className="ui-truncate" title={defaultDirectory}>{t('project.default_directory_hint', {
+                            directory: defaultDirectory || t('settings.project_default_directory')
+                          })}</span>
+                        </span>}
                       </button>
-                    </div>}
+                    </div>
                   </section>
                   <div className="ui-row">
-                    {!simpleChat && <ComposerAccessPicker modal disabled={busy} accessMode={accessMode} onChange={setAccessMode} />}
+                    <ComposerAccessPicker modal disabled={busy} accessMode={accessMode} onChange={setAccessMode} />
                     <div className="composer-model-selection-group ui-push-end">
                       <ModelPicker
                         modal
@@ -464,7 +442,7 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
                   </div>
                 </div>
               </div>
-              {!simpleChat && <section className="ui-dialog-pane ui-form-section" aria-label={t('settings.capabilities')}>
+              <section className="ui-dialog-pane ui-form-section" aria-label={t('settings.capabilities')}>
                 <h3 className="ui-dialog-title">{t('settings.capabilities')}</h3>
                 <CapabilityEditor customTools={projectTools?.tools} customToolRoots={projectTools?.roots} value={capabilities} skills={skills} mcpStatus={mcpStatus} mcpServers={config?.mcpServers} runtimeToolStatus={runtimeToolStatus} disabled={busy}
                   subagents={config?.subagents ?? []} restrictSubagents={restrictSubagents}
@@ -482,14 +460,14 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
                   onEnableAll={(capabilities) => { setCapabilities(capabilities); setRestrictSubagents(false) }}
                   toolbarEnd={<CheckboxButton label={t('capabilities.restrict_subagents')} checked={restrictSubagents} disabled={busy}
                     tooltip={t('capabilities.restrict_subagents_hint')} onChange={setRestrictSubagents} />} />
-              </section>}
+              </section>
             </div>
 
             <footer className="ui-dialog-footer">
-              {!simpleChat && <div className="ui-row ui-row-lg ui-dialog-footer-start">
+              <div className="ui-row ui-row-lg ui-dialog-footer-start">
                 <CheckboxField className="ui-checkbox-field-inline" checked={codingMode} disabled={busy}
-                  label={t('project.coding_mode')} onChange={updateCodingMode} />
-              </div>}
+                  label={t('project.coding_mode')} onChange={setCodingMode} />
+              </div>
               <Dialog.Close asChild>
                 <button className="ui-button ui-button-compact" type="button" disabled={busy}>
                   <X size={14} />
@@ -499,10 +477,10 @@ export function ProjectDialog({ open, kind, project, config, currentModelSelecti
               <button
                 className="ui-button ui-button-compact ui-button-primary"
                 type="submit"
-                disabled={busy || iconPending || Boolean(compressionError) || (!simpleChat && sourceFolders.length === 0)}
+                disabled={busy || iconPending || Boolean(compressionError)}
               >
                 {editing ? <Save size={14} /> : <Plus size={14} />}
-                <span>{t(editing ? 'common.save' : simpleChat ? 'project.create_simple_chat' : 'project.create')}</span>
+                <span>{t(editing ? 'common.save' : 'project.create')}</span>
               </button>
             </footer>
           </form>

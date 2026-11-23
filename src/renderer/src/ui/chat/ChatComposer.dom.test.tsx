@@ -19,7 +19,7 @@ function composerProps(): ComponentProps<typeof ChatComposer> {
     generationBusy: false, locked: false, dragActive: false,
     accessMode: 'smart_approval', formRef: createRef(), inputRef: createRef(),
     input: 'draft', assistantName: 'Anas', projects: [], queuedMessages: [],
-    simpleChatEnabled: false, submissionBusy: false, selectedProjectId: 'project',
+    submissionBusy: false, selectedProjectId: 'project',
     projectSelectionDisabled: false, showProjectPicker: false, showSuggestions: false,
     suggestions: [], todos: [],
     onApplySuggestion: vi.fn(), onAttachFiles: vi.fn(), onAutosizeInput: vi.fn(),

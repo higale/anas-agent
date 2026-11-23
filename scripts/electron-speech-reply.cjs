@@ -159,7 +159,7 @@ async function verifySpeechReply(launchApplication) {
     })
     await expect(page.getByRole('button', { name: 'Automatic speech reply', exact: true })).toHaveAttribute('aria-pressed', 'true')
     for (let index = 1; index <= 2; index += 1) {
-      if (index > 1) await page.getByRole('button', { name: 'New Session', exact: true }).click()
+      if (index > 1) await page.getByRole('button', { name: 'New chat', exact: true }).click()
       await page.locator('[data-agent-composer-input]').fill(`Test first reply in new thread ${index}.`)
       await page.getByRole('button', { name: 'Send', exact: true }).click()
       await expect.poll(() => application.evaluate(() => globalThis.__speechRequests), { timeout: 20000 })
@@ -168,7 +168,7 @@ async function verifySpeechReply(launchApplication) {
       await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0)
     }
     assert.equal(requestCount, 2)
-    await page.getByRole('button', { name: 'New Session', exact: true }).click()
+    await page.getByRole('button', { name: 'New chat', exact: true }).click()
     await page.locator('[data-agent-composer-input]').fill('Read the speech fixture and report the result.')
     await page.getByRole('button', { name: 'Send', exact: true }).click()
     await expect.poll(() => typeof beginToolReply, { timeout: 20000 }).toBe('function')
@@ -215,7 +215,7 @@ async function verifySpeechReply(launchApplication) {
     assert.equal(await page.evaluate(() => globalThis.__speechPlayers[3].paused), true, 'The colored playback button still stops audio.')
 
     finishToolReply = undefined
-    await page.getByRole('button', { name: 'New Session', exact: true }).click()
+    await page.getByRole('button', { name: 'New chat', exact: true }).click()
     await page.locator('[data-agent-composer-input]').fill('Read the speech fixture again.')
     await page.getByRole('button', { name: 'Send', exact: true }).click()
     await expect.poll(() => typeof finishToolReply, { timeout: 20000 }).toBe('function')

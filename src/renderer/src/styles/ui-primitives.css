@@ -1651,6 +1651,23 @@ fieldset.ui-form-section {
   width: 9em;
 }
 
+.ui-input-action {
+  display: grid;
+  position: relative;
+  min-width: 0;
+}
+
+.ui-input-action > .ui-input {
+  padding-inline-end: var(--control-height);
+}
+
+.ui-input-action > .ui-tool-button {
+  position: absolute;
+  inset-block: 3px;
+  inset-inline-end: 3px;
+  width: calc(var(--control-height) - 6px);
+}
+
 .ui-number-input {
   display: flex;
   height: var(--control-height);

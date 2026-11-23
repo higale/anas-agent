@@ -9,7 +9,10 @@ import { app } from 'electron'
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
-import { getDefaultWorkspaceDir, getProjectStoreFile } from './config/dataDir'
+import { getProjectStoreFile } from './config/dataDir'
+import { getAppSettings } from './config/appConfig'
+import { getConfiguredTranslator } from './languageStore'
+import { getAvailableProjectName, hasDuplicateProjectName } from '@shared/projectName'
 import { isProjectDirectoryId, isProjectStorageEntry } from './projectStorageEntries'
 import { parseResourceDirectories } from './resourceDirectories'
 import { PROJECT_ICON_COLORS, PROJECT_ICON_NAMES } from '@shared/projectAppearance'
@@ -82,18 +85,13 @@ function requireProject(value: unknown, index: number): Project {
   ) {
     throw new Error(`Project ${index + 1} has an invalid format.`)
   }
-  if (project.kind === 'workspace') {
-    if (!Array.isArray(project.sourceFolders) || project.sourceFolders.some((folder) => typeof folder !== 'string' || !folder.trim())) {
-      throw new Error(`Project ${index + 1} has an invalid format.`)
-    }
-  } else if (project.kind === 'simple_chat') {
-    if (typeof project.prompt !== 'string') {
-      throw new Error(`Project ${index + 1} has an invalid format.`)
-    }
-  } else {
+  const sourceFolders = project.sourceFolders === undefined ? [] : project.sourceFolders
+  if (!Array.isArray(sourceFolders) || sourceFolders.some(folder => typeof folder !== 'string' || !folder.trim())) {
     throw new Error(`Project ${index + 1} has an invalid format.`)
   }
-  const { icon_data, model_config_id, model_parameter_preset_id, capabilities, restrict_subagents, advanced_settings: _advancedSettings, script_auto_approve_skills: _scriptApprovals, coding_mode, compression_prompt, access_mode, sort_order, thread_order, skill_directories, tool_directories, ...metadata } = project
+  const { icon_data, model_config_id, model_parameter_preset_id, capabilities, restrict_subagents = defaultRestrictSubagents,
+    coding_mode = defaultProjectSettings.codingMode, compression_prompt, access_mode, sort_order, thread_order,
+    skill_directories, tool_directories } = project
   if (sort_order !== undefined && (typeof sort_order !== 'number' || !Number.isSafeInteger(sort_order))) {
     throw new Error(`Project ${index + 1} has an invalid sort order.`)
   }
@@ -106,15 +104,31 @@ function requireProject(value: unknown, index: number): Project {
     modelConfigId: model_config_id,
     modelParameterPresetId: model_parameter_preset_id
   })
-  if (project.kind === 'workspace' && typeof restrict_subagents !== 'boolean') throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Invalid project subagent restriction.')
-  if (project.kind === 'workspace' && typeof coding_mode !== 'boolean') throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Invalid project coding mode.')
+  if (typeof restrict_subagents !== 'boolean') throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Invalid project subagent restriction.')
+  if (typeof coding_mode !== 'boolean') throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Invalid project coding mode.')
   return {
-    ...metadata, ...selection,
+    id: project.id,
+    name: project.name,
+    pinned: project.pinned,
+    collapsed: project.collapsed,
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt,
+    ...(project.icon !== undefined ? { icon: project.icon as Project['icon'] } : {}),
+    ...(project.iconColor !== undefined ? { iconColor: project.iconColor as Project['iconColor'] } : {}),
+    ...selection,
     ...(icon_data !== undefined ? { iconData: normalizeIconData(icon_data) } : {}),
     ...(sort_order !== undefined ? { sortOrder: sort_order } : {}),
-    ...(thread_order !== undefined ? { threadOrder: thread_order } : {}),
-    ...(project.kind === 'workspace' ? { skillDirectories: parseResourceDirectories(skill_directories), toolDirectories: parseResourceDirectories(tool_directories), accessMode: validateProjectAccessMode(access_mode), capabilities: normalizeCapabilityChoices(parseCapabilities(capabilities)), restrictSubagents: restrict_subagents, codingMode: coding_mode, compressionPrompt: normalizeCompressionPrompt(compression_prompt), prompt: validateProjectPrompt(project.prompt) } : {})
-  } as Project
+    ...(thread_order !== undefined ? { threadOrder: thread_order as string[] } : {}),
+    sourceFolders,
+    skillDirectories: parseResourceDirectories(skill_directories),
+    toolDirectories: parseResourceDirectories(tool_directories),
+    accessMode: validateProjectAccessMode(access_mode),
+    capabilities: capabilities === undefined ? structuredClone(defaultCapabilities) : normalizeCapabilityChoices(parseCapabilities(capabilities)),
+    restrictSubagents: restrict_subagents,
+    codingMode: coding_mode,
+    compressionPrompt: normalizeCompressionPrompt(compression_prompt),
+    prompt: validateProjectPrompt(project.prompt === undefined ? defaultProjectSettings.prompt : project.prompt)
+  }
 }
 
 export function parseProjectStore(value: unknown): StoredProjects {
@@ -127,7 +141,7 @@ export function parseProjectStore(value: unknown): StoredProjects {
     throw new Error('Project store contains duplicate project IDs.')
   }
   const defaultWorkspace = projects.find((project) => project.id === DEFAULT_WORKSPACE_PROJECT_ID)
-  if (!defaultWorkspace || defaultWorkspace.kind !== 'workspace' || defaultWorkspace.pinned) {
+  if (!defaultWorkspace || defaultWorkspace.pinned) {
     throw new Error('Project store must contain one unpinned default workspace project.')
   }
   return { version: 0, projects }
@@ -243,13 +257,13 @@ export function serializeProjectStore(store: StoredProjects): { version: 0; proj
       delete stored.toolDirectories
       return {
         ...stored,
-        ...(project.kind === 'workspace' ? { skill_directories: project.skillDirectories ?? [], tool_directories: project.toolDirectories ?? [] } : {}),
+        skill_directories: project.skillDirectories ?? [], tool_directories: project.toolDirectories ?? [],
         ...(iconData ? { icon_data: iconData } : {}),
         ...(sortOrder !== undefined ? { sort_order: sortOrder } : {}),
         ...(threadOrder !== undefined ? { thread_order: threadOrder } : {}),
-        ...(project.kind === 'workspace' && project.accessMode && project.accessMode !== 'smart_approval'
+        ...(project.accessMode && project.accessMode !== 'smart_approval'
           ? { access_mode: project.accessMode } : {}),
-        ...(project.kind === 'workspace' ? { capabilities: serializeCapabilities(project.capabilities), restrict_subagents: project.restrictSubagents, coding_mode: project.codingMode, ...(project.compressionPrompt ? { compression_prompt: project.compressionPrompt } : {}) } : {}),
+        capabilities: serializeCapabilities(project.capabilities), restrict_subagents: project.restrictSubagents, coding_mode: project.codingMode, ...(project.compressionPrompt ? { compression_prompt: project.compressionPrompt } : {}),
         ...(modelConfigId ? { model_config_id: modelConfigId } : {}),
         ...(modelConfigId && modelParameterPresetId !== undefined
           ? { model_parameter_preset_id: modelParameterPresetId }
@@ -285,17 +299,14 @@ async function initializeMissingStore(path: string): Promise<void> {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       const timestamp = now()
-      const defaultWorkspaceDir = getDefaultWorkspaceDir()
-      await mkdir(defaultWorkspaceDir, { recursive: true })
       const store: StoredProjects = {
         version: 0,
         projects: [{
           id: DEFAULT_WORKSPACE_PROJECT_ID,
-          kind: 'workspace',
           name: initialDefaultWorkspaceName(),
           pinned: false,
           collapsed: false,
-          sourceFolders: [defaultWorkspaceDir],
+          sourceFolders: [],
           skillDirectories: [],
           toolDirectories: [],
           ...defaultProjectSettings,
@@ -380,7 +391,6 @@ export async function validateProjectSourceFolders(sourceFolders: string[]): Pro
       .filter(Boolean)
       .map((folder) => resolve(folder))
   ))
-  if (folders.length === 0) throw new ProjectOperationFailure({ code: 'folders_required' }, 'At least one source folder is required.')
   for (const folder of folders) {
     const info = await stat(folder)
     if (!info.isDirectory()) throw new ProjectOperationFailure({ code: 'not_directory', path: folder }, `Source folder is not a directory: ${folder}`)
@@ -391,15 +401,14 @@ export async function validateProjectSourceFolders(sourceFolders: string[]): Pro
 function validateProjectName(name: unknown): string {
   if (typeof name !== 'string') throw new ProjectOperationFailure({ code: 'name_required' }, 'Project name is required.')
   const normalized = name.replace(/\s+/g, ' ').trim()
-  if (!normalized) throw new ProjectOperationFailure({ code: 'name_required' }, 'Project name is required.')
   if (normalized.length > 80) throw new ProjectOperationFailure({ code: 'name_too_long' }, 'Project name must be 80 characters or fewer.')
   return normalized
 }
 
 function validateProjectPrompt(prompt: unknown): string {
-  if (typeof prompt !== 'string') throw new ProjectOperationFailure({ code: 'prompt_invalid' }, 'Simple chat prompt is required.')
+  if (typeof prompt !== 'string') throw new ProjectOperationFailure({ code: 'prompt_invalid' }, 'Project prompt is required.')
   const normalized = prompt.trim()
-  if (normalized.length > 50_000) throw new ProjectOperationFailure({ code: 'prompt_too_long' }, 'Simple chat prompt must be 50,000 characters or fewer.')
+  if (normalized.length > 50_000) throw new ProjectOperationFailure({ code: 'prompt_too_long' }, 'Project prompt must be 50,000 characters or fewer.')
   return normalized
 }
 
@@ -455,7 +464,7 @@ function validateProjectAccessMode(value: unknown): AgentAccessMode {
   throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Invalid project tool access mode.')
 }
 
-function projectCapabilities(request: Extract<ProjectCreateRequest, { kind: 'workspace' }>) {
+function projectCapabilities(request: ProjectCreateRequest) {
   if (typeof request.restrictSubagents !== 'boolean') throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Invalid project subagent restriction.')
   if (typeof request.codingMode !== 'boolean') throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Invalid project coding mode.')
   let capabilities
@@ -467,11 +476,11 @@ function projectCapabilities(request: Extract<ProjectCreateRequest, { kind: 'wor
   return { skillDirectories: parseResourceDirectories(request.skillDirectories), toolDirectories: parseResourceDirectories(request.toolDirectories), accessMode: validateProjectAccessMode(request.accessMode), compressionPrompt: normalizeCompressionPrompt(request.compressionPrompt), capabilities, restrictSubagents: request.restrictSubagents, codingMode: request.codingMode, prompt: validateProjectPrompt(request.prompt) }
 }
 
-function hasDuplicateName(projects: Project[], name: string, excludedProjectId?: string): boolean {
-  return projects.some((project) =>
-    project.id !== excludedProjectId
-    && project.name.localeCompare(name, undefined, { sensitivity: 'accent' }) === 0
-  )
+async function resolveProjectName(name: unknown, projects: Project[], excludedProjectId?: string): Promise<string> {
+  const normalized = validateProjectName(name)
+  if (normalized) return normalized
+  const t = await getConfiguredTranslator((await getAppSettings()).language)
+  return getAvailableProjectName(projects, t('project.untitled_name_prefix'), excludedProjectId)
 }
 
 export async function listProjects(): Promise<Project[]> {
@@ -488,35 +497,30 @@ export async function getProject(projectId: string): Promise<Project> {
 }
 
 export async function prepareProjectPreview(request: ProjectCreateRequest, projectId = 'project-preview'): Promise<Project> {
-  if (!request || (request.kind !== 'workspace' && request.kind !== 'simple_chat')) {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) {
     throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Project request is invalid.')
   }
   const timestamp = now()
-  if (projectId === DEFAULT_WORKSPACE_PROJECT_ID && request.kind !== 'workspace') {
-    throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'The default project must be a workspace.')
-  }
   const common = {
     id: projectId,
-    name: projectId === DEFAULT_WORKSPACE_PROJECT_ID ? initialDefaultWorkspaceName() : validateProjectName(request.name),
+    name: projectId === DEFAULT_WORKSPACE_PROJECT_ID ? initialDefaultWorkspaceName() : await resolveProjectName(request.name, (await readStore()).projects, projectId),
     ...validateProjectModelSelection(request),
     pinned: false,
     collapsed: false,
     createdAt: timestamp,
     updatedAt: timestamp
   }
-  return request.kind === 'workspace'
-    ? { ...common, kind: 'workspace', sourceFolders: await validateProjectSourceFolders(request.sourceFolders), ...projectCapabilities(request) }
-    : { ...common, kind: 'simple_chat', prompt: validateProjectPrompt(request.prompt) }
+  return { ...common, sourceFolders: await validateProjectSourceFolders(request.sourceFolders), ...projectCapabilities(request) }
 }
 
 export async function createProject(request: ProjectCreateRequest): Promise<Project> {
   return serializeProjectMutation(async () => {
-    if (!request || typeof request.name !== 'string' || (request.kind !== 'workspace' && request.kind !== 'simple_chat')) {
+    if (!request || typeof request.name !== 'string') {
       throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Project request is invalid.')
     }
-    const name = validateProjectName(request.name)
     const store = await readStore()
-    if (hasDuplicateName(store.projects, name)) {
+    const name = await resolveProjectName(request.name, store.projects)
+    if (hasDuplicateProjectName(store.projects, name)) {
       throw new ProjectOperationFailure({ code: 'duplicate_name', name }, `A project named "${name}" already exists.`)
     }
     const timestamp = now()
@@ -531,9 +535,7 @@ export async function createProject(request: ProjectCreateRequest): Promise<Proj
       createdAt: timestamp,
       updatedAt: timestamp
     }
-    const project: Project = request.kind === 'workspace'
-      ? { ...common, kind: 'workspace', sourceFolders: await validateProjectSourceFolders(request.sourceFolders), ...projectCapabilities(request) }
-      : { ...common, kind: 'simple_chat', prompt: validateProjectPrompt(request.prompt) }
+    const project: Project = { ...common, sourceFolders: await validateProjectSourceFolders(request.sourceFolders), ...projectCapabilities(request) }
     placeAtGroupStart(project, store.projects)
     store.projects = sortProjects([project, ...store.projects])
     await writeStore(store)
@@ -545,19 +547,17 @@ export async function updateProject(projectId: string, request: ProjectUpdateReq
   return serializeProjectMutation(async () => {
     if (
       typeof projectId !== 'string' || !projectId.trim() || !request
-      || (request.kind !== 'workspace' && request.kind !== 'simple_chat')
     ) {
       throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Project update request is invalid.')
     }
-    const name = validateProjectName(request.name)
     const store = await readStore()
     const current = store.projects.find((project) => project.id === projectId)
     if (!current) throw new ProjectOperationFailure({ code: 'not_found' }, 'Project was not found.')
-    if (current.kind !== request.kind) throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Project kind cannot be changed.')
+    const name = await resolveProjectName(request.name, store.projects, projectId)
     if (projectId === DEFAULT_WORKSPACE_PROJECT_ID && name !== current.name) {
       throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'The default project name cannot be changed.')
     }
-    if (name !== current.name && hasDuplicateName(store.projects, name, projectId)) {
+    if (name !== current.name && hasDuplicateProjectName(store.projects, name, projectId)) {
       throw new ProjectOperationFailure({ code: 'duplicate_name', name }, `A project named "${name}" already exists.`)
     }
     const appearance = validateProjectAppearance(request)
@@ -569,26 +569,15 @@ export async function updateProject(projectId: string, request: ProjectUpdateReq
     delete currentMetadata.modelParameterPresetId
     const modelSelection = validateProjectModelSelection(request)
     const updatedAt = now()
-    const project: Project = request.kind === 'workspace'
-      ? {
-          ...currentMetadata,
-          ...appearance,
-          ...modelSelection,
-          kind: 'workspace',
-          name,
-          sourceFolders: await validateProjectSourceFolders(request.sourceFolders),
-          ...projectCapabilities(request),
-          updatedAt
-        }
-      : {
-          ...currentMetadata,
-          ...appearance,
-          ...modelSelection,
-          kind: 'simple_chat',
-          name,
-          prompt: validateProjectPrompt(request.prompt),
-          updatedAt
-        }
+    const project: Project = {
+      ...currentMetadata,
+      ...appearance,
+      ...modelSelection,
+      name,
+      sourceFolders: await validateProjectSourceFolders(request.sourceFolders),
+      ...projectCapabilities(request),
+      updatedAt
+    }
     store.projects = sortProjects(store.projects.map((item) => item.id === projectId ? project : item))
     await writeStore(store)
     return project

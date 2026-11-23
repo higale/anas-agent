@@ -51,7 +51,7 @@ async function fixture() {
   await legacyMemory(storage.memoryStore).saveMemory({ scope: 'global', kind: 'fact', content: 'Preserved memory', keywords: [], importance: 3 }, { origin: 'user' })
   const { version: _version, ...defaults } = projectDefaults
   const projects = JSON.stringify({ version: 0, projects: [{ ...defaults, id: DEFAULT_WORKSPACE_PROJECT_ID,
-    kind: 'workspace', name: 'Workspace', pinned: false, collapsed: false, sourceFolders: [], restrict_subagents: false,
+    name: 'Workspace', pinned: false, collapsed: false, sourceFolders: [], restrict_subagents: false,
     capabilities: serializeCapabilities(defaultCapabilities), createdAt: '2026-10-27T00:00:00Z', updatedAt: '2026-10-27T00:00:00Z' }] })
   await writeProjectFixture(root, JSON.parse(projects))
   const repairDocument = await import('./recoveryProjectStorage').then(module => module.readRepairProjectDocument(root))

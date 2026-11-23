@@ -1,18 +1,17 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { Braces, Check, FolderKanban, MessageCircle } from 'lucide-react'
+import { Check, FolderKanban, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { isDefaultWorkspaceProject, type Project } from '@shared/types'
 import { DropdownMenuContent, DropdownMenuRoot, DropdownMenuTrigger } from '../DropdownMenuShell'
 import { NoFocusButton } from '../NoFocusButton'
 import { ProjectIcon } from './ProjectIcon'
-import type { ProjectCreationKind } from './ProjectDialog'
 
 interface ProjectPickerProps {
   disabled: boolean
   projects: Project[]
   selectedProjectId: string
-  onCreateProject: (kind: ProjectCreationKind) => void
+  onCreateProject: () => void
   onSelectProject: (projectId: string) => void
 }
 
@@ -27,9 +26,9 @@ export function ProjectPicker({
   const [open, setOpen] = useState(false)
   const selectedProject = projects.find((project) => project.id === selectedProjectId)
 
-  function openCreateDialog(kind: ProjectCreationKind): void {
+  function openCreateDialog(): void {
     setOpen(false)
-    window.requestAnimationFrame(() => onCreateProject(kind))
+    window.requestAnimationFrame(() => onCreateProject())
   }
 
   return (
@@ -46,7 +45,6 @@ export function ProjectPicker({
                 iconData={selectedProject.iconData}
                 color={selectedProject.iconColor}
                 icon={selectedProject.icon}
-                kind={selectedProject.kind}
                 size={14}
               />
             : <FolderKanban size={14} />}
@@ -73,7 +71,7 @@ export function ProjectPicker({
                 key={project.id}
                 onSelect={() => onSelectProject(project.id)}
               >
-                <ProjectIcon iconData={project.iconData} color={project.iconColor} icon={project.icon} kind={project.kind} size={15} />
+                <ProjectIcon iconData={project.iconData} color={project.iconColor} icon={project.icon} size={15} />
                 <span className={`ui-truncate${isDefaultWorkspaceProject(project) ? ' project-default-workspace-name' : ''}`}>
                   {project.name}
                 </span>
@@ -82,17 +80,9 @@ export function ProjectPicker({
             ))}
           </DropdownMenu.Group>
           <DropdownMenu.Separator className="ui-menu-separator" />
-          <DropdownMenu.Item className="project-picker-item ui-menu-item ui-menu-item-row" onSelect={() => openCreateDialog('workspace')}>
-            <FolderKanban size={15} />
-            <span>{t('project.normal_project')}</span>
-          </DropdownMenu.Item>
-          <DropdownMenu.Item className="project-picker-item ui-menu-item ui-menu-item-row" onSelect={() => openCreateDialog('coding')}>
-            <Braces size={15} />
-            <span>{t('project.coding_project')}</span>
-          </DropdownMenu.Item>
-          <DropdownMenu.Item className="project-picker-item ui-menu-item ui-menu-item-row" onSelect={() => openCreateDialog('simple_chat')}>
-            <MessageCircle size={15} />
-            <span>{t('project.simple_chat')}</span>
+          <DropdownMenu.Item className="project-picker-item ui-menu-item ui-menu-item-row" onSelect={openCreateDialog}>
+            <Plus size={15} />
+            <span>{t('chat.new_thread')}</span>
           </DropdownMenu.Item>
         </DropdownMenuContent>
       </DropdownMenu.Portal>

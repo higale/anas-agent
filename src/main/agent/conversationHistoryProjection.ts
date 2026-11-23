@@ -1,7 +1,7 @@
 import { summaryPromptForLanguage, type SummaryOutputLanguage } from '@shared/summaryPrompt'
 import type { ConversationMessage } from '../../runtime/conversationMessage'
 import { summaryTranscript, type SummaryTranscriptMessage } from '../../runtime/compression'
-import { compressionRetention, pendingToolImageStart, simpleChatAssistantContent, simpleChatUserContent,
+import { compressionRetention, pendingToolImageStart,
   toolHistoryPlan, unrecordedToolResultText, type HistoryEntry } from '../../runtime/conversationHistory'
 import { conversationHistoryFacts } from './conversationContext'
 
@@ -66,32 +66,4 @@ export function selectConversationRetention(effective: ConversationMessage[], ra
     return value
   }
   return compressionRetention(effective.map(fact), raw.map(fact), threshold, (start, end) => countMessages(effective.slice(start, end)))
-}
-
-function simpleContext(message: ConversationMessage): ConversationMessage['context'] {
-  return Object.fromEntries((['runId', 'createdAt', 'modelContextKey', 'requestKey', 'attachmentProjection', 'attachmentBlockCount'] as const)
-    .filter(key => message.context?.[key] !== undefined).map(key => [key, message.context![key]]))
-}
-
-/** Plain chat retains visible history while omitting client tool context. */
-export function simpleConversationHistory(messages: ConversationMessage[]): ConversationMessage[] {
-  return messages.flatMap((message): ConversationMessage[] => {
-    if (message.kind === 'user') {
-      const content = simpleChatUserContent({ content: message.content, displayText: message.context?.displayText,
-        summary: message.context?.summary === true, review: message.context?.reviewScope !== undefined })
-      return [content === undefined ? message : { id: message.id, kind: 'user', content, context: simpleContext(message) }]
-    }
-    if (message.kind !== 'assistant') return []
-    const source = message.source, metadata = source?.metadata ?? {}, extras = source?.extras ?? {}
-    const projected = simpleChatAssistantContent({ content: message.content, providerOutput: metadata.output,
-      reasoning: extras.reasoning, refusal: extras.refusal, hasClientCalls: Boolean(message.calls?.length || message.invalidCalls?.length) })
-    if (!projected) return []
-    return [{ id: message.id, kind: 'assistant', content: projected.content, calls: [], invalidCalls: [], usage: message.usage,
-      context: simpleContext(message), source: {
-        ...(source?.provider ? { provider: source.provider } : {}), ...(source?.contentFormat ? { contentFormat: source.contentFormat } : {}),
-        metadata: { ...metadata, ...(Array.isArray(metadata.output) ? { output: projected.providerOutput } : {}) },
-        extras: { ...(projected.reasoning !== undefined ? { reasoning: projected.reasoning } : {}),
-          ...(extras.refusal !== undefined ? { refusal: extras.refusal } : {}) }
-      } }]
-  })
 }

@@ -7,7 +7,6 @@ import { conversationToolCatalog } from './conversationToolCatalog'
 import { createConversationAttachmentProjector } from './conversationAttachments'
 import { createConversationMemoryProjector } from './conversationMemory'
 import { createConversationContextRuntime } from './conversationContextRuntime'
-import { simpleConversationHistory } from './conversationHistoryProjection'
 import { codeReviewToolDeclaration } from '../../runtime/codeReviewReport'
 
 /** Execution and read-only context inspection use identical tool, attachment,
@@ -16,20 +15,19 @@ export function prepareConversationContext(thread: AgentThread, database: Conver
   resources: Awaited<ReturnType<typeof prepareAgentRuntimeResources>>, context: {
     requestId?: string; providerFetch?: typeof fetch; review?: CodeReviewSnapshot
   }) {
-  const { resolveModel, requestSystemPrompt, activeSubagent, runConfiguration, simpleChat, capabilities, outputLanguage } = resources
+  const { resolveModel, requestSystemPrompt, activeSubagent, runConfiguration, capabilities, outputLanguage } = resources
   const catalog = conversationToolCatalog(resources)
   const tools = (model: Awaited<ReturnType<typeof resolveModel>>) => resources.selectModelTools(model, catalog.declarations)
   const attachments = createConversationAttachmentProjector({ artifacts: database.listAttachmentsForThread(thread.id),
     currentRunId: context.requestId, textMaxChars: config.settings.attachmentTextMaxChars, textOverflow: config.settings.attachmentTextOverflow })
-  const memory = createConversationMemoryProjector({ enabled: capabilities.memory && !simpleChat,
+  const memory = createConversationMemoryProjector({ enabled: capabilities.memory,
     store: database.memoryStore, projectId: thread.projectId })
-  const includeRules = !simpleChat && runConfiguration.codingMode
+  const includeRules = runConfiguration.codingMode
   const contextRuntime = createConversationContextRuntime({ retry: false, codingMode: runConfiguration.codingMode,
     compressionPrompt: activeSubagent ? undefined : runConfiguration.compressionPrompt, includeProjectRules: includeRules,
     developerHttpTrace: resources.developerHttpTrace, providerFetch: context.providerFetch, resolveModel, outputLanguage, requestId: context.requestId,
     systemPrompt: requestSystemPrompt, projectSystemMessage: memory,
     tools: model => [...tools(model), ...(context.review ? [codeReviewToolDeclaration(context.review.id)] : [])],
-    projectHistory: simpleChat ? simpleConversationHistory : undefined,
     projectMessages: (messages, model) => attachments.project(messages, model.capabilities.vision) })
   async function refreshTools(): Promise<void> {
     await resources.refreshMcpTools()

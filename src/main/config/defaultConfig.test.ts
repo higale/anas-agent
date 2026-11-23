@@ -31,7 +31,6 @@ describe('bundled configuration contract', () => {
     expect(snapshot.settings.sidebarCollapsedSections).toEqual({
       pinnedProjects: false,
       projects: false,
-      simpleChats: false
     })
     expect(snapshot.settings.sidebarWidth).toBe(260)
     expect(snapshot.settings.environmentContext.customInformationEnabled).toBe(settings.environment_context.custom_information_enabled)

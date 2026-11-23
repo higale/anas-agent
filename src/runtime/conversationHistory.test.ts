@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { compactLatestToolResults, compactedToolContent, compressionRetention, consumedToolImageIndices,
-  pendingToolImageStart, simpleChatAssistantContent, simpleChatUserContent, toolHistoryPlan, type HistoryEntry } from './conversationHistory'
+  pendingToolImageStart, toolHistoryPlan, type HistoryEntry } from './conversationHistory'
 
 const user = (text = 'Continue'): HistoryEntry => ({ role: 'user', userText: text })
 const call = (id = 'a'): HistoryEntry => ({ role: 'assistant', calls: [{ id, name: 'read_file' }] })
@@ -8,43 +8,6 @@ const result = (id = 'a', images = false): HistoryEntry => ({ role: 'tool', resu
 const count = (costs: number[]) => (start: number, end: number) => costs.slice(start, end).reduce((sum, n) => sum + n, 0)
 
 describe('native conversation history policies', () => {
-  it('restores display text while keeping attachments, summaries and fixed review scopes', () => {
-    const image = { type: 'image', url: 'https://fixture/image' }
-    const source = [image, { type: 'text', text: 'Expanded skill', language: 'zh' }, { type: 'text', text: 'Attachment caption' }]
-    const before = structuredClone(source)
-    const input = { content: source, displayText: '/skill user request', summary: false, review: false }
-    expect(simpleChatUserContent(input)).toEqual([image, { type: 'text', text: '/skill user request', language: 'zh' }, source[2]])
-    expect(simpleChatUserContent({ ...input, content: [image] })).toEqual([{ type: 'text', text: '/skill user request' }, image])
-    expect(simpleChatUserContent({ ...input, content: 'Expanded skill' })).toBe('/skill user request')
-    expect(simpleChatUserContent({ ...input, summary: true })).toBeUndefined()
-    expect(simpleChatUserContent({ ...input, review: true })).toBeUndefined()
-    expect(simpleChatUserContent({ ...input, displayText: '' })).toBeUndefined()
-    expect(source).toEqual(before)
-  })
-
-  it('removes calls from wrapped and raw output while retaining valid reasoning and server tools', () => {
-    const reasoning = (id: string) => ({ type: 'reasoning', id, encrypted_content: `opaque-${id}`, summary: [] })
-    const server = { type: 'web_search_call', id: 'search', status: 'completed' }
-    const call = { type: 'non_standard', value: { type: 'custom_tool_call', call_id: 'edit', input: 'patch' } }
-    const clientReasoning = reasoning('client'), serverReasoning = reasoning('server')
-    const input = { content: [serverReasoning, clientReasoning, call], providerOutput: [serverReasoning, server, clientReasoning, call],
-      reasoning: clientReasoning, hasClientCalls: false }
-    const before = structuredClone(input)
-    const detached = { type: 'reasoning', encrypted_content: 'opaque-client', summary: [] }
-    expect(simpleChatAssistantContent(input)).toEqual({ content: [serverReasoning, detached],
-      providerOutput: [serverReasoning, server, detached], reasoning: detached })
-    expect(input).toEqual(before)
-  })
-
-  it('omits call-only responses, but retains refusals and unmodified reasoning references', () => {
-    expect(simpleChatAssistantContent({ content: [{ type: 'tool_use', id: 'call', input: {} }], hasClientCalls: true })).toBeUndefined()
-    expect(simpleChatAssistantContent({ content: '', refusal: 'Unavailable', hasClientCalls: false }))
-      .toEqual({ content: '', providerOutput: undefined, reasoning: undefined })
-    const reasoning = { type: 'reasoning', id: 'valid', encrypted_content: 'opaque' }
-    expect(simpleChatAssistantContent({ content: '', reasoning, hasClientCalls: false })?.reasoning).toBe(reasoning)
-    expect(simpleChatAssistantContent({ content: '', reasoning, hasClientCalls: true })?.reasoning)
-      .toEqual({ type: 'reasoning', encrypted_content: 'opaque' })
-  })
 
   it('retains an oversized newest call and all its results together with the active request', () => {
     const messages = [user('  Keep all constraints  '), { role: 'assistant' } as HistoryEntry, call(), result()]

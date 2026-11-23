@@ -1,13 +1,11 @@
-## Anas v5.2.23
+## Anas v5.2.24
 
-- 插件技能统一在插件设置中配置“快捷方式／模型可用”，两项全关即停用，支持技能分组全选／取消全选。插件或依赖工具停用时仍可修改用途；技能页提供只读浏览和所属插件设置入口。
-- 技能预览统一到“设置 → 技能”，插件和 MCP 工具详情统一到“设置 → 工具”的对应目录。插件设置中的工具只显示本地名称，与 MCP 设置一致；工具目录和模型调用保留完整名称。插件提示词继续保留原预览入口。
-- 插件工具详情保留完整输入参数，并补充操作类型和超时，两项摘要在同一行展示；修复长工具名称的换行和裁切问题。
-- 默认对话分组统一隐藏图标，包括自定义图片。项目菜单仅在编码模式开启时显示编码图标，提示文字简化为“编码模式”。
-- 配置和数据库格式版本不变。旧插件单技能启用字段 `capability_choices.skill` 被忽略，不迁移原选择、读取不自动写回；已有快捷和模型用途设置继续生效。若此前仅通过旧启用开关停用技能，请在插件设置中关闭其两项用途。
+- 统一项目与对话入口，移除简易对话模式，创建入口统一为“新建对话”。编码模式独立选择，不再切换项目图标。
+- 新建和编辑项目时，目录可以留空，使用“设置 → 对话”中的项目默认目录；设置支持直接编辑和内嵌图标选择，清空后使用系统文档目录。项目保持空目录列表，不自动写入默认路径；修复保存默认目录后项目窗口提示未及时刷新的问题。
+- 项目名称留空时自动使用“未命名项目1、2、3…”中尚未占用的名称，输入框直接显示当前可用名称。空目录区域统一展示添加入口和默认路径，整块可点击。
+- 项目定义仍为 v0，数据库结构不变，不增加迁移。原简易项目保留名称、提示词、模型选择与对话；缺失能力设置默认全开、编码模式默认关闭，缺失目录跟随全局默认目录。可在项目设置中关闭不需要的能力。
 
-- Configure plugin skills through Shortcut and Available to model in plugin settings. Clearing both disables a skill; group select-all / clear-all controls are retained. Usage choices remain editable while the plugin or a required tool is disabled. The Skills page provides read-only browsing and a link to the owning plugin's settings.
-- Consolidate skill previews in Settings → Skills and plugin/MCP tool details in their catalogs under Settings → Tools. Plugin settings now show local tool names, matching MCP settings; catalogs and model calls retain full names. Plugin instruction previews remain available in plugin settings.
-- Retain complete input parameters and add operation type and timeout to plugin tool details, with both values on one line. Fix wrapping and clipping of long tool names.
-- Hide icons, including custom images, in the default conversation group. Show the project menu's coding icon only when coding mode is enabled, with the tooltip shortened to Coding mode.
-- Configuration and database format versions are unchanged. The retired per-skill `capability_choices.skill` field is ignored without migrating its choices or rewriting files on read; existing shortcut and model-use preferences remain effective. If a skill was disabled only through the old enabled switch, clear both usage options in plugin settings.
+- Unify projects and conversation entry points, removing simple-chat mode. Use a single New conversation entry; coding mode remains a separate choice and no longer changes the project icon.
+- Allow folders to stay empty when creating or editing projects, following the default project directory in Settings → Conversation. Edit the path directly or use its inline folder icon; clearing it uses the system Documents directory. Projects retain an empty folder list instead of saving the resolved path. Fix stale directory hints after saving the default setting.
+- Automatically choose the first available “Untitled project 1, 2, 3…” name when the name is blank, and show that name in the input placeholder. The entire empty-folder area opens the picker, with an add action and default-path hint.
+- Project definitions remain v0, with no database schema changes or new migrations. Former simple-chat projects retain their names, prompts, model selections and conversations. Missing capability settings enable all available capabilities, coding mode defaults to off, and missing folders follow the global default directory. Disable unwanted capabilities in project settings.

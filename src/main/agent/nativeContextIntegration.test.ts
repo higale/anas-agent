@@ -12,7 +12,6 @@ import * as gitChanges from '../gitChanges'
 import type { ConversationMessage } from '../../runtime/conversationMessage'
 import { contentText } from '../../runtime/inputContent'
 import { conversationContentBlocks } from '../../providers/conversationInput'
-import { simpleConversationHistory } from './conversationHistoryProjection'
 import { presentConversationMessage } from './conversationPresentation'
 import { conversationContextSource } from './conversationModelExecution'
 import { countConversationTokens, conversationRequestKey } from './conversationContext'
@@ -220,7 +219,6 @@ describe('native context integration', () => {
         context: { runId: 'review-run', displayText: 'Code review', reviewScope: scope } }
       database.runs.createRun({ threadId: thread.id, runId: 'review-run', operation: 'agent', message: { id: userMessage.id!, value: userMessage } })
       expect(database.runs.readRunInput({ threadId: thread.id, runId: 'review-run' })?.value.context?.reviewScope).toEqual(scope)
-      expect(simpleConversationHistory([userMessage])[0].content).toEqual(userMessage.content)
       expect(presentConversationMessage(userMessage, 'review-input').content).toEqual([{ type: 'text', text: userMessage.content }])
       const instance = await createConversationInstance(thread, database.resources, snapshot, { requestId: 'review-run', prepareWorkspace: false, review: scope }, database.execution)
       try {
@@ -628,11 +626,11 @@ describe('native context integration', () => {
 
   it.each(['openai_chat_completions', 'openai_responses', 'anthropic_messages'].flatMap(protocol =>
     [false, true].map(summarized => ({ protocol: protocol as ModelProtocol, summarized }))))(
-    'projects simple-chat history before counting or sending ($protocol/summary=$summarized)', async ({ protocol, summarized }) => {
+    'preserves tool history with all tools disabled before counting or sending ($protocol/summary=$summarized)', async ({ protocol, summarized }) => {
       const snapshot = previewConfig()
       snapshot.providers[0].protocol = protocol
       appConfigMocks.getAppConfigSnapshot.mockImplementation(async () => structuredClone(snapshot))
-      const simple: Project = { id: 'plain-chat', name: 'Plain chat', kind: 'simple_chat', pinned: false,
+      const simple: Project = { ...minimalProject(), id: 'history-project', name: 'History', pinned: false,
         collapsed: false, prompt: 'Plain system', createdAt: '', updatedAt: '' }
       projectStoreMocks.getProject.mockImplementation(async id => id === simple.id ? simple : defaultWorkspaceProject())
       const history: ConversationMessage[] = [{ id: 'old-user', kind: 'user', content: 'Inspect with detailed Skill instructions', context: { displayText: '/inspect visible request' } },
@@ -660,8 +658,8 @@ describe('native context integration', () => {
         const delivered = observed.requests.map(request => request.messages)
         expect(delivered).toHaveLength(1)
         expect(delivered[0].some(message => message.id === current.id)).toBe(true)
-        expect(delivered[0].some(message => message.kind === 'tool')).toBe(false)
-        expect(delivered[0].filter(message => message.kind === 'assistant').every(message => !message.calls?.length)).toBe(true)
+        expect(delivered[0].some(message => message.kind === 'tool')).toBe(!summarized)
+        expect(delivered[0].some(message => message.kind === 'assistant' && message.calls?.length)).toBe(!summarized)
         if (summarized) {
           expect(delivered[0].some(message => message.content === 'Previous inspection')).toBe(true)
           expect(delivered[0].some(message => message.id === 'old-user')).toBe(false)

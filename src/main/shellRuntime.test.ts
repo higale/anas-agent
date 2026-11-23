@@ -310,12 +310,13 @@ describe('shell runtime result text', () => {
         timeoutError: 'Stubborn timeout probe timed out.'
       })
 
-      expect(JSON.parse(output)).toMatchObject({
+      const result = JSON.parse(output)
+      expect(result).toMatchObject({
         ok: false,
         timedOut: true,
-        aborted: false,
         error: 'Stubborn timeout probe timed out.'
       })
+      expect(Boolean(result.aborted)).toBe(false)
       await new Promise((resolve) => setTimeout(resolve, 1_200))
       await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' })
     } finally {
@@ -363,12 +364,13 @@ describe('shell runtime result text', () => {
         onOutput: () => controller.abort()
       })
 
-      expect(JSON.parse(output)).toMatchObject({
+      const result = JSON.parse(output)
+      expect(result).toMatchObject({
         ok: false,
-        timedOut: false,
         aborted: true,
         error: 'Stubborn descendant probe was cancelled.'
       })
+      expect(Boolean(result.timedOut)).toBe(false)
       await expect(access(readyMarker)).resolves.toBeUndefined()
       await new Promise((resolve) => setTimeout(resolve, 2_200))
       await expect(access(survivedMarker)).rejects.toMatchObject({ code: 'ENOENT' })

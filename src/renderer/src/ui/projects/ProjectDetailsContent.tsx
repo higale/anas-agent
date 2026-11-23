@@ -29,15 +29,13 @@ export function ProjectDetailsContent({
   const { t } = useTranslation()
   const defaultWorkspace = isDefaultWorkspaceProject(project)
   const Separator = itemKind === 'context' ? ContextMenu.Separator : DropdownMenu.Separator
-  const simpleChat = project.kind === 'simple_chat'
-  const StatusIcon = simpleChat ? MessageCircle : CodeXml
-  const statusLabel = simpleChat ? `${t('project.simple_chat')}: ${t('common.on')}` : t('project.coding_mode')
+  const statusLabel = t('project.coding_mode')
 
   function runAfterSelect(action: () => void): void {
     window.requestAnimationFrame(action)
   }
 
-  async function openSourceFolder(sourceFolder: string): Promise<void> {
+  async function openSourceFolder(sourceFolder?: string): Promise<void> {
     try {
       await window.gale.projects.openSourceFolder(project.id, sourceFolder)
     } catch {
@@ -48,11 +46,11 @@ export function ProjectDetailsContent({
   return (
     <>
       <header className="project-details-header">
-        <ProjectIcon iconData={project.iconData} color={project.iconColor} icon={project.icon} kind={project.kind} size={16} />
+        <ProjectIcon iconData={project.iconData} color={project.iconColor} icon={project.icon} size={16} />
         <strong className={defaultWorkspace ? 'project-default-workspace-name' : undefined}>{project.name}</strong>
-        {(simpleChat || project.codingMode) && (
+        {project.codingMode && (
           <span className="ui-status-icon" data-active="true" role="img" aria-label={statusLabel} data-tooltip={statusLabel}>
-            <StatusIcon size={15} aria-hidden="true" />
+            <CodeXml size={15} aria-hidden="true" />
           </span>
         )}
       </header>
@@ -61,22 +59,25 @@ export function ProjectDetailsContent({
         <span>{t('project.thread_count', { count: threadCount })}</span>
       </div>
       <div className="project-details-separator" />
-      {project.kind === 'workspace' && <>
-        <div className="project-details-folders">
-          {project.sourceFolders.map((folder) => (
-            <MenuItemPrimitive
-              kind={itemKind}
-              className="project-details-folder ui-menu-item"
-              key={folder}
-              onSelect={() => void openSourceFolder(folder)}
-            >
-              <Folder size={14} />
-              <span>{folder}</span>
-            </MenuItemPrimitive>
-          ))}
-        </div>
-        <div className="project-details-separator" />
-      </>}
+      <div className="project-details-folders">
+        {project.sourceFolders.length === 0 && <MenuItemPrimitive kind={itemKind}
+          className="project-details-folder ui-menu-item" onSelect={() => void openSourceFolder()}>
+          <Folder size={14} />
+          <span>{t('settings.project_default_directory')}</span>
+        </MenuItemPrimitive>}
+        {project.sourceFolders.map((folder) => (
+          <MenuItemPrimitive
+            kind={itemKind}
+            className="project-details-folder ui-menu-item"
+            key={folder}
+            onSelect={() => void openSourceFolder(folder)}
+          >
+            <Folder size={14} />
+            <span>{folder}</span>
+          </MenuItemPrimitive>
+        ))}
+      </div>
+      <div className="project-details-separator" />
       {!defaultWorkspace && (
         <MenuItemPrimitive
           kind={itemKind}

@@ -34,7 +34,7 @@ export function BuiltinPanelContent({ state }: { state: PanelPageContext }) {
   const api = panelApi()
   const open = (content: BuiltinPanel) => { void api.open(content).catch(reason => notice.error(panelError(reason, t))) }
   const content = state.view.content
-  const project = state.project?.kind === 'workspace' ? state.project : undefined
+  const project = state.project ? state.project : undefined
   return <MarkdownWorkspaceProjectProvider projectId={project?.id}>
     <ActivityPreferences value={state.preferences}>
     <DiffPreferences.Provider value={{ ...state.preferences, onChange: async update => { await api.updatePreferences(update) } }}>

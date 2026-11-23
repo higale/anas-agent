@@ -523,9 +523,7 @@ export interface SkillCatalogRequest {
 async function loadCatalog({ agent, projectId, selection, pluginTools, skillDirectories, includeDisabledPlugins = false }: SkillCatalogRequest): Promise<{ roots: SkillRootSummary[]; skills: LoadedSkill[] }> {
   if (projectId && skillDirectories === undefined) {
     const project = await getProject(projectId)
-    if (project.kind === 'workspace') {
-      skillDirectories ??= project.skillDirectories ?? []
-    }
+    skillDirectories ??= project.skillDirectories ?? []
   }
   const [roots, config] = await Promise.all([resolveSkillRoots(skillDirectories), readSkillsConfig()])
   // A source owns its IDs, availability and explicit shortcut alias even when
@@ -722,9 +720,7 @@ async function reservedSkillRootPaths(projectId?: string): Promise<string[]> {
   const paths = [getSystemSkillsDir(), getSkillsDir(), getSkillExamplesDir()]
   if (projectId) {
     const project = await getProject(projectId)
-    if (project.kind === 'workspace') {
-      paths.push(...project.skillDirectories ?? [])
-    }
+    paths.push(...project.skillDirectories ?? [])
   }
   return Promise.all(paths.map(async (path) => realpath(path).catch(() => resolve(path))))
 }
@@ -794,7 +790,7 @@ export async function moveExternalSkillDirectory(rootId: string, direction: -1 |
 
 export async function buildUserSkillInvocation(projectId: string | undefined, name: string, sourceAlias: string | undefined, args: string): Promise<SkillInvocationResult> {
   const project = projectId ? await getProject(projectId) : undefined
-  const capabilities = resolvePluginCapabilities(project?.kind === 'workspace' ? project.capabilities : defaultCapabilities, await pluginRuntime().store.list())
+  const capabilities = resolvePluginCapabilities(project ? project.capabilities : defaultCapabilities, await pluginRuntime().store.list())
   const catalog = await loadCatalog({ agent: { kind: 'main' }, projectId, selection: capabilities.skills })
   const named = catalog.skills.filter((skill) => !skill.summary.loadError && skill.summary.name.toLowerCase() === name.trim().toLowerCase())
   if (!named.length) return { handled: false, promptText: '', displayText: '' }

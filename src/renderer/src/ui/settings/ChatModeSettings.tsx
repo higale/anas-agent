@@ -1,4 +1,5 @@
-import { useId } from 'react'
+import { useId, useState } from 'react'
+import { FolderOpen } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { AppSettings, SpeechReplyConfig } from '@shared/types'
 import { normalizeChatContentWidth } from '@shared/uiPreferences'
@@ -13,6 +14,9 @@ import {
 import { AttachmentSettings } from './AttachmentSettings'
 import { SettingsGroup } from './SettingsGroup'
 import { SegmentedControl } from '../SegmentedControl'
+import { unwrapProjectResult } from '@shared/projectOperation'
+import { projectErrorDescription } from '../projects/projectErrorDescription'
+import { notice } from '../notice'
 
 interface ChatModeSettingsProps {
   settings: AppSettings | undefined
@@ -24,11 +28,37 @@ interface ChatModeSettingsProps {
 export function ChatModeSettings({ settings, speechReply, onChange, onSpeechReplyChange }: ChatModeSettingsProps) {
   const { t } = useTranslation()
   const maxCallsId = useId()
+  const directoryId = useId()
+  const [choosingDirectory, setChoosingDirectory] = useState(false)
   const maxModelCallsPerRun = settings?.maxModelCallsPerRun ?? SETTINGS_MAX_MODEL_CALLS_DEFAULT
+
+  async function chooseProjectDirectory(): Promise<void> {
+    setChoosingDirectory(true)
+    try {
+      const folders = unwrapProjectResult(await window.gale.projects.chooseSourceFolders(false))
+      if (folders.length) await onChange({ projectDefaultDirectory: folders[0] })
+    } catch (error) {
+      notice.error(t('project.failed_choose_folders'), { description: projectErrorDescription(error, t) })
+    } finally { setChoosingDirectory(false) }
+  }
 
   return (
     <div className="settings-page-groups">
       <SettingsGroup title={t('settings.tabs.general')}>
+        <div className="ui-form-row">
+          <label htmlFor={directoryId}>
+            <strong>{t('settings.project_default_directory')}</strong>
+            <small>{t('settings.project_default_directory_hint')}</small>
+          </label>
+          <div className="ui-input-action">
+            <input id={directoryId} className="ui-input" value={settings?.projectDefaultDirectory ?? ''}
+              onChange={event => void onChange({ projectDefaultDirectory: event.target.value })}
+              placeholder={t('settings.documents_directory')} title={settings?.projectDefaultDirectory || t('settings.documents_directory')} />
+            <button type="button" className="ui-tool-button" disabled={choosingDirectory}
+              aria-label={t('settings.choose_project_default_directory')} data-tooltip={t('settings.choose_project_default_directory')}
+              onClick={() => void chooseProjectDirectory()}><FolderOpen size={16} /></button>
+          </div>
+        </div>
         <div className="ui-form-row ui-form-row-narrow">
           <label htmlFor={maxCallsId}>
             <strong>{t('settings.max_model_calls_per_run')}</strong>

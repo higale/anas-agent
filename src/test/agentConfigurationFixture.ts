@@ -54,9 +54,8 @@ export function config(settings: Partial<AppConfigSnapshot['settings']> = {}): A
       sidebarCollapsedSections: {
         pinnedProjects: false,
         projects: false,
-        simpleChats: false
       },
-      backupDir: '',
+      projectDefaultDirectory: '', backupDir: '',
       ...settings
     }
   }
@@ -81,7 +80,6 @@ export function defaultWorkspaceProject(): Project {
  capabilities: structuredClone(defaultCapabilities), restrictSubagents: false, codingMode: false, prompt: '',
     id: DEFAULT_WORKSPACE_PROJECT_ID,
     name: 'Default Workspace',
-    kind: 'workspace',
     pinned: false,
     collapsed: false,
     sourceFolders: ['/workspace/default'],

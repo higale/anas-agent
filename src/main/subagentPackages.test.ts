@@ -185,7 +185,7 @@ describe('Agent directory packages', () => {
       { id: ownSkills.skills[0].id, shortcut: false, model: true }
     ] }
     const { getProject } = await import('./projectStore')
-    vi.mocked(getProject, { partial: true }).mockResolvedValue({ id: 'project', kind: 'workspace', sourceFolders: [workspace], skillDirectories: [join(workspace, '.agents/skills')], capabilities, restrictSubagents: true })
+    vi.mocked(getProject, { partial: true }).mockResolvedValue({ id: 'project', sourceFolders: [workspace], skillDirectories: [join(workspace, '.agents/skills')], capabilities, restrictSubagents: true })
     const savedSelection = structuredClone(capabilities.skills)
     const ownSelection = resolveSkillSelection(defaultCapabilities.skills, ownSkills.skills, true, true)
     expect(await skills.buildSkillsPrompt({ agent: { kind: 'subagent', id: 'reporter' }, selection: ownSelection, skillDirectories: [] })).toContain(join(directory, 'skills/local-guide/SKILL.md'))

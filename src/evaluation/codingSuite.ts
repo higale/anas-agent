@@ -204,7 +204,7 @@ export async function defineCodingSuite(options: CodingSuiteOptions): Promise<vo
         capabilities: capabilities(task.subagent.tools)
       })
       const project = await createProject({
-        kind: 'workspace', name: 'Fixed coding evaluation', sourceFolders: [workspace],
+        name: 'Fixed coding evaluation', sourceFolders: [workspace],
         codingMode, restrictSubagents: task.subagent?.restrict ?? false, prompt: '',
         capabilities: capabilities(enabledTools, Boolean(task.subagent))
       })

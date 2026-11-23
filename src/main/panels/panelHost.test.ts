@@ -5,7 +5,7 @@ import type { PanelDefinition } from './panelPages'
 
 const mocks = vi.hoisted(() => ({
   settings: vi.fn(), languages: vi.fn(), configure: vi.fn(), setPreferences: vi.fn(), open: vi.fn(),
-  project: vi.fn(), list: vi.fn(), updateContent: vi.fn(),
+  project: vi.fn(), list: vi.fn(), updateContent: vi.fn(), updateProject: vi.fn(),
   setLanguages: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>()
 }))
 vi.mock('electron', () => ({ app: { isPackaged: true }, BrowserWindow: {}, nativeTheme: { on: vi.fn(), shouldUseDarkColors: true },
@@ -18,7 +18,7 @@ vi.mock('../projectStore', () => ({ getProject: mocks.project }))
 vi.mock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
 vi.mock('../ipcSecurity', () => ({ handleMainIpc: vi.fn() }))
 vi.mock('./panelRegistry', () => ({ panelLabel: () => 'Files', setPanelLanguages: mocks.setLanguages,
-  panelPages: { open: mocks.open, configure: mocks.configure, setPreferences: mocks.setPreferences, list: mocks.list, updateContent: mocks.updateContent } }))
+  panelPages: { open: mocks.open, configure: mocks.configure, setPreferences: mocks.setPreferences, list: mocks.list, updateContent: mocks.updateContent, updateProject: mocks.updateProject } }))
 
 function pending<T>() {
   let resolve!: (value: T) => void
@@ -29,9 +29,9 @@ const settings = { language: 'en', fontSize: 14, diffViewMode: 'inline', diffFol
 const resources = { resources: {}, languages: [], langDir: '/languages' } as LanguageResourcesSnapshot
 beforeEach(() => {
   vi.resetModules(); vi.clearAllMocks(); mocks.handlers.clear()
-  mocks.settings.mockResolvedValue(settings)
+  mocks.settings.mockResolvedValue({ ...settings, projectDefaultDirectory: '/isolated/default' })
   mocks.languages.mockResolvedValue(resources)
-  mocks.project.mockImplementation(async (id: string) => ({ id, name: id, kind: 'workspace' }))
+  mocks.project.mockImplementation(async (id: string) => ({ id, name: id, sourceFolders: [] }))
   mocks.list.mockReturnValue([])
 })
 
@@ -50,7 +50,7 @@ describe('file panel follows the active workspace', () => {
     await vi.waitFor(() => expect(mocks.project).toHaveBeenCalledWith('two'))
     const second = followFilesPanel({ projectId: 'three' })
     expect(mocks.project).not.toHaveBeenCalledWith('three')
-    slow.resolve({ id: 'two', name: 'Two' } as Project)
+    slow.resolve({ id: 'two', name: 'Two', sourceFolders: [] } as unknown as Project)
     await Promise.all([first, second])
     expect(view).toMatchObject({ viewId: 'files', location: 'window', name: 'Files · three', content: { projectId: 'three' } })
     expect(view.content).not.toHaveProperty('runId')
@@ -70,7 +70,7 @@ describe('file panel follows the active workspace', () => {
     const following = followFilesPanel({ projectId: 'two' })
     await vi.waitFor(() => expect(mocks.project).toHaveBeenCalled())
     mocks.list.mockReturnValue([])
-    slow.resolve({ id: 'two', name: 'Two' } as Project)
+    slow.resolve({ id: 'two', name: 'Two', sourceFolders: [] } as unknown as Project)
     await following
     expect(mocks.updateContent).not.toHaveBeenCalled()
     expect(mocks.open).not.toHaveBeenCalled()
@@ -78,6 +78,17 @@ describe('file panel follows the active workspace', () => {
 })
 
 describe('panel appearance preparation', () => {
+  it('refreshes effective folders of open panels after the global default changes without filling definitions', async () => {
+    const project = { id: 'project', name: 'Project', sourceFolders: [] } as unknown as Project
+    mocks.project.mockResolvedValue(project)
+    mocks.list.mockReturnValue([{ content: { kind: 'files', projectId: project.id } }])
+    const { refreshPanelAppearance } = await import('./panelHost')
+    for (const directory of ['/isolated/first', '/isolated/second']) {
+      await refreshPanelAppearance({ settings: { ...settings, projectDefaultDirectory: directory } })
+      expect(mocks.updateProject).toHaveBeenLastCalledWith({ ...project, sourceFolders: [directory] })
+    }
+    expect(project.sourceFolders).toEqual([])
+  })
   it('publishes preferences even if loading language resources fails', async () => {
     const { refreshPanelAppearance } = await import('./panelHost')
     mocks.languages.mockRejectedValueOnce(new Error('language pack is read-only'))

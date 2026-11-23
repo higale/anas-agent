@@ -65,7 +65,7 @@ export async function createConversationInstance(thread: AgentThread, database: 
       const [settings, currentProject] = await Promise.all([getAppSettings(), getProject(thread.projectId)])
       signal?.throwIfAborted()
       const memory = database.memoryStore.preferences
-      if (!memory || settings.memoryMode !== 'foreground' || currentProject.kind !== 'workspace' || !currentProject.capabilities.memory) {
+      if (!memory || settings.memoryMode !== 'foreground' || !currentProject.capabilities.memory) {
         throw new ToolInputError('Foreground memory is disabled.')
       }
       const head = owner.store.readHead(thread.id)
@@ -94,7 +94,7 @@ export async function createConversationInstance(thread: AgentThread, database: 
     project, persistent: true, prepareWorkspace: context.prepareWorkspace !== false, review: context.review,
     requestSubagentApproval: createConversationSubagentApproval(owner.store, { threadId: thread.id, runId: context.requestId })
   })
-  const { workspace, resolveModel, requestSystemPrompt, activeSubagent, runConfiguration, simpleChat, capabilities, outputLanguage } = resources
+  const { workspace, resolveModel, requestSystemPrompt, activeSubagent, runConfiguration, capabilities, outputLanguage } = resources
   const operations = new ToolRunScope()
   const { refreshTools, catalog, tools, attachments, memory, includeRules, contextRuntime } = prepareConversationContext(thread, database, config, resources, context)
   const accessMode = createAgentAccessModeResolver(database, thread.id, context.subagentCall)
@@ -121,7 +121,7 @@ export async function createConversationInstance(thread: AgentThread, database: 
   const modelOptions: ConversationModelExecutionOptions = { store: owner.store, resolveModel, systemPrompt: model => requestSystemPrompt(model).text,
     memoryWriteGeneration: model => resources.offersMemoryWrite(model) ? database.memoryStore.preferences?.generation() : undefined,
     tools, requiresTools: () => Boolean(context.review), maxModelCalls: activeSubagent ? 0 : config.settings.maxModelCallsPerRun,
-    simpleChat, review: context.review, attachments, memory, rules: includeRules ? preparation : undefined,
+    review: context.review, attachments, memory, rules: includeRules ? preparation : undefined,
     manualCompression: context.manualCompression ? contextRuntime : undefined, subagentId: context.subagentCall?.id,
     outputLanguage, codingMode: runConfiguration.codingMode, compressionPrompt: activeSubagent ? undefined : runConfiguration.compressionPrompt,
     developerHttpTrace: resources.developerHttpTrace, requestId: context.requestId, requestRole: activeSubagent ? 'subagent' : 'main',

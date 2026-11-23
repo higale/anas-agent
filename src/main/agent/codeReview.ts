@@ -3,6 +3,7 @@ import { parsePatch } from 'diff'
 import { codeReviewPriorityGuidance, codeReviewRequestSchema, type CodeReviewRequest, type CodeReviewSnapshot } from '@shared/codeReview'
 import type { AgentApplicationReadModel } from './agentApplicationTypes'
 import { getProject } from '../projectStore'
+import { resolveProjectSourceFolders } from '../projectWorkspace'
 import { queryGitChanges } from '../gitChanges'
 import { readRoundContents } from './roundChanges'
 import { createTextPatch } from '../fileEditDiff'
@@ -36,7 +37,7 @@ export async function captureCodeReview(database: Pick<AgentApplicationReadModel
   } else {
     if (request.projectId !== projectId) throw new Error('Git review scope belongs to another project.')
     const project = await getProject(projectId)
-    if (project.kind !== 'workspace' || !project.sourceFolders.includes(request.sourceFolder)) throw new Error('Git review source is not an actual project source folder.')
+    if (!(await resolveProjectSourceFolders(project)).includes(request.sourceFolder)) throw new Error('Git review source is not an actual project source folder.')
     let after = 0, hasMore = true
     description = ''
     do {

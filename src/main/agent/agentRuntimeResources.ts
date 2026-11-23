@@ -4,7 +4,7 @@ import { mkdir } from 'node:fs/promises'
 import { basename } from 'node:path'
 import type { AgentThread } from '@shared/agentTypes'
 import type { CodeReviewSnapshot } from '@shared/codeReview'
-import { DEFAULT_WORKSPACE_PROJECT_ID, type AppConfigSnapshot, type AppSettings, type Project, type WorkspaceProject, type ResolvedModelConfig } from '@shared/types'
+import { type AppConfigSnapshot, type AppSettings, type Project, type ResolvedModelConfig } from '@shared/types'
 import { assertResolvedCapabilities, capabilityFeatures, defaultCapabilities, intersectCapabilities, mcpToolAllowed, resolvePluginCapabilities, resolveSkillSelection, toolAllowed, type AgentCapabilities, type ResolvedAgentCapabilities, type RunConfiguration } from '@shared/agentCapabilities'
 import { builtinToolCatalog, enabledBuiltinFileToolNames, sortToolDefinitions } from '@shared/toolRegistry'
 import { resolveToolSelection } from '@shared/toolPackages'
@@ -22,6 +22,7 @@ import { runtimeToolDefinitions } from '../llm/runtimeTools'
 import { getCachedMcpRuntime, getLoadedMcpRuntime } from '../mcpRuntimeService'
 import { resolveConfiguredLanguage } from '../languageStore'
 import { getProject } from '../projectStore'
+import { resolveProjectSourceFolders } from '../projectWorkspace'
 import { describeCommandShell, getCommandShell, prepareShellCommand, resultText, runShellCommand, type ShellRunResult } from '../shellRuntime'
 import { buildSkillsPrompt, listSkillSnapshot, listSubagentSkills, type SkillAgentScope } from '../skillsStore'
 import type { AgentSubagentCallRecord } from './subagentTaskStore'
@@ -86,8 +87,7 @@ export function shouldIncludeCommandShell(
   return platform !== 'win32' && features.environment && features.commandExecution && settings.environmentContext.operatingSystem
 }
 
-function workspaceContext(project: WorkspaceProject): WorkspaceContext {
-  const workspaceFolders = project.sourceFolders
+function workspaceContext(project: Project, workspaceFolders: string[]): WorkspaceContext {
   const description = [
     '<workspace_context>',
     `The active project is "${project.name}".`,
@@ -137,28 +137,11 @@ export async function prepareAgentSystemPrompt(
 ): Promise<{
   workspace: WorkspaceContext
   systemPrompt: ReturnType<typeof buildAgentSystemPrompt>
-  simpleChatPrompt?: string
 }> {
   const project = projectDraft ?? await getProject(thread.projectId)
-  const effective = capabilities ?? resolvePluginCapabilities(project.kind === 'workspace' ? project.capabilities : defaultCapabilities, await pluginRuntime().store.list(), agent.kind === 'subagent')
+  const effective = capabilities ?? resolvePluginCapabilities(project.capabilities, await pluginRuntime().store.list(), agent.kind === 'subagent')
   const features = capabilityFeatures(effective)
-  if (project.kind === 'simple_chat') {
-    const defaultWorkspace = await getProject(DEFAULT_WORKSPACE_PROJECT_ID)
-    if (defaultWorkspace.kind !== 'workspace') throw new Error('The default workspace project is invalid.')
-    const workspace = workspaceContext(defaultWorkspace)
-    return {
-      workspace,
-      systemPrompt: buildAgentSystemPrompt(config, {
-        workspace: '',
-        memory: '',
-        skills: '',
-        simpleChatPrompt: project.prompt
-      }, features),
-      simpleChatPrompt: project.prompt
-    }
-  }
-  if (project.sourceFolders.length === 0) throw new Error(`Project ${project.id} has no source folders.`)
-  const workspace = workspaceContext(project)
+  const workspace = workspaceContext(project, await resolveProjectSourceFolders(project, config.settings))
   const [memory, skills, commandShell, pluginPrompts] = await Promise.all([
     memoryPrompt(features.memory, config.settings.memoryMode === 'foreground'),
     features.skills ? buildSkillsPrompt({ agent, projectId: project.id, selection: effective.skills,
@@ -184,10 +167,9 @@ export async function prepareAgentSystemPrompt(
   }
 }
 
-async function loadMcpTools(config: AppConfigSnapshot, simpleChat: boolean, capabilities: AgentCapabilities, preview = false): Promise<ToolDefinition[]> {
+async function loadMcpTools(config: AppConfigSnapshot, capabilities: AgentCapabilities, preview = false): Promise<ToolDefinition[]> {
   if (
-    simpleChat
-    || !capabilityFeatures(capabilities).mcp
+    !capabilityFeatures(capabilities).mcp
     || !config.mcpServers.some((server) => server.enabled)
   ) return []
   const runtime = preview ? getLoadedMcpRuntime() : await getCachedMcpRuntime()
@@ -218,17 +200,16 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
   let runConfiguration = context.configuration
   if (!runConfiguration) {
     const project = options.project ?? await getProject(thread.projectId)
-    const projectPolicy = project.kind === 'workspace' ? project : undefined
-    const ownCapabilities = resolvePluginCapabilities(activeSubagent ? activeSubagent.capabilities : projectPolicy?.capabilities ?? defaultCapabilities, await pluginRuntime().store.list(), Boolean(activeSubagent))
+    const ownCapabilities = resolvePluginCapabilities(activeSubagent ? activeSubagent.capabilities : project.capabilities, await pluginRuntime().store.list(), Boolean(activeSubagent))
     const parentLimit = activeSubagent ? context.parentConfiguration?.subagentLimit : undefined
-    const skillsEnabled = project.kind === 'workspace' && capabilityFeatures(ownCapabilities).skills && (!parentLimit || capabilityFeatures(parentLimit).skills)
+    const skillsEnabled = capabilityFeatures(ownCapabilities).skills && (!parentLimit || capabilityFeatures(parentLimit).skills)
     const globalCatalog = skillsEnabled
       ? await listSkillSnapshot(thread.projectId, project.skillDirectories ?? [])
       : { skills: [] }
-    const globalToolCatalog = project.kind === 'workspace' ? await listToolSnapshot(project.toolDirectories ?? []) : { tools: [] }
+    const globalToolCatalog = await listToolSnapshot(project.toolDirectories ?? [])
     const packageIds = activeSubagent?.id ? [activeSubagent.id] : []
     const ownedSkills = skillsEnabled ? await listSubagentSkills(packageIds) : { skills: [] }
-    const ownedTools = project.kind === 'workspace' && ownCapabilities.customTools.mode !== 'off' && (!parentLimit || parentLimit.customTools.entries.length)
+    const ownedTools = ownCapabilities.customTools.mode !== 'off' && (!parentLimit || parentLimit.customTools.entries.length)
       ? await listSubagentTools(packageIds) : []
     const catalog = { skills: [...ownedSkills.skills, ...globalCatalog.skills] }
     const toolCatalog = { tools: [...ownedTools, ...globalToolCatalog.tools] }
@@ -251,7 +232,7 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
     const rootSubagents = selectedSubagents(config.subagents, rootSelection)
     capabilities = { ...capabilities, subagents: { ...capabilities.subagents,
       names: selectedSubagents(rootSubagents, capabilities.subagents).map((subagent) => subagent.name) } }
-    let subagentLimit = activeSubagent ? parentLimit : projectPolicy?.restrictSubagents ? capabilities : undefined
+    let subagentLimit = activeSubagent ? parentLimit : project.restrictSubagents ? capabilities : undefined
     if (!activeSubagent && subagentLimit) {
       const ids = rootSubagents.flatMap(a => a.id ? [a.id] : [])
       const resources = skillsEnabled ? await listSubagentSkills(ids) : { skills: [] }
@@ -260,14 +241,13 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
       subagentLimit = resolve(ownCapabilities, [...catalog.skills, ...resources.skills], [...toolCatalog.tools, ...tools], false, false)
     }
     runConfiguration = {
-      customTools: structuredClone(project.kind === 'workspace'
-        ? toolCatalog.tools.filter(tool => capabilities.customTools.entries.includes(tool.id)).map(tool => tool.definition!) : []),
+      customTools: structuredClone(toolCatalog.tools.filter(tool => capabilities.customTools.entries.includes(tool.id)).map(tool => tool.definition!)),
       ...(activeSubagent ? { subagentSelectionLimit: structuredClone(rootSelection) } : {}),
-      ...(project.kind === 'workspace' && !activeSubagent && project.compressionPrompt
+      ...(!activeSubagent && project.compressionPrompt
         ? { compressionPrompt: project.compressionPrompt } : {}),
       codingMode: activeSubagent
         ? context.parentConfiguration?.codingMode === true
-        : project.kind === 'workspace' && project.codingMode,
+        : project.codingMode,
       capabilities,
       ...(subagentLimit ? { subagentLimit } : {})
     }
@@ -276,16 +256,14 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
   const capabilities = runConfiguration.capabilities
   const features = capabilityFeatures(capabilities)
   const skillAgent: SkillAgentScope = activeSubagent ? { kind: 'subagent', id: activeSubagent.id } : { kind: 'main' }
-  const { workspace, systemPrompt: rootSystemPrompt, simpleChatPrompt } = await prepareAgentSystemPrompt(
+  const { workspace, systemPrompt: rootSystemPrompt } = await prepareAgentSystemPrompt(
     thread, config, capabilities, !activeSubagent && runConfiguration.codingMode, true, options.project, skillAgent
   )
-  const simpleChat = simpleChatPrompt !== undefined
-  const toolsEnabled = !simpleChat
   const review = options.review
-  if (review && (!toolsEnabled || !initialModel.capabilities.toolUse)) throw new ModelSelectionError('Code review requires an agent project and a model with tool use enabled.')
+  if (review && !initialModel.capabilities.toolUse) throw new ModelSelectionError('Code review requires an agent project and a model with tool use enabled.')
   const hasUnresolvedManagedCalls = (options.persistent || options.contextPreview)
     && database.hasUnresolvedManagedCallsForThread(thread.id)
-  if (hasUnresolvedManagedCalls && (!toolsEnabled || !initialModel.capabilities.toolUse)) {
+  if (hasUnresolvedManagedCalls && !initialModel.capabilities.toolUse) {
     throw new ModelSelectionError(
       'This conversation has unresolved background calls. Continue it in an agent project with a model that supports tool use so those calls can be supervised.'
     )
@@ -297,25 +275,25 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
     context.requestId
     && database.listUnresolvedSubagentCallsForRun(context.requestId, 1).length > 0
   )
-  if (hasUnresolvedSubagents && (!toolsEnabled || !initialModel.capabilities.toolUse || !features.subagents)) {
+  if (hasUnresolvedSubagents && (!initialModel.capabilities.toolUse || !features.subagents)) {
     throw new ModelSelectionError(
       'This conversation has unresolved background subagents. Re-enable subagents and continue it with a model that supports tool use so they can be supervised.'
     )
   }
-  const availableSubagents = toolsEnabled && features.subagents
+  const availableSubagents = features.subagents
     ? selectedSubagents(config.subagents, capabilities.subagents)
     : []
   // Resolved selections apply only to new launches. A running child owns the
   // immutable definition captured when it was created, so config edits cannot
   // change or strand a recoverable execution.
   const [mcpTools, outputLanguage] = await Promise.all([
-    loadMcpTools(config, simpleChat, capabilities, options.contextPreview),
+    loadMcpTools(config, capabilities, options.contextPreview),
     resolveConfiguredLanguage(config.settings.language)
   ])
-  const commandShell = toolsEnabled && features.commandExecution
+  const commandShell = features.commandExecution
     ? await getCommandShell()
     : undefined
-  const baseEnvironment = toolsEnabled ? processEnvironment(capabilities.applicationEnvironment) : process.env
+  const baseEnvironment = processEnvironment(capabilities.applicationEnvironment)
   const shellEnvironment = commandShell && !options.contextPreview
     ? await bundledSearchEnvironment(baseEnvironment)
     : undefined
@@ -330,9 +308,9 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
     ? [...builtinToolCatalog.filter((tool) => toolAllowed(capabilities, tool.id)).map((tool) => tool.id), ...mcpTools.map((tool) => tool.name)]
     : undefined
   const activeMcpTools = mcpTools
-  const canWriteMemory = toolsEnabled && features.memory && !activeSubagent && !review
+  const canWriteMemory = features.memory && !activeSubagent && !review
   const offersMemoryWrite = (model: ResolvedModelConfig) => canWriteMemory && model.capabilities.toolUse && foregroundFor(model)
-  const backgroundRules = features.memory && !simpleChat
+  const backgroundRules = features.memory
     ? (config.settings.memoryMode === 'foreground' ? await memoryPrompt(true, false) : rootSystemPrompt.sections.find(section => section.kind === 'memory')?.content)
     : undefined
   const systemPrompt = activeSubagent
@@ -341,7 +319,7 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
         text: buildSubagentSystemPrompt(activeSubagent, rootSystemPrompt)
       }
     : rootSystemPrompt
-  if (options.prepareWorkspace && !simpleChat) {
+  if (options.prepareWorkspace) {
     await Promise.all([...new Set([workspace.primaryFolder, ...workspace.trustedFolders])]
       .map((folder) => mkdir(folder, { recursive: true })))
   }
@@ -390,9 +368,9 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
     return completed ? resultText(completed, control?.callId) : result
   }
   const runtimeTools = await runtimeToolDefinitions({
-    enabled: toolsEnabled,
+    enabled: true,
     primaryFolder: workspace.primaryFolder,
-    configuration: toolsEnabled && features.configuration,
+    configuration: features.configuration,
 
     projectId: thread.projectId,
     threadId: thread.id,
@@ -405,10 +383,10 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
       return { projectName: project.name, threadTitle: owner.title,
         ...(context.subagentCall ? { agentName: context.subagentCall.agentName } : {}) }
     },
-    network: toolsEnabled && features.networkAccess,
-    shell: toolsEnabled && features.commandExecution,
+    network: features.networkAccess,
+    shell: features.commandExecution,
     commandShell,
-    mcp: toolsEnabled && features.mcp && activeMcpTools.length > 0,
+    mcp: features.mcp && activeMcpTools.length > 0,
     signal: context.signal,
     mcpTools: activeMcpTools,
     toolNames: activeToolNames,
@@ -418,18 +396,16 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
     interactiveCustomTools: runConfiguration.customTools.some((tool) => tool.interactive),
     managedCallSupervision: hasUnresolvedManagedCalls
   })
-  const fileTools = toolsEnabled
-    ? fileToolDefinitions({
-        maxReadBytes: async () => (await resolveModel()).maxContextTokens,
-        toolNames: enabledBuiltinFileToolNames(features, activeToolNames),
-        signal: context.signal,
-        fileChanges: database.fileChanges,
-        fileEditStore: database.fileEditStore,
-        requestId: context.requestId,
-        primaryFolder: workspace.primaryFolder
-      })
-    : []
-  const subagentTools = toolsEnabled && features.subagents
+  const fileTools = fileToolDefinitions({
+    maxReadBytes: async () => (await resolveModel()).maxContextTokens,
+    toolNames: enabledBuiltinFileToolNames(features, activeToolNames),
+    signal: context.signal,
+    fileChanges: database.fileChanges,
+    fileEditStore: database.fileEditStore,
+    requestId: context.requestId,
+    primaryFolder: workspace.primaryFolder
+  })
+  const subagentTools = features.subagents
     ? subagentToolDefinitions({
         requestApproval: options.requestSubagentApproval,
         runtime: context.subagents,
@@ -441,12 +417,12 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
         )
       })
     : []
-  const customTools = toolsEnabled ? customToolDefinitions(runConfiguration.customTools, {
+  const customTools = customToolDefinitions(runConfiguration.customTools, {
     env: baseEnvironment,
     bundledPython: capabilities.bundledPython,
     backgroundTools: capabilities.backgroundTools,
     signal: context.signal, preview: !options.persistent
-  }) : []
+  })
   if (canWriteMemory) {
     runtimeTools.push(defineContentTool({
       ...updateMemoryToolSpec,
@@ -457,10 +433,10 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
       }
     }))
   }
-  const pluginDefinitions = toolsEnabled ? await resolvePluginTools(capabilities.pluginTools) : []
-  const pluginTools = toolsEnabled ? pluginToolDefinitions(pluginDefinitions, {
+  const pluginDefinitions = await resolvePluginTools(capabilities.pluginTools)
+  const pluginTools = pluginToolDefinitions(pluginDefinitions, {
     preview: !options.persistent
-  }) : []
+  })
   const requestSystemPrompt = (model: ResolvedModelConfig): AgentSystemPrompt => {
     const rules = foregroundFor(model) ? (offersMemoryWrite(model) ? foregroundRules : readOnlyRules) : backgroundRules
     let prompt = systemPrompt
@@ -470,8 +446,8 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
       if (activeSubagent) prompt.text = buildSubagentSystemPrompt(activeSubagent, prompt)
     }
     const provider = model.protocol === 'anthropic_messages' ? 'anthropic' : 'openai'
-    const suffix = simpleChat ? undefined : [modelSystemGuidance(provider, model.model),
-      toolsEnabled && model.capabilities.toolUse && accessMode() === 'smart_approval'
+    const suffix = [modelSystemGuidance(provider, model.model),
+      model.capabilities.toolUse && accessMode() === 'smart_approval'
         ? smartApprovalPrompt(safeApprovalFolders(workspace.trustedFolders, accessMode(), approvalDirectories)) : ''
     ].filter(Boolean).join('\n\n')
     return suffix ? {
@@ -483,8 +459,6 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
     try {
       const serverTools = configuredServerTools(model)
       if (!model.capabilities.toolUse) return []
-      // Simple chat disables host tools; configured tools execute at the provider.
-      if (!toolsEnabled) return serverTools
       return [...tools.filter(tool => tool.name !== 'update_memory' || offersMemoryWrite(model)).filter(tool => model.capabilities.vision || !['view_image', 'view_multiple_images'].includes(tool.name))
         .map(tool => accessMode() === 'smart_approval' && supportsApprovalParameter(tool)
           ? { ...tool, metadata: { ...('metadata' in tool ? tool.metadata as Record<string, unknown> : {}), smartApproval: true } } : tool), ...serverTools]
@@ -494,12 +468,12 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
   }
   async function refreshMcpTools(): Promise<void> {
     const previous = new Set(activeMcpTools.map(tool => tool.name))
-    const current = toolsEnabled ? await loadMcpTools(config, simpleChat, capabilities, true) : []
+    const current = await loadMcpTools(config, capabilities, true)
     runtimeTools.splice(0, runtimeTools.length, ...runtimeTools.filter(tool => !previous.has(tool.name)), ...current)
     activeMcpTools.splice(0, activeMcpTools.length, ...current)
   }
 
   return { refreshMcpTools, resolveModel, initialModel, offersMemoryWrite, developerHttpTrace, activeSubagent, runConfiguration, capabilities, features, requestSystemPrompt, selectModelTools,
-    workspace, approvalDirectories, systemPrompt, simpleChatPrompt, simpleChat, toolsEnabled, review, hasUnresolvedManagedCalls,
+    workspace, approvalDirectories, systemPrompt, review, hasUnresolvedManagedCalls,
     commandShell, shellCommandAuthorization, activeMcpTools, runtimeTools, fileTools, subagentTools, customTools, pluginTools, outputLanguage }
 }

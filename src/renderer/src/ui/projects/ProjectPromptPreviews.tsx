@@ -35,8 +35,8 @@ export function ProjectPromptPreviews({
   const [systemPreview, setSystemPreview] = useState<AgentSystemContextPreview>()
   const [previewError, setPreviewError] = useState<'model' | 'failed'>()
   const [previewLoading, setPreviewLoading] = useState(false)
-  const codingMode = project.kind === 'workspace' && project.codingMode
-  const customCompressionPrompt = project.kind === 'workspace' ? project.compressionPrompt : undefined
+  const codingMode = project.codingMode
+  const customCompressionPrompt = project.compressionPrompt
   const compressionInvalid = Boolean(compressionPromptError(customCompressionPrompt))
   const outputLanguageCode = resolveLanguagePreference(settings?.language)
   const outputLanguage = getLanguageOptions().find((language) => language.code === outputLanguageCode)
@@ -133,7 +133,7 @@ export function ProjectPromptPreviews({
             }}>
             <DropdownMenu.Item
               className="ui-menu-item ui-menu-item-row"
-              disabled={disabled || !settings || (project.kind === 'workspace' && !project.sourceFolders.length)}
+              disabled={disabled || !settings}
               onSelect={() => setKind('system')}
             >
               <FileText size={UI_ICON_SIZE_SMALL} />
@@ -149,7 +149,7 @@ export function ProjectPromptPreviews({
             </DropdownMenu.Item>
             <DropdownMenu.Item
               className="ui-menu-item ui-menu-item-row"
-              disabled={disabled || !settings || (project.kind === 'workspace' && !project.sourceFolders.length)}
+              disabled={disabled || !settings}
               onSelect={() => setKind('modelRequest')}
             >
               <FileJson size={UI_ICON_SIZE_SMALL} />

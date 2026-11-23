@@ -6,6 +6,7 @@ import { createConversationInstance } from './conversationInstance'
 import { getAppConfigSnapshot } from '../config/appConfig'
 import { getAgentConversationTempDir } from '../config/dataDir'
 import { getProject } from '../projectStore'
+import { resolveProjectSourceFolders } from '../projectWorkspace'
 import { validateCodeReviewSnapshot } from '../../runtime/codeReviewReport'
 import { ModelSelectionError } from '../../runtime/errors'
 import type { RunEventSink } from './runActivityProjection'
@@ -93,7 +94,8 @@ export class NativeAgentRuntime extends NativeRunHost {
     const snapshot = this.readSnapshot(threadId, startIndex)
     if (!snapshot.interrupts.length) return snapshot
     const project = await getProject(snapshot.thread.projectId)
-    return this.readSnapshotWithPreviews(threadId, project.kind === 'workspace' ? project.sourceFolders[0] : undefined, startIndex)
+    const [primaryFolder] = await resolveProjectSourceFolders(project)
+    return this.readSnapshotWithPreviews(threadId, primaryFolder, startIndex)
   }
 
   loadEarlierMessages(input: AgentMessageWindowInput) {

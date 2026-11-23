@@ -5,7 +5,6 @@ import { useLiveContextStatus } from './useLiveContextStatus'
 import { contextBudgetForModel } from '@shared/contextWindow'
 import type { AppConfigSnapshot, Project, SelectedAttachment } from '@shared/types'
 import { ChatComposer } from '../chat/ChatComposer'
-import type { ProjectCreationKind } from '../projects/ProjectDialog'
 import { MarkdownWorkspaceProjectProvider } from '../chat/MarkdownText'
 import type { ComposerSuggestion } from '../chat/composerTypes'
 import { NoFocusButton } from '../NoFocusButton'
@@ -59,7 +58,6 @@ interface AgentWorkspaceProps {
   assistantName: string
   projects: Project[]
   queuedMessages: QueuedAgentMessage[]
-  simpleChatEnabled: boolean
   submissionBusy: boolean
   run?: AgentRunView
   selectedProjectId: string
@@ -83,7 +81,7 @@ interface AgentWorkspaceProps {
   onComposerDrop(event: DragEvent<HTMLFormElement>): void | Promise<void>
   onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void
   onCompressContext(): void | Promise<void>
-  onCreateProject(kind: ProjectCreationKind): void
+  onCreateProject(): void
   onDeleteProject(project: Project): void
   onDeleteProjectThreads(project: Project): void
   onDeleteThread(threadId: string): void
@@ -180,7 +178,7 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
 
   return (
     <MarkdownWorkspaceProjectProvider
-      projectId={selectedProject?.kind === 'workspace' ? selectedProject.id : undefined}
+      projectId={selectedProject?.id}
     >
       <ActivityPreferences value={{ runningProcessDisplay: props.config?.settings.runningProcessDisplay ?? 'expanded', showModelRounds: props.config?.settings.showModelRounds ?? true }}>
       <DiffPreferences.Provider value={{
@@ -227,7 +225,7 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
             onOpenPlugin={props.onOpenPlugin} onOpenPluginSettings={props.onOpenPluginSettings}
             project={selectedProject ? { name: selectedProject.name,
               onOpenProcesses: props.activeThreadId ? () => props.panels.open({ kind: 'processes', projectId: selectedProject.id, threadId: props.activeThreadId! }) : undefined,
-              onOpenMemory: selectedProject.kind === 'workspace' ? () => props.panels.open({ kind: 'projectMemory', projectId: selectedProject.id }) : undefined,
+              onOpenMemory: () => props.panels.open({ kind: 'projectMemory', projectId: selectedProject.id }),
               onOpenFiles: () => props.panels.open({
               kind: 'files', projectId: selectedProject.id, threadId: props.activeThreadId,
               ...(!props.activeThreadId ? { draft: { modelConfigId: selectedModel?.id, modelParameterPresetId: props.selectedModelParameterPresetId ?? null, accessMode: props.accessMode } } : {})
@@ -287,7 +285,6 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
         contextCompressionDisabled={
           threadLocked
           || !props.activeThreadId
-          || props.simpleChatEnabled
           || !contextStatus?.manualCompressionAvailable
         }
         contextStatus={contextStatus}
@@ -302,7 +299,6 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
         assistantName={props.assistantName}
         projects={props.projects}
         queuedMessages={props.queuedMessages}
-        simpleChatEnabled={props.simpleChatEnabled}
         submissionBusy={props.submissionBusy}
         run={props.run}
         selectedProjectId={props.selectedProjectId}

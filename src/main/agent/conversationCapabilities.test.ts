@@ -1,5 +1,4 @@
 import type { AgentThread } from '@shared/agentTypes'
-import type { Project } from '@shared/types'
 import { ModelSelectionError } from '../../runtime/errors'
 import { ManagedCallService } from './managedCallService'
 import { defineContentTool } from '../../runtime/toolDefinition'
@@ -23,7 +22,7 @@ import { withToolExecution } from './toolExecutionContext'
 import * as customToolRuntime from './customToolRuntime'
 
 import Database from 'better-sqlite3'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, delimiter } from 'node:path'
 import { beforeAll, afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -52,7 +51,7 @@ vi.mock('../config/appConfig', async importOriginal => ({ ...await importOrigina
 vi.mock('./conversationMemory', async importOriginal => ({ ...await importOriginal<typeof import('./conversationMemory')>(), buildMemoryRulesPrompt: memoryStoreMocks.buildMemoryRulesPrompt }))
 vi.mock('../languageStore', () => ({ resolveConfiguredLanguage: languageStoreMocks.resolveConfiguredLanguage }))
 vi.mock('../toolsStore', async importOriginal => ({ ...await importOriginal<typeof import('../toolsStore')>(), listToolSnapshot: vi.fn(async () => ({ roots: [], tools: [] })) }))
-beforeAll(async () => { testPaths.root = await mkdtemp(join(tmpdir(), 'anas-native-capabilities-')) })
+beforeAll(async () => { testPaths.root = await realpath(await mkdtemp(join(tmpdir(), 'anas-native-capabilities-'))) })
 afterAll(async () => { await rm(testPaths.root, { recursive: true, force: true }) })
 const memories: Database.Database[] = []
 afterEach(() => { vi.restoreAllMocks(); for (const db of memories.splice(0)) db.close() })
@@ -556,27 +555,29 @@ describe('native capability snapshots', () => {
     const packages = await import('../subagentPackages')
     await packages.initializeSubagentPackages()
     const directory = join(testPaths.root, 'skills/recovery-guide')
-    await mkdir(directory, { recursive: true })
-    await writeFile(join(directory, 'SKILL.md'), '---\nname: recovery-guide\ndescription: Recovery guide.\n---\nUse the global recovery guide.\n')
+    const settingsFile = join(testPaths.root, 'config/subagents.json')
+    const originalSettings = await readFile(settingsFile, 'utf8')
     const capabilities = { ...structuredClone(defaultCapabilities), memory: false, toolMode: 'selected' as const, tools: ['read_file'],
       skills: { mode: 'custom' as const, project: false, entries: useGlobal ? [{ id: 'user:recovery-guide', shortcut: false, model: true }] : [] },
       customTools: { mode: 'custom' as const, project: false, entries: [] } }
     const original = { ...config().subagents[0], id: 'recovery-reviewer', name: 'recovery-reviewer', preset: undefined, builtIn: false,
       capabilities, systemPrompt: 'Keep the frozen reviewer instructions.' }
-    await packages.writeSubagentPackages([...(await packages.readSubagentPackages(testPaths.root)), {
-      id: original.id, name: original.name, description: original.description, enabled: true,
-      system_prompt: original.systemPrompt, capabilities: serializeCapabilities(capabilities)
-    }])
     const database = openDatabase()
-    const owner = configuredThread(database)
-    const parent = createRun(database, owner.id, 'frozen-skill-recovery-parent', 'Review')
-    const call = database.runs.createSubagentCall({
-      id: '92929292-9292-8292-8292-929292929292', ownerThreadId: owner.id, parentThreadId: owner.id, parentRunId: parent.id,
-      childThreadId: '93939393-9393-8393-8393-939393939393', childRunId: '94949494-9494-8494-9494-949494949494',
-      config: original, description: 'Review', childThread: { title: 'Frozen child', projectId: owner.projectId }
-    })
-    const configuration = { codingMode: false, customTools: [], capabilities }
     try {
+      await mkdir(directory, { recursive: true })
+      await writeFile(join(directory, 'SKILL.md'), '---\nname: recovery-guide\ndescription: Recovery guide.\n---\nUse the global recovery guide.\n')
+      await packages.writeSubagentPackages([...(await packages.readSubagentPackages(testPaths.root)), {
+        id: original.id, name: original.name, description: original.description, enabled: true,
+        system_prompt: original.systemPrompt, capabilities: serializeCapabilities(capabilities)
+      }])
+      const owner = configuredThread(database)
+      const parent = createRun(database, owner.id, 'frozen-skill-recovery-parent', 'Review')
+      const call = database.runs.createSubagentCall({
+        id: '92929292-9292-8292-8292-929292929292', ownerThreadId: owner.id, parentThreadId: owner.id, parentRunId: parent.id,
+        childThreadId: '93939393-9393-8393-8393-939393939393', childRunId: '94949494-9494-8494-9494-949494949494',
+        config: original, description: 'Review', childThread: { title: 'Frozen child', projectId: owner.projectId }
+      })
+      const configuration = { codingMode: false, customTools: [], capabilities }
       await packages.writeSubagentPackages((await packages.readSubagentPackages(testPaths.root)).filter(agent => agent.id !== original.id))
       const snapshot = { ...previewConfig(), subagents: [] }
       appConfigMocks.getAppConfigSnapshot.mockResolvedValue(snapshot)
@@ -587,7 +588,12 @@ describe('native capability snapshots', () => {
       const prompt = resources.requestSystemPrompt(resources.initialModel).text
       expect(prompt).toContain(original.systemPrompt)
       expect(prompt.includes(join(directory, 'SKILL.md'))).toBe(useGlobal)
-    } finally { database.close(); await rm(directory, { recursive: true, force: true }) }
+    } finally {
+      database.close()
+      await rm(directory, { recursive: true, force: true })
+      await rm(join(testPaths.root, 'subagents', original.id), { recursive: true, force: true })
+      await writeFile(settingsFile, originalSettings)
+    }
   })
 
   it('keeps recovery independent from disabled, deleted, or edited live definitions', async () => {
@@ -755,32 +761,13 @@ describe('native capability snapshots', () => {
     } finally { database.close() }
   })
 
-  it.each([
-    { mode: 'a model without tool use', toolUse: false, simpleChat: false },
-    { mode: 'simple chat', toolUse: true, simpleChat: true }
-  ])('rejects $mode while the conversation has unresolved background calls', async ({ toolUse, simpleChat }) => {
-    const snapshot = previewConfig(toolUse)
-    const simpleChatProject: Project = {
-      id: 'simple-chat-managed-call',
-      name: 'Plain chat',
-      kind: 'simple_chat',
-      pinned: false,
-      collapsed: false,
-      prompt: 'Answer plainly.',
-      createdAt: '2026-07-29T00:00:00.000Z',
-      updatedAt: '2026-07-29T00:00:00.000Z'
-    }
-    if (simpleChat) {
-      projectStoreMocks.getProject.mockImplementation(async (projectId: string) => (
-        projectId === simpleChatProject.id ? simpleChatProject : defaultWorkspaceProject()
-      ))
-    }
+  it('rejects a model without tool use while the conversation has unresolved background calls', async () => {
+    const snapshot = previewConfig(false)
     vi.mocked(toolsStore.listToolSnapshot).mockResolvedValue({ roots: [], tools: snapshot.customTools })
     appConfigMocks.getAppConfigSnapshot.mockResolvedValue(snapshot)
     const database = openDatabase()
     const agentThread = configuredThread(database, {
-      title: 'Unsupported supervision',
-      ...(simpleChat ? { projectId: simpleChatProject.id } : {})
+      title: 'Unsupported supervision'
     })
     const run = createUnresolvedManagedCall(database, agentThread)
 

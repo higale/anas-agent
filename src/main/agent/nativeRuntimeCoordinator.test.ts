@@ -21,7 +21,7 @@ import { listProjects } from '../projectStore'
 
 vi.mock('../projectStore', () => ({
   listProjects: vi.fn(),
-  getProject: vi.fn(async (id: string) => ({ id, kind: 'workspace', sourceFolders: [] })),
+  getProject: vi.fn(async (id: string) => ({ id, sourceFolders: [] })),
   deleteProjectWithThreads: vi.fn(async (_id: string, _threads: string[], commit: (apply: () => void) => void) => commit(() => {}))
 }))
 vi.mock('../runtimeLogger', () => ({ runtimeLog: vi.fn() }))
@@ -153,24 +153,24 @@ describe('conversation runtime routing', () => {
     expect(pages.mock.calls.map(([, offset, size]) => [offset, size])).toEqual([[205, 1]])
     expect(enumerate).not.toHaveBeenCalled()
   })
-  it('skips deleting chats and retires simple chats without blocking eligible sources', async () => {
+  it('skips deleting chats and projects with memory disabled without blocking eligible sources', async () => {
     const project = defaultWorkspaceProject(), config = previewConfig()
     config.settings.memoryModelId = 'preview-model'
-    const simple = { ...project, id: 'simple', kind: 'simple_chat' as const, prompt: '' }
+    const memoryDisabled = { ...project, id: 'memory-disabled', capabilities: { ...project.capabilities, memory: false }, prompt: '' }
     vi.spyOn(appConfig, 'getAppConfigSnapshot').mockResolvedValue(config)
-    vi.mocked(listProjects).mockResolvedValue([project, simple])
+    vi.mocked(listProjects).mockResolvedValue([project, memoryDisabled])
     const { storage, coordinator } = await fixture()
     const createDirty = (projectId: string) => {
       const id = storage.createThread({ projectId }).id
       storage.preferences.markDirty(id)
       return id
     }
-    const removing = createDirty(project.id), simpleChat = createDirty(simple.id), eligible = createDirty(project.id)
+    const removing = createDirty(project.id), memoryDisabledChat = createDirty(memoryDisabled.id), eligible = createDirty(project.id)
     storage.beginConversationDeletion(removing)
     coordinator.memory.start()
     await coordinator.memory.onConversationSpeech('another-chat')
     expect(coordinator.memory.snapshot().status).toBe('idle')
-    expect(storage.preferences.dirtyThreads()).not.toContain(simpleChat)
+    expect(storage.preferences.dirtyThreads()).toContain(memoryDisabledChat)
     expect(storage.preferences.dirtyThreads()).not.toContain(eligible)
   })
   it('uses one runtime per conversation and reads a catalog without opening runtimes', async () => {

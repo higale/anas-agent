@@ -146,9 +146,8 @@ describe('NativeAgentRuntime system prompt preview', () => {
         sidebarCollapsedSections: {
           pinnedProjects: false,
           projects: false,
-          simpleChats: false
         },
-        backupDir: ''
+        projectDefaultDirectory: '', backupDir: ''
       },
       defaultModelId: defaultModel.id,
       defaultModel
@@ -199,9 +198,8 @@ describe('NativeAgentRuntime system prompt preview', () => {
       sidebarCollapsedSections: {
         pinnedProjects: false,
         projects: false,
-        simpleChats: false
       },
-      backupDir: ''
+      projectDefaultDirectory: '', backupDir: ''
     }
     previewMocks.getAppConfigSnapshot.mockResolvedValue({ customTools: [],
         providers: [firstProvider, selectedProvider],
@@ -216,7 +214,7 @@ describe('NativeAgentRuntime system prompt preview', () => {
 
     const preview = await runtime.previewSystemContext({
       projectId: thread.projectId,
-      project: { kind: 'simple_chat', name: 'Draft', prompt: 'Unsaved prompt' },
+      project: { sourceFolders: [nativeRoot!], codingMode: false, capabilities: defaultCapabilities, restrictSubagents: false, name: 'Draft', prompt: 'Unsaved prompt' },
       settings
     })
 
@@ -258,8 +256,8 @@ describe('NativeAgentRuntime system prompt preview', () => {
       sidebarVisible: true,
       sidebarWidth: 260,
       workspacePanelWidth: 480, memoryMode: 'background', showMemoryActivityInTitlebar: true, ...diffViewSettingsFixture,
-      sidebarCollapsedSections: { pinnedProjects: false, projects: false, simpleChats: false },
-      backupDir: ''
+      sidebarCollapsedSections: { pinnedProjects: false, projects: false },
+      projectDefaultDirectory: '', backupDir: ''
     } satisfies AppSettings
     previewMocks.getAppConfigSnapshot.mockResolvedValue({ customTools: [],
         providers: [defaultProvider, selectedProvider],
@@ -274,7 +272,7 @@ describe('NativeAgentRuntime system prompt preview', () => {
 
     await expect(runtime.previewSystemContext({
       projectId: '0',
-      project: { kind: 'simple_chat', name: 'Draft', prompt: '', modelConfigId: selectedModel.id },
+      project: { sourceFolders: [nativeRoot!], codingMode: false, capabilities: defaultCapabilities, restrictSubagents: false, name: 'Draft', prompt: '', modelConfigId: selectedModel.id },
       settings
     })).resolves.toEqual({ content: 'SELECTED MODEL PROMPT' })
     expect(previewMocks.captureAgentSystemPrompt).toHaveBeenCalledWith(
@@ -354,8 +352,8 @@ describe('NativeAgentRuntime system prompt preview', () => {
       sidebarVisible: true,
       sidebarWidth: 260,
       workspacePanelWidth: 480, memoryMode: 'background', showMemoryActivityInTitlebar: true, ...diffViewSettingsFixture,
-      sidebarCollapsedSections: { pinnedProjects: false, projects: false, simpleChats: false },
-      backupDir: ''
+      sidebarCollapsedSections: { pinnedProjects: false, projects: false },
+      projectDefaultDirectory: '', backupDir: ''
     } satisfies AppSettings
     const config: AppConfigSnapshot = { customTools: [],
         providers,
@@ -373,7 +371,7 @@ describe('NativeAgentRuntime system prompt preview', () => {
     const resource = connection.resources
     const input = {
       projectId: thread.projectId,
-      project: { kind: 'simple_chat' as const, name: 'Draft', prompt: 'Unsaved prompt', ...scenario.project },
+      project: { sourceFolders: [nativeRoot!], codingMode: false, capabilities: defaultCapabilities, restrictSubagents: false, name: 'Draft', prompt: 'Unsaved prompt', ...scenario.project },
       currentModelSelection: scenario.current,
       settings
     }

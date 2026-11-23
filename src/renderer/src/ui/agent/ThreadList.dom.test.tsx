@@ -8,19 +8,19 @@ import { ThreadList } from './ThreadList'
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 
-const base = { pinned: false, collapsed: false, createdAt: '2026-10-01', updatedAt: '2026-10-01' }
+const base = { sourceFolders: [], capabilities: defaultCapabilities, restrictSubagents: false, codingMode: false, pinned: false, collapsed: false, createdAt: '2026-10-01', updatedAt: '2026-10-01' }
 const projects: Project[] = [
-  { ...base, id: 'a', name: 'Alpha', kind: 'simple_chat', prompt: '' },
-  { ...base, id: 'b', name: 'Beta', kind: 'simple_chat', prompt: '' },
-  { ...base, id: 'p', name: 'Pinned', kind: 'simple_chat', prompt: '', pinned: true },
-  { ...base, id: DEFAULT_WORKSPACE_PROJECT_ID, name: 'Default', kind: 'workspace', prompt: '', sourceFolders: [],
+  { ...base, id: 'a', name: 'Alpha', prompt: '' },
+  { ...base, id: 'b', name: 'Beta', prompt: '' },
+  { ...base, id: 'p', name: 'Pinned', prompt: '', pinned: true },
+  { ...base, id: DEFAULT_WORKSPACE_PROJECT_ID, name: 'Default', prompt: '', sourceFolders: [],
     capabilities: defaultCapabilities, restrictSubagents: false, codingMode: false }
 ]
 const threads: AgentThread[] = ['one', 'two'].map(id => ({ ...base, id, title: id, projectId: 'a', status: 'idle', accessMode: 'full_access', userTurnCount: 0 }))
 function fixture(overrides: Partial<ComponentProps<typeof ThreadList>> = {}) {
   const onReorder = vi.fn(), onOpenThread = vi.fn(), onToggleProjectCollapsed = vi.fn()
   const props: ComponentProps<typeof ThreadList> = {
-    loading: false, projects, threads, sidebarCollapsedSections: { pinnedProjects: false, projects: false, simpleChats: false },
+    loading: false, projects, threads, sidebarCollapsedSections: { pinnedProjects: false, projects: false },
     onReorder, onOpenThread, onToggleProjectCollapsed,
     onDeleteProject: vi.fn(), onDeleteProjectThreads: vi.fn(), onDeleteThread: vi.fn(), onEditProject: vi.fn(),
     onRenameThread: vi.fn(), onStartProjectThread: vi.fn(), onToggleSidebarSection: vi.fn(),
@@ -49,15 +49,15 @@ function fixture(overrides: Partial<ComponentProps<typeof ThreadList>> = {}) {
 const pinnedWorkspace: Project = { ...projects[3], id: 'pw', name: 'Pinned workspace', pinned: true }
 
 describe('pinned project section', () => {
-  it('puts both project kinds in the first section and collapses them independently', () => {
+  it('puts pinned projects in the first section and collapses them independently', () => {
     const f = fixture({ projects: [...projects, pinnedWorkspace, { ...pinnedWorkspace, id: 'w', name: 'Workspace', pinned: false }] })
     const sections = [...f.container.querySelectorAll<HTMLElement>('.thread-list-section')]
     expect(sections.map(section => section.querySelector('.thread-group-label')!.textContent))
-      .toEqual(['project.pinned_projects', 'project.projects', 'project.simple_chats'])
+      .toEqual(['project.pinned_projects', 'project.projects'])
     expect(within(sections[0]).getByText('Pinned')).toBeVisible()
     expect(within(sections[0]).getByText('Pinned workspace')).toBeVisible()
     expect(within(sections[1]).queryByText('Pinned workspace')).not.toBeInTheDocument()
-    expect(within(sections[2]).queryByText('Pinned')).not.toBeInTheDocument()
+    expect(within(sections[1]).queryByText('Pinned')).not.toBeInTheDocument()
     fireEvent.click(within(sections[0]).getByRole('button', { name: 'project.collapse_section' }))
     expect(f.props.onToggleSidebarSection).toHaveBeenCalledWith('pinnedProjects')
     f.rerender(<ThreadList {...f.props} sidebarCollapsedSections={{ ...f.props.sidebarCollapsedSections, pinnedProjects: true }} />)
@@ -68,19 +68,19 @@ describe('pinned project section', () => {
     expect(screen.getByText('common.default')).toBeVisible()
   })
 
-  it('returns unpinned projects to their original categories and removes an empty pinned section', () => {
+  it('returns unpinned projects to the project section and removes an empty pinned section', () => {
     const f = fixture({ projects: [...projects, pinnedWorkspace] })
     f.rerender(<ThreadList {...f.props} projects={f.props.projects.map(project => ({ ...project, pinned: false }))} />)
     expect(screen.queryByText('project.pinned_projects')).not.toBeInTheDocument()
     const sections = [...f.container.querySelectorAll<HTMLElement>('.thread-list-section')]
     expect(within(sections[0]).getByText('Pinned workspace')).toBeVisible()
-    expect(within(sections[1]).getByText('Pinned')).toBeVisible()
+    expect(within(sections[0]).getByText('Pinned')).toBeVisible()
     expect(screen.getAllByText('Pinned')).toHaveLength(1)
   })
 })
 
 describe('sidebar dragging', () => {
-  it('allows pinned projects of different kinds to reorder within the same pinned section', () => {
+  it('allows pinned projects to reorder within the same pinned section', () => {
     const f = fixture({ projects: [...projects, pinnedWorkspace] })
     f.down('pw'); f.move('p'); f.up()
     expect(f.onReorder).toHaveBeenCalledWith({ kind: 'project', groupId: 'pinned', pinned: true, id: 'pw', beforeId: 'p' })
@@ -111,7 +111,7 @@ describe('sidebar dragging', () => {
     f.up()
     fireEvent.click(f.row('b').querySelector('[data-sidebar-drag-handle]')!)
     expect(f.onToggleProjectCollapsed).not.toHaveBeenCalled()
-    expect(f.onReorder).toHaveBeenCalledWith({ kind: 'project', groupId: 'simple_chat', pinned: false, id: 'b', beforeId: 'a' })
+    expect(f.onReorder).toHaveBeenCalledWith({ kind: 'project', groupId: 'projects', pinned: false, id: 'b', beforeId: 'a' })
     expect(document.querySelector('.sidebar-drag-marker')).not.toBeInTheDocument()
     expect(document.documentElement).not.toHaveClass('ui-sidebar-dragging')
   })

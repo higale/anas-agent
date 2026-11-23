@@ -649,7 +649,7 @@ describe('data backup restore', () => {
   it('resets exactly the previewed execution storage while retaining project definitions and settings', async () => {
     const root = await temporaryDirectory(), dataRoot = join(root, 'data')
     const projects = JSON.stringify({ version: 0, projects: [{ ...projectDefaults,
-      id: DEFAULT_WORKSPACE_PROJECT_ID, kind: 'workspace', name: 'Keep project settings', pinned: false,
+      id: DEFAULT_WORKSPACE_PROJECT_ID, name: 'Keep project settings', pinned: false,
       collapsed: false, sourceFolders: ['/keep/source'], capabilities, restrict_subagents: false,
       createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z' }] })
     await writeProjectFixture(dataRoot, JSON.parse(projects))
