@@ -51,9 +51,11 @@ function modelListItems(value: unknown): unknown[] {
   return Array.isArray(record.models) ? record.models : []
 }
 
-function modelListItemId(value: unknown): string | undefined {
+function modelListItemId(value: unknown, onlyOnlineModels: boolean): string | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
-  const id = (value as Record<string, unknown>).id
+  const model = value as Record<string, unknown>
+  if (onlyOnlineModels && model.status !== 'online') return undefined
+  const id = model.id
   return typeof id === 'string' && id.trim().length > 0 ? id : undefined
 }
 
@@ -75,7 +77,12 @@ async function requestModelList({ endpoint, apiKey }: ModelListRequestRuntime): 
     const response = await fetch(endpoint, { headers, signal: controller.signal })
     const text = await response.text()
     if (!response.ok) throw new Error(`HTTP ${response.status}: ${text.slice(0, 240)}`)
-    const models = normalizeModelList(modelListItems(JSON.parse(text)).map(modelListItemId))
+    // Tencent's public catalog includes unavailable models; only online entries are usable.
+    const url = new URL(endpoint)
+    const onlyOnlineModels = ['tokenhub.tencentmaas.com', 'tokenhub-intl.tencentmaas.com'].includes(url.hostname)
+      && url.pathname.replace(/\/+$/, '') === '/v1/models'
+    const models = normalizeModelList(modelListItems(JSON.parse(text))
+      .map(item => modelListItemId(item, onlyOnlineModels)))
     if (models.length === 0) throw new Error('No models were returned.')
     return models
   } catch (error) {

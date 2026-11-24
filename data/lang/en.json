@@ -1529,6 +1529,9 @@
     "settings": "Settings",
     "details": "Plugin details",
     "settings_conflict": "Settings or the installed form changed. Reload to discard this draft and use the latest values.",
+    "settings_saved_fields": "{{fields}} saved.",
+    "settings_empty_fields": "{{fields}} not filled in.",
+    "settings_field_separator": ", ",
     "capabilities_hint": "Choose tools, skills and prompts in capability settings.",
     "contributions_count": "{{tools}} tools · {{skills}} skills · {{prompts}} instructions",
     "selection": "Plugin selection"
@@ -1556,5 +1559,17 @@
     "call_uncertain": "Shell outcome uncertain",
     "stop_hint": "Terminate only this process. Unsaved work may be lost.",
     "stale": "Refresh failed. Showing the previous result."
+  },
+  "usage": {
+    "title": "Usage information",
+    "show": "Show usage information",
+    "unsupported": "Usage queries are not supported for this API URL.",
+    "settings": "Usage query settings",
+    "show_balance": "Show balance",
+    "balance_help": "Query the Alibaba Cloud account balance using these RAM credentials. Requires AliyunBSSReadOnlyAccess.",
+    "tencent_balance_help": "Independently query the Tencent Cloud account balance using this SecretId/SecretKey. Turning this off keeps supported TokenHub usage and plan quota queries enabled.",
+    "failed": "Could not read usage information. Refresh to retry.",
+    "tencent_help": "Grant ReadOnlyAccess to the Tencent Cloud user associated with the query credentials, then enter its SecretId and SecretKey. Results describe the cloud account, not the current model key.",
+    "bailian_help": "In Alibaba Cloud, create a RAM user and AccessKey credentials, then grant AliyunTokenPlanReadOnlyAccess, AliyunBSSReadOnlyAccess, and AliyunModelStudioFullAccess.\nIn Alibaba Cloud Bailian, add that RAM user under Account Management. In Permission Management, select the workspace and add “Agent operations” (智能体-操作)."
   }
 }

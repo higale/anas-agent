@@ -44,7 +44,7 @@ export async function initializePluginsStore(): Promise<void> {
 
 export function pluginRuntime(): { store: PluginStore; backends: PluginBackends } {
   if (!store) {
-    store = new PluginStore(getDataDir(), { 'usage-meter': join(getSystemPluginsDir(), 'usage-meter') })
+    store = new PluginStore(getDataDir())
     backends = new PluginBackends(store, changed, undefined, undefined, id => {
       if (!readViews) throw new Error('Plugin host services are not ready.')
       return readViews(id)

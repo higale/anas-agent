@@ -100,7 +100,7 @@ return {
 - 常用布局类为 `ui-stack` / `ui-stack-tight`、`ui-row` / `ui-row-between`、`ui-grid-2` / `ui-grid-3`；文字类为 `ui-truncate`、`ui-muted`、`ui-field-hint`、`ui-numeric`。按钮复用 `ui-button`、`ui-icon-button`、`ui-tool-button`，普通按钮默认补上 `ui-button`，遵循 `--control-height`。内嵌图标操作可用 `ui-tool-button-small`。原生 `progress` 和表格由宿主统一着色和排版。
 - 按钮用 `data-action="操作 ID"`，必须在清单 `actions` 中声明；点击或键盘激活后仍调用原 handler，并传 `action`。宿主在请求期间禁用操作，保留插件声明的 `disabled`；可给图标加 `ui-busy-icon` 显示加载旋转，遵循减少动画设置。按钮没有额外参数，业务状态仍由后台校验。
 - 需要分开处理数据显示和查询时，widget 可声明 `"presentation": { "render": "redisplay", "actions": ["show_compact", "show_detailed"] }`。这些 ID 都须列入 widget 的 `actions`。切换语言时宿主调用 `render`，展示按钮调用对应的展示操作，两者都应只从已有结果生成 HTML。数据查询期间展示按钮仍可操作。调整宽度、窗口重新聚焦或再次显示已有组件均复用当前内容。首次显示、模型连接变化、定时检查及显式刷新仍走数据读取流程。
-- 紧凑文字可使用 `ui-adaptive-text` 容器，直接子元素分别标记 `data-full-text` 和 `data-short-text`，提供完整与简短文本。宿主按实际溢出、容器尺寸和字号变化选择版本；可见版本同步无障碍状态。插件决定哪些信息可缩短，例如用量仪表只省略套餐周期标签，保留余额币种。
+- 紧凑文字可使用 `ui-adaptive-text` 容器，直接子元素分别标记 `data-full-text` 和 `data-short-text`，提供完整与简短文本。宿主按实际溢出、容器尺寸和字号变化选择版本；可见版本同步无障碍状态。插件决定哪些信息可缩短，例如额度显示可以只省略周期标签，保留余额币种。
 - `img src` 使用包内 SVG / PNG / WebP 相对路径，宿主复用插件图标资源路由解析。文字提示使用 `title` 或 `data-tooltip`，宿主统一转换为支持多行的共享悬停提示，也支持键盘聚焦。`a href` 支持 HTTP、HTTPS、mailto，点击通过已有宿主外部链接接口打开，不导航主界面。
 - 可复制的详情使用 `data-details` 按钮，例如 `<button class="ui-link-button ui-field-hint-link" data-details="状态: 有效&#10;自动续费: 关闭">详情</button>`；也可使用单个包内 `img` 作为图标，此时按钮必须提供非空 `aria-label`。悬停预览，点击或键盘激活后固定浮层，再次点击、点击外部或按 Esc 关闭；浮层沿用宿主主题、字号和窗口边界。详情是非空纯文本，不能同时声明 `data-action`、`title` 或 `data-tooltip`；不调用后台，不受后台请求中的临时禁用影响，但保留按钮自身的 `disabled`。内容更新或组件移除时关闭旧浮层。
 - 业务错误、更新时间、套餐信息等均由插件写入 HTML，自由选择位置和结构；宿主只显示调用失败或 HTML 规范错误。模板自行标注标题、进度、按钮名称等无障碍语义。停用、切换上下文或关闭展示后，旧回执不再挂载。
@@ -109,33 +109,8 @@ return {
 
 展示调用允许并发，不能依赖普通页面 RPC 的顺序。停用、手动停止、后台崩溃及数据关闭后不会被展示轮询重新拉起；可在插件设置中重新启动后台或重新启用。应用重启后按启用状态重新按需加载。
 
-内置 `usage-meter` 识别 MiniMax 官方 API 主机，查询相应地区的 Token Plan 额度，缓存 5 分钟；立即刷新绕过缓存，同一供应商与凭据的在途请求合并，切换模型复用缓存。优先使用接口明确返回的剩余百分比；仅有旧计数字段时按剩余数量处理，零总量不伪造百分比。显示套餐的 `general` 通用额度，兼容旧套餐以 `MiniMax-M*` 命名的共享额度；不按当前模型匹配，不以 `video` 等独立分组代替通用额度。分别显示“5h 限额”和“周限额”，主读数显示剩余额度，进度条表示剩余占实际总额度的比例。周额度按 `weekly_boost_permille` 计入加成：例如加成为 1500、剩余比例为 99% 时，主读数为 148.5%，详情中总额度为 150%、已用为 1.5%；缺少加成字段时总额度为 100%。读数来自公开的 `/v1/token_plan/remains`，不接入官网未公开的展示接口；上游百分比精度可能造成与官网的小幅差异。接口本次起止区间即使较短，也不改变类别名称。重置时间与倒计时仍按接口返回的结束时间计算。默认紧凑显示，一行显示剩余额度、刷新和展开按钮，悬停查看供应商、重置时间及更新时间；点击仪表内的箭头切换详细显示，展示进度条和可见倒计时。样式选择由插件自行原子保存到其数据目录的 `display.json`（`version: 0`、`display_mode: compact | detailed`），缺省为 `compact`；不在设置页声明显示样式字段。切换样式读取同一额度缓存，不额外请求接口；每次读取缓存也重算倒计时，已结束的窗口标记待刷新，不假定额度已恢复。当前接口未提供套餐到期日，不能将额度重置时间当作套餐到期时间。查询限时 15 秒、响应上限 1 MiB；错误保留成功读数并退避，凭据变化使用新缓存。MiniMax 普通按量密钥或没有对应额度的套餐可能返回错误；MiniMax 适配不提供账户余额查询。
+用量仪表已迁入系统模型设置，不再注册为插件；实现、数据兼容和查询范围见[内置用量信息](USAGE_METER.md)。通用侧栏 widget 接口继续用于用户插件。
 
-智谱 / Z.ai 适配同时核对官方域名（`open.bigmodel.cn` / `api.z.ai`）与路径（`/api/coding/paas/v4` / `/api/anthropic`，允许末尾斜线），再查询套餐状态；普通 `/api/paas/v4` 不发出套餐查询；国内智谱转为账户余额查询，国际普通 API 与其他路径隐藏，即使同一 Key 已有缓存套餐额度也不展示。[官方接入说明](https://zcode.z.ai/en/docs/configuration)区分套餐与普通 API 的调用路径；Anthropic 路径仍需服务端确认套餐，不能仅凭 Key 格式或账户有套餐推断当前调用的计费方式。遵循[官方查询脚本](https://github.com/zai-org/zai-coding-plugins/blob/main/plugins/glm-plan-usage/skills/usage-query-skill/scripts/query-usage.mjs)，向对应站点的 `GET /api/monitor/usage/quota/limit` 发送原始 API Key（`Authorization` 不加 `Bearer`）。按[官方用量页面](https://bigmodel.cn/coding-plan/personal/usage)的字段含义解析：`percentage` 是已用百分比，显示时换算为剩余；`CREDIT_LIMIT` 为积分套餐，`TOKENS_LIMIT` 为旧套餐模型额度，`TIME_LIMIT` 为旧套餐独立 MCP 月额度。使用官方周期标识（`unit` 3 / 6 / 5 分别对应 5 小时 / 每周 / MCP 每月），有 `number` 时核对周期；优先采用积分套餐，避免把旧套餐额度混入。重置时间只取有效的 `nextResetTime` 毫秒时间戳，缺失时不推算。复用缓存、刷新、错误保留读数和中英文紧凑／详细显示；未开通套餐明确提示，不伪造余额或零额度。当前配置账户已实测“无套餐”响应；成功额度及国际站已用按官方字段构造的样本验证，尚无有套餐账户的成功实测。
-
-智谱国内普通 API（`open.bigmodel.cn/api/paas/v4`，允许末尾斜线）使用 `GET https://open.bigmodel.cn/api/biz/account/query-customer-account-report`，`Authorization` 为原始 API Key，无需控制台登录。该接口来自[官方控制台前端](https://static.bigmodel.cn/wd-paas-front/js/app.808381fa.js)，已用当前普通 Key 实测成功，但未查到公开接口契约；国际站未验证，不复用国内接口或假设其币种。主读数取 `availableBalance`（CNY），详情按实际返回显示 `rechargeAmount`、`totalSpendAmount`、`frozenBalance`；不四舍五入为两位小数，缺失或 null 的详情字段不伪造为零，主读数缺失或金额格式异常视为错误并保留上次成功读数。账户余额不含资源包和 Coding Plan 额度，不以零余额推断模型不可用。余额与套餐按查询 URL 分别缓存，切换路径不串用；共享刷新、限时、失败退避和本地化显示。
-
-百炼适配器位于 `data/plugins/_system/usage-meter/bailian.cjs`，通过本机 `bl` 的 JSON 输出查询中国站账户身份、Key 和用量；浏览器登录由插件按钮显式启动，后台独立管理并支持取消。Token Plan 使用 `/tokenplan/personal/api/v2/usage` 原始结果保留月度字段，Key 首尾匹配后才展示；剩余百分比在紧凑、详细及悬停视图统一显示两位小数，进度保留原始比例。普通 Key 详情完整匹配后限定工作空间和 Key ID 查询统计。数据读取阶段在使用缓存前和新查询后核对账户身份；CLI 配置、会话或账户变化及登录操作清空缓存，错误不保留百炼读数。纯展示操作只从内存结果生成界面，不调用 `bl`、不检查账户、不等待在途查询，即使缓存已过期也不触发查询。仅返回展示字段，不输出 CLI 原始错误、会话信息或完整 Key。
-
-用量仪表展开视图优先显示主要读数和重置时间，悬停或键盘聚焦标题可查看完整详情；与紧凑视图读数的提示共用同一份内容，不另设详情图标或更新时间行。提示包含供应商、读数、重置时间、最后成功更新时间，以及接口返回的附加资料：百炼的账户、工作空间、套餐资料和普通 API 用量明细，余额类的余额构成和消费明细，MiniMax 的总额度、已用和加成说明等。查询失败、明确的余额不足及百炼套餐已失效等异常仍直接显示。悬停不新增请求，未返回字段不补造。
-
-用量仪表同时支持以下官方接口，按 API URL 的精确主机名识别，复用所选供应商密钥。共享缓存、刷新、取消与错误保留机制；金额展示不渲染额度进度条，不跨币种相加，也不把无上限解释成账户有余额。
-
-| 厂商 | API 主机与查询路径 | 展示内容 |
-| --- | --- | --- |
-| [DeepSeek](https://api-docs.deepseek.com/api/get-user-balance/) | `api.deepseek.com/user/balance` | 各币种可用余额、未过期赠金、充值余额；保留金额字符串精度，按 `is_available` 提示不可调用。 |
-| [Moonshot/Kimi 国内](https://platform.kimi.com/docs/api/balance) / [国际](https://platform.kimi.ai/docs/api/balance) | `api.moonshot.cn` / `api.moonshot.ai` 的 `/v1/users/me/balance` | 可用、代金券、现金余额；国内 CNY、国际 USD。直接使用可用余额字段，现金为负时不自行重算。 |
-| [OpenRouter](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key) | `openrouter.ai/api/v1/key` | 当前密钥额度、累计及 UTC 日／周／月消费、额度重置周期、接口提供的密钥到期时间。仅表示密钥级数据；不调用要求管理密钥的 `/credits`。 |
-
-MiMo 适配使用 2026-11-03 发布的账务查询接口，识别 `api.xiaomimimo.com` 和 `token-plan-{cn,sgp,ams}.xiaomimimo.com` 的 `/v1`、`/anthropic` 路径（允许末尾斜线），不按 Key 前缀猜测计费方式。普通 API 请求 [GET /v1/platform/balance](https://mimo.mi.com/docs/zh-CN/api/asset/balance-get)：主读数为 `total_available - frozen_balance`，以整数分计算，保留负数和金额精度；详情显示总余额（含冻结）、现金、赠金、冻结及授信，币种和可用状态取接口返回。个人套餐请求相应地域的 [GET /v1/platform/token_plan](https://mimo.mi.com/docs/zh-CN/api/asset/credits-get)：显示剩余 Credits 占总额的比例、实际计费周期及自动续费等详情，周期时间按 UTC 解析；总额度为零时只显示 Credits，周期结束仅提示刷新，不推断新额度或套餐到期。余额、套餐、地域和凭据缓存相互隔离，复用 5 分钟缓存、手动刷新和失败保留读数。仅覆盖文档中的个人套餐，不承诺团队套餐查询。已用官方结构样本及 Windows 隔离桌面回归验证，未使用真实 MiMo 账户核验。
-
-设置概览中的支持厂商列表复用插件已有的本地化 `plugin.description`，宿主通用描述保留换行，不添加厂商专用设置或配置字段。内置说明同时维护中文和英文。
-
-接口核验（2026-10-15）：[硅基流动公告](https://docs.siliconflow.cn/docs/release-notes/overview)说明 `/user/info` 已于 2026-08-14 停用，因此未接入该旧接口；需要独立管理凭据或未确认官方查询协议的供应商不列为已支持。
-
-接口参考：[MiniMax 官方查询说明](https://platform.minimaxi.com/subscribe/coding-plan)、[官方 CLI 额度语义](https://github.com/MiniMax-AI/cli/blob/main/src/utils/quota.ts)。
-
-验证：`npm run test:e2e -- --plugin-widgets-only` 使用临时数据目录与受控 HTTP 响应运行真实内置后台，检查展示位置、刷新、失败保留、备份及启停；截图写入忽略的 `tmp/plugin-widgets/`。该测试不代表真实账户额度核验。
 
 ### 页面 SDK
 
@@ -184,7 +159,7 @@ const result = await anas.backend.call('example', { value: 1 });
 
 ### 多语言
 
-声明 `"lang": "lang"` 后，宿主读取该包内目录的 `<语言代码>.json`。格式与 Anas 相同：`version: 0`、`_meta: { name, author? }`、嵌套翻译键和 i18next 的 `{{变量}}` 占位符。`plugin.name`（最多 120 字符）和 `plugin.description`（最多 2,000 字符）用于宿主菜单、设置和默认标题；未提供时逐项回退英文，再回退清单文本。显式 `openView` 标题为用户内容，不翻译。
+声明 `"lang": "lang"` 后，宿主读取该包内目录的 `<语言代码>.json`。格式与 Anas 相同：`version: 0`、`_meta: { name, author? }`、嵌套翻译键和 i18next 的 `{{变量}}` 占位符。`plugin.name`（最多 120 字符）、`plugin.description`（最多 2,000 字符）和 `plugin.settings_title`（最多 120 字符）用于宿主菜单、描述及设置表单标题；未提供时逐项回退英文，再回退清单文本。显式 `openView` 标题为用户内容，不翻译。
 
 ```js
 const { resources, errors } = await anas.getLanguageResources();
@@ -381,11 +356,12 @@ ID 和处理器名使用字母开头的小写字母、数字、下划线，最�
 
 ## 通用设置
 
-清单可声明最多 64 个普通偏好字段。只有设置、没有 UI／后台／技能／提示词的包不构成功能插件。
+清单可声明最多 64 个设置字段，可选 `settings_title` 指定表单标题（非空，最多 120 字符），未提供时使用宿主的“设置”；语言包可逐项覆盖。只有设置、没有 UI／后台／技能／提示词的包不构成功能插件。
 
 ```json
 "settings": [
   { "key": "prefix", "label": "Prefix / 前缀", "type": "text", "default": "", "max_length": 100 },
+  { "key": "query_key", "label": "Query key / 查询密钥", "type": "password", "default": "", "max_length": 256 },
   { "key": "repeat", "label": "Repeat / 重复次数", "type": "number", "default": 1, "minimum": 1, "maximum": 5 },
   { "key": "uppercase", "label": "Uppercase / 大写", "type": "boolean", "default": false },
   { "key": "separator", "label": "Separator / 分隔符", "type": "enum", "default": "space",
@@ -395,13 +371,13 @@ ID 和处理器名使用字母开头的小写字母、数字、下划线，最�
 
 `key` 使用小写字母开头的 snake_case，最多 64 字符，不可重复。`label` 必填，最多 200 字符；可选 `description` 最多 1024 字符。每个字段必须有有效默认值；缺失新增字段时使用默认值，显式 `false`、`0` 和空字符串保持不变。文本默认最多 4096 字符，`max_length` 可调小；数字可限制范围，支持小数；枚举最多 64 项，值与标签最长 200 字符，值不能重复。前端与主进程共用校验。
 
-插件管理页控制整体启停、工具与提示词开关，以及插件技能的快捷和模型用途；项目和子 Agent 独立选择整个插件，普通技能在技能页设置用途上限。通用设置通过保存／取消编辑，后台状态刷新不覆盖草稿；保存失败保留输入，值或表单已变化时拒绝覆盖，重新加载前确认放弃草稿。停用时可以查看设置，不能保存。
+插件管理页控制整体启停、工具与提示词开关，以及插件技能的快捷和模型用途；项目和子 Agent 独立选择整个插件，普通技能在技能页设置用途上限。主设置页面只显示标题、编辑按钮，以及各字段已保存／未填写的状态，不重复展示具体值；空白文本视为未填写，`false` 和 `0` 保留为有效设置。通用设置通过弹出框保存／取消编辑，后台状态刷新不覆盖草稿；保存失败保留输入，值或表单已变化时拒绝覆盖，重新加载前确认放弃草稿。停用时可以查看设置，不能保存。
 
 页面通过 `anas.settings.get()` 获取 `{ values, revision }`，通过 `anas.settings.set(values, revision)` 传入完整值集合，原子保存并取得新结果；缺少字段会报错，不把遗漏当成恢复默认。对应 `plugins.invoke` 方法为 `settings.get`／`settings.set`。revision 只用于此设置表单的并发编辑，不绑定 Agent 运行或对话。后台通过 `host.getSettings()` 使用同一份当前值。
 
 设置保存在 `db/plugins/<id>/anas-settings.json`，由宿主读写，插件不要直接修改；卸载默认保留并随普通数据备份，显式删除插件数据时一并删除。移除字段的已存值保留在磁盘，但当前接口不暴露它。若字段类型发生不兼容变化，插件发布方仍需遵守数据升级规则，不能靠默认值静默重置。
 
-通用字段不存密码或令牌；凭据继续使用插件自身的加密与备份机制。复杂业务配置沿用插件页面，本轮不增加没有实际需求的专用设置页面钩子。示例 [text-tools](../data/examples/plugins/text-tools/PLUGIN.json) 的回显工具在每次调用时读取通用设置，无需打开页面或重启后台。
+`password` 与文本字段使用相同的值、默认值和长度校验，仅在编辑弹出框内提供输入，默认遮蔽，鼠标移入或键盘聚焦时显示，离开后恢复遮蔽。它是显示方式，不提供加密；值随其他设置保存在插件数据目录并进入普通备份，后台通过 `host.getSettings()` 读取。已有插件自身的凭据存储机制不变。复杂业务配置继续使用插件页面。示例 [text-tools](../data/examples/plugins/text-tools/PLUGIN.json) 的回显工具在每次调用时读取通用设置，无需打开页面或重启后台。
 
 ## 执行中的包资源
 

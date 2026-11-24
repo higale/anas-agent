@@ -2723,3 +2723,17 @@ html.ui-tab-dragging, html.ui-tab-dragging * { cursor: grabbing !important; user
   align-items: center;
   padding-inline-end: 6px;
 }
+
+.ui-numeric { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ui-adaptive-text { display: inline-grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.ui-adaptive-text > [data-full-text],
+.ui-adaptive-text > [data-short-text] {
+  grid-area: 1 / 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-adaptive-text > [data-short-text],
+.ui-adaptive-text[data-condensed] > [data-full-text] { visibility: hidden; }
+.ui-adaptive-text[data-condensed] > [data-short-text] { visibility: visible; }

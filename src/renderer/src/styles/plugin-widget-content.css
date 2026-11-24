@@ -30,19 +30,6 @@
 }
 progress::-webkit-progress-bar { background: var(--bg-soft); }
 progress::-webkit-progress-value { background: var(--accent); }
-.ui-numeric { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.ui-adaptive-text { display: inline-grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
-.ui-adaptive-text > [data-full-text],
-.ui-adaptive-text > [data-short-text] {
-  grid-area: 1 / 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ui-adaptive-text > [data-short-text],
-.ui-adaptive-text[data-condensed] > [data-full-text] { visibility: hidden; }
-.ui-adaptive-text[data-condensed] > [data-short-text] { visibility: visible; }
 :host([aria-busy="true"]) .ui-busy-icon { animation: widget-spin 1s linear infinite; }
 @keyframes widget-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { :host([aria-busy="true"]) .ui-busy-icon { animation: none; } }

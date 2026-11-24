@@ -50,6 +50,27 @@ function rawProvider(overrides: Partial<RawModelProviderConfig> = {}): RawModelP
 }
 
 describe('model provider configuration mapper', () => {
+  it('round-trips usage settings without including query credentials in execution configuration', () => {
+    const initial = rawProvider({ base_url: 'https://api.deepseek.com/v1' })
+    delete initial.usage
+    expect(normalizeModelProvider(initial, 0).usage?.enabled).toBe(true)
+    expect(initial).not.toHaveProperty('usage')
+    const saved = rawModelProviderFromSave(providerSave({ baseUrl: 'https://api.deepseek.com/v1', usage: {
+      enabled: false, displayMode: 'detailed', tencentSecretId: 'id', tencentSecretKey: 'secret', tencentShowBalance: false, bailianAccessKeyId: '', bailianAccessKeySecret: '', bailianShowBalance: true
+    } }), 'provider-id', initial)
+    expect(saved.usage).toMatchObject({ enabled: false, display_mode: 'detailed', tencent_secret_key: 'secret', tencent_show_balance: false, bailian_show_balance: true })
+    const provider = normalizeModelProvider(saved, 0)
+    expect(provider.usage?.enabled).toBe(false)
+    expect(provider.usage?.bailianShowBalance).toBe(true)
+    expect(provider.usage?.tencentShowBalance).toBe(false)
+    const resolved = resolveModelConfig(provider, provider.models[0])
+    expect(resolved).not.toHaveProperty('usage')
+    expect(JSON.stringify(resolved)).not.toContain('secret')
+    const unsupported = rawModelProviderFromSave(providerSave({ baseUrl: 'https://custom.test/v1' }), 'provider-id', saved)
+    expect(unsupported.usage?.enabled).toBe(false)
+    const supportedAgain = rawModelProviderFromSave(providerSave({ baseUrl: 'https://api.deepseek.com/v1' }), 'provider-id', unsupported)
+    expect(supportedAgain.usage).toMatchObject({ enabled: true, tencent_secret_key: 'secret', tencent_show_balance: false, bailian_show_balance: true })
+  })
   it('round-trips an unresolved environment reference without storing its value', () => {
     for (const apiKey of ['${NOT_CONFIGURED_YET}', '${ TEST_API_KEY }', '${9provider-token}', '${中文密钥}']) {
       const saved = rawModelProviderFromSave(providerSave({ apiKey }), 'provider-id')

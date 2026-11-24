@@ -113,6 +113,28 @@ afterEach(async () => {
 })
 
 describe('data backup restore', () => {
+  it('restores models without importing or repairing retired usage plugin data', async () => {
+    const root = await temporaryDirectory(), dataRoot = join(root, 'data')
+    await writeText(join(dataRoot, 'config/settings.json'), 'current')
+    const archive = join(root, 'plugin-usage.zip')
+    const models = { version: 0, providers: [{ id: 'cloud', base_url: 'https://tokenhub.tencentmaas.com/v1' }] }
+    await writeZip(archive, [
+      ...configFileNames.map(name => ({ name: `config/${name}`, data: JSON.stringify(name === 'models.json' ? models : { version: 0 }) })),
+      { name: 'db/plugins/usage-meter/anas-settings.json', data: JSON.stringify({ version: 0, values: { tencent_secret_id: 'fixture-id', tencent_secret_key: 'fixture-secret' } }) },
+      { name: 'db/plugins/usage-meter/anas-installation.json', data: JSON.stringify({ version: 0, enabled: false }) },
+      { name: 'db/plugins/usage-meter/display.json', data: '{damaged fixture' }
+    ])
+    const service = await loadBackupService(dataRoot, async staged => {
+      const saved = JSON.parse(await readFile(join(staged, 'config/models.json'), 'utf8'))
+      expect(saved).toEqual(models)
+    })
+    await service.restoreDataBackupZip(archive)
+    await expect(stat(join(dataRoot, 'db/plugins/usage-meter/models-before-native.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+    const current = await readFile(join(dataRoot, 'config/models.json'), 'utf8')
+    const backup = await service.createDataBackupZip(join(root, 'native-usage.zip'))
+    await service.restoreDataBackupZip(backup.path)
+    expect(await readFile(join(dataRoot, 'config/models.json'), 'utf8')).toBe(current)
+  })
   it('defaults to Anas/backups under system Documents and preserves an explicitly chosen backup directory', async () => {
     const root = await temporaryDirectory(), dataRoot = join(root, 'data')
     const service = await loadBackupService(dataRoot)

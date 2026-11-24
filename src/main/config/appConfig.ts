@@ -9,6 +9,7 @@ import { clampSpeechReplySpeed, defaultSpeechReplyVoice } from '@shared/speechTe
 import type { AppConfigSnapshot, AppProfile, AppProfileUpdate, AppSettings, AppSettingsUpdate, AttachmentTextOverflowMode, ChatContentWidth, McpServerConfigSave, McpServerUpdate, ModelProviderConfig, ModelProviderConfigSave, ProviderModelConfigSave, ResolvedModelConfig, RuntimeLogLevel, SidebarCollapsedSections, SpeechReplyConfig, SubagentConfigSave } from '@shared/types'
 import { normalizeSidebarWidth, normalizeUiFontSize, normalizeWorkspacePanelWidth } from '@shared/uiPreferences'
 import { mcpServerConfigDetail, normalizeMcpServer, rawMcpServerFromSave, type McpServerConfig } from './mcpServerConfigMapper'
+import { usageFromRaw, usageToRaw } from './modelConfigMapper'
 import { modelProviderConfigDetail, normalizeModelProvider, normalizeProviderModel, rawModelProviderFromSave, rawProviderModelFromSave, resolveModelConfig } from './modelConfigMapper'
 import {
   asRecord,
@@ -1114,5 +1115,17 @@ export async function setMcpToolEnabled(id: string, names: string[], enabled: bo
     if (server.toolCatalog?.connection_key !== mcpConfigKey(server) || names.some(name => !server.toolCatalog?.tools.some(tool => tool.name === name))) throw new Error('MCP tool no longer exists.')
     servers[index] = { ...asRecord(servers[index]), tool_choices: parseMcpToolChoices({ ...server.toolChoices, ...Object.fromEntries(names.map(name => [name, enabled])) }) }
     await writeRawMcpServersConfig(raw)
+  })
+}
+
+export async function updateUsageDisplayMode(providerId: string, mode: 'compact' | 'detailed'): Promise<AppConfigSnapshot> {
+  if (typeof providerId !== 'string' || !['compact', 'detailed'].includes(mode)) throw new Error('Invalid usage display preference.')
+  return serializeConfigMutation(async () => {
+    const raw = await readRawConfig()
+    const provider = raw.providers?.find(item => item.id === providerId)
+    if (!provider) throw new Error('Provider not found.')
+    provider.usage = usageToRaw({ ...usageFromRaw(provider.usage, provider.base_url ?? ''), displayMode: mode })
+    await writeRawModelsConfig(raw)
+    return savedModelsSnapshot()
   })
 }

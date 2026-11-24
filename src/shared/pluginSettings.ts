@@ -4,7 +4,7 @@ export interface PluginSetting {
   key: string
   label: string
   description: string
-  type: 'text' | 'number' | 'boolean' | 'enum'
+  type: 'text' | 'password' | 'number' | 'boolean' | 'enum'
   default: PluginSettingValue
   minimum?: number
   maximum?: number
@@ -35,10 +35,10 @@ export function parsePluginSettings(value: unknown): PluginSetting[] {
     if (typeof raw.key !== 'string' || !/^[a-z][a-z0-9_]{0,63}$/.test(raw.key) || ['constructor', 'prototype'].includes(raw.key)
       || typeof raw.label !== 'string' || !raw.label.trim() || raw.label.length > 200
       || (raw.description !== undefined && (typeof raw.description !== 'string' || raw.description.length > 1024))
-      || !['text', 'number', 'boolean', 'enum'].includes(String(raw.type))) throw new Error('Invalid plugin setting declaration.')
+      || !['text', 'password', 'number', 'boolean', 'enum'].includes(String(raw.type))) throw new Error('Invalid plugin setting declaration.')
     const field: PluginSetting = { key: raw.key, label: raw.label.trim(), description: raw.description as string ?? '',
       type: raw.type as PluginSetting['type'], default: raw.default as PluginSettingValue }
-    if (field.type === 'text' && raw.max_length !== undefined) {
+    if (['text', 'password'].includes(field.type) && raw.max_length !== undefined) {
       if (!Number.isInteger(raw.max_length) || Number(raw.max_length) < 1 || Number(raw.max_length) > 4096) throw new Error('Invalid plugin text setting limit.')
       field.maxLength = raw.max_length as number
     }

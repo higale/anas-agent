@@ -80,7 +80,7 @@ describe('model settings state', () => {
     let currentConfig: AppConfigSnapshot = { ...config, providers: [] }
     const createdConfig = {
       ...currentConfig,
-      providers: [{ ...config.providers[0], models: [] }]
+      providers: [{ ...config.providers[0], protocol: 'openai_responses', models: [] }]
     } satisfies AppConfigSnapshot
     const setConfig = vi.fn((nextConfig: AppConfigSnapshot) => {
       currentConfig = nextConfig
@@ -102,10 +102,12 @@ describe('model settings state', () => {
 
     expect(saveModelProvider).toHaveBeenCalledWith(expect.objectContaining({
       id: undefined,
-      name: 'settings.new_provider_name'
+      name: 'settings.new_provider_name',
+      protocol: 'openai_responses'
     }))
     expect(setConfig).toHaveBeenCalledWith(createdConfig)
     await waitFor(() => expect(result.current.modelDraft.providerId).toBe('provider-1'))
+    expect(result.current.modelDraft.protocol).toBe('openai_responses')
     expect(result.current.modelDraft.modelConfigId).toBeUndefined()
     expect(result.current.editingProvider?.models).toEqual([])
     expect(notice.error).not.toHaveBeenCalled()

@@ -48,6 +48,7 @@ import { AppSidebar } from './AppSidebar'
 import { useWorkspacePanels, workspacePanelScope } from './agent/useWorkspacePanels'
 import { isPanelClosed } from './panels/panelError'
 import { usePlugins } from './plugins/usePlugins'
+import { UsageMeter } from './model/UsageMeter'
 import { PluginWidgets } from './plugins/PluginWidgets'
 import { panelScope } from '@shared/panels'
 import { type PluginSummary } from '@shared/plugins'
@@ -1170,6 +1171,8 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
         sidebarVisible={sidebarVisible}
         sidebarWidth={sidebarWidth}
         footer={<>
+          <UsageMeter model={selectedModel} usage={config?.providers.find(provider => provider.id === selectedModel?.providerId)?.usage} active={!settingsOpen && sidebarVisible && initialAppReady} onSettings={() => { void openModelSettings() }}
+            onDisplayMode={async mode => { if (selectedModel) setConfig(await window.gale.usage.setDisplayMode(selectedModel.providerId, mode)) }} />
           <PluginWidgets plugins={pluginRegistry.plugins} model={selectedModel} active={!settingsOpen && sidebarVisible && initialAppReady} />
           {settingsOpen ? (
             <SettingsSidebarFooter onBack={() => closeSettings(ensureModelDraftCanLeave)} />

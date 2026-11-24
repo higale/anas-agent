@@ -2,7 +2,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Check, Pencil, X } from 'lucide-react'
-import type { PluginSummary } from '@shared/plugins'
+import { pluginDisplayText, type PluginSummary } from '@shared/plugins'
 import { pluginSettingValues, type PluginSettingsSnapshot, type PluginSettingValues } from '@shared/pluginSettings'
 import { errorDetail } from '@shared/recovery'
 import { CheckboxField } from '../CheckboxField'
@@ -10,10 +10,10 @@ import { CommitNumberInput } from '../CommitNumberInput'
 import { SearchableOptionPicker } from '../SearchableOptionPicker'
 import { ConfirmDialog } from '../dialogs/ConfirmDialog'
 
-function PreferencesEditor({ plugin, initial, onClose, onSaved }: {
-  plugin: PluginSummary; initial: PluginSettingsSnapshot; onClose(): void; onSaved(value: PluginSettingsSnapshot): void
+function PreferencesEditor({ plugin, title, initial, onClose, onSaved }: {
+  plugin: PluginSummary; title: string; initial: PluginSettingsSnapshot; onClose(): void; onSaved(value: PluginSettingsSnapshot): void
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   // A catalog refresh must never replace the form or the user's draft during editing.
   const [fields] = useState(plugin.manifest!.settings!)
   const [snapshot, setSnapshot] = useState(initial)
@@ -23,6 +23,8 @@ function PreferencesEditor({ plugin, initial, onClose, onSaved }: {
   const pending = useRef(false)
   const [discard, setDiscard] = useState(false)
   const [reload, setReload] = useState(false)
+  const [hoveredField, setHoveredField] = useState<string>()
+  const [focusedField, setFocusedField] = useState<string>()
   const dirty = JSON.stringify(draft) !== JSON.stringify(snapshot.values)
   const update = (key: string, value: string | number | boolean) => { if (!pending.current) setDraft(previous => ({ ...previous, [key]: value })) }
   const close = () => { if (!pending.current) { if (dirty) setDiscard(true); else onClose() } }
@@ -59,8 +61,8 @@ function PreferencesEditor({ plugin, initial, onClose, onSaved }: {
       <Dialog.Portal><Dialog.Overlay className="ui-backdrop" />
         <Dialog.Content className="ui-dialog ui-dialog-medium ui-dialog-font-scaled ui-dialog-centered ui-dialog-fixed-footer ui-popover" aria-busy={busy || undefined} onPointerDownOutside={event => event.preventDefault()}>
           <header className="ui-dialog-header-group">
-          <Dialog.Title className="ui-dialog-title">{t('plugins.settings')}</Dialog.Title>
-          <Dialog.Description className="ui-dialog-description">{plugin.manifest?.name}</Dialog.Description>
+          <Dialog.Title className="ui-dialog-title">{title}</Dialog.Title>
+          <Dialog.Description className="ui-dialog-description">{pluginDisplayText(plugin, i18n.language)}</Dialog.Description>
           </header>
           <div className="ui-dialog-body ui-form-section">
           <fieldset className="ui-form-section" inert={busy} disabled={!plugin.enabled || Boolean(plugin.error)}>
@@ -72,7 +74,12 @@ function PreferencesEditor({ plugin, initial, onClose, onSaved }: {
                   : field.type === 'number' ? <CommitNumberInput id={`plugin-setting-${field.key}`} aria-label={field.label} integer={false}
                     value={String(draft[field.key])} min={field.minimum} max={field.maximum}
                     onCommit={value => update(field.key, value)} onDraftChange={value => update(field.key, value)} />
-                    : <input id={`plugin-setting-${field.key}`} className="ui-input" value={String(draft[field.key])} maxLength={field.maxLength ?? 4096} onChange={event => update(field.key, event.target.value)} />}
+                    : <input id={`plugin-setting-${field.key}`} className="ui-input" value={String(draft[field.key])} maxLength={field.maxLength ?? 4096}
+                      type={field.type === 'password' && hoveredField !== field.key && focusedField !== field.key ? 'password' : 'text'}
+                      autoComplete={field.type === 'password' ? 'off' : undefined} spellCheck={field.type === 'password' ? false : undefined}
+                      onMouseEnter={() => setHoveredField(field.key)} onMouseLeave={() => setHoveredField(undefined)}
+                      onFocus={() => setFocusedField(field.key)} onBlur={() => setFocusedField(undefined)}
+                      onChange={event => update(field.key, event.target.value)} />}
               </>}
               {field.description && <small className="ui-field-hint">{field.description}</small>}
             </div>)}
@@ -94,11 +101,19 @@ function PreferencesEditor({ plugin, initial, onClose, onSaved }: {
 }
 
 export function PluginPreferences({ plugin }: { plugin: PluginSummary }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const [snapshot, setSnapshot] = useState<PluginSettingsSnapshot>()
   const [editing, setEditing] = useState<PluginSettingsSnapshot>()
   const [error, setError] = useState('')
   const readRevision = useRef(0)
+  const title = pluginDisplayText(plugin, i18n.language, 'settingsTitle') || t('plugins.settings')
+  const saved: string[] = [], empty: string[] = []
+  if (snapshot) for (const field of plugin.manifest?.settings ?? []) {
+    const value = snapshot.values[field.key]
+    const filled = typeof value === 'string' ? Boolean(value.trim()) : value !== undefined
+    if (filled) saved.push(field.label)
+    else empty.push(field.label)
+  }
   useEffect(() => {
     let active = true
     const request = ++readRevision.current
@@ -108,15 +123,13 @@ export function PluginPreferences({ plugin }: { plugin: PluginSummary }) {
     return () => { active = false }
   }, [plugin])
   return <div className="ui-form-section">
-    <div className="ui-toolbar ui-toolbar-between"><strong>{t('plugins.settings')}</strong>
+    <div className="ui-toolbar ui-toolbar-between"><strong>{title}</strong>
       <button type="button" className="ui-icon-button" aria-label={t('common.edit')} data-tooltip={t('common.edit')} disabled={!snapshot || Boolean(error) || !plugin.enabled}
         onClick={() => setEditing(snapshot)}><Pencil size={16} /></button>
     </div>
     {error && <p role="alert" className="ui-status-danger">{error}</p>}
-    {snapshot && plugin.manifest?.settings?.map(field => <div className="ui-form-row ui-form-row-label-content" key={field.key}>
-      <span>{field.label}</span><span>{field.type === 'boolean' ? t(snapshot.values[field.key] ? 'settings.enabled' : 'settings.disabled')
-        : field.choices?.find(choice => choice.value === snapshot.values[field.key])?.label ?? String(snapshot.values[field.key])}</span>
-    </div>)}
-    {editing && <PreferencesEditor plugin={plugin} initial={editing} onClose={() => setEditing(undefined)} onSaved={value => { readRevision.current++; setSnapshot(value) }} />}
+    {!error && saved.length > 0 && <p className="ui-field-hint">{t('plugins.settings_saved_fields', { fields: saved.join(t('plugins.settings_field_separator')) })}</p>}
+    {!error && empty.length > 0 && <p className="ui-field-hint">{t('plugins.settings_empty_fields', { fields: empty.join(t('plugins.settings_field_separator')) })}</p>}
+    {editing && <PreferencesEditor plugin={plugin} title={title} initial={editing} onClose={() => setEditing(undefined)} onSaved={value => { readRevision.current++; setSnapshot(value) }} />}
   </div>
 }

@@ -90,6 +90,39 @@ describe('native Responses persistence', () => {
     expect(closed).toBe(true)
   })
 
+  it.each([false, true])('reads sparse reasoning frames through the SDK and requires a complete terminal event (truncated=%s)', async truncated => {
+    const final = { ...response, output: output.slice(0, 2) } as NativeResponse
+    const items = [
+      { type: 'response.created', response: { ...final, status: 'in_progress', output: null } },
+      { type: 'response.output_item.added', output_index: 0, item: { type: 'reasoning', id: 'rs', status: 'in_progress' } },
+      { type: 'response.reasoning_summary_part.added', output_index: 0, item_id: 'rs', summary_index: 0, part: { type: 'summary_text' } },
+      { type: 'response.reasoning_summary_text.delta', output_index: 0, item_id: 'rs', summary_index: 0, delta: 'Plan' },
+      { type: 'response.reasoning_summary_text.done', output_index: 0, item_id: 'rs', summary_index: 0, text: 'Plan' },
+      { type: 'response.reasoning_summary_part.done', output_index: 0, item_id: 'rs', summary_index: 0, part: { type: 'summary_text', text: 'Plan' } },
+      { type: 'response.output_item.done', output_index: 0, item: final.output[0] },
+      { type: 'response.output_item.added', output_index: 1, item: { ...output[1], content: [] } },
+      { type: 'response.content_part.added', output_index: 1, item_id: 'msg', content_index: 0, part: { type: 'output_text' } },
+      { type: 'response.output_text.delta', output_index: 1, item_id: 'msg', content_index: 0, delta: 'Do it' },
+      { type: 'response.output_item.done', output_index: 1, item: final.output[1] }
+    ]
+    const prefix = items.map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join('')
+    const terminal = `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: final })}\n\n`
+    const provider = new OpenAiResponses({ apiKey: 'fixture', fetch: async () => new Response(
+      prefix + (truncated ? terminal.slice(0, -30) : terminal), { headers: { 'content-type': 'text/event-stream' } }) })
+    const streamed = { text: '', reasoning: '' }
+    const pending = streamResponsesConversation(provider.stream({ model: 'fixture', input: 'Go' }), event => {
+      if (event.kind === 'delta') streamed[event.channel] += event.text
+    })
+
+    if (truncated) await expect(pending).rejects.toMatchObject({ code: 'MODEL_RESPONSE_INCOMPLETE' })
+    else {
+      const result = await pending
+      expect(result.text).toBe('Do it')
+      expect(result.message.source?.metadata.output).toEqual(final.output)
+    }
+    expect(streamed).toEqual({ text: 'Do it', reasoning: 'Plan' })
+  })
+
   it('retains SDK structured parsing and refusals without inventing usage', () => {
     const { message } = openAiResponsesConversationResponse({ ...response, output: [{ type: 'message', id: 'm', role: 'assistant', status: 'completed', content: [
       { type: 'output_text', text: '{"ok":true}', annotations: [], parsed: { ok: true } }, { type: 'refusal', refusal: 'No' }

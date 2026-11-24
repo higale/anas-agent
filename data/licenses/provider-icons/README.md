@@ -15,13 +15,14 @@ Monochrome icons include light/dark theme styles; fixed glyph fills in Ollama, K
 
 - lm-studio: [official](https://lmstudio.ai/assets/marketing/brand/page/logos/lm-studio-icon-color.svg)
 - ollama: [official](https://raw.githubusercontent.com/ollama/ollama/main/docs/favicon.svg)
-- qwen: [LobeHub](https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/qwen-color.svg)
+- bailian: 用户提供的 `阿里云百炼.svg`，移除导出元数据、尺寸属性和冗余路径空白，保留原始几何与品牌配色。 / User-supplied `阿里云百炼.svg`, with export metadata, fixed dimensions, and redundant path whitespace removed while preserving the original geometry and brand colors.
 - deepseek: [LobeHub](https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/deepseek-color.svg)
 - minimax: [LobeHub](https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/minimax-color.svg)
 - volcengine: [LobeHub](https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/volcengine-color.svg)
 - kimi: [LobeHub](https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/kimi-color.svg)
 - glm: [LobeHub](https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/zhipu-color.svg)
 - mimo: 用户提供的 `小米.svg`，经 SVG 优化移除元数据并精简路径，保留橙色标识。 / User-supplied `小米.svg`, optimized to remove metadata and simplify paths while retaining the orange mark.
+- tencent: 用户提供的 `腾讯云.svg`，移除导出元数据、精简路径精度并居中适配方形视口，保留原始三色标识。 / User-supplied `腾讯云.svg`, with export metadata removed, path precision reduced, and the mark centered in a square viewport while retaining its three original colors.
 - openai: [LobeHub](https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/openai.svg)
 - anthropic: [LobeHub](https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/anthropic.svg)
 - gemini: [LobeHub](https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/gemini-color.svg)

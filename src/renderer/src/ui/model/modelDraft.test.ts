@@ -42,7 +42,7 @@ describe('model draft configuration', () => {
 
   it('uses the bundled data defaults for a new model', () => {
     expect(emptyModelDraft()).toMatchObject({
-      protocol: 'openai_chat_completions',
+      protocol: 'openai_responses',
       displayName: '',
       parametersJson: '',
       parameterPresetMode: 'protocol_default',
@@ -166,6 +166,7 @@ describe('model draft configuration', () => {
   it('accepts a default reasoning option from the active protocol', () => {
     const draft = {
       ...emptyModelDraft(),
+      protocol: 'openai_chat_completions' as const,
       providerId: 'provider',
       model: 'example-model',
       parameterPresetMode: 'protocol_default' as const,

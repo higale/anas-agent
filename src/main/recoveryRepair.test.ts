@@ -31,6 +31,33 @@ async function fixture() {
 }
 
 describe('field-level recovery', () => {
+  it('ignores retired plugin data when inspecting and repairing model configuration', async () => {
+    const { data } = await fixture()
+    const provider = { ...models.provider_defaults, id: 'cloud', name: 'Cloud', protocol: 'openai_chat_completions',
+      base_url: 'https://tokenhub.tencentmaas.com/v1', api_key: 'fixture', model_list_url: '', models: [] }
+    const before = JSON.stringify({ version: 0, providers: [provider] })
+    await writeFile(join(data, 'config/models.json'), before)
+    await mkdir(join(data, 'db/plugins/usage-meter'), { recursive: true })
+    await writeFile(join(data, 'db/plugins/usage-meter/display.json'), '{damaged fixture')
+    const status = (await inspectRecoveryRepair(data)).files.find(file => file.name === 'models.json')!
+    expect(status.error).toBeUndefined()
+    expect(status.repairableFields).toEqual([])
+    const preserve = vi.fn()
+    expect(await repairRecoveryData(data, 'models.json', preserve)).toEqual({ repaired: [], unresolved: [] })
+    expect(preserve).not.toHaveBeenCalled()
+    expect(await readFile(join(data, 'config/models.json'), 'utf8')).toBe(before)
+  })
+  it('repairs only invalid usage fields and preserves model credentials and explicit choices', () => {
+    const provider = { ...models.provider_defaults, id: 'provider', name: 'Usage', api_key: 'model-fixture', protocol: 'openai_chat_completions',
+      base_url: 'https://api.deepseek.com/v1', model_list_url: '', models: [], usage: { enabled: false, display_mode: 'invalid',
+        tencent_secret_id: 'fixture-id', tencent_secret_key: 'fixture-secret', bailian_access_key_secret: 42 } }
+    const original = { version: 0, providers: [provider] }
+    const repaired = repairDocument('models.json', original)
+    expect(repaired.value.providers).toEqual([{ ...provider, usage: { ...provider.usage, display_mode: 'compact', bailian_access_key_secret: '' } }])
+    expect(repaired.fields).toHaveLength(2)
+    expect(provider.usage.display_mode).toBe('invalid')
+    expect(repairDocument('models.json', repaired.value).fields).toEqual([])
+  })
   it('salvages MCP discovery metadata without losing server connections or valid tool choices', () => {
     const tool = { name: 'mcp__alpha__lookup', description: 'Look up', input_schema: { type: 'object' } }
     const server = { id: 'alpha', name: 'Alpha', enabled: true, type: 'http', url: 'https://example.test/mcp',

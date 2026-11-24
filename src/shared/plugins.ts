@@ -42,6 +42,7 @@ export interface PluginLanguage {
   author?: string
   pluginName?: string
   pluginDescription?: string
+  pluginSettingsTitle?: string
 }
 
 export interface PluginLanguageResources {
@@ -49,10 +50,10 @@ export interface PluginLanguageResources {
   errors: string[]
 }
 
-export function pluginDisplayText(plugin: PluginSummary, language: string, field: 'name' | 'description' = 'name'): string {
+export function pluginDisplayText(plugin: PluginSummary, language: string, field: 'name' | 'description' | 'settingsTitle' = 'name'): string {
   const languages = plugin.languages ?? []
   const selected = matchLanguageCode(language, languages.map(item => item.code))
-  const key = field === 'name' ? 'pluginName' : 'pluginDescription'
+  const key = field === 'name' ? 'pluginName' : field === 'settingsTitle' ? 'pluginSettingsTitle' : 'pluginDescription'
   return languages.find(item => item.code === selected)?.[key]
     ?? languages.find(item => item.code.toLowerCase() === 'en')?.[key]
     ?? plugin.manifest?.[field] ?? (field === 'name' ? plugin.id : '')
@@ -120,6 +121,7 @@ export interface PluginManifest {
   skills?: PluginSkillDefinition[]
   prompts?: PluginPromptDefinition[]
   settings?: PluginSetting[]
+  settingsTitle?: string
   widgets?: PluginWidgetDefinition[]
 }
 
@@ -217,6 +219,7 @@ export function parsePluginManifest(value: unknown): PluginManifest {
   if (typeof raw.plugin_version !== 'string' || !/^\d+\.\d+\.\d+$/.test(raw.plugin_version)) throw new Error('Invalid plugin version.')
   if (raw.api_version !== PLUGIN_API_VERSION) throw new Error(`Unsupported plugin API version; expected ${PLUGIN_API_VERSION}.`)
   if (raw.description !== undefined && (typeof raw.description !== 'string' || raw.description.length > 2000)) throw new Error('Invalid plugin description.')
+  if (raw.settings_title !== undefined && (typeof raw.settings_title !== 'string' || !raw.settings_title.trim() || raw.settings_title.length > 120)) throw new Error('Invalid plugin settings title.')
   const ui = raw.ui === undefined ? undefined : requirePluginPath(raw.ui)
   const backend = raw.backend === undefined ? undefined : requirePluginPath(raw.backend)
   const tools = parsePluginTools(raw.tools, Boolean(backend))
@@ -238,7 +241,8 @@ export function parsePluginManifest(value: unknown): PluginManifest {
     lang: raw.lang === undefined ? undefined : requirePluginPath(raw.lang), home: parsePluginHome(raw.home),
     icon: raw.icon === undefined ? undefined : requirePluginIcon(raw.icon),
     tools, ...(widgets.length ? { widgets } : {}), ...(skills.length ? { skills } : {}), ...(prompts.length ? { prompts } : {}),
-    ...(raw.settings === undefined ? {} : { settings: parsePluginSettings(raw.settings) }) }
+    ...(raw.settings === undefined ? {} : { settings: parsePluginSettings(raw.settings) }),
+    ...(raw.settings_title === undefined ? {} : { settingsTitle: (raw.settings_title as string).trim() }) }
 }
 
 export function pluginPageUrl(manifest: PluginManifest, instanceId?: string): string {

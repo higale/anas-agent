@@ -215,6 +215,40 @@ describe('model list configuration', () => {
     )
   })
 
+  it.each([
+    'https://tokenhub.tencentmaas.com/v1/models',
+    'https://tokenhub-intl.tencentmaas.com/v1/models/'
+  ])('offers and caches only online models from the Tencent catalog: %s', async (modelListUrl) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
+      data: [
+        { id: 'available-model', status: 'online' },
+        { id: 'retired-model', status: 'offline' },
+        { id: 'pending-model', status: 'pending' },
+        { id: 'unknown-model' },
+        null
+      ]
+    })))
+    const request = {
+      protocol: 'openai_responses' as const,
+      baseUrl: new URL(modelListUrl).origin + '/v1',
+      modelListUrl
+    }
+
+    await expect(fetchAvailableModels(request)).resolves.toEqual({ models: ['available-model'] })
+    await expect(getCachedAvailableModels(request)).resolves.toEqual({ models: ['available-model'] })
+  })
+
+  it('does not interpret another provider\'s model status using Tencent rules', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
+      data: [{ id: 'ready-model', status: 'ready' }, { id: 'standard-model' }]
+    })))
+
+    await expect(fetchAvailableModels({
+      protocol: 'openai_responses',
+      baseUrl: 'https://example.test/v1'
+    })).resolves.toEqual({ models: ['ready-model', 'standard-model'] })
+  })
+
   it('accepts an xAI-style models wrapper', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

@@ -63,7 +63,7 @@ export function parsePluginLanguages(files: Record<string, string>): PluginLangu
       const plugin = object(raw.plugin) ? raw.plugin : {}
       const string = (value: unknown, limit: number) => typeof value === 'string' && value.trim() && value.length <= limit ? value.trim() : undefined
       languages.push({ code, name: string(meta.name, 120) ?? code, author: string(meta.author, 120),
-        pluginName: string(plugin.name, 120), pluginDescription: string(plugin.description, 2000) })
+        pluginName: string(plugin.name, 120), pluginDescription: string(plugin.description, 2000), pluginSettingsTitle: string(plugin.settings_title, 120) })
       resources[code] = raw
       codes.add(code.toLowerCase())
     } catch (reason) { errors.push(`${file}: ${reason instanceof Error ? reason.message : 'Invalid language pack.'}`) }

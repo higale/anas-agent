@@ -1,3 +1,4 @@
+import { clearUsageRuntime } from './usage/usageRuntime'
 import { panelPages } from './panels/panelRegistry'
 import { readHelpDocument } from './helpDocuments'
 import { app, session, shell } from 'electron'
@@ -226,6 +227,7 @@ export function registerAppIpcHandlers(): void {
       throw new Error('Invalid data restore source path.')
     }
     const deactivate = async (): Promise<void> => {
+      clearUsageRuntime()
       await beginApplicationDataTransition()
       const stopped = await Promise.allSettled([
         Promise.resolve().then(() => panelPages.closeAll()),

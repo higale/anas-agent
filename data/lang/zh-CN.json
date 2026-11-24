@@ -1521,6 +1521,9 @@
     "settings": "设置",
     "details": "插件详情",
     "settings_conflict": "设置或已安装的表单已变更。重新加载会放弃当前草稿并使用最新值。",
+    "settings_saved_fields": "{{fields}} 已保存。",
+    "settings_empty_fields": "{{fields}} 未填写。",
+    "settings_field_separator": "、",
     "capabilities_hint": "工具、技能和提示词统一在能力设置中选择。",
     "contributions_count": "{{tools}} 个工具 · {{skills}} 个技能 · {{prompts}} 段提示词",
     "selection": "插件选择"
@@ -1548,5 +1551,17 @@
     "call_uncertain": "Shell 结果不确定",
     "stop_hint": "只终止此进程；未保存的内容可能丢失。",
     "stale": "刷新失败，以下为上次结果。"
+  },
+  "usage": {
+    "title": "用量信息",
+    "show": "显示用量信息",
+    "unsupported": "当前 API 地址暂不支持用量查询。",
+    "settings": "用量查询设置",
+    "show_balance": "显示余额",
+    "balance_help": "查询此 RAM 凭据对应的阿里云账户余额，需要 AliyunBSSReadOnlyAccess 权限。",
+    "tencent_balance_help": "单独查询此 SecretId／SecretKey 对应的腾讯云账户余额。关闭后仍查询支持的 TokenHub 用量和套餐额度。",
+    "failed": "用量信息读取失败，请刷新重试。",
+    "tencent_help": "为查询凭据对应的腾讯云用户添加 ReadOnlyAccess 权限，再填写 SecretId 和 SecretKey。查询结果为云账户范围，不代表当前模型 Key 的用量。",
+    "bailian_help": "阿里云创建用户并添加凭证，添加 AliyunTokenPlanReadOnlyAccess、AliyunBSSReadOnlyAccess、AliyunModelStudioFullAccess 权限。\n阿里云百炼，账号管理添加上述 RAM 用户，权限管理里选择业务空间，然后添加“智能体-操作”权限。"
   }
 }

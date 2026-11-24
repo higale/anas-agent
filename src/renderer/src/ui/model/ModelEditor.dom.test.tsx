@@ -60,7 +60,7 @@ describe('model creation', () => {
     )
 
     const protocol = screen.getByRole('combobox', { name: 'settings.provider' })
-    expect(protocol).toHaveValue('OpenAI Chat Completions')
+    expect(protocol).toHaveValue('OpenAI Responses')
     await user.click(protocol)
     const protocolOptions = document.getElementById(protocol.getAttribute('aria-controls') ?? '')
     expect(protocolOptions).not.toBeNull()
@@ -326,7 +326,7 @@ describe('model token controls', () => {
     const modePicker = within(dialog).getByRole('radiogroup', { name: 'settings.parameter_preset_mode' })
     expect(within(modePicker).getByRole('radio', { name: 'settings.parameter_preset_mode_protocol_default' }))
       .toBeChecked()
-    expect(within(dialog).getByText('OpenAI Chat Completions')).toBeVisible()
+    expect(within(dialog).getByText('OpenAI Responses')).toBeVisible()
     expect(screen.queryByRole('button', { name: 'settings.add_model_parameter_preset' })).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('heading', { level: 3 })).not.toBeInTheDocument()
     const protocolDefaultToggle = within(dialog).getByRole('checkbox', { name: 'common.default' })

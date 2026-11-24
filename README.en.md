@@ -21,7 +21,7 @@ Anas is a local desktop AI agent with support for multiple models, projects, too
 - Use file, image, network, memory, and command tools, and extend capabilities through MCP, custom tool packages, and Skills.
 - Work with text, image, PDF, and DOCX attachments, plus speech input and output.
 - View subagents, help, file differences, and plugin pages in the right workspace or separate windows.
-- Extend the application with plugin interfaces, tools, and skills; use the built-in Usage Meter to check supported providers' quotas or balances.
+- Extend the application with plugin interfaces, tools, and skills; use usage information in model settings to check supported providers' quotas or balances.
 - Control tool execution permissions and manage local backups, restores, and startup recovery.
 
 ## Download And Get Started
@@ -38,7 +38,13 @@ If macOS cannot verify the developer on first launch, choose **Open Anyway** in 
 
 Install plugin ZIPs in **Settings > Plugins**, or drag in a ZIP, plugin folder, or `PLUGIN.json`. Plugins can provide side panels, separate windows, tools, skills, and instructions, with availability configurable by project.
 
-The built-in Usage Meter shows the selected model provider's quota, balance, or spend, with compact/detailed views and a refresh button. Unsupported providers are hidden. See the [user guide](data/help/USER_GUIDE.en.md#plugins) for installation, management, and supported providers; see the [API documentation](docs/PLUGINS.md) and [examples](data/examples/plugins/README.en.md) for plugin development.
+See the [user guide](data/help/USER_GUIDE.en.md#plugins) for plugin installation and management, and the [API documentation](docs/PLUGINS.md) and [examples](data/examples/plugins/README.en.md) for plugin development.
+
+## Usage Information
+
+Enable **Show usage information** on the API Key row in model settings to view provider quotas, balances or spending, with compact/detailed layouts and refresh. Support follows the API URL; unsupported addresses disable and clear the checkbox. Configure Tencent and Bailian query credentials beside it. This is built in, with no Usage Meter plugin or Bailian CLI required. See [supported providers](data/help/USER_GUIDE.en.md#usage-information).
+
+For adding a Bailian RAM user, granting permissions, and resolving common errors, see the [setup guide](data/help/USER_GUIDE.en.md#bailian-ram-authorization-and-query-troubleshooting).
 
 ## Local Data
 

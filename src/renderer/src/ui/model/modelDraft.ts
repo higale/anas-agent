@@ -1,4 +1,5 @@
 import { requireModelImageLimits, type ModelImageLimits } from '@shared/modelImageLimits'
+import { normalizeUsageSettings, type UsageSettings } from '@shared/usageMeter'
 import type { TFunction } from 'i18next'
 import {
   defaultModelConfig,
@@ -35,6 +36,7 @@ export interface ModelDraft {
   protocol: ModelProtocol
   baseUrl: string
   modelListUrl: string
+  usage: UsageSettings
   apiKey: string
   providerParametersJson: string
   displayName: string
@@ -62,10 +64,11 @@ export function emptyModelDraft(): ModelDraft {
   return {
     name: '',
     iconData: '',
-    protocol: 'openai_chat_completions',
+    protocol: 'openai_responses',
     baseUrl: '',
     modelListUrl: '',
     apiKey: '',
+    usage: normalizeUsageSettings(undefined, ''),
     providerParametersJson: Object.keys(defaultModelProviderConfig.parameters).length > 0
       ? JSON.stringify(defaultModelProviderConfig.parameters, null, 2)
       : '',
@@ -103,6 +106,7 @@ export function modelConfigToDraft(
     baseUrl: provider.baseUrl,
     modelListUrl: provider.modelListUrl,
     apiKey: provider.apiKey ?? '',
+    usage: normalizeUsageSettings(provider.usage, provider.baseUrl),
     providerParametersJson: Object.keys(provider.parameters).length > 0
       ? JSON.stringify(provider.parameters, null, 2)
       : '',
@@ -141,6 +145,7 @@ export function providerConfigToDraft(
     baseUrl: provider.baseUrl,
     modelListUrl: provider.modelListUrl,
     apiKey: provider.apiKey ?? '',
+    usage: normalizeUsageSettings(provider.usage, provider.baseUrl),
     providerParametersJson: Object.keys(provider.parameters).length > 0
       ? JSON.stringify(provider.parameters, null, 2)
       : ''
@@ -154,6 +159,7 @@ export function modelTemplateToDraft(template: ModelProviderTemplate): ModelDraf
     iconData: template.iconData ?? '',
     protocol: template.protocol,
     baseUrl: template.baseUrl,
+    usage: normalizeUsageSettings(undefined, template.baseUrl),
     modelListUrl: template.modelListUrl,
     apiKey: template.apiKey,
     providerParametersJson: Object.keys(template.parameters).length > 0
@@ -219,6 +225,7 @@ export function buildProviderPayload(draft: ModelDraft): ModelProviderConfigSave
     baseUrl: draft.baseUrl,
     modelListUrl: draft.modelListUrl,
     apiKey: draft.apiKey,
+    usage: normalizeUsageSettings(draft.usage, draft.baseUrl),
     parameters
   }
 }

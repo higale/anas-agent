@@ -2,7 +2,7 @@ const { verifyMcp } = require('./electron-mcp.cjs')
 const { panelPage } = require('./electron-panel-helpers.cjs')
 const { verifyBackgroundMemory } = require('./electron-memory.cjs')
 const { verifyPluginTools } = require('./electron-plugin-tools.cjs')
-const { verifyPluginWidgets } = require('./electron-plugin-widgets.cjs')
+const { verifyUsageMeter } = require('./electron-usage-meter.cjs')
 const { verifyUnifiedPanels } = require('./electron-panels.cjs')
 const assert = require('node:assert/strict')
 const { execFile } = require('node:child_process')
@@ -1151,8 +1151,8 @@ async function main() {
     await verifyPluginTools(launchApplication)
     return
   }
-  if (process.argv.includes('--plugin-widgets-only')) {
-    await verifyPluginWidgets(launchApplication)
+  if (process.argv.includes('--usage-only')) {
+    await verifyUsageMeter(launchApplication)
     return
   }
   if (process.argv.includes('--model-recovery-only')) {

@@ -15,7 +15,7 @@ describe('bundled model templates', () => {
 
   it('uses one brand icon across protocols and distinct artwork for each supported brand', () => {
     const icons = modelTemplates.map((template) => template.iconData).filter(Boolean)
-    expect(new Set(icons).size).toBe(19)
+    expect(new Set(icons).size).toBe(20)
     for (const country of modelTemplateTree) {
       if (country.type !== 'group') continue
       for (const brand of country.children) {
@@ -73,7 +73,8 @@ describe('bundled model templates', () => {
     expect(china).toMatchObject({ type: 'group', label: 'China' })
     if (!china || china.type !== 'group') throw new Error('Expected the China template group.')
     expect(china.children.map((node) => node.label)).toEqual([
-      'Qwen',
+      'Bailian',
+      'Tencent',
       'DeepSeek',
       'MiniMax',
       'VolcEngine',
@@ -167,6 +168,10 @@ describe('bundled model templates', () => {
     ['china/kimi', 'https://api.moonshot.cn/v1', 'https://api.moonshot.cn/v1/models'],
     ['china/glm', 'https://open.bigmodel.cn/api/v1', 'https://open.bigmodel.cn/api/paas/v4/models'],
     ['china/mimo', 'https://api.xiaomimimo.com/v1', 'https://api.xiaomimimo.com/v1/models'],
+    ['china/tencent/tokenhub/guangzhou', 'https://tokenhub.tencentmaas.com/v1', 'https://tokenhub.tencentmaas.com/v1/models'],
+    ['china/tencent/tokenhub/singapore', 'https://tokenhub-intl.tencentmaas.com/v1', 'https://tokenhub-intl.tencentmaas.com/v1/models'],
+    ['china/tencent/token-plan/guangzhou', 'https://tokenhub.tencentmaas.com/plan/v3', 'https://tokenhub.tencentmaas.com/v1/models'],
+    ['china/tencent/token-plan/singapore', 'https://tokenhub-intl.tencentmaas.com/plan/v3', 'https://tokenhub-intl.tencentmaas.com/v1/models'],
     ['united-states/openai', 'https://api.openai.com/v1', 'https://api.openai.com/v1/models'],
     ['united-states/xai', 'https://api.x.ai/v1', 'https://api.x.ai/v1/language-models'],
     ['united-states/groq', 'https://api.groq.com/openai/v1', 'https://api.groq.com/openai/v1/models'],
@@ -195,12 +200,12 @@ describe('bundled model templates', () => {
     if (!china || china.type !== 'group') throw new Error('Expected the China template group.')
 
     const qwen = china.children.find((node) => node.id === 'qwen')
-    expect(qwen).toMatchObject({ type: 'group', label: 'Qwen' })
-    if (!qwen || qwen.type !== 'group') throw new Error('Expected the Qwen template group.')
+    expect(qwen).toMatchObject({ type: 'group', label: 'Bailian' })
+    if (!qwen || qwen.type !== 'group') throw new Error('Expected the Bailian template group.')
 
     const tokenPlan = qwen.children.find((node) => node.id === 'token-plan')
-    expect(tokenPlan).toMatchObject({ type: 'group', label: 'TokenPlan' })
-    if (!tokenPlan || tokenPlan.type !== 'group') throw new Error('Expected the TokenPlan template group.')
+    expect(tokenPlan).toMatchObject({ type: 'group', label: 'Token Plan' })
+    if (!tokenPlan || tokenPlan.type !== 'group') throw new Error('Expected the Token Plan template group.')
 
     expect(tokenPlan.children.map((node) => node.label)).toEqual([
       'OpenAI Responses',
@@ -209,12 +214,12 @@ describe('bundled model templates', () => {
     ])
     expect(getModelTemplate('china/qwen/token-plan/openai')).toMatchObject({
       label: 'OpenAI Chat Completions',
-      name: 'Qwen TokenPlan',
+      name: 'Bailian Token Plan',
       protocol: 'openai_chat_completions'
     })
     expect(getModelTemplate('china/qwen/token-plan/anthropic')).toMatchObject({
       label: 'Anthropic Messages',
-      name: 'Qwen TokenPlan',
+      name: 'Bailian Token Plan',
       protocol: 'anthropic_messages'
     })
   })
@@ -226,12 +231,12 @@ describe('bundled model templates', () => {
     })
     expect(getModelTemplate('china/qwen/openai')).toMatchObject({
       label: 'OpenAI Chat Completions',
-      name: 'Qwen',
+      name: 'Bailian',
       protocol: 'openai_chat_completions'
     })
     expect(getModelTemplate('china/qwen/anthropic')).toMatchObject({
       label: 'Anthropic Messages',
-      name: 'Qwen',
+      name: 'Bailian',
     })
   })
 
@@ -282,7 +287,7 @@ describe('bundled model templates', () => {
     expect(findModelTemplate(
       'anthropic_messages',
       'https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic/'
-    )?.name).toBe('Qwen TokenPlan')
+    )?.name).toBe('Bailian Token Plan')
     expect(findModelTemplate('openai_chat_completions', 'https://custom.example.com/v1')).toBeUndefined()
   })
 })

@@ -145,6 +145,25 @@ describe('plugin installation and data', () => {
     await expect(store.settings(manifest.id)).rejects.toThrow()
     expect(await readFile(path, 'utf8')).toBe('{broken')
   })
+  it('saves query credentials in plugin settings and reads them after restarting the store', async () => {
+    const settings = [
+      { key: 'query_id', label: 'Query ID', type: 'text', default: '' },
+      { key: 'query_key', label: 'Query key', type: 'password', default: '', max_length: 256 }
+    ]
+    await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ ...manifest, settings }))
+    await store.install(source)
+    const initial = await store.settings(manifest.id)
+    expect(initial.values).toEqual({ query_id: '', query_key: '' })
+    const path = join(root, 'data/db/plugins/test-plugin/anas-settings.json')
+    await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' })
+    const saved = await store.settings(manifest.id, { revision: initial.revision, values: { query_id: 'fixture-id', query_key: 'fixture-secret' } })
+    store = new PluginStore(join(root, 'data'))
+    expect(await store.settings(manifest.id)).toEqual(saved)
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({ version: 0, values: saved.values })
+    await expect(stat(join(root, 'data/.env'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await store.settings(manifest.id, { revision: saved.revision, values: { query_id: '', query_key: '' } })
+    expect((await store.settings(manifest.id)).values).toEqual(initial.values)
+  })
   it('installs pure static contributions and validates their files and dependencies before replacement', async () => {
     const staticManifest = { ...manifest, ui: undefined, skills: [{ id: 'local-guide', path: 'skills/guide/SKILL.md' }],
       prompts: [{ id: 'tone', path: 'tone.md', description: 'A concise tone.' }] }
@@ -466,8 +485,8 @@ describe('plugin language packs', () => {
   async function localized() {
     await writeFile(join(source, 'PLUGIN.json'), JSON.stringify({ ...manifest, lang: 'lang' }))
     await mkdir(join(source, 'lang'))
-    await writeFile(join(source, 'lang/en.json'), JSON.stringify({ version: 0, _meta: { name: 'English' }, plugin: { name: 'Notebook', description: 'English description' }, actions: { save: 'Save' } }))
-    await writeFile(join(source, 'lang/zh-CN.json'), JSON.stringify({ version: 0, _meta: { name: '简体中文' }, plugin: { name: '记事本' } }))
+    await writeFile(join(source, 'lang/en.json'), JSON.stringify({ version: 0, _meta: { name: 'English' }, plugin: { name: 'Notebook', description: 'English description', settings_title: 'Notebook settings' }, actions: { save: 'Save' } }))
+    await writeFile(join(source, 'lang/zh-CN.json'), JSON.stringify({ version: 0, _meta: { name: '简体中文' }, plugin: { name: '记事本', settings_title: '记事本设置' } }))
     await store.install(join(source, 'PLUGIN.json'))
     return join(root, 'data/plugins/test-plugin/lang')
   }
@@ -481,6 +500,8 @@ describe('plugin language packs', () => {
     expect(pluginDisplayText(item, 'zh-TW')).toBe('记事本')
     expect(pluginDisplayText(item, 'fr', 'description')).toBe('English description')
     expect(pluginDisplayText(item, 'ja')).toBe('Notebook')
+    expect(pluginDisplayText(item, 'zh-CN', 'settingsTitle')).toBe('记事本设置')
+    expect(pluginDisplayText(item, 'fr', 'settingsTitle')).toBe('Notebook settings')
     expect((await store.languageResources(manifest.id)).resources.fr.actions).toEqual({ save: 'Enregistrer' })
     await store.setEnabled(manifest.id, false)
     await expect(store.languageResources(manifest.id)).rejects.toThrow('disabled')

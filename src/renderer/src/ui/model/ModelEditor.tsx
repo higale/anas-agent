@@ -1,3 +1,4 @@
+import { UsageSettingsField } from './UsageSettingsField'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ModelApiKeyEnvironmentVariable, ModelProviderConfigDetail } from '@shared/types'
@@ -133,7 +134,9 @@ export function ModelEditor({
           />
         </label>
         <div className="ui-field-stack">
-          <span>{t('settings.api_key')}</span>
+          <div className="ui-row-between usage-key-label"><span>{t('settings.api_key')}</span>
+            <UsageSettingsField key={modelDraft.baseUrl} baseUrl={modelDraft.baseUrl} value={modelDraft.usage} onChange={usage => onUpdateDraft({ usage })} />
+          </div>
           <SearchableOptionPicker
             allowInput
             caseSensitive

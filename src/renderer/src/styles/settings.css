@@ -973,3 +973,6 @@
   color: var(--text);
 }
 .plugin-install-drop-hint svg { flex-shrink: 0; }
+
+.usage-key-label { flex-wrap: wrap; gap: 4px; }
+.usage-settings-actions { margin-left: auto; }

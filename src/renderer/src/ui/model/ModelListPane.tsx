@@ -42,12 +42,12 @@ function ModelTemplateMenuNodes({ nodes, depth = 0, onCreateModel }: ModelTempla
           onSelect={() => void onCreateModel(node.template.templateId)}
           textValue={node.label}
         >
-          <ProviderIcon iconData={node.template.iconData} />
+          {depth === 1 && <ProviderIcon iconData={node.template.iconData} />}
           <span>{node.label}</span>
         </DropdownMenu.Item>
       )
     }
-    const iconData = depth > 0 ? templateNodeIcon(node) : undefined
+    const iconData = depth === 1 ? templateNodeIcon(node) : undefined
     return (
       <DropdownMenu.Sub key={node.id}>
         <DropdownMenu.SubTrigger className="model-template-group ui-menu-item ui-menu-item-row">

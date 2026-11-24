@@ -1,16 +1,13 @@
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { UsageMeterContent } from '../../renderer/src/ui/model/UsageMeter'
+import { normalizeUsageSettings } from '@shared/usageMeter'
+import { createUsageService } from './usageService'
 // @vitest-environment jsdom
-import { createRequire } from 'node:module'
-import { resolve, join } from 'node:path'
-import { tmpdir } from 'node:os'
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync } from 'node:fs'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import type { PluginWidgetContent } from '@shared/pluginWidgets'
-import { parsePluginManifest } from '@shared/plugins'
 
-const load = createRequire(import.meta.url)
-const path = resolve('data/plugins/_system/usage-meter/backend.cjs')
-let backend: { activate(context: { dataDirectory: string }): void; call(method: string, params: unknown, context: { signal: AbortSignal }): Promise<PluginWidgetContent | null>; deactivate(): void }
-let dataDirectory: string
+let service: ReturnType<typeof createUsageService>
+let displayMode: 'compact' | 'detailed' = 'detailed'
 const model = { id: 'm1', model: 'MiniMax-M2.7', providerId: 'p1', providerName: 'MiniMax CN', baseUrl: 'https://api.minimaxi.com/anthropic', apiKey: 'test-secret' }
 const row = { model_name: 'MiniMax-M*', current_interval_total_count: 1500, current_interval_usage_count: 1200,
   current_weekly_total_count: 0, current_weekly_usage_count: 0, end_time: 1776373200000 }
@@ -18,18 +15,25 @@ const payload = (changes = {}) => ({ base_resp: { status_code: 0 }, model_remain
 const fetcher = vi.fn()
 // Observe the rendered HTML rather than a host-specific quota data schema.
 const call = async (changes: Record<string, unknown> = {}) => {
-  const result = await backend.call('quota', { model, language: 'zh-CN', action: null, ...changes }, { signal: new AbortController().signal })
+  const selected = (changes.model ?? model) as typeof model
+  const language = typeof changes.language === 'string' ? changes.language : 'zh-CN'
+  const action = changes.action
+  if (action === 'show_compact') displayMode = 'compact'
+  if (action === 'show_detailed') displayMode = 'detailed'
+  const usage = normalizeUsageSettings(undefined, selected.baseUrl)
+  const content = await service.read({ ...selected, usage }, language, action === 'refresh', ['redisplay', 'show_compact', 'show_detailed'].includes(String(action)))
+  const result = content && { title: content.title, html: renderToStaticMarkup(createElement(UsageMeterContent, { content, language, compact: displayMode === 'compact', onRefresh() {}, onToggle() {}, onSettings() {} })) }
   if (!result) return null
   const template = document.createElement('template')
   template.innerHTML = result.html
   const dom = template.content
-  const details = dom.querySelector('[tabindex="0"]')?.getAttribute('title')
+  const details = dom.querySelector('[tabindex="0"]')?.getAttribute('data-tooltip')
   return { ...result, dom,
     lines: [...dom.querySelectorAll('progress')].map(progress => {
       const section = progress.closest('section')!
       return { label: progress.getAttribute('aria-label'), value: section.textContent?.match(/[\d.]+%/)?.[0], progress: progress.value,
         ...(section.querySelector('small') ? { description: section.querySelector('small')!.textContent } : {}),
-        ...(section.getAttribute('title') ? { detail: section.getAttribute('title') } : {}) }
+        ...(section.getAttribute('data-tooltip') ? { detail: section.getAttribute('data-tooltip') } : {}) }
     }),
     error: dom.querySelector('[role="status"]')?.textContent,
     details,
@@ -37,22 +41,12 @@ const call = async (changes: Record<string, unknown> = {}) => {
   }
 }
 beforeEach(() => {
-  delete load.cache[path]
-  backend = load(path)
-  dataDirectory = mkdtempSync(join(tmpdir(), 'anas-usage-test-'))
-  writeFileSync(join(dataDirectory, 'display.json'), JSON.stringify({ version: 0, display_mode: 'detailed' }))
-  backend.activate({ dataDirectory })
+  service = createUsageService()
+  displayMode = 'detailed'
   fetcher.mockReset().mockImplementation(async () => Response.json(payload()))
   vi.stubGlobal('fetch', fetcher)
 })
-afterEach(() => { backend.deactivate(); vi.unstubAllGlobals(); vi.useRealTimers(); rmSync(dataDirectory, { recursive: true, force: true }) })
-
-it('loads the bundled manifest and registers MiMo wallet and regional plan hosts', () => {
-  const manifest = parsePluginManifest(JSON.parse(readFileSync(resolve('data/plugins/_system/usage-meter/PLUGIN.json'), 'utf8')))
-  expect(manifest.widgets?.[0].modelHosts).toEqual(expect.arrayContaining([
-    'api.xiaomimimo.com', 'token-plan-cn.xiaomimimo.com', 'token-plan-sgp.xiaomimimo.com', 'token-plan-ams.xiaomimimo.com'
-  ]))
-})
+afterEach(() => { service.clear(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
 it('recognizes exact provider hosts across protocols and hides other providers without a request', async () => {
   for (const baseUrl of ['https://example.com/minimax', 'https://api.minimaxi.com.evil.test/v1', 'invalid']) {
@@ -91,7 +85,7 @@ it('shows boosted remaining quota in both modes and moves totals and usage into 
   expect(chineseCompact?.dom.querySelector('[data-full-text]')?.textContent).toBe('5h 90% · 周 148.5%')
   const compact = await call({ action: 'show_compact', language: 'en' })
   expect(compact?.dom.querySelector('[data-full-text]')?.textContent).toBe('5h 90% · 1w 148.5%')
-  expect(compact?.dom.querySelector('[tabindex="0"]')?.getAttribute('title')).toContain('Weekly limit\nTotal quota: 150%\nUsed: 1.5%')
+  expect(compact?.dom.querySelector('[tabindex="0"]')?.getAttribute('data-tooltip')).toContain('Weekly limit\nTotal quota: 150%\nUsed: 1.5%')
   fetcher.mockResolvedValueOnce(Response.json(payload({ current_interval_remaining_percent: 0,
     current_weekly_remaining_percent: 0, weekly_boost_permille: 1500 })))
   const exhausted = await call({ action: 'show_detailed' })
@@ -242,18 +236,6 @@ it('does not substitute another quota bucket and reports missing credentials and
   expect((await call({ action: 'refresh' }))?.lines).toEqual([])
 })
 
-it('aborts network work when stopped and prevents subsequent queries', async () => {
-  fetcher.mockImplementationOnce((_url, options) => new Promise((_resolve, reject) => {
-    options.signal.addEventListener('abort', () => reject(new Error('cancelled')))
-  }))
-  const pending = call()
-  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
-  backend.deactivate()
-  await expect(pending).rejects.toThrow('stopped')
-  await expect(call()).rejects.toThrow('stopped')
-  expect(fetcher).toHaveBeenCalledTimes(1)
-})
-
 it('bounds response size and request time', async () => {
   fetcher.mockResolvedValueOnce(new Response('x'.repeat(1024 * 1024 + 1)))
   expect((await call())?.error).toBeTruthy()
@@ -266,7 +248,7 @@ it('bounds response size and request time', async () => {
   expect((await pending)?.error).toContain('超时')
 })
 
-it('uses a fixed title regardless of provider name and puts refresh markup in the plugin HTML', async () => {
+it('uses a fixed title regardless of provider name and renders native refresh controls', async () => {
   const providerName = '<script>alert("name")</script> & Quota'
   const result = await call({ model: { ...model, providerName } })
   expect(result?.dom.querySelector('script')).toBeNull()
@@ -274,7 +256,7 @@ it('uses a fixed title regardless of provider name and puts refresh markup in th
   expect(result?.dom.querySelector('header')?.textContent).toContain('MiniMax Token Plan')
   expect(result?.dom.textContent).not.toContain(providerName)
   expect(result?.details).not.toContain(providerName)
-  expect(result?.dom.querySelector('[data-action="refresh"] img')?.getAttribute('src')).toBe('assets/refresh.svg')
+  expect(result?.dom.querySelector('button')?.getAttribute('aria-label')).toBe('立即刷新')
 })
 
 it.each(['zh-CN', 'en'])('shares complete hover details between the title and compact summary (%s)', async language => {
@@ -307,10 +289,7 @@ it.each(['zh-CN', 'en'])('shares complete hover details between the title and co
 })
 
 it('defaults to a compact summary with reset details on hover and switches layouts without refetching quota', async () => {
-  rmSync(join(dataDirectory, 'display.json'))
-  delete load.cache[path]
-  backend = load(path)
-  backend.activate({ dataDirectory })
+  displayMode = 'compact'
   const now = Date.now()
   fetcher.mockResolvedValueOnce(Response.json(payload({ model_name: 'general', start_time: now - 4 * 3600000,
     end_time: now + 3600000, weekly_start_time: now - 6 * 86400000, weekly_end_time: now + 86400000,
@@ -318,16 +297,16 @@ it('defaults to a compact summary with reset details on hover and switches layou
   const compact = await call()
   expect(compact?.dom.textContent).toContain('5h 80% · 周 99%')
   expect(compact?.dom.querySelector('progress')).toBeNull()
-  const details = compact?.dom.querySelector('[tabindex="0"]')?.getAttribute('title')
+  const details = compact?.dom.querySelector('[tabindex="0"]')?.getAttribute('data-tooltip')
   expect(details).toContain('MiniMax Token Plan')
   expect(details).toContain('重置时间')
   expect(details).toContain('更新于')
-  expect(compact?.dom.querySelector('button')?.getAttribute('data-action')).toBe('refresh')
+  expect(compact?.dom.querySelector('button')?.getAttribute('aria-label')).toBe('立即刷新')
   const detailed = await call({ action: 'show_detailed' })
   expect(detailed?.dom.querySelectorAll('progress')).toHaveLength(2)
   const english = await call({ language: 'en', action: 'show_compact' })
   expect(english?.dom.textContent).toContain('5h 80% · 1w 99%')
-  expect(english?.dom.querySelector('[tabindex="0"]')?.getAttribute('title')).toContain('Resets')
+  expect(english?.dom.querySelector('[tabindex="0"]')?.getAttribute('data-tooltip')).toContain('Resets')
   expect(fetcher).toHaveBeenCalledTimes(1)
 })
 
@@ -338,30 +317,7 @@ it('keeps compact cached quota with an accessible failure indicator', async () =
   const failed = await call({ action: 'refresh' })
   expect(failed?.dom.textContent).toContain('80%')
   expect(failed?.dom.querySelector('[role="status"]')?.getAttribute('aria-label')).toContain('限流')
-  expect(failed?.dom.querySelector('[role="status"]')?.getAttribute('title')).toContain('限流')
-})
-
-it('persists in-widget choices across backend restarts and keeps the current mode when saving fails', async () => {
-  await call({ action: 'show_compact' })
-  expect(JSON.parse(readFileSync(join(dataDirectory, 'display.json'), 'utf8'))).toEqual({ version: 0, display_mode: 'compact' })
-  backend.deactivate()
-  delete load.cache[path]
-  backend = load(path)
-  backend.activate({ dataDirectory })
-  expect((await call())?.dom.querySelector('progress')).toBeNull()
-  await call({ action: 'show_detailed' })
-  const saved = readFileSync(join(dataDirectory, 'display.json'), 'utf8')
-  rmSync(join(dataDirectory, 'display.json'))
-  mkdirSync(join(dataDirectory, 'display.json'))
-  await expect(call({ action: 'show_compact' })).rejects.toThrow()
-  expect((await call())?.dom.querySelector('progress')).not.toBeNull()
-  rmSync(join(dataDirectory, 'display.json'), { recursive: true })
-  writeFileSync(join(dataDirectory, 'display.json'), saved)
-  writeFileSync(join(dataDirectory, 'display.json'), '{invalid')
-  delete load.cache[path]
-  const broken = load(path)
-  expect(() => broken.activate({ dataDirectory })).toThrow()
-  expect(readFileSync(join(dataDirectory, 'display.json'), 'utf8')).toBe('{invalid')
+  expect(failed?.dom.querySelector('[role="status"]')?.getAttribute('data-tooltip')).toContain('限流')
 })
 
 const mimo = { ...model, providerName: 'MiMo', baseUrl: 'https://api.xiaomimimo.com/v1', model: 'mimo-v2.6-pro' }
@@ -393,7 +349,7 @@ it('queries the MiMo wallet across protocols and subtracts frozen funds without 
     expect(result?.details).toContain('可用授信额度: CNY 380.00')
   }
   const compact = await call({ model: mimo, action: 'show_compact', language: 'en' })
-  expect(compact?.dom.textContent).toContain('CNY 490.25')
+  expect(compact?.dom.textContent).toContain('￥ 490.25')
   expect(compact?.details).toContain('Frozen balance: CNY 10.25')
   expect(fetcher).toHaveBeenCalledTimes(4)
 })
@@ -526,8 +482,8 @@ it('recognizes DeepSeek URLs and displays exact balances and breakdowns without 
     expect(result?.error).toBeUndefined()
   }
   const compact = await call({ model: { ...deepseek, model: 'another-model' }, action: 'show_compact' })
-  expect(compact?.dom.textContent).toContain('CNY 110.00001')
-  expect(compact?.dom.querySelector('[tabindex="0"]')?.getAttribute('title')).toContain('赠金余额: 10.00\n充值余额: 100.00001')
+  expect(compact?.dom.textContent).toContain('￥ 110.00001')
+  expect(compact?.dom.querySelector('[tabindex="0"]')?.getAttribute('data-tooltip')).toContain('赠金余额: 10.00\n充值余额: 100.00001')
   expect(fetcher).toHaveBeenCalledTimes(3)
   for (const baseUrl of ['https://api.deepseek.com.example/v1', 'https://proxy.example/deepseek']) expect(await call({ model: { ...deepseek, baseUrl } })).toBeNull()
   expect(fetcher).toHaveBeenCalledTimes(3)
@@ -540,17 +496,17 @@ it('keeps currencies separate and reports zero or negative unavailable balances'
   fetcher.mockResolvedValueOnce(Response.json(balancePayload({ balance_infos: [balance, { ...balance, currency: 'USD', total_balance: '0.000001' }] })))
   await call({ model: deepseek })
   const multi = await call({ model: deepseek, action: 'show_compact', language: 'en' })
-  expect(multi?.dom.textContent).toContain('CNY 110.00001 · USD 0.000001')
-  expect(multi?.dom.querySelector('[tabindex="0"]')?.getAttribute('title')).toContain('Granted balance')
+  expect(multi?.dom.textContent).toContain('￥ 110.00001 · USD 0.000001')
+  expect(multi?.dom.querySelector('[tabindex="0"]')?.getAttribute('data-tooltip')).toContain('Granted balance')
   const detailed = await call({ model: deepseek, action: 'show_detailed', language: 'en' })
   expect(detailed?.details).toContain('CNY available 110.00001\nGranted balance: 10.00\nTopped-up balance: 100.00001\n\nUSD available 0.000001\nGranted balance: 10.00\nTopped-up balance: 100.00001')
   await call({ model: deepseek, action: 'show_compact' })
   fetcher.mockResolvedValueOnce(Response.json(balancePayload({ is_available: false, balance_infos: [{ ...balance, total_balance: '0.00', granted_balance: '0.00', topped_up_balance: '0.00' }] })))
   const empty = await call({ model: deepseek, action: 'refresh' })
-  expect(empty?.dom.textContent).toContain('CNY 0.00')
+  expect(empty?.dom.textContent).toContain('￥ 0.00')
   expect(empty?.dom.querySelector('[role="status"]')?.getAttribute('aria-label')).toContain('余额不足')
   fetcher.mockResolvedValueOnce(Response.json(balancePayload({ is_available: false, balance_infos: [{ ...balance, total_balance: '-0.001' }] })))
-  expect((await call({ model: deepseek, action: 'refresh' }))?.dom.textContent).toContain('CNY -0.001')
+  expect((await call({ model: deepseek, action: 'refresh' }))?.dom.textContent).toContain('￥ -0.001')
 })
 
 it('retains the last DeepSeek balance on invalid responses and clears notices after recovery', async () => {
@@ -576,7 +532,7 @@ it('retains the last DeepSeek balance on invalid responses and clears notices af
 it('queries Moonshot regional balances without summing negative cash and vouchers', async () => {
   const data = { code: 0, status: true, scode: '0x0', data: { available_balance: 46.58893, voucher_balance: 46.58893, cash_balance: -3.00001 } }
   fetcher.mockImplementation(async () => Response.json(data))
-  for (const [host, currency] of [['api.moonshot.cn', 'CNY'], ['api.moonshot.ai', 'USD']]) {
+  for (const [host, currency, compactCurrency] of [['api.moonshot.cn', 'CNY', '￥'], ['api.moonshot.ai', 'USD', 'USD']]) {
     const provider = { ...model, providerName: 'Kimi', baseUrl: `https://${host}/v1` }
     const result = await call({ model: provider })
     expect(fetcher).toHaveBeenLastCalledWith(`https://${host}/v1/users/me/balance`, expect.anything())
@@ -587,8 +543,8 @@ it('queries Moonshot regional balances without summing negative cash and voucher
     expect(result?.details).toContain(`${currency} 可用余额 46.58893`)
     expect(result?.dom.querySelector('progress')).toBeNull()
     const compact = await call({ model: provider, action: 'show_compact', language: 'en' })
-    expect(compact?.dom.textContent).toContain(`${currency} 46.58893`)
-    expect(compact?.dom.querySelector('[tabindex="0"]')?.getAttribute('title')).toContain('Voucher balance')
+    expect(compact?.dom.textContent).toContain(`${compactCurrency} 46.58893`)
+    expect(compact?.dom.querySelector('[tabindex="0"]')?.getAttribute('data-tooltip')).toContain('Voucher balance')
     await call({ model: provider, action: 'show_detailed' })
   }
   expect(fetcher).toHaveBeenCalledTimes(2)
@@ -620,7 +576,7 @@ it('shows OpenRouter key limits and spend without presenting them as account bal
   fetcher.mockResolvedValueOnce(Response.json({ data: { ...data, limit: null, limit_remaining: null, limit_reset: null, expires_at: null } }))
   const unlimited = await call({ model: provider, action: 'refresh', language: 'en' })
   expect(unlimited?.dom.textContent).toContain('Key No cap')
-  expect(unlimited?.dom.querySelector('[tabindex="0"]')?.getAttribute('title')).toContain('not the account balance')
+  expect(unlimited?.dom.querySelector('[tabindex="0"]')?.getAttribute('data-tooltip')).toContain('not the account balance')
   fetcher.mockResolvedValueOnce(Response.json({ data: { ...data, limit: 0, limit_remaining: 0 } }))
   expect((await call({ model: provider, action: 'refresh' }))?.dom.textContent).toContain('密钥 USD 0')
   fetcher.mockResolvedValueOnce(Response.json({ data: { ...data, limit_remaining: null } }))
@@ -708,9 +664,9 @@ it.each([glmOrdinary, glmResponses])('queries the domestic GLM wallet for $baseU
   }
   const compact = await call({ model: provider, action: 'show_compact', language: 'en' })
   expect(compact?.title).toBe('GLM Balance')
-  expect(compact?.dom.textContent).toContain('CNY 0.123456789')
-  expect(compact?.dom.querySelector('[tabindex="0"]')?.getAttribute('title')).toContain('Total top-ups: CNY 20')
-  expect(compact?.dom.querySelector('[tabindex="0"]')?.getAttribute('title')).toContain('excludes resource packages and Coding Plan quotas')
+  expect(compact?.dom.textContent).toContain('￥ 0.123456789')
+  expect(compact?.dom.querySelector('[tabindex="0"]')?.getAttribute('data-tooltip')).toContain('Total top-ups: CNY 20')
+  expect(compact?.dom.querySelector('[tabindex="0"]')?.getAttribute('data-tooltip')).toContain('excludes resource packages and Coding Plan quotas')
   expect(fetcher).toHaveBeenCalledTimes(3)
 })
 
@@ -760,7 +716,7 @@ it('uses credit-plan percentages without mixing in old token or MCP allowances',
   expect(result?.lines.map(line => line.value)).toEqual(['100%', '0%'])
   const compact = await call({ model: { ...glm, id: 'next', model: 'glm-5.3-flash' }, action: 'show_compact', language: 'en' })
   expect(compact?.dom.textContent).toContain('5h 100% · 1w 0%')
-  expect(compact?.dom.querySelector('[tabindex="0"]')?.getAttribute('title')).toContain('Weekly quota remaining 0%')
+  expect(compact?.dom.querySelector('[tabindex="0"]')?.getAttribute('data-tooltip')).toContain('Weekly quota remaining 0%')
   expect(fetcher).toHaveBeenCalledTimes(1)
 })
 

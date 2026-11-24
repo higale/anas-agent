@@ -33,6 +33,7 @@ describe('model template menu', () => {
 
     await user.click(screen.getByLabelText('settings.new_provider'))
     const unitedStates = screen.getByRole('menuitem', { name: 'United States' })
+    expect(unitedStates.querySelector('img')).toBeNull()
     unitedStates.focus()
     await user.keyboard('{ArrowRight}')
 
@@ -40,11 +41,14 @@ describe('model template menu', () => {
     const unitedStatesMenu = screen.getAllByRole('menu').at(-1)
     const openAi = within(unitedStatesMenu!).getByRole('menuitem', { name: 'OpenAI' })
     expect(openAi).toHaveClass('model-template-group')
+    expect(openAi.querySelector('img')).toBeVisible()
+    expect(within(unitedStatesMenu!).getByRole('menuitem', { name: 'Gemini' }).querySelector('img')).toBeVisible()
     openAi.focus()
     await user.keyboard('{ArrowRight}')
 
     await waitFor(() => expect(screen.getAllByRole('menu')).toHaveLength(3))
     const protocolMenu = screen.getAllByRole('menu').at(-1)
+    expect(protocolMenu!.querySelector('img')).toBeNull()
     expect(within(protocolMenu!).getAllByRole('menuitem').map(item => item.textContent))
       .toEqual(['OpenAI Responses', 'OpenAI Chat Completions'])
     await user.click(within(protocolMenu!).getByRole('menuitem', { name: label }))
@@ -89,7 +93,7 @@ describe('model template menu', () => {
 
     await waitFor(() => expect(screen.getAllByRole('menu')).toHaveLength(2))
     const chinaMenu = screen.getAllByRole('menu').at(-1)
-    const qwen = within(chinaMenu!).getByRole('menuitem', { name: 'Qwen' })
+    const qwen = within(chinaMenu!).getByRole('menuitem', { name: 'Bailian' })
     expect(qwen).toHaveClass('model-template-group')
     qwen.focus()
     await user.keyboard('{ArrowRight}')
@@ -118,12 +122,13 @@ describe('model template menu', () => {
     await user.keyboard('{ArrowRight}')
     await waitFor(() => expect(screen.getAllByRole('menu')).toHaveLength(2))
     const chinaMenu = screen.getAllByRole('menu').at(-1)
-    const qwen = within(chinaMenu!).getByRole('menuitem', { name: 'Qwen' })
+    const qwen = within(chinaMenu!).getByRole('menuitem', { name: 'Bailian' })
     qwen.focus()
     await user.keyboard('{ArrowRight}')
     await waitFor(() => expect(screen.getAllByRole('menu')).toHaveLength(3))
     const qwenMenu = screen.getAllByRole('menu').at(-1)
-    const tokenPlan = within(qwenMenu!).getByRole('menuitem', { name: 'TokenPlan' })
+    const tokenPlan = within(qwenMenu!).getByRole('menuitem', { name: 'Token Plan' })
+    expect(tokenPlan.querySelector('img')).toBeNull()
     tokenPlan.focus()
     await user.keyboard('{ArrowRight}')
 
@@ -131,6 +136,7 @@ describe('model template menu', () => {
     const submenus = screen.getAllByRole('menu')
     const tokenPlanMenu = submenus.at(-1)
     expect(tokenPlanMenu).toHaveClass('model-template-submenu')
+    expect(tokenPlanMenu!.querySelector('img')).toBeNull()
     within(tokenPlanMenu!).getByRole('menuitem', { name: label }).focus()
     await user.keyboard('{Enter}')
 

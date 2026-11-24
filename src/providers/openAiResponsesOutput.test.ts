@@ -70,4 +70,36 @@ describe('native Responses output', () => {
     expect([...accumulator.blocks().values()]).toMatchObject([{ type: 'reasoning', reasoning: 'Plan', encrypted_content: 'opaque' }])
     expect(accumulator.result().output).toEqual(final.output)
   })
+
+  it('assembles summary parts when a reasoning item starts without a summary array', () => {
+    const accumulator = new ResponsesAccumulator()
+    const item = { type: 'reasoning', id: 'rs', status: 'in_progress' }
+    const part = { type: 'summary_text' }
+    accept(accumulator, { type: 'response.output_item.added', output_index: 0, item })
+    accept(accumulator, { type: 'response.reasoning_summary_part.added', output_index: 0, summary_index: 0, part })
+    accept(accumulator, { type: 'response.reasoning_summary_text.delta', output_index: 0, summary_index: 0, delta: 'Plan' })
+    accept(accumulator, { type: 'response.reasoning_summary_text.done', output_index: 0, summary_index: 0, text: 'Plan first.' })
+    accept(accumulator, { type: 'response.reasoning_summary_part.done', output_index: 0, summary_index: 0,
+      part: { type: 'summary_text', text: 'Plan first.' } })
+    accept(accumulator, { type: 'response.reasoning_summary_part.done', output_index: 0, summary_index: 1,
+      part: { type: 'summary_text', text: ' Then act.' } })
+    const final = response([{ type: 'reasoning', id: 'rs', summary: [], encrypted_content: 'opaque' }])
+    accept(accumulator, { type: 'response.completed', response: final })
+
+    expect([...accumulator.blocks().values()]).toMatchObject([{ type: 'reasoning', reasoning: 'Plan first. Then act.' }])
+    expect(item).not.toHaveProperty('summary')
+    expect(part).toEqual({ type: 'summary_text' })
+    expect(accumulator.result()).toBe(final)
+    expect(final.output[0]).toMatchObject({ summary: [] })
+  })
+
+  it('initializes summary text when part-added events are omitted', () => {
+    const accumulator = new ResponsesAccumulator()
+    accept(accumulator, { type: 'response.output_item.added', output_index: 0,
+      item: { type: 'reasoning', id: 'rs', status: 'in_progress' } })
+    accept(accumulator, { type: 'response.reasoning_summary_text.delta', output_index: 0, summary_index: 0, delta: 'Plan' })
+    accept(accumulator, { type: 'response.reasoning_summary_text.done', output_index: 0, summary_index: 1, text: ' and act.' })
+    accept(accumulator, { type: 'response.completed', response: response([{ type: 'reasoning', id: 'rs', summary: [] }]) })
+    expect([...accumulator.blocks().values()]).toMatchObject([{ type: 'reasoning', reasoning: 'Plan and act.' }])
+  })
 })

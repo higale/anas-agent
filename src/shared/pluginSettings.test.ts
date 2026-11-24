@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { parsePluginSettings, pluginSettingValues } from './pluginSettings'
-import { parsePluginManifest } from './plugins'
+import { parsePluginManifest, pluginDisplayText } from './plugins'
 
 const definition = [
   { key: 'label', label: 'Label', type: 'text', default: 'default', max_length: 8 },
@@ -25,4 +25,22 @@ it('rejects invalid definitions and does not treat settings alone as a functiona
   }
   expect(parsePluginSettings(undefined)).toEqual([])
   expect(() => parsePluginManifest({ version: 0, api_version: 2, id: 'settings-only', name: 'Settings', plugin_version: '1.0.0', settings: definition })).toThrow('entry')
+})
+
+it('supports password settings with empty defaults and validates credential lengths without exposing values', () => {
+  const fields = parsePluginSettings([{ key: 'query_key', label: 'Query key', type: 'password', default: '', max_length: 12 }])
+  expect(pluginSettingValues(fields, {})).toEqual({ query_key: '' })
+  expect(pluginSettingValues(fields, { query_key: 'new-secret' }, true)).toEqual({ query_key: 'new-secret' })
+  expect(() => pluginSettingValues(fields, { query_key: 'overlong-secret' }, true)).toThrow('Invalid plugin setting: query_key')
+  expect(() => parsePluginSettings([{ ...fields[0], default: 0 }])).toThrow()
+  expect(() => parsePluginSettings([{ ...fields[0], max_length: 0 }])).toThrow()
+})
+
+it('defaults the settings title to the host and accepts an optional manifest title', () => {
+  const raw = { version: 0, api_version: 2, id: 'example', name: 'Example', plugin_version: '1.0.0', ui: 'index.html', settings: definition }
+  const plugin = { id: 'example', enabled: true, backendStatus: 'stopped' as const, manifest: parsePluginManifest(raw) }
+  expect(pluginDisplayText(plugin, 'en', 'settingsTitle')).toBe('')
+  plugin.manifest = parsePluginManifest({ ...raw, settings_title: '  Account settings  ' })
+  expect(pluginDisplayText(plugin, 'en', 'settingsTitle')).toBe('Account settings')
+  for (const settings_title of ['', '   ', 123, 'x'.repeat(121)]) expect(() => parsePluginManifest({ ...raw, settings_title })).toThrow('settings title')
 })

@@ -155,7 +155,8 @@
   flex: 0 0 auto;
 }
 
-.plugin-widget {
+.plugin-widget,
+.usage-meter {
   display: grid;
   gap: 5px;
   min-width: 0;
@@ -193,3 +194,8 @@
   color: var(--text-secondary);
   font-weight: 600;
 }
+
+.usage-meter { max-height: 50vh; overflow: auto; -webkit-app-region: no-drag; }
+.usage-meter progress { appearance: none; display: block; width: 100%; height: 4px; margin-block: 4px; overflow: hidden; border: 0; border-radius: 2px; background: var(--bg-soft); }
+.usage-meter progress::-webkit-progress-bar { background: var(--bg-soft); }
+.usage-meter progress::-webkit-progress-value { background: var(--accent); }

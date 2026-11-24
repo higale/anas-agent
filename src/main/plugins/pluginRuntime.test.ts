@@ -35,6 +35,11 @@ beforeEach(async () => {
   runtime = await import('./pluginRuntime')
   await runtime.initializePluginsStore()
   await runtime.pluginRuntime().store.install(join(state.root, 'examples/plugins/text-tools.zip'))
+  const fixture = join(state.root, 'worker-fixture')
+  await mkdir(fixture)
+  await writeFile(join(fixture, 'PLUGIN.json'), JSON.stringify({ version: 0, id: 'fixture-worker', name: 'Fixture', plugin_version: '1.0.0', api_version: 2, backend: 'backend.cjs' }))
+  await writeFile(join(fixture, 'backend.cjs'), 'module.exports = {}')
+  await runtime.pluginRuntime().store.install(join(fixture, 'PLUGIN.json'))
 })
 afterEach(async () => { await runtime.stopPluginBackends(); await rm(state.root, { recursive: true, force: true }) })
 
@@ -53,53 +58,13 @@ it.each([false, true])('keeps backend stop notifications except during applicati
   else expect(state.send).toHaveBeenCalledWith('plugins:changed')
 })
 
-it('loads mirrored built-ins, keeps examples inactive and refreshes only app-owned packages', async () => {
-  const { store } = runtime.pluginRuntime()
-  expect((await store.list()).map(plugin => plugin.id).sort()).toEqual(['example-text-tools', 'usage-meter'])
-  expect(await store.packageDirectory('usage-meter')).toBe(join(state.root, 'plugins/_system/usage-meter'))
-  await store.data('usage-meter', 'choice', true, 'keep')
-  await store.setEnabled('usage-meter', false)
-  const settings = await store.settings('example-text-tools')
-  await store.settings('example-text-tools', { revision: settings.revision, values: { ...settings.values, prefix: 'keep' } })
-  const installed = await store.packageFile('example-text-tools', 'backend.cjs')
-  const original = await readFile(installed, 'utf8')
-  await writeFile(join(state.root, 'plugins/_system/usage-meter/stale.txt'), 'old file')
-  await mkdir(join(state.root, 'examples/plugins/text-tools'))
-  await writeFile(join(state.root, 'examples/plugins/text-tools/stale.txt'), 'old file')
-  await writeFile(join(state.bundled, 'plugins/_system/usage-meter/backend.cjs'), 'module.exports = {}\n')
-  await Promise.all([runtime.initializePluginsStore(), runtime.initializePluginsStore()])
-  expect(await readFile(await store.packageFile('usage-meter', 'backend.cjs'), 'utf8')).toBe('module.exports = {}\n')
-  expect(await readFile(installed, 'utf8')).toBe(original)
-  expect((await store.settings('example-text-tools')).values.prefix).toBe('keep')
-  expect(await store.read('usage-meter')).toMatchObject({ enabled: false, builtin: true, error: undefined })
-  await store.setEnabled('usage-meter', true)
-  expect(await store.data('usage-meter', 'choice')).toBe('keep')
-  await expect(readFile(join(state.root, 'plugins/_system/usage-meter/stale.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
-  expect(await readFile(join(state.root, 'examples/plugins/text-tools/stale.txt'), 'utf8')).toBe('old file')
-  expect(state.fork).not.toHaveBeenCalled()
-})
-
-it('retains the current system package on invalid bundled metadata and retries after correction', async () => {
-  const { store } = runtime.pluginRuntime()
-  const backend = await store.packageFile('usage-meter', 'backend.cjs')
-  const original = await readFile(backend, 'utf8')
-  const manifest = join(state.bundled, 'plugins/_system/usage-meter/PLUGIN.json')
-  const contents = await readFile(manifest, 'utf8')
-  await writeFile(manifest, '{broken')
-  await expect(runtime.initializePluginsStore()).rejects.toThrow()
-  expect(await readFile(backend, 'utf8')).toBe(original)
-  await writeFile(manifest, contents)
+it('keeps system resources separate from installed plugins and removes retired bundled code', async () => {
+  const directory = join(state.root, 'plugins/_system/retired')
+  await mkdir(directory, { recursive: true })
+  await writeFile(join(directory, 'PLUGIN.json'), JSON.stringify({ version: 0, id: 'retired' }))
   await runtime.initializePluginsStore()
-  expect(await store.read('usage-meter')).toMatchObject({ enabled: true, error: undefined })
-})
-
-it('recreates mirrors absent from an older backup without resetting plugin state', async () => {
-  const { store } = runtime.pluginRuntime()
-  await store.setEnabled('usage-meter', false)
-  await rm(join(state.root, 'plugins/_system'), { recursive: true })
-  await runtime.initializePluginsStore()
-  expect(await store.read('usage-meter')).toMatchObject({ enabled: false, error: undefined })
-  expect((await store.list()).map(plugin => plugin.id).sort()).toEqual(['example-text-tools', 'usage-meter'])
+  expect((await runtime.pluginRuntime().store.list()).map(plugin => plugin.id).sort()).toEqual(['example-text-tools', 'fixture-worker'])
+  await expect(readFile(join(directory, 'PLUGIN.json'))).rejects.toMatchObject({ code: 'ENOENT' })
   expect(state.fork).not.toHaveBeenCalled()
 })
 
@@ -181,7 +146,7 @@ it('allows backup to stop a running tool instead of waiting for its execution ti
 
 it.each([false, true])('restores backends and automatic eligibility after backup, allowing activation host calls (copy fails=%s)', async fails => {
   const { backends } = runtime.pluginRuntime()
-  await backends.stop('usage-meter')
+  await backends.stop('fixture-worker')
   const prepared = await backends.prepare('example-text-tools')
   child.emit('message', { ready: true })
   await prepared.ready
@@ -210,8 +175,8 @@ it.each([false, true])('restores backends and automatic eligibility after backup
   expect(backends.status('example-text-tools').backendStatus).toBe('running')
   expect(backends.canStartAutomatically('example-text-tools')).toBe(true)
   expect(backends.canStartAutomatically('unused-plugin')).toBe(true)
-  expect(backends.canStartAutomatically('usage-meter')).toBe(false)
-  expect(backends.status('usage-meter').backendStatus).toBe('stopped')
+  expect(backends.canStartAutomatically('fixture-worker')).toBe(false)
+  expect(backends.status('fixture-worker').backendStatus).toBe('stopped')
 })
 
 it.each(['shutdown', 'manual stop'])('does not undo %s while completing backup', async action => {
@@ -257,7 +222,7 @@ it('restores healthy backends if another backend cannot stop cleanly and prevent
   await prepared.ready
   const broken = new Child()
   state.fork.mockReturnValue(broken)
-  const other = await backends.prepare('usage-meter')
+  const other = await backends.prepare('fixture-worker')
   broken.emit('message', { ready: true })
   await other.ready
   broken.postMessage.mockImplementation(message => {
@@ -275,8 +240,8 @@ it('restores healthy backends if another backend cannot stop cleanly and prevent
   await expect(runtime.withPluginBackendsStoppedForBackup(copy)).rejects.toThrow('Could not cleanly stop')
   expect(copy).not.toHaveBeenCalled()
   expect(backends.status('example-text-tools').backendStatus).toBe('running')
-  expect(backends.status('usage-meter')).toEqual({ backendStatus: 'failed', backendError: 'Plugin backend cleanup failed: flush failed' })
-  expect(backends.canStartAutomatically('usage-meter')).toBe(false)
+  expect(backends.status('fixture-worker')).toEqual({ backendStatus: 'failed', backendError: 'Plugin backend cleanup failed: flush failed' })
+  expect(backends.canStartAutomatically('fixture-worker')).toBe(false)
 })
 
 it('serializes consecutive backups through backend restart', async () => {

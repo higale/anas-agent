@@ -25,7 +25,7 @@ export interface ProviderHttpTraceOptions {
 
 interface TraceEntry {
   directory: string
-  finalized: boolean
+  finalization?: Promise<void>
   maximumBodyBytes: number
   requestCapture: Promise<void>
   responseBodyBytes: number
@@ -216,7 +216,6 @@ async function beginTrace(
   await writeJson(join(directory, 'request.json'), metadata)
   const entry: TraceEntry = {
     directory,
-    finalized: false,
     maximumBodyBytes: limits.maximumBodyBytes,
     requestCapture: Promise.resolve(),
     responseBodyBytes: 0,
@@ -251,43 +250,43 @@ async function recordResponseHeaders(entry: TraceEntry, response: Response, star
   }
 }
 
-async function finalizeResponse(entry: TraceEntry, status: 'completed' | 'cancelled' | 'failed'): Promise<void> {
-  if (entry.finalized) return
-  entry.finalized = true
-  try {
-    if (entry.responseBodyFile) {
-      try {
-        await entry.responseBodyFile.close()
-      } catch {
-        // A trace close failure must not alter the provider response.
-      }
-      entry.responseBodyFile = undefined
-    }
-    if (!entry.responseMetadata || entry.traceFailed) return
-    entry.responseMetadata = {
-      ...entry.responseMetadata,
-      completedAt: new Date().toISOString(),
-      captureStatus: entry.truncated ? 'truncated' : status,
-      bodyBytes: entry.responseBodyBytes,
-      ...(entry.truncated
-        ? {
-            observedBodyBytes: entry.responseBodyObservedBytes,
-            maximumBodyBytes: entry.maximumBodyBytes
-          }
-        : {})
-    }
+function finalizeResponse(entry: TraceEntry, status: 'completed' | 'cancelled' | 'failed'): Promise<void> {
+  return entry.finalization ??= (async () => {
     try {
-      await writeJson(join(entry.directory, 'response.json'), entry.responseMetadata)
-    } catch (error) {
-      entry.traceFailed = true
-      runtimeLog('warn', 'agent-model-http-trace', 'Failed to finalize provider HTTP trace.', {
-        directory: entry.directory,
-        error: errorDetails(error)
-      })
+      if (entry.responseBodyFile) {
+        try {
+          await entry.responseBodyFile.close()
+        } catch {
+          // A trace close failure must not alter the provider response.
+        }
+        entry.responseBodyFile = undefined
+      }
+      if (!entry.responseMetadata || entry.traceFailed) return
+      entry.responseMetadata = {
+        ...entry.responseMetadata,
+        completedAt: new Date().toISOString(),
+        captureStatus: entry.truncated ? 'truncated' : status,
+        bodyBytes: entry.responseBodyBytes,
+        ...(entry.truncated
+          ? {
+              observedBodyBytes: entry.responseBodyObservedBytes,
+              maximumBodyBytes: entry.maximumBodyBytes
+            }
+          : {})
+      }
+      try {
+        await writeJson(join(entry.directory, 'response.json'), entry.responseMetadata)
+      } catch (error) {
+        entry.traceFailed = true
+        runtimeLog('warn', 'agent-model-http-trace', 'Failed to finalize provider HTTP trace.', {
+          directory: entry.directory,
+          error: errorDetails(error)
+        })
+      }
+    } finally {
+      await entry.requestCapture
     }
-  } finally {
-    await entry.requestCapture
-  }
+  })()
 }
 
 async function recordNetworkFailure(entry: TraceEntry, error: unknown): Promise<void> {
@@ -334,26 +333,28 @@ async function recordResponseChunk(entry: TraceEntry, chunk: Uint8Array): Promis
   }
 }
 
-function responseWithTracedBody(response: Response, entry: TraceEntry): Response {
+function responseWithTracedBody(response: Response, entry: TraceEntry, signal: AbortSignal): Response {
   if (!response.body) return response
   const reader = response.body.getReader()
+  let cancelled = false
   const body = new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
         const next = await reader.read()
         if (next.done) {
-          await finalizeResponse(entry, 'completed')
-          controller.close()
+          await finalizeResponse(entry, cancelled || signal.aborted ? 'cancelled' : 'completed')
+          if (!cancelled) controller.close()
           return
         }
         await recordResponseChunk(entry, next.value)
-        controller.enqueue(next.value)
+        if (!cancelled) controller.enqueue(next.value)
       } catch (error) {
-        await finalizeResponse(entry, 'failed')
-        controller.error(error)
+        await finalizeResponse(entry, cancelled || signal.aborted ? 'cancelled' : 'failed')
+        if (!cancelled) controller.error(error)
       }
     },
     async cancel(reason) {
+      cancelled = true
       try {
         await reader.cancel(reason)
       } finally {
@@ -404,7 +405,7 @@ export function createProviderHttpTraceFetch(
       try {
         await recordResponseHeaders(entry, response, startedAt)
         if (!response.body) await finalizeResponse(entry, 'completed')
-        return responseWithTracedBody(response, entry)
+        return responseWithTracedBody(response, entry, request.signal)
       } catch (error) {
         entry.traceFailed = true
         await finalizeResponse(entry, 'failed')

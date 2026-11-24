@@ -114,11 +114,15 @@ export class ResponsesAccumulator {
     }
     if (event.type.startsWith('response.reasoning')) {
       if (!item) { item = { type: 'reasoning', id: 'item_id' in event ? event.item_id : undefined, summary: [] }; this.items.set(index, item as unknown as Item) }
-      if (event.type === 'response.reasoning_summary_text.delta') {
-        this.summaries.set(index, (this.summaries.get(index) ?? '') + event.delta)
-        const summary = item.summary as Fields[]
-        const part = summary[event.summary_index] ??= { type: 'summary_text', text: '' }
-        part.text = String(part.text ?? '') + event.delta
+      if ('summary_index' in event) {
+        const summary = (item.summary ??= []) as Fields[]
+        if (event.type === 'response.reasoning_summary_part.added' || event.type === 'response.reasoning_summary_part.done') {
+          summary[event.summary_index] = structuredClone(event.part) as unknown as Fields
+        } else if (event.type === 'response.reasoning_summary_text.delta' || event.type === 'response.reasoning_summary_text.done') {
+          const part = summary[event.summary_index] ??= { type: 'summary_text', text: '' }
+          part.text = event.type === 'response.reasoning_summary_text.delta' ? String(part.text ?? '') + event.delta : event.text
+        }
+        this.summaries.set(index, textParts(summary))
       }
       return
     }

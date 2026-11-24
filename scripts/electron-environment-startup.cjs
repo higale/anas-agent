@@ -133,12 +133,10 @@ async function verifyEnvironmentStartup(repositoryRoot, executablePath) {
     }
     const profile = join(root, 'profile')
     assert.ok((await readdir(join(profile, 'examples/skills'))).length > 0)
-    assert.equal(JSON.parse(await readFile(join(profile, 'plugins/_system/usage-meter/PLUGIN.json'), 'utf8')).id, 'usage-meter')
+    await assert.rejects(readFile(join(profile, 'plugins/_system/usage-meter/PLUGIN.json')), { code: 'ENOENT' })
     assert.deepEqual((await readdir(join(profile, 'examples/plugins'))).sort(), ['README.en.md', 'README.md', 'backend-demo.zip', 'notepad.zip', 'text-tools.zip', 'writing-helper.zip'])
     const plugins = await page.evaluate(() => globalThis.gale.plugins.list())
-    assert.deepEqual(plugins.map(plugin => plugin.id), ['usage-meter'], 'Plugin examples must not be registered automatically.')
-    assert.equal(plugins[0].error, undefined)
-    assert.equal(plugins[0].backendStatus, 'stopped')
+    assert.deepEqual(plugins.map(plugin => plugin.id), [], 'Plugin examples must not be registered automatically.')
     assert.deepEqual(await readdir(join(profile, 'tools')), [], 'Tool examples must not be installed automatically.')
     for (const name of ['read_text_raw', 'file_sha256', 'json_format']) {
       const tool = JSON.parse(await readFile(join(profile, 'examples/tools', name, 'TOOL.json'), 'utf8'))

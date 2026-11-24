@@ -44,6 +44,8 @@ const api: GaleApi = {
       return () => { ipcRenderer.removeListener('panels:open', handler) }
     },
   },
+  usage: { read: (modelId, refresh, presentationOnly) => ipcRenderer.invoke('usage:read', modelId, refresh, presentationOnly),
+    setDisplayMode: (providerId, mode) => ipcRenderer.invoke('usage:setDisplayMode', providerId, mode) },
   plugins: {
     readWidget: (id, widgetId, modelConfigId, action) => ipcRenderer.invoke('plugins:readWidget', id, widgetId, modelConfigId, action),
     list: () => ipcRenderer.invoke('plugins:list'),

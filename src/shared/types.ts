@@ -155,6 +155,7 @@ export interface ProviderModelConfigSave {
 }
 
 export interface ModelProviderConfig {
+  usage?: import('./usageMeter').UsageSettings
   id: string
   name: string
   iconData?: string
@@ -171,6 +172,7 @@ export interface ModelProviderConfigDetail extends ModelProviderConfig {
 }
 
 export interface ModelProviderConfigSave {
+  usage?: import('./usageMeter').UsageSettings
   id?: string
   name: string
   iconData?: string
@@ -754,6 +756,7 @@ export interface SkillInvocationResult {
 export interface GaleApi {
   preferences: import('./preferenceMemory').PreferenceMemoryApi
   panels: import('./panels').PanelsApi
+  usage: import('./usageMeter').UsageApi
   plugins: import('./plugins').PluginsApi
   recovery: import('./recovery').RecoveryApi
   speechInput: import('./speechInput').SpeechInputApi

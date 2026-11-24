@@ -1,3 +1,4 @@
+import { observeAdaptiveText } from '../adaptiveText'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { pluginIconSources, requirePluginIconPath } from '@shared/plugins'
@@ -80,24 +81,7 @@ export function PluginWidgetHtml({ fragment, busy, displayActions, onAction, onL
       button.replaceWith(container)
       return { container, button }
     }))
-    const adaptiveText = [...root.querySelectorAll<HTMLElement>('.ui-adaptive-text')].flatMap(container => {
-      const full = container.querySelector<HTMLElement>(':scope > [data-full-text]')
-      const short = container.querySelector<HTMLElement>(':scope > [data-short-text]')
-      return full && short ? [{ container, full, short }] : []
-    })
-    const fitText = () => {
-      for (const { container, full, short } of adaptiveText) {
-        const condensed = full.scrollWidth > container.clientWidth
-        container.toggleAttribute('data-condensed', condensed)
-        full.setAttribute('aria-hidden', String(condensed))
-        short.setAttribute('aria-hidden', String(!condensed))
-      }
-    }
-    // Both variants retain their layout boxes, so choosing one cannot cause resize oscillation.
-    const observer = adaptiveText.length ? new ResizeObserver(fitText) : undefined
-    for (const { container, full } of adaptiveText) { observer!.observe(container); observer!.observe(full) }
-    document.fonts?.addEventListener('loadingdone', fitText)
-    fitText()
+    const stopAdaptiveText = observeAdaptiveText(root)
     controls.current = new Map([...root.querySelectorAll<HTMLButtonElement>('button[data-action]')].map(button => [button, button.disabled]))
     for (const [button, disabled] of controls.current) {
       button.disabled = disabled || (callbacks.current.busy && !displayActions.includes(button.dataset.action!))
@@ -119,8 +103,7 @@ export function PluginWidgetHtml({ fragment, busy, displayActions, onAction, onL
     root.addEventListener('click', click)
     root.addEventListener('auxclick', click)
     return () => {
-      observer?.disconnect()
-      document.fonts?.removeEventListener('loadingdone', fitText)
+      stopAdaptiveText()
       disconnectTooltips()
       root.removeEventListener('click', click)
       root.removeEventListener('auxclick', click)

@@ -1,3 +1,4 @@
+import { clearUsageRuntime, registerUsageIpc } from './usage/usageRuntime'
 import { registerPanelIpc } from './panels/panelHost'
 import { panelPages } from './panels/panelRegistry'
 import { initializeHelpFiles } from './helpDocuments'
@@ -66,6 +67,7 @@ function startApplication(): void {
   registerAppIpcHandlers()
   registerPanelIpc()
   registerPluginIpc()
+  registerUsageIpc()
   registerRecoveryIpcHandlers()
   registerWorkspaceIpcHandlers()
   registerSpeechInputIpc()
@@ -165,6 +167,7 @@ function startApplication(): void {
     shutdownStarted = true
     markAppQuitting()
     stopPluginChangeNotifications()
+    clearUsageRuntime()
     let deadline: ReturnType<typeof setTimeout> | undefined
     const shutdown = Promise.allSettled([
       Promise.resolve().then(() => panelPages.closeAll()),

@@ -7,6 +7,7 @@ import { beginApplicationDataTransition } from './applicationDataLifecycle'
 import { closeAgentRuntime } from './agent/agentIpcHandlers'
 import { closeCachedMcpRuntime } from './mcpRuntimeService'
 import { closePluginHost } from './plugins/pluginHost'
+import { clearUsageRuntime } from './usage/usageRuntime'
 import { createMainWindow } from './appShell'
 import { preserveRecoveryData, requireResettableConfigFile, resetRecoveryConfig } from './recoveryData'
 import { defaultRecoveryDirectory, inspectResetTargets, recoverInterruptedDataRestore, resetExecutionData, resetProjectData } from './backupService'
@@ -35,6 +36,7 @@ async function stopWriters(): Promise<void> {
   canModify = false
   stopError = undefined
   try {
+    clearUsageRuntime()
     await beginApplicationDataTransition()
     const results = await Promise.allSettled([
       Promise.resolve().then(() => panelPages.closeAll()),

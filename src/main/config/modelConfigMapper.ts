@@ -1,3 +1,4 @@
+import { changeUsageEndpoint, normalizeUsageSettings, type UsageSettings } from '@shared/usageMeter'
 import { requireModelImageLimits, type ModelImageLimits } from '@shared/modelImageLimits'
 import type {
   ModelCapabilities,
@@ -169,6 +170,9 @@ export function rawModelProviderFromSave(
       ? ''
       : requireString(provider.modelListUrl, 'provider.modelListUrl'),
     api_key: requireModelApiKey(provider.apiKey),
+    usage: usageToRaw(provider.usage === undefined
+      ? changeUsageEndpoint(usageFromRaw(existing?.usage, existing?.base_url ?? provider.baseUrl), existing?.base_url ?? provider.baseUrl, provider.baseUrl)
+      : normalizeUsageSettings(provider.usage, provider.baseUrl)),
     parameters: normalizeParameters(provider.parameters, 'provider.parameters'),
     models
   }
@@ -319,6 +323,7 @@ export function normalizeModelProvider(raw: RawModelProviderConfig, index: numbe
     baseUrl: requireString(raw.base_url, `${path}.base_url`),
     modelListUrl: raw.model_list_url === undefined ? '' : requireString(raw.model_list_url, `${path}.model_list_url`),
     apiKey,
+    usage: usageFromRaw(raw.usage, raw.base_url ?? ''),
     parameters: raw.parameters === undefined
       ? defaultModelProviderConfig.parameters
       : normalizeParameters(raw.parameters, `${path}.parameters`),
@@ -338,4 +343,15 @@ export function resolveModelConfig(
   model: ProviderModelConfig
 ): ResolvedModelConfig {
   return resolveProviderModelConfig(provider, model)
+}
+
+export function usageFromRaw(raw: RawModelProviderConfig['usage'], baseUrl: string): UsageSettings {
+  if (raw !== undefined && (!raw || typeof raw !== 'object' || Array.isArray(raw))) throw new Error('Invalid usage settings.')
+  return normalizeUsageSettings(raw === undefined ? undefined : { enabled: raw.enabled, displayMode: raw.display_mode,
+    tencentSecretId: raw.tencent_secret_id, tencentSecretKey: raw.tencent_secret_key, tencentShowBalance: raw.tencent_show_balance,
+    bailianAccessKeyId: raw.bailian_access_key_id, bailianAccessKeySecret: raw.bailian_access_key_secret, bailianShowBalance: raw.bailian_show_balance }, baseUrl)
+}
+export function usageToRaw(value: UsageSettings): NonNullable<RawModelProviderConfig['usage']> {
+  return { enabled: value.enabled, display_mode: value.displayMode, tencent_secret_id: value.tencentSecretId, tencent_show_balance: value.tencentShowBalance,
+    tencent_secret_key: value.tencentSecretKey, bailian_access_key_id: value.bailianAccessKeyId, bailian_access_key_secret: value.bailianAccessKeySecret, bailian_show_balance: value.bailianShowBalance }
 }

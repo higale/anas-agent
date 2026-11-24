@@ -51,6 +51,7 @@ export interface RawProviderModelConfig {
 }
 
 export interface RawModelProviderConfig {
+  usage?: { enabled?: boolean; display_mode?: 'compact' | 'detailed'; tencent_secret_id?: string; tencent_secret_key?: string; tencent_show_balance?: boolean; bailian_access_key_id?: string; bailian_access_key_secret?: string; bailian_show_balance?: boolean }
   icon_data?: string
   id?: string
   name?: string

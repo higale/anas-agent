@@ -2,6 +2,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { OpenAiResponses } from '../../providers/openAiResponses'
 
 const traceMocks = vi.hoisted(() => ({
   directory: '',
@@ -111,6 +112,82 @@ describe('provider HTTP trace', () => {
     const directory = await onlyTraceDirectory()
     await expect(readFile(join(directory, 'error.json'), 'utf8')).resolves.toContain('ECONNRESET')
   })
+
+  it.each(['close', 'error'] as const)('records cancellation when aborting a response makes its body %s', async ending => {
+    const abort = new AbortController()
+    const reason = new Error('Consumer stopped after a parse error')
+    const baseFetch = vi.fn(async (request: Request) => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('partial response'))
+        request.signal.addEventListener('abort', () => {
+          if (ending === 'close') controller.close()
+          else controller.error(request.signal.reason)
+        }, { once: true })
+      }
+    }), { headers: { 'content-type': 'text/event-stream' } })) as typeof fetch
+    const { createProviderHttpTraceFetch } = await import('./providerHttpTrace')
+    const tracedFetch = createProviderHttpTraceFetch(baseFetch, {
+      model: 'fixture', protocol: 'openai_responses', providerName: 'Fixture'
+    })
+    const response = await tracedFetch('https://provider.example/v1/responses', { signal: abort.signal })
+    const reader = response.body!.getReader()
+    expect(new TextDecoder().decode((await reader.read()).value)).toBe('partial response')
+    const pending = reader.read()
+    abort.abort(reason)
+    if (ending === 'close') await expect(pending).resolves.toMatchObject({ done: true })
+    else await expect(pending).rejects.toBe(reason)
+
+    const directory = await onlyTraceDirectory()
+    expect(JSON.parse(await readFile(join(directory, 'response.json'), 'utf8'))).toMatchObject({
+      captureStatus: 'cancelled', bodyBytes: 16
+    })
+    expect(await readFile(join(directory, 'response-body.sse'), 'utf8')).toBe('partial response')
+  })
+
+  it.each(['complete', 'break', 'consumer_error', 'network_error'] as const)(
+    'finishes the HTTP record before SDK cleanup returns (%s)', async ending => {
+      const failure = new Error(ending === 'consumer_error' ? 'Consumer could not parse the item' : 'Connection reset')
+      const cancel = vi.fn()
+      let source!: ReadableStreamDefaultController<Uint8Array>
+      const delta = 'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","output_index":0,"item_id":"m","content_index":0,"delta":"Hi"}\n\n'
+      const completed = 'event: response.completed\ndata: {"type":"response.completed","response":{"id":"r","status":"completed","output":[]}}\n\n'
+      const wire = delta + (ending === 'complete' ? completed : '')
+      const baseFetch = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          source = controller
+          controller.enqueue(new TextEncoder().encode(wire))
+          if (ending === 'complete') controller.close()
+        }, cancel
+      }), { headers: { 'content-type': 'text/event-stream' } }))
+      const { createProviderHttpTraceFetch } = await import('./providerHttpTrace')
+      const provider = new OpenAiResponses({ apiKey: 'fixture', baseURL: 'https://provider.example/v1',
+        fetch: createProviderHttpTraceFetch(baseFetch, {
+          model: 'fixture', protocol: 'openai_responses', providerName: 'Fixture'
+        }) })
+      const events: string[] = []
+      const consume = async () => {
+        for await (const event of provider.stream({ model: 'fixture', input: 'Hello' })) {
+          events.push(event.type)
+          if (ending === 'break') break
+          if (ending === 'consumer_error') throw failure
+          if (ending === 'network_error') source.error(failure)
+        }
+      }
+      if (ending.endsWith('_error')) await expect(consume()).rejects.toBe(failure)
+      else await consume()
+
+      expect(events).toEqual(ending === 'complete'
+        ? ['response.output_text.delta', 'response.completed'] : ['response.output_text.delta'])
+      expect(cancel).toHaveBeenCalledTimes(ending === 'break' || ending === 'consumer_error' ? 1 : 0)
+      const directory = await onlyTraceDirectory()
+      expect(JSON.parse(await readFile(join(directory, 'response.json'), 'utf8'))).toMatchObject({
+        captureStatus: ending === 'complete' ? 'completed' : ending === 'network_error' ? 'failed' : 'cancelled',
+        bodyBytes: new TextEncoder().encode(wire).byteLength
+      })
+      expect(await readFile(join(directory, 'response-body.sse'), 'utf8')).toBe(wire)
+      expect(traceMocks.runtimeLog).not.toHaveBeenCalled()
+    }
+  )
 
   it('streams full provider payloads while bounding diagnostic body files', async () => {
     const baseFetch = vi.fn(async (request: Request) => {

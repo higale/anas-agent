@@ -1,3 +1,4 @@
+import { changeUsageEndpoint } from '@shared/usageMeter'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { TFunction } from 'i18next'
 import type { AppConfigSnapshot, ModelProviderConfigDetail } from '@shared/types'
@@ -20,11 +21,11 @@ import type { ModelDraft } from './modelDraft'
 import { useModelCandidates } from './useModelCandidates'
 
 type ProviderDraftFields = Pick<ModelDraft,
-  'name' | 'iconData' | 'protocol' | 'baseUrl' | 'modelListUrl' | 'apiKey' | 'providerParametersJson'>
+  'name' | 'iconData' | 'protocol' | 'baseUrl' | 'modelListUrl' | 'apiKey' | 'usage' | 'providerParametersJson'>
 
 function providerDraftFields(draft: ModelDraft): ProviderDraftFields {
-  const { name, iconData, protocol, baseUrl, modelListUrl, apiKey, providerParametersJson } = draft
-  return { name, iconData, protocol, baseUrl, modelListUrl, apiKey, providerParametersJson }
+  const { name, iconData, protocol, baseUrl, modelListUrl, apiKey, usage, providerParametersJson } = draft
+  return { name, iconData, protocol, baseUrl, modelListUrl, apiKey, usage, providerParametersJson }
 }
 
 interface UseModelSettingsStateOptions {
@@ -235,6 +236,7 @@ export function useModelSettingsState({
 
   function updateModelDraft(update: Partial<ModelDraft>): void {
     const nextDraft = { ...modelDraftRef.current, ...update }
+    if (update.baseUrl !== undefined) nextDraft.usage = changeUsageEndpoint(modelDraftRef.current.usage, modelDraftRef.current.baseUrl, update.baseUrl)
     modelDraftRef.current = nextDraft
     if (nextDraft.providerId && failedProviderDrafts.current.has(nextDraft.providerId)) {
       failedProviderDrafts.current.set(nextDraft.providerId, providerDraftFields(nextDraft))

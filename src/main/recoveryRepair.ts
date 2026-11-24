@@ -1,4 +1,6 @@
 import { normalizeSubagentPackageSettings } from '@shared/subagentPackages'
+import { normalizeUsageSettings } from '@shared/usageMeter'
+import { usageFromRaw, usageToRaw } from './config/modelConfigMapper'
 import { parseMcpToolCatalog, parseMcpToolChoices } from '@shared/mcpCatalog'
 import { compressionPromptError } from '@shared/summaryPrompt'
 import { requireDataVersion } from '@shared/dataVersion'
@@ -206,6 +208,15 @@ export function repairDocument(file: string, input: unknown): { value: RecordVal
       for (const [index, provider] of repair.list(value.providers, 'providers').entries()) {
         const path = `providers[${index}]`
         repair.fill(provider, { ...modelDefaults.provider_defaults, models: [], api_key: '', model_list_url: '' }, path)
+        if (provider.usage !== undefined) {
+          const defaults = usageToRaw(normalizeUsageSettings(undefined, provider.base_url as string))!
+          if (!isObject(provider.usage)) repair.replace(provider, 'usage', defaults, `${path}.usage`)
+          else for (const [key, fallback] of Object.entries(defaults)) {
+            // Keep valid optional values and credentials; repair only the damaged field.
+            try { usageFromRaw({ [key]: provider.usage[key] }, provider.base_url as string) }
+            catch { repair.replace(provider.usage, key, fallback, `${path}.usage.${key}`) }
+          }
+        }
         for (const [modelIndex, model] of repair.list(provider.models, `${path}.models`).entries()) {
           const modelPath = `${path}.models[${modelIndex}]`
           repair.fill(model, modelDefaults.model_defaults, modelPath)
