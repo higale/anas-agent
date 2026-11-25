@@ -202,14 +202,16 @@ async function verifyAttachmentPreviews(launchApplication) {
     assert.equal(await input.evaluate(element => element.selectionStart), `保留已有内容\n${photo}`.length)
 
     const archive = join(root, '归档 # 100%.zip')
+    const document = join(root, '会议记录 #1.docx')
+    await writeFile(document, 'Converted only when requested')
     const folder = join(root, '未命名文件夹')
     await writeFile(archive, Buffer.from([0, 255, 0]))
     await mkdir(folder)
-    await application.evaluate(({ dialog }, paths) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: paths }) }, [photo, archive, folder])
+    await application.evaluate(({ dialog }, paths) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: paths }) }, [photo, archive, document, folder])
     await input.fill('继续分析\n')
     await page.getByRole('button', { name: /attach file/i }).click()
     await expect(tile).toHaveCount(1)
-    await expect(input).toHaveValue(`继续分析\n${archive}\n${folder}`)
+    await expect(input).toHaveValue(`继续分析\n${archive}\n${document}\n${folder}`)
 
     await input.fill('拖放文件')
     await dropNativeFile(page, archive)

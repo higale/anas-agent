@@ -250,7 +250,7 @@ const api: GaleApi = {
     invoke: (projectId: string | undefined, name: string, sourceAlias: string | undefined, args: string): Promise<SkillInvocationResult> => ipcRenderer.invoke('skills:invoke', projectId, name, sourceAlias, args),
     updateAvailability: (projectId: string | undefined, skillId: string, settings: SkillAvailabilityUpdate): Promise<SkillSnapshot> => ipcRenderer.invoke('skills:updateAvailability', projectId, skillId, settings),
     addDirectory: (projectId?: string): Promise<SkillDirectoryAddResult> => ipcRenderer.invoke('skills:addDirectory', projectId),
-    importDirectories: (projectId?: string): Promise<SkillImportResult> => ipcRenderer.invoke('skills:importDirectories', projectId),
+    importDirectories: (): Promise<SkillImportResult> => ipcRenderer.invoke('skills:importDirectories'),
     updateDirectory: (projectId: string | undefined, rootId: string, update: SkillRootUpdate): Promise<SkillSnapshot> => ipcRenderer.invoke('skills:updateDirectory', projectId, rootId, update),
     removeDirectory: (projectId: string | undefined, rootId: string): Promise<SkillSnapshot> => ipcRenderer.invoke('skills:removeDirectory', projectId, rootId),
     moveDirectory: (projectId: string | undefined, rootId: string, direction: -1 | 1): Promise<SkillSnapshot> => ipcRenderer.invoke('skills:moveDirectory', projectId, rootId, direction)
@@ -312,8 +312,6 @@ const api: GaleApi = {
       ipcRenderer.invoke('speech:logWarning', kind, diagnostics)
   },
   app: {
-    getPythonRuntimeStatus: () => ipcRenderer.invoke('app:getPythonRuntimeStatus'),
-    resetBundledPython: () => ipcRenderer.invoke('app:resetBundledPython'),
     getBuildInfo: (): Promise<AppBuildInfo> => ipcRenderer.invoke('app:getBuildInfo'),
     toggleDevTools: (): Promise<void> => ipcRenderer.invoke('app:toggleDevTools'),
     restartInConsole: (): Promise<void> => ipcRenderer.invoke('app:restartInConsole'),

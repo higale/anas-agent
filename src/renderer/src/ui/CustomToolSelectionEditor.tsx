@@ -1,4 +1,5 @@
 import { ProjectDirectoryAddButton, ProjectResourceGroup, type ProjectDirectoryControls } from './projects/ProjectResourceGroup'
+import { customToolCapabilityIssue } from '@shared/customTools'
 import { useTranslation } from 'react-i18next'
 import { resolveToolSelection, withToolShadows, type ToolPackage, type ToolRoot, type ToolSelection } from '@shared/toolPackages'
 import { CapabilitySection } from './CapabilitySection'
@@ -14,7 +15,7 @@ export function CustomToolSelectionEditor({ value, tools, roots = [], subagent =
   const mode = value.mode ?? 'custom'
   const selectionDisabled = disabled
   const visible = tools.filter(tool => !subagent || tool.source !== 'project')
-  const effective = resolveToolSelection(value, visible.filter(tool => backgroundTools || !tool.definition?.interactive), subagent, false).entries
+  const effective = resolveToolSelection(value, visible.filter(tool => !customToolCapabilityIssue(tool.definition, backgroundTools)), subagent, false).entries
   const items = withToolShadows(visible, effective)
   const selected = (id: string) => mode === 'all' || (mode === 'custom' && value.entries.includes(id))
   const missing = value.entries.filter(id => !tools.some(tool => tool.id === id))
@@ -24,6 +25,7 @@ export function CustomToolSelectionEditor({ value, tools, roots = [], subagent =
   const activeRoots = [...rootMap.values()].filter(root => items.some(tool => tool.rootId === root.id)
     || (root.error && (root.source !== 'project' || root.error.code !== 'path_not_found')))
   const groups = [
+    { id: 'system', label: t('settings.skill_group_system'), roots: activeRoots.filter(root => root.source === 'system') },
     { id: 'user', label: t('settings.skill_group_user'), roots: activeRoots.filter(root => root.source === 'user') },
     ...activeRoots.filter(root => root.source === 'external' || root.source === 'subagent').map(root => ({ id: root.id, label: root.name, roots: [root] })),
     { id: 'project', label: t('settings.skill_group_project'), roots: activeRoots.filter(root => root.source === 'project') }
@@ -46,11 +48,11 @@ export function CustomToolSelectionEditor({ value, tools, roots = [], subagent =
     setSelections(ids, checked, subagent ? checked : value.project)
   }
   function renderTool(tool: ToolPackage) {
-    const requiresBackground = tool.definition?.interactive && !backgroundTools
+    const capabilityIssue = customToolCapabilityIssue(tool.definition, backgroundTools)
     const inactiveReason = [tool.enabled === false && t('capabilities.globally_disabled'),
       tool.error && [t(`custom_tools.load_error_${tool.error.code}`), tool.error.detail].filter(Boolean).join('\n'),
       tool.shadowedBy && t('custom_tools.shadowed_by', { source: tool.shadowedBy }),
-      requiresBackground && t('custom_tools.requires_background')].filter(Boolean).join('\n')
+      capabilityIssue && t(capabilityIssue)].filter(Boolean).join('\n')
     return <CapabilityResourceRow key={tool.id} name={tool.name} description={tool.description} directory={tool.directory}
       inactiveReason={inactiveReason}
       label={`${tool.rootName} ${tool.name}`} enabled={selected(tool.id)}

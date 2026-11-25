@@ -5,7 +5,6 @@ import { applyLanguagePreference, getLanguageOptions, systemLanguagePreference }
 import { normalizeTheme } from './settings/AppearanceSettings'
 import type { AppBuildInfo, AppConfigSnapshot, InputHistorySnapshot, LanguagePackSummary, Project } from '@shared/types'
 import { normalizeUiFontSize } from '@shared/uiPreferences'
-import { usePythonRuntimeNotice } from './usePythonRuntimeNotice'
 import {
   createInitialAppLoadSnapshot,
   InitialAppLoader,
@@ -45,7 +44,6 @@ export function useAppLifecycle({
   setResolvedTheme,
   t
 }: UseAppLifecycleOptions): AppLifecycleState {
-  usePythonRuntimeNotice()
   const [initialLoad, setInitialLoad] = useState(createInitialAppLoadSnapshot)
   const initialLoaderRef = useRef<InitialAppLoader | null>(null)
 

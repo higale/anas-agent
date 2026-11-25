@@ -1,5 +1,5 @@
 import { createWriteStream } from 'node:fs'
-import { chmod, lstat, mkdir, realpath, rm, stat, symlink } from 'node:fs/promises'
+import { chmod, link as hardlink, lstat, mkdir, realpath, rm, stat, symlink } from 'node:fs/promises'
 import { dirname, posix, resolve, sep, win32 } from 'node:path'
 import { Transform, Writable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -157,6 +157,7 @@ async function openLimitedZip(sourcePath: string, limits: ZipArchiveLimits) {
 interface ZipEntryOptions {
   skipPath?(path: string): boolean
   validatePath?(path: string): void
+  stagePackageLinks?: boolean
 }
 
 async function* checkedEntries(zip: ZipFile, limits: ZipArchiveLimits, options: ZipEntryOptions & { storeUncompressed?: Set<string> }) {
@@ -256,7 +257,14 @@ export async function extractZipArchive(
       if (!target.startsWith(`${canonicalRoot}${sep}`)) throw new Error(`ZIP link target escapes the restore directory: ${link.name}`)
       resolvedLinks.push({ ...link, type: (await stat(target)).isDirectory() ? 'dir' as const : 'file' as const })
     }
-    for (const link of resolvedLinks) await symlink(link.target, link.path, link.type)
+    for (const link of resolvedLinks) {
+      // Plugin installation copies this temporary tree into independent files.
+      // Junctions and hard links work on Windows without symlink privileges.
+      if (options.stagePackageLinks && process.platform === 'win32') {
+        if (link.type === 'dir') await symlink(link.resolvedTarget, link.path, 'junction')
+        else await hardlink(link.resolvedTarget, link.path)
+      } else await symlink(link.target, link.path, link.type)
+    }
     if (fileCount === 0) throw new Error('ZIP archive is empty.')
     return { fileCount, totalBytes, entryNames }
   } catch (error) {

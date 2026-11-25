@@ -30,7 +30,6 @@ async function fixture() {
   const root = await directory()
   await mkdir(join(root, 'config'))
   for (const name of configFileNames) await cp(join(process.cwd(), 'data/config', name), join(root, 'config', name))
-  await cp(join(process.cwd(), 'data/subagents'), join(root, 'subagents'), { recursive: true })
   const storage = open(root), thread = storage.createThread({ title: 'Preserved conversation', modelConfigId: 'selected' })
   const database = storage.conversationForThread(thread.id), runId = randomUUID(), id = `${runId}:input`
   database.runs.createRun({ threadId: thread.id, runId, operation: 'agent',
@@ -83,7 +82,6 @@ it('preserves unsupported legacy execution databases during explicit repair inst
 it('backs up committed native WAL with history, queued attachments, memory and unaccepted input without executing it', async () => {
   const f = await fixture(), destination = await directory()
   await cp(join(f.root, 'config'), join(destination, 'config'), { recursive: true })
-  await cp(join(f.root, 'subagents'), join(destination, 'subagents'), { recursive: true })
   await snapshotAgentStorage(f.root, destination)
   await writeProjectFixture(destination, JSON.parse(f.projects))
   await cp(getAgentAttachmentsDir(f.thread.id, f.root), getAgentAttachmentsDir(f.thread.id, destination), { recursive: true })

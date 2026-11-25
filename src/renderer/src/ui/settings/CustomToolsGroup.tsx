@@ -52,8 +52,8 @@ export function CustomToolsGroup({ actionsTarget = null, tools, onConfigChange, 
   const rootIndex = external.findIndex(item => item.id === root?.id)
   const peers = snapshot?.tools.filter(tool => tool.rootId === selected?.rootId) ?? []
   const index = peers.findIndex(tool => tool.id === selected?.id)
-  const roots = [...(snapshot?.roots ?? [])].sort((a, b) => ({ subagent: -1, user: 0, project: 1, external: 2 }[a.source] - { subagent: -1, user: 0, project: 1, external: 2 }[b.source]))
-  const rootLabel = (root: ToolRoot) => root.source === 'user' ? t('settings.skill_group_user') : root.name
+  const roots = [...(snapshot?.roots ?? [])].sort((a, b) => ({ system: -2, subagent: -1, user: 0, project: 1, external: 2 }[a.source] - { system: -2, subagent: -1, user: 0, project: 1, external: 2 }[b.source]))
+  const rootLabel = (root: ToolRoot) => root.source === 'user' ? t('settings.skill_group_user') : root.source === 'system' ? t('settings.skill_group_system') : root.name
   const selectedRoot = !showingCatalog ? root ?? roots.find(item => item.id === selected?.rootId) : undefined
   const actionRoot = selectedRoot?.source === 'user' || selectedRoot?.source === 'external' ? selectedRoot : roots.find(item => item.source === 'user')
   const selectedTool = !showingCatalog && selection?.kind === 'tool' && (selected?.source === 'user' || selected?.source === 'external') ? selected : undefined
@@ -162,7 +162,8 @@ export function CustomToolsGroup({ actionsTarget = null, tools, onConfigChange, 
       const exists = await window.gale.tools.fileExists(tool.id, path)
       if (request.current !== revision) return
       if (!exists) {
-        setCreating({ tool, path })
+        if (tool.source === 'system') notice.error(t('custom_tools.command_file_unlisted'), { description: path })
+        else setCreating({ tool, path })
         return
       }
       for (const [index, name] of parts.entries()) {

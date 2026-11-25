@@ -106,6 +106,14 @@ function packagePaths(unpackedDirectory) {
 
 function packageManifest(unpackedDirectory) {
   const paths = packagePaths(unpackedDirectory)
+  for (const module of ['skills', 'subagents', 'plugins', 'tools']) {
+    if (existsSync(join(paths.resources, 'data', module, '_system'))) throw new Error(`Unexpected nested built-in resource directory: ${module}/_system`)
+  }
+  for (const file of ['skills/config/SKILL.md', 'skills/skill-manager/SKILL.md', 'skills/tool-manager/SKILL.md',
+    'tools/document-to-markdown/TOOL.json', 'tools/document-to-markdown/convert.py', 'licenses/document-markdown/MarkItDown-LICENSE.txt',
+    'subagents/general-purpose/AGENT.json', 'subagents/general-purpose/PROMPT.md', 'help/USER_GUIDE.en.md', 'lang/en.json', 'lang/zh-CN.json']) {
+    if (!existsSync(join(paths.resources, 'data', file))) throw new Error(`Packaged built-in resource is missing: ${file}`)
+  }
   const pluginExamples = join(paths.resources, 'data/examples/plugins')
   const pluginEntries = readdirSync(pluginExamples, { withFileTypes: true })
   if (!pluginEntries.some(entry => entry.name.endsWith('.zip'))
@@ -116,13 +124,17 @@ function packageManifest(unpackedDirectory) {
     if (!existsSync(path)) throw new Error(`Packaged application file is missing: ${path}`)
   }
   const rawEntries = listPackage(paths.asar)
-  const pythonRoot = join(paths.resources, 'runtime', 'python')
+  const pythonRoot = join(paths.resources, 'python')
   const pythonExecutable = join(pythonRoot, process.platform === 'win32' ? 'python.exe' : 'bin/python3')
   if (['win32', 'darwin'].includes(process.platform)) {
     const pythonVersion = require('../build/python-runtime.json').version.split('.').slice(0, 2).join('.')
     const pythonLicense = process.platform === 'win32' ? 'LICENSE.txt' : `lib/python${pythonVersion}/LICENSE.txt`
-    for (const file of [pythonExecutable, join(pythonRoot, pythonLicense), join(pythonRoot, 'anas-runtime.json')]) {
+    const stdlib = join(pythonRoot, process.platform === 'win32' ? 'Lib' : `lib/python${pythonVersion}`)
+    for (const file of [pythonExecutable, join(pythonRoot, pythonLicense), join(pythonRoot, 'anas-runtime.json'), join(stdlib, 'EXTERNALLY-MANAGED')]) {
       if (!existsSync(file)) throw new Error(`Packaged Python resource is missing: ${file}`)
+    }
+    for (const file of [join(stdlib, 'ensurepip'), ...['pip', 'setuptools', 'wheel'].map(name => join(stdlib, 'site-packages', name))]) {
+      if (existsSync(file)) throw new Error(`Unexpected Python package installer: ${file}`)
     }
   }
   const rawEntryByNormalized = new Map(rawEntries.map((entry) => [entry.replaceAll('\\', '/'), entry]))
@@ -210,11 +222,6 @@ function smoke(manifest) {
     const appData = join(home, 'AppData', 'Roaming'), localAppData = join(home, 'AppData', 'Local')
     mkdirSync(appData, { recursive: true })
     mkdirSync(localAppData, { recursive: true })
-    // A user's pip configuration must neither redirect the smoke installation
-    // nor break it. Keep every trap inside the disposable profile.
-    const pipTarget = join(home, 'outside-python-runtime')
-    const pipConfig = join(home, 'pip.ini')
-    writeFileSync(pipConfig, `[install]\ntarget = ${pipTarget}\n`)
     const result = spawnSync(manifest.paths.executable, [
       '--anas-packaged-smoke',
       `--user-data-dir=${join(home, 'electron')}`
@@ -224,11 +231,6 @@ function smoke(manifest) {
         ...process.env,
         ANAS_PACKAGED_SMOKE: '1',
         ELECTRON_RENDERER_URL: 'https://renderer-environment-must-be-ignored.invalid/',
-        PIP_TARGET: pipTarget,
-        PIP_PREFIX: join(pipTarget, 'prefix'),
-        PIP_USER: '1',
-        PIP_CONFIG_FILE: pipConfig,
-        PIP_CACHE_DIR: join(pipTarget, 'cache'),
         APPDATA: appData,
         LOCALAPPDATA: localAppData,
         HOME: home,
@@ -239,7 +241,6 @@ function smoke(manifest) {
       windowsHide: true
     })
     if (result.error) throw result.error
-    if (existsSync(pipTarget)) throw new Error('Packaged Python smoke wrote outside its isolated runtime.')
     if (result.status !== 0 || !result.stdout.includes('ANAS_PACKAGED_SMOKE_OK')) {
       throw new Error([
         `Packaged Agent smoke failed for ${basename(manifest.paths.root)} (exit ${result.status}).`,
@@ -257,6 +258,14 @@ function main() {
   if (command === 'verify' && args.length === 1) {
     const manifest = packageManifest(args[0])
     smoke(manifest)
+    if (['win32', 'darwin'].includes(process.platform)) {
+      const resources = manifest.paths.resources
+      const python = join(resources, 'python', process.platform === 'win32' ? 'python.exe' : 'bin/python3')
+      const check = spawnSync(python, ['-I', '-B', '-X', 'utf8', join(__dirname, 'test-document-conversion.py'),
+        join(resources, 'data/tools/document-to-markdown/convert.py')], { encoding: 'utf8', windowsHide: true, timeout: 180_000 })
+      if (check.error) throw check.error
+      if (check.status !== 0) throw new Error('Packaged document conversion verification failed: ' + check.stderr)
+    }
     console.log(`Packaged application verified: ${manifest.paths.root} (${manifest.entries.length} ASAR entries).`)
     console.log(`Package report: ${manifest.reportPath}`)
   } else if (command === 'compare' && args.length === 2) {

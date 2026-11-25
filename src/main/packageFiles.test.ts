@@ -9,6 +9,10 @@ vi.mock('node:fs/promises', async importOriginal => {
   return { ...actual, rename: vi.fn(actual.rename) }
 })
 let root: string
+vi.mock('./config/dataDir', () => ({
+  getBundledDataDir: () => join(root, 'bundled'),
+  getBundledExamplesDir: () => join(root, 'generated-examples')
+}))
 beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'package-edit-')) })
 afterEach(async () => { vi.restoreAllMocks(); await rm(root, { recursive: true, force: true }) })
 async function fixture() {
@@ -42,6 +46,22 @@ describe.each([
   })
 })
 describe('package file saving', () => {
+  it.each(['bundled', 'generated-examples'])('keeps %s files read-only through directory aliases and leaves no creation artifacts', async name => {
+    const bundled = join(root, name)
+    await mkdir(bundled)
+    await writeFile(join(bundled, 'run.py'), 'original')
+    const alias = join(root, 'alias')
+    await symlink(bundled, alias, process.platform === 'win32' ? 'junction' : 'dir')
+    for (const directory of [bundled, alias]) {
+      const preview = await readPackageFile(directory, 'run.py')
+      expect(preview.editable).toBe(false)
+      await expect(savePackageFile(directory, 'run.py', { content: 'changed', revision: preview.revision!, resolvedPath: preview.resolvedPath })).rejects.toThrow('read-only')
+      await expect(createPackageFile(directory, 'nested/new.py')).rejects.toThrow('read-only')
+    }
+    expect(await readFile(join(bundled, 'run.py'), 'utf8')).toBe('original')
+    expect(await readdir(bundled)).toEqual(['run.py'])
+  })
+
   it('creates missing parent directories and an empty editable file without overwriting an existing file', async () => {
     expect(await packageFileExists(root, 'scripts/nested/run.py')).toBe(false)
     const created = await createPackageFile(root, 'scripts/nested/run.py')

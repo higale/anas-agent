@@ -21,6 +21,17 @@ describe('activity display ownership', () => {
     expect((page.tools[0].call.args as { summary: string }).summary).toHaveLength(240)
     expect(source).toEqual(original)
   })
+  it.each([
+    [{ summary: ' '.repeat(250) + 'Inspect\nthe report', path: '/report' }, 'Inspect the report'],
+    [{ summary: '   ', path: '/report' }, '/report'],
+    [{ path: '/report' }, '/report'],
+    [{}, undefined]
+  ])('preserves the selected tool caption in a history page', (args, expected) => {
+    const source = run()
+    source.tools[0].call.args = args
+    const [tool] = displayActivityPage('thread', source).tools
+    expect(tool.call.args).toHaveProperty('summary', expected)
+  })
   it('retains no completed inner items in a collapsed run summary', () => {
     const summary = displayRunSummary('thread', run())
     expect([summary.models, summary.tools, summary.subagents, summary.memoryRecalls]).toEqual([[], [], [], []])

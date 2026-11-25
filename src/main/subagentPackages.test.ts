@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -10,6 +10,7 @@ import type { RawSubagentConfig } from './config/rawAppConfig'
 vi.mock('electron', () => ({ shell: { trashItem: vi.fn() } }))
 vi.mock('./projectStore', () => ({ getProject: vi.fn() }))
 let root: string
+let bundled: string
 let packages: typeof import('./subagentPackages')
 let files: typeof import('./subagentPackageFiles')
 let tools: typeof import('./toolsStore')
@@ -31,12 +32,17 @@ async function addResources(directory: string) {
 beforeEach(async () => {
   vi.resetModules()
   root = await realpath(await mkdtemp(join(tmpdir(), 'anas-agent-packages-')))
+  bundled = join(root, 'bundled')
+  await cp(resolve('data/config'), join(bundled, 'config'), { recursive: true })
+  await cp(resolve('data/subagents'), join(bundled, 'subagents'), { recursive: true })
   vi.doMock('./config/dataDir', () => ({
-    getDataDir: () => root, getBundledDataDir: () => resolve('data'),
-    getConfigFile: (file: string) => join(root, 'config', file), getBundledConfigFile: (file: string) => resolve('data/config', file),
+    getDataDir: () => root, getBundledDataDir: () => bundled,
+    getBundledExamplesDir: () => resolve('data/examples'),
+    getConfigFile: (file: string) => join(root, 'config', file), getBundledConfigFile: (file: string) => join(bundled, 'config', file),
     skillsConfigFileName: 'skills.json', customToolsConfigFileName: 'tools.json', subagentsConfigFileName: 'subagents.json',
-    getSkillsDir: () => join(root, 'skills'), getSystemSkillsDir: () => join(root, 'skills/_system'),
-    getSystemPluginsDir: () => join(root, 'plugins/_system'), getSkillExamplesDir: () => join(root, 'examples/skills')
+    getSkillsDir: () => join(root, 'skills'), getSystemSkillsDir: () => resolve('data/skills'),
+    getSkillExamplesDir: () => join(root, 'examples/skills'),
+    getSubagentExamplesDir: () => resolve('data/examples/subagents')
   }))
   packages = await import('./subagentPackages')
   tools = await import('./toolsStore')
@@ -49,7 +55,7 @@ afterEach(async () => { vi.doUnmock('./config/dataDir'); vi.doUnmock('./atomicJs
 describe('Agent directory packages', () => {
   it('loads system definitions and keeps user identities, resources, switches and order when editing', async () => {
     expect((await packages.readSubagentPackages(root)).map(a => a.id)).toEqual(['general-purpose'])
-    expect((await packages.readSubagentPackages(root)).every(a => a.directory === join(root, 'subagents/_system', a.id!))).toBe(true)
+    expect((await packages.readSubagentPackages(root)).every(a => a.directory === join(bundled, 'subagents', a.id!))).toBe(true)
     const directory = await addAgent('reporter')
     await addResources(directory)
     const values = await packages.readSubagentPackages(root)
@@ -104,7 +110,7 @@ describe('Agent directory packages', () => {
     }
   })
 
-  it('refreshes only system package files on startup and retains user packages and settings', async () => {
+  it('uses current bundled packages while preserving old system copies, user packages and settings', async () => {
     const directory = await addAgent('reporter')
     const values = await packages.readSubagentPackages(root)
     values.find(a => a.id === 'general-purpose')!.enabled = false
@@ -115,10 +121,10 @@ describe('Agent directory packages', () => {
     vi.resetModules()
     packages = await import('./subagentPackages')
     await packages.initializeSubagentPackages()
-    expect(await readFile(join(root, 'subagents/_system/general-purpose/PROMPT.md'), 'utf8')).toBe(await readFile(resolve('data/subagents/_system/general-purpose/PROMPT.md'), 'utf8'))
-    expect(await readdir(join(root, 'subagents/_system'))).toEqual(['general-purpose'])
+    expect(await readFile(join(root, 'subagents/_system/general-purpose/PROMPT.md'), 'utf8')).toBe('Outdated bundled prompt')
+    expect(await readdir(join(root, 'subagents/_system'))).toEqual(['general-purpose', 'project-analyst'])
     expect(await readFile(join(root, 'config/subagents.json'), 'utf8')).toBe(config)
-    expect(await packages.findSubagentPackage('general-purpose')).toMatchObject({ enabled: false })
+    expect(await packages.findSubagentPackage('general-purpose')).toMatchObject({ enabled: false, directory: join(bundled, 'subagents/general-purpose') })
     expect(await packages.findSubagentPackage('reporter')).toMatchObject({ directory, system_prompt: 'Complete work.' })
   })
 
@@ -337,7 +343,7 @@ describe('Agent directory packages', () => {
     expect(await readdir(join(root, 'subagents'))).not.toContain('.transaction')
   })
 
-  it('imports the whole folder, rejects collisions and linked files, and never imports its destination', async () => {
+  it('imports the whole folder, copies linked files and rejects collisions, and never imports its destination', async () => {
     const source = join(root, 'incoming')
     await packages.writeSubagentDefinition(source, { ...agentDefinition('imported'), capabilities: serializeCapabilities({ ...defaultCapabilities,
       skills: { ...defaultCapabilities.skills, package: { 'local-guide': false } }, customTools: { ...defaultCapabilities.customTools, package: { query: false } } }) })
@@ -357,7 +363,15 @@ describe('Agent directory packages', () => {
     expect((await skills.listSubagentSkills(['copied'])).skills[0]).toMatchObject({ id: 'subagent:copied:skill:local-guide', modelAvailable: false })
     await packages.writeSubagentDefinition(source, agentDefinition('linked'))
     await symlink('PROMPT.md', join(source, 'alias'))
-    await expect(packages.importSubagentPackages([source])).rejects.toThrow('regular files')
+    await rename(join(source, 'PROMPT.md'), join(source, 'source-prompt.md'))
+    await symlink('source-prompt.md', join(source, 'PROMPT.md'), 'file')
+    await packages.importSubagentPackages([source])
+    const copy = (await packages.findSubagentPackage('linked')).directory!
+    expect((await lstat(join(copy, 'PROMPT.md'))).isFile()).toBe(true)
+    expect((await lstat(join(copy, 'alias'))).isFile()).toBe(true)
+    await rename(source, join(root, 'moved-source'))
+    await writeFile(join(copy, 'alias'), 'Edited')
+    expect(await readFile(join(copy, 'PROMPT.md'), 'utf8')).toBe(await readFile(join(root, 'moved-source/source-prompt.md'), 'utf8'))
     await expect(packages.importSubagentPackages([root])).rejects.toThrow('ancestor')
     expect((await readdir(join(root, 'subagents'))).some(name => name.startsWith('.import'))).toBe(false)
   })
@@ -390,7 +404,7 @@ describe('Agent directory packages', () => {
 
   it('rejects imports beyond the directory limit without making the existing catalog unreadable', async () => {
     const destination = join(root, 'subagents')
-    await Promise.all(Array.from({ length: 2046 }, (_, index) => writeFile(join(destination, `.retained-${index}`), 'keep')))
+    await Promise.all(Array.from({ length: 2047 }, (_, index) => writeFile(join(destination, `.retained-${index}`), 'keep')))
     const first = join(root, 'incoming/first'), second = join(root, 'incoming/second')
     await packages.writeSubagentDefinition(first, agentDefinition('first'))
     await packages.writeSubagentDefinition(second, agentDefinition('second'))
@@ -414,9 +428,9 @@ describe('Agent directory packages', () => {
     const first = join(root, 'incoming/first'), second = join(root, 'incoming/second')
     await packages.writeSubagentDefinition(first, agentDefinition('first'))
     await packages.writeSubagentDefinition(second, agentDefinition('second'))
-    await symlink('PROMPT.md', join(second, 'alias'))
-    await expect(packages.importSubagentPackages([first, second])).rejects.toThrow('regular files')
-    expect(await readdir(join(root, 'subagents'))).toEqual(['_system'])
+    await symlink('missing.md', join(second, 'alias'), 'file')
+    await expect(packages.importSubagentPackages([first, second])).rejects.toThrow(/ENOENT|missing/)
+    expect(await readdir(join(root, 'subagents'))).toEqual([])
   })
 
   it('rolls back earlier packages when publishing a later package fails', async () => {
@@ -431,7 +445,7 @@ describe('Agent directory packages', () => {
     vi.resetModules()
     packages = await import('./subagentPackages')
     await expect(packages.importSubagentPackages([first, second])).rejects.toThrow('Disk write failed')
-    expect(await readdir(join(root, 'subagents'))).toEqual(['_system'])
+    expect(await readdir(join(root, 'subagents'))).toEqual([])
   })
 
   it('rejects the old array format without migrating, overwriting, or deleting it', async () => {
@@ -444,6 +458,33 @@ describe('Agent directory packages', () => {
 })
 
 describe('external Agent directories', () => {
+  it('preserves existing bundled-example references as unavailable instead of exposing editable package files', async () => {
+    const source = resolve('data/examples/subagents')
+    const path = join(root, 'config/subagents.json')
+    const saved = JSON.stringify({ ...await packages.readSubagentSettings(),
+      external_directories: [{ id: 'bundled-examples', name: 'Examples', path: source }] })
+    await writeFile(path, saved)
+    const external = (await packages.listSubagentRoots()).find(item => item.id === 'bundled-examples')!
+    expect(external).toMatchObject({ available: false, agentIds: [] })
+    expect(external.errors[0].message).toContain('overlaps')
+    expect((await packages.readSubagentPackages(root)).map(agent => agent.id)).toEqual(['general-purpose'])
+    expect(await readFile(path, 'utf8')).toBe(saved)
+  })
+
+  it('requires importing bundled examples instead of exposing them as editable external packages', async () => {
+    const source = resolve('data/examples/subagents')
+    const settings = await readFile(join(root, 'config/subagents.json'), 'utf8')
+    await expect(packages.addExternalSubagentDirectory(source)).rejects.toThrow('overlaps')
+    const alias = join(root, 'example-alias')
+    await symlink(source, alias, process.platform === 'win32' ? 'junction' : 'dir')
+    await expect(packages.addExternalSubagentDirectory(alias)).rejects.toThrow('overlaps')
+    expect(await readFile(join(root, 'config/subagents.json'), 'utf8')).toBe(settings)
+    await packages.importSubagentPackages([join(source, 'project-analyst')])
+    const imported = await packages.findSubagentPackage('project-analyst')
+    expect(imported.directory).toBe(join(root, 'subagents/project-analyst'))
+    expect((await files.readSubagentFile(imported.id!, 'PROMPT.md')).editable).toBe(true)
+  })
+
   async function external(name = 'external') {
     const source = join(root, name)
     await packages.writeSubagentDefinition(join(source, 'reporter'), agentDefinition('reporter'))
@@ -518,7 +559,7 @@ describe('external Agent directories', () => {
     const { source, directory, entry } = await external()
     await expect(packages.addExternalSubagentDirectory(source)).rejects.toThrow('overlaps')
     await expect(packages.addExternalSubagentDirectory(root)).rejects.toThrow('overlaps')
-    await expect(packages.addExternalSubagentDirectory(join(root, 'subagents/_system'))).rejects.toThrow('overlaps')
+    await expect(packages.addExternalSubagentDirectory(join(bundled, 'subagents'))).rejects.toThrow('overlaps')
     await expect(packages.addExternalSubagentDirectory(directory)).rejects.toThrow('parent directory')
     await packages.writeSubagentDefinition(join(source, 'duplicate'), { ...agentDefinition('general-purpose'), name: 'different-name' })
     expect((await packages.listSubagentRoots()).find(item => item.id === entry.id)?.errors[0].message).toContain('Duplicate')

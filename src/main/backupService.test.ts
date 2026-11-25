@@ -289,7 +289,6 @@ describe('data backup restore', () => {
     const service = await loadBackupService(dataRoot, validateRestoredDataDirectory, undefined, snapshotAgentStorage)
     const { AgentStorage } = await import('./agent/agentStorage')
     await cp(join(process.cwd(), 'data/config'), join(dataRoot, 'config'), { recursive: true })
-    await cp(join(process.cwd(), 'data/subagents'), join(dataRoot, 'subagents'), { recursive: true })
     const catalog = readFrozenStorage<{ thread: { id: string } }>('legacy-catalog')
     const conversation = readFrozenStorage<{ thread: { id: string } }>('legacy-conversation')
     const directory = join(dataRoot, 'db/projects/default-workspace/conversations', catalog.metadata.thread.id)
@@ -315,7 +314,6 @@ describe('data backup restore', () => {
     const { validateRestoredDataDirectory } = await vi.importActual<typeof import('./dataRestoreValidation')>('./dataRestoreValidation')
     const service = await loadBackupService(dataRoot, validateRestoredDataDirectory, undefined, snapshotAgentStorage)
     await cp(join(process.cwd(), 'data/config'), join(dataRoot, 'config'), { recursive: true })
-    await cp(join(process.cwd(), 'data/subagents'), join(dataRoot, 'subagents'), { recursive: true })
     const { AgentStorage } = await import('./agent/agentStorage')
     const { archiveAgentAttachments } = await import('./agent/agentAttachmentStore')
     const { getAgentConversationDatabaseFile, getAgentAttachmentsDir } = await import('./config/dataDir')
@@ -352,7 +350,6 @@ describe('data backup restore', () => {
     const service = await loadBackupService(dataRoot, validateRestoredDataDirectory, undefined, snapshotAgentStorage)
     const { AgentStorage } = await import('./agent/agentStorage')
     await cp(join(process.cwd(), 'data/config'), join(dataRoot, 'config'), { recursive: true })
-    await cp(join(process.cwd(), 'data/subagents'), join(dataRoot, 'subagents'), { recursive: true })
     const storage = AgentStorage.openNative(dataRoot)
     try {
       storage.createThread({ title: 'Keep registered conversation' })
@@ -369,7 +366,7 @@ describe('data backup restore', () => {
     const extracted = await extractBackupArchive(backup.path, destination)
     expect([...extracted.entryNames].some(name => name.includes('unfinished-creation'))).toBe(false)
     await validateRestoredDataDirectory(destination)
-    expect(await readFile(join(destination, 'subagents/_system/general-purpose/PROMPT.md'), 'utf8')).toBe(await readFile(join(dataRoot, 'subagents/_system/general-purpose/PROMPT.md'), 'utf8'))
+    expect([...extracted.entryNames].some(name => name.startsWith('subagents/'))).toBe(false)
     const restored = AgentStorage.openNative(destination)
     try { expect(restored.listThreads().map(thread => thread.title)).toEqual(['Keep registered conversation']) }
     finally { restored.close() }

@@ -98,25 +98,32 @@ export function applySubagentActivityUpdate<T extends AgentRunActivity>(
 
 function compactToolArgument(
   args: unknown,
-  keys: readonly string[]
+  keys: readonly string[],
+  maxLength?: number
 ): string | undefined {
   if (!args || typeof args !== 'object' || Array.isArray(args)) return undefined
   const record = args as Record<string, unknown>
-  return keys
-    .map((key) => record[key])
-    .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
-    ?.replace(/\s+/g, ' ')
-    .trim()
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value !== 'string') continue
+    const text = value.trimStart()
+    if (!text) continue
+    // Copy bounded headers so a stored preview cannot retain the entire argument.
+    const preview = maxLength === undefined ? text : [...text.slice(0, maxLength)].join('')
+    return preview.replace(/\s+/g, ' ').trimEnd()
+  }
+  return undefined
 }
 
 export function toolProvidedSummary(args: unknown): string | undefined {
   return compactToolArgument(args, ['summary'])
 }
 
-export function toolArgumentSummary(args: unknown): string {
+export function toolArgumentSummary(args: unknown, maxLength?: number): string {
   return compactToolArgument(
     args,
-    ['summary', 'description', 'path', 'url', 'query', 'command']
+    ['summary', 'description', 'path', 'input_path', 'url', 'query', 'command'],
+    maxLength
   ) ?? ''
 }
 

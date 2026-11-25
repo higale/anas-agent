@@ -150,28 +150,6 @@ describe('project store', () => {
     }
   })
 
-  it('defaults missing bundled Python capability without rewriting v0 and saves each project independently', async () => {
-    const store = await import('./projectStore')
-    const request = { name: 'Python', sourceFolders: [tempDir],
-      codingMode: false, prompt: '', capabilities: structuredClone(defaultCapabilities), restrictSubagents: false }
-    const first = await store.createProject(request)
-    const second = await store.createProject({ ...request, name: 'System Python' })
-    const raw = JSON.parse(await readSnapshot())
-    delete raw.projects.find((project: Project) => project.id === first.id).capabilities.bundled_python
-    await writeSnapshot(JSON.stringify(raw))
-    const before = await readSnapshot()
-    expect(await store.getProject(first.id)).toMatchObject({ capabilities: { bundledPython: true } })
-    expect(await readSnapshot()).toBe(before)
-    await store.updateProject(second.id, { ...request, name: second.name, capabilities: { ...request.capabilities, bundledPython: false } })
-    expect(await store.getProject(second.id)).toMatchObject({ capabilities: { bundledPython: false } })
-    expect(await store.getProject(first.id)).toMatchObject({ capabilities: { bundledPython: true } })
-    const saved = JSON.parse(await readSnapshot())
-    expect(saved.version).toBe(0)
-    const capabilities = saved.projects.find((project: Project) => project.id === second.id).capabilities
-    expect(capabilities.bundled_python).toBe(false)
-    expect(capabilities).not.toHaveProperty('bundledPython')
-  })
-
   it.each(['skill', 'tool'] as const)('defaults optional %s roots, persists them in v0, and retains offline references without touching their files', async kind => {
     const field = kind === 'skill' ? 'skillDirectories' : 'toolDirectories'
     const storedField = `${kind}_directories`

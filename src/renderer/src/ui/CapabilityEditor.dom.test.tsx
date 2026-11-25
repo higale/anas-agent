@@ -76,19 +76,10 @@ describe('shared capability editor', () => {
     }
     for (const key of ['customTools', 'mcp', 'skills', 'subagents'] as const) expect(changed.mock.lastCall![0][key]).toEqual(initial[key])
   })
-  it.each([false, true])('controls bundled Python independently and includes it in enable/disable all (subagent %s)', async subagent => {
-    const changed = vi.fn()
-    render(<Harness subagent={subagent} onChange={changed} />)
-    const python = screen.getByRole('checkbox', { name: 'settings.capability_bundledPython' })
-    expect(python).toBeChecked()
-    await userEvent.click(python)
-    expect(changed.mock.lastCall![0]).toMatchObject({ bundledPython: false, applicationEnvironment: true, environment: true })
-    expect(python).not.toBeChecked()
-    await userEvent.click(screen.getByRole('button', { name: 'settings.capabilities_enable_all' }))
-    expect(python).toBeChecked()
-    await userEvent.click(screen.getByRole('button', { name: 'settings.capabilities_disable_all' }))
-    expect(python).not.toBeChecked()
-    expect(changed.mock.lastCall![0].bundledPython).toBe(false)
+  it.each([false, true])('groups bundled command information under the environment capability (subagent %s)', subagent => {
+    render(<Harness subagent={subagent} />)
+    expect(screen.getByRole('checkbox', { name: 'settings.capability_environment' })).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: 'settings.capability_bundledPython' })).not.toBeInTheDocument()
   })
 
   it.each([false, true])('controls sleep separately from background and command tools in subagent mode %s', async (subagent) => {

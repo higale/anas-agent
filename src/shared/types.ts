@@ -319,11 +319,6 @@ export interface RuntimeToolStatus {
   toolNames: string[]
 }
 
-export interface PythonRuntimeStatus {
-  state: 'idle' | 'preparing' | 'ready' | 'unavailable' | 'error'
-  error?: string
-}
-
 export type SelectedAttachmentKind = 'text' | 'image' | 'binary'
 
 export interface SelectedAttachment {
@@ -562,7 +557,8 @@ export interface AgentFeatures {
 
 export interface EnvironmentContextSettings {
   operatingSystem: boolean
-  bundledCommands: boolean
+  bundledRg: boolean
+  bundledPython: boolean
   currentDate: boolean
   applicationDataDirectory: boolean
   userHomeDirectory: boolean
@@ -730,11 +726,16 @@ export type SkillImportError =
   | { code: 'already_exists'; name: string }
   | { code: 'invalid_directory' }
   | { code: 'invalid_skill'; issue: SkillLoadIssue }
-  | { code: 'failed' }
+  | { code: 'failed'; detail?: string }
+
+export interface SkillImportBatch {
+  names: string[]
+  failures: { name: string; error: SkillImportError; stagingPath?: string }[]
+}
 
 export type SkillImportResult =
   | { status: 'cancelled' }
-  | { status: 'imported'; names: string[]; snapshot: SkillSnapshot }
+  | ({ status: 'completed' } & SkillImportBatch)
   | { status: 'error'; error: SkillImportError }
 
 export type ToolImportResult =
@@ -835,7 +836,7 @@ export interface GaleApi {
     invoke(projectId: string | undefined, name: string, sourceAlias: string | undefined, args: string): Promise<SkillInvocationResult>
     updateAvailability(projectId: string | undefined, skillId: string, settings: SkillAvailabilityUpdate): Promise<SkillSnapshot>
     addDirectory(projectId?: string): Promise<SkillDirectoryAddResult>
-    importDirectories(projectId?: string): Promise<SkillImportResult>
+    importDirectories(): Promise<SkillImportResult>
     updateDirectory(projectId: string | undefined, rootId: string, update: SkillRootUpdate): Promise<SkillSnapshot>
     removeDirectory(projectId: string | undefined, rootId: string): Promise<SkillSnapshot>
     moveDirectory(projectId: string | undefined, rootId: string, direction: -1 | 1): Promise<SkillSnapshot>
@@ -880,8 +881,6 @@ export interface GaleApi {
     logWarning(kind: SpeechRendererWarningKind, diagnostics: SpeechRendererDiagnostics): Promise<void>
   }
   app: {
-    getPythonRuntimeStatus(): Promise<PythonRuntimeStatus>
-    resetBundledPython(): Promise<void>
     getBuildInfo(): Promise<AppBuildInfo>
     toggleDevTools(): Promise<void>
     restartInConsole(): Promise<void>

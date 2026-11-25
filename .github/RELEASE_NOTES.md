@@ -1,13 +1,15 @@
-## Anas v5.2.25
+## Anas v5.2.26
 
-- 用量信息内置到模型设置与侧栏，按 API 地址判断支持并默认开启；腾讯、百炼提供查询凭据设置。旧用量插件的开关、凭据和显示偏好不接续，原文件保留；已有模型用量配置继续有效，配置仍为 v0，数据库不变。
-- 支持腾讯 TokenHub 广州／新加坡本月用量与广州个人 General／Hy Token Plan，修正当天用量统计；腾讯云余额可独立开关。新增和整理腾讯、百炼模型模板，腾讯目录仅显示在线模型，完善套餐模型列表地址。
-- 百炼通过 RAM AccessKey 直接查询，无需 CLI；设置中提供授权说明，可选独立查询阿里云现金余额。余额排在用量前面，人民币紧凑显示使用 ￥，订阅状态支持中文，查询密钥仅输入聚焦时显示。模型 Key 环境变量缺失不再阻断独立账户查询。
-- 完善模型添加菜单的品牌图标，新建空白供应商默认使用 Responses；插件设置支持本地化标题和密码字段，概览只列已填写／未填写字段。
-- 修复 Responses 多段推理摘要组装，以及流取消时 HTTP 记录状态和收尾竞争。
+### 中文
 
-- Move usage information into model settings and the sidebar, enabled by default for supported API URLs, with query credentials for Tencent and Bailian. Retired usage-plugin preferences and credentials are not imported; existing files are retained. Existing model usage settings remain valid, configuration stays at v0, and databases are unchanged.
-- Support current-month Tencent TokenHub usage in Guangzhou/Singapore and Guangzhou personal General/Hy Token Plans, including corrected current-day statistics. Tencent Cloud balance queries can be toggled independently. Add and organize Tencent/Bailian templates, show only online Tencent models, and improve plan model-list endpoints.
-- Query Bailian directly with RAM AccessKeys, without a CLI. Include authorization guidance and optional independent Alibaba Cloud cash-balance queries. Show balances first, use ￥ for compact RMB amounts, localize subscription status, and reveal query secrets only while focused. Missing model-key environment variables no longer block independent account queries.
-- Improve brand icons in model menus and default blank providers to Responses. Plugin settings support localized titles and password fields, with an overview of completed and empty fields.
-- Fix assembly of multiple Responses reasoning summaries and HTTP trace status/finalization races during stream cancellation.
+- 新增离线文档工具 `document_to_markdown`。将 PDF、DOCX 或 PPTX 拖入聊天即可插入路径，模型可按需转换到指定的 Markdown 文件。图片保存在相邻的 `<输出文件主名>_images` 目录，结果返回文件路径、行数和字节数。
+- PowerPoint 转换可提取表格、演讲者备注和公式，跳过手写墨迹及其预览图。可转换的公式写为 LaTeX，无法准确转换的结构保留为 XML。聊天中的工具都可以用可选的 `summary` 说明当前操作。
+- 技能、自定义工具、子 Agent 和插件导入后是可独立编辑的完整副本。批量导入技能时，已成功的项目会保留，失败项单独说明原因。内置资源、示例、帮助和语言直接从程序包读取，数据目录中的旧副本留在原处。
+- Windows 和 macOS 的内置 Python 由程序包维护，额外依赖请安装在自己的 Python 环境。普通 Python 工具优先使用系统解释器，缺少时使用包内解释器。“设置 → 环境”中的内置 rg 和 Python 开关控制模型看到的说明，默认开启。升级前关闭过相关说明的用户，请在新开关中重新关闭。
+
+### English
+
+- The new offline `document_to_markdown` tool converts PDF, DOCX and PPTX files to a Markdown file at a specified path. Drag a document into chat to insert its path. Images are saved beside the output in `<output stem>_images`. The result includes the file paths, line count and byte count.
+- PowerPoint conversion extracts tables, speaker notes and equations, and skips handwritten ink and its previews. Supported equations use LaTeX, while unsupported structures are preserved as XML. Any tool can supply an optional `summary` to describe its current action in chat.
+- Imported skills, custom tools, subagents and plugins are complete, independently editable copies. Batch skill imports retain successful items and report failures individually. Bundled resources, examples, help and languages are read directly from the application package. Existing copies remain in the data directory.
+- On Windows and macOS, Anas manages its bundled Python inside the application package. Install additional dependencies in your own environment. Ordinary Python tools prefer the system interpreter and can use bundled Python when needed. The bundled rg and Python switches in Settings → Environment control what the model is told and default to on. If you previously disabled either description, turn it off again after upgrading.

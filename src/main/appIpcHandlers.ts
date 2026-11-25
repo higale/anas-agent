@@ -21,7 +21,7 @@ import { applyNativeTheme, configureApplicationMenu, openExternalUrl } from './a
 import { closeAgentRuntime, initializeAgentRuntime } from './agent/agentIpcHandlers'
 import { closePluginHost } from './plugins/pluginHost'
 import { initializePluginsStore, withPluginBackendsStoppedForBackup } from './plugins/pluginRuntime'
-import { initializeBundledExamples } from './bundledExamples'
+import { validateBundledExamples } from './bundledExamples'
 import { isDeveloperHttpTraceEnabled, setDeveloperHttpTraceEnabled } from './agent/developerHttpTraceState'
 import { dialogParentFromEvent, showModalOpenDialog, showModalSaveDialog } from './modalDialog'
 import { getRuntimeToolStatus } from './runtimeToolStatus'
@@ -34,7 +34,6 @@ import { detectSystemEnvironment } from './systemEnvironmentDetection'
 import { getDataStorageUsage, getDeveloperHttpTraceUsage } from './dataStorageUsage'
 import { restartInConsole } from './consoleRestart'
 import { createAppBuildInfo } from './buildInfo'
-import { getPythonRuntimeStatus, resetBundledPython } from './bundledPython'
 
 declare const __ANAS_BUILD_ENVIRONMENT__: AppBuildInfo['environment']
 declare const __ANAS_BUILD_TIME__: string
@@ -106,9 +105,7 @@ async function clearElectronCache(): Promise<void> {
 }
 
 export function registerAppIpcHandlers(): void {
-  handleMainIpc('app:getPythonRuntimeStatus', () => getPythonRuntimeStatus())
   // The runtime service owns the data lifecycle boundary, as it does at startup.
-  handleMainIpc('app:resetBundledPython', () => resetBundledPython())
   handleMainIpc('app:getBuildInfo', (): AppBuildInfo => {
     return createAppBuildInfo(app.getVersion(), app.isPackaged, {
       environment: __ANAS_BUILD_ENVIRONMENT__, builtAt: __ANAS_BUILD_TIME__,
@@ -244,7 +241,7 @@ export function registerAppIpcHandlers(): void {
     }
     const activate = async (): Promise<void> => {
       reloadDataEnv()
-      await initializeBundledExamples()
+      await validateBundledExamples()
       await initializePluginsStore()
       await Promise.all([
         initializeAgentRuntime(),

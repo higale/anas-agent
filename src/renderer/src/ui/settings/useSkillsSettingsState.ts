@@ -29,7 +29,7 @@ function skillImportErrorText(t: TFunction, error: SkillImportError): string {
       reason: error.issue.detail ? `${reason} ${error.issue.detail}` : reason
     })
   }
-  return t('settings.failed_import_skill')
+  return error.detail || t('settings.failed_import_skill')
 }
 
 export function useSkillsSettingsState({ openConfirmDialog, settingsOpen, settingsTab, t }: Options) {
@@ -70,7 +70,7 @@ export function useSkillsSettingsState({ openConfirmDialog, settingsOpen, settin
       const snapshot = await window.gale.skills.get()
       if (revision === snapshotRevision.current) setSavedSkills(snapshot)
     } catch {
-      notice.error(t('chat.failed_load_skill'), { id: noticeId })
+      if (revision === snapshotRevision.current) notice.error(t('chat.failed_load_skill'), { id: noticeId })
     }
   }, [t])
 
@@ -102,9 +102,22 @@ export function useSkillsSettingsState({ openConfirmDialog, settingsOpen, settin
         notice.error(skillImportErrorText(t, result.error), { id: noticeId })
         return
       }
-      setSkills(result.snapshot)
-      notice.success(t('settings.skills_imported', { count: result.names.length }), { id: noticeId })
-      return result.snapshot.skills.find(skill => skill.source === 'user' && skill.name === result.names[0])?.id
+      const resultId = 'settings-skill-import-result'
+      if (result.failures.length) {
+        const lines = result.names.length ? [t('settings.skill_import_saved_names', { names: result.names.join(', ') })] : []
+        for (const failed of result.failures) {
+          lines.push(`${failed.name} — ${skillImportErrorText(t, failed.error)}`)
+          if (failed.stagingPath) lines.push(t('settings.skill_import_check_path', { path: failed.stagingPath }))
+        }
+        notice.error(t('settings.skill_import_result', { saved: result.names.length, failed: result.failures.length }), {
+          id: resultId, description: lines.join('\n'), duration: Infinity
+        })
+      } else {
+        notice.success(t('settings.skills_imported', { count: result.names.length }), { id: resultId })
+      }
+      void refreshSkills()
+      const first = result.names[0]
+      return first ? `user:${first}` : undefined
     } catch {
       notice.error(t('settings.failed_import_skill'), { id: noticeId })
     }

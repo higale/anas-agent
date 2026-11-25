@@ -112,24 +112,6 @@ describe('package resource capability selections', () => {
 })
 
 describe('scoped Agent capabilities', () => {
-  it('defaults bundled Python for existing capabilities and run snapshots while retaining explicit false', () => {
-    const raw = serializeCapabilities(defaultCapabilities)
-    const { bundled_python: _bundledPython, ...previous } = raw
-    const original = JSON.stringify(previous)
-    expect(parseCapabilities(previous).bundledPython).toBe(true)
-    expect(JSON.stringify(previous)).toBe(original)
-    const disabled = { ...structuredClone(defaultCapabilities), bundledPython: false }
-    expect(serializeCapabilities(disabled).bundled_python).toBe(false)
-    expect(serializeCapabilities(disabled)).not.toHaveProperty('bundledPython')
-    expect(parseCapabilities(serializeCapabilities(disabled))).toEqual(disabled)
-    const saved = serializeRunConfiguration({ codingMode: false, customTools: [], capabilities: disabled, subagentLimit: disabled })
-    expect(parseRunConfiguration(saved).capabilities.bundledPython).toBe(false)
-    const old = parseRunConfiguration({ ...saved, capabilities: previous, subagent_limit: previous })
-    expect(old.capabilities.bundledPython).toBe(true)
-    expect(old.subagentLimit?.bundledPython).toBe(true)
-    for (const value of [null, 0, 'false']) expect(() => parseCapabilities({ ...raw, bundled_python: value })).toThrow()
-  })
-
   it('persists sleep through existing tool selections and applies the parent limit', () => {
     const capabilities = { ...structuredClone(defaultCapabilities), backgroundTools: false,
       skills: { mode: 'custom' as const, project: false as const, entries: [] }, customTools: selectedTools() }
@@ -386,7 +368,6 @@ describe('scoped Agent capabilities', () => {
     parent.tools = ['read_file']
     Object.assign(parent, { profile: false, environment: false, workspace: false, memory: false })
     parent.applicationEnvironment = false
-    parent.bundledPython = false
     parent.backgroundTools = false
     parent.skills = { mode: 'custom', project: false, entries: [{ id: 'private', model: false, shortcut: true }, { id: 'public', model: true, shortcut: false }] }
     const child = structuredClone(defaultCapabilities)
@@ -398,14 +379,12 @@ describe('scoped Agent capabilities', () => {
     const limited = intersectCapabilities(child, parent)
     expect(limited).toMatchObject({ profile: false, environment: false, workspace: false, memory: false })
     expect(limited.applicationEnvironment).toBe(false)
-    expect(limited.bundledPython).toBe(false)
     expect(limited.backgroundTools).toBe(false)
     expect(limited.tools).toEqual(['read_file'])
     expect(limited.skills.entries.map((entry) => entry.model)).toEqual([false, true])
     expect(intersectCapabilities(child, limited)).toEqual(limited)
     expect(child.memory).toBe(true)
     expect(child.applicationEnvironment).toBe(true)
-    expect(child.bundledPython).toBe(true)
   })
   it.each([undefined, {}, { ...defaultCapabilities, customTools: selectedTools(), toolMode: 'invalid' }, { ...defaultCapabilities, customTools: selectedTools(), applicationEnvironment: 'yes' }, { ...defaultCapabilities, customTools: selectedTools(), skills: { mode: 'inherit', entries: [] } }])('rejects incomplete or invalid settings', (value) => {
     expect(() => validateCapabilities(value)).toThrow()

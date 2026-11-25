@@ -285,6 +285,31 @@ describe('process display preferences', () => {
   })
 })
 
+it('displays the model summary for document conversion and keeps its format marker in the tool output', () => {
+  const run = activity('running')
+  const path = '/reports/季度报告.pdf'
+  const paths = { input_path: path, output_path: '/reports/季度报告.md' }
+  const summary = '读取季度报告中的收入明细'
+  run.tools[0].call = { id: 'tool-1', name: 'document_to_markdown', args: { ...paths, summary } }
+  const content = () => <AgentMessageList title="Thread" messages={messages} activities={[{ ...run, tools: [...run.tools] }]}
+    panelRef={{ current: null }} followOutputRef={{ current: true }} speech={{ status: 'idle' }} onSpeak={vi.fn()} />
+  const view = render(content())
+  const runningLabel = () => view.container.querySelector('.agent-tool-running > summary .agent-activity-summary-label')
+  expect(runningLabel()).toHaveTextContent(/^document_to_markdown\s*读取季度报告中的收入明细$/)
+  run.tools[0] = { ...run.tools[0], call: { ...run.tools[0].call, args: paths } }
+  view.rerender(content())
+  expect(runningLabel()).toHaveTextContent(path)
+  const output = `[Converted document · Markdown]\nSource: "${path}"\nComplete Markdown: "${paths.output_path}"\nLines: 3\nBytes: 48`
+  run.tools[0] = { ...run.tools[0], status: 'completed', output }
+  view.rerender(content())
+  const card = view.container.querySelector<HTMLDetailsElement>('.agent-activity-tool')!
+  if (!card.open) expand(card)
+  const result = card.querySelector<HTMLDetailsElement>('.agent-activity-result')!
+  expect(result.querySelector('summary')).toHaveTextContent(/^result$/)
+  expand(result)
+  expect(result.querySelector('pre')?.textContent).toBe(output)
+})
+
 describe('sleep countdown', () => {
   const props = { title: 'Thread', messages, panelRef: { current: null }, followOutputRef: { current: true },
     speech: { status: 'idle' as const }, onSpeak: vi.fn() }

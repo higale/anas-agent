@@ -40,27 +40,13 @@ async function invokeText(tool: ToolDefinition, input: unknown) {
 }
 
 describe('custom command tools', () => {
-  it.each([true, false])('uses a bundled interpreter only after system discovery fails and fallback is enabled (%s)', async enabled => {
-    const { directory, definition } = await fixture('')
-    await writeFile(join(directory, 'run.py'), 'console.log("fallback-ran")')
-    vi.spyOn(runtimeDiscovery, 'discoverPython3').mockResolvedValue(undefined)
-    const fallback = vi.spyOn(bundledPython, 'discoverBundledPython').mockResolvedValue({ executable: process.execPath, version: '3.13.18', command: process.execPath })
-    const [tool] = customToolDefinitions([{ ...definition, command: 'run.py {{args}}' }], {
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, backgroundTools: false, bundledPython: enabled
-    })
-    const output = await invokeText(tool, { title: 'test' })
-    if (enabled) expect(output.trim()).toBe('fallback-ran')
-    else expect(JSON.parse(output)).toMatchObject({ ok: false, error: expect.stringContaining('No usable Python 3') })
-    expect(fallback).toHaveBeenCalledTimes(enabled ? 1 : 0)
-  })
-
   it('does not retry a failed system script with bundled Python', async () => {
     const { directory, definition } = await fixture('')
     await writeFile(join(directory, 'run.py'), 'require("fs").appendFileSync("count.txt","once\\n"); console.error("missing dependency"); process.exit(1)')
     vi.spyOn(runtimeDiscovery, 'discoverPython3').mockResolvedValue({ executable: process.execPath, version: '3.12.0', command: 'python' })
     const fallback = vi.spyOn(bundledPython, 'discoverBundledPython')
     const [tool] = customToolDefinitions([{ ...definition, command: 'run.py {{args}}' }], {
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, backgroundTools: false, bundledPython: true
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, backgroundTools: false
     })
     expect(JSON.parse(await invokeText(tool, { title: 'test' }))).toMatchObject({ ok: false, exit_code: 1 })
     expect(await readFile(join(directory, 'count.txt'), 'utf8')).toBe('once\n')
@@ -74,7 +60,7 @@ describe('custom command tools', () => {
     vi.spyOn(runtimeDiscovery, 'discoverPython3').mockImplementation(async () => { controller.abort(); controller.signal.throwIfAborted(); return undefined })
     const fallback = vi.spyOn(bundledPython, 'discoverBundledPython')
     const [tool] = customToolDefinitions([{ ...definition, command: 'run.py {{args}}' }], {
-      env: process.env, backgroundTools: false, bundledPython: true, signal: controller.signal
+      env: process.env, backgroundTools: false, signal: controller.signal
     })
     await expect(invokeText(tool, { title: 'test' })).rejects.toMatchObject({ name: 'AbortError' })
     expect(fallback).not.toHaveBeenCalled()
@@ -102,7 +88,7 @@ describe('custom command tools', () => {
     if (!await runtimeDiscovery.discoverPython3()) return skip()
     const { directory } = await fixture('')
     const packageDirectory = join(directory, 'tool with spaces')
-    await cp(resolve('data/skills/_system/tool-manager/assets/python-tool'), packageDirectory, { recursive: true })
+    await cp(resolve('data/skills/tool-manager/assets/python-tool'), packageDirectory, { recursive: true })
     const [definition] = parseCustomTools([JSON.parse(await readFile(join(packageDirectory, 'TOOL.json'), 'utf8'))])
     const [tool] = customToolDefinitions([{ ...definition, directory: packageDirectory }], { env: process.env, backgroundTools: false })
     const text = '中文🙂 "quote"\n$() & {{tool_dir}}'
@@ -138,6 +124,7 @@ describe('custom command tools', () => {
     const { directory, definition } = await fixture('')
     await writeFile(join(directory, 'entry.py'), 'require("fs").writeFileSync("executed", "yes")')
     const discover = vi.spyOn(runtimeDiscovery, 'discoverPython3').mockResolvedValue(undefined)
+    vi.spyOn(bundledPython, 'discoverBundledPython').mockResolvedValue(undefined)
     const controller = new AbortController()
     const [tool] = customToolDefinitions([{ ...definition, command: 'entry.py {{args}}' }], { env: process.env, backgroundTools: false, signal: controller.signal })
     expect(JSON.parse(await invokeText(tool, { title: 'test' }))).toMatchObject({ ok: false, error: expect.stringContaining('No usable Python 3') })
@@ -185,6 +172,15 @@ describe('custom command tools', () => {
     const { snapshots } = await fixture('')
     const definitions = [...snapshots, { ...snapshots[0], id: 'interactive', name: 'interactive_tool', interactive: true }]
     expect(customToolDefinitions(definitions, { env: {}, backgroundTools: false }).map((tool) => tool.name)).toEqual(['submit_result'])
+  })
+  it('reports an unavailable explicit bundled interpreter without substituting system Python', async () => {
+    const { definition } = await fixture('')
+    const copied = { ...definition, command: '"{{bundled_python}}" run.py {{args}}' }
+    const system = vi.spyOn(runtimeDiscovery, 'discoverPython3')
+    vi.spyOn(bundledPython, 'discoverBundledPython').mockResolvedValue(undefined)
+    const [tool] = customToolDefinitions([copied], { env: {}, backgroundTools: false })
+    expect(JSON.parse(await invokeText(tool, { title: 'test' }))).toMatchObject({ ok: false, error: expect.stringContaining('Bundled Python is unavailable') })
+    expect(system).not.toHaveBeenCalled()
   })
   it('returns a background terminal, reads its prompt and sends input without Shell capability', async () => {
     const { tool } = await fixture(`const rl=require('node:readline').createInterface({input:process.stdin,output:process.stdout});console.log('TTY:'+process.stdin.isTTY+':'+process.stdout.isTTY);console.error('DIAGNOSTIC');rl.question('PROMPT:',answer=>{console.log('ANSWER:'+answer);rl.close()})`, { interactive: true })

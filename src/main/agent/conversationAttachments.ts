@@ -96,6 +96,7 @@ async function textContent(
   maxChars: number,
   overflow: AttachmentTextOverflowMode
 ): Promise<ModelContentBlock[]> {
+  // Published conversations can contain archived PDF/DOCX text attachments.
   const text = supportsLocalTextExtraction(artifact.mimeType)
     ? (await extractLocalAttachmentText(artifact.path, artifact.mimeType)).text
     : (await readFile(artifact.path)).toString('utf8')

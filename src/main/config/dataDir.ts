@@ -289,31 +289,23 @@ export function getSkillsDir(): string {
 }
 
 export function getSystemSkillsDir(): string {
-  return join(getSkillsDir(), '_system')
-}
-
-export function getExamplesDir(): string {
-  return join(getDataDir(), 'examples')
+  return join(getBundledDataDir(), 'skills')
 }
 
 export function getSkillExamplesDir(): string {
-  return join(getExamplesDir(), 'skills')
+  return join(getBundledExamplesDir(), 'skills')
 }
 
 export function getToolExamplesDir(): string {
-  return join(getExamplesDir(), 'tools')
+  return join(getBundledExamplesDir(), 'tools')
 }
 
 export function getSubagentExamplesDir(): string {
-  return join(getExamplesDir(), 'subagents')
-}
-
-export function getSystemPluginsDir(): string {
-  return join(getDataDir(), 'plugins', '_system')
+  return join(getBundledExamplesDir(), 'subagents')
 }
 
 export function getPluginExamplesDir(): string {
-  return join(getExamplesDir(), 'plugins')
+  return join(getBundledExamplesDir(), 'plugins')
 }
 
 export function getLogDir(): string {

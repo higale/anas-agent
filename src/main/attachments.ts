@@ -9,7 +9,6 @@ import { imageDimensionsFromStream } from 'image-dimensions'
 import { maxImageSourceBytes, maxImagePixels, maxImageDimension } from '@shared/imageLimits'
 import { getAppConfigSnapshot } from './config/appConfig'
 import { getAgentAttachmentsDir, getDataDir, getTempDir } from './config/dataDir'
-import { extractLocalAttachmentText, supportsLocalTextExtraction } from './attachmentTextExtractor'
 import { runtimeLog } from './runtimeLogger'
 import { findAvatarSourceImage, isAvatarImageExtension, readAvatarImage as readCurrentAvatarImage, readAvatarTransform, resetAvatarAssetsToDefault, setAvatarCrop, setAvatarSourceCrop } from './avatarAssets'
 import { applyProfileIcon } from './profileIconService'
@@ -18,7 +17,6 @@ import { armCurrentAgentToolEffect } from './agent/toolEffectScope'
 import type { AppAvatarImage, AttachmentPreview, AttachmentPreviewOptions, AttachmentTextOverflowMode, AvatarCropSource, AvatarCropSourceReadResult, AvatarTransform, FileIconImage, FileIconSize, SelectedAttachment, SelectedAttachmentKind } from '@shared/types'
 
 const textAttachmentProbeBytes = 8192
-const maxParsedAttachmentBytes = 20 * 1024 * 1024
 const imagePreviewSize = 240
 const maxThumbnailBytes = 4 * 1024 * 1024
 const imagePreviewTimeoutMs = 5_000
@@ -30,7 +28,7 @@ const avatarCropMaxSize = 1024
 const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 const fileIconSizes = new Set<FileIconSize>(['small', 'normal', 'large'])
 
-export const attachmentExtensions = ['txt', 'md', 'markdown', 'json', 'jsonl', 'csv', 'tsv', 'log', 'xml', 'yaml', 'yml', 'toml', 'ini', 'js', 'ts', 'tsx', 'jsx', 'py', 'ps1', 'css', 'html', 'pdf', 'docx', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp']
+export const attachmentExtensions = ['txt', 'md', 'markdown', 'json', 'jsonl', 'csv', 'tsv', 'log', 'xml', 'yaml', 'yml', 'toml', 'ini', 'js', 'ts', 'tsx', 'jsx', 'py', 'ps1', 'css', 'html', 'pdf', 'docx', 'pptx', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp']
 
 interface TextAttachmentLimit {
   maxChars: number
@@ -199,6 +197,7 @@ export function attachmentMimeType(filePath: string): string {
     '.md': 'text/markdown',
     '.markdown': 'text/markdown',
     '.pdf': 'application/pdf',
+    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     '.png': 'image/png',
     '.ps1': 'text/plain',
     '.py': 'text/x-python',
@@ -219,7 +218,6 @@ export function attachmentMimeType(filePath: string): string {
 
 function attachmentKind(mimeType: string): SelectedAttachmentKind {
   if (mimeType.startsWith('image/')) return [...imageMimeTypes.values()].includes(mimeType) ? 'image' : 'binary'
-  if (supportsLocalTextExtraction(mimeType)) return 'text'
   if (mimeType.startsWith('text/') || ['application/json', 'application/jsonl', 'application/toml', 'application/xml', 'application/yaml'].includes(mimeType)) return 'text'
   return 'binary'
 }
@@ -292,7 +290,7 @@ function limitAttachmentText(text: string, limit: TextAttachmentLimit): Pick<Sel
   }
 }
 
-async function readSelectedAttachment(filePath: string, textLimit: TextAttachmentLimit): Promise<SelectedAttachment> {
+async function readSelectedAttachment(filePath: string, getTextLimit: () => Promise<TextAttachmentLimit>): Promise<SelectedAttachment> {
   const info = await stat(filePath)
   if (!info.isFile()) {
     return {
@@ -364,54 +362,8 @@ async function readSelectedAttachment(filePath: string, textLimit: TextAttachmen
     }
   }
 
-  if (supportsLocalTextExtraction(mimeType)) {
-    if (info.size > maxParsedAttachmentBytes) {
-      return {
-        path: filePath,
-        name: basename(filePath),
-        sourcePath: resolve(filePath),
-        size: info.size,
-        kind,
-        mimeType,
-        contextPolicy: 'one_turn',
-        skippedReason: `File is larger than ${Math.round(maxParsedAttachmentBytes / 1024 / 1024)} MB.`
-      }
-    }
-    try {
-      const extracted = await extractLocalAttachmentText(filePath, mimeType)
-      const limitedText = limitAttachmentText(extracted.text, textLimit)
-      return {
-        path: filePath,
-        name: basename(filePath),
-        sourcePath: resolve(filePath),
-        size: info.size,
-        kind,
-        mimeType,
-        contextPolicy: 'one_turn',
-        ...limitedText
-      }
-    } catch (reason) {
-      const message = reason instanceof Error ? reason.message : 'Failed to extract text.'
-      runtimeLog('warn', 'attachment', 'Attachment text extraction failed.', {
-        file: filePath,
-        mimeType,
-        error: message
-      })
-      return {
-        path: filePath,
-        name: basename(filePath),
-        sourcePath: resolve(filePath),
-        size: info.size,
-        kind,
-        mimeType,
-        contextPolicy: 'one_turn',
-        skippedReason: message
-      }
-    }
-  }
-
   const buffer = await readFile(filePath)
-  const limitedText = limitAttachmentText(buffer.toString('utf8'), textLimit)
+  const limitedText = limitAttachmentText(buffer.toString('utf8'), await getTextLimit())
   return {
     path: filePath,
     name: basename(filePath),
@@ -426,10 +378,11 @@ async function readSelectedAttachment(filePath: string, textLimit: TextAttachmen
 
 export async function readSelectedAttachments(filePaths: string[]): Promise<SelectedAttachment[]> {
   const uniquePaths = Array.from(new Set(filePaths.filter((filePath) => filePath.length > 0)))
-  const textLimit = await getTextAttachmentLimit()
+  let textLimit: Promise<TextAttachmentLimit> | undefined
+  const getTextLimit = () => textLimit ??= getTextAttachmentLimit()
   return Promise.all(uniquePaths.map(async (filePath): Promise<SelectedAttachment> => {
     try {
-      return await readSelectedAttachment(filePath, textLimit)
+      return await readSelectedAttachment(filePath, getTextLimit)
     } catch (reason) {
       return { path: filePath, name: basename(filePath), sourcePath: resolve(filePath), size: 0, kind: 'binary',
         mimeType: 'application/octet-stream', contextPolicy: 'one_turn',

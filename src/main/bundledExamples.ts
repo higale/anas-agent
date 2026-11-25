@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { readdir } from 'node:fs/promises'
-import { mirrorBundledDirectories, validateBundledDirectories } from './bundledDirectories'
-import { getBundledExamplesDir, getExamplesDir, getTempDir } from './config/dataDir'
+import { validateBundledDirectories } from './bundledDirectories'
+import { getBundledExamplesDir, getTempDir } from './config/dataDir'
 import { validateBundledPluginZip } from './plugins/pluginStore'
 import { validateBundledSkill } from './skillsStore'
 import { validateBundledTool } from './toolsStore'
@@ -9,10 +9,10 @@ import { readSubagentPackage } from './subagentPackages'
 
 let initialization: Promise<void> | undefined
 
-/** Refresh the complete app-owned tree at startup and after backup restoration. */
-export function initializeBundledExamples(): Promise<void> {
+/** Validate package resources in place; importing creates a separate user copy. */
+export function validateBundledExamples(): Promise<void> {
   if (!initialization) {
-    initialization = mirrorBundledDirectories(getBundledExamplesDir(), getExamplesDir(), undefined, async (directory, category) => {
+    initialization = validateBundledDirectories(getBundledExamplesDir(), async (directory, category) => {
       if (category === 'skills') await validateBundledDirectories(directory, validateBundledSkill)
       else if (category === 'tools') await validateBundledDirectories(directory, validateBundledTool)
       else if (category === 'subagents') await validateBundledDirectories(directory, async path => {

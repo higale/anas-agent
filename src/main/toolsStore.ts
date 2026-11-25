@@ -1,17 +1,19 @@
+import { copyPackageContents } from './copyPackageContents'
 import { parseResourceDirectories, resourceDirectoryName } from './resourceDirectories'
 import { findSubagentPackage, withSubagentPackage } from './subagentPackages'
 import { writeJsonFileAtomic as writeAtomic } from './atomicJson'
 import { createHash, randomUUID } from 'node:crypto'
-import { copyFile, cp, lstat, mkdir, open, readFile, readdir, realpath, rename, rm } from 'node:fs/promises'
+import { copyFile, lstat, mkdir, open, readFile, readdir, realpath, rename, rm } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { shell } from 'electron'
 import { listPackageFiles, readPackageFile, savePackageFile, createPackageFile, packageFileExists } from './packageFiles'
-import { customToolsConfigFileName, getBundledConfigFile, getConfigFile, getDataDir, getToolExamplesDir } from './config/dataDir'
+import { customToolsConfigFileName, getBundledConfigFile, getBundledDataDir, getConfigFile, getDataDir } from './config/dataDir'
 import { parseCustomTools, serializeCustomTool, validateCustomTool, type CustomToolDefinition, type CustomToolSave } from '@shared/customTools'
 import { normalizeToolSettings, serializeToolSettings, type ToolImportError, type ToolLoadError, type ToolPackage, type ToolRoot, type ToolSnapshot, type ToolSettings } from '@shared/toolPackages'
 import { parseCapabilities } from '@shared/agentCapabilities'
 import { packageResourceEnabled } from '@shared/packageResourceSelection'
+import { assertUserResourceDirectory } from './bundledDirectories'
 
 let mutationTail: Promise<unknown> = Promise.resolve()
 const activeDirectories = new Map<string, number>()
@@ -117,7 +119,7 @@ export function importToolDirectories(sourcePaths: readonly string[], rootId = '
       throw new ToolImportFailure({ code: 'invalid_directory' })
     }
     const snapshot = await readToolSnapshot()
-    const targetRoot = editableToolRoot(snapshot, rootId)
+    const targetRoot = await editableToolRoot(snapshot, rootId)
     const catalog = { tools: snapshot.tools.filter(tool => tool.rootId === targetRoot.id) }
     const names = new Set(catalog.tools.map(tool => tool.name.toLowerCase()))
     const ids = new Set(catalog.tools.map(tool => tool.id))
@@ -150,14 +152,11 @@ export function importToolDirectories(sourcePaths: readonly string[], rootId = '
     try {
       for (const source of sources) {
         const target = join(stage, source.name)
-        await cp(source.path, target, { recursive: true, dereference: false, errorOnExist: true, force: false, verbatimSymlinks: true,
-          filter: async path => {
-            const info = await lstat(path)
-            if (!info.isDirectory() && !info.isFile() && !info.isSymbolicLink()) throw new ToolImportFailure({ code: 'invalid_tool', name: source.name })
-            bytes += info.size
-            if (++entries > 10000 || bytes > 128 * 1024 * 1024 || relative(source.path, path).split(sep).length > 32) throw new ToolImportFailure({ code: 'too_large' })
-            return true
-          }
+        await mkdir(target)
+        await copyPackageContents(source.path, target, ({ info, depth }) => {
+          if (!info.isDirectory() && !info.isFile()) throw new ToolImportFailure({ code: 'invalid_tool', name: source.name })
+          bytes += info.size
+          if (++entries > 10000 || bytes > 128 * 1024 * 1024 || depth > 32) throw new ToolImportFailure({ code: 'too_large' })
         })
         const staged = await readDefinition(target).catch(reason => { throw new ToolImportFailure({ code: 'invalid_tool', name: source.name, issue: toToolLoadError(reason, join(target, manifestName), 'invalid_definition') }) })
         if (staged.id !== source.definition.id || staged.name !== source.definition.name) throw new ToolImportFailure({ code: 'invalid_tool', name: source.name })
@@ -187,6 +186,7 @@ export function importToolDirectories(sourcePaths: readonly string[], rootId = '
 async function scan(root: ToolRoot, config: ToolSettings): Promise<ToolPackage[]> {
   try {
     if (!isAbsolute(root.path)) throw new ToolLoadFailure({ code: 'invalid_source_path', path: root.path })
+    if (root.source !== 'subagent' && root.source !== 'system') await assertUserResourceDirectory(root.path)
     const entries = await readdir(root.path, { withFileTypes: true })
     if (entries.length > maxSourceEntries) throw new ToolLoadFailure({ code: 'too_many_entries', path: root.path })
     const tools: ToolPackage[] = []
@@ -195,6 +195,7 @@ async function scan(root: ToolRoot, config: ToolSettings): Promise<ToolPackage[]
       const directory = join(root.path, entry.name)
       const base = { rootId: root.id, rootName: root.name, source: root.source, directory }
       try {
+        if (root.source !== 'subagent' && root.source !== 'system') await assertUserResourceDirectory(directory)
         const definition = await readDefinition(directory)
         const id = `${root.id}:${definition.id}`
         tools.push({ ...base, id, name: definition.name, description: definition.description,
@@ -254,7 +255,8 @@ async function readToolSnapshot(toolDirectories: readonly string[] = []): Promis
       name: resourceDirectoryName(path, 'tools'), path, source: 'project' as const
     })),
     { id: 'user', name: 'User', path: getToolsDir(), source: 'user' },
-    ...config.externalDirectories.map(directory => ({ ...directory, source: 'external' as const }))
+    ...config.externalDirectories.map(directory => ({ ...directory, source: 'external' as const })),
+    { id: 'system', name: 'System', path: join(getBundledDataDir(), 'tools'), source: 'system' }
   ]
   const tools = (await Promise.all(roots.map(root => scan(root, config)))).flat()
   return { roots, tools: tools.map(tool => ({ ...tool, enabled: tool.source === 'project' || !config.disabledTools?.includes(tool.id) })) }
@@ -319,10 +321,11 @@ async function renameToolDirectory(source: string, target: string, document: Ret
   }
 }
 
-function editableToolRoot(snapshot: ToolSnapshot, rootId: string): ToolRoot {
+async function editableToolRoot(snapshot: ToolSnapshot, rootId: string): Promise<ToolRoot> {
   const root = snapshot.roots.find(root => root.id === rootId)
   if (!root || (root.source !== 'user' && root.source !== 'external')) throw new Error('Only user and added tool directories can be modified.')
   if (root.error) throw new ToolLoadFailure(root.error)
+  await assertUserResourceDirectory(root.path)
   return root
 }
 
@@ -332,7 +335,8 @@ export async function saveToolPackage(input: CustomToolSave): Promise<void> {
     const existing = input.id === undefined ? undefined : catalog.tools.find(tool => tool.id === input.id)
     if (input.id !== undefined && (!existing || !existing.definition)) throw new Error('Only valid tools can be edited here.')
     if (existing && input.rootId !== undefined && input.rootId !== existing.rootId) throw new Error('Editing cannot move a tool to another source.')
-    const targetRoot = editableToolRoot(catalog, existing?.rootId ?? (input.rootId === undefined ? 'user' : input.rootId))
+    const targetRoot = await editableToolRoot(catalog, existing?.rootId ?? (input.rootId === undefined ? 'user' : input.rootId))
+    if (existing) await assertUserResourceDirectory(existing.directory)
     const id = existing?.definition?.id.slice(targetRoot.id.length + 1) ?? randomUUID()
     const definition = validateCustomTool({ ...input, id, directory: undefined })
     if ((!existing || existing.name !== definition.name) && catalog.tools.some(tool => tool.rootId === targetRoot.id && tool.id !== existing?.id && tool.name.toLowerCase() === definition.name.toLowerCase())) {
@@ -341,6 +345,7 @@ export async function saveToolPackage(input: CustomToolSave): Promise<void> {
     const document = serializeCustomTool(definition)
     if (Buffer.byteLength(`${JSON.stringify(document, null, 2)}\n`, 'utf8') > maxManifestBytes) throw new Error('TOOL.json exceeds 128 KiB.')
     const directory = existing && existing.name === definition.name ? existing.directory : join(targetRoot.path, definition.name)
+    await assertUserResourceDirectory(directory)
     if (!existing && await exists(directory)) throw new Error(`Tool directory already exists: ${definition.name}`)
     if (existing && directory !== existing.directory) {
       assertDirectoryIdle(existing.definition!.directory!)
@@ -373,6 +378,7 @@ export async function deleteToolPackage(id: string): Promise<void> {
   return mutate(async config => {
     const tool = (await readToolSnapshot()).tools.find(tool => tool.id === id)
     if (!tool || (tool.source !== 'user' && tool.source !== 'external')) throw new Error('Only user and added-directory tools can be deleted here.')
+    await assertUserResourceDirectory(tool.directory)
     const directory = await realpath(tool.directory).catch(reason => {
       if ((reason as NodeJS.ErrnoException).code === 'ENOENT') return undefined
       throw reason
@@ -411,8 +417,9 @@ export function addExternalToolDirectory(path: string): Promise<void> {
   return mutate(async config => {
     if (typeof path !== 'string' || !isAbsolute(path)) throw new Error('Tool directory must be an absolute path.')
     const canonical = await realpath(path)
+    await assertUserResourceDirectory(path)
     if (!(await lstat(canonical)).isDirectory()) throw new Error('Tool source is not a directory.')
-    const reserved = [getToolsDir(), getToolExamplesDir(), ...config.externalDirectories.map(d => d.path)]
+    const reserved = [getToolsDir(), ...config.externalDirectories.map(d => d.path)]
     for (const candidate of reserved) {
       if (resolve(candidate) === resolve(path) || await realpath(candidate).catch(() => undefined) === canonical) throw new Error('Tool directory is already managed.')
     }
@@ -464,7 +471,7 @@ export function listToolFiles(id: string, relativePath?: string, toolDirectories
 export function readToolFile(id: string, relativePath: string, toolDirectories: readonly string[] = []) {
   return serialize(async () => {
     const tool = await findToolPackage(id, toolDirectories)
-    return { ...await readPackageFile(tool.directory, relativePath), editable: true }
+    return readPackageFile(tool.directory, relativePath)
   })
 }
 

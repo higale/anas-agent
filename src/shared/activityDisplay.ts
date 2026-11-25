@@ -1,19 +1,10 @@
 import type { AgentMessage, AgentRunActivity, AgentThreadSnapshot, AgentModelActivity, AgentToolActivity, AgentActivityDetailReference, AgentRuntimeEvent } from './agentTypes'
 import { agentModelReplyDisposition } from './agentReplyLifecycle'
-import { hasVisibleModelText } from './agentActivity'
+import { hasVisibleModelText, toolArgumentSummary } from './agentActivity'
 
 export const activityWindowLimit = 500
 // Copy the small prefix: V8 sliced strings can otherwise retain a huge body.
 const caption = (value: string | undefined) => value === undefined ? undefined : [...value.slice(0, 240)].join('')
-function toolCaption(args: unknown): string | undefined {
-  if (!args || typeof args !== 'object' || Array.isArray(args)) return undefined
-  const record = args as Record<string, unknown>
-  for (const key of ['summary', 'description', 'path', 'url', 'query', 'command']) {
-    const value = record[key]
-    if (typeof value === 'string' && value.trim()) return caption(value)?.replace(/\s+/g, ' ').trim()
-  }
-  return undefined
-}
 
 export function activityReference(threadId: string, runId: string, kind: AgentActivityDetailReference['kind'], id: string, subagentId?: string): AgentActivityDetailReference {
   return { threadId, runId, kind, id, ...(subagentId ? { subagentId } : {}) }
@@ -32,7 +23,7 @@ export function displayTool(threadId: string, runId: string, tool: AgentToolActi
   if (tool.call.name === 'start_subagent' && typeof output === 'string') { try { output = JSON.parse(output) } catch { output = undefined } }
   const childId = tool.call.name === 'start_subagent' && output && typeof output === 'object' && 'subagent_id' in output
     && typeof output.subagent_id === 'string' ? output.subagent_id : undefined
-  return { ...tool, call: { ...tool.call, args: { summary: toolCaption(args),
+  return { ...tool, call: { ...tool.call, args: { summary: toolArgumentSummary(args, 240) || undefined,
     ...(typeof args?.seconds === 'number' ? { seconds: args.seconds } : {}),
     ...(typeof args?.description === 'string' ? { description: caption(args.description) } : {}) } },
     output: childId ? { subagent_id: childId } : undefined,

@@ -31,10 +31,8 @@ beforeEach(async () => {
   trashItem.mockReset().mockImplementation(async path => { await rename(path, join(root, 'trashed')) })
   vi.doMock('./config/dataDir', () => ({
     configDirName: 'config', customToolsConfigFileName: 'tools.json', getDataDir: () => root,
-    getBundledDataDir: () => resolve('data'), getToolExamplesDir: () => join(root, 'examples/tools'),
-    getExamplesDir: () => join(root, 'examples'),
+    getBundledDataDir: () => join(root, 'bundled-data'), getToolExamplesDir: () => join(root, 'bundled-examples/tools'),
     getBundledExamplesDir: () => join(root, 'bundled-examples'), getTempDir: () => join(root, 'tmp'),
-    getSystemPluginsDir: () => join(root, 'plugins/_system'),
     getConfigFile: (name: string) => join(root, 'config', name),
     getBundledConfigFile: (name: string) => resolve('data/config', name)
   }))
@@ -43,6 +41,67 @@ beforeEach(async () => {
 afterEach(async () => { vi.doUnmock('./config/dataDir'); vi.doUnmock('node:fs/promises'); await rm(root, { recursive: true, force: true }) })
 
 describe('tool directory imports', () => {
+  it('rejects bundled roots, their parents, nested templates and aliases while keeping saved references unavailable', async () => {
+    const examples = join(root, 'bundled-examples/tools')
+    const templates = join(root, 'bundled-data/skills/tool-manager/assets')
+    await packageAt(join(examples, 'demo'))
+    await packageAt(join(templates, 'python-tool'), 'template-id', 'template')
+    const alias = join(root, 'example-alias')
+    await symlink(examples, alias, process.platform === 'win32' ? 'junction' : 'dir')
+    await store.initializeToolsStore()
+    const configPath = join(root, 'config/tools.json')
+    const before = await readFile(configPath, 'utf8')
+    const paths = [examples, join(root, 'bundled-examples'), templates, alias]
+    for (const path of paths) await expect(store.addExternalToolDirectory(path)).rejects.toThrow('already managed')
+    expect(await readFile(configPath, 'utf8')).toBe(before)
+    const saved = JSON.stringify({ ...JSON.parse(before), external_directories: paths.map((path, index) => ({ id: `saved-${index}`, name: 'Bundle', path })) })
+    await writeFile(configPath, saved)
+    const snapshot = await store.listToolSnapshot(paths)
+    expect(snapshot.tools).toEqual([])
+    expect(snapshot.roots.filter(item => item.source !== 'user').every(item => item.error)).toBe(true)
+    await expect(store.deleteToolPackage('saved-1:invalid:tools')).rejects.toThrow()
+    expect(trashItem).not.toHaveBeenCalled()
+    expect(await readFile(configPath, 'utf8')).toBe(saved)
+    const imported = await store.importToolDirectories([join(templates, 'python-tool')])
+    const preview = await store.readToolFile(imported.ids[0], 'TOOL.json')
+    expect(preview.editable).toBe(true)
+    const content = JSON.stringify({ ...JSON.parse(preview.content!), description: 'User copy' })
+    await store.saveToolFile(imported.ids[0], 'TOOL.json', { content, revision: preview.revision!, resolvedPath: preview.resolvedPath })
+    expect(await readFile(join(templates, 'python-tool/TOOL.json'), 'utf8')).not.toContain('User copy')
+  })
+
+  it('opens a read-only system tool, imports an editable copy and selects it ahead of the bundled original', async () => {
+    const bundled = join(root, 'bundled-data/tools/read')
+    await packageAt(bundled)
+    await writeFile(join(bundled, 'entry.py'), 'original')
+    const id = 'system:read-id'
+    const original = await store.readToolFile(id, 'entry.py')
+    expect(original.editable).toBe(false)
+    await expect(store.createToolFile(id, 'new.py')).rejects.toThrow('read-only')
+    await expect(store.deleteToolPackage(id)).rejects.toThrow()
+    const { ids: [copy] } = await store.importToolDirectories([bundled])
+    const file = await store.readToolFile(copy, 'entry.py')
+    expect(file.editable).toBe(true)
+    await store.saveToolFile(copy, 'entry.py', { resolvedPath: file.resolvedPath, revision: file.revision!, content: 'edited' })
+    expect(await readFile(join(bundled, 'entry.py'), 'utf8')).toBe('original')
+    const all = { mode: 'all' as const, entries: [], project: false }
+    expect(resolveToolSelection(all, (await store.listToolSnapshot()).tools).entries).toEqual([copy])
+    await store.setToolEnabled(copy, false)
+    expect(resolveToolSelection(all, (await store.listToolSnapshot()).tools).entries).toEqual([id])
+  })
+
+  it('prevents deleting a bundled directory exposed by a linked tool entry', async () => {
+    const bundled = join(root, 'bundled-data/skills/tool-manager/assets/python-tool')
+    await packageAt(bundled)
+    await store.initializeToolsStore()
+    await symlink(bundled, join(root, 'tools/linked'), process.platform === 'win32' ? 'junction' : 'dir')
+    const tool = (await store.listToolSnapshot()).tools[0]
+    expect(tool.error).toBeDefined()
+    await expect(store.deleteToolPackage(tool.id)).rejects.toThrow('already managed')
+    expect(trashItem).not.toHaveBeenCalled()
+    expect((await store.readToolFile(tool.id, 'TOOL.json')).editable).toBe(false)
+  })
+
   it.each(['_system', '_SYSTEM'])('allows the ordinary tool name %s when creating, renaming and importing packages', async name => {
     await store.initializeToolsStore()
     await store.saveToolPackage({ ...customToolDefaults, name, description: 'An ordinary user tool.', inputSchema: { type: 'object' } })
@@ -83,21 +142,35 @@ describe('tool directory imports', () => {
     expect(resolveToolSelection(selected, (await store.listToolSnapshot()).tools).entries).toContain(id)
     await expect(store.withToolPackageDirectory(definition, execute)).resolves.toBe('executed')
   })
+  it('imports linked scripts as editable files that still work after moving the source', async () => {
+    const source = join(root, 'sources', 'example')
+    await packageAt(source, 'sample', 'sample')
+    await writeFile(join(root, 'source.py'), 'original')
+    await symlink(join(root, 'source.py'), join(source, 'linked.py'), 'file')
+    const { ids } = await store.importToolDirectories([source])
+    await rename(join(root, 'source.py'), join(root, 'moved.py'))
+    const preview = await store.readToolFile(ids[0], 'linked.py')
+    expect(preview).toMatchObject({ content: 'original', editable: true })
+    await store.saveToolFile(ids[0], 'linked.py', { content: 'edited', revision: preview.revision!, resolvedPath: preview.resolvedPath })
+    expect(await readFile(join(root, 'tools/example/linked.py'), 'utf8')).toBe('edited')
+    expect(await readFile(join(root, 'moved.py'), 'utf8')).toBe('original')
+  })
+
   it('loads the tool-manager template as an independent user package', async () => {
-    const result = await store.importToolDirectories([resolve('data/skills/_system/tool-manager/assets/python-tool')])
+    const result = await store.importToolDirectories([resolve('data/skills/tool-manager/assets/python-tool')])
     expect(result.ids).toEqual(['user:normalize-text-example'])
     expect((await store.listToolSnapshot()).tools).toEqual([expect.objectContaining({
       id: 'user:normalize-text-example', name: 'normalize_text',
       definition: expect.objectContaining({ command: 'scripts/run.py {{args}}' })
     })])
     await expect(readFile(join(root, 'tools/python-tool/scripts/run.py'), 'utf8')).resolves.toBe(
-      await readFile(resolve('data/skills/_system/tool-manager/assets/python-tool/scripts/run.py'), 'utf8'))
+      await readFile(resolve('data/skills/tool-manager/assets/python-tool/scripts/run.py'), 'utf8'))
   })
   it('initializes examples and the user directory before import, then imports independent copies', async () => {
     await prepareExamples(resolve('data/examples'), join(root, 'bundled-examples'))
-    await (await import('./bundledExamples')).initializeBundledExamples()
+    await (await import('./bundledExamples')).validateBundledExamples()
     await store.initializeToolsStore()
-    const examples = join(root, 'examples/tools')
+    const examples = join(root, 'bundled-examples/tools')
     expect(await readdir(join(root, 'tools'))).toEqual([])
     const exampleNames = await readdir(examples)
     expect(exampleNames).toEqual(expect.arrayContaining(['read_text_raw', 'baidu-search', 'file_sha256', 'json_format']))
@@ -128,7 +201,7 @@ describe('tool directory imports', () => {
     const saved = JSON.stringify(raw)
     await writeFile(path, saved)
     const snapshot = await store.listToolSnapshot()
-    expect(snapshot.roots.map(source => source.id)).toEqual(['user'])
+    expect(snapshot.roots.map(source => source.id)).toEqual(['user', 'system'])
     expect(snapshot.tools).toEqual([expect.objectContaining({
       id: 'user:invalid:_system', name: '_system', source: 'user',
       error: { code: 'manifest_not_found', path: join(root, 'tools/_system/TOOL.json'), detail: expect.any(String) }
@@ -144,7 +217,7 @@ describe('tool directory imports', () => {
     expect((await store.listToolSnapshot()).tools).toEqual([])
     expect(JSON.parse(await readFile(join(root, 'trashed/file_sha256/TOOL.json'), 'utf8')).id).toBe('example-file-sha256')
   })
-  it('leaves example refresh to the application lifecycle while preserving user tools', async () => {
+  it('preserves legacy examples and user tools when validating bundled examples', async () => {
     await packageAt(join(root, 'tools/user_tool'), 'user-id', 'user_tool')
     await mkdir(join(root, 'examples/tools/stale'), { recursive: true })
     await writeFile(join(root, 'examples/tools/stale/old.txt'), 'old bundled example')
@@ -152,9 +225,9 @@ describe('tool directory imports', () => {
     expect((await store.listToolSnapshot()).tools.filter(tool => tool.source === 'user').map(tool => tool.name)).toEqual(['user_tool'])
     expect(await readFile(join(root, 'examples/tools/stale/old.txt'), 'utf8')).toBe('old bundled example')
     await prepareExamples(resolve('data/examples'), join(root, 'bundled-examples'))
-    await (await import('./bundledExamples')).initializeBundledExamples()
-    await expect(readFile(join(root, 'examples/tools/stale/old.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
-    expect(JSON.parse(await readFile(join(root, 'examples/tools/read_text_raw/TOOL.json'), 'utf8')).name).toBe('read_text_raw')
+    await (await import('./bundledExamples')).validateBundledExamples()
+    expect(await readFile(join(root, 'examples/tools/stale/old.txt'), 'utf8')).toBe('old bundled example')
+    expect(JSON.parse(await readFile(join(root, 'bundled-examples/tools/read_text_raw/TOOL.json'), 'utf8')).name).toBe('read_text_raw')
   })
   it('initializes resources without overwriting or parsing existing user configuration', async () => {
     await mkdir(join(root, 'config'), { recursive: true })
@@ -475,7 +548,7 @@ describe('directory tool packages', () => {
     await packageAt(directory)
     await packageAt(join(root, 'unconfigured/read'))
     const snapshot = await store.listToolSnapshot([project])
-    expect(snapshot.roots.map(source => source.path)).toEqual([project, join(root, 'tools')])
+    expect(snapshot.roots.map(source => source.path)).toEqual([project, join(root, 'tools'), join(root, 'bundled-data/tools')])
     expect(snapshot.tools).toHaveLength(1)
     await expect(store.deleteToolPackage(snapshot.tools[0].id)).rejects.toThrow('Only user')
     await expect(store.saveToolPackage(snapshot.tools[0].definition!)).rejects.toThrow('Only')

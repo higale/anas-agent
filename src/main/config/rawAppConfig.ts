@@ -114,7 +114,8 @@ export interface RawAppSettings {
   show_memory_activity_in_titlebar?: boolean
   environment_context?: Partial<{
     operating_system: boolean
-    bundled_commands: boolean
+    bundled_rg: boolean
+    bundled_python: boolean
     current_date: boolean
     application_data_directory: boolean
     user_home_directory: boolean

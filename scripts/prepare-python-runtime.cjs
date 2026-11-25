@@ -1,5 +1,5 @@
 const { createHash } = require('node:crypto')
-const { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } = require('node:fs')
+const { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } = require('node:fs')
 const { dirname, join, resolve } = require('node:path')
 const { spawnSync } = require('node:child_process')
 const manifest = require('../build/python-runtime.json')
@@ -20,6 +20,27 @@ function removeChild(parent, target) {
 function validArchive(file, spec) {
   return existsSync(file) && statSync(file).size === spec.bytes
     && createHash('sha256').update(readFileSync(file)).digest('hex') === spec.sha256
+}
+
+// The build host owns dependency installation. Ship a runtime, not a package manager.
+function trimRuntime(pythonRoot, platform) {
+  const stdlib = join(pythonRoot, platform === 'win32' ? 'Lib' : `lib/python${manifest.version.split('.').slice(0, 2).join('.')}`)
+  const sitePackages = join(stdlib, 'site-packages')
+  for (const [directory, matches] of [
+    [stdlib, name => name === 'ensurepip'],
+    [sitePackages, name => /^(?:pip|setuptools|wheel)(?:$|[-.])|^_distutils_hack$|^distutils-precedence\.pth$/.test(name)],
+    [join(pythonRoot, platform === 'win32' ? 'Scripts' : 'bin'), name => /^(?:pip(?:\d+(?:\.\d+)?)?|easy_install(?:-\d+(?:\.\d+)?)?|wheel)(?:\.exe|-script\.py)?$/.test(name)]
+  ]) {
+    if (!existsSync(directory)) continue
+    for (const name of readdirSync(directory)) {
+      if (!matches(name)) continue
+      const target = join(directory, name)
+      // Remove a launcher symlink itself, never the interpreter it points to.
+      if (lstatSync(target).isSymbolicLink()) unlinkSync(target)
+      else removeChild(directory, target)
+    }
+  }
+  writeFileSync(join(stdlib, 'EXTERNALLY-MANAGED'), '[externally-managed]\nError = This Python runtime is managed by Anas. Use a separate user-managed Python environment to install dependencies.\n')
 }
 
 function preparePythonRuntime(platform = process.platform, arch = process.arch) {
@@ -53,8 +74,14 @@ function preparePythonRuntime(platform = process.platform, arch = process.arch) 
     run('tar', ['-xzf', archive, '-C', stage])
     const python = join(stage, 'python', platform === 'win32' ? 'python.exe' : 'bin/python3')
     if (!existsSync(python)) throw new Error(`Python executable is missing: ${python}`)
-    if (platform === process.platform && arch === process.arch) {
-      const version = run(python, ['-I', '-B', '-c', 'import sys,ssl,sqlite3,ctypes; print(".".join(map(str,sys.version_info[:3])))']).trim()
+    trimRuntime(join(stage, 'python'), platform)
+    const nativeTarget = platform === process.platform && arch === process.arch
+    const buildPython = nativeTarget ? python : process.platform === 'win32' ? 'python' : 'python3'
+    run(buildPython, [
+      '-I', '-B', join(__dirname, 'prepare-document-wheels.py'), target, join(stage, 'python', 'anas-documents')
+    ], { timeout: 600_000 })
+    if (nativeTarget) {
+      const version = run(python, ['-I', '-B', '-c', 'import sys,ssl,sqlite3,ctypes,importlib.util; assert all(importlib.util.find_spec(name) is None for name in ("pip","ensurepip","setuptools","wheel")); print(".".join(map(str,sys.version_info[:3])))']).trim()
       if (version !== manifest.version) throw new Error(`Unexpected Python version: ${version}`)
     }
     writeFileSync(join(stage, 'python', 'anas-runtime.json'), `${JSON.stringify({ ...spec, version: manifest.version, target }, null, 2)}\n`)

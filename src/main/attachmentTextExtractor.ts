@@ -1,5 +1,3 @@
-import mammoth from 'mammoth'
-import { PDFParse } from 'pdf-parse'
 import { readFile } from 'node:fs/promises'
 
 export interface ExtractedAttachmentText {
@@ -18,6 +16,7 @@ export function supportsLocalTextExtraction(mimeType: string): boolean {
 export async function extractLocalAttachmentText(filePath: string, mimeType: string): Promise<ExtractedAttachmentText> {
   const buffer = await readFile(filePath)
   if (mimeType === 'application/pdf') {
+    const { PDFParse } = await import('pdf-parse')
     const parser = new PDFParse({ data: buffer })
     try {
       const result = await parser.getText()
@@ -27,6 +26,7 @@ export async function extractLocalAttachmentText(filePath: string, mimeType: str
     }
   }
   if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+    const { default: mammoth } = await import('mammoth')
     const result = await mammoth.extractRawText({ buffer })
     return { text: normalizeText(result.value) }
   }

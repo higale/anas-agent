@@ -23,6 +23,11 @@
 }
 
 .notice-description {
+  max-block-size: 50vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   color: var(--text-secondary);
   font-size: var(--font-size-small);
   line-height: var(--font-line-height-small);

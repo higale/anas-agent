@@ -2,7 +2,7 @@
 
 [简体中文](README.md)
 
-**Settings > Plugins > Install plugin** opens `examples/plugins/` under application data by default. Select one of the ZIP files below directly. Each ZIP is a complete independent plugin with `PLUGIN.json` at its root; manual extraction is unnecessary. Startup and backup restore refresh the ZIP files and this guide. Examples are not registered or enabled automatically, and refreshing them does not overwrite installed copies.
+**Settings > Plugins > Install plugin** opens `data/examples/plugins/` in the application package (`out/examples/plugins/` in development). Select one of the ZIP files below directly. Each ZIP is a complete independent plugin with `PLUGIN.json` at its root; manual extraction is unnecessary. The ZIP files and this guide are read directly from the package without copying them into user data. Old copies are preserved but no longer used as built-in sources. Examples are not registered or enabled automatically; installed user copies are stored independently.
 
 - `notepad.zip`: a Chinese/English notepad without a backend, demonstrating bundled SVG icons, shared save actions, language resources, host language selection, data persistence, and preservation of unsaved edits.
 - `text-tools.zip`: tools without a page, demonstrating text, Base64 images, cancellation, backend reuse, and general settings that can be edited without starting the backend.

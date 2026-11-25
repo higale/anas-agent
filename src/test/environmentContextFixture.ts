@@ -3,7 +3,8 @@ import type { EnvironmentContextSettings } from '@shared/types'
 export function environmentContextFixture(overrides: Partial<EnvironmentContextSettings> = {}): EnvironmentContextSettings {
   return {
     operatingSystem: true,
-    bundledCommands: true,
+    bundledRg: true,
+    bundledPython: true,
     currentDate: true,
     applicationDataDirectory: true,
     userHomeDirectory: true,

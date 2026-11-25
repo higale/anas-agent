@@ -26,11 +26,15 @@
 
 - 原生实现来自 Anas Next `553fded16ee7ac1205e9283a37f3fa80e932da12`，保留 Anas 的 UI、设置和插件操作。Next 保留重构历史，后续开发以本仓库为准。
 - 旧框架快照 `codex/legacy-framework-4.0.9` 固定在 `460f58de4f3d914456e3ca64b6e628e845769ecb`，长期保留。
-- 本次同步版本为 `5.2.25`，发布范围以本轮中英文 Release 说明为准。已确认发布源码由 `refs/anas/github/v<版本>` 记录；发布成功并核对源码后更新对应基点。开发差异由 Git 自动生成，日常开发不修改正式版本号。
+- 本次同步版本为 `5.2.26`，发布范围以本轮中英文 Release 说明为准。已确认发布源码由 `refs/anas/github/v<版本>` 记录；发布成功并核对源码后更新对应基点。开发差异由 Git 自动生成，日常开发不修改正式版本号。
 - 源码同步和安装包分别以 [GitHub 源码](https://github.com/higale/anas-agent)与 [Release](https://github.com/higale/anas-agent/releases)为准。独立源码快照、版本递增及发布基点更新遵循[发布流程](SOURCE_PUBLISHING.md)。
 - 普通需求在 `main` 开发；复杂需求使用临时 `codex/` 分支，验证后合回并删除，旧框架快照分支除外。
 
 ## 当前执行与数据
+
+内置 Python 已改为直接调用程序包 `resources/python/`，构建移除 pip、ensurepip、setuptools、wheel 并写入应用管理标记。启动释放、准备通知、重置 UI 和 IPC 已删除。用户脚本仍可调用，自动保底忽略 Python 环境覆盖和用户安装包、禁写字节码，额外依赖使用独立环境。旧 `runtimes/` 不读取、不迁移、不清理；这是资源管理边界，不是操作系统沙箱。全局“内置 rg”和“内置 Python”随项目或子 Agent 的“运行环境”能力决定模型能看到的说明。已启用的 `document_to_markdown` 自定义工具固定使用包内 Python 将 PDF、DOCX、PPTX 转换为 Markdown 文件。
+
+内置技能、自定义工具、子 Agent、示例、帮助和内置语言也直接读取程序包，源码 `data/` 各模块已去掉 `_system` 层；开发时示例使用 `out/examples/`。用户配置、导入包和自定义语言独立保存，旧副本不覆盖、不自动清理。备份恢复使用当前包内定义，无需携带内置资源副本；已有备份中的旧副本仍按原保全规则处理。目录与来源边界见[存储设计](CURRENT_STATE_STORAGE.md)。
 
 - 普通聊天、简单聊天、审核、压缩、子任务、历史编辑和恢复共用原生协调器、`NativeRunHost` 与一份执行状态。LangChain、LangGraph、Deep Agents 及旧执行器、图存储、middleware 和适配依赖已移除。支持 OpenAI Chat Completions、Responses 和 Anthropic 协议。
 - 默认数据目录为 `~/.anas`，开发与打包一致，保留 `--data-dir`。不自动发现、导入或清理 `.galeAnas`、`.anas-next`。测试使用隔离目录。
@@ -44,7 +48,7 @@
 
 Shell 已移除 `keep_processes`，仅管理直接 Shell；已派发且已交接调用可跨轮继续，显式取消／应用退出停止 Shell，不递归关闭子进程。“工作区菜单 → 进程列表”位于项目记忆下方，在右侧显示当前对话及子 Agent 的 Shell 和已知直接子进程，支持刷新和按身份手动终止。Shell 的模型返回保留原始标准输出，仅按需附带状态或进程 PID／名称；`read_call`／`wait_call` 重新核验进程身份，不直接复用旧的存活结论。观察是尽力而为，终端挂断仍可能影响连接终端的程序；详见[安全模型](SECURITY_MODEL.md#76-受管工具执行与输出)。既有 Windows 回归覆盖真实进程退出、保留独立子进程和列表操作，本轮未重测该范围。
 
-发布复审已修正 Shell 工具对原始标准输出的说明；Python 通知统一通过共享详情格式保留底层诊断。历史编辑测试同时校验已提交输入的即时显示和尚未接受输入时的权威历史，避免将两者混为一谈。
+发布复审已修正 Shell 工具对原始标准输出的说明。历史编辑测试同时校验已提交输入的即时显示和尚未接受输入时的权威历史，避免将两者混为一谈。
 
 PTY 回归通过内部结果检查退出状态，通过明确输出标记获取独立子进程 PID，不假定模型返回始终为 JSON，也不依赖终端控制序列之外的换行布局。
 

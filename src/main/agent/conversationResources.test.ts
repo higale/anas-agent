@@ -16,7 +16,7 @@ import { z } from 'zod/v3'
 import Database from 'better-sqlite3'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { beforeAll, afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentThread } from '@shared/agentTypes'
 import type { AppConfigSnapshot, Project } from '@shared/types'
@@ -38,8 +38,8 @@ const memoryStoreMocks = vi.hoisted(() => ({ buildMemoryRulesPrompt: vi.fn() }))
 const languageStoreMocks = vi.hoisted(() => ({ resolveConfiguredLanguage: vi.fn(async () => ({ code: 'en', name: 'English', builtIn: true })) }))
 vi.mock('../config/dataDir', async importOriginal => ({ ...await importOriginal<typeof import('../config/dataDir')>(),
   getDataDir: () => testPaths.root, getConfigFile: (name: string) => join(testPaths.root, 'config', name),
-  getSkillsDir: () => join(testPaths.root, 'skills'), getSystemSkillsDir: () => join(testPaths.root, 'skills/_system'),
-  getSystemPluginsDir: () => join(testPaths.root, 'plugins/_system'), getSkillExamplesDir: () => join(testPaths.root, 'examples/skills') }))
+  getSkillsDir: () => join(testPaths.root, 'skills'), getSystemSkillsDir: () => resolve('data/skills'),
+  getSkillExamplesDir: () => join(testPaths.root, 'examples/skills') }))
 vi.mock('../projectStore', () => ({ getProject: projectStoreMocks.getProject }))
 vi.mock('../config/appConfig', async importOriginal => ({ ...await importOriginal<typeof import('../config/appConfig')>(), getAppConfigSnapshot: appConfigMocks.getAppConfigSnapshot }))
 vi.mock('./conversationMemory', async importOriginal => ({ ...await importOriginal<typeof import('./conversationMemory')>(), buildMemoryRulesPrompt: memoryStoreMocks.buildMemoryRulesPrompt }))
@@ -405,7 +405,7 @@ it.each([
 ])('preserves configured server tools when project capabilities are disabled in preview and execution ($toolUse, $configured, $stream)', async ({ toolUse, configured, stream }) => {
   const project: Project = { ...defaultWorkspaceProject(), id: 'server-tools-chat', name: 'Server tools', pinned: false,
     capabilities: { ...structuredClone(defaultCapabilities), profile: false, environment: false, workspace: false, memory: false,
-      toolMode: 'selected', tools: [], planning: false, backgroundTools: false, bundledPython: false,
+      toolMode: 'selected', tools: [], planning: false, backgroundTools: false,
       subagents: { mode: 'off', names: [] }, skills: { mode: 'off', project: false, entries: [] },
       customTools: { mode: 'off', project: false, entries: [] }, mcp: { mode: 'off', defaultMode: 'selected', servers: [] }, pluginMode: 'off' },
     collapsed: false, prompt: 'Answer the question.', createdAt: '', updatedAt: '' }

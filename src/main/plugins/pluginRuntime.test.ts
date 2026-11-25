@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { cp, mkdtemp, realpath, rm, writeFile, readFile, mkdir } from 'node:fs/promises'
+import { mkdtemp, realpath, rm, writeFile, readFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
@@ -9,7 +9,6 @@ vi.mock('../runtimeLogger', () => ({ runtimeLog: state.log }))
 vi.mock('../config/dataDir', () => ({
   getDataDir: () => state.root,
   getBundledDataDir: () => state.bundled,
-  getSystemPluginsDir: () => join(state.root, 'plugins/_system'),
   getPluginExamplesDir: () => join(state.root, 'examples/plugins')
 }))
 vi.mock('../ipcSecurity', () => ({ isMainRendererWindow: () => true }))
@@ -28,7 +27,6 @@ beforeEach(async () => {
   state.send.mockReset()
   state.root = await realpath(await mkdtemp(join(tmpdir(), 'anas-plugin-runtime-')))
   state.bundled = join(state.root, 'bundled')
-  await cp(resolve('data/plugins/_system'), join(state.bundled, 'plugins/_system'), { recursive: true })
   await prepareExamples(resolve('data/examples'), join(state.root, 'examples'))
   child = new Child()
   state.fork.mockReset().mockReturnValue(child)
@@ -58,13 +56,13 @@ it.each([false, true])('keeps backend stop notifications except during applicati
   else expect(state.send).toHaveBeenCalledWith('plugins:changed')
 })
 
-it('keeps system resources separate from installed plugins and removes retired bundled code', async () => {
+it('ignores retired system resources without changing their files', async () => {
   const directory = join(state.root, 'plugins/_system/retired')
   await mkdir(directory, { recursive: true })
   await writeFile(join(directory, 'PLUGIN.json'), JSON.stringify({ version: 0, id: 'retired' }))
   await runtime.initializePluginsStore()
   expect((await runtime.pluginRuntime().store.list()).map(plugin => plugin.id).sort()).toEqual(['example-text-tools', 'fixture-worker'])
-  await expect(readFile(join(directory, 'PLUGIN.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+  expect(JSON.parse(await readFile(join(directory, 'PLUGIN.json'), 'utf8'))).toEqual({ version: 0, id: 'retired' })
   expect(state.fork).not.toHaveBeenCalled()
 })
 

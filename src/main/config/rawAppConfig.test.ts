@@ -59,7 +59,7 @@ async function loadRawConfig() {
     getConfigFile: (fileName = fileNames.settings) => join(configDir, fileName)
   }))
   await writeJson(join(bundledDir, fileNames.customTools), { tools: [] })
-  await mkdir(join(dirname(bundledDir), 'subagents/_system'), { recursive: true })
+  await mkdir(join(dirname(bundledDir), 'subagents'), { recursive: true })
   return {
     bundledDir,
     configDir,
@@ -162,7 +162,7 @@ describe('domain config storage', () => {
       language: 'system',
       environment_context: {
         operating_system: true,
-        bundled_commands: true,
+        bundled_rg: true,
         current_date: true,
         application_data_directory: true,
         user_home_directory: true,
@@ -222,7 +222,7 @@ describe('domain config storage', () => {
       language: 'system',
       environment_context: {
         operating_system: true,
-        bundled_commands: true,
+        bundled_rg: true,
         current_date: false,
         application_data_directory: true,
         user_home_directory: true,

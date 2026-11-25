@@ -276,14 +276,14 @@ export function registerWorkspaceIpcHandlers(): void {
     if (result.canceled || !path) return { status: 'cancelled' }
     return { status: 'added', snapshot: await addExternalSkillDirectory(path, projectId) }
   })
-  handleMainIpc('skills:importDirectories', async (event, projectId?: string): Promise<SkillImportResult> => {
+  handleMainIpc('skills:importDirectories', async (event): Promise<SkillImportResult> => {
     const result = await showModalOpenDialog(dialogParentFromEvent(event), {
       defaultPath: getSkillExamplesDir(),
       properties: ['openDirectory', 'multiSelections']
     })
     if (result.canceled || result.filePaths.length === 0) return { status: 'cancelled' }
     try {
-      return { status: 'imported', ...await importSkillDirectories(result.filePaths, projectId) }
+      return { status: 'completed', ...await importSkillDirectories(result.filePaths) }
     } catch (reason) {
       const error = toSkillImportError(reason)
       if (error.code === 'failed') runtimeLog('error', 'skills', 'Failed to import Skill directories.', { error: reason })

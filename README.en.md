@@ -19,7 +19,7 @@ Anas is a local desktop AI agent with support for multiple models, projects, too
 - Connect to OpenAI-compatible and Anthropic-compatible model services, with streamed replies and context compression.
 - Organize conversations, working folders, and capabilities by project; configure separate models and tools for subagents. Add custom project skill directories, browse skills by source, and open their directories directly.
 - Use file, image, network, memory, and command tools, and extend capabilities through MCP, custom tool packages, and Skills.
-- Work with text, image, PDF, and DOCX attachments, plus speech input and output.
+- Attach text and images, use speech input and output, and convert PDF, DOCX, and PPTX documents to Markdown offline on Windows and macOS.
 - View subagents, help, file differences, and plugin pages in the right workspace or separate windows.
 - Extend the application with plugin interfaces, tools, and skills; use usage information in model settings to check supported providers' quotas or balances.
 - Control tool execution permissions and manage local backups, restores, and startup recovery.

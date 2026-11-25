@@ -33,7 +33,7 @@ import { defaultCapabilities } from '@shared/agentCapabilities'
 import { randomUUID } from 'node:crypto'
 import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -50,8 +50,7 @@ vi.mock('../config/dataDir', async (importOriginal) => ({
   getDataDir: () => testPaths.root,
   getConfigFile: (name: string) => join(testPaths.root, 'config', name),
   getSkillsDir: () => join(testPaths.root, 'skills'),
-  getSystemSkillsDir: () => join(testPaths.root, 'skills/_system'),
-  getSystemPluginsDir: () => join(testPaths.root, 'plugins/_system'),
+  getSystemSkillsDir: () => resolve('data/skills'),
   getSkillExamplesDir: () => join(testPaths.root, 'examples/skills')
 }))
 beforeAll(async () => { testPaths.root = await mkdtemp(join(tmpdir(), 'anas-native-product-')) })

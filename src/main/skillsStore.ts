@@ -3,11 +3,16 @@ import { findSubagentPackage } from './subagentPackages'
 import { requireDataVersion } from '@shared/dataVersion'
 import { listPackageFiles, readPackageFile, savePackageFile } from './packageFiles'
 import { writeJsonFileAtomic } from './atomicJson'
-import { mirrorBundledDirectories } from './bundledDirectories'
+import { assertUserResourceDirectory, validateBundledDirectories } from './bundledDirectories'
 import { createHash, randomUUID } from 'node:crypto'
-import { copyFile, cp, lstat, mkdir, open, readFile, readdir, readlink, realpath, rename, rm, stat } from 'node:fs/promises'
+import { copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, readlink, realpath, stat } from 'node:fs/promises'
+import { shell } from 'electron'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
+import { isSameOrInsideDirectory } from './pathContainment'
+import { renameDirectoryExclusive } from './renameDirectoryExclusive'
+import { copyPackageContents } from './copyPackageContents'
+import { runtimeLog } from './runtimeLogger'
 import { inspectSkillText } from './skillDefinition'
 import { pluginRuntime, pluginToolMapping } from './plugins/pluginRuntime'
 import { pluginToolId } from '@shared/pluginTools'
@@ -16,6 +21,7 @@ import type {
   SkillAvailabilityUpdate,
   SkillFileNode,
   SkillFilePreview,
+  SkillImportBatch,
   SkillImportError,
   SkillInvocationResult,
   SkillLoadIssue,
@@ -27,9 +33,7 @@ import type {
 } from '@shared/types'
 import {
   getBundledConfigFile,
-  getBundledDataDir,
   getConfigFile,
-  getSkillExamplesDir,
   getSkillsDir,
   getSystemSkillsDir,
   skillsConfigFileName
@@ -223,9 +227,7 @@ export function toSkillImportError(reason: unknown): SkillImportError {
     }
     if (reason.code === 'invalid_directory') return { code: 'invalid_directory' }
   }
-  const code = (reason as NodeJS.ErrnoException | undefined)?.code
-  if (code === 'ENOENT' || code === 'ENOTDIR') return { code: 'invalid_directory' }
-  return { code: 'failed' }
+  return { code: 'failed', detail: reason instanceof Error ? reason.message : String(reason) }
 }
 
 export async function validateBundledSkill(dirPath: string, expectedName: string): Promise<void> {
@@ -240,10 +242,9 @@ export async function initializeSkillsStore(): Promise<void> {
     initialization = Promise.allSettled([
       ensureSkillsConfig(),
       mkdir(getSkillsDir(), { recursive: true }),
-      mirrorBundledDirectories(join(getBundledDataDir(), 'skills/_system'), getSystemSkillsDir(), 'SKILL.md', validateBundledSkill)
+      validateBundledDirectories(getSystemSkillsDir(), validateBundledSkill)
     ]).then((results) => {
-      // A failed initialization must retain ownership of every started mirror
-      // until it settles, so a retry cannot overwrite its staging directories.
+      // Settle all initialization work before allowing a failed attempt to retry.
       const failure = results.find((result) => result.status === 'rejected')
       if (failure) throw failure.reason
     })
@@ -338,15 +339,18 @@ function invalidSkill(root: SkillRootSummary, directory: SkillDirectory, issue: 
   }
 }
 
+function isVisibleSkillEntry(name: string, userRoot: boolean): boolean {
+  return !name.startsWith('.') && (!userRoot || name.toLowerCase() !== '_system')
+}
+
 async function skillDirectories(rootPath: string, userRoot: boolean): Promise<SkillDirectory[]> {
   const entries = (await readdir(rootPath, { withFileTypes: true }))
-    .filter(entry => !userRoot || entry.name.toLowerCase() !== '_system')
+    .filter(entry => isVisibleSkillEntry(entry.name, userRoot))
   if (entries.length > maxSkillDirectoriesPerRoot) {
     throw new Error(`Skill root contains more than ${maxSkillDirectoriesPerRoot} entries.`)
   }
   const result: SkillDirectory[] = []
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-    if (entry.name.startsWith('.')) continue
     const path = join(rootPath, entry.name)
     if (entry.isDirectory()) result.push({ name: entry.name, path, linked: false, resolvedPath: await realpath(path).catch(() => undefined) })
     else if (entry.isSymbolicLink()) {
@@ -364,7 +368,9 @@ async function skillDirectories(rootPath: string, userRoot: boolean): Promise<Sk
 
 async function scanRoot(root: SkillRootSummary, config: SkillsConfigFile, declaredDirectories?: SkillDirectory[]): Promise<RootScan> {
   let directories = declaredDirectories
+  const userSource = root.kind === 'user' || root.kind === 'external' || root.kind === 'project'
   try {
+    if (userSource) await assertUserResourceDirectory(root.path)
     const info = await stat(root.path)
     if (!info.isDirectory()) return { root: { ...root, available: false, issue: 'not_directory' }, skills: [] }
     directories ??= await skillDirectories(root.path, root.kind === 'user')
@@ -380,6 +386,7 @@ async function scanRoot(root: SkillRootSummary, config: SkillsConfigFile, declar
     }
     let content: string | undefined
     try {
+      if (userSource) await assertUserResourceDirectory(directory.path)
       content = await readBoundedTextFile(join(directory.path, 'SKILL.md'))
     } catch (reason) {
       const error = reason as NodeJS.ErrnoException
@@ -584,7 +591,8 @@ export async function listSkillFiles(projectId: string | undefined, skillId: str
 
 export async function readSkillFile(projectId: string | undefined, skillId: string, relativePath: string): Promise<SkillFilePreview> {
   const { summary } = await findSkill(projectId, skillId)
-  return { ...await readPackageFile(summary.dirPath, relativePath), skillId, editable: summary.source !== 'system' && summary.source !== 'plugin' }
+  const preview = await readPackageFile(summary.dirPath, relativePath)
+  return { ...preview, skillId, editable: preview.editable && summary.source !== 'system' && summary.source !== 'plugin' }
 }
 
 export async function updateSkillAvailability(projectId: string | undefined, skillId: string, update: SkillAvailabilityUpdate): Promise<SkillSnapshot> {
@@ -615,9 +623,18 @@ interface SkillImportSource {
   path: string
 }
 
-async function inspectSkillImportSource(sourcePath: string): Promise<SkillImportSource> {
+async function importDirectoryIdentity(path: string): Promise<string> {
+  const info = await lstat(path, { bigint: true })
+  if (!info.isDirectory() || info.ino === 0n) throw new Error(`Cannot identify Skill import directory: ${path}`)
+  return `${info.dev}:${info.ino}:${info.birthtimeNs}`
+}
+
+async function checkImportDirectory(path: string, identity: string): Promise<void> {
+  if (await importDirectoryIdentity(path) !== identity) throw new Error(`Skill import directory changed: ${path}`)
+}
+
+async function inspectSkillImportSource(sourcePath: string, name = basename(resolve(sourcePath))): Promise<SkillImportSource> {
   const selectedPath = resolve(sourcePath)
-  const name = basename(selectedPath)
   if (!skillNamePattern.test(name) || name.length > 64) {
     throw new SkillImportFailure('invalid_directory', `Invalid Skill directory name: ${name}`)
   }
@@ -656,48 +673,85 @@ async function inspectSkillImportSource(sourcePath: string): Promise<SkillImport
   return { name, path: canonicalPath }
 }
 
-async function importSkillDirectoriesExclusive(sourcePaths: readonly string[], projectId?: string): Promise<{ names: string[]; snapshot: SkillSnapshot }> {
-  if (!Array.isArray(sourcePaths) || sourcePaths.length === 0 || sourcePaths.some((path) => typeof path !== 'string' || !path.trim())) {
+async function importSkillDirectoriesExclusive(sourcePaths: readonly string[]): Promise<SkillImportBatch> {
+  if (!Array.isArray(sourcePaths) || !sourcePaths.length || sourcePaths.some(path => typeof path !== 'string' || !path.trim())) {
     throw new SkillImportFailure('invalid_directory', 'At least one Skill directory is required.')
   }
+  const userRoot = getSkillsDir()
+  await assertUserResourceDirectory(userRoot)
   await initializeSkillsStore()
-  const sources = await Promise.all(sourcePaths.map(inspectSkillImportSource))
-  const names = new Set<string>()
+  const destination = await realpath(userRoot)
+  const destinationId = await importDirectoryIdentity(destination)
+  const verifyRoot = async () => {
+    await assertUserResourceDirectory(destination)
+    await checkImportDirectory(destination, destinationId)
+  }
+  const verifyDestination = async () => {
+    await verifyRoot()
+    if (await realpath(userRoot) !== destination) throw new Error('User Skill directory changed during import.')
+  }
+  const sources = await Promise.all(sourcePaths.map(path => inspectSkillImportSource(path)))
+  const selected = new Set<string>()
   for (const source of sources) {
-    if (names.has(source.name) || await entryExists(join(getSkillsDir(), source.name))) {
+    if (isSameOrInsideDirectory(source.path, destination)) {
+      throw new SkillImportFailure('invalid_directory', 'The selected Skill contains its import destination.')
+    }
+    if (selected.has(source.name) || await entryExists(join(destination, source.name))) {
       throw new SkillImportFailure('already_exists', `Skill already exists: ${source.name}`, source.name)
     }
-    names.add(source.name)
+    selected.add(source.name)
+  }
+  const existing = (await readdir(destination)).filter(name => isVisibleSkillEntry(name, true))
+  if (existing.length + selected.size > maxSkillDirectoriesPerRoot) {
+    throw new Error(`User Skill directory would exceed ${maxSkillDirectoriesPerRoot} entries.`)
   }
 
-  const stageRoot = join(getSkillsDir(), `.import.${process.pid}.${randomUUID()}.tmp`)
-  const installed: string[] = []
-  await mkdir(stageRoot)
-  try {
-    for (const source of sources) {
-      const staged = join(stageRoot, source.name)
-      await cp(source.path, staged, { recursive: true, dereference: false, errorOnExist: true, force: false, verbatimSymlinks: true })
-      await inspectSkillImportSource(staged)
-    }
-    for (const source of sources) {
-      const target = join(getSkillsDir(), source.name)
-      if (await entryExists(target)) {
+  const result: SkillImportBatch = { names: [], failures: [] }
+  for (const source of sources) {
+    let stage: string | undefined
+    let stageId: string | undefined
+    try {
+      await verifyDestination()
+      stage = await mkdtemp(join(destination, '.import-'))
+      stageId = await importDirectoryIdentity(stage)
+      const stagingPath = stage, identity = stageId
+      await copyPackageContents(source.path, stagingPath, () => checkImportDirectory(stagingPath, identity))
+      const target = join(destination, source.name)
+      await inspectSkillImportSource(stagingPath, source.name)
+      await verifyDestination()
+      await checkImportDirectory(stage, stageId)
+      try {
+        renameDirectoryExclusive(stage, target)
+      } catch (reason) {
+        if ((reason as NodeJS.ErrnoException).code !== 'EEXIST') throw reason
         throw new SkillImportFailure('already_exists', `Skill already exists: ${source.name}`, source.name)
       }
-      await rename(join(stageRoot, source.name), target)
-      installed.push(target)
+      // This rename commits one Skill. Later operations do not own its files.
+      result.names.push(source.name)
+    } catch (reason) {
+      const failure: SkillImportBatch['failures'][number] = { name: source.name, error: toSkillImportError(reason) }
+      if (stage) {
+        try {
+          await verifyRoot()
+          if (await entryExists(stage)) {
+            if (!stageId) throw new Error('Unverified Skill staging directory.')
+            await checkImportDirectory(stage, stageId)
+            // Keep even unexpected edits recoverable. Only the private staging directory is discarded.
+            await shell.trashItem(stage)
+          }
+        } catch (cleanupError) {
+          failure.stagingPath = stage
+          runtimeLog('warn', 'skills', 'Failed to discard an incomplete Skill copy.', { path: stage, error: cleanupError })
+        }
+      }
+      result.failures.push(failure)
     }
-    return { names: sources.map((source) => source.name), snapshot: await listSkillSnapshot(projectId) }
-  } catch (reason) {
-    await Promise.all(installed.map((path) => rm(path, { recursive: true, force: true }).catch(() => undefined)))
-    throw reason
-  } finally {
-    await rm(stageRoot, { recursive: true, force: true }).catch(() => undefined)
   }
+  return result
 }
 
-export function importSkillDirectories(sourcePaths: readonly string[], projectId?: string): Promise<{ names: string[]; snapshot: SkillSnapshot }> {
-  const result = skillImportTail.then(async () => importSkillDirectoriesExclusive(sourcePaths, projectId))
+export function importSkillDirectories(sourcePaths: readonly string[]): Promise<SkillImportBatch> {
+  const result = skillImportTail.then(() => importSkillDirectoriesExclusive(sourcePaths))
   skillImportTail = result.then(() => undefined, () => undefined)
   return result
 }
@@ -717,7 +771,7 @@ function defaultExternalDirectoryName(path: string): string {
 }
 
 async function reservedSkillRootPaths(projectId?: string): Promise<string[]> {
-  const paths = [getSystemSkillsDir(), getSkillsDir(), getSkillExamplesDir()]
+  const paths = [getSkillsDir()]
   if (projectId) {
     const project = await getProject(projectId)
     paths.push(...project.skillDirectories ?? [])
@@ -730,6 +784,7 @@ export async function addExternalSkillDirectory(path: string, projectId?: string
   const info = await stat(absolute)
   if (!info.isDirectory()) throw new Error('Selected Skill root is not a directory.')
   const canonical = await realpath(absolute)
+  await assertUserResourceDirectory(absolute)
   if ((await reservedSkillRootPaths(projectId)).includes(canonical)) {
     throw new Error('This Skill directory is already managed by Anas.')
   }

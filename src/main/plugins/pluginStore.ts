@@ -1,4 +1,5 @@
-import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat } from 'node:fs/promises'
+import { copyPackageContents } from '../copyPackageContents'
+import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { parsePluginCapabilityChoices, pluginCapabilityEnabled, type PluginCapabilityChoices, type PluginCapabilityKind } from '@shared/pluginCapabilities'
 import { pluginToolId, pluginToolName, type PluginToolDefinition, type ResolvedPluginTool } from '@shared/pluginTools'
@@ -19,6 +20,7 @@ const MAX_FILE_BYTES = 128 * 1024 * 1024
 const MAX_PACKAGE_BYTES = 512 * 1024 * 1024
 const MAX_PACKAGE_ENTRIES = 10_000
 const MAX_PLUGIN_PROMPT_BYTES = 16 * 1024
+const pluginZipOptions = { validatePath: requirePluginPath, stagePackageLinks: true }
 const pluginArchiveLimits: ZipArchiveLimits = {
   maxArchiveBytes: MAX_PACKAGE_BYTES,
   maxEntries: MAX_PACKAGE_ENTRIES,
@@ -40,18 +42,17 @@ async function optionalJson(path: string, maxBytes = 1024 * 1024): Promise<unkno
   }
 }
 
-export async function validateBundledPlugin(directory: string, expectedId?: string): Promise<void> {
+async function validateBundledPlugin(directory: string): Promise<void> {
   const info = await lstat(directory)
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Bundled plugin must be a regular directory.')
-  const manifest = parsePluginManifest(await optionalJson(join(directory, 'PLUGIN.json'), 64 * 1024))
-  if (expectedId !== undefined && manifest.id !== expectedId) throw new Error('Bundled plugin ID does not match its directory.')
+  parsePluginManifest(await optionalJson(join(directory, 'PLUGIN.json'), 64 * 1024))
 }
 
 export async function validateBundledPluginZip(path: string, temporaryRoot: string): Promise<void> {
   await mkdir(temporaryRoot, { recursive: true })
   const stage = await mkdtemp(join(temporaryRoot, 'plugin-example-'))
   try {
-    await extractZipArchive(path, stage, pluginArchiveLimits, { validatePath: requirePluginPath })
+    await extractZipArchive(path, stage, pluginArchiveLimits, pluginZipOptions)
     await validateBundledPlugin(stage)
   } finally {
     await rm(stage, { recursive: true, force: true })
@@ -299,6 +300,7 @@ export class PluginStore {
     const info = await stat(source)
     if (info.isDirectory()) return this.installDirectory(source)
     if (!info.isFile()) throw new Error('Select a plugin ZIP file, directory or PLUGIN.json.')
+    if (basename(sourcePath) === 'PLUGIN.json') return this.installDirectory(dirname(sourcePath))
     if (basename(source) === 'PLUGIN.json') return this.installDirectory(dirname(source))
     if (extname(source).toLowerCase() !== '.zip') throw new Error('Select a plugin ZIP file, directory or PLUGIN.json.')
 
@@ -306,7 +308,7 @@ export class PluginStore {
     const stage = await mkdtemp(join(tempRoot, 'plugin-extract-'))
     try {
       const contents = join(stage, 'contents')
-      const extracted = await extractZipArchive(source, contents, pluginArchiveLimits, { validatePath: requirePluginPath })
+      const extracted = await extractZipArchive(source, contents, pluginArchiveLimits, pluginZipOptions)
       const manifests = [...extracted.entryNames].filter(name => name === 'PLUGIN.json' || /^[^/]+\/PLUGIN\.json$/.test(name))
       if (manifests.length > 1) throw new Error('Plugin ZIP contains multiple plugin roots; select a package with one PLUGIN.json.')
       if (manifests.length === 0) throw new Error('Plugin ZIP must contain PLUGIN.json at its root or inside a single top-level directory.')
@@ -327,8 +329,13 @@ export class PluginStore {
   private async installDirectory(sourceDirectory: string): Promise<PluginInstallPreview> {
     const source = await realpath(sourceDirectory)
     if (!(await stat(source)).isDirectory()) throw new Error('Select a plugin directory.')
-    const definition = await optionalJson(join(source, 'PLUGIN.json'), 64 * 1024)
-    if (definition === undefined) throw new Error('Plugin directory must contain PLUGIN.json at its root.')
+    const manifestPath = join(source, 'PLUGIN.json')
+    const actualManifest = await realpath(manifestPath).catch(error => {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      throw new Error('Plugin directory must contain PLUGIN.json at its root.')
+    })
+    if (!isSameOrInsideDirectory(source, actualManifest)) throw new Error('Plugin package link leaves its directory.')
+    const definition = await optionalJson(actualManifest, 64 * 1024)
     const manifest = parsePluginManifest(definition)
     if (this.isBuiltin(manifest.id)) throw new Error('Built-in plugins are updated with the application and cannot be replaced.')
     const root = await this.directory('plugins', undefined, true)
@@ -342,27 +349,15 @@ export class PluginStore {
       const incoming = join(stage, 'incoming')
       let bytes = 0
       let entries = 0
-      const copy = async (from: string, to: string, ancestors: Set<string>): Promise<void> => {
+      await mkdir(incoming)
+      await copyPackageContents(source, incoming, ({ name, actual, info, depth }) => {
+        if (depth) requirePluginPath(name)
         if (++entries > MAX_PACKAGE_ENTRIES) throw new Error('Plugin package contains too many files.')
-        const actual = await realpath(from)
         if (!isSameOrInsideDirectory(source, actual)) throw new Error('Plugin package link leaves its directory.')
-        const info = await stat(actual)
-        if (info.isDirectory()) {
-          if (ancestors.has(actual)) throw new Error('Plugin package contains a circular directory link.')
-          const next = new Set(ancestors).add(actual)
-          await mkdir(to)
-          for (const name of await readdir(actual)) {
-            requirePluginPath(name)
-            await copy(join(actual, name), join(to, name), next)
-          }
-        } else {
-          if (!info.isFile() || info.size > MAX_FILE_BYTES || (bytes += info.size) > MAX_PACKAGE_BYTES) throw new Error('Plugin package exceeds its file size limit.')
-          await copyFile(actual, to)
-          if ((await stat(to)).size !== info.size) throw new Error('Plugin source changed while installing.')
-          await chmod(to, info.mode & 0o777)
+        if (info.isFile() && (info.size > MAX_FILE_BYTES || (bytes += info.size) > MAX_PACKAGE_BYTES)) {
+          throw new Error('Plugin package exceeds its file size limit.')
         }
-      }
-      await copy(source, incoming, new Set())
+      })
       const staged = parsePluginManifest(await optionalJson(join(incoming, 'PLUGIN.json'), 64 * 1024))
       if (JSON.stringify(staged) !== JSON.stringify(manifest)) throw new Error('Plugin manifest changed while installing.')
       for (const entry of [manifest.ui, manifest.backend]) {

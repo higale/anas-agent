@@ -86,13 +86,21 @@ describe('environment settings', () => {
     const user = userEvent.setup()
     const onSaveSettings = vi.fn()
     render(<EnvironmentSettingsHarness initialSettings={appSettings()} onSaveSettings={onSaveSettings} />)
-    const checkbox = screen.getByRole('checkbox', { name: 'settings.capability_bundledCommands' })
+    const checkbox = screen.getByRole('checkbox', { name: 'settings.capability_bundledRg' })
     expect(checkbox).toBeChecked()
     await user.click(checkbox)
     expect(onSaveSettings).toHaveBeenLastCalledWith({
-      environmentContext: { ...appSettings().environmentContext, bundledCommands: false }
+      environmentContext: { ...appSettings().environmentContext, bundledRg: false }
     })
     expect(checkbox).not.toBeChecked()
+    const python = screen.getByRole('checkbox', { name: 'settings.capability_bundledPython' })
+    expect(python).toBeChecked()
+    await user.click(python)
+    await user.click(checkbox)
+    expect(onSaveSettings).toHaveBeenLastCalledWith({
+      environmentContext: { ...appSettings().environmentContext, bundledRg: true, bundledPython: false }
+    })
+    expect(python).not.toBeChecked()
     expect(environmentMocks.detectSystemEnvironment).not.toHaveBeenCalled()
   })
 

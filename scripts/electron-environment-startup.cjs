@@ -44,22 +44,6 @@ async function verifyEnvironmentStartup(repositoryRoot, executablePath) {
     await writeFile(join(root, 'main.cjs'), `
       require('electron').app.setPath('documents', ${JSON.stringify(documents)})
       const { ipcMain } = require('electron')
-      const files = require('node:fs/promises')
-      const originalCopy = files.cp
-      let controlledCopy = true
-      let releasePython
-      const pythonPending = new Promise((resolve) => { releasePython = resolve })
-      globalThis.__anasPythonPreparation = { pending: false, release: releasePython }
-      files.cp = async function (source, ...args) {
-        if (controlledCopy && String(source).includes('python-runtime')) {
-          controlledCopy = false
-          globalThis.__anasPythonPreparation.pending = true
-          const fail = await pythonPending
-          globalThis.__anasPythonPreparation.pending = false
-          if (fail) throw new Error('Simulated Python preparation failure')
-        }
-        return originalCopy.call(this, source, ...args)
-      }
       let releaseTrace
       const tracePending = new Promise((resolve) => { releaseTrace = resolve })
       globalThis.__anasDevStorageProbe = { calls: {}, release: releaseTrace }
@@ -117,29 +101,20 @@ async function verifyEnvironmentStartup(repositoryRoot, executablePath) {
     })
     const page = await application.firstWindow({ timeout: 10_000 })
     await expect(page.locator('[data-agent-composer-input]')).toBeVisible({ timeout: 10_000 })
-    if (['win32', 'darwin'].includes(process.platform)) {
-      await expect.poll(() => application.evaluate(() => globalThis.__anasPythonPreparation.pending)).toBe(true)
-      assert.equal((await page.evaluate(() => globalThis.gale.app.getPythonRuntimeStatus())).state, 'preparing')
-      await expect(page.getByText(/正在准备内置 Python|Preparing bundled Python/)).toBeVisible()
-      const composer = page.locator('[data-agent-composer-input]')
-      await composer.fill('Keep chatting while Python is preparing')
-      await application.evaluate(() => globalThis.__anasPythonPreparation.release(true))
-      await expect(page.getByText(/内置 Python 准备失败|Bundled Python preparation failed/)).toBeVisible()
-      assert.equal((await page.evaluate(() => globalThis.gale.app.getPythonRuntimeStatus())).state, 'error')
-      await expect(composer).toBeEditable()
-      await expect(composer).toHaveValue('Keep chatting while Python is preparing')
-      await composer.fill('')
-      console.log('Python startup E2E passed: slow preparation shows a notice after window load; copy failure leaves the composer interactive and preserves its draft.')
-    }
     const profile = join(root, 'profile')
-    assert.ok((await readdir(join(profile, 'examples/skills'))).length > 0)
+    assert.ok(!(await readdir(profile)).includes('runtimes'), 'Startup must not extract Python into user data.')
+    for (const path of ['skills/_system', 'subagents/_system', 'plugins/_system', 'examples', 'help']) {
+      await assert.rejects(readdir(join(profile, path)), { code: 'ENOENT' })
+    }
+    assert.deepEqual(await readdir(join(profile, 'lang')), [])
+    assert.ok((await readdir(join(root, 'out/examples/skills'))).length > 0)
     await assert.rejects(readFile(join(profile, 'plugins/_system/usage-meter/PLUGIN.json')), { code: 'ENOENT' })
-    assert.deepEqual((await readdir(join(profile, 'examples/plugins'))).sort(), ['README.en.md', 'README.md', 'backend-demo.zip', 'notepad.zip', 'text-tools.zip', 'writing-helper.zip'])
+    assert.deepEqual((await readdir(join(root, 'out/examples/plugins'))).sort(), ['README.en.md', 'README.md', 'backend-demo.zip', 'notepad.zip', 'text-tools.zip', 'writing-helper.zip'])
     const plugins = await page.evaluate(() => globalThis.gale.plugins.list())
     assert.deepEqual(plugins.map(plugin => plugin.id), [], 'Plugin examples must not be registered automatically.')
     assert.deepEqual(await readdir(join(profile, 'tools')), [], 'Tool examples must not be installed automatically.')
     for (const name of ['read_text_raw', 'file_sha256', 'json_format']) {
-      const tool = JSON.parse(await readFile(join(profile, 'examples/tools', name, 'TOOL.json'), 'utf8'))
+      const tool = JSON.parse(await readFile(join(root, 'out/examples/tools', name, 'TOOL.json'), 'utf8'))
       assert.equal(tool.name, name)
     }
     await expect.poll(() => application.evaluate(() => globalThis.__anasEnvironmentProbe?.pending)).toBe(true)
@@ -149,24 +124,25 @@ async function verifyEnvironmentStartup(repositoryRoot, executablePath) {
     await page.locator('.sidebar-settings').click()
     await page.getByRole('menuitem', { name: /^(设置|Settings)$/ }).click()
     await page.locator('[data-settings-tab="environment"]').click()
-    await expect(page.getByRole('checkbox', { name: /^(启用内置 Python|Enable bundled Python|内置 Python|Bundled Python)$/ })).toHaveCount(0)
+    const rg = page.getByRole('checkbox', { name: /^(内置 rg|Bundled rg)$/ })
+    const python = page.getByRole('checkbox', { name: /^(内置 Python|Bundled Python)$/ })
+    await expect(rg).toBeChecked()
+    await expect(python).toBeChecked()
+    await python.uncheck()
+    await expect.poll(() => page.evaluate(async () => (await globalThis.gale.config.get()).settings.environmentContext.bundledPython)).toBe(false)
+    await expect(rg).toBeChecked()
+    await expect(page.getByRole('button', { name: /^(重置内置 Python|Reset bundled Python)$/ })).toHaveCount(0)
+    await expect(page.getByText(/直接从程序包运行|directly from the application package/)).toBeVisible()
     if (['win32', 'darwin'].includes(process.platform)) {
-      await page.getByRole('button', { name: /^(重置内置 Python|Reset bundled Python)$/ }).click()
-      const confirmation = page.getByRole('alertdialog')
-      await expect(confirmation).toContainText(/清除在其中安装的依赖|removing packages installed into it/)
-      await confirmation.getByRole('button', { name: /^(重置内置 Python|Reset bundled Python)$/ }).click()
-      await expect(page.getByText(/^(内置 Python 已重置|Bundled Python has been reset)$/)).toBeVisible({ timeout: 30_000 })
-      await expect(page.getByText('Simulated Python preparation failure', { exact: true })).toHaveCount(0)
-      assert.equal((await page.evaluate(() => globalThis.gale.app.getPythonRuntimeStatus())).state, 'ready')
       const version = require('../build/python-runtime.json').version
       const entry = process.platform === 'win32' ? 'python.exe' : 'bin/python3'
-      const executable = join(profile, 'runtimes', 'python', version, entry)
+      const executable = join(repositoryRoot, 'build/python-runtime', process.platform + '-' + process.arch, 'python', entry)
       const { execFile } = require('node:child_process')
       const result = await require('node:util').promisify(execFile)(executable,
-        ['-E', '-s', '-B', '-X', 'utf8', '-c', 'import pip, venv, sys; print(sys.version.split()[0])'])
+        ['-I', '-B', '-X', 'utf8', '-c', 'import ssl,sqlite3,ctypes,sys,importlib.util; assert importlib.util.find_spec("pip") is None; assert importlib.util.find_spec("ensurepip") is None; print(sys.version.split()[0])'])
       assert.equal(result.stdout.trim(), version)
       await page.screenshot({ path: join(repositoryRoot, 'tmp/python-environment-settings.png') })
-      console.log('Python reset E2E passed: confirmed settings action restores a runnable runtime with pip and venv after startup failure.')
+      console.log('Python startup E2E passed: package runtime works without installers; no user runtime extraction or reset action.')
     }
     await expect(page.getByRole('checkbox', { name: /^(操作系统|Operating system)$/ })).toBeVisible()
     await expect(page.getByRole('checkbox', { name: 'PowerShell', exact: true })).toHaveCount(0)
@@ -214,7 +190,6 @@ async function verifyEnvironmentStartup(repositoryRoot, executablePath) {
     await closeElectronTestApplication(application, () => application.evaluate(() => {
       globalThis.__anasEnvironmentProbe?.release()
       globalThis.__anasDevStorageProbe?.release()
-      globalThis.__anasPythonPreparation?.release(true)
     }))
     await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
   }

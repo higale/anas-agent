@@ -2,7 +2,7 @@ import { homedir } from 'node:os'
 import type { AgentFeatures, AppConfigSnapshot, AppProfile, EnvironmentContextSettings } from '@shared/types'
 import { capabilityFeatures, defaultCapabilities } from '@shared/agentCapabilities'
 import { getDataDir } from '../config/dataDir'
-import type { BundledPythonInfo } from '../bundledPython'
+import { bundledPythonArgs, getBundledPythonInfo } from '../bundledPython'
 
 export type AgentSystemPromptSectionKind =
   | 'profile'
@@ -73,10 +73,8 @@ export function buildProfileBlock(profile: AppProfile): string {
 }
 
 export function buildRuntimeContextBlock(
-  context: EnvironmentContextSettings | undefined,
-  commandShell?: string,
-  commandToolsEnabled = false,
-  bundledPython?: BundledPythonInfo
+  context: EnvironmentContextSettings,
+  commandShell?: string
 ): string {
   const now = new Date()
   const date = [
@@ -84,25 +82,30 @@ export function buildRuntimeContextBlock(
     String(now.getMonth() + 1).padStart(2, '0'),
     String(now.getDate()).padStart(2, '0')
   ].join('-')
-  const customInformation = context?.customInformation.trim()
-  const bundledCommands = context?.bundledCommands && commandToolsEnabled
-    ? ['- rg: ripgrep for text and file search; available on PATH.'] : []
+  const customInformation = context.customInformation.trim()
+  const commandDescriptions = context.bundledRg
+    ? ['- rg: ripgrep for text and file search, on PATH in Anas shell commands.'] : []
+  const bundledPython = context.bundledPython ? getBundledPythonInfo() : undefined
   if (bundledPython) {
     const quoted = `'${bundledPython.executable.replaceAll("'", process.platform === 'win32' ? "''" : "'\\''")}'`
-    bundledCommands.push(escapeXml(`- Python ${bundledPython.version} (fallback; ${bundledPython.state}): ${bundledPython.executable}`))
-    bundledCommands.push(escapeXml(`  Prefer a working system Python. If unavailable, you may explicitly invoke ${process.platform === 'win32' ? '& ' : ''}${quoted} followed by script arguments. This interpreter is not added to PATH; detected system Python versions describe a separate interpreter.`))
-    if (bundledPython.state !== 'installed') bundledCommands.push(bundledPython.state === 'preparing'
-      ? '  Startup preparation is pending; check that the executable is ready before using it.'
-      : '  The bundled executable is unavailable; check the startup error or reset it in Settings > Environment.')
+    commandDescriptions.push(escapeXml(`- Python ${bundledPython.version} (fallback; ${bundledPython.state}): ${bundledPython.executable}`))
+    commandDescriptions.push(escapeXml(`  Prefer a working system Python for general scripts. To use the bundled libraries or when system Python is unavailable, invoke ${process.platform === 'win32' ? '& ' : ''}${quoted} ${bundledPythonArgs.join(' ')} followed by script arguments. System Python has its own packages and PATH is unchanged.`))
+    commandDescriptions.push('  This runtime and its packages are application-managed resources. Do not modify them or install, upgrade or remove packages there. pip and ensurepip are not included. Use a separate user-managed Python environment for additional dependencies; write script outputs and caches outside the application package.')
+    if (bundledPython.state === 'available' && bundledPython.documentPackages?.length) {
+      commandDescriptions.push(escapeXml(`  Document libraries bundled with this interpreter: ${bundledPython.documentPackages.join(', ')}.`))
+      commandDescriptions.push('  To use these libraries, run the bundled interpreter. Before importing them, add the library directory in your script:',
+        '    import sys', '    from pathlib import Path', '    sys.path.insert(0, str(Path(sys.base_prefix) / "anas-documents"))')
+    }
+    if (bundledPython.state === 'unavailable') commandDescriptions.push('  The bundled executable is missing from the application package. Use system Python or reinstall Anas; do not reuse an old runtime from the application data directory.')
   }
   const details = [
-    ...(context?.operatingSystem ? [`Operating system: ${operatingSystemName()}`] : []),
-    ...(context && commandShell ? [`Command shell: ${commandShell}`] : []),
-    ...(context?.currentDate ? [`Current date: ${date}`] : []),
-    ...(context?.applicationDataDirectory ? [`Application data directory: ${getDataDir()}`] : []),
-    ...(context?.userHomeDirectory ? [`User home directory: ${homedir()}`] : []),
-    ...(bundledCommands.length ? ['Bundled commands:', ...bundledCommands] : []),
-    ...(context?.customInformationEnabled && customInformation
+    ...(context.operatingSystem ? [`Operating system: ${operatingSystemName()}`] : []),
+    ...(commandShell ? [`Command shell: ${commandShell}`] : []),
+    ...(context.currentDate ? [`Current date: ${date}`] : []),
+    ...(context.applicationDataDirectory ? [`Application data directory: ${getDataDir()}`] : []),
+    ...(context.userHomeDirectory ? [`User home directory: ${homedir()}`] : []),
+    ...(commandDescriptions.length ? ['Bundled commands:', ...commandDescriptions] : []),
+    ...(context.customInformationEnabled && customInformation
       ? [escapeXml(customInformation)]
       : [])
   ]
@@ -117,7 +120,6 @@ export function buildAgentSystemPrompt(
     skills: string
     pluginPrompts?: string
     commandShell?: string
-    bundledPython?: BundledPythonInfo
     projectPrompt?: string
     codingMode?: boolean
     toolsEnabled?: boolean
@@ -135,14 +137,8 @@ export function buildAgentSystemPrompt(
 
   if (features.profile) appendSection('profile', buildProfileBlock(config.settings.profile))
   if (context.codingMode) appendSection('coding_instruction', buildCodingInstruction(features, context.toolsEnabled ?? true))
-  const bundledPython = (context.toolsEnabled ?? true) ? context.bundledPython : undefined
-  if (features.environment || bundledPython) {
-    appendSection('runtime_context', buildRuntimeContextBlock(
-      features.environment ? config.settings.environmentContext : undefined,
-      context.commandShell,
-      (context.toolsEnabled ?? true) && features.commandExecution,
-      bundledPython
-    ))
+  if (features.environment) {
+    appendSection('runtime_context', buildRuntimeContextBlock(config.settings.environmentContext, context.commandShell))
   }
   if (context.projectPrompt?.trim()) appendSection('project_instruction', `<project_instruction>\n${context.projectPrompt.trim()}\n</project_instruction>`)
   if (features.workspaceContext) appendSection('workspace', context.workspace)

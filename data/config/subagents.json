@@ -4,7 +4,6 @@
     "enabled": false,
     "capabilities": {
       "application_environment": false,
-      "bundled_python": false,
       "background_tools": false,
       "subagents": {
         "mode": "off",

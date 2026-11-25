@@ -209,7 +209,8 @@ function normalizeEnvironmentContext(raw: RawAppConfig): AppSettings['environmen
   if (!context) throw new Error('Config setting settings.environment_context is missing.')
   return {
     operatingSystem: requireBoolean(context.operating_system, 'settings.environment_context.operating_system'),
-    bundledCommands: requireBoolean(context.bundled_commands, 'settings.environment_context.bundled_commands'),
+    bundledRg: context.bundled_rg === undefined || requireBoolean(context.bundled_rg, 'settings.environment_context.bundled_rg'),
+    bundledPython: context.bundled_python === undefined || requireBoolean(context.bundled_python, 'settings.environment_context.bundled_python'),
     currentDate: requireBoolean(context.current_date, 'settings.environment_context.current_date'),
     applicationDataDirectory: requireBoolean(
       context.application_data_directory,
@@ -392,6 +393,19 @@ function writeSettingsPath(root: Record<string, unknown>, segments: readonly str
   current[segments.at(-1)!] = value
 }
 
+function serializeEnvironmentContext(context: AppSettings['environmentContext']) {
+  return {
+    operating_system: context.operatingSystem,
+    bundled_rg: context.bundledRg,
+    bundled_python: context.bundledPython,
+    current_date: context.currentDate,
+    application_data_directory: context.applicationDataDirectory,
+    user_home_directory: context.userHomeDirectory,
+    custom_information_enabled: context.customInformationEnabled,
+    custom_information: context.customInformation
+  }
+}
+
 function rawSettingsFromSnapshot(snapshot: AppConfigSnapshot, previousProfile?: RawAppSettings['profile']): RawAppSettings {
   const settings = snapshot.settings
   return {
@@ -417,15 +431,7 @@ function rawSettingsFromSnapshot(snapshot: AppConfigSnapshot, previousProfile?: 
     memory_mode: settings.memoryMode,
     memory_model_id: settings.memoryModelId ?? null,
     show_memory_activity_in_titlebar: settings.showMemoryActivityInTitlebar,
-    environment_context: {
-      operating_system: settings.environmentContext.operatingSystem,
-      bundled_commands: settings.environmentContext.bundledCommands,
-      current_date: settings.environmentContext.currentDate,
-      application_data_directory: settings.environmentContext.applicationDataDirectory,
-      user_home_directory: settings.environmentContext.userHomeDirectory,
-      custom_information_enabled: settings.environmentContext.customInformationEnabled,
-      custom_information: settings.environmentContext.customInformation
-    },
+    environment_context: serializeEnvironmentContext(settings.environmentContext),
     sidebar_visible: settings.sidebarVisible,
     sidebar_width: settings.sidebarWidth,
     workspace_panel_width: settings.workspacePanelWidth,
@@ -873,17 +879,7 @@ export async function updateSettings(settings: AppSettingsUpdate): Promise<AppCo
         ? raw.settings?.memory_model_id
         : normalizeMemoryModelId(settings.memoryModelId),
       show_memory_activity_in_titlebar: settings.showMemoryActivityInTitlebar ?? raw.settings?.show_memory_activity_in_titlebar,
-      environment_context: settings.environmentContext
-        ? {
-            operating_system: settings.environmentContext.operatingSystem,
-            bundled_commands: settings.environmentContext.bundledCommands,
-            current_date: settings.environmentContext.currentDate,
-            application_data_directory: settings.environmentContext.applicationDataDirectory,
-            user_home_directory: settings.environmentContext.userHomeDirectory,
-            custom_information_enabled: settings.environmentContext.customInformationEnabled,
-            custom_information: settings.environmentContext.customInformation
-          }
-        : raw.settings?.environment_context,
+      environment_context: settings.environmentContext ? serializeEnvironmentContext(settings.environmentContext) : raw.settings?.environment_context,
       diff_view_mode: settings.diffViewMode === undefined ? raw.settings?.diff_view_mode : settings.diffViewMode === 'side_by_side' ? 'side_by_side' : 'inline',
       diff_fold_unchanged: settings.diffFoldUnchanged ?? raw.settings?.diff_fold_unchanged,
       diff_word_wrap: settings.diffWordWrap ?? raw.settings?.diff_word_wrap,

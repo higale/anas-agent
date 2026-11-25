@@ -55,6 +55,7 @@ describe('custom tool definitions', () => {
 
 describe('custom command parsing', () => {
   it.each([
+    ['{{bundled_python}} convert.py {{args}}', 'convert.py', 'convert.py'],
     ['scripts/run.py {{args}}', 'scripts/run.py', 'scripts/run.py'],
     ['  "scripts/run file.py"  {{args}}', '"scripts/run file.py"', 'scripts/run file.py'],
     ['python3 "{{tool_dir}}/scripts/run file.py" {{args}}', '"{{tool_dir}}/scripts/run file.py"', 'scripts/run file.py'],

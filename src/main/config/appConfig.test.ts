@@ -37,7 +37,7 @@ function rawConfig(): RawAppConfig {
       max_model_calls_per_run: 100,
       environment_context: {
         operating_system: true,
-        bundled_commands: true,
+        bundled_rg: true,
         current_date: true,
         application_data_directory: true,
         user_home_directory: true,
@@ -550,18 +550,22 @@ describe('configuration domain writes', () => {
     expect(changed).toHaveBeenCalledTimes(2)
   })
 
-  it('loads a saved PowerShell switch and omits it when saving runtime environment settings', async () => {
+  it('defaults missing bundled settings to on, ignores retired settings and persists explicit choices', async () => {
     const raw = rawConfig()
-    Object.assign(raw.settings!.environment_context!, { power_shell: false })
+    delete raw.settings!.environment_context!.bundled_rg
+    delete raw.settings!.environment_context!.bundled_python
+    Object.assign(raw.settings!.environment_context!, { power_shell: false, bundled_commands: false })
     const { appConfig, writeRawSettingsConfig } = await loadAppConfig(raw)
 
     expect((await appConfig.getAppConfigSnapshot()).settings.environmentContext)
-      .toMatchObject({ operatingSystem: true, bundledCommands: true })
+      .toMatchObject({ operatingSystem: true, bundledRg: true, bundledPython: true })
+    expect(writeRawSettingsConfig).not.toHaveBeenCalled()
 
     const snapshot = await appConfig.updateSettings({
       environmentContext: {
         operatingSystem: false,
-        bundledCommands: false,
+        bundledRg: false,
+        bundledPython: false,
         currentDate: true,
         applicationDataDirectory: false,
         userHomeDirectory: true,
@@ -572,7 +576,8 @@ describe('configuration domain writes', () => {
 
     expect(raw.settings?.environment_context).toEqual({
       operating_system: false,
-      bundled_commands: false,
+      bundled_rg: false,
+      bundled_python: false,
       current_date: true,
       application_data_directory: false,
       user_home_directory: true,
@@ -581,7 +586,8 @@ describe('configuration domain writes', () => {
     })
     expect(snapshot.settings.environmentContext).toEqual({
       operatingSystem: false,
-      bundledCommands: false,
+      bundledRg: false,
+      bundledPython: false,
       currentDate: true,
       applicationDataDirectory: false,
       userHomeDirectory: true,

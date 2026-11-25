@@ -7,6 +7,7 @@ import type { CodeReviewSnapshot } from '@shared/codeReview'
 import { type AppConfigSnapshot, type AppSettings, type Project, type ResolvedModelConfig } from '@shared/types'
 import { assertResolvedCapabilities, capabilityFeatures, defaultCapabilities, intersectCapabilities, mcpToolAllowed, resolvePluginCapabilities, resolveSkillSelection, toolAllowed, type AgentCapabilities, type ResolvedAgentCapabilities, type RunConfiguration } from '@shared/agentCapabilities'
 import { builtinToolCatalog, enabledBuiltinFileToolNames, sortToolDefinitions } from '@shared/toolRegistry'
+import { customToolCapabilityIssue } from '@shared/customTools'
 import { resolveToolSelection } from '@shared/toolPackages'
 import { defaultSubagentSelection, selectedSubagents } from '@shared/subagentSelection'
 import type { ToolDefinition } from '../../runtime/toolDefinition'
@@ -15,7 +16,6 @@ import { processEnvironment } from '../config/apiKeys'
 import { resolvePluginTools, buildPluginPrompts, pluginRuntime } from '../plugins/pluginRuntime'
 import { listToolSnapshot, listSubagentTools } from '../toolsStore'
 import { bundledSearchEnvironment } from '../bundledRipgrep'
-import { getBundledPythonInfo } from '../bundledPython'
 import { createShellCommandAuthorization } from '../shellCommandAuthorization'
 import { fileToolDefinitions } from '../llm/fileTools'
 import { runtimeToolDefinitions } from '../llm/runtimeTools'
@@ -161,7 +161,6 @@ export async function prepareAgentSystemPrompt(
       projectPrompt: project.prompt,
       codingMode: codingMode ?? project.codingMode,
       toolsEnabled,
-      bundledPython: effective.bundledPython && toolsEnabled ? getBundledPythonInfo() : undefined,
       commandShell
     }, features)
   }
@@ -215,7 +214,7 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
     const toolCatalog = { tools: [...ownedTools, ...globalToolCatalog.tools] }
     const resolve = (value: AgentCapabilities, skills = catalog.skills, tools = toolCatalog.tools, child = Boolean(activeSubagent), unique = false): ResolvedAgentCapabilities => ({ ...value, pluginMode: 'custom',
       subagents: { mode: value.subagents.mode === 'off' ? 'off' : 'custom', names: selectedSubagents(config.subagents, value.subagents).map((subagent) => subagent.name) },
-      customTools: resolveToolSelection(value.customTools, tools.filter(tool => !tool.definition?.interactive || value.backgroundTools), child, false),
+      customTools: resolveToolSelection(value.customTools, tools.filter(tool => !customToolCapabilityIssue(tool.definition, value.backgroundTools)), child, false),
       skills: resolveSkillSelection(value.skills, skills, unique, child, value.pluginTools) })
     let capabilities = resolve(ownCapabilities)
     if (activeSubagent && parentLimit) {
@@ -225,7 +224,7 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
     // Apply the root ceiling before resolving duplicate names, so an excluded
     // project override cannot hide an allowed tool from another source.
     capabilities = { ...capabilities, skills: resolveSkillSelection(capabilities.skills, catalog.skills, true, false, capabilities.pluginTools), customTools: resolveToolSelection(capabilities.customTools,
-      toolCatalog.tools.filter(tool => !tool.definition?.interactive || capabilities.backgroundTools)) }
+      toolCatalog.tools.filter(tool => !customToolCapabilityIssue(tool.definition, capabilities.backgroundTools))) }
     const rootSelection = activeSubagent
       ? context.parentConfiguration?.subagentSelectionLimit ?? context.parentConfiguration?.capabilities.subagents ?? defaultSubagentSelection
       : capabilities.subagents
@@ -419,7 +418,6 @@ export async function prepareAgentRuntimeResources(thread: AgentThread, database
     : []
   const customTools = customToolDefinitions(runConfiguration.customTools, {
     env: baseEnvironment,
-    bundledPython: capabilities.bundledPython,
     backgroundTools: capabilities.backgroundTools,
     signal: context.signal, preview: !options.persistent
   })

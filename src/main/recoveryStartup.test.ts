@@ -50,7 +50,6 @@ it('keeps desktop metadata from triggering or blocking repair, startup and resto
   const repaired = await repairRecoveryData(f.root, 'projects.json', () => preserveRecoveryData(f.root, f.parent))
   expect(repaired.readyToRestart).toBe(true)
   expect(repaired.unresolved).toEqual([])
-  await cp(join(process.cwd(), 'data/subagents'), join(f.root, 'subagents'), { recursive: true })
   await validateRestoredDataDirectory(f.root)
   for (const path of metadata) expect(await readFile(join(f.root, path), 'utf8')).toBe('Finder metadata')
 })
@@ -115,7 +114,6 @@ it('ignores unrelated files and directories and retains them through independent
   expect(repaired.unresolved).toEqual([])
   expect(await readFile(join(repaired.preservationPath!, 'data/db/projects/unexpected.txt'), 'utf8')).toBe('Preserve unexpected data')
   expect(await readFile(join(f.root, 'db/projects/personal notes/notes.txt'), 'utf8')).toBe('User notes')
-  await cp(join(process.cwd(), 'data/subagents'), join(f.root, 'subagents'), { recursive: true })
   await validateRestoredDataDirectory(f.root)
 })
 

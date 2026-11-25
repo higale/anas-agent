@@ -16,7 +16,6 @@ async function fixture(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'anas-restore-validation-'))
   temporaryDirectories.push(root)
   await mkdir(join(root, 'config'))
-  await cp(join(process.cwd(), 'data/subagents'), join(root, 'subagents'), { recursive: true })
   for (const name of configFileNames) await cp(join(process.cwd(), 'data', 'config', name), join(root, 'config', name))
   return root
 }
@@ -52,7 +51,7 @@ describe('restored native data validation', () => {
   it('accepts nested managed packages while continuing to validate adjacent user packages', async () => {
     const root = await fixture()
     for (const category of ['skills', 'plugins']) {
-      await cp(join(process.cwd(), 'data', category, '_system'), join(root, category, '_system'), { recursive: true })
+      await cp(join(process.cwd(), 'data', category), join(root, category, '_system'), { recursive: true })
     }
     await writeText(join(root, 'skills/personal/SKILL.md'), '---\nname: personal\ndescription: Personal skill\n---\nBody\n')
     await cp(join(process.cwd(), 'data/examples/tools/read_text_raw'), join(root, 'tools/read_text_raw'), { recursive: true })

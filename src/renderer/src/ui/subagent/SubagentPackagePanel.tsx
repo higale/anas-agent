@@ -1,3 +1,4 @@
+import { customToolCapabilityIssue } from '@shared/customTools'
 import { useTranslation } from 'react-i18next'
 import type { AgentCapabilities } from '@shared/agentCapabilities'
 import { packageResourceEnabled, packageResourceKey } from '@shared/packageResourceSelection'
@@ -49,13 +50,16 @@ export function SubagentPackagePanel({ resources, value, onChange }: { resources
         {value.customTools.mode === 'custom' && <CapabilityGroupActions allSelected={resources.tools.every(tool => tool.error || packageResourceEnabled(value.customTools.package, tool))} onChange={checked => toggleGroup('customTools', checked)} />}
       </div>
       <div className="ui-grid-auto">
-        {resources.tools.map(tool => <div className="ui-field-stack" key={tool.id}>
-          <CheckboxField className="ui-checkbox-field-inline" label={tool.name}
-            tooltip={[tool.description, tool.directory].filter(Boolean).join('\n')}
-            inactiveReason={[tool.error && [t(`custom_tools.load_error_${tool.error.code}`), tool.error.detail].filter(Boolean).join('\n'),
-              tool.definition?.interactive && !value.backgroundTools && t('custom_tools.requires_background')].filter(Boolean).join('\n')}
-            checked={value.customTools.mode !== 'off' && packageResourceEnabled(value.customTools.package, tool)} onChange={checked => toggle('customTools', tool, checked)} />
-        </div>)}
+        {resources.tools.map(tool => {
+          const issue = customToolCapabilityIssue(tool.definition, value.backgroundTools)
+          return <div className="ui-field-stack" key={tool.id}>
+            <CheckboxField className="ui-checkbox-field-inline" label={tool.name}
+              tooltip={[tool.description, tool.directory].filter(Boolean).join('\n')}
+              inactiveReason={[tool.error && [t(`custom_tools.load_error_${tool.error.code}`), tool.error.detail].filter(Boolean).join('\n'),
+                issue && t(issue)].filter(Boolean).join('\n')}
+              checked={value.customTools.mode !== 'off' && packageResourceEnabled(value.customTools.package, tool)} onChange={checked => toggle('customTools', tool, checked)} />
+          </div>
+        })}
       </div>
     </div>}
   </>

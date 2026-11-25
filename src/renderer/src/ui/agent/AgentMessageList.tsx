@@ -30,8 +30,7 @@ import type {
   AgentContentBlock,
   AgentContextSummary,
   AgentMessage,
-  AgentRunActivity,
-  AgentToolCall
+  AgentRunActivity
 } from '@shared/agentTypes'
 import { isCommandShellToolName } from '@shared/commandShell'
 import {
@@ -514,13 +513,6 @@ function ActivityDisclosure({
   )
 }
 
-interface ToolPresentation {
-  icon: ReactNode
-  title: string
-  codeTitle?: boolean
-  showArgumentSummary?: boolean
-}
-
 function BackgroundCleanupDisclosure({ entry }: { entry: TurnTimelineCleanupItem }) {
   const { t } = useTranslation()
   const { cleanup } = entry
@@ -540,41 +532,12 @@ function BackgroundCleanupDisclosure({ entry }: { entry: TurnTimelineCleanupItem
   )
 }
 
-function specialToolPresentation(call: AgentToolCall): ToolPresentation | undefined {
-  if (isCommandShellToolName(call.name)) {
-    return {
-      icon: <Terminal size={13} />,
-      title: call.name,
-      codeTitle: true,
-      showArgumentSummary: true
-    }
-  }
-  switch (call.name.toLowerCase()) {
-    case 'sleep':
-      return {
-        icon: <Clock size={13} />,
-        title: call.name,
-        codeTitle: true,
-        showArgumentSummary: true
-      }
-    case 'http_request':
-      return {
-        icon: <Globe size={13} />,
-        title: call.name,
-        codeTitle: true,
-        showArgumentSummary: true
-      }
-    default:
-      return undefined
-  }
-}
-
-function toolPresentation(call: AgentToolCall): ToolPresentation {
-  return specialToolPresentation(call) ?? {
-    icon: <ToolsIcon size={13} />,
-    title: call.name,
-    codeTitle: true,
-    showArgumentSummary: true
+function toolActivityIcon(name: string) {
+  if (isCommandShellToolName(name)) return <Terminal size={13} />
+  switch (name.toLowerCase()) {
+    case 'sleep': return <Clock size={13} />
+    case 'http_request': return <Globe size={13} />
+    default: return <ToolsIcon size={13} />
   }
 }
 
@@ -687,7 +650,6 @@ interface ToolDisclosureInput {
 
 function ToolActivityLabel({ tool, progress, active }: Pick<ToolDisclosureInput, 'tool' | 'progress' | 'active'>) {
   const { t } = useTranslation()
-  const presentation = toolPresentation(tool.call)
   const args = tool.call.args
   const freeform = tool.freeform ?? (tool.call.name === 'apply_patch' && args !== null && typeof args === 'object'
     && !Array.isArray(args) && Object.keys(args).length === 1 && 'input' in args && typeof args.input === 'string'
@@ -695,10 +657,9 @@ function ToolActivityLabel({ tool, progress, active }: Pick<ToolDisclosureInput,
   const summary = toolArgumentSummary(tool.call.args)
   const duration = activityDuration(tool.startedAt, tool.completedAt)
   return <>
-    {!presentation.title ? <span>{t('agent.tool_call')}</span> : presentation.codeTitle
-      ? <code>{presentation.title}</code> : <span>{presentation.title}</span>}
+    {tool.call.name ? <code>{tool.call.name}</code> : <span>{t('agent.tool_call')}</span>}
     {freeform && <span className="ui-badge ui-badge-inline" data-tooltip={t('agent.tool_call_freeform_hint')}>{t('agent.tool_call_freeform')}</span>}
-    {presentation.showArgumentSummary && summary && <span className="agent-activity-argument">{summary}</span>}
+    {summary && <span className="agent-activity-argument">{summary}</span>}
     {active && !progress && tool.approval?.status !== 'pending_approval' && tool.call.name.startsWith('mcp__') && <McpStartupLabel toolName={tool.call.name} />}
     {duration && <small>· {duration}</small>}
     {progress && <small>· {t(progress.complete ? 'agent.tool_arguments_ready' : 'agent.tool_arguments_generating', { count: progress.characterCount })}</small>}
@@ -706,7 +667,6 @@ function ToolActivityLabel({ tool, progress, active }: Pick<ToolDisclosureInput,
 }
 
 function ToolActivityDisclosure({ tool, progress, active, standalone = false, processActive }: ToolDisclosureInput) {
-  const presentation = toolPresentation(tool.call)
   const waitingForApproval = tool.approval?.status === 'pending_approval'
   const executing = active && tool.status === 'running' && !tool.completedAt && !progress && !waitingForApproval
   const shimmer = executing && tool.call.name !== 'request_user_input'
@@ -718,7 +678,7 @@ function ToolActivityDisclosure({ tool, progress, active, standalone = false, pr
       className={`agent-activity-tool${shimmer ? ' agent-tool-running' : ''}`}
       bodyClassName="agent-activity-tool-body"
       disabled={Boolean(progress)}
-      icon={standalone && (!active || tool.status !== 'running') ? <Activity size={13} /> : presentation.icon}
+      icon={standalone && (!active || tool.status !== 'running') ? <Activity size={13} /> : toolActivityIcon(tool.call.name)}
       statusIndicator={waitingForApproval
         ? <ShieldAlert size={13} />
         : active && tool.status === 'running'
@@ -826,7 +786,7 @@ function ProcessGroup({ group, run, expanded, onExpanded }: { group: ActivityGro
   const deadline = active?.type === 'tool' && !active.progress ? sleepDeadline(active.tool) : undefined
   let icon: ReactNode = <Activity size={13} />
   if (recovery) icon = <RotateCcw size={13} />
-  else if (active?.type === 'tool') icon = active.tool.approval ? <ShieldAlert size={13} /> : toolPresentation(active.tool.call).icon
+  else if (active?.type === 'tool') icon = active.tool.approval ? <ShieldAlert size={13} /> : toolActivityIcon(active.tool.call.name)
   else if (active?.type === 'model') icon = thinking ? <Brain size={13} /> : <Clock size={13} />
   return <details className="agent-activity-disclosure agent-activity-process" open={expanded}
     onToggle={event => { if (event.target === event.currentTarget && event.currentTarget.open !== expanded) onExpanded(event.currentTarget.open) }}>

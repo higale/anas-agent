@@ -50,7 +50,7 @@ extraResources:
 mac:
   extraResources:
     - from: build/python-runtime/darwin-${arch}/python
-      to: runtime/python
+      to: python
   icon: build/icon.icns
   # Daily builds stay local, even when a developer certificate is installed.
   identity: "-"
@@ -60,7 +60,7 @@ mac:
 win:
   extraResources:
     - from: build/python-runtime/win32-${arch}/python
-      to: runtime/python
+      to: python
   icon: build/icon.ico
   artifactName: ${productName}-${version}-${arch}.${ext}
 linux:

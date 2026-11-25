@@ -41,10 +41,7 @@ async function verifyPluginTransactions(launchApplication) {
       const page = await application.firstWindow()
       await expect(page.locator('[data-agent-composer-input]')).toBeVisible({ timeout: 20000 })
       const plugins = await page.evaluate(() => globalThis.gale.plugins.list())
-      for (const file of ['plugins/README.md', 'plugins/README.en.md', 'skills/weather/SKILL.md',
-        'tools/read_text_raw/TOOL.json', 'plugins/notepad.zip']) {
-        assert.deepEqual(await readFile(join(root, 'examples', file)), await readFile(join(process.cwd(), 'out/examples', file)))
-      }
+      await assert.rejects(lstat(join(root, 'examples')), { code: 'ENOENT' })
       if (committed) {
         assert.equal(plugins.some(plugin => plugin.id === id), false)
         await assert.rejects(lstat(live), { code: 'ENOENT' })

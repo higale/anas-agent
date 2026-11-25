@@ -45,7 +45,6 @@ export interface AgentCapabilities {
   /** Include completed global/project preferences and allow background extraction. */
   memory: boolean
   applicationEnvironment: boolean
-  bundledPython: boolean
   backgroundTools: boolean
   subagents: SubagentSelection
   planning: boolean
@@ -149,7 +148,6 @@ export function validateCapabilities(value: unknown): AgentCapabilities {
   return {
     profile: boolean(raw.profile), environment: boolean(raw.environment), workspace: boolean(raw.workspace), memory: boolean(raw.memory),
     applicationEnvironment: boolean(raw.applicationEnvironment),
-    bundledPython: raw.bundledPython === undefined ? true : boolean(raw.bundledPython),
     backgroundTools: boolean(raw.backgroundTools),
     subagents: validateSubagentSelection(raw.subagents),
     planning: boolean(raw.planning),
@@ -169,12 +167,12 @@ export function validateCapabilities(value: unknown): AgentCapabilities {
 export function parseCapabilities(value: unknown): AgentCapabilities {
   const raw = object(value)
   const mcp = object(raw.mcp)
-  return validateCapabilities({ ...raw, pluginGroupMode: raw.plugin_group_mode, pluginMode: raw.plugin_mode, pluginTools: raw.plugin_tools, pluginPrompts: raw.plugin_prompts, customTools: raw.custom_tools, mcp: { ...mcp, defaultMode: mcp.default_mode }, applicationEnvironment: raw.application_environment, bundledPython: raw.bundled_python, backgroundTools: raw.background_tools, toolMode: raw.tool_mode })
+  return validateCapabilities({ ...raw, pluginGroupMode: raw.plugin_group_mode, pluginMode: raw.plugin_mode, pluginTools: raw.plugin_tools, pluginPrompts: raw.plugin_prompts, customTools: raw.custom_tools, mcp: { ...mcp, defaultMode: mcp.default_mode }, applicationEnvironment: raw.application_environment, backgroundTools: raw.background_tools, toolMode: raw.tool_mode })
 }
 
 export function serializeCapabilities(value: AgentCapabilities) {
-  const { applicationEnvironment, bundledPython, backgroundTools, toolMode, customTools, pluginGroupMode, pluginMode, pluginTools, pluginPrompts, mcp, ...rest } = validateCapabilities(value)
-  return { ...rest, ...(pluginGroupMode === undefined ? {} : { plugin_group_mode: pluginGroupMode }), plugin_mode: pluginMode, plugin_tools: pluginTools, plugin_prompts: pluginPrompts, custom_tools: customTools, mcp: { ...(mcp.mode === undefined ? {} : { mode: mcp.mode }), default_mode: mcp.defaultMode, servers: mcp.servers }, application_environment: applicationEnvironment, bundled_python: bundledPython, background_tools: backgroundTools, tool_mode: toolMode }
+  const { applicationEnvironment, backgroundTools, toolMode, customTools, pluginGroupMode, pluginMode, pluginTools, pluginPrompts, mcp, ...rest } = validateCapabilities(value)
+  return { ...rest, ...(pluginGroupMode === undefined ? {} : { plugin_group_mode: pluginGroupMode }), plugin_mode: pluginMode, plugin_tools: pluginTools, plugin_prompts: pluginPrompts, custom_tools: customTools, mcp: { ...(mcp.mode === undefined ? {} : { mode: mcp.mode }), default_mode: mcp.defaultMode, servers: mcp.servers }, application_environment: applicationEnvironment, background_tools: backgroundTools, tool_mode: toolMode }
 }
 
 /** Shared initial capabilities; saved custom selections are never replaced by these defaults. */
@@ -476,7 +474,6 @@ export function intersectCapabilities(value: ResolvedAgentCapabilities, limit: R
     workspace: value.workspace && limit.workspace,
     memory: value.memory && limit.memory,
     applicationEnvironment: value.applicationEnvironment && limit.applicationEnvironment,
-    bundledPython: value.bundledPython && limit.bundledPython,
     backgroundTools: value.backgroundTools && limit.backgroundTools,
     subagents: { mode: value.subagents.mode === 'off' || limit.subagents.mode === 'off' ? 'off' : 'custom',
       names: value.subagents.names.filter((name) => limit.subagents.names.includes(name)) },

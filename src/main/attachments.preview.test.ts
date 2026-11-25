@@ -104,6 +104,15 @@ describe('bounded attachment previews', () => {
     expect(files[5].skippedReason).toBeTruthy()
   })
 
+  it('selects documents as paths without parsing and keeps Markdown and HTML as text', async () => {
+    const paths = ['word.docx', 'slides.pptx', 'scan.pdf', 'notes.md', 'page.html'].map(name => join(root, name))
+    await Promise.all(paths.map(path => writeFile(path, 'sample')))
+    const files = await readSelectedAttachments(paths)
+    expect(files.map(item => item.kind)).toEqual(['binary', 'binary', 'binary', 'text', 'text'])
+    expect(files.map(item => item.text)).toEqual([undefined, undefined, undefined, 'sample', 'sample'])
+    expect(files.every(item => !item.skippedReason)).toBe(true)
+  })
+
   it('reads SVG source as text but keeps binary files with an SVG extension path-only', async () => {
     const svg = join(root, 'diagram.svg')
     const binary = join(root, 'binary.svg')

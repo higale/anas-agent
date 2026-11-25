@@ -11,4 +11,4 @@ In **Settings > Subagents**, click **Import subagent** at the top right and sele
 
 Each package contains `AGENT.json` (definition and capabilities) and `PROMPT.md` (prompt). You can add private `skills/` and `tools/`. Edit the prompt through the file tree in settings. Available capabilities remain subject to host and project settings.
 
-The app refreshes this examples directory. Import before editing; do not edit it directly or add it as an external Agent source. Refreshing examples does not overwrite imported copies.
+This examples directory is read directly from the application package without copying it into user data. Import before editing; do not edit it directly or add it as an external Agent source. Imported copies are stored independently and are not overwritten by application updates.

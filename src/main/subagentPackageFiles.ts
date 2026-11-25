@@ -9,7 +9,10 @@ import { parseCustomTools } from '@shared/customTools'
 import { assertToolDirectoryTreeIdle } from './toolsStore'
 
 export const listSubagentFiles = (id: string, path?: string) => withSubagentPackage(id, agent => listPackageFiles(agent.directory!, path))
-export const readSubagentFile = (id: string, path: string) => withSubagentPackage(id, async agent => ({ ...await readPackageFile(agent.directory!, path), editable: !agent.preset }))
+export const readSubagentFile = (id: string, path: string) => withSubagentPackage(id, async agent => {
+  const preview = await readPackageFile(agent.directory!, path)
+  return { ...preview, editable: preview.editable && !agent.preset }
+})
 export function saveSubagentFile(id: string, path: string, update: PackageFileUpdate) {
   return withSubagentPackage(id, async agent => {
     if (agent.preset) throw new Error('System Agent files are read-only.')

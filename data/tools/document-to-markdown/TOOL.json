@@ -1,0 +1,19 @@
+{
+  "version": 0,
+  "id": "document-to-markdown",
+  "name": "document_to_markdown",
+  "description": "Convert a local PDF, DOCX or PPTX to UTF-8 Markdown. PPTX conversion skips ink strokes and their previews. Embedded images are saved beside the output in <output stem>_images/ and linked with relative paths. Scans retain their images without OCR. Returns the source and output paths, line count and byte count.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "summary": { "type": "string", "pattern": "\\S", "description": "Brief UI summary of this action, 5-10 words, in the user's language." },
+      "input_path": { "type": "string", "minLength": 1, "description": "Absolute path to the source PDF, DOCX or PPTX." },
+      "output_path": { "type": "string", "minLength": 1, "description": "Absolute path for a new Markdown file. Missing parent directories are created." }
+    },
+    "required": ["input_path", "output_path"],
+    "additionalProperties": false
+  },
+  "command": "{{bundled_python}} convert.py {{args}}",
+  "timeout_seconds": 300,
+  "interactive": false
+}

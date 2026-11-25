@@ -1,41 +1,37 @@
-import { cp, lstat, mkdir, readdir, rename, rm } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { readdir, realpath } from 'node:fs/promises'
+import { dirname, join, relative, resolve } from 'node:path'
+import { getBundledDataDir, getBundledExamplesDir } from './config/dataDir'
+import { isSameOrInsideDirectory } from './pathContainment'
 
-/** Refresh app-owned examples/resources without changing imported user copies. */
-export async function mirrorBundledDirectories(source: string, target: string, manifestName: string | undefined, validate: (path: string, name: string) => Promise<unknown>): Promise<void> {
-  const stage = join(dirname(target), `.${basename(target)}.mirror.tmp`)
-  const previous = join(dirname(target), `.${basename(target)}.mirror.previous`)
-  await mkdir(dirname(target), { recursive: true })
-  await rm(stage, { recursive: true, force: true })
-  await rm(previous, { recursive: true, force: true })
-  // Copy the entire tree, including root-level documentation. Validate the
-  // staged snapshot so no category is published before the others are ready.
-  await cp(source, stage, { recursive: true, errorOnExist: true, force: false })
-  await validateBundledDirectories(stage, validate)
-  const existing = await lstat(target).catch(reason => {
-    if (reason.code === 'ENOENT') return undefined
-    throw reason
-  })
-  if (existing) {
-    if (!existing.isDirectory() || existing.isSymbolicLink()) throw new Error(`Bundled resource destination must be a regular directory: ${target}`)
-    const packageManifest = manifestName && await lstat(join(target, manifestName)).catch(reason => {
-      if (reason.code === 'ENOENT') return undefined
-      throw reason
-    })
-    if (packageManifest) throw new Error(`Bundled resource destination is occupied by a package: ${target}. Move that package elsewhere before starting Anas.`)
-    await rename(target, previous)
-  }
-  try {
-    await rename(stage, target)
-  } catch (reason) {
-    if (existing) {
-      try { await rename(previous, target) } catch (rollback) {
-        throw new AggregateError([reason, rollback], `Bundled resource replacement failed; previous files remain at ${previous}.`)
-      }
+// Resolve missing children through their existing parent before any creation.
+async function resourcePath(path: string): Promise<string> {
+  const target = resolve(path)
+  let parent = target
+  while (true) {
+    try { return join(await realpath(parent), relative(parent, target)) }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || dirname(parent) === parent) throw error
+      parent = dirname(parent)
     }
-    throw reason
   }
-  await rm(previous, { recursive: true, force: true })
+}
+
+export async function isBundledResourcePath(path: string, includeAncestors = false): Promise<boolean> {
+  const roots = [getBundledDataDir(), getBundledExamplesDir()]
+  const [target, ...canonicalRoots] = await Promise.all([resourcePath(path), ...roots.map(resourcePath)])
+  return [...roots, ...canonicalRoots].some(root => [resolve(path), target].some(candidate =>
+    isSameOrInsideDirectory(root, candidate) || includeAncestors && isSameOrInsideDirectory(candidate, root)))
+}
+
+/** Editable catalogs cannot own a bundled directory or any of its parents. */
+export async function assertUserResourceDirectory(path: string): Promise<void> {
+  if (await isBundledResourcePath(path, true)) {
+    throw new Error('This directory overlaps bundled resources already managed by Anas. Import a copy before editing.')
+  }
+}
+
+export async function assertWritablePackagePath(path: string): Promise<void> {
+  if (await isBundledResourcePath(path)) throw new Error('Bundled resource files are read-only.')
 }
 
 export async function validateBundledDirectories(root: string, validate: (path: string, name: string) => Promise<unknown>): Promise<void> {

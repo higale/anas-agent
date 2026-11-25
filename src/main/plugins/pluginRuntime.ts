@@ -3,12 +3,10 @@ import { BrowserWindow } from 'electron'
 import type { ResolvedPluginTool } from '@shared/pluginTools'
 import type { PluginBackendCallContext } from '@shared/plugins'
 import { pluginToolId } from '@shared/pluginTools'
-import { getDataDir, getBundledDataDir, getSystemPluginsDir } from '../config/dataDir'
-import { join } from 'node:path'
+import { getDataDir } from '../config/dataDir'
 import { isMainRendererWindow } from '../ipcSecurity'
 import { runApplicationDataOperation } from '../applicationDataLifecycle'
-import { mirrorBundledDirectories } from '../bundledDirectories'
-import { PluginStore, validateBundledPlugin } from './pluginStore'
+import { PluginStore } from './pluginStore'
 import { PluginBackends, type PluginViewAction } from './pluginBackend'
 import { withApplicationDataSnapshot } from '../applicationDataSnapshot'
 import { runtimeLog } from '../runtimeLogger'
@@ -38,7 +36,6 @@ export function changed(): void {
 export async function initializePluginsStore(): Promise<void> {
   await pluginRuntime().store.exclusive(async () => {
     await pluginRuntime().store.recoverTransactions()
-    await mirrorBundledDirectories(join(getBundledDataDir(), 'plugins/_system'), getSystemPluginsDir(), 'PLUGIN.json', validateBundledPlugin)
   })
 }
 

@@ -23,7 +23,7 @@ import { CapabilityResourceGroup } from './CapabilityResourceGroup'
 import { CustomToolSelectionEditor } from './CustomToolSelectionEditor'
 
 const capabilityGroupOrder = [
-  'profile', 'environment', 'workspace', 'applicationEnvironment', 'bundledPython',
+  'profile', 'environment', 'workspace', 'applicationEnvironment',
   'backgroundTools', 'planning', 'commandExecution', 'networkAccess',
   'configuration', 'request_user_input', 'sleep', 'memory', 'fileRead', 'fileWrite'
 ]
@@ -97,9 +97,9 @@ export function CapabilityEditor({ customTools: globalTools = [], customToolRoot
   })
   const catalogToolIds = new Set<string>(builtinToolCatalog.map((tool) => tool.id))
   const missingTools = value.tools.filter((id) => !catalogToolIds.has(id))
-  type CapabilityFlag = 'profile' | 'environment' | 'workspace' | 'memory' | 'applicationEnvironment' | 'bundledPython' | 'backgroundTools' | 'planning'
+  type CapabilityFlag = 'profile' | 'environment' | 'workspace' | 'memory' | 'applicationEnvironment' | 'backgroundTools' | 'planning'
   const groups: Array<{ id: string; name: string; flag?: CapabilityFlag; tools: Array<{ id: string; name: string; unavailable?: boolean }> }> = [
-    ...(['profile', 'environment', 'workspace', 'applicationEnvironment', 'bundledPython', 'backgroundTools', 'planning'] as const).map((flag) => ({
+    ...(['profile', 'environment', 'workspace', 'applicationEnvironment', 'backgroundTools', 'planning'] as const).map((flag) => ({
       id: flag, name: t(`settings.capability_${flag === 'workspace' ? 'workspaceContext' : flag}`), flag, tools: []
     })),
     ...(['commandExecution', 'networkAccess', 'fileRead', 'fileWrite', 'configuration', 'memory'] as const).map((feature) => ({
@@ -185,7 +185,7 @@ export function CapabilityEditor({ customTools: globalTools = [], customToolRoot
   function setAll(checked: boolean) {
     const next: AgentCapabilities = { ...value,
       profile: checked, environment: checked, workspace: checked, memory: checked,
-      applicationEnvironment: checked, bundledPython: checked, backgroundTools: checked, planning: checked,
+      applicationEnvironment: checked, backgroundTools: checked, planning: checked,
       toolMode: checked ? 'all' : 'selected', tools: [],
       pluginGroupMode: checked ? 'all' : 'off',
       customTools: setAllCustomTools(value.customTools, checked),
@@ -218,8 +218,7 @@ export function CapabilityEditor({ customTools: globalTools = [], customToolRoot
             if (isDirectToggle(group)) return <CheckboxField className="ui-checkbox-field-inline" key={group.id}
               checked={group.flag ? value[group.flag] : group.tools.some((tool) => toolAllowed(value, tool.id))}
               aria-label={group.name} label={group.name} inactiveReason={group.tools[0]?.unavailable ? t('capabilities.deleted') : undefined}
-              tooltip={group.flag === 'applicationEnvironment' ? t('capabilities.environment_hint')
-                : group.flag === 'bundledPython' ? t('settings.capability_bundledPython_hint') : undefined}
+              tooltip={group.flag === 'applicationEnvironment' ? t('capabilities.environment_hint') : undefined}
               onChange={(checked) => group.flag ? onChange({ ...value, [group.flag]: checked }) : setTools(group.tools.map((tool) => tool.id), checked)} />
             const total = group.tools.length + (group.flag ? 1 : 0)
             const count = group.tools.filter(tool => toolAllowed(value, tool.id)).length + (group.flag && value[group.flag] ? 1 : 0)

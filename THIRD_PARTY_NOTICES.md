@@ -18,6 +18,7 @@ Anas 使用 `LICENSE` 中的 MIT 协议。第三方代码和资源保留各自�
 
 安装依赖或添加第三方 Skills、工具、模型和服务不会改变其协议条款。请查阅所分发内容附带的协议。
 
+- 文档转换采用 Microsoft MarkItDown 0.1.9 的 PDF、DOCX 和 PPTX 转换模块。其 MIT 许可证见 `data/licenses/document-markdown/`。依赖的发行元数据及所附许可证与对应 wheel 内容位于 `python/anas-documents/`。
 - Python：Windows 和 macOS 随包提供 Astral python-build-standalone 构建的 CPython。版本与下载校验信息见 `build/python-runtime.json`；保留发行件中的许可证，并在 `data/licenses/python-build-standalone/` 附带同一上游发布的许可文件集合。
 
 ## English
@@ -37,6 +38,7 @@ Anas is licensed under the MIT License in `LICENSE`. Third-party code and assets
 
 Source distributions include the bundled notices under `data/licenses/`. Packaged applications place them under `resources/data/licenses/` (under `Contents/Resources/` on macOS). Package dependencies retain their notices under `node_modules/` in the application archive. Build-time components shipped in renderer bundles have notices under `licenses/monaco-editor/`, `licenses/dompurify/`, and `licenses/marked/` in that archive.
 
+- Document conversion uses the PDF, DOCX and PPTX converters from Microsoft MarkItDown 0.1.9. Its MIT license is under `data/licenses/document-markdown/`. Dependency distribution metadata and supplied licenses accompany the wheel contents under `python/anas-documents/`.
 - Python: Windows and macOS packages include CPython built by Astral python-build-standalone. Version and download checksums are pinned in `build/python-runtime.json`. Distribution licenses are retained, and the upstream license collection from the same release is included in `data/licenses/python-build-standalone/`.
 
 Installing dependencies or adding third-party Skills, tools, models, or services does not change their license terms. Review the licenses supplied with anything you redistribute.

@@ -1,5 +1,6 @@
 import { app } from 'electron'
-import { mkdir, mkdtemp, open, readdir, rm, writeFile } from 'node:fs/promises'
+import { rejects } from 'node:assert/strict'
+import { lstat, mkdir, mkdtemp, open, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -64,10 +65,31 @@ export async function runPackagedSmoke(): Promise<void> {
     await mkdir(join(root, 'db/projects/unrelated'))
     await writeFile(join(root, 'db/projects/.DS_Store'), 'Finder metadata')
     await writeFile(join(root, 'db/projects/personal notes/notes.txt'), 'Preserve unrelated content')
-    const { initializeBundledExamples } = await import('./bundledExamples')
+    const appConfig = await import('./config/appConfig')
+    await appConfig.initializeAppProfile()
+    const { validateBundledExamples } = await import('./bundledExamples')
     const { PluginStore } = await import('./plugins/pluginStore')
-    await initializeBundledExamples()
-    const examples = join(root, 'examples/plugins')
+    await validateBundledExamples()
+    const { getBundledDataDir, getPluginExamplesDir } = await import('./config/dataDir')
+    const { initializeSkillsStore, listSkillSnapshot } = await import('./skillsStore')
+    const { initializeSubagentPackages, readSubagentPackages } = await import('./subagentPackages')
+    const { getLanguageResources } = await import('./languageStore')
+    const { readHelpDocument } = await import('./helpDocuments')
+    await initializeSkillsStore()
+    await initializeSubagentPackages()
+    const skills = (await listSkillSnapshot()).skills.filter(skill => skill.source === 'system')
+    const agents = await readSubagentPackages(root)
+    if (!skills.length || skills.some(skill => skill.dirPath !== join(getBundledDataDir(), 'skills', skill.name))
+      || agents.find(agent => agent.id === 'general-purpose')?.directory !== join(getBundledDataDir(), 'subagents/general-purpose')) {
+      throw new Error('Packaged built-in resources did not resolve inside the application package.')
+    }
+    const languages = await getLanguageResources()
+    if (!languages.resources.en || !(await readHelpDocument('USER_GUIDE.en.md')).length) throw new Error('Packaged language or help resources are missing.')
+    for (const path of ['skills/_system', 'subagents/_system', 'plugins/_system', 'examples', 'help', 'lang/en.json', 'lang/zh-CN.json', 'lang/README.md']) {
+      const released = await lstat(join(root, path)).catch(error => { if (error.code === 'ENOENT') return undefined; throw error })
+      if (released) throw new Error(`Bundled resource was copied into user data: ${path}`)
+    }
+    const examples = getPluginExamplesDir()
     const plugins = new PluginStore(root)
     for (const name of await readdir(examples)) {
       if (!name.endsWith('.zip')) continue
@@ -83,16 +105,16 @@ export async function runPackagedSmoke(): Promise<void> {
       ...(process.platform === 'darwin' ? { ZDOTDIR: root } : {}) })
     const shell = await getCommandShell()
     if (process.platform === 'win32' || process.platform === 'darwin') {
-      const { ensureBundledPython } = await import('./bundledPython')
-      const { probePython3, discoverPython3 } = await import('./runtimeDiscovery')
-      const bundled = await ensureBundledPython()
-      if (!bundled) throw new Error('Packaged Python runtime is missing.')
+      const { bundledPythonArgs, discoverBundledPython, getBundledPythonInfo } = await import('./bundledPython')
+      const { discoverPython3 } = await import('./runtimeDiscovery')
+      const bundled = getBundledPythonInfo()
+      if (bundled?.state !== 'available') throw new Error('Packaged Python runtime is missing.')
       // Isolate discovery and .py fallback from system Python; Shell keeps its normal environment.
       const pythonEnv: NodeJS.ProcessEnv = { ...searchEnvironment.env, PATH: '', PYTHONHOME: undefined, PYTHONPATH: undefined,
         PYTHONNOUSERSITE: '1', PYTHONDONTWRITEBYTECODE: '1', PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' }
       for (const key of Object.keys(pythonEnv)) if (key.toLowerCase() === 'path' && key !== 'PATH') delete pythonEnv[key]
       if (await discoverPython3({ env: pythonEnv, cwd: documents })) throw new Error('Python smoke must not discover a system interpreter.')
-      const python = await probePython3(bundled.executable, [], { env: pythonEnv, cwd: documents })
+      const python = await discoverBundledPython({ env: pythonEnv, cwd: documents })
       if (python?.executable !== bundled.executable || python.version !== bundled.version) {
         throw new Error(`Packaged Python probe failed: ${JSON.stringify(python)}`)
       }
@@ -100,7 +122,7 @@ export async function runPackagedSmoke(): Promise<void> {
       await writeFile(join(documents, 'local_helper.py'), 'value = "中文🙂"\n')
       await writeFile(script, 'import json, ssl, sqlite3, hashlib, ctypes, urllib.request, subprocess, local_helper\nprint(json.dumps({"value": local_helper.value}, ensure_ascii=False))\n')
       const quote = (text: string) => `'${text.replaceAll("'", process.platform === 'win32' ? "''" : "'\\''")}'`
-      const pythonCommand = `${process.platform === 'win32' ? '& ' : ''}${quote(bundled.executable)} ${quote(script)}`
+      const pythonCommand = `${process.platform === 'win32' ? '& ' : ''}${quote(bundled.executable)} ${bundledPythonArgs.join(' ')} ${quote(script)}`
       const preparedPython = await prepareShellCommand({ command: pythonCommand, workingDir: documents }, documents)
       if ('ok' in preparedPython) throw new Error(preparedPython.error)
       preparedPython.env = { ...pythonEnv, PATH: searchEnvironment.env.PATH }
@@ -113,43 +135,56 @@ export async function runPackagedSmoke(): Promise<void> {
       const { parseCustomTools } = await import('../shared/customTools')
       const [definition] = parseCustomTools([{ version: 0, id: 'python-smoke', name: 'python_smoke', description: 'Smoke',
         command: '"python smoke 中文.py" {{args}}', input_schema: { type: 'object', properties: {} }, timeout_seconds: 10, interactive: false }])
-      const [tool] = customToolDefinitions([{ ...definition, directory: documents }], { env: pythonEnv, backgroundTools: false, bundledPython: true })
+      const [tool] = customToolDefinitions([{ ...definition, directory: documents }], { env: pythonEnv, backgroundTools: false })
       const result = await tool.execute({}, { callId: 'python-smoke' })
       if (!JSON.stringify(result).includes('中文🙂')) throw new Error(`Packaged Python custom tool failed: ${JSON.stringify(result)}`)
-      // runPreparedProcess inherits the host environment. Explicitly unset all
-      // pip variables so target/prefix/config/cache settings cannot escape this
-      // fixture. pip compares PIP_CONFIG_FILE to Python's exact os.devnull value.
-      const dependencyEnv: NodeJS.ProcessEnv = {
-        ...Object.fromEntries(Object.keys(process.env).filter(key => /^PIP_/i.test(key)).map(key => [key, undefined])),
-        PIP_CONFIG_FILE: process.platform === 'win32' ? 'nul' : '/dev/null',
-        PIP_NO_INDEX: '1', PIP_DISABLE_PIP_VERSION_CHECK: '1', PIP_NO_CACHE_DIR: '1'
+      if (bundled.executable !== join(process.resourcesPath, 'python', process.platform === 'win32' ? 'python.exe' : 'bin/python3')) {
+        throw new Error('Bundled Python must run directly from package resources.')
       }
-      const runPython = async (executable: string, args: string[]) => {
-        let succeeded = false, output = ''
-        await runPreparedProcess({ command: 'packaged Python dependency smoke', workingDir: documents, timeoutSec: 30,
-          // -I ignores PYTHONUTF8/PYTHONIOENCODING; keep captured Unicode paths
-          // readable even when the Windows host uses a legacy ANSI code page.
-          invocation: { executable, args: ['-X', 'utf8', ...args], windowsHide: true }, env: dependencyEnv,
-          logScope: 'packaged-smoke', successMessage: 'Python dependency smoke passed.', failureMessage: 'Python dependency smoke failed.',
-          abortBeforeStartError: 'Python cancelled.', abortError: 'Python cancelled.', timeoutError: 'Python smoke timed out.'
-        }, undefined, { onResult: value => { succeeded = value.ok; output = value.stdout + value.stderr } })
-        if (!succeeded) throw new Error(`Python dependency smoke failed: ${output}`)
-        return output
+      const document = join(documents, '文档 smoke.pdf')
+      // Single text page with a standard PDF cross-reference table.
+      await writeFile(document, Buffer.from('JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA1OTUgODQyXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA0IDAgUiA+PiA+PiAvQ29udGVudHMgNSAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhID4+CmVuZG9iago1IDAgb2JqCjw8IC9MZW5ndGggNTAgPj4Kc3RyZWFtCkJUIC9GMSAxMiBUZiA1MCA3MDAgVGQgKEFuYXMgTWFya2Rvd24gc21va2UpIFRqIEVUCmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQxIDAwMDAwIG4gCjAwMDAwMDAzMTEgMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA2IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgo0MTEKJSVFT0YK', 'base64'))
+      const { readSelectedAttachments } = await import('./attachments')
+      const [selectedDocument] = await readSelectedAttachments([document])
+      if (selectedDocument.kind !== 'binary' || selectedDocument.text || selectedDocument.skippedReason) throw new Error('Document selection must return a path.')
+      const { listToolSnapshot } = await import('./toolsStore')
+      const converter = (await listToolSnapshot()).tools.find(item => item.id === 'system:document-to-markdown')?.definition
+      if (!converter) throw new Error('Packaged document tool is missing.')
+      const [convertDocument] = customToolDefinitions([converter], { env: pythonEnv, backgroundTools: false })
+      const { validateCapabilityInput } = await import('../runtime/toolInput')
+      const args = { input_path: document, output_path: join(documents, '导出', '报告.md'), summary: '读取报告中的季度数据' }
+      await rejects(validateCapabilityInput(convertDocument, { input_path: document }), /output_path/)
+      await rejects(validateCapabilityInput(convertDocument, { output_path: args.output_path }), /input_path/)
+      await validateCapabilityInput(convertDocument, { input_path: document, output_path: args.output_path })
+      await validateCapabilityInput(convertDocument, args)
+      const converted = await convertDocument.execute(args, { callId: 'document-conversion-smoke' })
+      const lines = typeof converted.content === 'string' ? converted.content.trimEnd().split(/\r?\n/) : []
+      const [marker, source, markdown, lineCount, size] = lines
+      const fileLabel = 'Complete Markdown: '
+      if (lines.length !== 5 || marker !== '[Converted document · Markdown]' || source !== 'Source: ' + JSON.stringify(document)
+        || markdown !== fileLabel + JSON.stringify(args.output_path)) {
+        throw new Error('Packaged document conversion failed: ' + JSON.stringify(converted))
       }
-      // Build a tiny local wheel: pip must install offline into the released runtime,
-      // and a subsequent prepare must preserve it. No PyPI or user environment access.
-      const wheel = join(documents, 'anas_smoke-1.0-py3-none-any.whl')
-      await runPython(python.executable, ['-I', '-B', '-c',
-        'import sys,zipfile\nwith zipfile.ZipFile(sys.argv[1],"w") as z:\n z.writestr("anas_smoke.py", "value = 42\\n")\n z.writestr("anas_smoke-1.0.dist-info/METADATA", "Metadata-Version: 2.1\\nName: anas-smoke\\nVersion: 1.0\\n")\n z.writestr("anas_smoke-1.0.dist-info/WHEEL", "Wheel-Version: 1.0\\nGenerator: anas-smoke\\nRoot-Is-Purelib: true\\nTag: py3-none-any\\n")\n z.writestr("anas_smoke-1.0.dist-info/RECORD", "")', wheel])
-      await runPython(python.executable, ['-I', '-B', '-m', 'pip', 'install', '--no-index', '--no-deps', wheel])
-      await ensureBundledPython()
-      await runPython(python.executable, ['-I', '-B', '-c', 'import anas_smoke; assert anas_smoke.value == 42'])
-      const venv = join(documents, 'venv 中文')
-      await runPython(python.executable, ['-I', '-B', '-m', 'venv', venv])
-      const venvPython = join(venv, process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python3')
-      const pipVersion = await runPython(venvPython, ['-I', '-B', '-m', 'pip', '--version'])
-      if (!pipVersion.includes('venv 中文')) throw new Error(`Python venv pip output lost its Unicode path: ${pipVersion}`)
-      await runPython(venvPython, ['-I', '-B', '-c', 'import sys; assert sys.prefix != sys.base_prefix'])
+      const markdownPath: unknown = JSON.parse(markdown.slice(fileLabel.length))
+      const { fileToolDefinitions } = await import('./llm/fileTools')
+      const [readMarkdown] = fileToolDefinitions({ primaryFolder: documents, maxReadBytes: 4096, toolNames: ['read_file'] })
+      const saved = await readMarkdown.execute({ path: markdownPath }, { callId: 'document-read-smoke' })
+      const file = JSON.parse(String(saved.content))
+      if (!file.ok || !file.content.includes('Anas Markdown smoke') || lineCount !== `Lines: ${file.lineCount}` || size !== `Bytes: ${file.returnedBytes}`) {
+        throw new Error('Packaged Markdown content or statistics do not match the file reader.')
+      }
+      let managed = false, managedOutput = ''
+      await runPreparedProcess({ command: 'packaged Python boundary smoke', workingDir: documents, timeoutSec: 30,
+        invocation: { executable: bundled.executable, args: ['-I', '-B', '-X', 'utf8', '-c',
+          'import sys,site,sysconfig,pathlib,importlib.util; assert not site.ENABLE_USER_SITE; assert sys.dont_write_bytecode; assert all(importlib.util.find_spec(name) is None for name in ("pip","ensurepip","setuptools","wheel")); assert (pathlib.Path(sysconfig.get_path("stdlib")) / "EXTERNALLY-MANAGED").is_file()'], windowsHide: true },
+        env: { ...pythonEnv, PYTHONHOME: join(root, 'invalid-home'), PYTHONPATH: documents },
+        logScope: 'packaged-smoke', successMessage: 'Python boundary smoke passed.', failureMessage: 'Python boundary smoke failed.',
+        abortBeforeStartError: 'Python cancelled.', abortError: 'Python cancelled.', timeoutError: 'Python smoke timed out.'
+      }, undefined, { onResult: value => { managed = value.ok; managedOutput = value.stdout + value.stderr } })
+      if (!managed) throw new Error('Python boundary smoke failed: ' + managedOutput)
+      if ((await readdir(documents)).includes('__pycache__') || (await readdir(root)).includes('runtimes')) {
+        throw new Error('Bundled Python created an unexpected bytecode cache or user runtime.')
+      }
     }
     const authorization = createShellCommandAuthorization({ shell, env: searchEnvironment.env, rgExecutable: searchEnvironment.executable,
       primaryFolder: documents, trustedFolders: [documents], accessMode: () => 'strict_approval' })
@@ -200,13 +235,11 @@ export async function runPackagedSmoke(): Promise<void> {
       onResult: (result) => { terminalSucceeded = result.ok } })
     await terminalInputResult
     if (!terminalSucceeded || !terminalOutput.includes('PTY_REPLY:中文 smoke')) throw new Error(`Packaged terminal probe failed: ${terminalOutput}`)
-    const [{ AgentStorage }, { NativeRuntimeCoordinator }, { createAgentRunSubmissionExecutionInput }, appConfig] = await Promise.all([
+    const [{ AgentStorage }, { NativeRuntimeCoordinator }, { createAgentRunSubmissionExecutionInput }] = await Promise.all([
       import('./agent/agentStorage'),
       import('./agent/nativeRuntimeCoordinator'),
-      import('./agent/agentRunInput'),
-      import('./config/appConfig')
+      import('./agent/agentRunInput')
     ])
-    await appConfig.initializeAppProfile()
     const providerConfig = await appConfig.saveModelProvider({
       name: 'Packaged smoke',
       protocol: 'openai_chat_completions',

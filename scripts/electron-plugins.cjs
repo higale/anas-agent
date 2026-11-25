@@ -413,11 +413,12 @@ async function checkBackup(application, page, directory) {
     await application.evaluate(({ app }, directory) => app.setPath('documents', directory), backups)
     await application.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }) }, join(backups, 'plugins.zip'))
     await page.evaluate(() => globalThis.gale.plugins.startBackend('example-backend'))
+    await mkdir(join(directory, 'examples/plugins'), { recursive: true })
     await writeFile(join(directory, 'examples/plugins/README.md'), 'Stale example documentation')
-    await writeFile(join(directory, 'examples/obsolete.txt'), 'Remove with the complete tree')
+    await writeFile(join(directory, 'examples/obsolete.txt'), 'Preserve the old example tree')
     const backup = await page.evaluate(() => globalThis.gale.app.backupData())
     assert.ok(backup?.path)
-    assert.equal(await page.evaluate(async () => (await globalThis.gale.plugins.list()).find(item => item.id === 'example-backend').backendStatus), 'stopped')
+    assert.equal(await page.evaluate(async () => (await globalThis.gale.plugins.list()).find(item => item.id === 'example-backend').backendStatus), 'running', 'Backup must resume the previously running backend after taking its snapshot.')
     await page.evaluate(() => globalThis.gale.plugins.invoke('example-notepad', 'data.set', { key: 'draft', value: 'Changed after backup' }))
     const home = await page.evaluate(() => globalThis.gale.panels.list().then(views => views.find(view => view.content.pluginId === 'example-notepad' && view.content.instanceId === 'main')))
     assert.ok(home)
@@ -426,11 +427,8 @@ async function checkBackup(application, page, directory) {
     await expect.poll(() => windowCount(application)).toBe(2)
     await page.evaluate(() => globalThis.gale.plugins.startBackend('example-backend'))
     await page.evaluate(path => globalThis.gale.app.restoreData(path), backup.path)
-    for (const file of ['plugins/README.md', 'plugins/README.en.md', 'skills/weather/SKILL.md',
-      'tools/read_text_raw/TOOL.json', 'plugins/notepad.zip']) {
-      assert.deepEqual(await readFile(join(directory, 'examples', file)), await readFile(join(process.cwd(), 'out/examples', file)))
-    }
-    await assert.rejects(readFile(join(directory, 'examples/obsolete.txt')), { code: 'ENOENT' })
+    assert.equal(await readFile(join(directory, 'examples/plugins/README.md'), 'utf8'), 'Stale example documentation')
+    assert.equal(await readFile(join(directory, 'examples/obsolete.txt'), 'utf8'), 'Preserve the old example tree')
     await expect.poll(() => windowCount(application)).toBe(1)
     assert.equal((await page.evaluate(() => globalThis.gale.panels.list())).length, 0)
     assert.equal(await page.evaluate(() => globalThis.gale.plugins.invoke('example-notepad', 'data.get', { key: 'draft' })), 'Plugin saved draft')

@@ -1,7 +1,7 @@
 import { requireDataVersion } from '@shared/dataVersion'
 import { app } from 'electron'
 import { createInstance, type Resource, type TFunction } from 'i18next'
-import { copyFile, mkdir, readFile, readdir } from 'node:fs/promises'
+import { mkdir, readFile, readdir } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
 import { getBundledLangDir, getLangDir } from './config/dataDir'
 import { matchLanguageCode } from '@shared/languages'
@@ -11,7 +11,6 @@ import type { AppProfile, LanguagePackSummary, LanguageResourcesSnapshot } from 
 type JsonObject = Record<string, unknown>
 
 const builtInLanguages = ['en', 'zh-CN']
-const readmeFileName = 'README.md'
 const systemLanguagePreference = 'system'
 let latestSnapshot: LanguageResourcesSnapshot | undefined
 
@@ -93,22 +92,7 @@ async function listUserLanguageFiles(): Promise<string[]> {
     .map((file) => join(getLangDir(), file))
 }
 
-async function releaseBuiltinLanguageFiles(): Promise<void> {
-  await mkdir(getLangDir(), { recursive: true })
-  await Promise.all([
-    ...builtInLanguages.map((code) => copyFile(
-      join(getBundledLangDir(), `${code}.json`),
-      join(getLangDir(), `${code}.json`)
-    )),
-    copyFile(
-      join(getBundledLangDir(), readmeFileName),
-      join(getLangDir(), readmeFileName)
-    )
-  ])
-}
-
 export async function getLanguageResources(): Promise<LanguageResourcesSnapshot> {
-  await releaseBuiltinLanguageFiles()
   const resources: Record<string, JsonObject> = {}
   const summaries = new Map<string, LanguagePackSummary>()
 
@@ -126,6 +110,9 @@ export async function getLanguageResources(): Promise<LanguageResourcesSnapshot>
 
   for (const filePath of await listUserLanguageFiles()) {
     const code = basename(filePath, extname(filePath))
+    // Older releases copied built-in packs here. Preserve those files without
+    // letting stale translations override the current application resources.
+    if (builtInLanguages.some(builtin => builtin.toLowerCase() === code.toLowerCase())) continue
     const resource = await readJsonFile(filePath)
     if (!resource) continue
     resources[code] = mergeDeep(resources[code] ?? {}, resource)

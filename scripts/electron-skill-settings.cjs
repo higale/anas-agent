@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict')
-const { mkdir, mkdtemp, readFile, rm, writeFile } = require('node:fs/promises')
+const { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } = require('node:fs/promises')
 const { tmpdir } = require('node:os')
 const { join } = require('node:path')
 const { expect } = require('playwright/test')
@@ -81,6 +81,64 @@ async function verifySkillSettings(launchApplication) {
     const invocation = await page.evaluate(() => globalThis.gale.skills.invoke(undefined, 'long-description', undefined, 'Use it'))
     assert.ok(invocation.promptText.includes(longDescription), 'Shortcut must preserve the complete description.')
     if (process.env.ANAS_E2E_SKILL_WARNING_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_SKILL_WARNING_SCREENSHOT })
+    const names = ['z-imported', 'a-imported']
+    const sources = await Promise.all(names.map(async name => {
+      const source = join(root, 'incoming', name)
+      await mkdir(source, { recursive: true })
+      await writeFile(join(source, 'SKILL.md'), `---\nname: ${name}\ndescription: Imported example\n---\n`)
+      return source
+    }))
+    const guides = join(root, 'incoming', 'shared-guides')
+    await mkdir(guides)
+    await writeFile(join(guides, 'walkthrough.md'), 'Open this linked guide.')
+    await symlink(guides, join(sources[0], 'linked-guides'), process.platform === 'win32' ? 'junction' : 'dir')
+    await application.evaluate(({ dialog }, paths) => {
+      const original = dialog.showOpenDialog
+      dialog.showOpenDialog = async () => {
+        dialog.showOpenDialog = original
+        return { canceled: false, filePaths: paths }
+      }
+    }, sources)
+    await page.getByRole('button', { name: 'Import skill', exact: true }).click()
+    await expect(viewer.getByRole('button', { name: 'z-imported', exact: true })).toBeVisible()
+    await expect.poll(() => page.evaluate(() => globalThis.gale.skills.get().then(snapshot =>
+      snapshot.skills.filter(skill => skill.source === 'user').map(skill => skill.name)))).toEqual(expect.arrayContaining(names))
+    await rename(join(root, 'incoming'), join(root, 'moved-source'))
+    await page.getByRole('button', { name: 'Expand Skill “z-imported”', exact: true }).click()
+    await page.getByRole('button', { name: 'linked-guides', exact: true }).click()
+    await page.getByRole('button', { name: 'walkthrough.md', exact: true }).click()
+    await expect(viewer.getByText('Open this linked guide.', { exact: true })).toBeVisible()
+    await expect(viewer.getByRole('button', { name: 'Edit', exact: true })).toBeEnabled()
+    await page.evaluate(async () => {
+      const id = 'user:z-imported', path = 'linked-guides/walkthrough.md'
+      const preview = await globalThis.gale.skills.readFile(undefined, id, path)
+      await globalThis.gale.skills.saveFile(undefined, id, path, {
+        content: 'Edited after import.', revision: preview.revision, resolvedPath: preview.resolvedPath
+      })
+    })
+    assert.equal(await readFile(join(root, 'skills', 'z-imported', 'linked-guides', 'walkthrough.md'), 'utf8'), 'Edited after import.')
+    assert.equal(await readFile(join(root, 'moved-source', 'shared-guides', 'walkthrough.md'), 'utf8'), 'Open this linked guide.')
+    await application.evaluate(({ ipcMain }) => {
+      ipcMain.removeHandler('skills:importDirectories')
+      ipcMain.handle('skills:importDirectories', () => ({
+        status: 'completed', names: [],
+        failures: Array.from({ length: 60 }, (_, i) => ({ name: `skill-${i + 1}`, error: { code: 'failed', detail: 'Disk full' } }))
+      }))
+    })
+    await page.getByRole('button', { name: 'Import skill', exact: true }).click()
+    const details = page.locator('[data-sonner-toast] [data-description]').filter({ hasText: 'skill-60' })
+    await expect(details).toBeVisible()
+    await details.hover()
+    await page.mouse.wheel(0, await details.evaluate(el => el.scrollHeight))
+    await expect.poll(() => details.evaluate(el => {
+      const text = el.firstChild
+      const line = el.ownerDocument.createRange()
+      line.setStart(text, text.textContent.lastIndexOf('skill-60'))
+      line.setEnd(text, text.length)
+      const rect = line.getBoundingClientRect()
+      const box = el.getBoundingClientRect()
+      return el.scrollTop > 0 && rect.top >= box.top && rect.bottom <= Math.min(box.bottom + 1, el.ownerDocument.documentElement.clientHeight)
+    })).toBe(true)
     await application.close()
     application = await launchApplication(root)
     page = await application.firstWindow()
@@ -90,7 +148,7 @@ async function verifySkillSettings(launchApplication) {
     assert.deepEqual(saved.availability['system:config'], { model_available: false, user_available: true })
     assert.equal(Object.hasOwn(saved, 'script_auto_approve'), false)
     assert.equal(Object.hasOwn(saved, 'script_auto_approve_skills'), false)
-    console.log('Skill settings E2E passed: no exemption controls, availability persistence, keyboard toggles, location reveal, and usable long-description warning.')
+    console.log('Skill settings E2E passed: skill import and selection, scrollable import failures, availability persistence, keyboard toggles, location reveal, and long-description warning.')
   } finally {
     await application?.close().catch(() => undefined)
     assert.ok(root.startsWith(join(tmpdir(), 'anas-skill-settings-e2e-')))

@@ -1,7 +1,8 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { TFunction } from 'i18next'
+import { createInstance, type TFunction } from 'i18next'
+import en from '../../../../../data/lang/en.json'
 import type { AppConfigSnapshot, EnvFileSnapshot, McpServerConfigSave, SkillRootSummary, SkillSnapshot, SubagentConfigSave } from '@shared/types'
 import { useEnvSettingsState } from './useEnvSettingsState'
 import { useSkillsSettingsState } from './useSkillsSettingsState'
@@ -51,7 +52,7 @@ describe('autosave page boundaries', () => {
     expect(saved.skills.every(item => item.configuredAvailability?.userAvailable && item.configuredAvailability.modelAvailable)).toBe(true)
   })
 
-  it('returns the first imported user skill ID, not a same-named external skill or catalog order', async () => {
+  it.each(['completes', 'fails'])('reveals the first imported user skill when a superseded refresh %s', async outcome => {
     const initial = { roots: [], skills: [] } satisfies SkillSnapshot
     const skill = { id: 'user:z-first', name: 'z-first', source: 'user', rootId: 'user', description: '',
       modelAvailable: true, userAvailable: true, dirPath: '', linked: false,
@@ -60,15 +61,23 @@ describe('autosave page boundaries', () => {
       { ...skill, id: 'external:z-first', source: 'external' as const },
       { ...skill, id: 'user:a-second', name: 'a-second' }, skill
     ] }
-    vi.stubGlobal('gale', { plugins: { onChanged: vi.fn(() => () => {}) }, skills: {
-      get: vi.fn().mockResolvedValue(initial),
-      importDirectories: vi.fn().mockResolvedValue({ status: 'imported', names: ['z-first', 'a-second'], snapshot: imported })
+    let pluginChanged!: () => void
+    const importRefresh = deferred<SkillSnapshot>()
+    vi.stubGlobal('gale', { plugins: { onChanged: (notify: () => void) => { pluginChanged = notify; return () => {} } }, skills: {
+      get: vi.fn().mockResolvedValueOnce(initial).mockReturnValueOnce(importRefresh.promise).mockResolvedValue(imported),
+      importDirectories: vi.fn().mockResolvedValue({ status: 'completed', names: ['z-first', 'a-second'], failures: [] })
     } })
     const { result } = renderHook(() => useSkillsSettingsState({ openConfirmDialog: vi.fn(), settingsOpen: false, settingsTab: 'skills', t }))
     await waitFor(() => expect(result.current.skills).toBeDefined())
     await act(async () => expect(await result.current.importDirectories()).toBe('user:z-first'))
+    await act(async () => pluginChanged())
+    await act(async () => {
+      if (outcome === 'fails') importRefresh.reject(new Error('Stale request failed'))
+      else importRefresh.resolve(initial)
+    })
     expect(result.current.skills).toEqual(imported)
     expect(notice.success).toHaveBeenCalledWith('settings.skills_imported', expect.anything())
+    expect(notice.error).not.toHaveBeenCalled()
   })
 
   it.each(['cancelled', 'error', 'rejected'])('keeps the skill catalog and returns no selection after an import is %s', async status => {
@@ -83,6 +92,43 @@ describe('autosave page boundaries', () => {
     await act(async () => expect(await result.current.importDirectories()).toBeUndefined())
     expect(result.current.skills).toBe(initial)
     expect(notice.success).not.toHaveBeenCalled()
+  })
+
+  it('shows the committed names, individual failures and remaining staging paths after import', async () => {
+    const paths = ['/skills/restored', '/skills/.import.tmp']
+    const i18n = createInstance()
+    await i18n.init({ lng: 'en', resources: { en: { translation: en } }, interpolation: { escapeValue: false } })
+    const initial: SkillSnapshot = { roots: [], skills: [] }
+    const restored = { id: 'user:restored', name: 'restored', source: 'user', rootId: 'user', description: '',
+      modelAvailable: true, userAvailable: true, dirPath: paths[0], linked: false,
+      relativePath: 'restored', rootName: 'User', shortcutAlias: 'user' } as const
+    const refreshed: SkillSnapshot = { roots: [], skills: [restored] }
+    vi.stubGlobal('gale', { plugins: { onChanged: () => () => {} }, skills: {
+      get: vi.fn().mockResolvedValueOnce(initial).mockResolvedValue(refreshed),
+      importDirectories: vi.fn().mockResolvedValue({ status: 'completed', names: ['restored'], failures: [
+        { name: 'second', error: { code: 'failed', detail: 'Disk full' }, stagingPath: paths[1] }
+      ] })
+    } })
+    const { result } = renderHook(() => useSkillsSettingsState({ openConfirmDialog: vi.fn(), settingsOpen: false, settingsTab: 'skills', t: i18n.t }))
+    await waitFor(() => expect(result.current.skills).toBeDefined())
+    await act(async () => expect(await result.current.importDirectories()).toBe('user:restored'))
+    expect(result.current.skills?.skills).toEqual([restored])
+    expect(notice.error).toHaveBeenCalledWith('Imported 1. Failed 1.', expect.objectContaining({
+      description: `Imported: restored\nsecond — Disk full\nCheck this temporary copy: ${paths[1]}`, duration: Infinity
+    }))
+  })
+
+  it('reports a list refresh failure separately from a committed import', async () => {
+    vi.stubGlobal('gale', { plugins: { onChanged: () => () => {} }, skills: {
+      get: vi.fn().mockResolvedValueOnce({ roots: [], skills: [] }).mockRejectedValue(new Error('Offline')),
+      importDirectories: vi.fn().mockResolvedValue({ status: 'completed', names: ['saved'], failures: [] })
+    } })
+    const { result } = renderHook(() => useSkillsSettingsState({ openConfirmDialog: vi.fn(), settingsOpen: false, settingsTab: 'skills', t }))
+    await waitFor(() => expect(result.current.skills).toBeDefined())
+    await act(async () => expect(await result.current.importDirectories()).toBe('user:saved'))
+    expect(notice.success).toHaveBeenCalledWith('settings.skills_imported', expect.anything())
+    expect(notice.error).toHaveBeenCalledWith('chat.failed_load_skill', expect.anything())
+    expect(notice.error).not.toHaveBeenCalledWith('settings.failed_import_skill', expect.anything())
   })
 
   it('loads the surviving subagent draft after deletion reuses the selected index', async () => {

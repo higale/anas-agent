@@ -17,12 +17,12 @@ vi.mock('../settings/PackageTree', async importOriginal => ({ ...await importOri
   PackageFileViewer: ({ preview, onSave }: any) => preview && <><p>{preview.content}</p><button onClick={() => void onSave({ content: 'Saved prompt', revision: preview.revision, resolvedPath: preview.resolvedPath })}>Save file</button></>
 }))
 const agents: SubagentConfig[] = [
-  { id: 'builtin', index: 0, directory: '/data/subagents/_system/builtin', name: 'builtin', enabled: true, builtIn: true, description: 'Built in', systemPrompt: 'Help', capabilities: defaultCapabilities },
+  { id: 'builtin', index: 0, directory: '/data/subagents/builtin', name: 'builtin', enabled: true, builtIn: true, description: 'Built in', systemPrompt: 'Help', capabilities: defaultCapabilities },
   { id: 'reporter', index: 1, directory: '/external/reporter', name: 'reporter', enabled: true, builtIn: false, description: 'Reports', systemPrompt: 'Read', capabilities: defaultCapabilities }
 ]
 function api() {
   let roots: SubagentRootSummary[] = [
-    { id: 'system', kind: 'system', path: '/data/subagents/_system', name: 'System', available: true, agentIds: ['builtin'], errors: [] },
+    { id: 'system', kind: 'system', path: '/data/subagents', name: 'System', available: true, agentIds: ['builtin'], errors: [] },
     { id: 'user', kind: 'user', path: '/data/subagents', name: 'User', available: true, agentIds: [], errors: [] },
     { id: 'external', kind: 'external', path: '/external', name: 'Shared agents', available: true, agentIds: ['reporter'], errors: [] }
   ]

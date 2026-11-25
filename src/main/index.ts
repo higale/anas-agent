@@ -1,7 +1,6 @@
 import { clearUsageRuntime, registerUsageIpc } from './usage/usageRuntime'
 import { registerPanelIpc } from './panels/panelHost'
 import { panelPages } from './panels/panelRegistry'
-import { initializeHelpFiles } from './helpDocuments'
 import { closePluginHost, registerPluginIpc, registerPluginProtocol, registerPluginScheme } from './plugins/pluginHost'
 import { registerAttachmentPreviewProtocol, registerAttachmentPreviewScheme } from './attachments'
 import { app, BrowserWindow, nativeTheme } from 'electron'
@@ -21,12 +20,11 @@ import { initializeAvatarAssets } from './avatarAssets'
 import { consumePendingAvatarUpdate } from './avatarConfigService'
 import { initializeUserShellEnvironment } from './shellEnvironment'
 import { initializeCustomEnvironmentInformation } from './environmentContextService'
-import { initializeBundledPython } from './bundledPython'
 import { installRuntimeNetworkPolicy } from './runtimeNetworkPolicy'
 import { initializeSkillsStore } from './skillsStore'
 import { initializeToolsStore } from './toolsStore'
 import { initializePluginsStore, stopPluginChangeNotifications } from './plugins/pluginRuntime'
-import { initializeBundledExamples } from './bundledExamples'
+import { validateBundledExamples } from './bundledExamples'
 import { getInputHistory } from './inputHistoryStore'
 import { validateExecutionStorageDirectory } from './executionStorageValidation'
 import { recoverInterruptedDataRestore, defaultBackupDirectory } from './backupService'
@@ -92,7 +90,7 @@ function startApplication(): void {
     registerPluginProtocol()
     const recoveredInterruptedRestore = await recoverInterruptedDataRestore()
     await validateExecutionStorageDirectory(getDataDir())
-    await initializeBundledExamples()
+    await validateBundledExamples()
     await initializePluginsStore()
     await recoverPendingProjectDeletion()
     const upgradeBackup = await upgradeSavedConversationStorage(getDataDir(), join(defaultBackupDirectory(), 'before-upgrade'))
@@ -130,15 +128,9 @@ function startApplication(): void {
     } catch (reason) {
       runtimeLog('warn', 'profile', 'Failed to apply a pending avatar update on startup.', { error: reason })
     }
-    try {
-      await initializeHelpFiles()
-    } catch (reason) {
-      runtimeLog('warn', 'help', 'Failed to initialize help files on startup.', { error: reason })
-    }
     await applyProfileIcon()
     await cleanupTempFiles()
-    const mainWindow = createMainWindow()
-    mainWindow.webContents.once('did-finish-load', () => { void initializeBundledPython() })
+    createMainWindow()
     windowReady = true
     void initializeCustomEnvironmentInformation()
     void loadMcpRuntimeForCurrentConfig(false)

@@ -2,7 +2,7 @@
 
 ## Discovery and Identity
 
-Each package is a directory with `TOOL.json` at its root and any scripts/resources beside it. User packages live under the application data directory's `tools/`; project packages live in tool roots explicitly added using the plus button beside the Capabilities > Custom tools heading. `.agents/tools/` under source folders is not scanned automatically. Added external directories are referenced in place. Bundled examples in `examples/tools/` must be imported into a user or external directory before use. Project packages do not appear in the global tool-management list.
+Each package is a directory with `TOOL.json` at its root and any scripts/resources beside it. User packages live under the application data directory's `tools/`; project packages live in tool roots explicitly added using the plus button beside the Capabilities > Custom tools heading. `.agents/tools/` under source folders is not scanned automatically. Added external directories are referenced in place. Bundled examples in the application package's `data/examples/tools/` (`out/examples/tools/` in development) must be imported into a user or external directory before use. Project packages do not appear in the global tool-management list.
 
 `config/tools.json` stores versioned source references and ordering, not tool definitions. Creating a package does not require adding its manifest there. Inspect names and IDs before choosing a destination; do not overwrite a conflicting package. Preserve the ID when updating or renaming. Use Anas's management UI to rename or delete installed user packages so selection, ordering, and active-directory checks remain consistent.
 
@@ -25,6 +25,8 @@ Use these persisted field names:
 
 The manifest must be no larger than 128 KiB. Do not write internal fields such as `directory`, `inputSchema`, or `timeoutSeconds` into it. Use `required`, bounds, and `additionalProperties` according to the operation; declare useful argument descriptions. Schema `format` annotations are not runtime format validation, so validate business-specific formats in the script.
 
+To let the model describe an action in chat, declare an optional string property named `summary` and ask for a brief description in the user's language. The script receives it in `{{args}}` when supplied.
+
 ## Commands, Paths, and Environment
 
 The process working directory is always the package directory, not the project directory. Resolve packaged resources relative to it; require explicit paths for project files when needed.
@@ -37,11 +39,13 @@ scripts/run.py {{args}}
 node scripts/run.cjs {{args}}
 ```
 
+Use `{{bundled_python}} scripts/run.py {{args}}` for tools that depend on libraries shipped with Anas on Windows or macOS. This selects the bundled interpreter even when system Python is installed. These commands receive `ANAS_CACHE_DIR` for disposable output. For dependencies installed in a virtual environment, put that environment's interpreter path first in the command.
+
 Anas tokenizes the command first, substitutes `{{tool_dir}}` in fixed arguments, then replaces `{{args}}` with the entire JSON argument string. Model-provided strings are not expanded or parsed as Shell source. There must be exactly one independent `{{args}}`, not `--data={{args}}` or a fragment inside script source.
 
 Quotes group arguments containing spaces; backslashes remain literal. Pipelines, redirection, variable expansion, and multiple Shell statements are unsupported. Put such orchestration in a script. Limits are 16384 command characters and 128 arguments after the executable. JSON input is limited to 1 MiB and also to the operating system's command-line limit; use files for large payloads.
 
-A `.py` executable entry probes system Python 3 first. When the Agent's Bundled Python capability is enabled and no system interpreter can execute the probe, it tries bundled Python by absolute path. Probes reject uninstalled Microsoft Store aliases and never request automatic installation. A script failure or missing dependency does not trigger a retry with another interpreter. Windows and macOS packages include Python with pip and venv, prepared in the application data directory at startup; tools never trigger or wait for preparation. Python is not added to PATH. Prefer a `.py` entry for automatic selection, including interactive tools. Explicit commands such as `python script.py`, `py -3 script.py`, and virtual-environment paths are not replaced. For Windows interactive tools with an explicit interpreter, use its absolute executable path. Node and other programs must be available through the actual execution environment or an explicit executable path.
+A `.py` executable entry probes system Python 3 first. If no system interpreter can execute the probe, it tries bundled Python by absolute path. Probes reject uninstalled Microsoft Store aliases and never request automatic installation. A script failure or missing dependency does not trigger a retry with another interpreter. Windows and macOS packages include application-managed Python, executed directly from the application package. It excludes pip, ensurepip, setuptools and wheel. Do not modify its runtime or dependencies; use a separate user-managed Python environment for additional packages. Automatic fallback uses `-E -s -B -X utf8`, ignoring Python environment overrides and user site-packages and disabling bytecode writes, while keeping script-local imports and business environment variables. Write outputs and caches outside the application package. Python is not added to PATH. Prefer a `.py` entry for automatic selection, including interactive tools. Explicit commands such as `python script.py`, `py -3 script.py`, and virtual-environment paths are not replaced. For Windows interactive tools with an explicit interpreter, use its absolute executable path. Node and other programs must be available through the actual execution environment or an explicit executable path.
 
 Tools inherit the process environment. Application `.env` variables are additionally supplied only when that Agent's `.env` capability is enabled. Use environment variables for credentials; do not put their values in manifests, scripts, example arguments, or output.
 

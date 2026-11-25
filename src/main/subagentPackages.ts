@@ -1,3 +1,4 @@
+import { copyPackageContents } from './copyPackageContents'
 import { randomUUID } from 'node:crypto'
 import { cp, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -6,13 +7,12 @@ import type { RawSubagentConfig } from './config/rawAppConfig'
 import { normalizeSubagent, rawSubagentFromSave } from './config/subagentConfigMapper'
 import { getBundledDataDir, getDataDir } from './config/dataDir'
 import { writeJsonFileAtomic } from './atomicJson'
-import { mirrorBundledDirectories } from './bundledDirectories'
 import { assertToolDirectoryTreeIdle } from './toolsStore'
+import { assertUserResourceDirectory } from './bundledDirectories'
 
 const configPath = (root: string) => join(root, 'config', 'subagents.json')
 const maxSourceEntries = 2048
 let tail: Promise<unknown> = Promise.resolve()
-let initializedRoot: string | undefined
 export function serializeSubagentPackages<T>(operation: () => Promise<T>): Promise<T> {
   const next = tail.then(operation); tail = next.catch(() => undefined); return next
 }
@@ -20,9 +20,10 @@ export async function packageExists(path: string): Promise<boolean> {
   try { await lstat(path); return true } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error }
 }
 
-export async function readSubagentPackage(directory: string): Promise<RawSubagentConfig> {
+export async function readSubagentPackage(directory: string, followSourceLinks = false): Promise<RawSubagentConfig> {
   const text = async (file: string) => {
-    const path = join(directory, file), info = await lstat(path)
+    const path = followSourceLinks ? await realpath(join(directory, file)) : join(directory, file)
+    const info = await lstat(path)
     if (!info.isFile() || info.isSymbolicLink() || info.size > 1024 * 1024) throw new Error(`Invalid Agent package file: ${path}`)
     return readFile(path, 'utf8')
   }
@@ -109,12 +110,6 @@ async function initializeExclusive(): Promise<void> {
     await cp(configPath(getBundledDataDir()), configPath(root), { errorOnExist: true, force: false })
   }
   await recover(root)
-  if (initializedRoot !== root) {
-    await mirrorBundledDirectories(join(getBundledDataDir(), 'subagents/_system'), join(root, 'subagents/_system'), 'AGENT.json', async (directory, name) => {
-      validateSystemAgent(await readSubagentPackage(directory), name)
-    })
-    initializedRoot = root
-  }
 }
 
 function validateSystemAgent(agent: RawSubagentConfig, name: string): void {
@@ -133,15 +128,22 @@ async function readCatalogExclusive(root: string): Promise<{ agents: RawSubagent
   const result: RawSubagentConfig[] = []
   const ids = new Set<string>(), names = new Set<string>()
   const roots: SubagentRootSummary[] = [
-    { id: 'system', name: 'System', path: join(directory, '_system'), kind: 'system', available: true, agentIds: [], errors: [] },
-    { id: 'user', name: 'User', path: directory, kind: 'user', available: true, agentIds: [], errors: [] },
+    { id: 'system', name: 'System', path: join(getBundledDataDir(), 'subagents'), kind: 'system', available: true, agentIds: [], errors: [] },
+    ...(resolve(root) === resolve(getBundledDataDir()) ? [] : [
+      { id: 'user', name: 'User', path: directory, kind: 'user' as const, available: true, agentIds: [], errors: [] }
+    ]),
     ...settings.external_directories.map(item => ({ ...item, kind: 'external' as const, available: true, agentIds: [], errors: [] }))
   ]
   const paths: string[] = []
   for (const source of roots) {
     try {
       if (!isAbsolute(source.path)) throw new Error('Agent directory path must be absolute.')
-      const info = await lstat(source.path)
+      if (source.kind === 'external') await assertUserResourceDirectory(source.path)
+      const info = await lstat(source.path).catch(error => {
+        if (source.kind === 'user' && error.code === 'ENOENT') return undefined
+        throw error
+      })
+      if (!info) continue
       if (!info.isDirectory() || info.isSymbolicLink()) { source.issue = 'not_directory'; throw new Error('Agent root must be a regular directory.') }
       const canonical = await realpath(source.path)
       if (source.kind === 'external' && paths.some(path => pathsOverlap(path, canonical))) throw new Error('Agent directory overlaps another source.')
@@ -157,7 +159,7 @@ async function readCatalogExclusive(root: string): Promise<{ agents: RawSubagent
           if (!entry.isDirectory() || entry.isSymbolicLink()) throw new Error(`Invalid Agent directory: ${entry.name}`)
           const agent = await readSubagentPackage(join(canonical, entry.name)), id = agent.id!
           if (source.kind === 'system') validateSystemAgent(agent, entry.name)
-          else if (agent.preset) throw new Error('Built-in Agents must be stored in subagents/_system.')
+          else if (agent.preset) throw new Error('User packages cannot declare a built-in Agent preset.')
           if (ids.has(id) || names.has(agent.name!)) throw new Error(`Duplicate Agent ID or name: ${id} / ${agent.name}`)
           const configured = { ...agent, enabled: !settings.disabled.includes(id) }
           normalizeSubagent(configured, result.length)
@@ -188,6 +190,7 @@ export function addExternalSubagentDirectory(path: string): Promise<void> {
   return serializeSubagentPackages(async () => {
     await initializeExclusive()
     const canonical = await realpath(path)
+    await assertUserResourceDirectory(path)
     if (!(await lstat(canonical)).isDirectory()) throw new Error('Selected Agent root is not a directory.')
     if (await packageExists(join(canonical, 'AGENT.json'))) throw new Error('Select the parent directory containing Agent packages, or import this package.')
     const settings = await readSubagentSettings()
@@ -307,7 +310,7 @@ export async function importSubagentPackages(sourcePaths: readonly string[]): Pr
         const canonical = await realpath(path)
         const overlap = relative(canonical, destination)
         if (!overlap || overlap !== '..' && !overlap.startsWith(`..${sep}`) && !isAbsolute(overlap)) throw new Error('Import an Agent package, not its destination or an ancestor.')
-        const agent = await readSubagentPackage(canonical)
+        const agent = await readSubagentPackage(canonical, true)
         if (agent.preset) throw new Error('Imported Agent packages cannot replace a built-in Agent.')
         const name = requireSubagentPackageId(agent.name)
         if (ids.has(agent.id) || names.has(name)) throw new Error(`Agent ID or name already exists: ${name}`)
@@ -321,19 +324,17 @@ export async function importSubagentPackages(sourcePaths: readonly string[]): Pr
     const installed: string[] = []
     await mkdir(stage)
     try {
-      // Prepare every package before publishing any of them, matching Skills and tools imports.
+      // Prepare the complete Agent batch before publishing.
       for (const source of sources) {
         let bytes = 0, count = 0
         const incoming = join(stage, source.name)
         try {
-          await cp(source.path, incoming, { recursive: true, dereference: false, errorOnExist: true, force: false, filter: async path => {
-            if (relative(source.path, path).split(sep).length > 24) throw new Error('Agent package is too deep.')
-            const info = await lstat(path)
-            if (info.isSymbolicLink() || !info.isDirectory() && !info.isFile()) throw new Error('Imported Agent packages must contain regular files and directories.')
+          await mkdir(incoming)
+          await copyPackageContents(source.path, incoming, ({ info, depth }) => {
+            if (depth > 24) throw new Error('Agent package is too deep.')
             bytes += info.size
             if (++count > 10000 || bytes > 128 * 1024 * 1024) throw new Error('Agent package exceeds import limits.')
-            return true
-          } })
+          })
           const staged = await readSubagentPackage(incoming)
           if (staged.id !== source.id || staged.name !== source.name) throw new Error('Agent identity changed during import.')
         } catch (error) { throw new Error(`${source.path}: ${error instanceof Error ? error.message : String(error)}`, { cause: error }) }

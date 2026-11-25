@@ -24,7 +24,7 @@ import * as customToolRuntime from './customToolRuntime'
 import Database from 'better-sqlite3'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, delimiter } from 'node:path'
+import { join, delimiter, resolve } from 'node:path'
 import { beforeAll, afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { defaultCapabilities, serializeCapabilities } from '@shared/agentCapabilities'
@@ -44,8 +44,8 @@ const memoryStoreMocks = vi.hoisted(() => ({ buildMemoryRulesPrompt: vi.fn() }))
 const languageStoreMocks = vi.hoisted(() => ({ resolveConfiguredLanguage: vi.fn(async () => ({ code: 'en', name: 'English', builtIn: true })) }))
 vi.mock('../config/dataDir', async importOriginal => ({ ...await importOriginal<typeof import('../config/dataDir')>(),
   getDataDir: () => testPaths.root, getConfigFile: (name: string) => join(testPaths.root, 'config', name),
-  getSkillsDir: () => join(testPaths.root, 'skills'), getSystemSkillsDir: () => join(testPaths.root, 'skills/_system'),
-  getSystemPluginsDir: () => join(testPaths.root, 'plugins/_system'), getSkillExamplesDir: () => join(testPaths.root, 'examples/skills') }))
+  getSkillsDir: () => join(testPaths.root, 'skills'), getSystemSkillsDir: () => resolve('data/skills'),
+  getSkillExamplesDir: () => join(testPaths.root, 'examples/skills') }))
 vi.mock('../projectStore', () => ({ getProject: projectStoreMocks.getProject }))
 vi.mock('../config/appConfig', async importOriginal => ({ ...await importOriginal<typeof import('../config/appConfig')>(), getAppConfigSnapshot: appConfigMocks.getAppConfigSnapshot }))
 vi.mock('./conversationMemory', async importOriginal => ({ ...await importOriginal<typeof import('./conversationMemory')>(), buildMemoryRulesPrompt: memoryStoreMocks.buildMemoryRulesPrompt }))
@@ -102,13 +102,17 @@ describe('native capability snapshots', () => {
       expect(result).toBe(stdout)
     } finally { await service.shutdown(); database.close() }
   })
-  it.each([true, false])('controls initial Python information and custom-tool fallback without changing PATH (%s)', async enabled => {
+  it.each([[true, true], [true, false], [false, true], [false, false]])('keeps Python tools available with global Python %s and environment capability %s', async (enabled, environment) => {
     const snapshot = previewConfig()
+    snapshot.settings.environmentContext.bundledPython = enabled
     appConfigMocks.getAppConfigSnapshot.mockResolvedValue(snapshot)
     projectStoreMocks.getProject.mockResolvedValue({ ...defaultWorkspaceProject(), sourceFolders: [testPaths.root],
-      capabilities: { ...structuredClone(defaultCapabilities), bundledPython: enabled } })
+      capabilities: { ...structuredClone(defaultCapabilities), environment } })
     const pythonDirectory = join(testPaths.root, 'bundled-python')
-    vi.spyOn(bundledPython, 'getBundledPythonInfo').mockReturnValue({ executable: join(pythonDirectory, 'python'), version: '3.13.18', state: 'installed' })
+    const tools = ['{{bundled_python}} reader.py {{args}}', 'reader.py {{args}}'].map((command, index) =>
+      toolPackageFixture({ ...customToolDefaults, id: `reader_${index}`, name: `reader_${index}`, description: 'Read data.', inputSchema: { type: 'object' }, command }))
+    vi.mocked(toolsStore.listToolSnapshot).mockResolvedValue({ roots: [], tools })
+    vi.spyOn(bundledPython, 'getBundledPythonInfo').mockReturnValue({ executable: join(pythonDirectory, 'python'), version: '3.13.18', state: 'available' })
     const verify = vi.spyOn(toolAuthorization, 'verifyCurrentShellAuthorization').mockResolvedValue()
     const execute = vi.spyOn(shellRuntime, 'runShellCommand').mockResolvedValue('executed once')
     const custom = vi.spyOn(customToolRuntime, 'customToolDefinitions')
@@ -121,8 +125,8 @@ describe('native capability snapshots', () => {
       expect(await runner({ command: 'python script.py', workingDir: testPaths.root })).toBe('executed once')
       const customPath = custom.mock.lastCall![1].env.PATH ?? custom.mock.lastCall![1].env.Path ?? ''
       expect(customPath.split(delimiter)).not.toContain(pythonDirectory)
-      expect(custom.mock.lastCall![1].bundledPython).toBe(enabled)
-      expect(resources.requestSystemPrompt(resources.initialModel).text.includes('Python 3.13.18')).toBe(enabled)
+      expect(resources.customTools.map(tool => tool.name)).toEqual(tools.map(tool => tool.name))
+      expect(resources.requestSystemPrompt(resources.initialModel).text.includes('Python 3.13.18')).toBe(enabled && environment)
       expect(verify).toHaveBeenCalledWith()
       expect(execute).toHaveBeenCalledTimes(1)
       expect(execute.mock.calls[0][0]).toMatchObject({ command: 'python script.py' })
@@ -525,7 +529,9 @@ describe('native capability snapshots', () => {
   })
 
   it.each([false, true])('applies a root project ceiling only when enabled (%s)', async (restricted) => {
-    const project = { ...defaultWorkspaceProject(), capabilities: { ...structuredClone(defaultCapabilities), memory: false, applicationEnvironment: false, bundledPython: false, toolMode: 'selected' as const, tools: [] } }
+    const pythonPath = join(testPaths.root, 'bundled-python', 'python')
+    vi.spyOn(bundledPython, 'getBundledPythonInfo').mockReturnValue({ executable: pythonPath, version: '3.13.18', state: 'available' })
+    const project = { ...defaultWorkspaceProject(), capabilities: { ...structuredClone(defaultCapabilities), memory: false, applicationEnvironment: false, environment: false, toolMode: 'selected' as const, tools: [] } }
     projectStoreMocks.getProject.mockResolvedValue(project)
     memoryStoreMocks.buildMemoryRulesPrompt.mockResolvedValue('MEMORY RULES')
     appConfigMocks.getAppConfigSnapshot.mockResolvedValue(previewConfig())
@@ -541,13 +547,14 @@ describe('native capability snapshots', () => {
     })
     const resolved = vi.fn()
     try {
-      await prepareAgentRuntimeResources(database.getThread(call.childThreadId)!, database.resources, await appConfigMocks.getAppConfigSnapshot(), {
+      const resources = await prepareAgentRuntimeResources(database.getThread(call.childThreadId)!, database.resources, await appConfigMocks.getAppConfigSnapshot(), {
         requestId: call.childRunId, subagentCall: call, parentConfiguration: { customTools: [], codingMode: false, capabilities: project.capabilities, ...(restricted ? { subagentLimit: { ...project.capabilities, customTools: selectedTools(), skills: resolveSkillSelection(project.capabilities.skills, []) } } : {}) },
         onConfigurationResolved: resolved
       }, {
         persistent: true, prepareWorkspace: false, requestSubagentApproval: async () => { throw new Error('Unexpected approval during resource preparation') }
       })
-      expect(resolved.mock.lastCall?.[0].capabilities).toMatchObject({ memory: !restricted, applicationEnvironment: !restricted, bundledPython: !restricted })
+      expect(resolved.mock.lastCall?.[0].capabilities).toMatchObject({ memory: !restricted, applicationEnvironment: !restricted, environment: !restricted })
+      expect(resources.requestSystemPrompt(resources.initialModel).text.includes(pythonPath)).toBe(!restricted)
       expect(definitions.mock.lastCall![0]).toMatchObject({ network: !restricted })
     } finally { database.close() }
   })

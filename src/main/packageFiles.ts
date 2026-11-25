@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { lstat, stat, readdir, readlink, realpath, open, rm, rename, mkdir, rmdir } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { PackageFileNode, PackageFilePreview, PackageFileUpdate } from '@shared/packageFiles'
+import { assertWritablePackagePath, isBundledResourcePath } from './bundledDirectories'
 
 const ignoredDirectories = new Set(['.git', '.svn', '__pycache__', 'node_modules', '.backup', '__history', '__recovery'])
 const systemEntriesByPlatform: Partial<Record<NodeJS.Platform, ReadonlySet<string>>> = {
@@ -111,6 +112,7 @@ export async function readPackageFile(packageDirectory: string, relativePath: st
     path: lexicalPath,
     relativePath: safeRelativePath(relativePath),
     resolvedPath,
+    editable: !await isBundledResourcePath(resolvedPath) && !await isBundledResourcePath(lexicalPath),
     ...(linkInfo.isSymbolicLink() ? { linkTarget: await readlink(lexicalPath) } : {}),
     size: info.size,
     kind: binary ? 'binary' : 'text',
@@ -141,7 +143,7 @@ export async function packageFileExists(directory: string, relativePath: string)
 }
 
 export async function createPackageFile(directory: string, relativePath: string): Promise<PackageFilePreview> {
-  lexicalPackagePath(directory, relativePath)
+  await assertWritablePackagePath(lexicalPackagePath(directory, relativePath))
   const root = await realpath(directory)
   const parts = safeRelativePath(relativePath).split('/')
   let parent = root
@@ -149,6 +151,7 @@ export async function createPackageFile(directory: string, relativePath: string)
   try {
     for (const part of parts.slice(0, -1)) {
       const path = join(parent, part)
+      await assertWritablePackagePath(path)
       try { await mkdir(path); createdDirectories.push(path) }
       catch (reason) { if ((reason as NodeJS.ErrnoException).code !== 'EEXIST') throw reason }
       parent = await realpath(path)
@@ -156,7 +159,9 @@ export async function createPackageFile(directory: string, relativePath: string)
       if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new Error('Package file path is outside the Package directory.')
       if (!(await stat(parent)).isDirectory()) throw new Error('Package tree node is not a directory.')
     }
-    const handle = await open(join(parent, parts.at(-1)!), 'wx')
+    const target = join(parent, parts.at(-1)!)
+    await assertWritablePackagePath(target)
+    const handle = await open(target, 'wx')
     await handle.close()
     return await readPackageFile(directory, relativePath)
   } catch (reason) {
@@ -176,6 +181,7 @@ export function savePackageFile(directory: string, relativePath: string, update:
     validatePackageFileUpdate(update)
     const check = async () => {
       const current = await readPackageFile(directory, relativePath)
+      if (!current.editable) throw new Error('Bundled resource files are read-only.')
       if (current.kind !== 'text' || current.revision !== update.revision || current.resolvedPath !== update.resolvedPath) {
         throw new Error('The file changed outside the editor. Reload it before saving.')
       }

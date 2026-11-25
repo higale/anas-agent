@@ -76,7 +76,7 @@ Supplies the assistant name and role from **Settings > General**. Older custom i
 
 Supplies the system, date, directory, command environment, and custom information selected in **Settings > Environment**. It provides context without installing programs or enabling command execution.
 
-Bundled rg instructions require both **Command execution** and **Bundled commands** in environment settings. Turning runtime information off does not remove available programs. See [Runtime Environment And Variables](#runtime-environment-and-variables) for automatic detection of empty custom information.
+Projects and subagents with **Runtime environment information** enabled receive the instructions selected in **Settings > Environment**. These instructions remain visible when command execution is disabled. See [Runtime environment and variables](#runtime-environment-and-variables).
 
 ### Project Information
 
@@ -87,10 +87,6 @@ Supplies the current project name, source folders, and path instructions, with n
 Controls whether commands and custom tools additionally receive variables from the application data directory's `.env` file. Edit the file in **Settings > Environment**.
 
 It has no separate tool. Turning it off preserves inherited system environment variables and the `.env` file. It does not change model connections or shared MCP server configuration.
-
-### Bundled Python
-
-Enabled by default, this adds the fallback Python version, absolute path and preparation status to the initial **Bundled commands** context section for the model to choose in Shell. `.py` custom tools use system Python first and fall back to the bundled runtime only when no system interpreter is usable. PATH stays unchanged. This is independent of **Runtime environment information** and **.env**. Subagents use their own capability under the project’s **Limit subagent capabilities** policy. Startup preparation and reset are unaffected; see [Runtime environment and variables](#runtime-environment-and-variables) for maintenance.
 
 ### Background Tools
 
@@ -116,7 +112,7 @@ Provides `write_todos` to create and update the current task's plan and completi
 
 Runs programs, scripts, searches, tests, and builds through the system command interpreter. The tool uses its actual program name, such as `zsh` on macOS or `pwsh` or `powershell` on Windows. A supported command interpreter must be available.
 
-Bundled rg supports file and text searches without a separate installation. Windows and macOS packages include fallback Python with pip and venv. By default, the model receives its absolute path and chooses whether to invoke it; ordinary `python`/`python3` commands keep using the system environment. Other runtimes, such as Node.js, must be installed as needed. Follow-up terminal input requires **Background tools**; application `.env` variables are controlled separately by **.env**. Commands follow the conversation’s access mode.
+Bundled rg supports file and text searches without a separate installation. Windows and macOS packages include application-managed fallback Python without pip or ensurepip. By default, the model receives its absolute path and chooses whether to invoke it; ordinary `python`/`python3` commands keep using the system environment. Other runtimes, such as Node.js, must be installed as needed. Follow-up terminal input requires **Background tools**; application `.env` variables are controlled separately by **.env**. Commands follow the conversation’s access mode.
 
 Command execution manages only the directly launched Shell. Its exit completes the call; cancellation, timeout and exiting Anas stop only that Shell. Stop its children explicitly when needed. With Background tools enabled, a long-running Shell can continue across turns after returning a call ID; stopping the reply does not cancel that yielded Shell. Use `read_call` / `wait_call` for status and `cancel_call` to stop a live Shell. Cancelling a completed call does not stop its children. Completed results directly include known remaining direct child processes.
 
@@ -235,15 +231,15 @@ subagents/<folder>/
 
 New custom Agents start disabled with every capability turned off; enable capabilities as needed.
 
-`AGENT.json` contains `version: 0`, a stable `id`, `name`, `description`, `capabilities`, and optional model selection. `PROMPT.md` contains the system prompt. Create an Agent in Settings, then use **Show in folder** to add standard Skills, tools, and supporting files. **Import subagent** at the top right accepts multiple package folders. The entire selection is checked before import; a conflicting ID or name, or an invalid package, stops the batch. **Add directory** at the top right references external Agent directories. The left pane groups packages and their files under All, Built-in, User, and external directories; the right pane shows Agent settings or a file preview. Preview and edit custom prompts through `PROMPT.md` in the file tree; the Agent settings form no longer duplicates the prompt editor. Refresh after external changes.
+`AGENT.json` contains `version: 0`, a stable `id`, `name`, `description`, `capabilities`, and optional model selection. `PROMPT.md` contains the system prompt. Create an Agent in Settings, then use **Show in folder** to add standard Skills, tools, and supporting files. **Import subagent** at the top right accepts multiple package folders. The entire selection is checked before import; a conflicting ID or name, or an invalid package, stops the batch. Import includes scripts, skills, tools and the contents of linked files and directories. The copy stays editable after the source moves. **Add directory** at the top right references external Agent directories. The left pane groups packages and their files under All, Built-in, User, and external directories; the right pane shows Agent settings or a file preview. Preview and edit custom prompts through `PROMPT.md` in the file tree; the Agent settings form no longer duplicates the prompt editor. Refresh after external changes.
 
 **Add external directory** selects a parent folder containing Agent packages and references the original files without copying them. Rename, reorder, or remove directory references; removing a reference preserves its files, while deleting an Agent deletes its package. Newly created and imported packages are saved in the user directory. Agents can be reordered within their source. Missing directories, invalid packages, and ID/name conflicts show errors without blocking other valid packages. Unavailable packages retain their enabled states. Backups include external directory references, not their files; back up those directories separately.
 
 The left toolbar's move-up, move-down, and delete buttons act on the selected external directory or Agent. These actions are unavailable for built-in Agents, fixed groups, and package files.
 
-Only `general-purpose` is built in under `subagents/_system/`, handling general execution tasks. Its definition and all package files are maintained by the app and can only be viewed, not edited, renamed, or deleted. It always uses the parent Agent’s model with all capabilities enabled, subject to global availability and the project’s subagent limits. Settings retain only the Agent’s enabled switch; there is no **Restore default** action. Custom Agent packages remain editable.
+Only `general-purpose` is built in under `data/subagents/` in the application package, handling general execution tasks. Its definition and all package files are maintained by the app and can only be viewed, not edited, renamed, or deleted. It always uses the parent Agent’s model with all capabilities enabled, subject to global availability and the project’s subagent limits. Settings retain only the Agent’s enabled switch; there is no **Restore default** action. Custom Agent packages remain editable.
 
-`examples/subagents/` provides `web-researcher` (external research and source verification) and `project-analyst` (read-only project analysis). Examples are not loaded automatically. **Import subagent** opens this directory by default; select one or more packages to copy them into the user directory, where they can be edited, disabled, or deleted. App updates refresh the examples without overwriting imported copies.
+`data/examples/subagents/` in the application package provides `web-researcher` (external research and source verification) and `project-analyst` (read-only project analysis). Examples are not loaded automatically. **Import subagent** opens this directory by default; select one or more packages to copy them into the user directory, where they can be edited, disabled, or deleted. Examples are read directly from the application package; imported copies are stored independently. **Add directory** cannot reference bundled examples as an external source. Existing references are retained in configuration and shown as unavailable, without exposing package files for editing.
 
 Custom package Skills and tools start enabled and can be disabled individually in that Agent's resource section. They are available only to their owning Agent and do not appear in global catalogs or the main Agent's resources. Turning a capability group off disables its package resources too. When **Restrict subagent capabilities** is enabled, the project must also allow these resources. Project sources labeled **Subagent only** grant access to subagents only. Within the allowed selection, package resources take precedence over resources with the same name. Skills still require file reading. Definition changes, package deletion, and file edits are rejected while a package tool is running; retry when it finishes.
 
@@ -345,13 +341,22 @@ Subagents can work in the background. Select a subagent status entry to view its
 
 ## Runtime Environment And Variables
 
-Bundled commands in Runtime Environment is enabled by default and supplies rg instructions. The project’s **Bundled Python** capability is on by default and supplies the fallback interpreter’s version, absolute path, preparation status and invocation syntax in the same **Bundled commands** section of initial context. It is independent of **Runtime environment information**, the global **Bundled commands** switch and **.env**. The model chooses whether to invoke it; Python is not added to PATH and Shell commands are not rewritten. Custom Environment Information continues to describe the system environment, with system and bundled Python identified separately; saved user text is unchanged. Capability changes apply from the next chat request. Subagents follow **Limit subagent capabilities**. Existing configurations without this field default to enabled without rewriting files.
+**Settings > Environment** has separate **Bundled rg** and **Bundled Python** checkboxes. Both default to on. If the machine already has a system Python, you can turn off **Bundled Python** globally. Turn it on to show the model how to use the bundled interpreter. Changes apply from the next request to projects and subagents with **Runtime environment information** enabled. Subagents follow **Limit subagent capabilities**. Both settings default to on when missing after an upgrade. If you previously disabled rg or Python instructions, you can turn them off again here.
 
-A `.py` custom-tool entry first probes system Python 3 by executing code. Only when no system interpreter is usable and bundled Python is enabled does it probe and use the bundled executable by absolute path. Uninstalled Microsoft Store aliases are not accepted merely because a file exists. Probes have timeouts and never request automatic installation. Ordinary and interactive `.py` tools share this selection. Script errors and missing dependencies do not trigger retries with another interpreter. Explicit `python ...`, `py -3 ...` and virtual-environment commands keep their configured meaning without fallback. Windows interactive tools with an explicit interpreter should use its absolute path.
+A `.py` custom-tool entry first probes system Python 3 by executing code. If no system interpreter is usable, it probes and uses the bundled executable by absolute path. Uninstalled Microsoft Store aliases are not accepted merely because a file exists. Probes have timeouts and never request automatic installation. Ordinary and interactive `.py` tools share this selection. Script errors and missing dependencies do not trigger retries with another interpreter. Explicit `python ...`, `py -3 ...` and virtual-environment commands keep their configured meaning without fallback. Windows interactive tools with an explicit interpreter should use its absolute path.
 
-At application startup, after the window loads, the complete runtime with pip and venv is copied in the background into `runtimes/python/<Python-version>/` under the data directory. Slow preparation shows a notice; failure does not block the window or chat. Conversations and tools never trigger or wait for this copy. Context does not claim the runtime is ready while preparation is pending; subsequent `.py` calls can use it after preparation finishes. Use its `-m pip` or `-m venv` yourself. Anas does not automatically manage virtual environments or guarantee third-party packages. Disabling the capability does not affect preparation or reset.
+Bundled Python runs directly from the application package and is maintained by Anas builds and updates. It is no longer copied to the data directory, and has no startup preparation or reset workflow. The package excludes pip, ensurepip, setuptools and wheel. Do not install, upgrade, remove or modify its dependencies; use your own Python environment for additional packages. Automatic fallback and the suggested invocation use `-E -s -B -X utf8` to ignore Python environment overrides and user packages and prevent bytecode writes, while retaining script-local imports, business environment variables and normal output files. System interpreter execution is unchanged. Write outputs and caches to your working directory. This is an application resource boundary, not an operating-system-enforced read-only sandbox.
 
-For damaged or missing files, use **Settings → Environment → Bundled Python → Reset bundled Python**. Confirmation restores the current version and removes its installed packages and modifications, leaving system Python, other versions and external virtual environments unaffected. Stop scripts using bundled Python first. Deleting its entire current version directory causes preparation at the next launch. Existing environments are preserved; Python updates use separate directories without migrating dependencies or removing older versions. `runtimes/` is excluded from backups, preserved during restore and retained by unknown-file cleanup. **Detect System Environment** inserts system command information at the last cursor position in Custom Environment Information, replacing selected text.
+The model’s **Bundled commands** section lists the document libraries shipped for the current platform, their versions and common import names such as `pdfplumber`, `mammoth`, `pptx` and `PIL`. When running a script with bundled Python, add the library directory before importing these modules. The selected MarkItDown converters are available under `anas_markitdown`.
+
+```python
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(sys.base_prefix) / "anas-documents"))
+```
+
+Reinstall Anas if the packaged Python files are damaged or missing. Existing data-directory `runtimes/` contents are preserved without reading, migrating or automatically deleting them. They remain excluded from backups and retained during restore and unknown-file cleanup. **Detect System Environment** inserts system command information at the last cursor position in Custom Environment Information, replacing selected text.
 
 Custom Environment Information is enabled by default. If selected and empty at startup, it is filled by background detection without blocking startup. Existing content is preserved; deselecting it during detection discards the result.
 
@@ -361,21 +366,23 @@ Edit the application `.env` in Settings > Environment to prepare variables for c
 
 The bundled `tool-manager` Skill guides the model through creating, modifying, and troubleshooting custom tools, with a format reference and Python examples. Enable the Skill and required file capabilities, then ask the model to create a tool for the current project. Script testing also requires command execution and the appropriate runtime. Check the capability list to confirm the generated tool is selected.
 
-In **Settings > Tools**, Built-in tools and MCP appear above a divider. Below it, the custom-tool tree lists all packages, user tools, and added directories. Select a group name to list its tools on the right; use the boxed arrow to expand or collapse it. Select a tool from the list to view its details. Click a detail title to locate its directory, or expand packages to browse and preview files. User and added-directory tools support creation, editing by double-click, deletion, and ordering; deletion moves the entire tool package to the trash.
+In **Settings > Tools**, Built-in tools and MCP appear above a divider. Below it, the custom-tool tree lists all packages, system tools, user tools, and added directories. Select a group name to list its tools on the right; use the boxed arrow to expand or collapse it. Select a tool from the list to view its details. Click a detail title to locate its directory, or expand packages to browse and preview files. User and added-directory tools support creation, editing by double-click, deletion, and ordering; deletion moves the entire tool package to the trash.
 
 **Add directory** at the top right references an external source in place. Rename its display label, reorder it, or remove the reference without deleting files. Name changes save on Enter or focus loss. The left toolbar provides refresh, plus move-up, move-down, and delete actions for the selected directory or tool. Tools can only move within their source. Fixed groups and package files cannot be deleted or reordered here.
 
 Each directory contains a `TOOL.json` manifest with explicit `"version": 0`, plus scripts or resources. User tools live in the application data directory's `tools/`; project tool roots are manually referenced using the add button beside the **Capabilities > Custom tools** heading and are available only to that project. The editor configures names, descriptions, JSON parameter rules, and commands; it does not generate scripts or install dependencies.
 
-The **New tool**, **Import tools**, and **Add directory** icon-and-text buttons stay at the top right. They use the User directory by default, or the selected external directory when browsing that source, its tools, or its files. Button tooltips show the destination. Import accepts multiple directories and opens the bundled examples by default. The examples provide text reading, Baidu AI Search, file SHA-256, and JSON formatting, all using the Python 3 standard library. Baidu AI Search also requires internet access and `BAIDU_SEARCH_API_KEY`; see its bundled README for setup. Imports copy into the selected source without overwriting existing tools.
+The **New tool**, **Import tools**, and **Add directory** icon-and-text buttons stay at the top right. They use the User directory by default, or the selected external directory when browsing that source, its tools, or its files. Button tooltips show the destination. Import accepts multiple directories and opens the bundled examples by default. The examples provide text reading, Baidu AI Search, file SHA-256, and JSON formatting, all using the Python 3 standard library. Baidu AI Search also requires internet access and `BAIDU_SEARCH_API_KEY`; see its bundled README for setup. Import copies the package and the contents of its file and directory links into the selected destination. You can edit that copy independently. Existing tools keep their names and files.
 
 **Edit information** and **Edit parameters** open the same editor on the corresponding section. Switching sections preserves the draft. The parameter section supports **Parameters / Source**, with controls for names, types, required status, descriptions, enums, limits, and nested object or array parameters. Edit each parameter within the same window and apply it to return to the list. Save the tool to apply all changes together; discarding unsaved changes requires confirmation. Update scripts separately. Use Source for advanced references and composed schemas; other untouched attributes are preserved. Defaults are annotations and are not automatically supplied during calls.
 
 Click a package-local script path in the command to locate it in the file list. If missing, confirm to create an empty file and its parent directories. Existing files are never overwritten.
 
+Import examples and tool templates from the application package into independent user copies first. Project and external directories cannot reference bundled resource directories, their parents, or directory aliases; existing references remain in configuration and appear unavailable. File editing checks the actual target, so links to files in the application package are read-only.
+
 Manage global availability in tool details, and select tools with checkboxes in project and subagent capabilities. Entries are grouped by source, with multiple tools per row. Subagents have independent choices, may select Use current project tools, and follow project limits. For duplicate names, the first valid enabled entry wins: project tool directories in order, then user tools and external directories in order.
 
-Commands run in the tool directory, where relative paths resolve, for example `scripts/run.py {{args}}`. A `.py` entry automatically selects an available Python 3; an explicit interpreter is also supported. A standalone `{{args}}` receives complete JSON; `{{tool_dir}}` supplies the absolute tool directory. A command starts one program with fixed arguments, without pipelines or redirection. Standard output is returned to the model; pass large inputs through files.
+Commands run in the tool directory, where relative paths resolve, for example `scripts/run.py {{args}}`. A `.py` entry automatically selects an available Python 3; use `{{bundled_python}} convert.py {{args}}` to select the bundled interpreter explicitly. A standalone `{{args}}` receives complete JSON; `{{tool_dir}}` supplies the absolute tool directory. A command starts one program with fixed arguments, without pipelines or redirection. Standard output is returned to the model; pass large inputs through files.
 
 **Interactive terminal (PTY)** supports programs needing follow-up input and requires **Background tools**, without requiring **Command execution**. Leave it off for ordinary text results. A blank timeout means no limit; positive seconds set an execution limit, including time spent waiting for input. Cancellation or timeout terminates the process tree but does not undo changes already made.
 
@@ -403,7 +410,23 @@ Conversation databases automatically upgrade from v3 to v4 at startup or when re
 
 Sending an attachment saves a local copy, so moving or deleting the original does not prevent viewing it. Attachments apply to the current turn by default; pin one to keep using it in later turns of the same conversation. Before sending, hover over an attachment to show its remove, keep-in-conversation, and Convert to path buttons. Converting removes the pending attachment and appends its original absolute path when known, without replacing existing text, one path per line. This also applies when editing historical messages. Only temporary attachments without an original path are retained in the conversation directory and converted to that retained copy's path; these retained files are deleted with the conversation.
 
-Text extraction supports text files, PDFs, and docx files; SVG files are attached as source text. Images require a model with Vision enabled; text-only models cannot receive or view image content. Selecting or dropping unsupported files, or dropping folders, appends their paths to the input without expanding folders or attaching file content. Windows drive letters, backslashes and network paths, and macOS paths are preserved; Unicode and spaces are not URL-encoded. Read failures, damaged files and size-limit failures still show errors and can be converted manually.
+Plain text, Markdown, HTML and SVG source are sent as text attachments. Images require a model with Vision enabled. Selecting or dropping other files and folders appends their original paths to the input, one per line.
+
+The system custom tool `document_to_markdown` converts PDF, DOCX and PPTX files to UTF-8 Markdown offline. On Windows and macOS, enable this tool to use the interpreter and conversion libraries shipped with Anas.
+
+- `input_path` is required. Supply the absolute path to the source document.
+- `output_path` is required. Supply an absolute path for a new Markdown file. The tool creates missing parent directories and reports an error if the file already exists.
+- `summary` is optional. Chat shows the model’s summary beside the tool name, or the source path when omitted.
+
+On success, the result contains the `[Converted document · Markdown]` marker, the source and saved file paths, and the Markdown line and byte counts. With File Read enabled, the model can use `read_file` to read line ranges. A script can read exceptionally long lines in smaller chunks when Command Execution is enabled.
+
+When the document contains embedded pictures, the tool creates a sibling folder named after the output file. For example, `report.md` links to images in `report_images/`. Word and PowerPoint pictures appear in place. PDF images follow the text in page order with page numbers. Keep the folder beside the Markdown file when moving or sharing it. If the image folder already exists, choose a new output path.
+
+PowerPoint conversion skips ink strokes and their preview images. Text, tables, and regular pictures in the same group are preserved. Office equations in text boxes, tables, and speaker notes are written as LaTeX when supported. An equation with an unsupported structure or mathematical alphabet (such as the double-struck ℝ) is preserved in full as Office Math XML. Embedded MathML appears in XML code blocks. If the MathML cannot be parsed, the tool keeps an available alternative, such as a preview image. A preview of an entire group is accompanied by the group's readable text and tables. If no alternative is available, a message appears in place of the formula.
+
+Embedded SVG images can be opened from the image folder in a browser. For regular EMF and WMF pictures, Windows can render PNG previews and macOS links to the original metafiles. For diagrams built from separate shapes, the output contains the shape text. Refer to the slide for spatial relationships.
+
+The source size limit is 64 MiB. Office archives can expand to 256 MiB and contain up to 32,000 entries. Scanned PDFs retain their page images. Extracting searchable text requires a text layer in the original. Save legacy .doc and .ppt files in a newer format first.
 
 The microphone button invokes Windows voice typing or macOS Dictation. The system controls starting, stopping, and recognition language. On macOS, enable Dictation in System Settings > Keyboard > Dictation first. Confirm that system dictation has started, then review the recognized text before sending. Anas does not record or save audio.
 
@@ -412,6 +435,8 @@ Spoken replies connect directly to Microsoft Edge online speech services and req
 Automatic speech reads the main model's reply in chunks. If a subsequent tool call, approval wait, or subagent task appears before playback begins, pending narration is cancelled. Once playback has begun, the reply continues, including during synthesis gaps between chunks. A new main-model reply's body text stops the old audio and switches to the new reply; reasoning and tool-only calls do not interrupt speech that has already begun. Final messages do not replay text already read or cancelled.
 
 ## Conversations And Context
+
+In the chat activity, a tool call with a nonblank `summary` string shows the model’s description beside the tool name. This applies to built-in, shell, custom, plugin and MCP tools. Tools can omit this parameter from their schema. When the call has no summary, the activity shows the first available description, path, URL, query or command. If none is available, it shows the tool name alone.
 
 In **Settings → Conversation → Chat display**, adjust chat content width, running process display, and model round information. Processes can open expanded or collapsed; they collapse when a new reply appears or the run ends, and can be reopened manually. Model round information shows each model call's number and duration.
 
@@ -439,7 +464,7 @@ Preview request in the project editor shows the context and tools that would be 
 
 ## Plugins
 
-Install plugin opens `examples/plugins/` by default, offering four independent ZIP examples: Notepad, Backend demo, Text tools, and Writing helper. Select a ZIP directly without extracting it. You can extract it to read or modify the source; refreshing examples does not overwrite installed plugins.
+Install plugin opens `data/examples/plugins/` in the application package by default, offering four independent ZIP examples: Notepad, Backend demo, Text tools, and Writing helper. Select a ZIP directly without extracting it. You can extract it to read or modify the source; installed user copies are stored independently and are not overwritten by application updates.
 
 The overview in **Settings → Plugins** groups instructions, skills, and tools. Hover over a name for its description. Configure skill and tool availability here; preview them through **Settings → Skills** and **Settings → Tools → Plugins**, respectively. Instructions retain their clickable previews, rendered/source views, and copy action. Previews work while a plugin is disabled or stopped and never start its backend.
 
@@ -493,11 +518,13 @@ Deleting an entire conversation from its menu does not require repairing a missi
 | `skills/`, `tools/` | User-managed packages |
 | `subagents/` | Subagent definitions, prompts, and private Skills and tools |
 | `plugins/`, `db/plugins/` | Installed plugins and independent data; uninstalling retains data unless deletion is selected |
-| `skills/_system/`, `plugins/_system/` | Built-in packages refreshed by the app |
-| `examples/skills/`, `examples/tools/`, `examples/plugins/`, `examples/subagents/` | Examples refreshed by the app, with plugins supplied as individual ZIPs; import or install before use |
-| `help/`, `lang/` | Help and language packs |
+| `lang/` | User language packs; built-in English and Chinese are read from the application package |
 | `config/assets/` | Avatar source, crop settings, and generated icons |
 | `log/`, `cache/`, `tmp/`, `electron/` | Logs, cache, temporary files, and Electron profile |
+
+Built-in skills, subagents, examples, help and languages are read directly from `data/` in the application package, without copying them into user data. Old `_system`, example, help and built-in language copies are preserved but no longer used as built-in sources. Settings, resource selections and imported packages remain independently stored; backups need not include built-in copies.
+
+The package's `data/` is located at `<application directory>/resources/data/` on Windows and `<Anas.app>/Contents/Resources/data/` on macOS. Development reads the repository's `data/` directly, with generated examples in `out/examples/`. The user's `lang/` may be empty and is reserved for custom languages; old `en.json` and `zh-CN.json` copies do not override current built-in translations.
 
 ## Troubleshooting
 

@@ -5,7 +5,6 @@
   "description": "Inspect and analyze project files, code, configuration, or documents without modifying them.",
   "capabilities": {
     "application_environment": true,
-    "bundled_python": true,
     "background_tools": true,
     "subagents": {
       "mode": "default",

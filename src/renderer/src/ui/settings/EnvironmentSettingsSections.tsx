@@ -23,7 +23,8 @@ interface EnvironmentSettingsSectionsProps {
 
 const defaultEnvironmentContext = Object.freeze<EnvironmentContextSettings>({
   operatingSystem: true,
-  bundledCommands: true,
+  bundledRg: true,
+  bundledPython: true,
   currentDate: true,
   applicationDataDirectory: true,
   userHomeDirectory: true,
@@ -36,7 +37,8 @@ const environmentContextCheckboxKeys = Object.freeze([
   'currentDate',
   'applicationDataDirectory',
   'userHomeDirectory',
-  'bundledCommands'
+  'bundledRg',
+  'bundledPython'
 ] satisfies Array<keyof EnvironmentContextSettings>)
 
 export function EnvironmentSettingsSections({

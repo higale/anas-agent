@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'stubborn-fs'
 import { createWriteStream } from 'node:fs'
-import { cp, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { chmod, cp, lstat, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ZipFile } from 'yazl'
@@ -24,6 +24,20 @@ beforeEach(async () => {
 afterEach(async () => { vi.restoreAllMocks(); await rm(root, { recursive: true, force: true }) })
 
 describe('plugin installation and data', () => {
+  it('installs linked manifests and read-only entries as independent writable files', async () => {
+    await rename(join(source, 'PLUGIN.json'), join(source, 'manifest.json'))
+    await symlink('manifest.json', join(source, 'PLUGIN.json'), 'file')
+    await symlink('index.html', join(source, 'linked.html'), 'file')
+    await chmod(join(source, 'index.html'), 0o444)
+    await store.install(join(source, 'PLUGIN.json'))
+    await rename(source, join(root, 'moved'))
+    const entry = await store.packageFile(manifest.id, 'linked.html')
+    expect((await lstat(entry)).isFile()).toBe(true)
+    expect((await stat(entry)).mode & 0o200).toBe(0o200)
+    await writeFile(entry, 'edited')
+    expect(await readFile(join(root, 'moved', 'index.html'), 'utf8')).toBe('<p>Hello</p>')
+  })
+
   it('writes installation settings only under db and leaves obsolete installation settings unread and unchanged', async () => {
     await store.install(source)
     const path = join(root, 'data/db/plugins/test-plugin/anas-installation.json')
@@ -720,10 +734,16 @@ describe('plugin package selection', () => {
     await expectNoStagedInstallation()
   })
 
-  it.skipIf(process.platform === 'win32')('installs internal ZIP links as ordinary copied files', async () => {
-    const archive = await pluginZip([...packageEntries(), { name: 'linked.html', text: 'index.html', mode: 0o120777 }])
+  it('installs internal ZIP links as independent editable files and directories', async () => {
+    const archive = await pluginZip([...packageEntries(), { name: 'linked.html', text: 'index.html', mode: 0o120777 },
+      { name: 'docs/page.md', text: 'Guide' }, { name: 'guides', text: 'docs', mode: 0o120777 }])
     await store.install(archive)
-    expect(await readFile(await store.packageFile(manifest.id, 'linked.html'), 'utf8')).toBe('<p>ZIP plugin</p>')
+    const installed = join(root, 'data/plugins', manifest.id)
+    expect((await lstat(join(installed, 'guides'))).isDirectory()).toBe(true)
+    expect((await lstat(join(installed, 'linked.html'))).isFile()).toBe(true)
+    expect(await readFile(await store.packageFile(manifest.id, 'guides/page.md'), 'utf8')).toBe('Guide')
+    await writeFile(join(installed, 'linked.html'), 'Edited')
+    expect(await readFile(join(installed, 'index.html'), 'utf8')).toBe('<p>ZIP plugin</p>')
   })
 })
 

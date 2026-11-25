@@ -1,11 +1,14 @@
 import { defaultCapabilities } from '@shared/agentCapabilities'
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdirSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, rmdir, symlink, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { presentConversationMessage } from './agent/conversationPresentation'
 
 const tempDirs: string[] = []
+const trashItem = vi.hoisted(() => vi.fn<(path: string) => Promise<void>>())
+vi.mock('electron', () => ({ shell: { trashItem } }))
 
 function skillText(name: string, description = `${name} description`, body = `Use ${name}.`): string {
   return `---\nname: ${name}\ndescription: ${description}\n---\n\n${body}\n`
@@ -26,17 +29,22 @@ async function loadSkillsStore(externalDirectories: unknown[] = []) {
   vi.resetModules()
   const root = await mkdtemp(join(tmpdir(), 'anas-skills-'))
   tempDirs.push(root)
+  trashItem.mockReset().mockImplementation(async path => {
+    const trash = join(root, 'trash')
+    await mkdir(trash, { recursive: true })
+    await rename(path, join(trash, basename(path)))
+  })
   const bundledDataDir = join(root, 'bundled-data')
   const bundledConfigDir = join(root, 'bundled-config')
   const configDir = join(root, 'config')
   const skillsDir = join(root, 'skills')
-  const systemDir = join(root, 'skills/_system')
+  const systemDir = join(bundledDataDir, 'skills')
   const examplesDir = join(root, 'examples/skills')
   const workspace = join(root, 'workspace')
   const projectCapabilities = structuredClone(defaultCapabilities)
   const projectSettings: { skillDirectories?: string[] } = { }
   await Promise.all([
-    mkdir(join(bundledDataDir, 'skills/_system'), { recursive: true }),
+    mkdir(join(bundledDataDir, 'skills'), { recursive: true }),
     mkdir(join(bundledDataDir, 'examples/skills'), { recursive: true }),
     mkdir(skillsDir, { recursive: true }),
     mkdir(workspace, { recursive: true }),
@@ -46,11 +54,11 @@ async function loadSkillsStore(externalDirectories: unknown[] = []) {
     skillsConfigFileName: 'skills.json',
     getBundledConfigFile: (name: string) => join(bundledConfigDir, name),
     getBundledDataDir: () => bundledDataDir,
+    getBundledExamplesDir: () => dirname(examplesDir),
     getConfigFile: (name: string) => join(configDir, name),
     getSkillExamplesDir: () => examplesDir,
     getSkillsDir: () => skillsDir,
     getDataDir: () => root,
-    getSystemPluginsDir: () => join(root, 'plugins/_system'),
     getSystemSkillsDir: () => systemDir
   }))
   vi.doMock('./config/appConfig', () => ({ getAppConfigSnapshot: async () => ({ customTools: [] }) }))
@@ -62,7 +70,7 @@ async function loadSkillsStore(externalDirectories: unknown[] = []) {
     projectCapabilities,
     projectSettings,
     root,
-    bundledSystemDir: join(bundledDataDir, 'skills/_system'),
+    bundledSystemDir: join(bundledDataDir, 'skills'),
     bundledExamplesDir: join(bundledDataDir, 'examples/skills'),
     configFile: join(configDir, 'skills.json'),
     examplesDir,
@@ -75,6 +83,7 @@ async function loadSkillsStore(externalDirectories: unknown[] = []) {
 
 afterEach(async () => {
   vi.doUnmock('node:fs/promises')
+  vi.doUnmock('./renameDirectoryExclusive')
   vi.doUnmock('./config/dataDir')
   vi.doUnmock('./projectStore')
   vi.doUnmock('./config/appConfig')
@@ -83,14 +92,38 @@ afterEach(async () => {
 })
 
 describe('skillsStore', () => {
+  it('keeps bundled project and saved external references unavailable without rewriting configuration', async () => {
+    const h = await loadSkillsStore()
+    await writeSkill(h.systemDir, 'bundled-guide')
+    await writeSkill(h.examplesDir, 'example-guide')
+    const alias = join(h.root, 'bundle-alias')
+    await symlink(h.systemDir, alias, process.platform === 'win32' ? 'junction' : 'dir')
+    await h.store.initializeSkillsStore()
+    const saved = JSON.stringify({ ...JSON.parse(await readFile(h.configFile, 'utf8')),
+      external_directories: [{ id: 'saved-bundle', name: 'Bundle', shortcut_alias: 'bundle', path: alias }] })
+    await writeFile(h.configFile, saved)
+    h.projectSettings.skillDirectories = [h.systemDir, h.examplesDir, alias, dirname(h.systemDir)]
+    const snapshot = await h.store.listSkillSnapshot('project')
+    expect(snapshot.roots.filter(item => item.kind === 'project' || item.kind === 'external').every(item => !item.available)).toBe(true)
+    expect(snapshot.skills.map(item => item.id)).toEqual(['system:bundled-guide'])
+    expect((await h.store.readSkillFile('project', 'system:bundled-guide', 'SKILL.md')).editable).toBe(false)
+    await expect(h.store.saveSkillFile('project', 'system:bundled-guide', 'SKILL.md', {} as never)).rejects.toThrow('read-only')
+    await expect(h.store.addExternalSkillDirectory(alias)).rejects.toThrow('already managed')
+    await expect(h.store.addExternalSkillDirectory(dirname(h.systemDir))).rejects.toThrow('already managed')
+    expect(await readFile(h.configFile, 'utf8')).toBe(saved)
+    await h.store.importSkillDirectories([join(h.examplesDir, 'example-guide')])
+    const user = (await h.store.listSkillSnapshot()).skills.find(item => item.source === 'user')!
+    expect((await h.store.readSkillFile(undefined, user.id, 'SKILL.md')).editable).toBe(true)
+  })
+
   it.each([1024, 1025, 1510])('keeps a %i-character description usable through import, model context, shortcuts, editing, and restore', async length => {
     const h = await loadSkillsStore()
     const description = '长'.repeat(length)
     const source = join(h.root, 'import', 'long-description')
     const content = skillText('long-description', description)
     await writeText(join(source, 'SKILL.md'), content)
-    const imported = await h.store.importSkillDirectories([source])
-    const skill = imported.snapshot.skills.find(item => item.name === 'long-description')!
+    await h.store.importSkillDirectories([source])
+    const skill = (await h.store.listSkillSnapshot()).skills.find(item => item.name === 'long-description')!
     expect(skill).toMatchObject({ description, modelAvailable: true, userAvailable: true, shortcut: '/long-description' })
     expect(skill.loadError).toBeUndefined()
     expect(await h.store.buildSkillsPrompt({ agent: { kind: 'main' }, selection: defaultCapabilities.skills })).toContain(description)
@@ -173,17 +206,17 @@ describe('skillsStore', () => {
     expect((await h.store.buildUserSkillInvocation('project', 'guide', projectSkill.shortcutAlias, 'check')).promptText).toContain('Use guide.')
   })
 
-  it('keeps nested system skills separate from user packages and excludes the reserved directory on restore', async () => {
+  it('reads bundled skills directly and preserves ignored legacy copies during startup and restore', async () => {
     const h = await loadSkillsStore()
     await writeSkill(h.bundledSystemDir, 'system-guide')
     await writeSkill(h.skillsDir, 'personal-guide')
-    await writeText(join(h.systemDir, 'stale/SKILL.md'), skillText('stale'))
+    await writeText(join(h.skillsDir, '_system/stale/SKILL.md'), skillText('stale'))
     const snapshot = await h.store.listSkillSnapshot()
     expect(snapshot.skills.map(skill => skill.id).sort()).toEqual(['system:system-guide', 'user:personal-guide'])
     expect(snapshot.skills.every(skill => !skill.loadError)).toBe(true)
-    await expect(readFile(join(h.systemDir, 'stale/SKILL.md'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(join(h.skillsDir, '_system/stale/SKILL.md'), 'utf8')).toBe(skillText('stale'))
     await expect(h.store.validateRestoredSkillsDirectory(h.skillsDir, true)).resolves.toBeUndefined()
-    await expect(h.store.importSkillDirectories([h.systemDir])).rejects.toThrow('Invalid Skill directory name')
+    await expect(h.store.addExternalSkillDirectory(h.systemDir)).rejects.toThrow('already managed')
     expect(await readFile(join(h.skillsDir, 'personal-guide/SKILL.md'), 'utf8')).toContain('personal-guide')
   })
 
@@ -470,50 +503,15 @@ describe('skillsStore', () => {
     }
   })
 
-  it('settles every started mirror before rejecting initialization and allowing a retry', async () => {
-    const fs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
-    const failure = new Error('Injected configuration copy failure')
-    let notifyConfigFailed!: () => void
-    const configFailed = new Promise<void>((resolve) => { notifyConfigFailed = resolve })
-    const copyConfig = vi.fn(fs.copyFile).mockImplementationOnce(async () => {
-      notifyConfigFailed()
-      throw failure
-    })
-    let releaseMirror!: () => void
-    const mirrorAllowed = new Promise<void>((resolve) => { releaseMirror = resolve })
-    let notifyMirrorStarted!: () => void
-    const mirrorStarted = new Promise<void>((resolve) => { notifyMirrorStarted = resolve })
-    const copySkill = vi.fn(async (...args: Parameters<typeof fs.cp>) => {
-      notifyMirrorStarted()
-      await mirrorAllowed
-      return fs.cp(...args)
-    })
-    vi.doMock('node:fs/promises', () => ({ ...fs, copyFile: copyConfig, cp: copySkill }))
+  it('retries initialization after correcting an invalid bundled skill without changing user files', async () => {
     const fixture = await loadSkillsStore()
-    await writeSkill(fixture.bundledSystemDir, 'system-skill')
-    let returned = false
-    const initial = fixture.store.initializeSkillsStore().then(
-      () => { returned = true; return undefined },
-      (reason: unknown) => { returned = true; return reason }
-    )
-    await Promise.all([mirrorStarted, configFailed])
-    const sameAttempt = fixture.store.initializeSkillsStore().catch((reason: unknown) => reason)
-    try {
-      expect(returned).toBe(false)
-      expect(copyConfig).toHaveBeenCalledOnce()
-      releaseMirror()
-      expect(await initial).toBe(failure)
-      expect(await sameAttempt).toBe(failure)
-      expect(copyConfig).toHaveBeenCalledOnce()
-
-      await fixture.store.initializeSkillsStore()
-      expect(copyConfig).toHaveBeenCalledTimes(2)
-      await expect(readFile(join(fixture.systemDir, 'system-skill', 'SKILL.md'), 'utf8')).resolves.toContain('system-skill description')
-      await expect(fixture.store.listSkillSnapshot()).resolves.toMatchObject({ skills: [expect.objectContaining({ name: 'system-skill' })] })
-    } finally {
-      releaseMirror()
-      await Promise.allSettled([initial, sameAttempt])
-    }
+    await writeText(join(fixture.systemDir, 'system-skill/SKILL.md'), 'invalid skill')
+    await writeSkill(fixture.skillsDir, 'personal')
+    await expect(fixture.store.initializeSkillsStore()).rejects.toThrow()
+    await writeSkill(fixture.systemDir, 'system-skill')
+    await fixture.store.initializeSkillsStore()
+    expect((await fixture.store.listSkillSnapshot()).skills.map(skill => skill.id).sort()).toEqual(['system:system-skill', 'user:personal'])
+    await expect(readFile(join(fixture.skillsDir, '_system/system-skill/SKILL.md'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('discovers system, Anas user, current-project, and configured external roots', async () => {
@@ -524,7 +522,7 @@ describe('skillsStore', () => {
       writeSkill(fixture.bundledSystemDir, 'shared'),
       writeSkill(fixture.bundledExamplesDir, 'sample'),
       writeSkill(fixture.examplesDir, 'stale'),
-      writeSkill(fixture.systemDir, 'stale-system'),
+      writeSkill(join(fixture.skillsDir, '_system'), 'stale-system'),
       writeSkill(fixture.skillsDir, 'user-one'),
       writeSkill(join(fixture.workspace, '.agents', 'skills'), 'project-one'),
       writeSkill(external, 'external-one')
@@ -543,7 +541,7 @@ describe('skillsStore', () => {
     // Example refresh belongs to the application lifecycle, not Skill discovery.
     await expect(readFile(join(fixture.examplesDir, 'sample', 'SKILL.md'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(readFile(join(fixture.examplesDir, 'stale', 'SKILL.md'), 'utf8')).resolves.toContain('stale description')
-    await expect(readFile(join(fixture.systemDir, 'stale-system', 'SKILL.md'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(join(fixture.skillsDir, '_system/stale-system/SKILL.md'), 'utf8')).resolves.toContain('stale-system description')
   })
 
   it('treats a symlinked Skill directory as a first-class Skill', async () => {
@@ -757,7 +755,8 @@ Body
     const result = await fixture.store.importSkillDirectories([first, second])
 
     expect(result.names).toEqual(['first-import', 'second-import'])
-    expect(result.snapshot.skills.filter((skill) => skill.source === 'user').map((skill) => skill.name)).toEqual([
+    expect(result.failures).toEqual([])
+    expect((await fixture.store.listSkillSnapshot()).skills.filter((skill) => skill.source === 'user').map((skill) => skill.name)).toEqual([
       'first-import',
       'second-import'
     ])
@@ -773,6 +772,183 @@ Body
     } })
     expect(customPrompt).toContain(firstPath)
     expect(customPrompt).not.toContain(secondPath)
+  })
+
+  it('imports the source manifest, binary files, hidden files and linked folders as independent editable contents', async () => {
+    const h = await loadSkillsStore()
+    const source = join(h.examplesDir, 'manual'), assets = join(h.root, 'assets')
+    await mkdir(source, { recursive: true })
+    await writeText(join(assets, 'guide.md'), skillText('manual', 'Original'))
+    await writeText(join(h.skillsDir, 'shared', 'guide.md'), skillText('manual', 'Different destination sibling'))
+    await symlink(assets, join(h.examplesDir, 'shared'), process.platform === 'win32' ? 'junction' : 'dir')
+    await symlink('../shared/guide.md', join(source, 'SKILL.md'), 'file')
+    await symlink(assets, join(source, 'guides'), process.platform === 'win32' ? 'junction' : 'dir')
+    await mkdir(join(assets, '.empty'))
+    await writeFile(join(assets, 'helper.bin'), Buffer.from([0, 255, 1]))
+    await chmod(join(assets, 'helper.bin'), 0o555)
+    await chmod(join(assets, 'guide.md'), 0o444)
+    expect(await h.store.importSkillDirectories([source])).toEqual({ names: ['manual'], failures: [] })
+    const installed = join(h.skillsDir, 'manual')
+    expect((await lstat(join(installed, 'SKILL.md'))).isFile()).toBe(true)
+    expect((await lstat(join(installed, 'guides'))).isDirectory()).toBe(true)
+    expect(await readdir(join(installed, 'guides', '.empty'))).toEqual([])
+    const helper = join(installed, 'guides', 'helper.bin')
+    expect(await readFile(helper)).toEqual(Buffer.from([0, 255, 1]))
+    if (process.platform !== 'win32') expect((await lstat(helper)).mode & 0o700).toBe(0o700)
+    await rename(assets, join(h.root, 'moved'))
+    const preview = await h.store.readSkillFile(undefined, 'user:manual', 'SKILL.md')
+    expect(preview).toMatchObject({ content: skillText('manual', 'Original'), editable: true })
+    await h.store.saveSkillFile(undefined, 'user:manual', 'SKILL.md', {
+      content: skillText('manual', 'Edited'), revision: preview.revision!, resolvedPath: preview.resolvedPath
+    })
+    expect(await readFile(join(installed, 'SKILL.md'), 'utf8')).toBe(skillText('manual', 'Edited'))
+    expect(await readFile(join(h.root, 'moved', 'guide.md'), 'utf8')).toBe(skillText('manual', 'Original'))
+  })
+
+  it.each(['dangling', 'circular', 'destination'])('reports a %s resource and continues with the next complete Skill', async kind => {
+    const h = await loadSkillsStore()
+    const bad = await writeSkill(h.examplesDir, 'incomplete')
+    const good = await writeSkill(h.examplesDir, 'good')
+    const target = kind === 'circular' ? bad : kind === 'destination' ? h.skillsDir : join(h.root, 'missing')
+    await symlink(target, join(bad, 'resource'), process.platform === 'win32' ? 'junction' : 'dir')
+    const result = await h.store.importSkillDirectories([bad, good])
+    expect(result).toMatchObject({ names: ['good'], failures: [{ name: 'incomplete', error: { code: 'failed' } }] })
+    expect(await readdir(h.skillsDir)).toEqual(['good'])
+  })
+
+  it('rejects import into a linked bundled destination and allows retry into linked user storage', async () => {
+    const h = await loadSkillsStore()
+    const source = await writeSkill(h.examplesDir, 'example-guide')
+    const linkType = process.platform === 'win32' ? 'junction' : 'dir'
+    await rmdir(h.skillsDir)
+    await symlink(h.bundledSystemDir, h.skillsDir, linkType)
+    await expect(h.store.importSkillDirectories([source])).rejects.toThrow()
+    expect(await readdir(h.bundledSystemDir)).toEqual([])
+
+    await unlink(h.skillsDir)
+    await symlink(h.workspace, h.skillsDir, linkType)
+    const result = await h.store.importSkillDirectories([source])
+    expect(result).toEqual({ names: ['example-guide'], failures: [] })
+    expect(await readFile(join(h.workspace, 'example-guide/SKILL.md'), 'utf8')).toBe(skillText('example-guide'))
+  })
+
+  it('keeps the committed Skill in the original directory when the user link changes', async () => {
+    const native = await vi.importActual<typeof import('./renameDirectoryExclusive')>('./renameDirectoryExclusive')
+    const linkType = process.platform === 'win32' ? 'junction' : 'dir'
+    vi.doMock('./renameDirectoryExclusive', () => ({ renameDirectoryExclusive: (from: string, to: string) => {
+      native.renameDirectoryExclusive(from, to)
+      if (basename(to) === 'first-import') {
+        unlinkSync(h.skillsDir)
+        symlinkSync(h.bundledSystemDir, h.skillsDir, linkType)
+      }
+    } }))
+    const h = await loadSkillsStore()
+    await rmdir(h.skillsDir)
+    await symlink(h.workspace, h.skillsDir, linkType)
+    const first = await writeSkill(h.examplesDir, 'first-import')
+    const second = await writeSkill(h.examplesDir, 'second-import')
+    expect(await h.store.importSkillDirectories([first, second])).toMatchObject({
+      names: ['first-import'], failures: [{ name: 'second-import', error: { code: 'failed' } }]
+    })
+    expect(await readdir(h.bundledSystemDir)).toEqual([])
+    expect(await readdir(h.workspace)).toEqual(['first-import'])
+  })
+
+  it('keeps successful and edited Skills and continues after one publication fails', async () => {
+    const native = await vi.importActual<typeof import('./renameDirectoryExclusive')>('./renameDirectoryExclusive')
+    vi.doMock('./renameDirectoryExclusive', () => ({ renameDirectoryExclusive: (from: string, to: string) => {
+      if (basename(to) === 'second-import') {
+        writeFileSync(join(h.skillsDir, 'first-import', 'guide.bin'), Buffer.from([0, 9, 8, 7]))
+        throw new Error('Disk full')
+      }
+      native.renameDirectoryExclusive(from, to)
+    } }))
+    const h = await loadSkillsStore()
+    const sources = await Promise.all(['first-import', 'second-import', 'third-import'].map(name => writeSkill(h.examplesDir, name)))
+    await writeFile(join(sources[0], 'guide.bin'), Buffer.from([0, 1, 2, 3]))
+    expect(await h.store.importSkillDirectories(sources)).toEqual({
+      names: ['first-import', 'third-import'], failures: [{ name: 'second-import', error: { code: 'failed', detail: 'Disk full' } }]
+    })
+    expect(await readdir(h.skillsDir)).toEqual(['first-import', 'third-import'])
+    expect(await readFile(join(h.skillsDir, 'first-import', 'guide.bin'))).toEqual(Buffer.from([0, 9, 8, 7]))
+    expect(trashItem).toHaveBeenCalledOnce()
+  })
+
+  it.each(['destination', 'stage'])('leaves a replaced %s untouched after an interruption', async replaced => {
+    const fs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    let marker = ''
+    vi.doMock('node:fs/promises', () => ({ ...fs, copyFile: async (...args: Parameters<typeof fs.copyFile>) => {
+      await fs.copyFile(...args)
+      if (!String(args[1]).includes('.import-')) return
+      const stage = dirname(String(args[1]))
+      const path = replaced === 'destination' ? dirname(stage) : stage
+      await fs.rename(path, join(h.root, 'previous'))
+      await mkdir(path)
+      marker = join(path, 'restored.txt')
+      await writeFile(marker, 'user content')
+      throw new Error('Copy interrupted')
+    } }))
+    const h = await loadSkillsStore()
+    const source = await writeSkill(h.examplesDir, 'only-skill')
+    const result = await h.store.importSkillDirectories([source])
+    expect(result).toMatchObject({ names: [], failures: [{ name: 'only-skill', stagingPath: expect.any(String) }] })
+    expect(await readFile(marker, 'utf8')).toBe('user content')
+    expect(trashItem).not.toHaveBeenCalled()
+  })
+
+  it.each([true, false])('preserves incomplete copies when the recycle bin is available: %s', async available => {
+    const fs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    let stage = ''
+    vi.doMock('node:fs/promises', () => ({ ...fs, copyFile: async (...args: Parameters<typeof fs.copyFile>) => {
+      await fs.copyFile(...args)
+      if (!String(args[1]).includes('.import-')) return
+      if (basename(String(args[0])) === 'guide.md') {
+        stage = dirname(dirname(String(args[1])))
+        await writeFile(join(stage, 'references', 'notes.md'), 'user edit')
+        throw new Error('Copy interrupted')
+      }
+    } }))
+    const h = await loadSkillsStore()
+    if (!available) trashItem.mockRejectedValue(new Error('Recycle bin unavailable'))
+    const source = await writeSkill(h.examplesDir, 'partial')
+    await writeText(join(source, 'references', 'guide.md'), 'original')
+    const result = await h.store.importSkillDirectories([source])
+    expect(result).toEqual({ names: [], failures: [{ name: 'partial', error: { code: 'failed', detail: 'Copy interrupted' },
+      ...(!available ? { stagingPath: stage } : {}) }] })
+    expect(trashItem).toHaveBeenCalledWith(stage)
+    const retained = available ? join(h.root, 'trash', basename(stage)) : stage
+    expect(await readFile(join(retained, 'references', 'notes.md'), 'utf8')).toBe('user edit')
+    expect(await readdir(h.skillsDir)).toEqual(available ? [] : [basename(stage)])
+  })
+
+  it.each([true, false])('keeps a concurrent directory at publication and continues (empty: %s)', async empty => {
+    const native = await vi.importActual<typeof import('./renameDirectoryExclusive')>('./renameDirectoryExclusive')
+    vi.doMock('./renameDirectoryExclusive', () => ({ renameDirectoryExclusive: (from: string, to: string) => {
+      if (basename(to) === 'occupied') {
+        mkdirSync(to)
+        if (!empty) writeFileSync(join(to, 'notes.md'), 'existing')
+      }
+      native.renameDirectoryExclusive(from, to)
+    } }))
+    const h = await loadSkillsStore()
+    const sources = await Promise.all(['occupied', 'fresh'].map(name => writeSkill(h.examplesDir, name)))
+    expect(await h.store.importSkillDirectories(sources)).toEqual({
+      names: ['fresh'], failures: [{ name: 'occupied', error: { code: 'already_exists', name: 'occupied' } }]
+    })
+    expect(await readdir(join(h.skillsDir, 'occupied'))).toEqual(empty ? [] : ['notes.md'])
+  })
+
+  it('checks the catalog capacity before committing any Skill and ignores private staging directories', async () => {
+    const h = await loadSkillsStore()
+    for (let start = 0; start < 2047; start += 64) {
+      await Promise.all(Array.from({ length: Math.min(64, 2047 - start) }, (_, i) =>
+        writeFile(join(h.skillsDir, `entry-${start + i}`), '')))
+    }
+    await mkdir(join(h.skillsDir, '.import-previous'))
+    const sources = await Promise.all(['first-import', 'second-import'].map(name => writeSkill(h.examplesDir, name)))
+    await expect(h.store.importSkillDirectories(sources)).rejects.toThrow('2048')
+    expect(await h.store.importSkillDirectories([sources[0]])).toEqual({ names: ['first-import'], failures: [] })
+    expect((await h.store.listSkillSnapshot()).skills.map(skill => skill.name)).toContain('first-import')
   })
 
   it('does not partially import a multi-selection when one Skill already exists', async () => {

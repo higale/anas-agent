@@ -64,7 +64,7 @@
         "lang",
         "help"
       ],
-      "reason": "允许包内自由组织文件；包含 _system、用户包、插件事务 .replace-* / .remove-* 及各模块暂存。示例由自身刷新机制维护。"
+      "reason": "完整保留用户包、用户语言、旧 _system／示例／帮助副本、插件事务及各模块暂存。内置资源直接读取程序包，不覆盖或自动清理旧副本。"
     },
     {
       "type": "tree",
@@ -89,7 +89,7 @@
         ".examples.mirror.tmp",
         ".examples.mirror.previous"
       ],
-      "reason": "头像事务及整份示例替换材料，由所属模块完成恢复或清理。"
+      "reason": "头像事务由所属模块恢复或清理；旧示例镜像暂存及回滚材料原样保留。"
     },
     {
       "type": "file",
