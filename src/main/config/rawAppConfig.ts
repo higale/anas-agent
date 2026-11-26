@@ -115,7 +115,6 @@ export interface RawAppSettings {
   environment_context?: Partial<{
     operating_system: boolean
     bundled_rg: boolean
-    bundled_python: boolean
     current_date: boolean
     application_data_directory: boolean
     user_home_directory: boolean

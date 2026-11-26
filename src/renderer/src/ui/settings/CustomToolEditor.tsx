@@ -90,7 +90,7 @@ export function CustomToolEditor({ tool, initialSection = 'information', onClose
                   <div className="ui-toolbar ui-toolbar-between">
                     <label className="ui-field-label" htmlFor={commandId}>{t('custom_tools.command')}</label>
                     <button className="ui-icon-button" type="button" aria-label={t('custom_tools.command_help')}
-                      data-tooltip={t('custom_tools.protocol_hint', { args: '{{args}}', tool_dir: '{{tool_dir}}', bundled_python: '{{bundled_python}}' })}><CircleHelp size={14} /></button>
+                      data-tooltip={t('custom_tools.protocol_hint', { args: '{{args}}', tool_dir: '{{tool_dir}}' })}><CircleHelp size={14} /></button>
                   </div>
                   <CommitTextarea id={commandId} className="ui-textarea ui-code-textarea ui-autosize-textarea" rows={3} data-min-rows={3} data-max-rows={5} value={draft.command}
                     onCommit={(command) => update({ command })} onDraftChange={(command) => update({ command })} />

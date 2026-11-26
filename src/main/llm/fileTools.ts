@@ -17,6 +17,7 @@ import { captureFilePatchPreimages } from '../filePatchState'
 import { FilePatchTransactionError } from '../filePatchTransaction'
 import { patchCompensationComplete } from '../filePatchRecord'
 import type { AuthorizeFilePatchRestore } from '../filePatchRestore'
+import { documentTool } from '../documents/documentTool'
 import { imageToolDefinitions } from './imageTools'
 import { toolSummarySchema } from './toolSummary'
 import type { FileChangeLedger } from '../agent/fileChangeLedger'
@@ -320,6 +321,7 @@ export function fileToolDefinitions(options: FileToolOptions): ToolDefinition[] 
     } catch (error) { return failed(error, reference) }
   }
   const tools = [
+    documentTool,
     ...imageToolDefinitions(options),
     defineContentTool({
       name: 'write_file',

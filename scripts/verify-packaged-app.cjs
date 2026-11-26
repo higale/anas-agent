@@ -10,6 +10,7 @@ const requiredEntries = [
   '/THIRD_PARTY_NOTICES.md',
   '/out/main/index.js',
   '/out/main/packagedSmoke.js',
+  '/out/main/documentWorker.js',
   '/out/preload/index.js',
   '/out/renderer/index.html',
   '/licenses/monaco-editor/LICENSE',
@@ -110,7 +111,6 @@ function packageManifest(unpackedDirectory) {
     if (existsSync(join(paths.resources, 'data', module, '_system'))) throw new Error(`Unexpected nested built-in resource directory: ${module}/_system`)
   }
   for (const file of ['skills/config/SKILL.md', 'skills/skill-manager/SKILL.md', 'skills/tool-manager/SKILL.md',
-    'tools/document-to-markdown/TOOL.json', 'tools/document-to-markdown/convert.py', 'licenses/document-markdown/MarkItDown-LICENSE.txt',
     'subagents/general-purpose/AGENT.json', 'subagents/general-purpose/PROMPT.md', 'help/USER_GUIDE.en.md', 'lang/en.json', 'lang/zh-CN.json']) {
     if (!existsSync(join(paths.resources, 'data', file))) throw new Error(`Packaged built-in resource is missing: ${file}`)
   }
@@ -124,19 +124,7 @@ function packageManifest(unpackedDirectory) {
     if (!existsSync(path)) throw new Error(`Packaged application file is missing: ${path}`)
   }
   const rawEntries = listPackage(paths.asar)
-  const pythonRoot = join(paths.resources, 'python')
-  const pythonExecutable = join(pythonRoot, process.platform === 'win32' ? 'python.exe' : 'bin/python3')
-  if (['win32', 'darwin'].includes(process.platform)) {
-    const pythonVersion = require('../build/python-runtime.json').version.split('.').slice(0, 2).join('.')
-    const pythonLicense = process.platform === 'win32' ? 'LICENSE.txt' : `lib/python${pythonVersion}/LICENSE.txt`
-    const stdlib = join(pythonRoot, process.platform === 'win32' ? 'Lib' : `lib/python${pythonVersion}`)
-    for (const file of [pythonExecutable, join(pythonRoot, pythonLicense), join(pythonRoot, 'anas-runtime.json'), join(stdlib, 'EXTERNALLY-MANAGED')]) {
-      if (!existsSync(file)) throw new Error(`Packaged Python resource is missing: ${file}`)
-    }
-    for (const file of [join(stdlib, 'ensurepip'), ...['pip', 'setuptools', 'wheel'].map(name => join(stdlib, 'site-packages', name))]) {
-      if (existsSync(file)) throw new Error(`Unexpected Python package installer: ${file}`)
-    }
-  }
+  if (existsSync(join(paths.resources, 'python'))) throw new Error('Unexpected Python runtime in application resources.')
   const rawEntryByNormalized = new Map(rawEntries.map((entry) => [entry.replaceAll('\\', '/'), entry]))
   const entries = [...rawEntryByNormalized.keys()].sort()
   const set = new Set(entries)
@@ -230,6 +218,7 @@ function smoke(manifest) {
       env: {
         ...process.env,
         ANAS_PACKAGED_SMOKE: '1',
+        ANAS_SMOKE_DOCUMENT_FIXTURES: join(__dirname, '../src/test/fixtures/documents'),
         ELECTRON_RENDERER_URL: 'https://renderer-environment-must-be-ignored.invalid/',
         APPDATA: appData,
         LOCALAPPDATA: localAppData,
@@ -258,14 +247,6 @@ function main() {
   if (command === 'verify' && args.length === 1) {
     const manifest = packageManifest(args[0])
     smoke(manifest)
-    if (['win32', 'darwin'].includes(process.platform)) {
-      const resources = manifest.paths.resources
-      const python = join(resources, 'python', process.platform === 'win32' ? 'python.exe' : 'bin/python3')
-      const check = spawnSync(python, ['-I', '-B', '-X', 'utf8', join(__dirname, 'test-document-conversion.py'),
-        join(resources, 'data/tools/document-to-markdown/convert.py')], { encoding: 'utf8', windowsHide: true, timeout: 180_000 })
-      if (check.error) throw check.error
-      if (check.status !== 0) throw new Error('Packaged document conversion verification failed: ' + check.stderr)
-    }
     console.log(`Packaged application verified: ${manifest.paths.root} (${manifest.entries.length} ASAR entries).`)
     console.log(`Package report: ${manifest.reportPath}`)
   } else if (command === 'compare' && args.length === 2) {

@@ -558,7 +558,6 @@ export interface AgentFeatures {
 export interface EnvironmentContextSettings {
   operatingSystem: boolean
   bundledRg: boolean
-  bundledPython: boolean
   currentDate: boolean
   applicationDataDirectory: boolean
   userHomeDirectory: boolean

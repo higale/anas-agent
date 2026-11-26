@@ -125,25 +125,7 @@ async function verifyEnvironmentStartup(repositoryRoot, executablePath) {
     await page.getByRole('menuitem', { name: /^(设置|Settings)$/ }).click()
     await page.locator('[data-settings-tab="environment"]').click()
     const rg = page.getByRole('checkbox', { name: /^(内置 rg|Bundled rg)$/ })
-    const python = page.getByRole('checkbox', { name: /^(内置 Python|Bundled Python)$/ })
     await expect(rg).toBeChecked()
-    await expect(python).toBeChecked()
-    await python.uncheck()
-    await expect.poll(() => page.evaluate(async () => (await globalThis.gale.config.get()).settings.environmentContext.bundledPython)).toBe(false)
-    await expect(rg).toBeChecked()
-    await expect(page.getByRole('button', { name: /^(重置内置 Python|Reset bundled Python)$/ })).toHaveCount(0)
-    await expect(page.getByText(/直接从程序包运行|directly from the application package/)).toBeVisible()
-    if (['win32', 'darwin'].includes(process.platform)) {
-      const version = require('../build/python-runtime.json').version
-      const entry = process.platform === 'win32' ? 'python.exe' : 'bin/python3'
-      const executable = join(repositoryRoot, 'build/python-runtime', process.platform + '-' + process.arch, 'python', entry)
-      const { execFile } = require('node:child_process')
-      const result = await require('node:util').promisify(execFile)(executable,
-        ['-I', '-B', '-X', 'utf8', '-c', 'import ssl,sqlite3,ctypes,sys,importlib.util; assert importlib.util.find_spec("pip") is None; assert importlib.util.find_spec("ensurepip") is None; print(sys.version.split()[0])'])
-      assert.equal(result.stdout.trim(), version)
-      await page.screenshot({ path: join(repositoryRoot, 'tmp/python-environment-settings.png') })
-      console.log('Python startup E2E passed: package runtime works without installers; no user runtime extraction or reset action.')
-    }
     await expect(page.getByRole('checkbox', { name: /^(操作系统|Operating system)$/ })).toBeVisible()
     await expect(page.getByRole('checkbox', { name: 'PowerShell', exact: true })).toHaveCount(0)
     const input = page.locator('#custom-environment-information-input')

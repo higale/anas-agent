@@ -1,3 +1,4 @@
+import { isAbsolute } from 'node:path'
 import type { WorkspacePathSemantics } from '../workspacePath'
 import { filePatchPathArguments, parseFilePatch, parseWriteFile } from '../filePatch'
 import { withoutApprovalParameter } from '../../runtime/smartApproval'
@@ -22,6 +23,10 @@ export interface ToolPathArgument {
 }
 
 export const toolPathDescriptors: Readonly<Record<string, readonly ToolPathDescriptor[]>> = {
+  document_to_markdown: [
+    { pattern: ['input_path'], semantics: 'follow', access: 'read' },
+    { pattern: ['output_path'], semantics: 'entry', access: 'write' }
+  ],
   apply_patch: [], // Paths are parsed from the public context patch below.
   write_file: [], // The shared transaction plan binds the public path below.
   view_image: [{ pattern: ['path'], semantics: 'follow', access: 'read' }],
@@ -76,6 +81,7 @@ export function toolPathArguments(
 ): ToolPathArgument[] | undefined {
   if (!args || typeof args !== 'object' || Array.isArray(args)) return undefined
   args = withoutApprovalParameter({ name: toolName }, args) as Record<string, unknown>
+  if (toolName === 'document_to_markdown' && [args.input_path, args.output_path].some(path => typeof path !== 'string' || !isAbsolute(path))) return undefined
   if (toolName === 'apply_patch' || toolName === 'write_file') {
     try {
       return filePatchPathArguments(toolName === 'write_file' ? parseWriteFile(args) : parseFilePatch(args)).map(({ operationIndex, field, value, semantics, access }) => ({

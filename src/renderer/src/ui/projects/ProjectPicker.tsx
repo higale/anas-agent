@@ -82,7 +82,7 @@ export function ProjectPicker({
           <DropdownMenu.Separator className="ui-menu-separator" />
           <DropdownMenu.Item className="project-picker-item ui-menu-item ui-menu-item-row" onSelect={openCreateDialog}>
             <Plus size={15} />
-            <span>{t('chat.new_thread')}</span>
+            <span>{t('project.create')}</span>
           </DropdownMenu.Item>
         </DropdownMenuContent>
       </DropdownMenu.Portal>

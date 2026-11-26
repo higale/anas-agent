@@ -10,7 +10,7 @@
 
 ## 内置命令的环境设置
 
-全局设置 v0 的 `environment_context.bundled_rg` 和 `environment_context.bundled_python` 缺失时均按开启读取，显式关闭会保留。经用户批准，忽略原 `bundled_commands` 和项目、子 Agent 能力中的 `bundled_python`。旧设置中单独关闭过 rg 或 Python 的用户可在“设置 > 环境”重新关闭相应选项。
+全局设置 v0 的 `environment_context.bundled_rg` 缺失时默认开启，显式关闭会保留。已移除的 Python 说明开关直接忽略，旧 `runtimes/` 目录继续原样保留并排除备份。
 
 ## 项目目录化边界
 

@@ -26,13 +26,13 @@
 
 - 原生实现来自 Anas Next `553fded16ee7ac1205e9283a37f3fa80e932da12`，保留 Anas 的 UI、设置和插件操作。Next 保留重构历史，后续开发以本仓库为准。
 - 旧框架快照 `codex/legacy-framework-4.0.9` 固定在 `460f58de4f3d914456e3ca64b6e628e845769ecb`，长期保留。
-- 本次同步版本为 `5.2.26`，发布范围以本轮中英文 Release 说明为准。已确认发布源码由 `refs/anas/github/v<版本>` 记录；发布成功并核对源码后更新对应基点。开发差异由 Git 自动生成，日常开发不修改正式版本号。
+- 本次同步版本为 `5.2.27`，发布范围以本轮中英文 Release 说明为准。已确认发布源码由 `refs/anas/github/v<版本>` 记录；发布成功并核对源码后更新对应基点。开发差异由 Git 自动生成，日常开发不修改正式版本号。
 - 源码同步和安装包分别以 [GitHub 源码](https://github.com/higale/anas-agent)与 [Release](https://github.com/higale/anas-agent/releases)为准。独立源码快照、版本递增及发布基点更新遵循[发布流程](SOURCE_PUBLISHING.md)。
 - 普通需求在 `main` 开发；复杂需求使用临时 `codex/` 分支，验证后合回并删除，旧框架快照分支除外。
 
 ## 当前执行与数据
 
-内置 Python 已改为直接调用程序包 `resources/python/`，构建移除 pip、ensurepip、setuptools、wheel 并写入应用管理标记。启动释放、准备通知、重置 UI 和 IPC 已删除。用户脚本仍可调用，自动保底忽略 Python 环境覆盖和用户安装包、禁写字节码，额外依赖使用独立环境。旧 `runtimes/` 不读取、不迁移、不清理；这是资源管理边界，不是操作系统沙箱。全局“内置 rg”和“内置 Python”随项目或子 Agent 的“运行环境”能力决定模型能看到的说明。已启用的 `document_to_markdown` 自定义工具固定使用包内 Python 将 PDF、DOCX、PPTX 转换为 Markdown 文件。
+原生文件工具 `document_to_markdown` 离线转换 PDF、DOCX、PPTX。Windows 上普通 EMF、WMF 图片的 PNG 预览使用系统 GDI+。用户的 Python 工具使用系统 Python 3 或显式配置的解释器。
 
 内置技能、自定义工具、子 Agent、示例、帮助和内置语言也直接读取程序包，源码 `data/` 各模块已去掉 `_system` 层；开发时示例使用 `out/examples/`。用户配置、导入包和自定义语言独立保存，旧副本不覆盖、不自动清理。备份恢复使用当前包内定义，无需携带内置资源副本；已有备份中的旧副本仍按原保全规则处理。目录与来源边界见[存储设计](CURRENT_STATE_STORAGE.md)。
 

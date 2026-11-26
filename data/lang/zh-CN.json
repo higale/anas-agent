@@ -471,8 +471,6 @@
     "environment_detection_failed": "系统环境检测失败。",
     "environment_detection_content_changed": "检测期间环境信息已修改，未插入检测结果。请重新定位光标并检测。",
     "capability_applicationEnvironment": ".env",
-    "capability_bundledPython": "内置 Python",
-    "capability_bundledPython_hint": "向启用“运行环境”的项目和子 Agent 提供包内 Python 的路径、调用方法和随包依赖。工具按各自的命令选择解释器。",
     "capability_applicationEnvironment_hint": "控制数据目录 .env 是否生效；关闭后其中的所有变量都会失效。",
     "capability_subagents": "子 Agent",
     "capability_subagents_hint": "提供已配置的异步子 Agent 及启动、读取、等待和取消工具。",
@@ -1056,9 +1054,7 @@
     "memory_conflict": "记忆已更新。请将以下最新正文与编辑器中的草稿核对后再保存。",
     "memory_reviewed": "已核对最新正文",
     "memory_finish_edit": "项目记忆有未保存的修改。请先保存或取消编辑，再关闭面板。",
-    "memory_document_empty": "尚无已整理的偏好。",
-    "bundled_python": "内置 Python",
-    "bundled_python_hint": "由 Anas 管理，直接从程序包运行，不含 pip 和 ensurepip。可运行脚本，请勿修改运行时或其依赖；额外依赖请使用自己的 Python 环境。“运行环境”中的“内置 Python”复选框全局控制模型能否看到使用说明。文件损坏时请重新安装 Anas。"
+    "memory_document_empty": "尚无已整理的偏好。"
   },
   "speech_input": {
     "open_win32": "系统语音输入（Win+H）",
@@ -1434,7 +1430,7 @@
     "interactive": "交互式终端（PTY）",
     "interactive_hint": "需要开启“后台工具”。启动时分配终端，可发送后续输入；等待输入也计入超时。stdout/stderr 合并，可能包含终端控制符；读取原始文件等工具请保持关闭。",
     "requires_background": "需要后台工具",
-    "protocol_hint": "用 {{args}} 传入完整 JSON。.py 入口优先使用系统 Python 3，找不到时使用包内 Python。依赖随包库时用 {{bundled_python}} 指定包内解释器，依赖虚拟环境时填写其解释器路径。路径从工具目录（{{tool_dir}}）解析，stdout 原样返回模型。",
+    "protocol_hint": "用 {{args}} 传入完整 JSON。.py 入口使用系统 Python 3。使用虚拟环境时填写解释器路径。路径从工具目录（{{tool_dir}}）解析，stdout 原样返回模型。",
     "update_failed": "自定义工具配置未能保存，请检查以下详情。",
     "project_tools": "使用当前项目工具",
     "project_tools_summary": "项目工具",

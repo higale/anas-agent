@@ -38,6 +38,7 @@ export const builtinToolCatalog = [
   { id: 'list_directory', feature: 'fileRead' },
   { id: 'directory_tree', feature: 'fileRead' },
   { id: 'get_file_info', feature: 'fileRead' },
+  { id: 'document_to_markdown', feature: 'fileWrite' },
   { id: 'apply_patch', feature: 'fileWrite' },
   { id: 'write_file', feature: 'fileWrite' },
   { id: 'restore_file_edit', feature: 'fileWrite' },
@@ -51,7 +52,7 @@ export const builtinToolCatalog = [
 const catalogToolOrder: Partial<Record<typeof toolGroupOrder[number], readonly string[]>> = {
   backgroundTools: ['read_call', 'read_call_output', 'write_call', 'wait_call', 'cancel_call'],
   fileRead: ['list_directory', 'directory_tree', 'get_file_info', 'read_file', 'read_multiple_files', 'view_image', 'view_multiple_images'],
-  fileWrite: ['create_directory', 'write_file', 'apply_patch', 'get_file_edit_diff', 'restore_file_edit', 'move_file', 'delete_file']
+  fileWrite: ['create_directory', 'document_to_markdown', 'write_file', 'apply_patch', 'get_file_edit_diff', 'restore_file_edit', 'move_file', 'delete_file']
 }
 
 export const orderedToolCatalog = toolGroupOrder.flatMap((group) => {

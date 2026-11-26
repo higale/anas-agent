@@ -19,6 +19,7 @@ export default defineConfig(({ command }) => {
           output: { interop: 'auto' },
           input: {
             index: resolve('src/main/index.ts'),
+            documentWorker: resolve('src/main/documents/documentWorker.ts'),
             pluginWorker: resolve('src/main/plugins/pluginWorker.ts'),
             packagedSmoke: resolve('src/main/packagedSmoke.ts')
           }

@@ -10,6 +10,10 @@ files:
   - package.json
   - LICENSE
   - THIRD_PARTY_NOTICES.md
+  # The document worker uses Node entry points. Browser bundles and source maps are development artifacts.
+  - "!node_modules/{@embedpdf/pdfium,dwml-ts}/dist/*.map"
+  - "!node_modules/@embedpdf/pdfium/dist/index.browser.js"
+  - "!node_modules/mammoth/mammoth.browser*.js"
   # Monaco and its bundled dependencies are build-time inputs. Ship their
   # license notices without copying the editor's source and prebuilt bundles.
   - from: node_modules/monaco-editor
@@ -48,9 +52,6 @@ extraResources:
   - from: build/icon.png
     to: icon.png
 mac:
-  extraResources:
-    - from: build/python-runtime/darwin-${arch}/python
-      to: python
   icon: build/icon.icns
   # Daily builds stay local, even when a developer certificate is installed.
   identity: "-"
@@ -58,9 +59,6 @@ mac:
   timestamp: none
   notarize: false
 win:
-  extraResources:
-    - from: build/python-runtime/win32-${arch}/python
-      to: python
   icon: build/icon.ico
   artifactName: ${productName}-${version}-${arch}.${ext}
 linux:

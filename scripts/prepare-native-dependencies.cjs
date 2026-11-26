@@ -26,7 +26,6 @@ async function prepareNativeDependencies(context = {}) {
   const electronVersion = context.electronVersion || localRequire('electron/package.json').version
   const platform = context.platform?.nodeName || process.platform
   const arch = context.arch || process.arch
-  require('./prepare-python-runtime.cjs').preparePythonRuntime(platform, arch)
   const usePrebuild = canUsePtyPrebuild({ appDir, platform, arch, electronVersion })
   const { rebuild } = await import('@electron/rebuild')
   const result = rebuild({

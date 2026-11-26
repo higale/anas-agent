@@ -4,7 +4,6 @@ export function environmentContextFixture(overrides: Partial<EnvironmentContextS
   return {
     operatingSystem: true,
     bundledRg: true,
-    bundledPython: true,
     currentDate: true,
     applicationDataDirectory: true,
     userHomeDirectory: true,

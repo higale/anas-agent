@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import { rejects } from 'node:assert/strict'
-import { lstat, mkdir, mkdtemp, open, readdir, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, open, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -105,52 +105,14 @@ export async function runPackagedSmoke(): Promise<void> {
       ...(process.platform === 'darwin' ? { ZDOTDIR: root } : {}) })
     const shell = await getCommandShell()
     if (process.platform === 'win32' || process.platform === 'darwin') {
-      const { bundledPythonArgs, discoverBundledPython, getBundledPythonInfo } = await import('./bundledPython')
-      const { discoverPython3 } = await import('./runtimeDiscovery')
-      const bundled = getBundledPythonInfo()
-      if (bundled?.state !== 'available') throw new Error('Packaged Python runtime is missing.')
-      // Isolate discovery and .py fallback from system Python; Shell keeps its normal environment.
-      const pythonEnv: NodeJS.ProcessEnv = { ...searchEnvironment.env, PATH: '', PYTHONHOME: undefined, PYTHONPATH: undefined,
-        PYTHONNOUSERSITE: '1', PYTHONDONTWRITEBYTECODE: '1', PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' }
-      for (const key of Object.keys(pythonEnv)) if (key.toLowerCase() === 'path' && key !== 'PATH') delete pythonEnv[key]
-      if (await discoverPython3({ env: pythonEnv, cwd: documents })) throw new Error('Python smoke must not discover a system interpreter.')
-      const python = await discoverBundledPython({ env: pythonEnv, cwd: documents })
-      if (python?.executable !== bundled.executable || python.version !== bundled.version) {
-        throw new Error(`Packaged Python probe failed: ${JSON.stringify(python)}`)
-      }
-      const script = join(documents, 'python smoke 中文.py')
-      await writeFile(join(documents, 'local_helper.py'), 'value = "中文🙂"\n')
-      await writeFile(script, 'import json, ssl, sqlite3, hashlib, ctypes, urllib.request, subprocess, local_helper\nprint(json.dumps({"value": local_helper.value}, ensure_ascii=False))\n')
-      const quote = (text: string) => `'${text.replaceAll("'", process.platform === 'win32' ? "''" : "'\\''")}'`
-      const pythonCommand = `${process.platform === 'win32' ? '& ' : ''}${quote(bundled.executable)} ${bundledPythonArgs.join(' ')} ${quote(script)}`
-      const preparedPython = await prepareShellCommand({ command: pythonCommand, workingDir: documents }, documents)
-      if ('ok' in preparedPython) throw new Error(preparedPython.error)
-      preparedPython.env = { ...pythonEnv, PATH: searchEnvironment.env.PATH }
-      let pythonSucceeded = false
-      const pythonOutput = await runShellCommand(preparedPython, shell, undefined, {
-        onResult: result => { pythonSucceeded = result.ok }
-      })
-      if (!pythonSucceeded || !pythonOutput.includes('中文🙂')) throw new Error(`Packaged Python Shell failed: ${pythonOutput}`)
-      const { customToolDefinitions } = await import('./agent/customToolRuntime')
-      const { parseCustomTools } = await import('../shared/customTools')
-      const [definition] = parseCustomTools([{ version: 0, id: 'python-smoke', name: 'python_smoke', description: 'Smoke',
-        command: '"python smoke 中文.py" {{args}}', input_schema: { type: 'object', properties: {} }, timeout_seconds: 10, interactive: false }])
-      const [tool] = customToolDefinitions([{ ...definition, directory: documents }], { env: pythonEnv, backgroundTools: false })
-      const result = await tool.execute({}, { callId: 'python-smoke' })
-      if (!JSON.stringify(result).includes('中文🙂')) throw new Error(`Packaged Python custom tool failed: ${JSON.stringify(result)}`)
-      if (bundled.executable !== join(process.resourcesPath, 'python', process.platform === 'win32' ? 'python.exe' : 'bin/python3')) {
-        throw new Error('Bundled Python must run directly from package resources.')
-      }
       const document = join(documents, '文档 smoke.pdf')
       // Single text page with a standard PDF cross-reference table.
       await writeFile(document, Buffer.from('JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA1OTUgODQyXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA0IDAgUiA+PiA+PiAvQ29udGVudHMgNSAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhID4+CmVuZG9iago1IDAgb2JqCjw8IC9MZW5ndGggNTAgPj4Kc3RyZWFtCkJUIC9GMSAxMiBUZiA1MCA3MDAgVGQgKEFuYXMgTWFya2Rvd24gc21va2UpIFRqIEVUCmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQxIDAwMDAwIG4gCjAwMDAwMDAzMTEgMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA2IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgo0MTEKJSVFT0YK', 'base64'))
       const { readSelectedAttachments } = await import('./attachments')
       const [selectedDocument] = await readSelectedAttachments([document])
       if (selectedDocument.kind !== 'binary' || selectedDocument.text || selectedDocument.skippedReason) throw new Error('Document selection must return a path.')
-      const { listToolSnapshot } = await import('./toolsStore')
-      const converter = (await listToolSnapshot()).tools.find(item => item.id === 'system:document-to-markdown')?.definition
-      if (!converter) throw new Error('Packaged document tool is missing.')
-      const [convertDocument] = customToolDefinitions([converter], { env: pythonEnv, backgroundTools: false })
+      const { fileToolDefinitions } = await import('./llm/fileTools')
+      const [convertDocument] = fileToolDefinitions({ primaryFolder: documents, maxReadBytes: 4096, toolNames: ['document_to_markdown'] })
       const { validateCapabilityInput } = await import('../runtime/toolInput')
       const args = { input_path: document, output_path: join(documents, '导出', '报告.md'), summary: '读取报告中的季度数据' }
       await rejects(validateCapabilityInput(convertDocument, { input_path: document }), /output_path/)
@@ -166,24 +128,21 @@ export async function runPackagedSmoke(): Promise<void> {
         throw new Error('Packaged document conversion failed: ' + JSON.stringify(converted))
       }
       const markdownPath: unknown = JSON.parse(markdown.slice(fileLabel.length))
-      const { fileToolDefinitions } = await import('./llm/fileTools')
       const [readMarkdown] = fileToolDefinitions({ primaryFolder: documents, maxReadBytes: 4096, toolNames: ['read_file'] })
       const saved = await readMarkdown.execute({ path: markdownPath }, { callId: 'document-read-smoke' })
       const file = JSON.parse(String(saved.content))
       if (!file.ok || !file.content.includes('Anas Markdown smoke') || lineCount !== `Lines: ${file.lineCount}` || size !== `Bytes: ${file.returnedBytes}`) {
         throw new Error('Packaged Markdown content or statistics do not match the file reader.')
       }
-      let managed = false, managedOutput = ''
-      await runPreparedProcess({ command: 'packaged Python boundary smoke', workingDir: documents, timeoutSec: 30,
-        invocation: { executable: bundled.executable, args: ['-I', '-B', '-X', 'utf8', '-c',
-          'import sys,site,sysconfig,pathlib,importlib.util; assert not site.ENABLE_USER_SITE; assert sys.dont_write_bytecode; assert all(importlib.util.find_spec(name) is None for name in ("pip","ensurepip","setuptools","wheel")); assert (pathlib.Path(sysconfig.get_path("stdlib")) / "EXTERNALLY-MANAGED").is_file()'], windowsHide: true },
-        env: { ...pythonEnv, PYTHONHOME: join(root, 'invalid-home'), PYTHONPATH: documents },
-        logScope: 'packaged-smoke', successMessage: 'Python boundary smoke passed.', failureMessage: 'Python boundary smoke failed.',
-        abortBeforeStartError: 'Python cancelled.', abortError: 'Python cancelled.', timeoutError: 'Python smoke timed out.'
-      }, undefined, { onResult: value => { managed = value.ok; managedOutput = value.stdout + value.stderr } })
-      if (!managed) throw new Error('Python boundary smoke failed: ' + managedOutput)
-      if ((await readdir(documents)).includes('__pycache__') || (await readdir(root)).includes('runtimes')) {
-        throw new Error('Bundled Python created an unexpected bytecode cache or user runtime.')
+      const fixtures = process.env.ANAS_SMOKE_DOCUMENT_FIXTURES
+      if (fixtures) {
+        for (const [name, expected] of [['formula.docx', '![Sales trend]'], ['math-notes.pptx', 'Before $x+y$ After'], ['scan.pdf', '![Page 2]']]) {
+          const output = join(documents, name + '.md')
+          const message = await convertDocument.execute({ input_path: join(fixtures, name), output_path: output }, { callId: name })
+          if (!String(message.content).startsWith('[Converted document · Markdown]') || !(await readFile(output, 'utf8')).includes(expected)) {
+            throw new Error('Packaged conversion failed for ' + name + ': ' + String(message.content))
+          }
+        }
       }
     }
     const authorization = createShellCommandAuthorization({ shell, env: searchEnvironment.env, rgExecutable: searchEnvironment.executable,

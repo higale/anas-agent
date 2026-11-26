@@ -83,7 +83,7 @@ async function loadSkillsStore(externalDirectories: unknown[] = []) {
 
 afterEach(async () => {
   vi.doUnmock('node:fs/promises')
-  vi.doUnmock('./renameDirectoryExclusive')
+  vi.doUnmock('./renameExclusive')
   vi.doUnmock('./config/dataDir')
   vi.doUnmock('./projectStore')
   vi.doUnmock('./config/appConfig')
@@ -833,10 +833,10 @@ Body
   })
 
   it('keeps the committed Skill in the original directory when the user link changes', async () => {
-    const native = await vi.importActual<typeof import('./renameDirectoryExclusive')>('./renameDirectoryExclusive')
+    const native = await vi.importActual<typeof import('./renameExclusive')>('./renameExclusive')
     const linkType = process.platform === 'win32' ? 'junction' : 'dir'
-    vi.doMock('./renameDirectoryExclusive', () => ({ renameDirectoryExclusive: (from: string, to: string) => {
-      native.renameDirectoryExclusive(from, to)
+    vi.doMock('./renameExclusive', () => ({ renameExclusive: (from: string, to: string) => {
+      native.renameExclusive(from, to)
       if (basename(to) === 'first-import') {
         unlinkSync(h.skillsDir)
         symlinkSync(h.bundledSystemDir, h.skillsDir, linkType)
@@ -855,13 +855,13 @@ Body
   })
 
   it('keeps successful and edited Skills and continues after one publication fails', async () => {
-    const native = await vi.importActual<typeof import('./renameDirectoryExclusive')>('./renameDirectoryExclusive')
-    vi.doMock('./renameDirectoryExclusive', () => ({ renameDirectoryExclusive: (from: string, to: string) => {
+    const native = await vi.importActual<typeof import('./renameExclusive')>('./renameExclusive')
+    vi.doMock('./renameExclusive', () => ({ renameExclusive: (from: string, to: string) => {
       if (basename(to) === 'second-import') {
         writeFileSync(join(h.skillsDir, 'first-import', 'guide.bin'), Buffer.from([0, 9, 8, 7]))
         throw new Error('Disk full')
       }
-      native.renameDirectoryExclusive(from, to)
+      native.renameExclusive(from, to)
     } }))
     const h = await loadSkillsStore()
     const sources = await Promise.all(['first-import', 'second-import', 'third-import'].map(name => writeSkill(h.examplesDir, name)))
@@ -922,13 +922,13 @@ Body
   })
 
   it.each([true, false])('keeps a concurrent directory at publication and continues (empty: %s)', async empty => {
-    const native = await vi.importActual<typeof import('./renameDirectoryExclusive')>('./renameDirectoryExclusive')
-    vi.doMock('./renameDirectoryExclusive', () => ({ renameDirectoryExclusive: (from: string, to: string) => {
+    const native = await vi.importActual<typeof import('./renameExclusive')>('./renameExclusive')
+    vi.doMock('./renameExclusive', () => ({ renameExclusive: (from: string, to: string) => {
       if (basename(to) === 'occupied') {
         mkdirSync(to)
         if (!empty) writeFileSync(join(to, 'notes.md'), 'existing')
       }
-      native.renameDirectoryExclusive(from, to)
+      native.renameExclusive(from, to)
     } }))
     const h = await loadSkillsStore()
     const sources = await Promise.all(['occupied', 'fresh'].map(name => writeSkill(h.examplesDir, name)))

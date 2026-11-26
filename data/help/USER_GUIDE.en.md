@@ -112,7 +112,7 @@ Provides `write_todos` to create and update the current task's plan and completi
 
 Runs programs, scripts, searches, tests, and builds through the system command interpreter. The tool uses its actual program name, such as `zsh` on macOS or `pwsh` or `powershell` on Windows. A supported command interpreter must be available.
 
-Bundled rg supports file and text searches without a separate installation. Windows and macOS packages include application-managed fallback Python without pip or ensurepip. By default, the model receives its absolute path and chooses whether to invoke it; ordinary `python`/`python3` commands keep using the system environment. Other runtimes, such as Node.js, must be installed as needed. Follow-up terminal input requires **Background tools**; application `.env` variables are controlled separately by **.env**. Commands follow the conversation’s access mode.
+Bundled rg supports file and text searches without a separate installation. Python and Node.js must be installed as needed. Follow-up terminal input requires **Background tools**; application `.env` variables are controlled separately by **.env**. Commands follow the conversation’s access mode.
 
 Command execution manages only the directly launched Shell. Its exit completes the call; cancellation, timeout and exiting Anas stop only that Shell. Stop its children explicitly when needed. With Background tools enabled, a long-running Shell can continue across turns after returning a call ID; stopping the reply does not cancel that yielded Shell. Use `read_call` / `wait_call` for status and `cancel_call` to stop a live Shell. Cancelling a completed call does not stop its children. Completed results directly include known remaining direct child processes.
 
@@ -174,6 +174,7 @@ Creates, changes, moves, or deletes local files without requiring **Command exec
 | --- | --- |
 | `apply_patch` | Edit files by context using the Codex patch format; the JSON tool interface supports a preview without writing. |
 | `write_file` | Create a text file or explicitly replace the entire contents of an existing file. |
+| `document_to_markdown` | Convert a PDF, DOCX or PPTX to a new Markdown file and export embedded images. See [Attachments and voice input](#attachments-and-voice-input). |
 | `restore_file_edit` | Undo a complete recorded `apply_patch` or `write_file` operation. Recovery data must still be available; conflicting edits are not overwritten. |
 | `get_file_edit_diff` | Inspect recorded Agent file changes, rather than Git working-tree changes. This tool itself is read-only. |
 | `create_directory` | Create a directory and missing parents. |
@@ -341,22 +342,11 @@ Subagents can work in the background. Select a subagent status entry to view its
 
 ## Runtime Environment And Variables
 
-**Settings > Environment** has separate **Bundled rg** and **Bundled Python** checkboxes. Both default to on. If the machine already has a system Python, you can turn off **Bundled Python** globally. Turn it on to show the model how to use the bundled interpreter. Changes apply from the next request to projects and subagents with **Runtime environment information** enabled. Subagents follow **Limit subagent capabilities**. Both settings default to on when missing after an upgrade. If you previously disabled rg or Python instructions, you can turn them off again here.
+**Settings > Environment > Bundled rg** controls rg instructions for projects and subagents with runtime environment information enabled. It defaults to on.
 
-A `.py` custom-tool entry first probes system Python 3 by executing code. If no system interpreter is usable, it probes and uses the bundled executable by absolute path. Uninstalled Microsoft Store aliases are not accepted merely because a file exists. Probes have timeouts and never request automatic installation. Ordinary and interactive `.py` tools share this selection. Script errors and missing dependencies do not trigger retries with another interpreter. Explicit `python ...`, `py -3 ...` and virtual-environment commands keep their configured meaning without fallback. Windows interactive tools with an explicit interpreter should use its absolute path.
+Python custom tools require system Python 3 or an explicitly configured interpreter. Install any extra packages in that environment. For a tool whose command explicitly uses `{{bundled_python}}`, change the command to a `.py` entry or the absolute path of your interpreter.
 
-Bundled Python runs directly from the application package and is maintained by Anas builds and updates. It is no longer copied to the data directory, and has no startup preparation or reset workflow. The package excludes pip, ensurepip, setuptools and wheel. Do not install, upgrade, remove or modify its dependencies; use your own Python environment for additional packages. Automatic fallback and the suggested invocation use `-E -s -B -X utf8` to ignore Python environment overrides and user packages and prevent bytecode writes, while retaining script-local imports, business environment variables and normal output files. System interpreter execution is unchanged. Write outputs and caches to your working directory. This is an application resource boundary, not an operating-system-enforced read-only sandbox.
-
-The model’s **Bundled commands** section lists the document libraries shipped for the current platform, their versions and common import names such as `pdfplumber`, `mammoth`, `pptx` and `PIL`. When running a script with bundled Python, add the library directory before importing these modules. The selected MarkItDown converters are available under `anas_markitdown`.
-
-```python
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(sys.base_prefix) / "anas-documents"))
-```
-
-Reinstall Anas if the packaged Python files are damaged or missing. Existing data-directory `runtimes/` contents are preserved without reading, migrating or automatically deleting them. They remain excluded from backups and retained during restore and unknown-file cleanup. **Detect System Environment** inserts system command information at the last cursor position in Custom Environment Information, replacing selected text.
+Existing data-directory `runtimes/` contents are preserved without reading, migrating or automatically deleting them. They remain excluded from backups and retained during restore and unknown-file cleanup. **Detect System Environment** inserts system command information at the last cursor position in Custom Environment Information, replacing selected text.
 
 Custom Environment Information is enabled by default. If selected and empty at startup, it is filled by background detection without blocking startup. Existing content is preserved; deselecting it during detection discards the result.
 
@@ -382,7 +372,7 @@ Import examples and tool templates from the application package into independent
 
 Manage global availability in tool details, and select tools with checkboxes in project and subagent capabilities. Entries are grouped by source, with multiple tools per row. Subagents have independent choices, may select Use current project tools, and follow project limits. For duplicate names, the first valid enabled entry wins: project tool directories in order, then user tools and external directories in order.
 
-Commands run in the tool directory, where relative paths resolve, for example `scripts/run.py {{args}}`. A `.py` entry automatically selects an available Python 3; use `{{bundled_python}} convert.py {{args}}` to select the bundled interpreter explicitly. A standalone `{{args}}` receives complete JSON; `{{tool_dir}}` supplies the absolute tool directory. A command starts one program with fixed arguments, without pipelines or redirection. Standard output is returned to the model; pass large inputs through files.
+Commands run in the tool directory, where relative paths resolve, for example `scripts/run.py {{args}}`. A `.py` entry uses system Python 3. A standalone `{{args}}` receives complete JSON; `{{tool_dir}}` supplies the absolute tool directory. A command starts one program with fixed arguments, without pipelines or redirection. Standard output is returned to the model; pass large inputs through files.
 
 **Interactive terminal (PTY)** supports programs needing follow-up input and requires **Background tools**, without requiring **Command execution**. Leave it off for ordinary text results. A blank timeout means no limit; positive seconds set an execution limit, including time spent waiting for input. Cancellation or timeout terminates the process tree but does not undo changes already made.
 
@@ -412,7 +402,7 @@ Sending an attachment saves a local copy, so moving or deleting the original doe
 
 Plain text, Markdown, HTML and SVG source are sent as text attachments. Images require a model with Vision enabled. Selecting or dropping other files and folders appends their original paths to the input, one per line.
 
-The system custom tool `document_to_markdown` converts PDF, DOCX and PPTX files to UTF-8 Markdown offline. On Windows and macOS, enable this tool to use the interpreter and conversion libraries shipped with Anas.
+The built-in file tool `document_to_markdown` converts PDF, DOCX and PPTX files to UTF-8 Markdown offline. Projects and subagents can select it under File write.
 
 - `input_path` is required. Supply the absolute path to the source document.
 - `output_path` is required. Supply an absolute path for a new Markdown file. The tool creates missing parent directories and reports an error if the file already exists.
@@ -420,11 +410,11 @@ The system custom tool `document_to_markdown` converts PDF, DOCX and PPTX files 
 
 On success, the result contains the `[Converted document · Markdown]` marker, the source and saved file paths, and the Markdown line and byte counts. With File Read enabled, the model can use `read_file` to read line ranges. A script can read exceptionally long lines in smaller chunks when Command Execution is enabled.
 
-When the document contains embedded pictures, the tool creates a sibling folder named after the output file. For example, `report.md` links to images in `report_images/`. Word and PowerPoint pictures appear in place. PDF images follow the text in page order with page numbers. Keep the folder beside the Markdown file when moving or sharing it. If the image folder already exists, choose a new output path.
+When the document contains embedded pictures, the tool creates a sibling folder named after the output file. For example, `report.md` links to images in `report_images/`. Word and PowerPoint pictures appear in place. PDF images follow the text of their respective pages and carry the page number. Keep the folder beside the Markdown file when moving or sharing it. If the image folder already exists, choose a new output path.
 
 PowerPoint conversion skips ink strokes and their preview images. Text, tables, and regular pictures in the same group are preserved. Office equations in text boxes, tables, and speaker notes are written as LaTeX when supported. An equation with an unsupported structure or mathematical alphabet (such as the double-struck ℝ) is preserved in full as Office Math XML. Embedded MathML appears in XML code blocks. If the MathML cannot be parsed, the tool keeps an available alternative, such as a preview image. A preview of an entire group is accompanied by the group's readable text and tables. If no alternative is available, a message appears in place of the formula.
 
-Embedded SVG images can be opened from the image folder in a browser. For regular EMF and WMF pictures, Windows can render PNG previews and macOS links to the original metafiles. For diagrams built from separate shapes, the output contains the shape text. Refer to the slide for spatial relationships.
+Embedded SVG images can be opened in a browser. On Windows, ordinary EMF and WMF pictures appear inline as PNGs when rendering succeeds. Other platforms and pictures that Windows cannot render use links to the original files. TIFF pictures also use file links. For diagrams built from separate shapes, the output contains the shape text. Refer to the slide for spatial relationships.
 
 The source size limit is 64 MiB. Office archives can expand to 256 MiB and contain up to 32,000 entries. Scanned PDFs retain their page images. Extracting searchable text requires a text layer in the original. Save legacy .doc and .ppt files in a newer format first.
 

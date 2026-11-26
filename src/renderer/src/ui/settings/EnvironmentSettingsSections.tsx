@@ -7,7 +7,6 @@ import { notice } from '../notice'
 import { UI_TEXTAREA_ROWS_COMPACT } from '../uiConstants'
 import { EnvSettings } from './EnvSettings'
 import { SettingsGroup } from './SettingsGroup'
-import { BundledPythonSettings } from './BundledPythonSettings'
 import type { SettingsTab } from './settingsTabs'
 
 interface EnvironmentSettingsSectionsProps {
@@ -24,7 +23,6 @@ interface EnvironmentSettingsSectionsProps {
 const defaultEnvironmentContext = Object.freeze<EnvironmentContextSettings>({
   operatingSystem: true,
   bundledRg: true,
-  bundledPython: true,
   currentDate: true,
   applicationDataDirectory: true,
   userHomeDirectory: true,
@@ -38,7 +36,6 @@ const environmentContextCheckboxKeys = Object.freeze([
   'applicationDataDirectory',
   'userHomeDirectory',
   'bundledRg',
-  'bundledPython'
 ] satisfies Array<keyof EnvironmentContextSettings>)
 
 export function EnvironmentSettingsSections({
@@ -174,7 +171,6 @@ export function EnvironmentSettingsSections({
         </SettingsGroup>
       </section>
       <section className={sectionClass('environment')}>
-        <BundledPythonSettings />
       </section>
       <section className={sectionClass('environment')}>
         <EnvSettings

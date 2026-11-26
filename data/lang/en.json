@@ -473,8 +473,6 @@
     "environment_detection_failed": "System environment detection failed.",
     "environment_detection_content_changed": "The environment information changed during detection, so the result was not inserted. Position the cursor and detect again.",
     "capability_applicationEnvironment": ".env",
-    "capability_bundledPython": "Bundled Python",
-    "capability_bundledPython_hint": "Show the bundled Python path, usage and libraries to projects and subagents with Runtime environment information enabled. Each tool selects its interpreter through its command.",
     "capability_applicationEnvironment_hint": "Control whether the data-directory .env file takes effect. When disabled, all variables from that file are unavailable.",
     "capability_subagents": "Subagents",
     "capability_subagents_hint": "Provide configured asynchronous subagents and tools to start, read, wait for, and cancel them.",
@@ -1058,9 +1056,7 @@
     "memory_conflict": "Memory has changed. Compare the latest text below with your draft in the editor before saving.",
     "memory_reviewed": "I have reviewed the latest text",
     "memory_finish_edit": "Project memory has unsaved changes. Save or cancel the edit before closing the panel.",
-    "memory_document_empty": "No consolidated preferences yet.",
-    "bundled_python": "Bundled Python",
-    "bundled_python_hint": "Managed by Anas and run directly from the application package, without pip or ensurepip. Scripts may use it, but must not modify the runtime or its packages. Use your own Python environment for additional dependencies. The Bundled Python checkbox in Runtime environment controls model instructions globally. Reinstall Anas if its files are damaged."
+    "memory_document_empty": "No consolidated preferences yet."
   },
   "speech_input": {
     "open_win32": "System voice typing (Win+H)",
@@ -1440,7 +1436,7 @@
     "interactive": "Interactive terminal (PTY)",
     "interactive_hint": "Requires Background tools. Allocates a terminal at launch for follow-up input; waiting for input counts toward the timeout. stdout/stderr are merged and may contain terminal control sequences. Leave off for tools that read raw files.",
     "requires_background": "Requires Background tools",
-    "protocol_hint": "Pass complete JSON with {{args}}. A .py entry uses system Python 3 first, then bundled Python if needed. Use {{bundled_python}} for libraries shipped with Anas, or a virtual environment’s interpreter path for its packages. Paths resolve from the tool directory ({{tool_dir}}). stdout is returned verbatim.",
+    "protocol_hint": "Pass complete JSON with {{args}}. A .py entry uses system Python 3. Specify the interpreter path for a virtual environment. Paths resolve from the tool directory ({{tool_dir}}). stdout is returned verbatim.",
     "update_failed": "Could not update custom tool settings. Check the details below.",
     "project_tools": "Use current project tools",
     "project_tools_summary": "Project tools",

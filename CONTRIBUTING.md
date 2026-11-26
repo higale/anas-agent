@@ -21,6 +21,8 @@ Anas 在独立的开发仓库中维护。公开的 `anas-agent` 仓库定期接�
 
 使用 Node.js 24、npm 和 Git。在目标操作系统上安装依赖，不要跨平台复制 `node_modules`。如果没有匹配的预编译原生模块，可能需要安装平台构建工具。只有使用 Python 工具、Skills 或相关测试时才需要 Python。在 Windows PowerShell 中，如果执行策略阻止 `npm.ps1`，请使用 `npm.cmd`。
 
+`npm install` 和 `npm ci` 按锁文件中的 npm 官方源地址下载已锁定的包，并校验完整性。项目的 `.npmrc` 保留这些地址，即使本机默认使用第三方镜像，也无需修改全局 npm 配置。
+
 ```bash
 npm ci
 npm run dev

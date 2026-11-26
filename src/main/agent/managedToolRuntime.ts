@@ -13,7 +13,7 @@ import { toolLocalCommitStarted, withToolExecution } from './toolExecutionContex
 
 const managementTools = new Set(['read_call', 'read_call_output', 'wait_call', 'cancel_call', 'write_call'])
 const builtinTools = new Set<string>(builtinToolCatalog.map(({ id }) => id))
-const fileMutations = new Set(['apply_patch', 'write_file', 'restore_file_edit', 'create_directory', 'move_file', 'delete_file'])
+const fileMutations = new Set(['document_to_markdown', 'apply_patch', 'write_file', 'restore_file_edit', 'create_directory', 'move_file', 'delete_file'])
 
 export interface ManagedResultStorage {
   /** Current format is supplied by the owning database, never inferred. */

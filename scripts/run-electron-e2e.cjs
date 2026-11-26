@@ -599,11 +599,12 @@ async function verifyProjectModelSelection(electronApplication) {
   await dialog.locator('.ui-dialog-footer button').first().click()
   await expect(dialog).not.toBeVisible()
   await page.locator('.project-picker-trigger').click()
-  await expect(page.getByRole('menuitem', { name: 'New chat', exact: true })).toHaveCount(1)
+  const newProjectItem = page.getByRole('menuitem', { name: 'New project', exact: true })
+  await expect(newProjectItem).toHaveCount(1)
   if (process.env.ANAS_E2E_PROJECT_SCREENSHOT) {
-    await page.screenshot({ path: process.env.ANAS_E2E_PROJECT_SCREENSHOT.replace(/\.png$/, '-new-chat-menu.png') })
+    await page.screenshot({ path: process.env.ANAS_E2E_PROJECT_SCREENSHOT.replace(/\.png$/, '-new-project-menu.png') })
   }
-  await page.getByRole('menuitem', { name: 'New chat', exact: true }).click()
+  await newProjectItem.click()
   const creationCodingMode = dialog.getByRole('checkbox', { name: 'Coding mode', exact: true })
   await expect(creationCodingMode).not.toBeChecked()
   const creationIcon = dialog.locator('.project-appearance-trigger svg').first()

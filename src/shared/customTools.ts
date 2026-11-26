@@ -70,7 +70,6 @@ function customToolCommandTokens(command: string): { value: string; start: numbe
   return tokens
 }
 
-export const bundledPythonCommand = '{{bundled_python}}'
 
 export function customToolCapabilityIssue(tool: CustomToolDefinition | undefined, backgroundTools: boolean) {
   if (tool?.interactive && !backgroundTools) return 'custom_tools.requires_background'
@@ -85,7 +84,7 @@ export function parseCustomToolCommand(command: string): { executable: string; a
 export function getCustomToolCommandFile(command: string): { start: number; end: number; relativePath: string } | undefined {
   const tokens = customToolCommandTokens(command)
   const executable = tokens[0].value.replace(/\\/g, '/').split('/').at(-1)!
-  const interpreter = tokens[0].value === bundledPythonCommand || /^(?:python(?:\d+(?:\.\d+)*)?|node|ruby|perl|php|lua|bash|zsh|sh)(?:\.exe)?$/i.test(executable)
+  const interpreter = /^(?:python(?:\d+(?:\.\d+)*)?|node|ruby|perl|php|lua|bash|zsh|sh)(?:\.exe)?$/i.test(executable)
   const token = tokens[interpreter ? 1 : 0]
   if (!token || token.value.startsWith('-')) return
   let path = token.value.replace(/\\/g, '/').replace(/^\{\{tool_dir\}\}\//, '')

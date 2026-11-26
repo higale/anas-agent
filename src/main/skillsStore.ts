@@ -10,7 +10,7 @@ import { shell } from 'electron'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { isSameOrInsideDirectory } from './pathContainment'
-import { renameDirectoryExclusive } from './renameDirectoryExclusive'
+import { renameExclusive } from './renameExclusive'
 import { copyPackageContents } from './copyPackageContents'
 import { runtimeLog } from './runtimeLogger'
 import { inspectSkillText } from './skillDefinition'
@@ -721,7 +721,7 @@ async function importSkillDirectoriesExclusive(sourcePaths: readonly string[]): 
       await verifyDestination()
       await checkImportDirectory(stage, stageId)
       try {
-        renameDirectoryExclusive(stage, target)
+        renameExclusive(stage, target)
       } catch (reason) {
         if ((reason as NodeJS.ErrnoException).code !== 'EEXIST') throw reason
         throw new SkillImportFailure('already_exists', `Skill already exists: ${source.name}`, source.name)

@@ -42,7 +42,7 @@ git fetch origin
 | macOS Intel | `macos-15-intel`，x64 | `Anas-<version>-macos-x64.dmg` |
 | Windows x64 | `windows-2022` | `Anas-<version>-windows-x64.zip` |
 
-Python 使用 `build/python-runtime.json` 锁定三个平台的版本、下载地址、大小和 SHA-256。`npm run prepare:python`、开发／构建及打包钩子在构建机准备发行件，缓存位于 `tmp/python-downloads/`，生成资源位于 Git 忽略的 `build/python-runtime/`。每个包仅携带本平台架构的 `python/`，应用直接调用该资源，不在启动时下载或复制到数据目录。构建移除 pip、ensurepip、setuptools、wheel 及对应安装入口，写入 `EXTERNALLY-MANAGED`；依赖由构建过程管理。旧 `runtimes/` 不读取、不迁移、不清理，继续从备份与修复保全副本排除。文档工具的 wheel 按平台在 `build/document-wheels.json` 中锁定文件与 SHA-256。原生构建直接使用刚解包的解释器，交叉构建使用宿主 Python 3.8 或以上（Windows 使用 `python`，macOS 使用 `python3`）。构建通过 curl 下载，再用标准库展开已验证的 wheel 到 `python/anas-documents/`。更新 MarkItDown 时核对所选上游转换模块及其导入，使用准备好的解释器执行 `scripts/test-document-conversion.py` 验证三种格式的 Markdown 输出。更新运行时需同步校验值、上游许可证及相关验证；不得使用浮动 latest 地址。包内自检使用隔离应用数据目录和无系统 Python 的 PATH，验证包内绝对路径、标准库、Shell 调用、`.py` 保底、中文与脚本同目录导入、安装器缺失、环境隔离及无字节码／用户运行时副本。系统优先、能力开关、取消与商店占位链接另由行为测试覆盖。macOS 仍须通过现有完整签名检查。
+包内自检调用原生文档转换工具，核对新建的 Markdown 文件与返回的行数、大小。Windows 和 macOS 打包均不下载或分发 Python 运行时。
 
 每个作业使用 Node.js 24，在本机架构安装锁定依赖、运行 lint、类型检查与构建，再校验打包资源和实际启动。macOS 检查 ad-hoc 签名，不执行证书签名或公证；Windows ZIP 内有完整 `Anas/` 目录，不是安装器或单文件便携 EXE。Release 同时提供 `SHA256SUMS.txt`。
 

@@ -4,7 +4,7 @@ import type { ToolDefinition } from './toolDefinition'
 import { isCustomToolMetadata } from '../shared/customTools'
 import { pluginToolMetadata } from '../shared/pluginTools'
 
-const writes = new Set(['write_file', 'apply_patch', 'restore_file_edit', 'create_directory', 'move_file', 'delete_file',
+const writes = new Set(['document_to_markdown', 'write_file', 'apply_patch', 'restore_file_edit', 'create_directory', 'move_file', 'delete_file',
   'http_request', 'write_call', 'update_config'])
 
 export function supportsApprovalParameter(tool: Pick<ToolDefinition, 'name' | 'metadata'>): boolean {

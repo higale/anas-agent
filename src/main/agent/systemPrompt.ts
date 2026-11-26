@@ -2,7 +2,6 @@ import { homedir } from 'node:os'
 import type { AgentFeatures, AppConfigSnapshot, AppProfile, EnvironmentContextSettings } from '@shared/types'
 import { capabilityFeatures, defaultCapabilities } from '@shared/agentCapabilities'
 import { getDataDir } from '../config/dataDir'
-import { bundledPythonArgs, getBundledPythonInfo } from '../bundledPython'
 
 export type AgentSystemPromptSectionKind =
   | 'profile'
@@ -85,19 +84,6 @@ export function buildRuntimeContextBlock(
   const customInformation = context.customInformation.trim()
   const commandDescriptions = context.bundledRg
     ? ['- rg: ripgrep for text and file search, on PATH in Anas shell commands.'] : []
-  const bundledPython = context.bundledPython ? getBundledPythonInfo() : undefined
-  if (bundledPython) {
-    const quoted = `'${bundledPython.executable.replaceAll("'", process.platform === 'win32' ? "''" : "'\\''")}'`
-    commandDescriptions.push(escapeXml(`- Python ${bundledPython.version} (fallback; ${bundledPython.state}): ${bundledPython.executable}`))
-    commandDescriptions.push(escapeXml(`  Prefer a working system Python for general scripts. To use the bundled libraries or when system Python is unavailable, invoke ${process.platform === 'win32' ? '& ' : ''}${quoted} ${bundledPythonArgs.join(' ')} followed by script arguments. System Python has its own packages and PATH is unchanged.`))
-    commandDescriptions.push('  This runtime and its packages are application-managed resources. Do not modify them or install, upgrade or remove packages there. pip and ensurepip are not included. Use a separate user-managed Python environment for additional dependencies; write script outputs and caches outside the application package.')
-    if (bundledPython.state === 'available' && bundledPython.documentPackages?.length) {
-      commandDescriptions.push(escapeXml(`  Document libraries bundled with this interpreter: ${bundledPython.documentPackages.join(', ')}.`))
-      commandDescriptions.push('  To use these libraries, run the bundled interpreter. Before importing them, add the library directory in your script:',
-        '    import sys', '    from pathlib import Path', '    sys.path.insert(0, str(Path(sys.base_prefix) / "anas-documents"))')
-    }
-    if (bundledPython.state === 'unavailable') commandDescriptions.push('  The bundled executable is missing from the application package. Use system Python or reinstall Anas; do not reuse an old runtime from the application data directory.')
-  }
   const details = [
     ...(context.operatingSystem ? [`Operating system: ${operatingSystemName()}`] : []),
     ...(commandShell ? [`Command shell: ${commandShell}`] : []),

@@ -8,3 +8,8 @@ patches/*.patch whitespace=-blank-at-eol,-space-before-tab
 *.icns binary
 *.ico binary
 *.png binary
+*.pdf binary
+*.docx binary
+*.pptx binary
+*.emf binary
+*.wmf binary

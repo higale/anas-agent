@@ -1,14 +1,12 @@
 import { serializeToolInput } from '../../runtime/toolInput'
 import { defineContentTool, type ToolDefinition } from '../../runtime/toolDefinition'
-import { getCacheDir } from '../config/dataDir'
 import { stat } from 'node:fs/promises'
 import { extname, resolve } from 'node:path'
-import { bundledPythonCommand, customToolCapabilityIssue, maxCustomToolInputBytes, maxCustomToolOutputChars, parseCustomToolCommand, type CustomToolDefinition } from '@shared/customTools'
+import { customToolCapabilityIssue, maxCustomToolInputBytes, maxCustomToolOutputChars, parseCustomToolCommand, type CustomToolDefinition } from '@shared/customTools'
 import { runPreparedProcess, type ShellRunResult } from '../shellRuntime'
 import { withToolPackageDirectory } from '../toolsStore'
 import { currentToolExecution } from './toolExecutionContext'
 import { discoverPython3 } from '../runtimeDiscovery'
-import { bundledPythonArgs, discoverBundledPython } from '../bundledPython'
 
 export function customToolDefinitions(definitions: readonly CustomToolDefinition[], options: {
   env: NodeJS.ProcessEnv
@@ -40,12 +38,7 @@ export function customToolDefinitions(definitions: readonly CustomToolDefinition
         }
         // Probe and execution share the same environment, including the effective .env.
         const env: NodeJS.ProcessEnv = { ...process.env, ...options.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' }
-        if (command.executable === bundledPythonCommand) {
-          const python = await discoverBundledPython({ env, cwd: directory, signal })
-          if (!python) return failure('Bundled Python is unavailable for this installation.')
-          env.ANAS_CACHE_DIR = getCacheDir()
-          invocation = { ...invocation, executable: python.executable, args: [...bundledPythonArgs, ...invocation.args] }
-        } else if (extname(invocation.executable).toLowerCase() === '.py') {
+        if (extname(invocation.executable).toLowerCase() === '.py') {
           const script = resolve(directory, invocation.executable)
           try {
             if (!(await stat(script)).isFile()) return failure(`Python script is not a regular file: ${script}`)
@@ -53,10 +46,9 @@ export function customToolDefinitions(definitions: readonly CustomToolDefinition
             signal?.throwIfAborted()
             return failure(`Cannot access Python script ${script}: ${error instanceof Error ? error.message : String(error)}`)
           }
-          const systemPython = await discoverPython3({ env, cwd: directory, signal, cache: true })
-          const python = systemPython ?? await discoverBundledPython({ env, cwd: directory, signal })
-          if (!python) return failure('No usable Python 3 interpreter was found in the system environment or application package. Specify a working interpreter explicitly.')
-          invocation = { ...invocation, executable: python.executable, args: [...(systemPython ? [] : bundledPythonArgs), script, ...invocation.args] }
+          const python = await discoverPython3({ env, cwd: directory, signal, cache: true })
+          if (!python) return failure('No usable Python 3 interpreter was found in the system environment. Specify a working interpreter explicitly.')
+          invocation = { ...invocation, executable: python.executable, args: [script, ...invocation.args] }
         }
         signal?.throwIfAborted()
         let result: ShellRunResult | undefined

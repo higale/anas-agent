@@ -210,7 +210,6 @@ function normalizeEnvironmentContext(raw: RawAppConfig): AppSettings['environmen
   return {
     operatingSystem: requireBoolean(context.operating_system, 'settings.environment_context.operating_system'),
     bundledRg: context.bundled_rg === undefined || requireBoolean(context.bundled_rg, 'settings.environment_context.bundled_rg'),
-    bundledPython: context.bundled_python === undefined || requireBoolean(context.bundled_python, 'settings.environment_context.bundled_python'),
     currentDate: requireBoolean(context.current_date, 'settings.environment_context.current_date'),
     applicationDataDirectory: requireBoolean(
       context.application_data_directory,
@@ -397,7 +396,6 @@ function serializeEnvironmentContext(context: AppSettings['environmentContext'])
   return {
     operating_system: context.operatingSystem,
     bundled_rg: context.bundledRg,
-    bundled_python: context.bundledPython,
     current_date: context.currentDate,
     application_data_directory: context.applicationDataDirectory,
     user_home_directory: context.userHomeDirectory,

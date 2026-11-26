@@ -79,7 +79,6 @@ describe('shared capability editor', () => {
   it.each([false, true])('groups bundled command information under the environment capability (subagent %s)', subagent => {
     render(<Harness subagent={subagent} />)
     expect(screen.getByRole('checkbox', { name: 'settings.capability_environment' })).toBeInTheDocument()
-    expect(screen.queryByRole('checkbox', { name: 'settings.capability_bundledPython' })).not.toBeInTheDocument()
   })
 
   it.each([false, true])('controls sleep separately from background and command tools in subagent mode %s', async (subagent) => {

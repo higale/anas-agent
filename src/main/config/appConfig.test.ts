@@ -553,19 +553,17 @@ describe('configuration domain writes', () => {
   it('defaults missing bundled settings to on, ignores retired settings and persists explicit choices', async () => {
     const raw = rawConfig()
     delete raw.settings!.environment_context!.bundled_rg
-    delete raw.settings!.environment_context!.bundled_python
     Object.assign(raw.settings!.environment_context!, { power_shell: false, bundled_commands: false })
     const { appConfig, writeRawSettingsConfig } = await loadAppConfig(raw)
 
     expect((await appConfig.getAppConfigSnapshot()).settings.environmentContext)
-      .toMatchObject({ operatingSystem: true, bundledRg: true, bundledPython: true })
+      .toMatchObject({ operatingSystem: true, bundledRg: true })
     expect(writeRawSettingsConfig).not.toHaveBeenCalled()
 
     const snapshot = await appConfig.updateSettings({
       environmentContext: {
         operatingSystem: false,
         bundledRg: false,
-        bundledPython: false,
         currentDate: true,
         applicationDataDirectory: false,
         userHomeDirectory: true,
@@ -577,7 +575,6 @@ describe('configuration domain writes', () => {
     expect(raw.settings?.environment_context).toEqual({
       operating_system: false,
       bundled_rg: false,
-      bundled_python: false,
       current_date: true,
       application_data_directory: false,
       user_home_directory: true,
@@ -587,7 +584,6 @@ describe('configuration domain writes', () => {
     expect(snapshot.settings.environmentContext).toEqual({
       operatingSystem: false,
       bundledRg: false,
-      bundledPython: false,
       currentDate: true,
       applicationDataDirectory: false,
       userHomeDirectory: true,

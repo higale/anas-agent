@@ -30,6 +30,7 @@ export const builtinToolEffectPolicies = {
   get_file_info: 'read',
   apply_patch: 'conditional',
   write_file: 'confirm',
+  document_to_markdown: 'confirm',
   restore_file_edit: 'conditional',
   get_file_edit_diff: 'read',
   create_directory: 'idempotent',

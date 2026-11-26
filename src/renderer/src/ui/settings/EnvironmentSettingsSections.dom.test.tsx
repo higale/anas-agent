@@ -93,14 +93,6 @@ describe('environment settings', () => {
       environmentContext: { ...appSettings().environmentContext, bundledRg: false }
     })
     expect(checkbox).not.toBeChecked()
-    const python = screen.getByRole('checkbox', { name: 'settings.capability_bundledPython' })
-    expect(python).toBeChecked()
-    await user.click(python)
-    await user.click(checkbox)
-    expect(onSaveSettings).toHaveBeenLastCalledWith({
-      environmentContext: { ...appSettings().environmentContext, bundledRg: true, bundledPython: false }
-    })
-    expect(python).not.toBeChecked()
     expect(environmentMocks.detectSystemEnvironment).not.toHaveBeenCalled()
   })
 

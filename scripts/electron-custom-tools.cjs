@@ -103,7 +103,6 @@ async function verifyCustomTools(launchApplication) {
     const customToolsToggle = page.locator('.settings-skill-tree-root').filter({ hasText: /^All custom tools/ }).locator('.settings-skill-tree-toggle')
     const initialTools = await page.evaluate(() => globalThis.gale.tools.get())
     const systemTools = initialTools.tools.filter(tool => tool.source === 'system')
-    assert.ok(systemTools.some(tool => tool.name === 'document_to_markdown' && !tool.error))
     assert.equal(initialTools.tools.length, systemTools.length)
     assert.deepEqual(initialTools.roots.map(root => root.id), ['user', 'system'])
     await expect(customToolsGroup).toHaveText(`All custom tools${systemTools.length}`)

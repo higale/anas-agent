@@ -102,7 +102,7 @@ async function verifyCurrentData(launch) {
     await unifiedPage.reload()
     for (const number of [1, 2]) {
       await unifiedPage.locator('.project-picker-trigger').click()
-      await unifiedPage.getByRole('menuitem', { name: '新建对话', exact: true }).click()
+      await unifiedPage.getByRole('menuitem', { name: '新建项目', exact: true }).click()
       const creation = unifiedPage.locator('.project-dialog')
       await expect(creation.getByRole('textbox', { name: '项目名称', exact: true })).toHaveValue('')
       await expect(creation.getByRole('textbox', { name: '项目名称', exact: true })).toHaveAttribute('placeholder', `未命名项目${number}`)
