@@ -79,11 +79,11 @@ export function createManagedToolRuntime(definition: ToolDefinition, options: Ma
             }
             const output = await (options.withResources ? options.withResources(args, invoke) : invoke())
             const message = toolResultMessage(output, { name: definition.name, callId, metadata: definition.metadata })
-            if (kind === 'custom' && control.outcome?.ok === false) message.resultStatus = 'error'
+            if (control.outcome?.ok === false) message.resultStatus = 'error'
             // Publish the reference metadata only after its body is durable.
             // Await here so a rejected save participates in effect recovery.
             const reference = await options.results.save(message, { threadId: options.threadId, runId, managedCallId: control.callId })
-            control.setOutcome({ ok: typeof control.outcome?.ok === 'boolean' ? control.outcome.ok : message.resultStatus !== 'error',
+            control.setOutcome({ ok: message.resultStatus !== 'error',
               result_format: options.results.format, ...(kind !== 'shell' ? { result_output_chars: toolResultText(message).length } : {}),
               ...(toolLocalCommitStarted() ? { local_commit_completed: true } : {}) })
             return reference

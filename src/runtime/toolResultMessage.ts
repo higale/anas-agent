@@ -6,7 +6,7 @@ export function toolResultMessage(result: ToolResult, context: { name: string; c
     && result.content.every(block => block !== null && typeof block === 'object' && 'type' in block)
     ? result.content : JSON.stringify(result.content) ?? ''
   return { kind: 'tool', name: context.name, resultFor: context.callId, content, artifact: result.artifact,
-    resultMetadata: context.metadata, resultStatus: 'success' }
+    resultMetadata: context.metadata, resultStatus: result.status ?? 'success' }
 }
 
 export function toolResultText(message: Pick<ConversationMessage, 'content'>): string {

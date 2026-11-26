@@ -1,4 +1,4 @@
-import { defineTool, defineContentTool, type ToolDefinition } from '../../runtime/toolDefinition'
+import { defineTool, defineContentTool, jsonToolResult, type ToolDefinition } from '../../runtime/toolDefinition'
 import { z } from 'zod/v3'
 import { configToolDefinitions } from './configTools'
 import { httpRequestDefinition } from './httpRequestTool'
@@ -70,7 +70,7 @@ export function managedCallToolDefinitions(
   options: ManagedCallToolOptions = {}
 ): ToolDefinition[] {
   return [
-    defineContentTool({
+    defineTool({
       name: 'read_call',
       description: 'Read background call status without waiting. Pass call_id for one exact call, or omit it to list every call in this conversation that still requires attention. Output content is available through read_call_output.',
       inputSchema: z.object({
@@ -79,10 +79,10 @@ export function managedCallToolDefinitions(
       }),
       execute: async (input) => {
         const { managedCalls, threadId } = requireManagedCallContext(options)
-        return managedCalls.read({
+        return jsonToolResult(JSON.parse(await managedCalls.read({
           callId: input.call_id,
           threadId
-        })
+        })))
       }
     }),
     defineTool({
@@ -96,19 +96,19 @@ export function managedCallToolDefinitions(
       }),
       execute: async (input) => {
         const { managedCalls, threadId } = requireManagedCallContext(options)
-        const output = managedCalls.readOutput({
+        const output = jsonToolResult(JSON.parse(await managedCalls.readOutput({
           callId: input.call_id,
           threadId,
           offset: input.output_offset,
           length: input.output_length
-        })
+        })))
         const result = input.output_offset === 0 ? await managedCalls.readResult(input.call_id, threadId) : undefined
         const nonText = result && Array.isArray(result.content)
           ? result.content.filter((block) => block !== null && typeof block === 'object' && 'type' in block && block.type !== 'text') : []
-        return { content: nonText.length ? [{ type: 'text' as const, text: output }, ...nonText] : output, artifact: result?.artifact }
+        return { ...output, content: nonText.length ? [{ type: 'text' as const, text: String(output.content) }, ...nonText] : output.content, artifact: result?.artifact }
       }
     }),
-    defineContentTool({
+    defineTool({
       name: 'wait_call',
       description: 'Wait for one background call until it reaches a terminal state or the requested timeout expires. New output never wakes the wait. The response always includes the current total output size and progress counters; use read_call_output only when details are needed.',
       inputSchema: z.object({
@@ -118,15 +118,15 @@ export function managedCallToolDefinitions(
       }),
       execute: async (input) => {
         const { managedCalls, threadId } = requireManagedCallContext(options)
-        return managedCalls.wait({
+        return jsonToolResult(JSON.parse(await managedCalls.wait({
           callId: input.call_id,
           threadId,
           timeoutMs: typeof input.timeout === 'number' ? Math.round(input.timeout * 1000) : undefined,
           signal: options.signal
-        })
+        })))
       }
     }),
-    defineContentTool({
+    defineTool({
       name: 'cancel_call',
       description: 'Request cancellation of one exact background tool call owned by this conversation. Cancellation is idempotent; remote effects may remain uncertain.',
       inputSchema: z.object({
@@ -135,7 +135,7 @@ export function managedCallToolDefinitions(
       }),
       execute: async (input) => {
         const { managedCalls, threadId } = requireManagedCallContext(options)
-        return managedCalls.cancel(input.call_id, threadId)
+        return jsonToolResult(JSON.parse(await managedCalls.cancel(input.call_id, threadId)))
       }
     })
   ]
@@ -205,7 +205,7 @@ export async function runtimeToolDefinitions(options: RuntimeToolOptions): Promi
         working_dir: z.string().optional().describe('Execution directory, absolute or relative to the primary/default folder. Defaults to that folder.'),
       }).strict(),
       execute: async (input) => {
-        if (!options.shellRunner) return JSON.stringify({ ok: false, error: `${toolName} is not connected to an executor.` })
+        if (!options.shellRunner) throw new Error(`${toolName} is not connected to an executor.`)
         return options.shellRunner({
           command: input.command,
           summary: typeof input.summary === 'string' ? input.summary : undefined,

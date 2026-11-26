@@ -74,12 +74,30 @@ async function validateRestoreJournal(value: unknown, dataDir: string, path: str
   return journal as RestoreJournal
 }
 
+async function rollbackParents(root: string, name: string, create: boolean): Promise<boolean> {
+  let parent = root
+  for (const part of name.split('/').slice(0, -1)) {
+    parent = join(parent, part)
+    let info = await lstat(parent).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error
+    })
+    if (!info) {
+      if (!create) return false
+      await mkdir(parent)
+      info = await lstat(parent)
+    }
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error(`Cannot roll back through a linked or invalid directory: ${parent}`)
+  }
+  return true
+}
+
 export async function rollbackRestore(transactionRoot: string, journal: RestoreJournal): Promise<void> {
+  const dataDir = journal.dataDir
   const staged = join(transactionRoot, 'staged')
   const previous = join(transactionRoot, 'previous')
   if (journal.phase !== 'restoring_previous') {
     for (const name of [...journal.installedEntries].reverse()) {
-      await rm(join(journal.dataDir, name), { recursive: true, force: true })
+      await rm(join(dataDir, name), { recursive: true, force: true })
     }
     // Commit this boundary before moving any old entries back. Retrying cleanup
     // after a partial rollback would otherwise delete data already restored.
@@ -87,15 +105,12 @@ export async function rollbackRestore(transactionRoot: string, journal: RestoreJ
     await writeRestoreJournal(join(transactionRoot, 'transaction.json'), journal)
   }
   for (const name of [...journal.previousEntries].reverse()) {
+    if (!await rollbackParents(transactionRoot, `previous/${name}`, false)) continue
     const saved = join(previous, name)
     if (!(await pathExists(saved))) continue
-    if (name.includes('/')) {
-      const parent = dirname(join(journal.dataDir, name))
-      await mkdir(parent, { recursive: true })
-      if (!(await lstat(parent)).isDirectory()) throw new Error(`Cannot roll back through a linked directory: ${parent}`)
-    }
-    await rm(join(journal.dataDir, name), { recursive: true, force: true })
-    await rename(saved, join(journal.dataDir, name))
+    await rollbackParents(dataDir, name, true)
+    await rm(join(dataDir, name), { recursive: true, force: true })
+    await rename(saved, join(dataDir, name))
   }
   journal.phase = 'rolled_back'
   await writeRestoreJournal(join(transactionRoot, 'transaction.json'), journal)

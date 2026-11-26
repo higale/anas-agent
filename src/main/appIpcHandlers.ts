@@ -266,7 +266,7 @@ export function registerAppIpcHandlers(): void {
   handleMainIpc('app:cleanupData', async (_event, request: DataCleanupRequest): Promise<DataCleanupResult> => {
     const cleanupRequest = asRecord(request) as DataCleanupRequest
     const cleanup = await cleanupData(cleanupRequest, { clearElectronCache })
-    if (cleanupRequest.log_folder === true) {
+    if (cleanup.items.some(item => item.target === 'log_folder' && item.ok)) {
       const snapshot = await getAppConfigSnapshot()
       configureRuntimeLogger(snapshot.settings.logLevel, snapshot.settings.logRetentionDays)
     }

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream, openAsBlob } from 'node:fs'
-import { access, mkdir, open, rename, stat } from 'node:fs/promises'
+import { mkdir, open, rename, stat } from 'node:fs/promises'
 import { basename, dirname } from 'node:path'
 import { defineContentTool, type ToolDefinition } from '../../runtime/toolDefinition'
 import { z } from 'zod/v3'
@@ -9,6 +9,7 @@ import { registerExternalTemporaryFile, releaseExternalTemporaryFile } from '../
 import { resolveWorkspacePath } from '../workspacePath'
 import { toolSummarySchema } from './toolSummary'
 import { currentToolExecution } from '../agent/toolExecutionContext'
+import { renameExclusive } from '../renameExclusive'
 
 const envPlaceholderPattern = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g
 const methodsWithoutBody = new Set(['GET', 'HEAD'])
@@ -280,11 +281,8 @@ async function downloadResponse(
     await handle.sync()
     await handle.close()
     handle = undefined
-    if (!overwrite) await access(targetPath).then(
-      () => { throw new Error(`download target already exists: ${targetPath}`) },
-      () => undefined
-    )
-    await rename(temporaryPath, targetPath)
+    if (overwrite) await rename(temporaryPath, targetPath)
+    else renameExclusive(temporaryPath, targetPath)
     return bytesWritten
   } finally {
     await handle?.close().catch(() => undefined)

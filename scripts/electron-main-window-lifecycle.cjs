@@ -102,6 +102,26 @@ async function verifyMainWindowLifecycle(launchApplication) {
       await expect(plugin.locator('#draft')).toHaveValue('Keep this plugin draft')
       await main.evaluate(() => globalThis.removeEventListener('beforeunload', globalThis.__blockMainUnload))
     }
+    const cleanupFile = join(root, 'tmp', 'shutdown-cleanup.txt')
+    const cleanupPending = join(root, 'cleanup-pending'), cleanupContinue = join(root, 'cleanup-continue')
+    await mkdir(join(root, 'tmp'), { recursive: true })
+    await writeFile(cleanupFile, 'old session')
+    await application.evaluate((_electron, paths) => {
+      const fs = process.getBuiltinModule('node:fs/promises')
+      const remove = fs.rm
+      fs.rm = async (path, options) => {
+        if (path === paths.file) {
+          await fs.writeFile(paths.pending, 'cleanup entered')
+          const deadline = Date.now() + 4000
+          while (true) {
+            try { await fs.stat(paths.resume); break }
+            catch (error) { if (error.code !== 'ENOENT' || Date.now() >= deadline) throw error }
+            await new Promise(resolve => setTimeout(resolve, 20))
+          }
+        }
+        return remove(path, options)
+      }
+    }, { file: cleanupFile, pending: cleanupPending, resume: cleanupContinue })
     const child = applicationProcess
     await application.evaluate(({ BrowserWindow }, url) => {
       const window = BrowserWindow.getAllWindows().find(window => window.webContents.getURL() === url)
@@ -116,8 +136,12 @@ async function verifyMainWindowLifecycle(launchApplication) {
       await expect.poll(() => application.evaluate(({ BrowserWindow }, url) => BrowserWindow.getAllWindows().find(window => window.webContents.getURL() === url)?.isVisible(), mainUrl)).toBe(true)
       await application.evaluate(({ app }) => { setImmediate(() => app.quit()) })
     }
+    await expect.poll(() => readFile(cleanupPending, 'utf8').catch(() => ''), { timeout: 4000 }).toBe('cleanup entered')
+    assert.equal(child.exitCode, null, 'The application must own cleanup until it completes or the shutdown deadline expires.')
+    await writeFile(cleanupContinue, 'continue')
     await expect.poll(() => child.exitCode !== null || child.signalCode !== null, { timeout: 10000 }).toBe(true)
     assert.equal(child.exitCode, 0, 'Main-window close must complete normal application shutdown.')
+    await assert.rejects(readFile(cleanupFile), { code: 'ENOENT' })
     const notifications = JSON.parse(await readFile(notificationReport, 'utf8'))
     assert.ok(notifications.running > 0, 'Normal plugin changes must still notify the main renderer.')
     assert.equal(notifications.quitting, 0, 'Application shutdown must not trigger new plugin resource refreshes.')
@@ -133,9 +157,12 @@ async function verifyMainWindowLifecycle(launchApplication) {
     applicationProcess = application.process()
     main = await application.firstWindow()
     await main.locator('[data-agent-composer-input]').waitFor({ timeout: 45000 })
+    await writeFile(cleanupFile, 'new session')
+    await new Promise(resolve => setTimeout(resolve, 200))
+    assert.equal(await readFile(cleanupFile, 'utf8'), 'new session')
     assert.equal(await windowCount(application), 1, 'The same profile must restart without orphaned windows or a stale instance lock.')
     assert.equal((await main.evaluate(() => globalThis.gale.plugins.list())).find(plugin => plugin.id === 'window-lifecycle').backendStatus, 'stopped')
-    console.log(`Main window lifecycle passed on ${process.platform}: canceled close preserves windows; normal quit closes plugin windows, stops backends and connections, and releases the profile for restart.`)
+    console.log(`Main window lifecycle passed on ${process.platform}: canceled close preserves windows; normal quit stops backends and connections, owns temporary cleanup before exit, and releases the profile for restart.`)
   } finally {
     if (applicationProcess?.exitCode === null && applicationProcess?.signalCode === null) {
       await closeElectronTestApplication(application)

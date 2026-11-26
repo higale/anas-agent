@@ -134,7 +134,7 @@ async function verifyMcp(launchApplication) {
     })
     await page.screenshot({ path: resolve(__dirname, '../tmp/mcp-tool-preview.png') })
     await details.getByRole('button', { name: 'Copy', exact: true }).click()
-    await expect.poll(() => application.evaluate(({ clipboard }) => clipboard.readText())).toBe(JSON.stringify({
+    await expect.poll(() => application.evaluate(({ clipboard }) => clipboard.readText().replace(/\r\n/g, '\n'))).toBe(JSON.stringify({
       name: 'mcp__fixture__lookup', description: tools[0].description, parameters: tools[0].inputSchema
     }, null, 2))
     await details.getByRole('button', { name: 'Close', exact: true }).click()

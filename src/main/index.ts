@@ -9,7 +9,7 @@ import { getAppConfigSnapshot, initializeAppProfile } from './config/appConfig'
 import { acquireRuntimeLock, configureDataRuntime, getDataDir, getProgramName, releaseRuntimeLock } from './config/dataDir'
 import { closeCachedMcpRuntime, loadMcpRuntimeForCurrentConfig } from './mcpRuntimeService'
 import { configureRuntimeLogger, runtimeLog } from './runtimeLogger'
-import { cleanupTempFiles, cleanupTempFilesInBackground } from './tempCleanupService'
+import { cleanupTempFiles } from './tempCleanupService'
 import { activateMainWindow, applyNativeTheme, configureApplicationMenu, createMainWindow, markAppQuitting } from './appShell'
 import { applyWindowTheme } from './windowAppearance'
 import { registerAppIpcHandlers } from './appIpcHandlers'
@@ -166,7 +166,10 @@ function startApplication(): void {
       closePluginHost(),
       closeAgentRuntime({ allowIncomplete: true, timeoutMs: 5_000 }),
       closeCachedMcpRuntime()
-    ])
+    ]).then(results => {
+      // Keep recovery artifacts when a writer could not finish shutting down.
+      if (results.every(result => result.status === 'fulfilled' && result.value !== false)) return cleanupTempFiles()
+    })
     void Promise.race([
       shutdown,
       new Promise<void>((resolve) => {
@@ -174,7 +177,6 @@ function startApplication(): void {
       })
     ]).finally(() => {
       if (deadline) clearTimeout(deadline)
-      cleanupTempFilesInBackground()
       releaseRuntimeLock()
       app.exit(0)
     })

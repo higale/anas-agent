@@ -2,7 +2,7 @@ import { constants } from 'node:fs'
 import type { Stats } from 'node:fs'
 import { lstat, mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { defineContentTool, type ToolDefinition } from '../../runtime/toolDefinition'
+import { defineTool, jsonToolResult as json, type ToolDefinition, type ToolResult } from '../../runtime/toolDefinition'
 import { z } from 'zod/v3'
 import { builtinFileToolNames } from '@shared/toolRegistry'
 import { armCurrentAgentToolEffect, currentAgentToolEffectArtifactId, currentAgentToolEffectReference } from '../agent/toolEffectScope'
@@ -22,6 +22,7 @@ import { imageToolDefinitions } from './imageTools'
 import { toolSummarySchema } from './toolSummary'
 import type { FileChangeLedger } from '../agent/fileChangeLedger'
 import { readFileContentInfo } from '../fileMetadata'
+import { renameExclusive } from '../renameExclusive'
 
 export type FileEditStoreOperations = Pick<FileEditStore,
   | 'loadPatchForExecution'
@@ -40,15 +41,6 @@ const defaultDirectoryLimit = 300
 const maxDirectoryLimit = 1_000
 const defaultTreeLimit = 300
 const maxTreeEntries = 1_000
-
-interface JsonResult {
-  ok: boolean
-  [key: string]: unknown
-}
-
-function json(value: JsonResult): string {
-  return JSON.stringify(value)
-}
 
 function boundedPositiveInteger(value: unknown, fallback: number, max: number): number {
   return typeof value === 'number' ? Math.min(max, Math.max(1, Math.floor(value))) : fallback
@@ -166,7 +158,7 @@ function fileInfo(info: Stats): Record<string, unknown> {
   }
 }
 
-function toolError(error: unknown): string {
+function toolError(error: unknown): ToolResult {
   return json({ ok: false, error: error instanceof Error ? error.message : 'File tool failed.' })
 }
 
@@ -323,13 +315,13 @@ export function fileToolDefinitions(options: FileToolOptions): ToolDefinition[] 
   const tools = [
     documentTool,
     ...imageToolDefinitions(options),
-    defineContentTool({
+    defineTool({
       name: 'write_file',
       description: 'Create a UTF-8 text file or replace its entire content. Prefer this tool for complete new files; send ordinary source text without patch prefixes or Markdown fences. For local changes to an existing file, use apply_patch. overwrite defaults to false: fail if the file already exists. To replace an existing file, first read it, then send its complete intended content with overwrite: true; omitted text will be lost. Missing parent directories are created automatically. Returns operationId/recoveryRequestId and a diff for get_file_edit_diff or restore_file_edit.',
       inputSchema: writeFileSchema,
       execute: (input) => executeEdit(false, () => resolveWriteFileTargets(input, primaryFolder))
     }),
-    defineContentTool({
+    defineTool({
       name: 'apply_patch',
       description: filePatchDescription,
       inputSchema: filePatchSchema,
@@ -340,7 +332,7 @@ export function fileToolDefinitions(options: FileToolOptions): ToolDefinition[] 
       }
     }),
 
-    defineContentTool({
+    defineTool({
       name: 'restore_file_edit',
       description: 'Restore an entire original apply_patch or write_file operation. Uses confirmed identities, resumes its unfinished inverse, and never overwrites conflicting external edits. Returns a separate inverse record when files changed.',
       inputSchema: z.object({ summary: toolSummarySchema, operation_id: z.string().uuid(), request_id: z.string().uuid().optional(), dry_run: z.boolean().optional() }).strict(),
@@ -389,7 +381,7 @@ export function fileToolDefinitions(options: FileToolOptions): ToolDefinition[] 
         } catch (error) { return failed(error, reference) }
       }
     }),
-    defineContentTool({
+    defineTool({
       name: 'read_file',
       description: `Read UTF-8 text before editing, preserving original CRLF/LF, BOM and final-newline state without adding line numbers. format=json (default) returns content and range metadata; format=raw returns only the exact text of the requested range, with no wrapper. Raw fails instead of returning a byte-limited partial range. ${readLimitDescription} Use max_lines for files larger than this limit. Rejects binary or invalid UTF-8 data. Use view_image or view_multiple_images for images.`,
       inputSchema: z.object({
@@ -407,7 +399,7 @@ export function fileToolDefinitions(options: FileToolOptions): ToolDefinition[] 
           const { outputLimitReached, ...result } = await readUtf8Text(path, startLine, input.max_lines, byteLimit, signal())
           if (input.format === 'raw') {
             if (outputLimitReached) throw new Error(`Requested line range exceeds ${byteLimit} bytes; no partial raw content was returned. Request fewer lines or use format: json.`)
-            return result.content
+            return { content: result.content }
           }
           return json({ ok: true, startLine, byteLimit, ...result })
         } catch (error) {
@@ -418,7 +410,7 @@ export function fileToolDefinitions(options: FileToolOptions): ToolDefinition[] 
       }
     }),
 
-    defineContentTool({
+    defineTool({
       name: 'read_multiple_files',
       description: `Read up to 20 UTF-8 files as JSON with per-file results. ${readLimitDescription} All files in this call share that aggregate budget. Preserves original text, including CRLF/LF, BOM and final-newline state. Rejects binary or invalid UTF-8 data. Use read_file with format=raw for a single file without a JSON wrapper.`,
       inputSchema: z.object({
@@ -466,7 +458,7 @@ export function fileToolDefinitions(options: FileToolOptions): ToolDefinition[] 
       }
     }),
 
-    defineContentTool({
+    defineTool({
       name: 'get_file_edit_diff',
       description: 'Query persistent recorded changes for an operation or a run and all its actual subagents, with bounded pagination and evidence-backed segments. Not Git workspace changes. History diffs do not imply recovery materials still exist. Retained scope lists actual crash-recovery handles across conversations.',
       inputSchema: z.object({
@@ -535,7 +527,7 @@ export function fileToolDefinitions(options: FileToolOptions): ToolDefinition[] 
       }
     }),
 
-    defineContentTool({
+    defineTool({
       name: 'create_directory',
       description: 'Create a directory and, by default, missing parents.',
       inputSchema: z.object({
@@ -560,7 +552,7 @@ export function fileToolDefinitions(options: FileToolOptions): ToolDefinition[] 
       }
     }),
 
-    defineContentTool({
+    defineTool({
       name: 'list_directory',
       description: 'List only the immediate children of a directory; this is non-recursive. Use directory_tree to traverse descendants.',
       inputSchema: z.object({
@@ -590,7 +582,7 @@ export function fileToolDefinitions(options: FileToolOptions): ToolDefinition[] 
       }
     }),
 
-    defineContentTool({
+    defineTool({
       name: 'directory_tree',
       description: 'Incrementally traverse breadth-first in filesystem order, without following symlinks. Continue with nextCursor as cursor and the same path; cursors are single-use, run-scoped and expire after 5 idle minutes. Pages limit both output and scanning work, so a page may be short or empty while hasMore is true. Entries marked childrenOmitted were not expanded: use that subdirectory as a new root to inspect it. Unreadable descendants are reported and skipped. This is a live listing, not a filesystem snapshot.',
       inputSchema: z.object({
@@ -614,7 +606,7 @@ export function fileToolDefinitions(options: FileToolOptions): ToolDefinition[] 
       }
     }),
 
-    defineContentTool({
+    defineTool({
       name: 'move_file',
       description: 'Move or rename a file or directory.',
       inputSchema: z.object({
@@ -634,7 +626,8 @@ export function fileToolDefinitions(options: FileToolOptions): ToolDefinition[] 
             target: { source, destination, overwrite: input.overwrite === true }
           })
           if (input.create_parents === true) await mkdir(dirname(destination), { recursive: true })
-          await rename(source, destination)
+          if (input.overwrite === true) await rename(source, destination)
+          else renameExclusive(source, destination)
           return json({ ok: true })
         } catch (error) {
           return toolError(error)
@@ -642,7 +635,7 @@ export function fileToolDefinitions(options: FileToolOptions): ToolDefinition[] 
       }
     }),
 
-    defineContentTool({
+    defineTool({
       name: 'delete_file',
       description: 'Delete a file or, with recursive=true, a directory.',
       inputSchema: z.object({
@@ -666,7 +659,7 @@ export function fileToolDefinitions(options: FileToolOptions): ToolDefinition[] 
       }
     }),
 
-    defineContentTool({
+    defineTool({
       name: 'get_file_info',
       description: 'Get path type, size in bytes and timestamps. Automatically inspect local images (pixel dimensions, EXIF orientation and alpha when known), audio and video (format, durationSeconds and compact track details). No pixel decoding or external command is required. UTF-8 text files up to 1 MB include lineCount. Metadata detection is bounded; metadataError explains failures while basic file information remains available.',
       inputSchema: z.object({

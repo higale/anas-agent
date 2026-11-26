@@ -24,6 +24,13 @@ function toolNames(tools: Awaited<ReturnType<typeof runtimeToolDefinitions>>): s
 
 
 describe('subagent runtime tool scopes', () => {
+  it('fails a Shell invocation when its executor is unavailable', async () => {
+    const tools = await runtimeToolDefinitions({ enabled: true, primaryFolder: process.cwd(),
+      network: false, shell: true, mcp: false, commandShell: pwsh })
+    await expect(invokeContent(tools.find(tool => tool.name === 'pwsh')!, { command: 'echo ready' }))
+      .rejects.toThrow('is not connected to an executor')
+  })
+
   it.each(['background', 'supervision'] as const)('advertises %s management tools without an execution service', async (mode) => {
     const tools = await runtimeToolDefinitions({ enabled: true, primaryFolder: process.cwd(),
       network: false, shell: false, mcp: false, toolNames: [],
@@ -156,10 +163,10 @@ describe('subagent runtime tool scopes', () => {
   it('keeps call supervision available for unresolved calls when their executors are disabled', async () => {
     const managedCalls = {
       start: vi.fn(),
-      read: vi.fn().mockResolvedValue('call status'),
-      readOutput: vi.fn().mockResolvedValue('call output'),
+      read: vi.fn().mockReturnValue('{"ok":true,"status":"running"}'),
+      readOutput: vi.fn().mockReturnValue('{"ok":true,"output":[]}'),
       readResult: vi.fn(),
-      wait: vi.fn().mockResolvedValue('waited'),
+      wait: vi.fn().mockResolvedValue('{"ok":true,"status":"completed"}'),
       cancel: vi.fn()
     }
     const tools = await runtimeToolDefinitions({
@@ -184,7 +191,7 @@ describe('subagent runtime tool scopes', () => {
     ])
     await expect(invokeContent(tools[0], {
       call_id: '11111111-1111-8111-8111-111111111111'
-    })).resolves.toBe('call status')
+    })).resolves.toBe('{"ok":true,"status":"running"}')
     expect(managedCalls.read).toHaveBeenCalledWith({
       callId: '11111111-1111-8111-8111-111111111111',
       threadId: 'thread-1'
@@ -193,7 +200,7 @@ describe('subagent runtime tool scopes', () => {
       call_id: '11111111-1111-8111-8111-111111111111',
       output_offset: -100,
       output_length: 100
-    })).resolves.toBe('call output')
+    })).resolves.toBe('{"ok":true,"output":[]}')
     expect(managedCalls.readOutput).toHaveBeenCalledWith({
       callId: '11111111-1111-8111-8111-111111111111',
       threadId: 'thread-1',
@@ -203,7 +210,7 @@ describe('subagent runtime tool scopes', () => {
     await expect(invokeContent(tools[2], {
       call_id: '11111111-1111-8111-8111-111111111111',
       timeout: 30
-    })).resolves.toBe('waited')
+    })).resolves.toBe('{"ok":true,"status":"completed"}')
     expect(managedCalls.wait).toHaveBeenCalledWith({
       callId: '11111111-1111-8111-8111-111111111111',
       threadId: 'thread-1',

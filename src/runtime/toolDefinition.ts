@@ -13,6 +13,12 @@ export interface ToolDefinition<Result = ToolResult> {
 export interface ToolResult {
   content: unknown
   artifact?: unknown
+  status?: 'success' | 'error'
+}
+
+/** Application JSON envelopes carry an explicit outcome; arbitrary content does not. */
+export function jsonToolResult(value: { ok: boolean; [key: string]: unknown }): ToolResult {
+  return { content: JSON.stringify(value), status: value.ok ? 'success' : 'error' }
 }
 
 export interface ToolInvocationContext {

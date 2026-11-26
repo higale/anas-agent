@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict')
-const { mkdir, mkdtemp, readFile, rm, writeFile } = require('node:fs/promises')
+const { mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } = require('node:fs/promises')
 const { basename, dirname, join, resolve } = require('node:path')
 const { expect } = require('playwright/test')
 const { closeElectronTestApplication } = require('./electron-test-close.cjs')
@@ -75,8 +75,40 @@ async function verifyDataCleanup(launchApplication) {
     assert.equal(await readFile(join(data, 'db/projects/default-workspace/conversations/unregistered/retained.txt'), 'utf8'), 'fixture')
     await page.getByRole('button', { name: '清理...', exact: true }).click()
     await expect(dialog.locator('.data-cleanup-option').filter({ hasText: '未知文件' })).toHaveCount(0)
+    const logs = join(data, 'log'), savedLogs = join(root, 'saved-log'), outside = join(root, 'external')
+    await mkdir(outside)
+    const sentinel = join(outside, '2001-01-01_main.log')
+    await writeFile(sentinel, 'must survive cleanup and logger retention')
+    assert.equal(await realpath(logs), logs)
+    await rename(logs, savedLogs)
+    try {
+      await symlink(outside, logs, process.platform === 'win32' ? 'junction' : 'dir')
+      const rejected = await page.evaluate(() => globalThis.gale.app.cleanupData({ log_folder: true }))
+      assert.equal(rejected.items[0].ok, false)
+      assert.equal(await readFile(sentinel, 'utf8'), 'must survive cleanup and logger retention')
+    } finally {
+      // Both locations were created and checked inside this isolated fixture.
+      await rm(logs, { recursive: true, force: true })
+      await rename(savedLogs, logs)
+    }
+    const developer = join(data, 'dev'), savedDeveloper = join(root, 'saved-dev')
+    await mkdir(developer, { recursive: true })
+    await mkdir(join(outside, 'model-http'))
+    const traceSentinel = join(outside, 'model-http', 'keep.txt')
+    await writeFile(traceSentinel, 'must survive linked parent cleanup')
+    assert.equal(await realpath(developer), developer)
+    await rename(developer, savedDeveloper)
+    try {
+      await symlink(outside, developer, process.platform === 'win32' ? 'junction' : 'dir')
+      const rejected = await page.evaluate(() => globalThis.gale.app.cleanupData({ developer_http_trace: true }))
+      assert.equal(rejected.items[0].ok, false)
+      assert.equal(await readFile(traceSentinel, 'utf8'), 'must survive linked parent cleanup')
+    } finally {
+      await rm(developer, { recursive: true, force: true })
+      await rename(savedDeveloper, developer)
+    }
     assert.deepEqual(pageErrors, [])
-    console.log('Data cleanup: Documents backup default, directory previews, empty categories and real IPC cleanup passed.')
+    console.log('Data cleanup: Documents backup default, directory previews, empty categories, linked-log/parent refusal and real IPC cleanup passed.')
   } finally {
     await closeElectronTestApplication(application)
     await rm(root, { recursive: true, force: true })

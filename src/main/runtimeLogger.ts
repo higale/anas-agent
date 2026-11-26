@@ -1,5 +1,5 @@
 import log from 'electron-log/main'
-import { closeSync, mkdirSync, openSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, lstatSync, mkdirSync, openSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { dirname, join, parse } from 'node:path'
 import { shell } from 'electron'
@@ -110,9 +110,13 @@ function archiveLogFile(file: { toString(): string }): void {
 }
 
 function pruneOldLogFilesInDir(dir: string, cutoff: Date): number {
+  const identity = lstatSync(dir)
+  if (!identity.isDirectory() || identity.isSymbolicLink()) return 0
   let deleted = 0
 
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const current = lstatSync(dir)
+    if (!current.isDirectory() || current.isSymbolicLink() || current.dev !== identity.dev || current.ino !== identity.ino) break
     const entryPath = join(dir, entry.name)
     if (entry.isDirectory()) {
       deleted += pruneOldLogFilesInDir(entryPath, cutoff)

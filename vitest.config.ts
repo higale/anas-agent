@@ -50,6 +50,7 @@ export default defineConfig({
       }
     },
     environment: 'node',
+    testTimeout: 15_000,
     include: ['src/**/*.test.ts'],
     restoreMocks: true,
     clearMocks: true

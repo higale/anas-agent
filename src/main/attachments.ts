@@ -1,10 +1,11 @@
 import { bmpImageDimensions } from '@shared/imageDimensions'
 import { app, nativeImage, protocol } from 'electron'
 import { createHash, randomUUID } from 'node:crypto'
-import { createReadStream } from 'node:fs'
+import { constants, createReadStream } from 'node:fs'
 import { copyFile, mkdir, open, readFile, rm, rmdir, stat } from 'node:fs/promises'
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { Readable } from 'node:stream'
+import { StringDecoder } from 'node:string_decoder'
 import { imageDimensionsFromStream } from 'image-dimensions'
 import { maxImageSourceBytes, maxImagePixels, maxImageDimension } from '@shared/imageLimits'
 import { getAppConfigSnapshot } from './config/appConfig'
@@ -290,6 +291,27 @@ function limitAttachmentText(text: string, limit: TextAttachmentLimit): Pick<Sel
   }
 }
 
+async function readAttachmentText(filePath: string, limit: TextAttachmentLimit) {
+  const file = await open(filePath, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0))
+  try {
+    if (!(await file.stat()).isFile()) throw new Error('Text attachment target is not a file.')
+    const decoder = new StringDecoder('utf8')
+    const buffer = Buffer.alloc(Math.min(64 * 1024, limit.maxChars + 1))
+    const chunks: string[] = []
+    let characters = 0
+    // One extra UTF-16 code unit distinguishes an exact fit from overflow.
+    // Decode incrementally so BOMs and characters split across reads are preserved.
+    while (characters <= limit.maxChars) {
+      const { bytesRead } = await file.read(buffer, 0, Math.min(buffer.length, limit.maxChars + 1 - characters), null)
+      const text = bytesRead ? decoder.write(buffer.subarray(0, bytesRead)) : decoder.end()
+      chunks.push(text)
+      characters += text.length
+      if (!bytesRead) break
+    }
+    return limitAttachmentText(chunks.join(''), limit)
+  } finally { await file.close() }
+}
+
 async function readSelectedAttachment(filePath: string, getTextLimit: () => Promise<TextAttachmentLimit>): Promise<SelectedAttachment> {
   const info = await stat(filePath)
   if (!info.isFile()) {
@@ -362,8 +384,7 @@ async function readSelectedAttachment(filePath: string, getTextLimit: () => Prom
     }
   }
 
-  const buffer = await readFile(filePath)
-  const limitedText = limitAttachmentText(buffer.toString('utf8'), await getTextLimit())
+  const limitedText = await readAttachmentText(filePath, await getTextLimit())
   return {
     path: filePath,
     name: basename(filePath),

@@ -1,7 +1,7 @@
 import log from 'electron-log/main'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -24,6 +24,38 @@ afterEach(async () => {
   }
   viewer = undefined
   if (state.directory) rmSync(state.directory, { recursive: true, force: true })
+})
+
+it('does not prune old log files through a linked log root', () => {
+  const root = mkdtempSync(join(tmpdir(), 'anas-log-retention-'))
+  try {
+    const outside = join(root, 'external')
+    mkdirSync(outside)
+    const sentinel = join(outside, '2001-01-01_main.log')
+    writeFileSync(sentinel, 'must survive automatic retention')
+    state.directory = join(root, 'log')
+    symlinkSync(outside, state.directory, process.platform === 'win32' ? 'junction' : 'dir')
+    configureRuntimeLogger('info', 7)
+    expect(readFileSync(sentinel, 'utf8')).toBe('must survive automatic retention')
+  } finally { rmSync(root, { recursive: true, force: true }); state.directory = '' }
+})
+
+it('prunes regular old logs while retaining linked child directories and current logs', () => {
+  const root = mkdtempSync(join(tmpdir(), 'anas-log-retention-'))
+  try {
+    const outside = join(root, 'external')
+    state.directory = join(root, 'log')
+    mkdirSync(outside); mkdirSync(state.directory)
+    const old = '2001-01-01_main.log'
+    writeFileSync(join(outside, old), 'outside')
+    writeFileSync(join(state.directory, old), 'expired')
+    writeFileSync(join(state.directory, '2099-01-01_main.log'), 'recent')
+    symlinkSync(outside, join(state.directory, 'linked'), process.platform === 'win32' ? 'junction' : 'dir')
+    configureRuntimeLogger('info', 7)
+    expect(() => readFileSync(join(state.directory, old))).toThrow()
+    expect(readFileSync(join(outside, old), 'utf8')).toBe('outside')
+    expect(readFileSync(join(state.directory, '2099-01-01_main.log'), 'utf8')).toBe('recent')
+  } finally { rmSync(root, { recursive: true, force: true }); state.directory = '' }
 })
 
 it.runIf(process.platform === 'win32')('displays UTF-8 log history and appended Chinese in Windows PowerShell', async () => {

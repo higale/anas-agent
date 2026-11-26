@@ -1,9 +1,9 @@
-import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, readdir, rename, rm, rmdir, writeFile } from 'node:fs/promises'
 import { basename, isAbsolute, join } from 'node:path'
 import { getTempDir } from './config/dataDir'
 import { runtimeLog } from './runtimeLogger'
+import { guardCleanupDirectory } from './cleanupDirectoryGuard'
 
 const externalRegistryName = 'external-files'
 const externalTemporaryFileIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -81,10 +81,13 @@ export async function releaseExternalTemporaryFile(path: string, recordPath: str
   if (removed) await rm(recordPath, { force: true }).catch(() => undefined)
 }
 
-async function cleanupExternalTemporaryFiles(): Promise<{ scanned: number; deleted: number; failed: number }> {
-  const registry = externalRegistryPath()
+async function cleanupExternalTemporaryFiles(tempDir: string, verifyRoot: () => Promise<void>): Promise<{ scanned: number; deleted: number; failed: number }> {
+  const registry = join(tempDir, externalRegistryName)
   let entries: Array<{ name: string; isFile(): boolean }>
+  let verifyRegistry: () => Promise<void>
   try {
+    await verifyRoot()
+    verifyRegistry = await guardCleanupDirectory(registry)
     entries = await readdir(registry, { withFileTypes: true })
   } catch (reason) {
     const code = reason && typeof reason === 'object' && 'code' in reason ? reason.code : undefined
@@ -98,10 +101,16 @@ async function cleanupExternalTemporaryFiles(): Promise<{ scanned: number; delet
     scanned += 1
     const recordPath = join(registry, entry.name)
     try {
+      await verifyRoot()
+      await verifyRegistry()
       if (!entry.isFile() || !entry.name.endsWith('.json')) throw new Error('Unexpected external temporary file record.')
       const expectedId = entry.name.slice(0, -'.json'.length)
       const record = await readExternalRecord(recordPath, expectedId)
+      await verifyRoot()
+      await verifyRegistry()
       await rm(record.path, { force: true })
+      await verifyRoot()
+      await verifyRegistry()
       await rm(recordPath, { force: true })
       deleted += 1
     } catch (reason) {
@@ -118,13 +127,20 @@ async function cleanupExternalTemporaryFiles(): Promise<{ scanned: number; delet
 
 export async function cleanupTempFiles(): Promise<void> {
   const tempDir = tempDirPath()
-  let { scanned, deleted, failed } = await cleanupExternalTemporaryFiles().catch((reason) => {
+  let verifyRoot: () => Promise<void>
+  try { verifyRoot = await guardCleanupDirectory(tempDir) }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') runtimeLog('warn', 'tmp', 'Temp cleanup skipped.', { dir: tempDir, error })
+    return
+  }
+  let { scanned, deleted, failed } = await cleanupExternalTemporaryFiles(tempDir, verifyRoot).catch((reason) => {
     runtimeLog('warn', 'tmp', 'External temporary file cleanup failed.', { error: reason })
     return { scanned: 0, deleted: 0, failed: 1 }
   })
 
   let entries: Array<{ name: string }>
   try {
+    await verifyRoot()
     entries = await readdir(tempDir, { withFileTypes: true })
   } catch (reason) {
     const code = reason && typeof reason === 'object' ? (reason as { code?: unknown }).code : undefined
@@ -139,6 +155,7 @@ export async function cleanupTempFiles(): Promise<void> {
     scanned += 1
     const filePath = join(tempDir, entry.name)
     try {
+      await verifyRoot()
       await rm(filePath, { force: true, recursive: true })
       deleted += 1
     } catch (reason) {
@@ -153,56 +170,4 @@ export async function cleanupTempFiles(): Promise<void> {
     deleted,
     failed
   })
-}
-
-export function cleanupTempFilesInBackground(): void {
-  const tempDir = tempDirPath()
-  const script = `
-const fs = require('fs')
-const path = require('path')
-const dir = process.argv[1]
-const registryName = ${JSON.stringify(externalRegistryName)}
-const registry = path.join(dir, registryName)
-try {
-  for (const name of fs.readdirSync(registry)) {
-    const recordPath = path.join(registry, name)
-    try {
-      const record = JSON.parse(fs.readFileSync(recordPath, 'utf8'))
-      const valid = record && record.version === 0 && record.kind === 'http-download'
-        && typeof record.id === 'string' && name === record.id + '.json'
-        && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(record.id)
-        && typeof record.path === 'string' && path.isAbsolute(record.path)
-        && path.basename(record.path).endsWith('.anas-download-' + record.id + '.tmp')
-      if (!valid) continue
-      fs.rmSync(record.path, { force: true })
-      fs.rmSync(recordPath, { force: true })
-    } catch {}
-  }
-  fs.rmdirSync(registry)
-} catch {}
-try {
-  for (const name of fs.readdirSync(dir)) {
-    if (name === registryName) continue
-    fs.rmSync(path.join(dir, name), { recursive: true, force: true })
-  }
-} catch (reason) {
-  if (!reason || reason.code !== 'ENOENT') process.exitCode = 1
-}
-`
-
-  try {
-    const child = spawn(process.execPath, ['-e', script, tempDir], {
-      detached: true,
-      env: {
-        ...process.env,
-        ELECTRON_RUN_AS_NODE: '1'
-      },
-      stdio: 'ignore',
-      windowsHide: true
-    })
-    child.unref()
-    runtimeLog('debug', 'tmp', 'Temp cleanup scheduled in background.', { dir: tempDir })
-  } catch (reason) {
-    runtimeLog('debug', 'tmp', 'Failed to schedule background temp cleanup.', { dir: tempDir, error: reason })
-  }
 }

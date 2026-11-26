@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -38,6 +38,47 @@ afterEach(async () => {
 })
 
 describe('data cleanup service', () => {
+  it('refuses developer trace cleanup through a linked parent', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'anas-trace-external-'))
+    try {
+      await mkdir(join(outside, 'model-http'))
+      const sentinel = join(outside, 'model-http', 'keep.txt')
+      await writeFile(sentinel, 'must survive')
+      await symlink(outside, join(root, 'dev'), process.platform === 'win32' ? 'junction' : 'dir')
+      const { cleanupData } = await import('./dataCleanupService')
+      const result = await cleanupData({ developer_http_trace: true })
+      expect(result.items[0].ok).toBe(false)
+      expect(await readFile(sentinel, 'utf8')).toBe('must survive')
+    } finally { await rm(outside, { recursive: true, force: true }) }
+  })
+
+  it('initializes a missing log directory and preserves it after clearing regular contents', async () => {
+    const { cleanupData } = await import('./dataCleanupService')
+    expect((await cleanupData({ log_folder: true })).items[0].ok).toBe(true)
+    await mkdir(join(paths.log, 'nested'))
+    await writeFile(join(paths.log, 'nested', 'old.log'), 'old')
+    expect((await cleanupData({ log_folder: true })).items[0].ok).toBe(true)
+    expect((await lstat(paths.log)).isDirectory()).toBe(true)
+    expect(await readdir(paths.log)).toEqual([])
+  })
+
+  it.each([true, false])('does not follow external log links (linked root=%s)', async linkedRoot => {
+    const outside = await mkdtemp(join(tmpdir(), 'anas-cleanup-external-'))
+    try {
+      const sentinel = join(outside, 'keep.txt')
+      await writeFile(sentinel, 'must survive')
+      if (!linkedRoot) await mkdir(paths.log)
+      const link = linkedRoot ? paths.log : join(paths.log, 'linked-child')
+      await symlink(outside, link, process.platform === 'win32' ? 'junction' : 'dir')
+      const { cleanupData } = await import('./dataCleanupService')
+      const result = await cleanupData({ log_folder: true })
+      expect(await readFile(sentinel, 'utf8')).toBe('must survive')
+      expect(result.items[0].ok).toBe(!linkedRoot)
+      if (linkedRoot) expect((await lstat(link)).isSymbolicLink()).toBe(true)
+      else expect(await readdir(paths.log)).toEqual([])
+    } finally { await rm(outside, { recursive: true, force: true }) }
+  })
+
   it('waits for an in-progress backup before deleting its unknown source files', async () => {
     await writeFile(join(root, 'old.zip'), 'backup')
     const { cleanupData } = await import('./dataCleanupService')

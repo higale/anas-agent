@@ -28,12 +28,14 @@ it('returns original image blocks, with labels and per-file errors in input orde
   expect(JSON.parse(result.content[1].text)).toEqual({ ok: true, path: join(root, '图.png'), mimeType: 'image/png' })
   expect(result.content[2]).toEqual({ type: 'image', mimeType: 'image/png', data: png.toString('base64') })
   expect(JSON.parse(result.content[3].text)).toMatchObject({ ok: false })
+  expect(result.status).toBe('error')
 })
 
 it('identifies WebP from content and passes it through without local decoding', async () => {
   await writeFile(join(root, 'image.bin'), webp)
   const result = await invoke('view_image', { path: 'image.bin' })
   expect(result.content[1]).toEqual({ type: 'image', mimeType: 'image/webp', data: webp.toString('base64') })
+  expect(result.status).toBe('success')
 })
 
 it('rejects empty, excessive and non-file input and invalid batch sizes', async () => {

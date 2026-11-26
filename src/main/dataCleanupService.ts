@@ -1,5 +1,7 @@
-import { mkdir, readdir, rm } from 'node:fs/promises'
-import { join } from 'node:path'
+import { lstat, mkdir, readdir, realpath, rm } from 'node:fs/promises'
+import { dirname, join, relative, resolve, sep } from 'node:path'
+import { isSameOrInsideDirectory, samePath } from './pathContainment'
+import { guardCleanupDirectory } from './cleanupDirectoryGuard'
 import { getCacheDir, getDataDir, getDeveloperHttpTraceDir, getLogDir, getTempDir } from './config/dataDir'
 import { clearInputHistory } from './inputHistoryStore'
 import { cleanupUnknownData } from './unknownDataCleanup'
@@ -25,15 +27,43 @@ const cleanupTargets: DataCleanupTarget[] = [
   'unknown_files'
 ]
 
-function cleanupDirectory(path: string): Promise<{ path: string }> {
-  return rm(path, { recursive: true, force: true }).then(() => ({ path }))
+async function cleanupDirectory(path: string): Promise<{ path: string }> {
+  const root = await realpath(getDataDir())
+  const target = resolve(root, relative(resolve(getDataDir()), resolve(path)))
+  if (samePath(root, target) || !isSameOrInsideDirectory(root, target)) throw new Error('Cleanup target is outside the data directory.')
+  const guards = [await guardCleanupDirectory(root)]
+  let parent = root
+  for (const part of relative(root, dirname(target)).split(sep).filter(Boolean)) {
+    parent = join(parent, part)
+    try { guards.push(await guardCleanupDirectory(parent)) }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { path }
+      throw error
+    }
+  }
+  for (const verify of guards) await verify()
+  await rm(target, { recursive: true, force: true })
+  return { path }
 }
 
 async function cleanupDirectoryContents(path: string): Promise<{ path: string }> {
-  await mkdir(path, { recursive: true })
-  const entries = await readdir(path, { withFileTypes: true })
-  await Promise.all(entries.map((entry) => rm(join(path, entry.name), { recursive: true, force: true })))
-  await mkdir(path, { recursive: true })
+  const root = await realpath(getDataDir())
+  const target = resolve(root, relative(resolve(getDataDir()), resolve(path)))
+  if (!samePath(dirname(target), root)) throw new Error('Log cleanup target is outside the data directory.')
+  let original = await lstat(target).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'ENOENT') throw error
+  })
+  if (!original) {
+    await mkdir(target)
+    original = await lstat(target)
+  }
+  const verify = await guardCleanupDirectory(target, original)
+  const entries = await readdir(target, { withFileTypes: true })
+  for (const entry of entries) {
+    await verify()
+    await rm(join(target, entry.name), { recursive: true, force: true })
+  }
+  await verify()
   return { path }
 }
 

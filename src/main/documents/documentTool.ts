@@ -5,7 +5,7 @@ import { dirname, isAbsolute, join, parse } from 'node:path'
 import { armCurrentAgentToolEffect } from '../agent/toolEffectScope'
 import { verifyCurrentToolAuthorization } from '../agent/toolAuthorizationRuntime'
 import { renameExclusive } from '../renameExclusive'
-import { defineContentTool } from '../../runtime/toolDefinition'
+import { defineTool, jsonToolResult } from '../../runtime/toolDefinition'
 import { z } from 'zod/v3'
 import { toolSummarySchema } from '../llm/toolSummary'
 import type { stageDocument } from './convert'
@@ -75,7 +75,7 @@ export async function convertDocument(source: string, output: string, convert = 
 function absoluteFile(description: string) {
   return z.string().min(1).refine(isAbsolute, 'Supply an absolute filename.').describe(description)
 }
-export const documentTool = defineContentTool({
+export const documentTool = defineTool({
   name: 'document_to_markdown',
   description: 'Convert a local PDF, DOCX or PPTX to a new UTF-8 Markdown file. Saves embedded images beside it in <output stem>_images/ using relative links. Skips PowerPoint ink and its previews. Scans retain images without OCR. Returns paths, line count and byte count.',
   inputSchema: z.object({
@@ -84,7 +84,7 @@ export const documentTool = defineContentTool({
     summary: toolSummarySchema
   }).strict(),
   execute: async (input, context) => {
-    try { return await convertDocument(input.input_path, input.output_path, runConverter, context.signal) }
-    catch (error) { return JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }) }
+    try { return { content: await convertDocument(input.input_path, input.output_path, runConverter, context.signal) } }
+    catch (error) { return jsonToolResult({ ok: false, error: error instanceof Error ? error.message : String(error) }) }
   }
 })

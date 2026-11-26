@@ -14,6 +14,10 @@ import { ManagedCallService } from './managedCallService'
 import { createManagedToolRuntime } from './managedToolRuntime'
 import { beginToolEffect } from './toolExecutionContext'
 import { armCurrentAgentToolEffect } from './toolEffectScope'
+import { writeFile } from 'node:fs/promises'
+import { fileToolDefinitions } from '../llm/fileTools'
+import { conversationAnthropicInput } from '../../providers/conversationInput'
+import { managedCallToolDefinitions } from '../llm/runtimeTools'
 
 function fixture(runId: string) {
   const root = mkdtempSync(join(tmpdir(), 'anas-managed-capability-')), storage = AgentStorage.openNative(root)
@@ -27,6 +31,66 @@ function fixture(runId: string) {
 }
 
 describe('native managed capability with the current owning service', () => {
+  it('persists missing background call supervision as tool failures', async () => {
+    const h = nativeCapabilityFixture()
+    try {
+      const definitions = managedCallToolDefinitions({ managedCalls: h.service, threadId: h.thread.id })
+      const history = await h.executeCalls(definitions, [definitions.map((definition, index) => ({
+        id: `missing-${index}`, name: definition.name,
+        args: { summary: 'Inspect missing call', call_id: '11111111-1111-4111-8111-111111111111',
+          ...(definition.name === 'read_call_output' ? { output_offset: 0, output_length: 100 } : {}) }
+      }))])
+      const results = history.messages.map(record => record.value).filter(message => message.kind === 'tool')
+      expect(results).toHaveLength(4)
+      for (const result of results) {
+        expect(JSON.parse(String(result.content))).toMatchObject({ ok: false, error: expect.stringContaining('was not found') })
+        expect(result.resultStatus).toBe('error')
+        expect(conversationAnthropicInput([result]).messages[0].content).toEqual([
+          expect.objectContaining({ type: 'tool_result', is_error: true })
+        ])
+      }
+    } finally { await h.close() }
+  })
+
+  it('keeps successful supervision of a failed call successful', async () => {
+    const h = nativeCapabilityFixture()
+    try {
+      const callId = '22222222-2222-4222-8222-222222222222'
+      h.database.managed.createManagedCall({ id: callId, threadId: h.thread.id, runId: h.run.id, kind: 'shell', summary: 'Failed command' })
+      h.database.managed.finishManagedCall({ callId, threadId: h.thread.id, status: 'failed', outcome: { ok: false, exit_code: 1 } })
+      const definitions = managedCallToolDefinitions({ managedCalls: h.service, threadId: h.thread.id })
+      for (const definition of definitions) {
+        const result = await invokeCapability(h.managed(definition), { summary: 'Inspect failed call', call_id: callId,
+          ...(definition.name === 'read_call_output' ? { output_offset: 0, output_length: 100 } : {}) }, {})
+        expect(result.resultStatus).toBe('success')
+        expect(JSON.parse(String(result.content))).toMatchObject({ ok: true, status: 'failed' })
+      }
+    } finally { await h.close() }
+  })
+
+  it('persists business failures as errors while keeping error-shaped file content successful', async () => {
+    const h = nativeCapabilityFixture()
+    try {
+      const source = join(h.root, 'source.txt'), destination = join(h.root, 'existing.txt')
+      const content = '{"ok":false,"error":"ordinary file content"}'
+      await writeFile(source, content); await writeFile(destination, 'keep')
+      const tools = fileToolDefinitions({ primaryFolder: h.root, maxReadBytes: 1024 })
+      const finished = vi.spyOn(h.database.managed, 'finishManagedCall')
+      const history = await h.executeCalls(tools, [
+        [{ id: 'failed-move', name: 'move_file', args: { summary: 'Move file', source, destination, overwrite: false } }],
+        [{ id: 'raw-read', name: 'read_file', args: { summary: 'Read file', path: source, format: 'raw' } }]
+      ])
+      const results = history.messages.map(record => record.value).filter(message => message.kind === 'tool')
+      expect(results.map(result => result.resultStatus)).toEqual(['error', 'success'])
+      expect(JSON.parse(String(results[0].content))).toMatchObject({ ok: false, error: 'destination already exists' })
+      expect(results[1].content).toBe(content)
+      expect(finished.mock.calls.map(([call]) => [call.status, call.outcome?.ok])).toEqual([['failed', false], ['completed', true]])
+      expect(conversationAnthropicInput([results[0]]).messages[0].content).toEqual([
+        expect.objectContaining({ type: 'tool_result', is_error: true })
+      ])
+    } finally { await h.close() }
+  })
+
   it('queues one native batch call and retains its canonical identity, original input and artifact in history', async () => {
     const h = nativeCapabilityFixture()
     try {

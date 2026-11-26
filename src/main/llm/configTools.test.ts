@@ -35,6 +35,15 @@ async function invokeConfig(input: Record<string, unknown>) {
 }
 
 describe('update_config tool', () => {
+  it('marks a rejected configuration update as an explicit tool failure', async () => {
+    configMocks.updateConfigValue.mockRejectedValue(new Error('Setting is not writable.'))
+    const result = await invokeCapability(configToolDefinitions('/workspace')[0], {
+      config: 'settings', key: 'profile.assistant.name', value: 'test'
+    }, {})
+    expect(result.status).toBe('error')
+    expect(JSON.parse(String(result.content))).toEqual({ ok: false, error: 'Setting is not writable.' })
+  })
+
   it('passes native JSON values to the settings config service without exposing the snapshot', async () => {
 
     const result = await invokeConfig({

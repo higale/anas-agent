@@ -3,6 +3,7 @@ import { invokeCapability } from '../../runtime/toolInvocation'
 import type { ToolDefinition } from '../../runtime/toolDefinition'
 import { toolJsonSchema } from '../../runtime/toolSchema'
 import Database from 'better-sqlite3'
+import { writeFileSync } from 'node:fs'
 import { NativeConversationDatabase } from '../agent/nativeConversationDatabase'
 import { SqliteMemoryStore } from '../../test/legacyMemoryFixture'
 import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
@@ -958,6 +959,17 @@ describe('file tools', () => {
     expect(moved).toEqual({ ok: true })
     expect(await pathExists(source)).toBe(false)
     expect(await readFile(destination, 'utf8')).toBe('source')
+  })
+
+  it('preserves a destination created after move preflight but before commit', async () => {
+    const dir = await tempDir(), source = join(dir, 'source.txt'), destination = join(dir, 'destination.txt')
+    await writeFile(source, 'source')
+    const tool = fileToolDefinitions({ primaryFolder: dir, maxReadBytes: 1024 }).find(tool => tool.name === 'move_file')!
+    const result = await runWithCurrentAgentToolEffect({ arm: () => writeFileSync(destination, 'competing writer') },
+      () => invokeCapability(tool, { source, destination, overwrite: false }, {}))
+    expect(result.status).toBe('error')
+    expect(await readFile(source, 'utf8')).toBe('source')
+    expect(await readFile(destination, 'utf8')).toBe('competing writer')
   })
 
   it('rejects binary files when reading as text', async () => {

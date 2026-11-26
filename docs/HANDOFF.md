@@ -26,7 +26,7 @@
 
 - 原生实现来自 Anas Next `553fded16ee7ac1205e9283a37f3fa80e932da12`，保留 Anas 的 UI、设置和插件操作。Next 保留重构历史，后续开发以本仓库为准。
 - 旧框架快照 `codex/legacy-framework-4.0.9` 固定在 `460f58de4f3d914456e3ca64b6e628e845769ecb`，长期保留。
-- 本次同步版本为 `5.2.27`，发布范围以本轮中英文 Release 说明为准。已确认发布源码由 `refs/anas/github/v<版本>` 记录；发布成功并核对源码后更新对应基点。开发差异由 Git 自动生成，日常开发不修改正式版本号。
+- 本次同步版本为 `5.2.28`，发布范围以本轮中英文 Release 说明为准。已确认发布源码由 `refs/anas/github/v<版本>` 记录；发布成功并核对源码后更新对应基点。开发差异由 Git 自动生成，日常开发不修改正式版本号。
 - 源码同步和安装包分别以 [GitHub 源码](https://github.com/higale/anas-agent)与 [Release](https://github.com/higale/anas-agent/releases)为准。独立源码快照、版本递增及发布基点更新遵循[发布流程](SOURCE_PUBLISHING.md)。
 - 普通需求在 `main` 开发；复杂需求使用临时 `codex/` 分支，验证后合回并删除，旧框架快照分支除外。
 

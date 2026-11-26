@@ -1,4 +1,4 @@
-import { defineContentTool, type ToolDefinition } from '../../runtime/toolDefinition'
+import { defineTool, jsonToolResult, type ToolDefinition, type ToolResult } from '../../runtime/toolDefinition'
 import { resolve } from 'node:path'
 import { z } from 'zod/v3'
 import { assistantNewAvatarPathKey, updateConfigValue } from '../config/appConfig'
@@ -35,7 +35,7 @@ async function applyConfigValue(input: {
   config: 'settings'
   key: string
   value: unknown
-}, primaryFolder: string): Promise<string> {
+}, primaryFolder: string): Promise<ToolResult> {
   const value = input.key === assistantNewAvatarPathKey
     && typeof input.value === 'string'
     && input.value !== 'default'
@@ -48,12 +48,12 @@ async function applyConfigValue(input: {
   } catch (error) {
     const decodedValue = decodeJsonText(value)
     if (decodedValue === value || !isConfigValueRejection(error)) {
-      return JSON.stringify({ ok: false, error: configToolError(error) })
+      return jsonToolResult({ ok: false, error: configToolError(error) })
     }
     try {
       result = await updateConfigValue(input.config, input.key, decodedValue)
     } catch (decodedError) {
-      return JSON.stringify({ ok: false, error: configToolError(decodedError) })
+      return jsonToolResult({ ok: false, error: configToolError(decodedError) })
     }
   }
   let avatarUpdated: boolean | undefined
@@ -61,10 +61,10 @@ async function applyConfigValue(input: {
     try {
       avatarUpdated = (await consumePendingAvatarUpdate(result.value)).applied
     } catch (error) {
-      return JSON.stringify({ ok: false, error: configToolError(error) })
+      return jsonToolResult({ ok: false, error: configToolError(error) })
     }
   }
-  return JSON.stringify({
+  return jsonToolResult({
     ok: true,
     changed: result.changed,
     config: result.config,
@@ -76,7 +76,7 @@ async function applyConfigValue(input: {
 
 export function configToolDefinitions(primaryFolder: string): ToolDefinition[] {
   return [
-    defineContentTool({
+    defineTool({
       name: 'update_config',
       description: 'Update one supported application configuration value only when the user explicitly asks to change it. Never use this tool to remember something. Of the profile settings, only assistant name, role and avatar are writable. Most values persist; profile.assistant.new_avatar_path submits a one-time avatar request and is cleared after the attempt. Set it to an image path to replace the avatar or to "default" to restore the default avatar. The only supported config document is settings. Use a dot-separated snake_case key from settings.json. Pass the new value itself in value; never serialize it into JSON text. Arrays and objects replace the complete value atomically.',
       inputSchema: z.object({

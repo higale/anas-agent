@@ -187,7 +187,7 @@ async function verifyProjectModelPicker(launchApplication) {
     await dialog.getByRole('button', { name: 'Select model', exact: true }).click()
     await page.getByRole('menuitemradio', { name: /^Model 0(?: |$)/ }).click()
     await expect.poll(() => dialog.evaluate((element) => {
-      const folders = element.querySelector('.project-folder-list').getBoundingClientRect()
+      const folders = element.querySelector('.project-folders').getBoundingClientRect()
       const permissions = element.querySelector('.composer-access-trigger').getBoundingClientRect()
       const modelGroup = element.querySelector('.composer-model-selection-group')
       const models = modelGroup.getBoundingClientRect()

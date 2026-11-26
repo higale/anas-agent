@@ -32,6 +32,15 @@ async function convert(name: string) {
 }
 
 describe('native document conversion', () => {
+  it('marks an existing-output refusal as a tool failure without changing its contents', async () => {
+    const output = join(root, 'keep.md')
+    await writeFile(output, 'keep')
+    const result = await documentTool.execute({ input_path: source('formula.docx'), output_path: output }, {})
+    expect(result.status).toBe('error')
+    expect(JSON.parse(String(result.content))).toMatchObject({ ok: false, error: expect.stringContaining('Output already exists') })
+    expect(await readFile(output, 'utf8')).toBe('keep')
+  })
+
   it('describes the source and destination independently in the model schema', () => {
     const schema = modelToolJsonSchema(documentTool.inputSchema)
     expect(schema.required).toEqual(['input_path', 'output_path'])

@@ -1,6 +1,6 @@
 import { imageDimensionsFromData } from 'image-dimensions'
 import { open, stat } from 'node:fs/promises'
-import { defineContentTool, type ToolDefinition } from '../../runtime/toolDefinition'
+import { defineTool, type ToolDefinition, type ToolResult } from '../../runtime/toolDefinition'
 import { z } from 'zod/v3'
 import { resolveWorkspacePath } from '../workspacePath'
 import { currentToolExecution } from '../agent/toolExecutionContext'
@@ -42,10 +42,11 @@ async function readImage(path: string, signal?: AbortSignal) {
 }
 
 export function imageToolDefinitions(options: { primaryFolder: string; signal?: AbortSignal }): ToolDefinition[] {
-  const read = async (paths: string[]): Promise<ImageToolContent[]> => {
+  const read = async (paths: string[]): Promise<ToolResult> => {
     const signal = currentToolExecution()?.signal ?? options.signal
     const content: ImageToolContent[] = []
     let total = 0
+    let failed = false
     for (const requestedPath of paths) {
       signal?.throwIfAborted()
       let path = requestedPath
@@ -58,18 +59,19 @@ export function imageToolDefinitions(options: { primaryFolder: string; signal?: 
           { type: 'image', mimeType: info.mimeType, data: bytes.toString('base64') })
       } catch (error) {
         signal?.throwIfAborted()
+        failed = true
         content.push({ type: 'text', text: JSON.stringify({ ok: false, path, error: error instanceof Error ? error.message : String(error) }) })
       }
     }
-    return content
+    return { content, status: failed ? 'error' : 'success' }
   }
   const path = z.string().trim().min(1).describe('Local image path, absolute or relative to the primary/default folder.')
   const usage = 'Use only for local images whose content is not already included in the current context, or when the user explicitly requests rereading the file. Inspect attached images directly without calling this tool. Use paths supplied by the user or obtained from tool results; never guess a local path from an attachment filename.'
   const limits = 'Supports PNG, JPEG and WebP. Requires a vision-capable model. Maximum 8 MiB per image. Returns the original image as image content without resizing or re-encoding.'
   return [
-    defineContentTool({ name: 'view_image', description: `View one local image. ${usage} ${limits}`,
+    defineTool({ name: 'view_image', description: `View one local image. ${usage} ${limits}`,
       inputSchema: z.object({ summary: toolSummarySchema, path }).strict(), execute: input => read([input.path]) }),
-    defineContentTool({ name: 'view_multiple_images', description: `View up to 10 local images in input order. ${usage} Each image is preceded by its path; failed files return individual errors without discarding successful images. Maximum 16 MiB total output image data before base64 encoding. ${limits}`,
+    defineTool({ name: 'view_multiple_images', description: `View up to 10 local images in input order. ${usage} Each image is preceded by its path; failed files return individual errors without discarding successful images. Maximum 16 MiB total output image data before base64 encoding. ${limits}`,
       inputSchema: z.object({ summary: toolSummarySchema, paths: z.array(path).min(1).max(maxImages) }).strict(), execute: input => read(input.paths) })
   ]
 }
