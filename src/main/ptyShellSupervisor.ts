@@ -113,7 +113,9 @@ export class PtyShellSupervisor extends EventEmitter implements ShellTerminalCon
   kill(signal: NodeJS.Signals | number = 'SIGKILL'): boolean {
     if (!['SIGTERM', 'SIGKILL', 15, 9].includes(signal)) return false
     if (!this.terminal) return false
-    if (this.exited) return this.containmentConfirmed
+    // Forced cleanup is final: all captured members and the guardian have been
+    // killed. Later pipe/PTY callbacks must not recheck identities being reaped.
+    if (this.exited || this.containmentConfirmed) return this.containmentConfirmed
     try {
       const contained = this.rootOnly || Boolean(this.sessionLeader && this.session.terminate(this.sessionLeader, signal === 'SIGKILL' || signal === 9))
       const ended = Boolean(this.sessionLeader && this.session.signalMember(this.sessionLeader, signal === 'SIGKILL' || signal === 9 ? 'SIGKILL' : 'SIGTERM'))
