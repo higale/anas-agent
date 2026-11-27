@@ -30,8 +30,8 @@ async function expectChildrenInside(locator) {
 
 async function expectAppearanceWidths(appearance) {
   const bounds = await appearance.locator('.searchable-option-picker, .ui-segmented-control').evaluateAll(elements => elements.map(element => {
-    const { right, width } = element.getBoundingClientRect()
-    return { right, width }
+    const { left, right, width, y, height } = element.getBoundingClientRect()
+    return { left, right, width, y, height }
   }))
   assert.equal(bounds.length, 2)
   assert.ok(Math.abs(bounds[0].width - 240) < 0.5, 'The language picker must retain its original width regardless of segment labels or font size.')
@@ -39,6 +39,13 @@ async function expectAppearanceWidths(appearance) {
     assert.ok(boundsOfControl.width >= bounds[0].width - 0.5, 'Segments must use the language picker width as their minimum and may grow independently.')
     assert.ok(Math.abs(boundsOfControl.right - bounds[0].right) < 0.5, 'Appearance controls must share the same trailing edge.')
   }
+  const titlebarOption = await appearance.getByRole('checkbox').locator('..').boundingBox()
+  assert.ok(titlebarOption)
+  const themeBounds = bounds[1]
+  assert.ok(Math.abs(titlebarOption.y + titlebarOption.height / 2 - themeBounds.y - themeBounds.height / 2) < 0.5,
+    'The titlebar checkbox and theme selector must share the same vertical center.')
+  assert.ok(themeBounds.left - titlebarOption.x - titlebarOption.width >= 12,
+    'The titlebar checkbox must have clear spacing before the theme selector.')
   const fontRail = await appearance.locator('.ui-slider-rail').boundingBox()
   assert.ok(fontRail)
   assert.ok(Math.abs(fontRail.width - bounds[0].width) < 0.5, 'The visible font slider rail must match the language picker width.')

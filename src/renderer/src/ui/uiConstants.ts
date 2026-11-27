@@ -11,6 +11,12 @@ export const UI_POPOVER_SIDE_OFFSET = 8
 export const UI_POPOVER_COLLISION_PADDING = 12
 export const UI_POPOVER_FALLBACK_WIDTH = 240
 
+export const TITLEBAR_ACTION_MENU_POSITION = {
+  side: 'bottom',
+  align: 'center',
+  sideOffset: UI_POPOVER_SIDE_OFFSET
+} as const
+
 export const SIDEBAR_ROW_OVERLAY_POSITION = {
   side: 'right',
   align: 'start',

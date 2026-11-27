@@ -29,6 +29,7 @@ function config(): AppConfigSnapshot {
       },
       language: 'en',
       theme: 'dark',
+      showThemeInTitlebar: true,
       fontSize: 14,
       chatContentWidth: 'narrow',
       attachmentTextMaxChars: 1000,

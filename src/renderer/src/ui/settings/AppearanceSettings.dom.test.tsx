@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { AppearanceSettings } from './AppearanceSettings'
 
@@ -7,17 +8,16 @@ vi.mock('react-i18next', () => ({
 }))
 
 describe('appearance settings layout', () => {
-  it('renders its options as divided rows in one settings card', () => {
-    render(
+  it('renders divided appearance rows and saves the titlebar checkbox independently of the theme', async () => {
+    const onSaveTheme = vi.fn(), onSaveShowThemeInTitlebar = vi.fn()
+    const props = {
+      languageOptions: [{ code: 'en', name: 'English', builtIn: true }], languageValue: 'en', systemLanguage: 'system',
+      themeValue: 'dark', fontSizeValue: 15, showThemeInTitlebar: true,
+      onSaveLanguage: vi.fn(), onSaveTheme, onSaveShowThemeInTitlebar, onSaveFontSize: vi.fn()
+    }
+    const { rerender } = render(
       <AppearanceSettings
-        languageOptions={[{ code: 'en', name: 'English', builtIn: true }]}
-        languageValue="en"
-        systemLanguage="system"
-        themeValue="dark"
-        fontSizeValue={15}
-        onSaveLanguage={vi.fn()}
-        onSaveTheme={vi.fn()}
-        onSaveFontSize={vi.fn()}
+        {...props}
       />
     )
 
@@ -36,5 +36,14 @@ describe('appearance settings layout', () => {
     expect(Array.from(card?.children ?? []).every((row) => row.classList.contains('ui-form-row-narrow'))).toBe(true)
     expect(fontSizeInput.closest('.ui-range-row')).toHaveClass('ui-form-row-narrow')
     expect(screen.queryByRole('radiogroup', { name: 'settings.chat_content_width' })).toBeNull()
+    const checkbox = screen.getByRole('checkbox', { name: 'settings.theme_titlebar_icon' })
+    expect(checkbox).toBeChecked()
+    await userEvent.click(checkbox)
+    expect(onSaveShowThemeInTitlebar).toHaveBeenCalledExactlyOnceWith(false)
+    expect(onSaveTheme).not.toHaveBeenCalled()
+    rerender(<AppearanceSettings {...props} showThemeInTitlebar={false} />)
+    expect(checkbox).not.toBeChecked()
+    await userEvent.click(screen.getByRole('radio', { name: 'settings.theme_system' }))
+    expect(onSaveTheme).toHaveBeenCalledExactlyOnceWith('system')
   })
 })

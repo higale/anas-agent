@@ -1342,6 +1342,12 @@ fieldset.ui-form-section {
   flex-shrink: 0;
 }
 
+.ui-form-row-controls {
+  --ui-toolbar-gap: 16px;
+  max-width: 100%;
+  margin-inline-start: auto;
+}
+
 .ui-form-row-label-content {
   grid-template-columns: minmax(0, 8em) minmax(0, 1fr);
   align-items: baseline;

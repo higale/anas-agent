@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import type { TFunction } from 'i18next'
 import { applyLanguagePreference, getLanguageOptions, systemLanguagePreference } from '../i18n'
-import { normalizeTheme } from './settings/AppearanceSettings'
+import { normalizeTheme } from './theme'
 import type { AppBuildInfo, AppConfigSnapshot, InputHistorySnapshot, LanguagePackSummary, Project } from '@shared/types'
 import { normalizeUiFontSize } from '@shared/uiPreferences'
 import {

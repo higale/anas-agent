@@ -18,6 +18,7 @@
   },
   "language": "system",
   "theme": "system",
+  "show_theme_in_titlebar": true,
   "font_size": 14,
   "chat_content_width": "narrow",
   "default_model_id": null,

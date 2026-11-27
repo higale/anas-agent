@@ -82,6 +82,20 @@ it('defaults optional process preferences and preserves explicit collapsed and h
   await expect(appConfig.updateSettings({ runningProcessDisplay: 'invalid' as 'expanded' })).rejects.toThrow('running_process_display')
 })
 
+it('defaults the theme shortcut without rewriting settings and persists hiding and showing it', async () => {
+  const raw = rawConfig(), { appConfig, writeRawSettingsConfig } = await loadAppConfig(raw)
+  expect((await appConfig.getAppSettings()).showThemeInTitlebar).toBe(true)
+  expect(writeRawSettingsConfig).not.toHaveBeenCalled()
+  await appConfig.updateSettings({ showThemeInTitlebar: false })
+  expect((await appConfig.updateSettings({ theme: 'dark' })).settings).toMatchObject({ theme: 'dark', showThemeInTitlebar: false })
+  expect(raw.settings?.show_theme_in_titlebar).toBe(false)
+  expect((await appConfig.updateSettings({ showThemeInTitlebar: true })).settings.showThemeInTitlebar).toBe(true)
+  expect(raw.settings?.show_theme_in_titlebar).toBe(true)
+  writeRawSettingsConfig.mockClear()
+  await expect(appConfig.updateSettings({ showThemeInTitlebar: 'false' as unknown as boolean })).rejects.toThrow('show_theme_in_titlebar')
+  expect(writeRawSettingsConfig).not.toHaveBeenCalled()
+})
+
 function rawProvider(id: string, name: string) {
   return {
     id: `${id}-provider`,

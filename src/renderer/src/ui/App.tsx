@@ -1340,6 +1340,8 @@ function AppContent({ onRestoreData }: { onRestoreData(sourcePath: string): void
         composerFormRef={composerFormRef}
         composerInputRef={composerInputRef}
         config={chatConfig}
+        resolvedTheme={resolvedTheme}
+        onChangeTheme={theme => saveSettings({ theme })}
         defaultModelId={config?.defaultModelId}
         selectedModelParameterPresetId={selectedModelParameterPresetId}
         error={agent.activeError}

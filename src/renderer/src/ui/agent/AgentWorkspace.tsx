@@ -34,6 +34,7 @@ import { useTranslation } from 'react-i18next'
 import { ThreadTopbar } from './ThreadTopbar'
 import { ActivityPreferences } from './ActivityPreferences'
 import { PanelViewState } from './PanelViewState'
+import type { ThemeMode } from '../theme'
 
 interface AgentWorkspaceProps {
   plugins?: PluginSummary[]
@@ -50,6 +51,8 @@ interface AgentWorkspaceProps {
   composerFormRef: RefObject<HTMLFormElement | null>
   composerInputRef: RefObject<HTMLTextAreaElement | null>
   config?: AppConfigSnapshot
+  resolvedTheme: 'light' | 'dark'
+  onChangeTheme(theme: ThemeMode): void | Promise<void>
   defaultModelId?: string
   selectedModelParameterPresetId?: string
   error?: string
@@ -222,6 +225,7 @@ export function AgentWorkspace(props: AgentWorkspaceProps) {
         <div className="topbar-actions ui-row ui-row-tight ui-push-end">
           {(props.config?.settings.showMemoryActivityInTitlebar ?? true) && <MemoryActivityButton onOpen={openMemoryActivity} />}
           <WorkspaceMenu plugins={props.plugins ?? []} onOpenMemoryActivity={openMemoryActivity}
+            theme={(props.config?.settings.showThemeInTitlebar ?? true) ? { value: props.config?.settings.theme, resolvedTheme: props.resolvedTheme, onChange: props.onChangeTheme } : undefined}
             onOpenPlugin={props.onOpenPlugin} onOpenPluginSettings={props.onOpenPluginSettings}
             project={selectedProject ? { name: selectedProject.name,
               onOpenProcesses: props.activeThreadId ? () => props.panels.open({ kind: 'processes', projectId: selectedProject.id, threadId: props.activeThreadId! }) : undefined,

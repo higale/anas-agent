@@ -90,6 +90,8 @@ function workspaceProps(
     onCancelGeneration: vi.fn(),
     onChangeAccessMode: vi.fn(),
     onChangeInput: vi.fn(),
+    onChangeTheme: vi.fn(),
+    resolvedTheme: 'light',
     onChangeSpeechReplyEnabled: vi.fn(),
     onComposerDragEnter: vi.fn(),
     onComposerDragLeave: vi.fn(),
@@ -133,6 +135,14 @@ function workspaceProps(
 describe('AgentWorkspace', () => {
   beforeEach(() => vi.stubGlobal('gale', { panels: { onEscape: () => () => {} }, agent: { context: { status: vi.fn(async () => undefined) } } }))
   afterEach(() => vi.unstubAllGlobals())
+  it('hides only the theme shortcut when its titlebar preference is disabled', () => {
+    const props = workspaceProps(interruptedRun([]))
+    const { rerender } = render(<AgentWorkspace {...props} />)
+    expect(screen.getByRole('button', { name: /^settings.theme: / })).toBeVisible()
+    rerender(<AgentWorkspace {...props} config={{ settings: { showThemeInTitlebar: false }, models: [] } as unknown as AppConfigSnapshot} />)
+    expect(screen.queryByRole('button', { name: /^settings.theme: / })).toBeNull()
+    expect(screen.getByRole('button', { name: 'agent.workspace_menu' })).toBeVisible()
+  })
   it('keeps an open context window mounted while model parameters require an asynchronous reestimate', async () => {
     let finish!: (status: AgentContextStatus) => void
     const reader = vi.fn(() => new Promise<AgentContextStatus>((resolve) => { finish = resolve }))

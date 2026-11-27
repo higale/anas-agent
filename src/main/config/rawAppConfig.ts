@@ -100,6 +100,7 @@ export interface RawAppSettings {
   default_model_id?: string | null
   language?: string
   theme?: string
+  show_theme_in_titlebar?: boolean
   font_size?: number
   chat_content_width?: string
   attachment_text_max_chars?: number

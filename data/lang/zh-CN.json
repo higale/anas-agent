@@ -591,6 +591,8 @@
     "language_hint": "选择应用界面语言。",
     "theme": "主题",
     "theme_hint": "选择应用颜色模式。",
+    "theme_titlebar_icon": "标题栏图标",
+    "theme_titlebar_hint": "当前{{current}}；左键切换为{{next}}，右键选择主题。",
     "theme_system": "系统",
     "theme_light": "浅色",
     "theme_dark": "深色",

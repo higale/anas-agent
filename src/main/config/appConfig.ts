@@ -251,6 +251,7 @@ function normalizeSettings(raw: RawAppConfig): AppSettings {
     speechReply: normalizeSpeechReply(raw),
     language: requireString(settings.language, 'settings.language'),
     theme: normalizeTheme(settings.theme),
+    showThemeInTitlebar: settings.show_theme_in_titlebar === undefined || requireBoolean(settings.show_theme_in_titlebar, 'settings.show_theme_in_titlebar'),
     fontSize: normalizeUiFontSize(settings.font_size),
     chatContentWidth: normalizeChatContentWidth(settings.chat_content_width),
     attachmentTextMaxChars: normalizeAttachmentTextMaxChars(settings.attachment_text_max_chars),
@@ -417,6 +418,7 @@ function rawSettingsFromSnapshot(snapshot: AppConfigSnapshot, previousProfile?: 
     project_default_directory: settings.projectDefaultDirectory,
     language: settings.language,
     theme: settings.theme,
+    show_theme_in_titlebar: settings.showThemeInTitlebar,
     font_size: settings.fontSize,
     chat_content_width: settings.chatContentWidth,
     attachment_text_max_chars: settings.attachmentTextMaxChars,
@@ -857,6 +859,8 @@ export async function updateSettings(settings: AppSettingsUpdate): Promise<AppCo
       project_default_directory: settings.projectDefaultDirectory === undefined ? raw.settings?.project_default_directory : requireString(settings.projectDefaultDirectory, 'settings.project_default_directory').trim(),
       language: settings.language ?? raw.settings?.language,
       theme: settings.theme === undefined ? raw.settings?.theme : normalizeTheme(settings.theme),
+      show_theme_in_titlebar: settings.showThemeInTitlebar === undefined
+        ? raw.settings?.show_theme_in_titlebar : requireBoolean(settings.showThemeInTitlebar, 'settings.show_theme_in_titlebar'),
       font_size: settings.fontSize === undefined
         ? raw.settings?.font_size
         : normalizeUiFontSize(settings.fontSize),

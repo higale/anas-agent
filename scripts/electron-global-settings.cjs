@@ -4,6 +4,26 @@ const { tmpdir } = require('node:os')
 const { join } = require('node:path')
 const { expect } = require('playwright/test')
 
+async function expectTitlebarMenuPosition(page, button) {
+  const anchor = await button.boundingBox()
+  assert.ok(anchor)
+  await expect.poll(() => page.getByRole('menu').evaluate((menu, anchor) => {
+    const overlay = globalThis.navigator.windowControlsOverlay
+    const titlebarBottom = overlay?.visible ? overlay.getTitlebarAreaRect().bottom : 0
+    const bounds = menu.getBoundingClientRect()
+    const expectedTop = Math.max(anchor.y + anchor.height + 8, titlebarBottom + 12)
+    const centeredLeft = anchor.x + anchor.width / 2 - bounds.width / 2
+    const expectedLeft = Math.max(12, Math.min(centeredLeft, globalThis.innerWidth - 12 - bounds.width))
+    return { belowButton: Math.abs(bounds.top - expectedTop) <= 1,
+      centeredOrClamped: Math.abs(bounds.left - expectedLeft) <= 1 }
+  }, anchor), { message: 'Both titlebar menus must center below their buttons, clamp inside the window, and clear native controls.' })
+    .toEqual({ belowButton: true, centeredOrClamped: true })
+  return page.getByRole('menu').evaluate((menu, anchor) => {
+    const bounds = menu.getBoundingClientRect()
+    return Math.abs(bounds.left + bounds.width / 2 - anchor.x - anchor.width / 2) > 1
+  }, anchor)
+}
+
 async function verifyGlobalSettings(launchApplication) {
   const root = await mkdtemp(join(tmpdir(), 'anas-global-settings-'))
   let application
@@ -110,6 +130,13 @@ async function verifyGlobalSettings(launchApplication) {
       await expect.poll(() => page.evaluate(async () => (await globalThis.gale.config.get()).settings.profile.assistant.name)).toBe(assistantName)
       await page.getByRole('radiogroup', { name: 'Theme', exact: true }).getByText('Dark', { exact: true }).click()
       await expect.poll(() => page.evaluate(async () => (await globalThis.gale.config.get()).settings.theme)).toBe('dark')
+      const titlebarIcon = page.getByRole('checkbox', { name: 'Titlebar icon', exact: true })
+      await expect(titlebarIcon).toBeChecked()
+      await titlebarIcon.uncheck()
+      await expect.poll(() => page.evaluate(async () => (await globalThis.gale.config.get()).settings.showThemeInTitlebar)).toBe(false)
+      await expect(page.locator('.topbar').getByRole('button', { name: /^Theme: / })).toHaveCount(0)
+      await titlebarIcon.check()
+      await expect.poll(() => page.evaluate(async () => (await globalThis.gale.config.get()).settings.showThemeInTitlebar)).toBe(true)
       if (process.env.ANAS_E2E_GENERAL_SETTINGS_SCREENSHOT) await page.screenshot({ path: process.env.ANAS_E2E_GENERAL_SETTINGS_SCREENSHOT })
       await page.getByRole('button', { name: 'Clean up...', exact: true }).click()
       const cleanup = page.getByRole('alertdialog')
@@ -144,9 +171,69 @@ async function verifyGlobalSettings(launchApplication) {
       await expect(composer).toHaveValue('/')
       await expect(page.locator('.composer-suggestions')).toBeVisible()
       await composer.fill('')
+      const themeButton = page.locator('.topbar').getByRole('button', { name: /^Theme: / })
+      await expect(themeButton).toBeVisible()
+      assert.equal(await themeButton.evaluate(element => element.nextElementSibling?.getAttribute('aria-label')), 'Workspace menu')
+      for (const [label, value] of [['Light', 'light'], ['Dark', 'dark']]) {
+        await themeButton.click()
+        await expect(themeButton).toHaveAccessibleName(`Theme: ${label}`)
+        await expect(page.getByRole('menu')).toHaveCount(0)
+        await expect.poll(() => page.evaluate(async () => (await globalThis.gale.config.get()).settings.theme)).toBe(value)
+        await expect(page.locator('html')).toHaveAttribute('data-theme', value)
+      }
+      async function chooseTheme(label, value) {
+        const previous = await page.evaluate(async () => (await globalThis.gale.config.get()).settings.theme)
+        await themeButton.click({ button: 'right' })
+        const choices = page.getByRole('menuitemradio')
+        await expect(choices).toHaveCount(3)
+        await expectTitlebarMenuPosition(page, themeButton)
+        await expect(page.getByRole('menuitemradio', { name: { system: 'System', light: 'Light', dark: 'Dark' }[previous], exact: true })).toBeChecked()
+        assert.equal(await page.evaluate(async () => (await globalThis.gale.config.get()).settings.theme), previous)
+        await page.getByRole('menuitemradio', { name: label, exact: true }).click()
+        await expect(page.getByRole('menu')).toHaveCount(0)
+        await expect.poll(() => page.evaluate(async () => (await globalThis.gale.config.get()).settings.theme)).toBe(value)
+      }
+      await chooseTheme('System', 'system')
+      for (const systemAppearance of ['dark', 'light']) {
+        await page.emulateMedia({ colorScheme: systemAppearance })
+        await expect(page.locator('html')).toHaveAttribute('data-theme', systemAppearance)
+        await expect(themeButton).toHaveAccessibleName('Theme: System')
+        await themeButton.click()
+        const next = systemAppearance === 'dark' ? 'light' : 'dark'
+        await expect.poll(() => page.evaluate(async () => (await globalThis.gale.config.get()).settings.theme)).toBe(next)
+        await expect(page.locator('html')).toHaveAttribute('data-theme', next)
+        await chooseTheme('System', 'system')
+      }
+      await page.emulateMedia({ colorScheme: null })
+      await chooseTheme('Light', 'light')
+      await chooseTheme('Dark', 'dark')
+      await chooseTheme('System', 'system')
+      const menuPositions = new Set()
+      for (const zoom of [0.8, 1.25, 1.5, 1]) {
+        await application.evaluate(({ BrowserWindow }, factor) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(factor), zoom)
+        await chooseTheme('System', 'system')
+        const workspaceMenu = page.locator('.topbar').getByRole('button', { name: 'Workspace menu', exact: true })
+        await workspaceMenu.click()
+        await expect(page.getByRole('menu')).toBeVisible()
+        menuPositions.add(await expectTitlebarMenuPosition(page, workspaceMenu) ? 'clamped' : 'centered')
+        await page.keyboard.press('Escape')
+      }
+      assert.deepEqual([...menuPositions].sort(), ['centered', 'clamped'], 'Exercise both centered placement and window-edge clamping.')
+      if (process.env.ANAS_E2E_THEME_SCREENSHOT) {
+        await themeButton.click({ button: 'right' })
+        await page.screenshot({ path: process.env.ANAS_E2E_THEME_SCREENSHOT })
+        await page.keyboard.press('Escape')
+      }
     }
     assert.equal(await application.evaluate(() => globalThis.__globalSettingsReloads), 2)
-    console.log('Global settings E2E passed: unified General page with profile/theme saves and cleanup access, project-independent pages, global skills and memories, MCP without a model, manual project skill directories, and composer suggestions hidden in settings while preserving the draft.')
+    await application.close()
+    application = await launchApplication(root)
+    const restarted = await application.firstWindow()
+    await expect(restarted.locator('.topbar').getByRole('button', { name: 'Theme: System', exact: true })).toBeVisible()
+    const settings = await restarted.evaluate(async () => (await globalThis.gale.config.get()).settings)
+    assert.equal(settings.theme, 'system')
+    assert.equal(settings.showThemeInTitlebar, true)
+    console.log('Global settings E2E passed: profile/theme saves, titlebar visibility, two-state left-click including system appearance changes, three-state right-click selection and restart persistence, cleanup access, project-independent pages, global skills and memories, MCP without a model, manual project skill directories, and composer suggestions hidden in settings while preserving the draft.')
   } finally {
     await application?.close()
     await rm(root, { recursive: true, force: true })

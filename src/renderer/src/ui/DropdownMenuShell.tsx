@@ -5,7 +5,7 @@ import {
   type ReactElement,
   type ReactNode
 } from 'react'
-import { useFloatingCollisionPadding } from './floatingViewport'
+import { useMenuCollisionProps } from './floatingViewport'
 
 type DropdownMenuRootProps = ComponentPropsWithoutRef<typeof DropdownMenu.Root>
 
@@ -28,7 +28,7 @@ export function DropdownMenuTrigger(props: DropdownMenuTriggerProps) {
   )
 }
 
-type DropdownMenuContentProps = ComponentPropsWithoutRef<typeof DropdownMenu.Content> & {
+type DropdownMenuContentProps = Omit<ComponentPropsWithoutRef<typeof DropdownMenu.Content>, 'sticky'> & {
   restoreFocus?: boolean
 }
 
@@ -38,11 +38,11 @@ export function DropdownMenuContent({
   restoreFocus = false,
   ...props
 }: DropdownMenuContentProps) {
-  const safePadding = useFloatingCollisionPadding(collisionPadding)
+  const collision = useMenuCollisionProps(collisionPadding)
   return (
     <DropdownMenu.Content
       {...props}
-      collisionPadding={safePadding}
+      {...collision}
       onCloseAutoFocus={(event) => {
         onCloseAutoFocus?.(event)
         if (!restoreFocus) event.preventDefault()
@@ -51,9 +51,9 @@ export function DropdownMenuContent({
   )
 }
 
-export function DropdownMenuSubContent({ collisionPadding, ...props }: ComponentProps<typeof DropdownMenu.SubContent>) {
-  const safePadding = useFloatingCollisionPadding(collisionPadding)
-  return <DropdownMenu.SubContent {...props} collisionPadding={safePadding} />
+export function DropdownMenuSubContent({ collisionPadding, ...props }: Omit<ComponentProps<typeof DropdownMenu.SubContent>, 'sticky'>) {
+  const collision = useMenuCollisionProps(collisionPadding)
+  return <DropdownMenu.SubContent {...props} {...collision} />
 }
 
 interface DropdownMenuPosition {

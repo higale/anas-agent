@@ -18,6 +18,8 @@ New conversations use the project model, then the global default, then the model
 
 During tool execution, one continuous shimmer moves across the entire tool header, including its icon, name, description, status indicators and controls, without affecting clicks or expansion. It stops when awaiting user approval or an answer, or when the call ends. The system's reduced-motion setting keeps the text static.
 
+In Settings → General → Appearance, choose System, Light, or Dark in the Theme row. The “Titlebar icon” checkbox controls the theme shortcut and is on by default. Left-click the theme icon immediately to the left of the chat titlebar menu to toggle between Light and Dark based on the current appearance. Right-click to choose System, Light, or Dark. Each change is saved automatically. Left-clicking in System mode selects a fixed theme; choose System from the right-click menu to resume following your system.
+
 ## Projects And Capabilities
 
 When creating or editing a project, a blank name becomes the first available name in “Untitled project 1, 2, 3…”. Folders may be left empty. They then follow **Settings → Conversation → Default project directory**, which defaults to the system Documents directory. The project keeps an empty folder list instead of saving the resolved default path.

@@ -582,6 +582,7 @@ export interface AppSettings {
   speechReply: SpeechReplyConfig
   language: string
   theme: string
+  showThemeInTitlebar: boolean
   fontSize: number
   chatContentWidth: ChatContentWidth
   attachmentTextMaxChars: number

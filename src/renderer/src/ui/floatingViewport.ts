@@ -1,4 +1,5 @@
-import { useSyncExternalStore } from 'react'
+import { useCallback, useSyncExternalStore, type RefObject } from 'react'
+import { TITLEBAR_ACTION_MENU_POSITION, UI_POPOVER_COLLISION_PADDING } from './uiConstants'
 
 interface WindowControlsOverlay extends EventTarget {
   readonly visible: boolean
@@ -35,4 +36,27 @@ export function useFloatingCollisionPadding(padding: CollisionPadding = 0): Coll
   // Native caption buttons are outside the DOM. Keep Radix's collision viewport
   // below them, using CSS-pixel geometry that follows window zoom and resizing.
   return { ...sides, top: titlebarBottom + (sides.top ?? 0) }
+}
+
+export function useMenuCollisionProps(padding: CollisionPadding = UI_POPOVER_COLLISION_PADDING) {
+  // Safe bounds take priority over staying attached to a button or pointer
+  // inside the native titlebar. Both menu types must be free to shift away.
+  return { collisionPadding: useFloatingCollisionPadding(padding), sticky: 'always' as const }
+}
+
+export function useTitlebarMenuPosition(trigger: RefObject<HTMLElement | null>) {
+  const subscribeToPosition = useCallback((onChange: () => void) => {
+    const unsubscribe = subscribe(onChange)
+    const observer = new ResizeObserver(onChange)
+    if (trigger.current) observer.observe(trigger.current)
+    return () => { unsubscribe(); observer.disconnect() }
+  }, [trigger])
+  const sideOffset = useSyncExternalStore(subscribeToPosition, () => {
+    const bottom = trigger.current?.getBoundingClientRect().bottom
+    return bottom === undefined ? TITLEBAR_ACTION_MENU_POSITION.sideOffset : Math.max(
+      TITLEBAR_ACTION_MENU_POSITION.sideOffset,
+      nativeTitlebarBottom() + UI_POPOVER_COLLISION_PADDING - bottom
+    )
+  })
+  return { ...TITLEBAR_ACTION_MENU_POSITION, sideOffset }
 }

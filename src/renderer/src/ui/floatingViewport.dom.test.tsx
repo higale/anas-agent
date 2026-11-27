@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
-import { useFloatingCollisionPadding } from './floatingViewport'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { useFloatingCollisionPadding, useTitlebarMenuPosition } from './floatingViewport'
 
 afterEach(() => Reflect.deleteProperty(navigator, 'windowControlsOverlay'))
 
@@ -11,6 +11,28 @@ function overlayFixture() {
 }
 
 describe('floating content viewport', () => {
+  it('positions titlebar menus below their buttons while clearing resized native controls', () => {
+    const overlay = overlayFixture()
+    const trigger = { current: document.createElement('button') }
+    let buttonBottom = 40
+    vi.spyOn(trigger.current, 'getBoundingClientRect').mockImplementation(() => new DOMRect(700, buttonBottom - 32, 32, 32))
+    const { result } = renderHook(() => useTitlebarMenuPosition(trigger))
+    expect(result.current).toMatchObject({ side: 'bottom', align: 'center', sideOffset: 8 })
+    act(() => {
+      overlay.getTitlebarAreaRect = () => new DOMRect(0, 0, 800, 45)
+      overlay.dispatchEvent(new Event('geometrychange'))
+    })
+    expect(buttonBottom + result.current.sideOffset).toBe(57)
+    act(() => { buttonBottom = 50; window.dispatchEvent(new Event('resize')) })
+    expect(result.current.sideOffset).toBe(8)
+    act(() => {
+      buttonBottom = 40
+      overlay.visible = false
+      overlay.dispatchEvent(new Event('geometrychange'))
+    })
+    expect(result.current.sideOffset).toBe(8)
+  })
+
   it('reserves native caption height while preserving the other edge paddings', () => {
     const overlay = overlayFixture()
     const { result } = renderHook(() => useFloatingCollisionPadding({ top: 8, right: 12, bottom: 16, left: 20 }))

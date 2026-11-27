@@ -1,7 +1,6 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { type ComponentProps, type ReactElement, type ReactNode } from 'react'
-import { UI_POPOVER_COLLISION_PADDING } from './uiConstants'
-import { useFloatingCollisionPadding } from './floatingViewport'
+import { useMenuCollisionProps } from './floatingViewport'
 
 interface ContextMenuShellProps {
   panelId?: string
@@ -12,8 +11,8 @@ interface ContextMenuShellProps {
 }
 
 function ContextMenuContent(props: ComponentProps<typeof ContextMenu.Content>) {
-  const collisionPadding = useFloatingCollisionPadding(UI_POPOVER_COLLISION_PADDING)
-  return <ContextMenu.Content {...props} collisionPadding={collisionPadding} />
+  const collision = useMenuCollisionProps()
+  return <ContextMenu.Content {...props} {...collision} />
 }
 
 export function ContextMenuShell({

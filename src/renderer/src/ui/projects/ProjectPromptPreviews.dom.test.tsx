@@ -29,6 +29,7 @@ const settings = {
   speechReply: { enabled: false, voice: '', speed: 1 },
   language: 'en',
   theme: 'dark',
+  showThemeInTitlebar: true,
   fontSize: 14,
   chatContentWidth: 'narrow',
   attachmentTextMaxChars: 200_000,

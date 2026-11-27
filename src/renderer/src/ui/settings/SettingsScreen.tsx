@@ -312,9 +312,11 @@ export function SettingsScreen({
                 languageValue: config?.settings.language ?? systemLanguage,
                 systemLanguage,
                 themeValue: config?.settings.theme,
+                showThemeInTitlebar: config?.settings.showThemeInTitlebar ?? true,
                 fontSizeValue: config?.settings.fontSize,
                 onSaveLanguage,
                 onSaveTheme: (theme) => onSaveSettings({ theme }),
+                onSaveShowThemeInTitlebar: (showThemeInTitlebar) => onSaveSettings({ showThemeInTitlebar }),
                 onSaveFontSize: (fontSize) => onSaveSettings({ fontSize })
               }}
               data={{

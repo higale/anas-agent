@@ -1,4 +1,4 @@
-import { Globe, Monitor, Moon, Sun } from 'lucide-react'
+import { Globe } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { LanguagePackSummary } from '@shared/types'
 import { UI_FONT_SIZE_MAX, UI_FONT_SIZE_MIN, normalizeUiFontSize } from '@shared/uiPreferences'
@@ -7,26 +7,24 @@ import { SearchableOptionPicker } from '../SearchableOptionPicker'
 import { SegmentedControl } from '../SegmentedControl'
 import { UI_ICON_SIZE_NAV } from '../uiConstants'
 import { SettingsGroup } from './SettingsGroup'
-
-export type ThemeMode = 'system' | 'light' | 'dark'
+import { CheckboxField } from '../CheckboxField'
+import { normalizeTheme, themeOptions, type ThemeMode } from '../theme'
 
 const FONT_SIZE_MARKS = Array.from({ length: UI_FONT_SIZE_MAX - UI_FONT_SIZE_MIN + 1 }, (_, index) => {
   const value = UI_FONT_SIZE_MIN + index
   return { value, label: index % 2 === 0 ? String(value) : undefined }
 })
 
-export function normalizeTheme(value?: string): ThemeMode {
-  return value === 'light' || value === 'dark' ? value : 'system'
-}
-
 interface AppearanceSettingsProps {
   languageOptions: LanguagePackSummary[]
   languageValue: string
   systemLanguage: string
   themeValue?: string
+  showThemeInTitlebar: boolean
   fontSizeValue?: number
   onSaveLanguage: (language: string) => void | Promise<void>
   onSaveTheme: (theme: ThemeMode) => void | Promise<void>
+  onSaveShowThemeInTitlebar: (visible: boolean) => void | Promise<void>
   onSaveFontSize: (fontSize: number) => void | Promise<void>
 }
 
@@ -35,9 +33,11 @@ export function AppearanceSettings({
   languageValue,
   systemLanguage,
   themeValue,
+  showThemeInTitlebar,
   fontSizeValue,
   onSaveLanguage,
   onSaveTheme,
+  onSaveShowThemeInTitlebar,
   onSaveFontSize
 }: AppearanceSettingsProps) {
   const { t } = useTranslation()
@@ -50,11 +50,7 @@ export function AppearanceSettings({
       searchText: `${language.name} ${language.code}`
     }))
   ]
-  const themePickerOptions = [
-    { value: 'system', label: t('settings.theme_system'), icon: <Monitor size="1em" /> },
-    { value: 'light', label: t('settings.theme_light'), icon: <Sun size="1em" /> },
-    { value: 'dark', label: t('settings.theme_dark'), icon: <Moon size="1em" /> }
-  ]
+  const themePickerOptions = themeOptions.map(({ value, label, Icon }) => ({ value, label: t(label), icon: <Icon size="1em" /> }))
 
   return (
     <SettingsGroup title={t('settings.appearance')}>
@@ -75,18 +71,22 @@ export function AppearanceSettings({
           onChange={(language) => void onSaveLanguage(language)}
         />
       </div>
-      <div className="ui-form-row ui-form-row-narrow ui-form-row-fit-control">
+      <div className="ui-form-row ui-form-row-narrow ui-form-row-inline">
         <span>
           <strong>{t('settings.theme')}</strong>
           <small>{t('settings.theme_hint')}</small>
         </span>
-        <SegmentedControl
-          ariaLabel={t('settings.theme')}
-          minWidth="var(--settings-control-width-narrow-preferred)"
-          options={themePickerOptions}
-          value={normalizeTheme(themeValue)}
-          onChange={(theme) => void onSaveTheme(normalizeTheme(theme))}
-        />
+        <div className="ui-toolbar ui-form-row-controls">
+          <CheckboxField label={t('settings.theme_titlebar_icon')}
+            checked={showThemeInTitlebar} onChange={visible => void onSaveShowThemeInTitlebar(visible)} />
+          <SegmentedControl
+            ariaLabel={t('settings.theme')}
+            minWidth="var(--settings-control-width-narrow-preferred)"
+            options={themePickerOptions}
+            value={normalizeTheme(themeValue)}
+            onChange={(theme) => void onSaveTheme(normalizeTheme(theme))}
+          />
+        </div>
       </div>
       <RangeField
         ariaLabel={t('settings.font_size')}

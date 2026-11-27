@@ -39,6 +39,7 @@ export function config(settings: Partial<AppConfigSnapshot['settings']> = {}): A
       },
       language: 'en',
       theme: 'dark',
+      showThemeInTitlebar: true,
       fontSize: 14,
       chatContentWidth: 'narrow',
       attachmentTextMaxChars: 1000,
