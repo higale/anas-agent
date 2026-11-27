@@ -6,6 +6,7 @@ Anas 使用 `LICENSE` 中的 MIT 协议。第三方代码和资源保留各自�
 
 - OpenAI Codex：Skill 目录指导内容、补丁算法的 TypeScript 移植、补丁语法、工具说明和参考测试依据 Apache-2.0 使用，协议和署名位于 `data/licenses/codex/`；移植范围见 [补丁实现](docs/CODEX_PATCH.md)。
 - 供应商品牌图标：来源、修改说明及协议见 [图标声明](data/licenses/provider-icons/README.md)。
+- Emojibase：项目表情选择器使用离线中英文数据；MIT 协议保存在 `data/licenses/emojibase/LICENSE`。显示使用随包提供的 Noto Color Emoji 字体，其 OFL-1.1 协议保存在 `data/licenses/noto-color-emoji/LICENSE`。
 - node-edge-tts：内置语音及 Sec-MS-GEC v2 算法的来源、修改说明和 MIT 协议位于 `data/licenses/node-edge-tts.txt`。
 - Deep Agents 1.13.0：沿用的特定模型提示文本位于 `src/main/agent/modelGuidance.json`，保留原文并合并相同文本；版权属于 LangChain, Inc.，MIT 协议位于 `data/licenses/deepagents/LICENSE`。不包含其框架实现。
 - LangChain Core 1.2.10：`src/runtime/compression.ts` 的摘要文本排版依据导入版本的角色、工具调用和媒体占位行为实现；`src/runtime/inputContent.ts` 保留输入媒体归一化行为；`src/providers/assistantContent.ts` 保留产品所用 OpenAI／Anthropic 响应的内容、引用和服务端工具呈现。实现均使用应用普通数据接口；版权属于 LangChain, Inc.，MIT 协议位于 `data/licenses/langchain/LICENSE`。
@@ -23,6 +24,8 @@ Anas 使用 `LICENSE` 中的 MIT 协议。第三方代码和资源保留各自�
 ## English
 
 Anas is licensed under the MIT License in `LICENSE`. Third-party code and assets retain their own copyrights and licenses.
+
+- Emojibase: the project emoji picker bundles Chinese and English data for offline use. Its MIT license is in `data/licenses/emojibase/LICENSE`. Emoji are rendered with the bundled Noto Color Emoji font, whose OFL-1.1 license is in `data/licenses/noto-color-emoji/LICENSE`.
 
 - LangChain Core 1.2.10: summary rendering in `src/runtime/compression.ts` preserves the imported role, tool-call and media-placeholder behavior; `src/runtime/inputContent.ts` retains input media normalization; `src/providers/assistantContent.ts` retains content, citation and server-tool presentation for the product's OpenAI/Anthropic responses. All implementations use plain application data. Copyright LangChain, Inc.; the MIT license is in `data/licenses/langchain/LICENSE`.
 - LangChain 1.5.11: `src/runtime/planningDescription.ts` retains the task-list tool description. Planning schemas, acknowledgements and concurrent-update checks preserve the original product behavior in application-owned code. Application-owned call budgets, approval batches, tool error handling and structured review reports retain the imported product behavior. Copyright LangChain, Inc.; the MIT license is in `data/licenses/langchain/LICENSE`.

@@ -23,19 +23,23 @@ export function UsageMeterContent({ content, language, compact, busy, onRefresh,
   const toggle = compact ? (zh ? '展开用量详情' : 'Show usage details') : (zh ? '收起用量详情' : 'Collapse usage details')
   const status = [content.notice, content.error].filter(Boolean).join('\n')
   const summary = content.lines.map(line => `${line.compactLabel === 'CNY' ? '￥' : line.compactLabel} ${line.value}`).join(' · ') || content.emptyLabel || (zh ? '暂无用量数据' : 'Usage unavailable')
+  const refreshButton = <button type="button" className="ui-tool-button ui-tool-button-small usage-meter-refresh" disabled={busy} onClick={onRefresh}
+    data-tooltip={zh ? '立即刷新' : 'Refresh now'} aria-label={zh ? '立即刷新' : 'Refresh now'}>
+    {compact && <Gauge size={16} className="usage-meter-indicator" aria-hidden="true" />}
+    <RefreshCw size={14} className={`${compact ? 'usage-meter-refresh-icon' : ''}${busy ? ' agent-spin' : ''}`} />
+  </button>
   return <div ref={root} className="ui-stack ui-stack-tight">
-    <header className="ui-row-between">
+    <header className={`ui-row-between usage-meter-header${compact ? ' ui-row-tight' : ''}`}>
+      {compact && refreshButton}
       {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Keyboard focus must expose the same read-only details as hover. */}
       <span className="ui-row ui-row-tight ui-truncate" data-tooltip={details} tabIndex={0} aria-label={details}>
-        {compact && <Gauge size={16} aria-hidden="true" />}
         {compact ? content.lines.length > 0 && content.lines.every(line => line.progress !== undefined)
           ? <span className="ui-numeric ui-adaptive-text"><span data-full-text>{summary}</span><span data-short-text>{content.lines.map(line => line.value).join(' · ')}</span></span>
           : <span className="ui-numeric ui-truncate">{summary}</span> : content.title}
       </span>
       <span className="ui-row ui-row-tight">
         {compact && status && <span role="status" data-tooltip={status} aria-label={status}>!</span>}
-        <button type="button" className="ui-tool-button ui-tool-button-small" disabled={busy} onClick={onRefresh}
-          data-tooltip={zh ? '立即刷新' : 'Refresh now'} aria-label={zh ? '立即刷新' : 'Refresh now'}><RefreshCw size={14} className={busy ? 'agent-spin' : undefined} /></button>
+        {!compact && refreshButton}
         <button type="button" className="ui-tool-button ui-tool-button-small" onClick={onToggle} data-tooltip={toggle} aria-label={toggle} aria-expanded={!compact}>
           {compact ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </button>

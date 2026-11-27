@@ -51,6 +51,7 @@ export function ProjectDialog({ open, project, projects = [], config, currentMod
   const [name, setName] = useState('')
   const [icon, setIcon] = useState<ProjectIconName>()
   const [iconData, setIconData] = useState<string>()
+  const [iconEmoji, setIconEmoji] = useState<string>()
   const [iconColor, setIconColor] = useState<ProjectIconColor>()
   const [projectTools, setProjectTools] = useState<ToolSnapshot>()
   const [sourceFolders, setSourceFolders] = useState<string[]>([])
@@ -86,13 +87,14 @@ export function ProjectDialog({ open, project, projects = [], config, currentMod
       name: name.trim(),
       ...(icon ? { icon } : {}),
       ...(iconData ? { iconData } : {}),
+      ...(iconEmoji ? { iconEmoji } : {}),
       ...(iconColor ? { iconColor } : {}),
       ...(modelConfigId ? { modelConfigId, modelParameterPresetId } : {})
     }
     return { ...preferences, sourceFolders, skillDirectories, toolDirectories,
         capabilities: config ? removeEmptyMissingMcpSelections(capabilities, new Set(config.mcpServers.map((server) => server.id))) : capabilities,
         restrictSubagents, prompt, codingMode, ...(accessMode !== 'smart_approval' ? { accessMode } : {}), ...(compressionPrompt.trim() ? { compressionPrompt } : {}) }
-  }, [accessMode, capabilities, codingMode, compressionPrompt, config, icon, iconColor, iconData, modelConfigId,
+  }, [accessMode, capabilities, codingMode, compressionPrompt, config, icon, iconColor, iconData, iconEmoji, modelConfigId,
     modelParameterPresetId, name, prompt, restrictSubagents, sourceFolders, skillDirectories, toolDirectories])
 
   useEffect(() => {
@@ -101,6 +103,7 @@ export function ProjectDialog({ open, project, projects = [], config, currentMod
     setName(project?.name ?? '')
     setIcon(project?.icon)
     setIconData(project?.iconData)
+    setIconEmoji(project?.iconEmoji)
     setIconColor(project?.iconColor)
     setSourceFolders(project ? project.sourceFolders : [])
     setSkillDirectories(project ? project.skillDirectories ?? [] : [])
@@ -284,6 +287,8 @@ export function ProjectDialog({ open, project, projects = [], config, currentMod
                       onPendingChange={setIconPending}
                       iconData={iconData}
                       onChangeImage={setIconData}
+                      emoji={iconEmoji}
+                      onChangeEmoji={setIconEmoji}
                       color={iconColor}
                       icon={icon}
                       onChangeColor={setIconColor}

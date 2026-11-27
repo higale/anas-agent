@@ -71,6 +71,23 @@ afterEach(async () => {
 })
 
 describe('project store', () => {
+  it('defaults the workspace to House without rewriting missing icons or replacing explicit choices', async () => {
+    const store = await import('./projectStore')
+    const initial = await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)
+    expect(initial.icon).toBe('house')
+    const raw = JSON.parse(await readSnapshot())
+    delete raw.projects.find((project: Project) => project.id === DEFAULT_WORKSPACE_PROJECT_ID).icon
+    await writeSnapshot(JSON.stringify(raw))
+    const before = await readSnapshot()
+    expect((await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)).icon).toBe('house')
+    expect(await readSnapshot()).toBe(before)
+    await store.updateProject(initial.id, { ...initial, icon: 'pineapple' })
+    expect((await store.getProject(initial.id)).icon).toBe('pineapple')
+    expect((await store.updateProject(initial.id, { ...initial, icon: undefined })).icon).toBe('house')
+    const regular = await store.createProject({ ...projectSettings(), name: 'Regular', prompt: '' })
+    expect((await store.getProject(regular.id)).icon).toBeUndefined()
+  })
+
   it('keeps empty folders on create, edit and unrelated saves and numbers blank names atomically', async () => {
     const store = await import('./projectStore')
     const request = { ...projectSettings(), name: '', sourceFolders: [], prompt: '' }
@@ -639,6 +656,23 @@ describe('project store', () => {
     })).resolves.toMatchObject({ sourceFolders: [] })
   })
 
+  it('stores emoji as an optional project field and clears it when switching appearance', async () => {
+    const { createProject, getProject, updateProject } = await import('./projectStore')
+    const project = await createProject({ ...projectSettings(), name: 'Emoji project', prompt: '', iconEmoji: '👩‍💻' })
+    expect(await getProject(project.id)).toMatchObject({ iconEmoji: '👩‍💻' })
+    const document = JSON.parse(await readFile(join(tempDir, 'db/projects', project.id, 'project.json'), 'utf8'))
+    expect(document.version).toBe(0)
+    expect(document.project.icon_emoji).toBe('👩‍💻')
+    expect(document.project).not.toHaveProperty('iconEmoji')
+    await expect(updateProject(project.id, { ...project, iconEmoji: 'plain text' })).rejects.toThrow('Project icon emoji is invalid.')
+    expect(await getProject(project.id)).toMatchObject({ iconEmoji: '👩‍💻' })
+    await updateProject(project.id, { ...project, iconEmoji: undefined, icon: 'heart' })
+    expect(await getProject(project.id)).not.toHaveProperty('iconEmoji')
+    const before = await readSnapshot()
+    await getProject(project.id)
+    expect(await readSnapshot()).toBe(before)
+  })
+
   it('persists project appearance and clears it when automatic defaults are selected', async () => {
     const { createProject, updateProject, listProjects } = await import('./projectStore')
     const iconData = 'data:image/svg+xml;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>').toString('base64')
@@ -893,6 +927,7 @@ describe('project store', () => {
   it('persists default workspace settings like a regular project while retaining its fixed identity', async () => {
     const store = await import('./projectStore')
     const initial = await store.getProject(DEFAULT_WORKSPACE_PROJECT_ID)
+    expect(initial.icon).toBe('house')
     await mkdir(join(tempDir, 'default-workspace'))
 
     const updated = await store.updateProject(DEFAULT_WORKSPACE_PROJECT_ID, {
@@ -912,6 +947,7 @@ describe('project store', () => {
 
     expect(updated).toMatchObject({
       id: DEFAULT_WORKSPACE_PROJECT_ID,
+      icon: 'folder',
       name: initial.name,
       accessMode: 'full_access',
       modelConfigId: 'workspace-model',

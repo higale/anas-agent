@@ -46,7 +46,7 @@ export function ProjectDetailsContent({
   return (
     <>
       <header className="project-details-header">
-        <ProjectIcon iconData={project.iconData} color={project.iconColor} icon={project.icon} size={16} />
+        <ProjectIcon iconData={project.iconData} emoji={project.iconEmoji} color={project.iconColor} icon={project.icon} size={16} />
         <strong className={defaultWorkspace ? 'project-default-workspace-name' : undefined}>{project.name}</strong>
         {project.codingMode && (
           <span className="ui-status-icon" data-active="true" role="img" aria-label={statusLabel} data-tooltip={statusLabel}>

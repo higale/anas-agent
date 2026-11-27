@@ -24,6 +24,7 @@ const { verifyActivityWindow } = require('./electron-activity-window.cjs')
 const { verifyCurrentStorage } = require('./electron-current-storage.cjs')
 const { verifyProjectPreviews } = require('./electron-project-previews.cjs')
 const { verifyProjectModelPicker } = require('./electron-project-model-picker.cjs')
+const { verifyProjectAppearance } = require('./electron-project-appearance.cjs')
 const { verifyHelpDocuments } = require('./electron-help-documents.cjs')
 const { verifyWorkspaceTabs } = require('./electron-workspace-tabs.cjs')
 const { verifyMainWindowLifecycle } = require('./electron-main-window-lifecycle.cjs')
@@ -1194,6 +1195,10 @@ async function main() {
   }
   if (process.argv.includes('--project-model-picker-only')) {
     await verifyProjectModelPicker(launchApplication)
+    return
+  }
+  if (process.argv.includes('--project-appearance-only')) {
+    await verifyProjectAppearance(launchApplication)
     return
   }
   if (process.argv.includes('--help-only')) {

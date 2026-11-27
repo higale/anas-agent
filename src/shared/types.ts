@@ -17,6 +17,7 @@ export interface Project extends ProjectModelSelection {
   name: string
   icon?: ProjectIconName
   iconData?: string
+  iconEmoji?: string
   iconColor?: ProjectIconColor
   pinned: boolean
   collapsed: boolean
@@ -61,6 +62,7 @@ export interface ProjectCreateRequest extends ProjectModelSelection {
   name: string
   icon?: ProjectIconName
   iconData?: string
+  iconEmoji?: string
   iconColor?: ProjectIconColor
   sourceFolders: string[]
   skillDirectories?: string[]

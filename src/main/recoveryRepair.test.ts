@@ -31,6 +31,18 @@ async function fixture() {
 }
 
 describe('field-level recovery', () => {
+  it('repairs an invalid project emoji without losing valid emoji or project settings', () => {
+    const project = { id: DEFAULT_WORKSPACE_PROJECT_ID, name: 'Keep project', pinned: false, collapsed: true,
+      createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z', sourceFolders: ['/keep/path'],
+      prompt: 'Keep prompt', coding_mode: true, restrict_subagents: true, capabilities: structuredClone(capabilities), icon_emoji: '🚀' }
+    const raw = { version: 0, projects: [{ ...project, icon_emoji: 'invalid text' }, { ...project, id: 'valid-project' }] }
+    const repaired = repairDocument('projects.json', raw)
+    expect(repaired.value).toEqual({ ...raw, projects: [{ ...raw.projects[0], icon_emoji: '' }, raw.projects[1]] })
+    expect(repaired.fields).toEqual(['projects.json: projects[0].icon_emoji'])
+    expect(raw.projects[0].icon_emoji).toBe('invalid text')
+    expect(repairDocument('projects.json', repaired.value).fields).toEqual([])
+  })
+
   it('ignores retired plugin data when inspecting and repairing model configuration', async () => {
     const { data } = await fixture()
     const provider = { ...models.provider_defaults, id: 'cloud', name: 'Cloud', protocol: 'openai_chat_completions',

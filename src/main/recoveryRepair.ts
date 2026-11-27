@@ -27,6 +27,7 @@ import { samePath } from './pathContainment'
 import { normalizeAppConfigSnapshot } from './config/appConfig'
 import type { RawAppConfig } from './config/rawAppConfig'
 import { parseProjectStore } from './projectStore'
+import { normalizeIconEmoji } from '@shared/iconEmoji'
 import { normalizeSkillsConfig } from './skillsStore'
 import { DEFAULT_WORKSPACE_PROJECT_ID } from '@shared/types'
 import { inspectProjectStorageRepair, repairProjectsForStartup, readRepairProjectDocument } from './recoveryProjectStorage'
@@ -186,6 +187,7 @@ export function repairDocument(file: string, input: unknown): { value: RecordVal
       if (compressionPromptError(project.compression_prompt)) repair.replace(project, 'compression_prompt', '', `${path}.compression_prompt`)
       if (project.access_mode !== undefined) repair.choice(project, 'access_mode', ['strict_approval', 'smart_approval', 'full_access'], 'smart_approval', path)
       repair.capabilities(project, projectCapabilityDefaults, path)
+      try { normalizeIconEmoji(project.icon_emoji) } catch { repair.replace(project, 'icon_emoji', '', `${path}.icon_emoji`) }
     }
     parseProjectStore(value)
   } else {

@@ -1,3 +1,11 @@
+@font-face {
+  font-family: 'Noto Color Emoji';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('@fontsource/noto-color-emoji/files/noto-color-emoji-emoji-400-normal.woff2') format('woff2');
+}
+
 .project-picker-trigger {
   display: inline-flex;
   align-items: center;
@@ -85,6 +93,7 @@
 
 .project-appearance-trigger:hover,
 .project-appearance-trigger[aria-expanded="true"],
+.project-appearance-trigger[data-drag-active],
 .project-appearance-trigger:focus-visible {
   background: var(--bg-hover);
   outline: none;
@@ -94,14 +103,39 @@
 .project-appearance-popover {
   --ui-floating-z-index: 160;
 
-  width: min(292px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(480px, var(--radix-popover-content-available-height));
   padding: 12px;
+  overflow: hidden;
+}
+
+.project-appearance-popover > :not(.project-appearance-results) {
+  flex-shrink: 0;
+}
+
+.project-appearance-results {
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+.project-appearance-empty {
+  margin: 0;
+  padding: 24px 8px;
+  color: var(--text-muted);
+  text-align: center;
 }
 
 .project-icon-colors {
   display: grid;
-  grid-template-columns: repeat(8, 24px);
-  gap: 8px;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  justify-items: center;
+  padding: 4px;
+  gap: 4px;
 }
 
 .project-icon-color,
@@ -123,17 +157,8 @@
 }
 
 .project-icon-color-auto {
-  border: 2px solid var(--text-secondary);
-  background: transparent;
+  background: var(--text-secondary);
   color: var(--text-secondary);
-}
-
-.project-icon-color-auto::after {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: currentColor;
-  content: '';
 }
 
 .project-icon-color[aria-pressed="true"] {
@@ -152,21 +177,16 @@
   transform: scale(1.08);
 }
 
-.project-appearance-separator {
-  height: 1px;
-  margin: 12px 0;
-  background: var(--line-muted);
-}
-
 .project-icon-options {
   display: grid;
-  grid-template-columns: repeat(6, 28px);
-  gap: 8px 16px;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 4px;
 }
 
 .project-icon-option {
-  width: 28px;
-  height: 28px;
+  width: 100%;
+  min-width: 0;
+  height: var(--control-height);
   border-radius: 6px;
 }
 
@@ -182,11 +202,50 @@
 }
 
 .project-appearance-footer {
-  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-muted);
 }
 
 .project-appearance-footer .ui-button {
   min-width: 62px;
+}
+
+.project-emoji {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Noto Color Emoji', sans-serif;
+  font-weight: normal;
+  line-height: 1;
+}
+
+.project-emoji-categories {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.project-emoji-categories .ui-tool-button {
+  width: 100%;
+  height: var(--control-height);
+}
+
+.project-emoji-categories [aria-pressed="true"] {
+  background: var(--bg-hover);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.project-emoji-section + .project-emoji-section {
+  margin-top: 14px;
+}
+
+.project-emoji-section h3 {
+  margin: 0 0 8px;
+  font-size: var(--font-size-small);
+  font-weight: 500;
+  color: var(--text-muted);
 }
 
 .project-folders {

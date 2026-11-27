@@ -196,6 +196,14 @@
 }
 
 .usage-meter { max-height: 50vh; overflow: auto; -webkit-app-region: no-drag; }
+.usage-meter-header > [tabindex] { flex: 1; }
+.usage-meter-refresh { flex: none; }
+.usage-meter-refresh > svg { grid-area: 1 / 1; }
+.usage-meter-refresh-icon { opacity: 0; }
+.usage-meter-header:is(:hover, :has(:focus-visible)) .usage-meter-refresh-icon,
+.usage-meter-refresh:disabled .usage-meter-refresh-icon { opacity: 1; }
+.usage-meter-header:is(:hover, :has(:focus-visible)) .usage-meter-indicator,
+.usage-meter-refresh:disabled .usage-meter-indicator { opacity: 0; }
 .usage-meter progress { appearance: none; display: block; width: 100%; height: 4px; margin-block: 4px; overflow: hidden; border: 0; border-radius: 2px; background: var(--bg-soft); }
 .usage-meter progress::-webkit-progress-bar { background: var(--bg-soft); }
 .usage-meter progress::-webkit-progress-value { background: var(--accent); }

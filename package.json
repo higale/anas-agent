@@ -1,6 +1,6 @@
 {
     "name": "anas",
-    "version": "5.2.29",
+    "version": "5.2.30",
     "productName": "Anas",
     "description": "Anas, short for Ananas: a local desktop agent with project-scoped context, tools, and skills customization.",
     "main": "out/main/index.js",
@@ -109,6 +109,7 @@
     "devDependencies": {
         "@electron/rebuild": "4.2.0",
         "@eslint/js": "^9.39.5",
+        "@fontsource/noto-color-emoji": "5.3.2",
         "@swc/core": "^1.16.1",
         "@testing-library/jest-dom": "^7.0.1",
         "@testing-library/react": "^16.3.2",
@@ -129,6 +130,7 @@
         "electron": "^42.9.3",
         "electron-builder": "^26.15.2",
         "electron-vite": "^6.0.0",
+        "emojibase-data": "18.0.0",
         "eslint": "^9.39.5",
         "eslint-plugin-jsx-a11y": "^6.10.2",
         "eslint-plugin-react-hooks": "^7.1.1",

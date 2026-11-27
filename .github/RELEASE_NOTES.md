@@ -1,15 +1,15 @@
-## Anas v5.2.29
+## Anas v5.2.30
 
 ### 中文
 
-- 聊天标题栏增加主题快捷图标，默认显示，可在主题设置中关闭。左键根据当前实际外观切换浅色与深色，右键选择系统、浅色或深色。
-- 主题菜单与工作区菜单共用定位规则：默认在按钮下方水平居中，超出窗口边缘时向内调整，并在不同缩放下避让系统窗口按钮区域。
-- 优化系统主题图标和主题设置布局，同步更新中英文操作说明。
-- 修复 macOS/Linux 交互式终端在强制终止已确认后，重复清理偶发将取消结果误报为不确定的问题。
+- 紧凑用量栏的刷新按钮在整行悬停或键盘聚焦时原位显示，为用量文字留出空间，并修复收起后残留焦点导致刷新图标不恢复的问题。
+- 项目图标支持拖放图片，以及表情符号与内置图标两种选择方式；表情支持离线中英文搜索、分类、键盘和鼠标滚轮操作，并内置彩色表情字体。
+- 内置图标补充菠萝与 House，形成一页 32 个图标；默认项目未定制时使用 House，保留已有图标、图片和表情选择。
+- 同步更新中英文使用说明及新增表情资源的许可证声明。
 
 ### English
 
-- Added a theme shortcut to the chat titlebar, shown by default and configurable in Theme settings. Left-click toggles Light and Dark based on the current appearance; right-click selects System, Light, or Dark.
-- Unified theme and workspace menu positioning: menus center below their buttons, shift inward at window edges, and clear native window controls across zoom levels.
-- Refined the System theme icon and Theme settings layout, with updated Chinese and English instructions.
-- Fixed repeated cleanup after confirmed forced termination occasionally marking cancelled macOS/Linux terminal commands as uncertain.
+- The compact usage row reveals its refresh button in place when the row is hovered or receives keyboard focus, leaving more room for usage text. Fixed lingering focus keeping the refresh icon visible after collapsing the row.
+- Project icons now support image drag and drop, emoji, and built-in symbols. Emoji selection includes offline Chinese and English search, categories, keyboard and mouse-wheel navigation, and a bundled color emoji font.
+- Added Pineapple and House to complete a single page of 32 icons. The default project uses House when no icon is configured, while preserving existing icon, image, and emoji choices.
+- Updated Chinese and English instructions and license notices for the added emoji resources.

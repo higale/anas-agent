@@ -28,12 +28,15 @@ export const PROJECT_ICON_NAMES = [
   'brain',
   'heart',
   'sprout',
-  'gamepad'
+  'gamepad',
+  'pineapple',
+  'house'
 ] as const
 
 export type ProjectIconName = typeof PROJECT_ICON_NAMES[number]
 
 export const DEFAULT_PROJECT_ICON: ProjectIconName = 'folder'
+export const DEFAULT_WORKSPACE_ICON: ProjectIconName = 'house'
 
 export const PROJECT_ICON_COLORS = [
   'red',

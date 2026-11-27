@@ -1,4 +1,5 @@
 import { normalizeIconData } from '@shared/iconImage'
+import { normalizeIconEmoji } from '@shared/iconEmoji'
 import { normalizeCompressionPrompt } from '@shared/summaryPrompt'
 import type { AgentAccessMode, AgentThread } from '@shared/agentTypes'
 import { orderProjectThreads, projectSidebarGroup, reorderSidebarItems, type SidebarReorderRequest } from '@shared/sidebarOrder'
@@ -15,7 +16,7 @@ import { getConfiguredTranslator } from './languageStore'
 import { getAvailableProjectName, hasDuplicateProjectName } from '@shared/projectName'
 import { isProjectDirectoryId, isProjectStorageEntry } from './projectStorageEntries'
 import { parseResourceDirectories } from './resourceDirectories'
-import { PROJECT_ICON_COLORS, PROJECT_ICON_NAMES } from '@shared/projectAppearance'
+import { DEFAULT_WORKSPACE_ICON, PROJECT_ICON_COLORS, PROJECT_ICON_NAMES } from '@shared/projectAppearance'
 import { normalizeCapabilityChoices, defaultCapabilities, defaultProjectSettings, defaultRestrictSubagents, parseCapabilities, serializeCapabilities, validateCapabilities } from '@shared/agentCapabilities'
 import {
   compareProjects,
@@ -75,7 +76,7 @@ function requireProject(value: unknown, index: number): Project {
   if (
     typeof project.id !== 'string' || !project.id.trim()
     || typeof project.name !== 'string' || !project.name.trim()
-    || 'iconData' in project
+    || 'iconData' in project || 'iconEmoji' in project
     || (project.icon !== undefined && (typeof project.icon !== 'string' || !projectIconNames.has(project.icon)))
     || (project.iconColor !== undefined && (typeof project.iconColor !== 'string' || !projectIconColors.has(project.iconColor)))
     || typeof project.pinned !== 'boolean'
@@ -86,10 +87,11 @@ function requireProject(value: unknown, index: number): Project {
     throw new Error(`Project ${index + 1} has an invalid format.`)
   }
   const sourceFolders = project.sourceFolders === undefined ? [] : project.sourceFolders
+  const icon = project.icon ?? (project.id === DEFAULT_WORKSPACE_PROJECT_ID ? DEFAULT_WORKSPACE_ICON : undefined)
   if (!Array.isArray(sourceFolders) || sourceFolders.some(folder => typeof folder !== 'string' || !folder.trim())) {
     throw new Error(`Project ${index + 1} has an invalid format.`)
   }
-  const { icon_data, model_config_id, model_parameter_preset_id, capabilities, restrict_subagents = defaultRestrictSubagents,
+  const { icon_data, icon_emoji, model_config_id, model_parameter_preset_id, capabilities, restrict_subagents = defaultRestrictSubagents,
     coding_mode = defaultProjectSettings.codingMode, compression_prompt, access_mode, sort_order, thread_order,
     skill_directories, tool_directories } = project
   if (sort_order !== undefined && (typeof sort_order !== 'number' || !Number.isSafeInteger(sort_order))) {
@@ -113,10 +115,11 @@ function requireProject(value: unknown, index: number): Project {
     collapsed: project.collapsed,
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
-    ...(project.icon !== undefined ? { icon: project.icon as Project['icon'] } : {}),
+    ...(icon !== undefined ? { icon: icon as Project['icon'] } : {}),
     ...(project.iconColor !== undefined ? { iconColor: project.iconColor as Project['iconColor'] } : {}),
     ...selection,
     ...(icon_data !== undefined ? { iconData: normalizeIconData(icon_data) } : {}),
+    ...(icon_emoji !== undefined ? { iconEmoji: normalizeIconEmoji(icon_emoji) } : {}),
     ...(sort_order !== undefined ? { sortOrder: sort_order } : {}),
     ...(thread_order !== undefined ? { threadOrder: thread_order as string[] } : {}),
     sourceFolders,
@@ -246,7 +249,7 @@ export function serializeProjectStore(store: StoredProjects): { version: 0; proj
   return {
     version: store.version,
     projects: store.projects.map((project) => {
-      const { iconData, modelConfigId, modelParameterPresetId, sortOrder, threadOrder, ...metadata } = project
+      const { iconData, iconEmoji, modelConfigId, modelParameterPresetId, sortOrder, threadOrder, ...metadata } = project
       const stored = { ...metadata } as Record<string, unknown>
       delete stored.capabilities
       delete stored.restrictSubagents
@@ -259,6 +262,7 @@ export function serializeProjectStore(store: StoredProjects): { version: 0; proj
         ...stored,
         skill_directories: project.skillDirectories ?? [], tool_directories: project.toolDirectories ?? [],
         ...(iconData ? { icon_data: iconData } : {}),
+        ...(iconEmoji ? { icon_emoji: iconEmoji } : {}),
         ...(sortOrder !== undefined ? { sort_order: sortOrder } : {}),
         ...(threadOrder !== undefined ? { thread_order: threadOrder } : {}),
         ...(project.accessMode && project.accessMode !== 'smart_approval'
@@ -304,6 +308,7 @@ async function initializeMissingStore(path: string): Promise<void> {
         projects: [{
           id: DEFAULT_WORKSPACE_PROJECT_ID,
           name: initialDefaultWorkspaceName(),
+          icon: DEFAULT_WORKSPACE_ICON,
           pinned: false,
           collapsed: false,
           sourceFolders: [],
@@ -433,8 +438,14 @@ function validateProjectModelSelection(request: {
   }
 }
 
-function validateProjectAppearance(request: ProjectCreateRequest): Pick<Project, 'icon' | 'iconColor' | 'iconData'> {
-  const appearance: Pick<Project, 'icon' | 'iconColor' | 'iconData'> = {}
+function validateProjectAppearance(request: ProjectCreateRequest): Pick<Project, 'icon' | 'iconColor' | 'iconData' | 'iconEmoji'> {
+  const appearance: Pick<Project, 'icon' | 'iconColor' | 'iconData' | 'iconEmoji'> = {}
+  try {
+    const emoji = normalizeIconEmoji(request.iconEmoji)
+    if (emoji) appearance.iconEmoji = emoji
+  } catch {
+    throw new ProjectOperationFailure({ code: 'invalid_settings' }, 'Project icon emoji is invalid.')
+  }
   if (request.iconData !== undefined) {
     try {
       const data = normalizeIconData(request.iconData)
@@ -562,8 +573,10 @@ export async function updateProject(projectId: string, request: ProjectUpdateReq
     }
     const appearance = validateProjectAppearance(request)
     const currentMetadata = { ...current }
+    if (projectId === DEFAULT_WORKSPACE_PROJECT_ID && appearance.icon === undefined) appearance.icon = DEFAULT_WORKSPACE_ICON
     delete currentMetadata.icon
     delete currentMetadata.iconData
+    delete currentMetadata.iconEmoji
     delete currentMetadata.iconColor
     delete currentMetadata.modelConfigId
     delete currentMetadata.modelParameterPresetId
